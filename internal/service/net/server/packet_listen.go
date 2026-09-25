@@ -33,6 +33,11 @@ func listenPacket(ctx context.Context, addr corenet.AddressValue) (pc stdnet.Pac
 		return nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
 			errs.String("network", addr.Network))
 	}
+	//: a served family this platform has no socket for, refused by name.
+	if unavailable := familyUnavailable(addr); unavailable != nil {
+		//: UNSUPPORTED_PLATFORM, before the OS is asked.
+		return nil, unavailable
+	}
 	//: an empty target would otherwise fail obscurely inside the stdlib.
 	if strings.TrimSpace(addr.Addr) == "" {
 		//: refuse with the address that was actually supplied.

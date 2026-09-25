@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-25T00:00:00Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -33,6 +33,8 @@ Public façade: `pkg/v1/server`.
 | `conn_waiter.go` | `connWaiter` — the completion channel and the hijack flag one `ServeConn` blocks on |
 | `http_listener.go` | the channel-fed bridge listener |
 | `reuseport_{linux,bsd,other}.go` | the cited `SO_REUSEPORT` constant per family |
+| `family_{windows,other}.go` | `platformLacks` — the two unix families Windows cannot open (`unixgram`, `unixpacket`), refused with `UNSUPPORTED_PLATFORM` before the OS is asked |
+| `truncation_{windows,other}.go` | `datagramTruncated` — Windows' `WSAEMSGSIZE` (hand-defined, cited), the read that FAILS where Unix truncates |
 | `stream_group_limiter.go` | the per-group connection ceiling — a reject-mode semaphore whose slot a hijacked connection keeps until it closes |
 | `conn_tracked.go` | `trackedConn` — the socket that reports its own `Close`, so a hijacked connection's slot comes back when it ends |
 | `listen_tracked.go` | `trackedListener` — hands out `trackedConn`s beneath TLS, for a group that serves HTTP under a ceiling |
@@ -100,6 +102,16 @@ Public façade: `pkg/v1/server`.
 - **The fallback is reported, never silent.** `batchDegradation` returns both a
   flag and a reason, and they reach `State().Listeners[i]`. A degradation nobody
   notices is the failure mode the field exists to prevent.
+- **An oversized datagram is counted on every platform, and the platforms
+  disagree about what it is.** Unix truncates it in silence and the probe byte
+  past the ceiling is filled; Windows FAILS the read with `WSAEMSGSIZE`. The
+  portable reader handed that error up and the read loop skipped it, so on
+  Windows a datagram past `MaxPacketSize` was neither delivered nor counted —
+  `OversizedPackets` read zero for drops that happened (ADR 0095). The reader now
+  turns the errno into a slot filled to the probe byte, which `dispatch` drops
+  and counts like any other. `WSAEMSGSIZE` lives in `internal/syscall/windows`,
+  which nothing outside the stdlib may import, so it is declared and cited in
+  `truncation_windows.go`.
 - **`TestLinuxSelectsTheBatchedReader` is the only test that proves the batched
   path is in use.** Every behavioural datagram test passes identically on the
   portable fallback, so without it a broken type assertion would degrade the
@@ -203,6 +215,12 @@ contending on one accept queue. Zero means one per core; one disables it.
 - **A Unix socket is not shardable and says so** — but only when sharding was
   explicitly asked for. Auto-sizing on a Unix socket disappoints no expectation,
   so it is not reported as a degradation.
+- **The same rule holds for a platform that cannot shard at all.** An explicit
+  count is a degradation on Windows; auto-sizing is not, and reports nothing.
+  It used to return the reason with `degraded=false`, so `State` contradicted
+  itself on every auto-sized Windows listener (ADR 0095). `shardsFor` takes the
+  platform's answer as a parameter, so `Test_resolveShards` runs every case both
+  ways on every lane rather than on Windows alone.
 - **Only the first shard appears in `State`**, carrying the real shard count. N
   rows for one address would read as N addresses.
 - **On this machine it buys nothing.** `BENCH.md` §4 reports the null result and
@@ -293,6 +311,12 @@ connection is lost and no bind races.
   the child, which is what a supervisor does. `LISTEN_PID` is omitted because a
   parent cannot know its child's pid beforehand — the same choice
   `sdlisten.Prepare` makes.
+- **Windows has nothing to adopt.** `sdlisten` refuses there with
+  `UNSUPPORTED_PLATFORM`, so `Start` fails with `SOCKET_ADOPT_FAILED` whose
+  `cause` field names it — never a socket of its own. `ExtraFiles` is itself unsupported on
+  Windows, so `TestAdopt` runs its children there with the environment alone and
+  still requires the refusal; `TestAdopt_ServesTheInheritedSocket`, whose
+  fixture is a child holding an inherited socket, skips there and says why.
 
 ## Concurrency
 
@@ -310,6 +334,14 @@ connection trying to deregister.
 None of its own. Every failure is a `internal/core/net` sentinel (`0.2.11.*`),
 wrapped with the offending group or address. Per ADR 0029 the service layer
 declares **no** codes.
+
+The one exception is a platform refusal, and it is the SDK's shared one: a
+family this platform has no socket for — `unixgram` and `unixpacket` on
+Windows, whose AF_UNIX is stream-only — is `core/proc.UnsupportedPlatform`
+(ADR 0018 §(a)), carrying `network` and `goos`, returned before the OS is
+asked. `LISTEN_FAILED` would read as a bind an operator could fix, and no
+address makes this one bind. `TestWindowsHasNoUnixDatagramOrSeqpacketSocket` is
+the measurement behind it and fails the day Windows opens either family.
 
 ## Do NOT
 

@@ -4,11 +4,14 @@ package server_test
 import (
 	"context"
 	stdnet "net"
+	"runtime"
 	"slices"
 	"testing"
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/net/server"
 )
 
@@ -178,7 +181,17 @@ func TestPacketGroup_HandleFunc(t *testing.T) {
 		if chained != group {
 			t.Fatal("HandleFunc did not return the group for chaining")
 		}
-		if err := srv.Start(t.Context()); err != nil {
+		err := srv.Start(t.Context())
+		//: Windows' AF_UNIX is stream-only: there is no datagram socket to
+		//: round-trip through, and the engine says so by name rather than
+		//: letting the bind fail as if an operator could fix it.
+		if c.unixSocket && runtime.GOOS == "windows" {
+			if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) {
+				t.Fatalf("start with a unixgram listener on windows = %v, want UNSUPPORTED_PLATFORM", err)
+			}
+			return
+		}
+		if err != nil {
 			t.Fatalf("start: %v", err)
 		}
 		bound := srv.State().Listeners[0].Address

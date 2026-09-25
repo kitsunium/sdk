@@ -5,8 +5,25 @@ import (
 	"errors"
 	stdnet "net"
 	"os"
+	"runtime"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
+
+// onWindows returns code when the suite runs on Windows and zero elsewhere —
+// for a case whose outcome is a refusal on that platform alone. It reads
+// runtime.GOOS rather than sharing the production file's build tag on
+// purpose: the table is a second opinion, and it fails when someone widens or
+// narrows the tag without saying so here.
+func onWindows(code errs.Code) errs.Code {
+	//: the platform whose answer differs.
+	if runtime.GOOS == "windows" {
+		return code
+	}
+	//: zero means "the bind must succeed" in every table that uses this.
+	return 0
+}
 
 // udpPair opens a bound receiver and a sender that can reach it.
 func udpPair(t *testing.T) (receiver *stdnet.UDPConn, sender *stdnet.UDPConn) {

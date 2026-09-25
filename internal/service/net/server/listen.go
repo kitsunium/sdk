@@ -10,6 +10,7 @@ import (
 	"syscall"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -36,6 +37,15 @@ func shardable(network string) bool {
 // above one on a platform or family that cannot shard degrades to a single
 // listener — reported, never silent.
 func resolveShards(requested int, network string) (count int, degraded bool, reason string) {
+	//: the platform's answer, decided by build tag.
+	return shardsFor(requested, network, reusePortSupported())
+}
+
+// shardsFor is resolveShards with the platform's SO_REUSEPORT answer passed
+// in, so the branch only Windows takes in production is exercised by the
+// suite on every OS — it is where the self-contradicting report lived, and a
+// branch one platform alone reaches is a branch one lane alone can check.
+func shardsFor(requested int, network string, reusePort bool) (count int, degraded bool, reason string) {
 	//: a single listener is always achievable, so it can never degrade.
 	if requested == 1 {
 		//: exactly what was asked for, so nothing to report.
@@ -53,9 +63,17 @@ func resolveShards(requested int, network string) (count int, degraded bool, rea
 		return 1, false, ""
 	}
 	//: without the socket option, N listeners on one address cannot coexist.
-	if !reusePortSupported() {
-		//: without the option, N listeners on one address cannot coexist.
-		return 1, requested > 1, "SO_REUSEPORT unavailable on this platform; using a single listener"
+	if !reusePort {
+		//: an explicit request that cannot be met is a real degradation.
+		if requested > 1 {
+			//: reported, flag and reason together.
+			return 1, true, "SO_REUSEPORT unavailable on this platform; using a single listener"
+		}
+		//: auto-sizing where nothing can shard disappoints no expectation, the
+		//: same answer the unix-socket branch gives. It used to return the
+		//: reason anyway with degraded=false, so State contradicted itself on
+		//: every auto-sized listener on Windows.
+		return 1, false, ""
 	}
 	//: auto-sizing tracks the cores available to run the accept loops.
 	if requested <= 0 {
@@ -102,6 +120,11 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 		return nil, errs.Wrap(corenet.UnsupportedNetwork, errs.WrapParams{},
 			errs.String("network", addr.Network))
 	}
+	//: a served family this platform has no socket for, refused by name.
+	if unavailable := familyUnavailable(addr); unavailable != nil {
+		//: UNSUPPORTED_PLATFORM, before the OS is asked.
+		return nil, unavailable
+	}
 	//: an empty target cannot be bound and would otherwise fail obscurely.
 	if strings.TrimSpace(addr.Addr) == "" {
 		//: an empty target would otherwise fail obscurely inside the stdlib.
@@ -122,6 +145,24 @@ func listen(ctx context.Context, addr corenet.AddressValue, id corenet.IdentityV
 	}
 	//: the same layers an adopted socket gets, from the same function.
 	return layered(raw, id, trackCloses), nil
+}
+
+// familyUnavailable refuses a family the engine serves but this platform has
+// no socket for, before the OS is asked — or returns nil.
+//
+// The refusal is the SDK's uniform UNSUPPORTED_PLATFORM (ADR 0018 §(a)), not
+// LISTEN_FAILED: a failed bind is something an operator can fix — a port in
+// use, a permission, a path — and no address would ever make this one bind.
+// The family and the platform travel as fields, so the log line says which.
+func familyUnavailable(addr corenet.AddressValue) error {
+	//: every family this platform can open reaches the kernel as before.
+	if !platformLacks(addr.Network) {
+		//: nothing to refuse.
+		return nil
+	}
+	//: the one answer every missing mechanic in the SDK gives.
+	return errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+		errs.String("network", addr.Network), errs.String("goos", runtime.GOOS))
 }
 
 // layered puts a group's layers over a raw stream listener: the close tracker
