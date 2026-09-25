@@ -61,6 +61,11 @@ const MaxMajor Major = 0x7F // 127
 // Field is a single typed key/value pair attached to an error. Build one with
 // String / Int / Int64 / Bool / Float (or NewFieldValue); the zero value is
 // invalid and must never be passed across the API.
+//
+// A Field read back from an error — see [FieldsOf] — answers two methods:
+// Key(), the name the emitter chose, and StringValue(), the value as text (a
+// string verbatim, a number in decimal, a bool as true or false, "" for the
+// zero Field). The rendering is for reading, not for parsing back into a type.
 type Field = kerrs.FieldValue
 
 // WrapParams groups the metadata Wrap stamps onto the wrapping error when the

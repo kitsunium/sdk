@@ -35,8 +35,10 @@
 //
 // # What's shipped
 //
-// Nine accessors, two code helpers, four mask presets, one matcher
-// constructor. All re-exported as aliases over internal/kernel/errs.
+// Seven accessors, four predicates, two code helpers, four mask presets, one
+// matcher constructor, and the two methods that read a [Field]. All are
+// re-exported over internal/kernel/errs; HasAnyCode and HasAnyReason are
+// composed here from HasCode and HasReason.
 //
 //	| Symbol                                | Kind       | Returns / role                                            |
 //	|---------------------------------------|------------|------------------------------------------------------------|
@@ -46,6 +48,9 @@
 //	| errs.PrivateOf(err)                   | accessor   | string — DIAGNOSTIC ONLY, never surface                    |
 //	| errs.HTTPStatusOf(err)                | accessor   | int — HTTP status, default 500                             |
 //	| errs.ExitCodeOf(err)                  | accessor   | int — POSIX exit code, default 70 (EX_SOFTWARE)            |
+//	| errs.FieldsOf(err)                    | accessor   | []Field — the chain's fields, oldest first; nil if none    |
+//	| field.Key()                           | field read | string — the key the emitter chose, such as "problem"      |
+//	| field.StringValue()                   | field read | string — the value as text; "" for the zero Field          |
 //	| errs.HasCode(err, c)                  | predicate  | bool — true if c appears in the Unwrap chain               |
 //	| errs.HasAnyCode(err, c1, c2, …)       | predicate  | bool — variadic OR over multiple codes (routing on a set)  |
 //	| errs.HasReason(err, r)                | predicate  | bool — same with the reason string                         |
@@ -72,6 +77,7 @@
 //	func PrivateOf(err error)    string          // "" if none — DIAGNOSTIC ONLY
 //	func HTTPStatusOf(err error) int             // 500 default
 //	func ExitCodeOf(err error)   int             // 70 (EX_SOFTWARE) default
+//	func FieldsOf(err error)     []Field         // nil if none — oldest cause first
 //	func HasCode(err error, c Code) bool
 //	func HasReason(err error, reason string) bool
 //
@@ -109,6 +115,36 @@
 // can see. It exists so observability tooling can correlate a request
 // ID with a detailed server-side explanation in the log backend
 // without re-logging the entire chain.
+//
+// # Reading the fields an error carries
+//
+// [FieldsOf] returns the structured clauses the emitters along the chain
+// attached, oldest cause first and newest wrapper last, as a copy the caller
+// owns. Each is read with Key and StringValue — the value as text: a string
+// verbatim, a number in decimal, a bool as true or false. A key may appear at
+// more than one depth of a chain, which is why no map-shaped accessor exists:
+// the caller decides which depth it wants.
+//
+//	_, err := mail.ParseURL(raw)
+//	for _, field := range errs.FieldsOf(err) {
+//	    if field.Key() == "problem" {
+//	        fmt.Println("SMTP URL", field.StringValue()) // "has a port that is not a number from 1 to 65535"
+//	    }
+//	}
+//
+// A field value is a clause an emitter CHOSE to attach — a name, a position, a
+// reason — and no SDK emitter attaches a value it was given to protect:
+// mail.ParseURL says which part of a URL is wrong and never quotes the URL,
+// whose userinfo is the password; the secret domain names a secret and never
+// its value. That rule is what makes the fields safe to read, and a consumer
+// minting its own errors with [New] and [Wrap] owes its readers the same. The
+// one field whose text the SDK does not write is "cause", which carries a
+// foreign error's message as its library wrote it.
+//
+// Safe to read is not safe to publish: fields are diagnostics, like
+// [PrivateOf] — authz attaches the subject, the action and the resource — so
+// they belong in a log line or an operator's report, never in an HTTP response
+// or an error page.
 //
 // # HTTP status policy
 //
@@ -203,6 +239,17 @@ var (
 	// ExitCodeOf returns the sysexits code mapped from the deepest *errs.Error,
 	// defaulting to 70 (EX_SOFTWARE) when no *errs.Error is present.
 	ExitCodeOf = kerrs.ExitCodeOf
+
+	// FieldsOf returns every Field attached along err's chain, oldest cause
+	// first and newest wrapper last, as a copy the caller owns — nil when no
+	// *errs.Error is present. Read each with Key and StringValue.
+	//
+	// The values are clauses the emitters chose to attach — names, positions,
+	// reasons — never secrets: no SDK emitter attaches a value it was given to
+	// protect (mail.ParseURL never quotes the URL), which is what makes reading
+	// them safe. They are diagnostics nonetheless, like PrivateOf — keep them
+	// off the wire.
+	FieldsOf = kerrs.FieldsOf
 
 	// HasCode walks the chain (including errors.Join subtrees) and reports
 	// whether any *errs.Error carries code (origin or trail entry).

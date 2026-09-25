@@ -2,10 +2,13 @@ package errs_test
 
 import (
 	"errors"
+	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/mail"
 )
 
 // TestV1ErrsEndToEnd proves that a real failure surfaced by pkg/v1/logger
@@ -128,5 +131,81 @@ func TestHasAnyCode_AndHasAnyReason(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestFieldsOfReadsTheClauseAnEmitterAttached reads, with the public names
+// alone, the clause mail.ParseURL attaches to a refusal — what a framework's
+// settings page shows beside a setting it could not use — and pins the two
+// promises the FieldsOf doc makes: the fields come oldest cause first, newest
+// wrapper last, and the password in the URL is in no field and in no message.
+func TestFieldsOfReadsTheClauseAnEmitterAttached(t *testing.T) {
+	t.Parallel()
+	const password = "correct-horse-battery"
+	type tc struct {
+		name string
+		raw  string
+		want string
+	}
+	tests := []tc{
+		{
+			"an unknown tls mode",
+			"smtp://camille:" + password + "@mail.example.com:587?tls=bogus",
+			"has a tls parameter that is not starttls, implicit or none",
+		},
+		{
+			"a port out of range",
+			"smtp://camille:" + password + "@mail.example.com:99999",
+			"has a port that is not a number from 1 to 65535",
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		_, err := mail.ParseURL(c.raw)
+		if !errors.Is(err, mail.InvalidURL) {
+			t.Fatalf("ParseURL = %v, want InvalidURL", err)
+		}
+		//: a caller adds its own clause on the way up; it comes last.
+		wrapped := errs.Wrap(err, errs.WrapParams{Code: 0x40_01_01_01}, errs.String("setting", "KIT_SMTP_URL"))
+		fields := errs.FieldsOf(wrapped)
+		keys := make([]string, 0, len(fields))
+		problem := ""
+		for _, field := range fields {
+			keys = append(keys, field.Key())
+			if field.Key() == "problem" {
+				problem = field.StringValue()
+			}
+			if strings.Contains(field.StringValue(), password) {
+				t.Errorf("field %q carries the password", field.Key())
+			}
+		}
+		if !slices.Equal(keys, []string{"problem", "setting"}) {
+			t.Fatalf("FieldsOf keys = %v, want [problem setting]", keys)
+		}
+		if problem != c.want {
+			t.Fatalf("problem = %q, want %q", problem, c.want)
+		}
+		for _, text := range []string{wrapped.Error(), errs.PublicOf(wrapped), errs.PrivateOf(wrapped)} {
+			if strings.Contains(text, password) {
+				t.Errorf("a rendering carries the password: %q", text)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestFieldsOfWithoutAnSDKError pins the absence arm through the facade: no
+// *errs.Error on the chain, no fields — nil, not an empty slice.
+func TestFieldsOfWithoutAnSDKError(t *testing.T) {
+	t.Parallel()
+	for _, err := range []error{nil, errors.New("plain")} {
+		if got := errs.FieldsOf(err); got != nil {
+			t.Errorf("FieldsOf(%v) = %v, want nil", err, got)
+		}
 	}
 }

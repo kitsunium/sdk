@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-25T16:51:30Z -->
 # pkg/v1/errs/
 
 ## Purpose
@@ -11,8 +11,8 @@ Public **introspection and construction** of SDK errors (ADR 0019). The concrete
 accessors.go — package doc; type aliases (Code, Major, Layer, PkgCode, Serial,
                PrefixMatcher), mask constants (MaskByMajor|Layer|Package|Exact),
                var-grouped accessors block re-exporting CodeOf, ReasonOf,
-               PublicOf, PrivateOf, HTTPStatusOf, ExitCodeOf, HasCode, HasReason,
-               NewPrefixMatcher, Pack, ParseCode; HasAnyCode/HasAnyReason
+               PublicOf, PrivateOf, HTTPStatusOf, ExitCodeOf, FieldsOf, HasCode,
+               HasReason, NewPrefixMatcher, Pack, ParseCode; HasAnyCode/HasAnyReason
 construct.go — construction surface: New, Wrap (+ WrapParams alias), the Field
                alias + String/Int/Int64/Bool/Float/NewFieldValue helpers, and the
                MinAppMajor/MaxMajor application-code-range constants
@@ -29,6 +29,8 @@ construct.go — construction surface: New, Wrap (+ WrapParams alias), the Field
 - **No package code range.** `pkg/v1/errs` emits no errors of its own (no `codes.go`, no `errors.go`). It is a re-export layer; every code observable through it originated in some other package (origin wins on wrap — ADR 0005).
 - **Single typed accessor per concept.** `CodeOf(err) (Code, bool)` returns the typed `Code`; the layer octet is composable via `code.Layer()`. There is no int-returning shim and no parallel `LayerOf` — the kernel exports exactly one accessor per field and `pkg/v1/errs` re-exports it verbatim.
 - **PrefixMatcher routes via `errors.Is`.** Use `NewPrefixMatcher(code, mask)` (combined with `MaskByMajor` / `MaskByLayer` / `MaskByPackage` / `MaskExact`) for CIDR-style code routing inside dashboards / middleware. Single-code matching uses `HasCode(err, c)` which is cheaper.
+- **Fields are read through `FieldsOf` and the `Field` alias's own methods.** `FieldsOf(err)` is the kernel accessor re-exported verbatim — every field on the chain, oldest cause first, newest wrapper last, a copy, `nil` without an SDK error — and a `Field` answers `Key()` and `StringValue()`. There is no map-shaped or by-key helper on purpose: a key can appear at several depths of one chain, and the caller is the one who knows which depth it wants.
+- **A field value is a clause the emitter chose, never a secret it was given.** Names, positions, reasons: `mail.ParseURL` names the part of the URL that is wrong and never the URL; the secret domain names a secret, never its value. That is what makes `FieldsOf` safe to expose, and the accessor's doc says so. A `cause` field is the exception to "chosen" — a foreign error's text, as its library wrote it.
 - **Defaults are global.** `HTTPStatusOf` returns 500 when no override exists; `ExitCodeOf` returns 70 (EX_SOFTWARE). Emitter packages set per-error overrides via `errs.WithHTTPStatus` / `WithExitCode` at `Define` time.
 
 ## Do NOT
@@ -37,6 +39,8 @@ construct.go — construction surface: New, Wrap (+ WrapParams alias), the Field
 - Construct an `*errs.Error` by struct literal or expose the concrete type — `New` / `Wrap` return `error`, and the struct stays unexported so it cannot be forged.
 - Re-export the internal `errs.Define` here — it panics at init and is meant for AST-audited SDK-internal sentinels. The public construction path is the runtime-validated `New` / `Wrap` (ADR 0019); a consumer minting its own sentinel uses those with an application-range code (Major `0x40–0x7F`).
 - Let a consumer assign codes a Major `< MinAppMajor` (`0x40`) — that range belongs to the SDK and a future SDK release may collide with it.
+- **Put `FieldsOf` output on the wire.** Safe to read is not safe to publish: fields are diagnostics like `Private` — authz attaches the subject, the action and the resource — and they go to logs and operator reports only.
+- Parse `StringValue()` back into a type — it is a rendering for reading, and the kernel promises nothing more.
 - Rely on specific default values beyond 500 / 70 — emitter packages may override per error, and a future ADR may broaden the defaults.
 
 ## Verification
@@ -47,4 +51,4 @@ bazel test --config=race //pkg/v1/errs:errs_test
 cd pkg/v1 && GOWORK=off go test -race ./errs/...
 ```
 
-`accessors_external_test.go` walks every accessor against a real failure path (`logger.NewText(Config{})` → `WriterRequired`) and against stdlib-only / nil cases.
+`accessors_external_test.go` walks every accessor against a real failure path (`logger.NewText(Config{})` → `WriterRequired`) and against stdlib-only / nil cases, and reads `mail.ParseURL`'s `problem` clause through `FieldsOf` — in order under a consumer's own wrap, with the URL's password in no field and no rendering.
