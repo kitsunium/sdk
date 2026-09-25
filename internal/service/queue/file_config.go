@@ -101,7 +101,9 @@ func prepareQueueDir(dir string) error {
 // /tmp is, and the sticky bit is precisely the rule that only an entry's
 // owner may unlink it. World-writable WITHOUT it is refused: any account
 // could then unlink a queued message, which is a silent, undetectable drain,
-// or plant one, which is a silent, undetectable injection.
+// or plant one, which is a silent, undetectable injection. On Windows, which
+// has no mode bits, the same question is asked of the directory's DACL
+// (dirtrust_windows.go).
 func checkQueueDir(dir string, info fs.FileInfo) error {
 	why, observed, unusable := unusableBecause(dir, info)
 	//: acceptable.
@@ -129,9 +131,10 @@ func withObserved(observed string, fields ...kerrs.FieldValue) []kerrs.FieldValu
 }
 
 // unusableBecause reports whether a directory is unusable for this queue, and
-// names why — plus, for a permission verdict, what it was read from. It is [checkQueueDir]'s rule, and it shares its first half
-// with the stricter one the state directories get ([stateUnusableBecause]), so
-// the two levels cannot drift apart.
+// names why — plus, for a permission verdict, what it was read from. It is
+// [checkQueueDir]'s rule, and it shares its first half with the stricter one
+// the state directories get ([stateUnusableBecause]), so the two levels cannot
+// drift apart.
 //
 // A symlink is only ever seen here through os.Lstat, which is what the state
 // check uses; the queue directory itself is read through os.Stat, so a link
