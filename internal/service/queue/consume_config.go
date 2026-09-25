@@ -19,6 +19,12 @@ import (
 // because it bounds idle latency at a tenth of a second while costing one
 // directory read per worker per tenth of a second. A caller who cares picks
 // their own.
+//
+// Both brokers in this package are a [corequeue.Waker], so for them it bounds
+// only what a wake cannot see — a publication made by ANOTHER process into a
+// durable queue — and a caller that has no such producer can raise it a
+// hundredfold. It stays at 100 ms because a zero must keep meaning what it
+// always meant for a broker that cannot wake anyone.
 const DefaultPollInterval time.Duration = 100 * time.Millisecond
 
 // ConsumerConfig configures [Consume]: what to run, how many of it, how often
@@ -37,6 +43,15 @@ type ConsumerConfig struct {
 	Clock clock.Timed
 	// PollInterval is how long a worker waits after finding the queue empty.
 	// Zero means [DefaultPollInterval]; negative is read as zero.
+	//
+	// When the broker is a [corequeue.Waker] — both brokers in this package
+	// are — it is an upper bound and not a cadence: a Publish or a Nack in
+	// this process wakes the worker at once, and a retry delay ending or a
+	// lease lapsing wakes it at that instant. What is left for the poll to
+	// find is a publication another process made into a durable queue, so set
+	// it to how late such a message may be noticed — seconds, not
+	// milliseconds, is the usual answer — and an idle consumer then costs
+	// nothing between polls.
 	PollInterval time.Duration
 	// Parallelism is how many independent workers run. Each one polls, leases
 	// and processes on its OWN goroutine, which is what makes this the

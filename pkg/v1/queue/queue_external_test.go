@@ -45,10 +45,10 @@ func TestTheFacadePublishesLeasesAndAcknowledges(t *testing.T) {
 	}
 }
 
-// TestBothFacadeBrokersCarryTheTwoCapabilitySiblings pins the ADR 0039 shape
+// TestBothFacadeBrokersCarryTheCapabilitySiblings pins the ADR 0039 shape
 // through the aliases: the port is frozen at four methods and the extras are
 // reached by type assertion.
-func TestBothFacadeBrokersCarryTheTwoCapabilitySiblings(t *testing.T) {
+func TestBothFacadeBrokersCarryTheCapabilitySiblings(t *testing.T) {
 	t.Parallel()
 	for _, name := range []string{"memory", "file"} {
 		t.Run(name, func(t *testing.T) {
@@ -59,6 +59,58 @@ func TestBothFacadeBrokersCarryTheTwoCapabilitySiblings(t *testing.T) {
 			}
 			if _, ok := broker.(queue.LeaseExtender); !ok {
 				t.Fatalf("%T does not implement queue.LeaseExtender", broker)
+			}
+			if _, ok := broker.(queue.Waker); !ok {
+				t.Fatalf("%T does not implement queue.Waker", broker)
+			}
+		})
+	}
+}
+
+// TestTheFacadeWakesAnIdleConsumerOnAPublication drives the engine through the
+// public surface with a poll interval no test would sit out: only the wake can
+// deliver the message in time.
+//
+// GOROUTINE LIFECYCLE: one goroutine runs Consume; it is ended by the cancel
+// and joined by running.Wait before the test returns.
+func TestTheFacadeWakesAnIdleConsumerOnAPublication(t *testing.T) {
+	t.Parallel()
+	for _, name := range []string{"memory", "file"} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			broker := facadeBroker(t, name)
+			ctx, cancel := context.WithCancel(t.Context())
+			handled := make(chan string, 1)
+			var running sync.WaitGroup
+			var result error
+			running.Go(func() {
+				result = queue.Consume(ctx, broker, queue.ConsumerConfig{
+					Handler: func(_ context.Context, delivery queue.Delivery) error {
+						handled <- string(delivery.Message.Payload)
+						return nil
+					},
+					HandlerIsIdempotent: true, PollInterval: time.Hour,
+				})
+			})
+			defer func() {
+				cancel()
+				running.Wait()
+				if result != nil {
+					t.Errorf("Consume() = %v, want nil for a cancelled consumer", result)
+				}
+			}()
+			//: whether the consumer is already asleep or not, the message must
+			//: arrive long before the hour.
+			if _, err := broker.Publish(t.Context(), []byte("now")); err != nil {
+				t.Fatalf("Publish() = %v, want nil", err)
+			}
+			select {
+			case got := <-handled:
+				if got != "now" {
+					t.Errorf("handled %q, want the publication", got)
+				}
+			case <-time.After(10 * time.Second):
+				t.Fatal("the idle consumer was not woken by the publication")
 			}
 		})
 	}

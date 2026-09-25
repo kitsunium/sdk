@@ -26,7 +26,8 @@ construction; a change to `events` that moves it right is wrong the same way.
 |---|---|
 | `queue.go` | package doc (the frontier, the guarantee, the three non-guarantees), `Broker` (FROZEN at four methods), `Handler` (FUNC port), `NackValue` |
 | `message.go` | `MessageValue`, `ReceiptValue`, `LeaseValue`, `DeliveryValue` |
-| `capability.go` | the ADR 0039 siblings — `DeadLetterReader`, `LeaseExtender` — and `DeadLetterValue` |
+| `capability.go` | the ADR 0039 siblings `DeadLetterReader` and `LeaseExtender`, and `DeadLetterValue` |
+| `wake.go` | the third sibling, `Waker`, and the `WakeValue` it answers with (ADR 0104) |
 | `policy.go` | `PolicyValue`, `Validate`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
 | `codes.go` | the five `0.2.23.*` codes |
 | `errors.go` | the five sentinels |
@@ -73,6 +74,14 @@ construction; a change to `events` that moves it right is wrong the same way.
 - **Frozen ports.** `Broker` has four methods and gets no fifth. `Handler` is a
   func type, so it cannot grow one at all. A capability is a sibling interface
   reached by type assertion.
+- **`Waker` is a hint, and says so (ADR 0104).** `Wake()` hands out a signal
+  closed by the next Publish or Nack IN THIS PROCESS, and how long until
+  something the broker holds becomes receivable on its own. A wake may find
+  nothing and work may arrive with no wake — another process's publication —
+  so a consumer that uses it still polls, at a cadence that bounds the second
+  case. `WakeValue.In` is a duration on the broker's clock, never an instant,
+  so a consumer on a different clock waits the right length instead of
+  comparing two clocks.
 - **No registry.** One `Broker` value is one queue; the name of the queue is
   the implementation's configuration (a directory, for the file broker). A
   registry would have one entry per queue and would add a way to misconfigure a

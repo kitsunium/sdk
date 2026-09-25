@@ -129,6 +129,25 @@
 // refused rather than stranding the message; an extension that would reach
 // past 2262 is refused by both brokers for the same reason.
 //
+// # An idle consumer sleeps until there is work
+//
+// Both brokers here implement [Waker], and [Consume] waits on it: a Publish or
+// a Nack in this process wakes an idle worker at once, and a retry delay
+// ending or a lease lapsing wakes it at that instant. [ConsumerConfig]
+// .PollInterval is then an upper bound rather than a cadence — what is left
+// for it to find is a message ANOTHER process published into a durable queue —
+// so an idle consumer costs nothing between polls and a poll of a few seconds
+// loses no latency inside one process:
+//
+//	queue.Consume(ctx, broker, queue.ConsumerConfig{
+//		Handler:             handle,
+//		HandlerIsIdempotent: true,
+//		PollInterval:        5 * time.Second, // bounds only a publication from another process
+//	})
+//
+// Two durable brokers over one directory in one process share their wake, as
+// they share everything else: they are one queue.
+//
 // # Two brokers
 //
 // [NewFile] is the real one: its state is a directory, it survives the
@@ -162,12 +181,13 @@ const DefaultMaxMessageBytes int = corequeue.DefaultMaxMessageBytes
 const MaxDeadlineOffset time.Duration = corequeue.MaxDeadlineOffset
 
 // DefaultPollInterval is how long an idle worker waits before asking again
-// when [ConsumerConfig.PollInterval] is left at zero.
+// when [ConsumerConfig.PollInterval] is left at zero. With a [Waker] broker it
+// bounds only how late another process's publication is noticed.
 const DefaultPollInterval time.Duration = svcqueue.DefaultPollInterval
 
 // Broker is the public alias for the queue contract. It is FROZEN at four
 // methods; capabilities arrive as siblings ([DeadLetterReader],
-// [LeaseExtender]) reached by type assertion.
+// [LeaseExtender], [Waker]) reached by type assertion.
 type Broker = corequeue.Broker
 
 // Handler is the public alias for the function that processes one delivery.
@@ -205,6 +225,16 @@ type DeadLetterReader = corequeue.DeadLetterReader
 // LeaseExtender is the public alias for the capability of renewing a lease a
 // handler is still working under. Both brokers here implement it.
 type LeaseExtender = corequeue.LeaseExtender
+
+// Waker is the public alias for the capability of telling an idle consumer
+// when to look again. Both brokers here implement it, and Consume uses it; a
+// broker of your own that omits it is simply polled.
+type Waker = corequeue.Waker
+
+// Wake is the public alias for what an idle consumer waits on: a signal the
+// next Publish or Nack in this process closes, and how long until something
+// the broker holds becomes receivable on its own.
+type Wake = corequeue.WakeValue
 
 // FileConfig is the public alias for [NewFile]'s configuration.
 type FileConfig = svcqueue.FileConfig
