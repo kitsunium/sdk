@@ -66,12 +66,15 @@
 // that was asked for. Closing it needs the tag INSIDE the signed document,
 // which is a release-format decision rather than a code one.
 //
-// **Windows is not supported for the replacement step.** Archive and binary
-// naming handle it, but Windows will not let a running executable be renamed
-// over, and the privilege fallback is `sudo -n mv`. Every update that reaches
-// replacement on Windows fails.
+// **Windows is not supported for the replacement step.** Windows will not let
+// a running executable be renamed over, so on a Windows build Upgrade refuses
+// with the SDK's UNSUPPORTED_PLATFORM — errors.Is(err, proc.UnsupportedPlatform)
+// — before it downloads anything. CheckForUpdate works there: a product can
+// still tell its user that a newer release exists. A build with no vendor key
+// is told about the key first, on every platform.
 //
-// Both are recorded in ADR 0077 §Deferred rather than left to be discovered.
+// Both are recorded in ADR 0077 §Deferred rather than left to be discovered,
+// and the Windows refusal in ADR 0095.
 //
 // # What this package does not do
 //

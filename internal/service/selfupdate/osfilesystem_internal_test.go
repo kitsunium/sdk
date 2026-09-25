@@ -163,8 +163,15 @@ func TestOsFileSystem_Rename(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			t.Cleanup(func() { file.Close() })
 			oldPath := file.Name()
+			//: closed BEFORE the rename, as writeAndReplaceBinary closes its
+			//: staged file first. Held open, it cannot be renamed on Windows —
+			//: Go opens files without FILE_SHARE_DELETE — and the test was
+			//: asserting that it could, which is a Unix premise, not a property
+			//: of osFileSystem.
+			if cerr := file.Close(); cerr != nil {
+				t.Fatalf("closing the temp file: %v", cerr)
+			}
 
 			// Prepare new path
 			newPath := oldPath + tt.suffix
@@ -201,8 +208,14 @@ func TestOsFileSystem_Remove(t *testing.T) {
 			if err != nil {
 				t.Fatalf("Failed to create temp file: %v", err)
 			}
-			t.Cleanup(func() { file.Close() })
 			path := file.Name()
+			//: closed BEFORE the removal. Held open, it cannot be deleted on
+			//: Windows — Go opens files without FILE_SHARE_DELETE — and the test
+			//: was asserting that it could, which is a Unix premise, not a
+			//: property of osFileSystem.
+			if cerr := file.Close(); cerr != nil {
+				t.Fatalf("closing the temp file: %v", cerr)
+			}
 
 			// Remove file
 			err = fs.Remove(path)

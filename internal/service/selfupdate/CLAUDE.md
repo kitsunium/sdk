@@ -20,6 +20,7 @@ module.
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
 | `elevation.go` | the second, separate opt-in for a non-writable install directory |
+| `replace_platform.go` | `canReplace` — the Windows refusal of the replacement step, before anything is downloaded |
 | `candidate.go` | the release-candidate channel |
 | `codes.go`, `errors.go` | this package's own range `0.3.66.*` and its sentinels |
 | `wrap.go` | `refuse` and `classify` — the only two ways an error is built here |
@@ -66,6 +67,34 @@ never collide.
 Temp file in the target directory → `chmod 0755` → `os.Rename`. There is no
 window where the binary is half-written. There is also no rollback: once the
 rename lands the previous version is gone.
+
+### Windows is refused, before the download (ADR 0095)
+
+Windows will not let a running executable be renamed over:
+`MoveFileEx(MOVEFILE_REPLACE_EXISTING)` answers `ERROR_ACCESS_DENIED`. ADR 0077
+documented the platform as unsupported for the step and nothing enforced it:
+the flow downloaded and authenticated the archive, the rename failed as
+`os.ErrPermission`, the privilege fallback ran `sudo -n mv` — a command Windows
+does not have — and the failure advised the sudo opt-in. `canReplace` refuses a
+Service built for Windows with the SDK's `UNSUPPORTED_PLATFORM` (ADR 0018),
+carrying `goos` and `tag`, right after `canAuthenticate` and before a byte is
+fetched — the same "refuse before spending a download the result can never be
+used for" rule, and a build with no vendor key still hears about the key first.
+`CheckForUpdate` works on Windows; `Upgrade` checks and then stops. It reads the
+Service's `goos`, not `runtime.GOOS`, so the refusal is asserted on every host
+(`TestAWindowsTargetRefusesTheReplacementBeforeDownloadingAnything`,
+`TestUpgradeOnAWindowsTargetChecksAndThenStops`).
+
+### The suite builds every Service for one platform
+
+`TestMain` pins `runtimeGOOS` to `fixtureGOOS` (`linux`) once, before any test
+runs. The pipeline's fixtures are built for one platform — a tar.gz, a manifest
+naming that platform's asset — and left to the host they changed meaning on
+Windows (a zip expected, the tar.gz refused as `ARCHIVE_UNREADABLE`, and now the
+platform refusal ahead of every gate). One assignment before `m.Run` races
+nothing; the warning on `Service` is about mutating it under `t.Parallel`. The
+Windows shapes (zip, `.exe`, the refusal) are asserted by tables that build a
+Service per platform explicitly.
 
 ## Errors: two shapes, and which half a fact goes in
 
