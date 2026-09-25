@@ -166,14 +166,8 @@ func TestTwoDurableBrokersOverOneDirectoryWakeEachOther(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewManualClock(epoch)
 	dir := t.TempDir()
-	consuming, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
-	if err != nil {
-		t.Fatalf("NewFile() = %v", err)
-	}
-	producing, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
-	if err != nil {
-		t.Fatalf("NewFile() = %v", err)
-	}
+	consuming := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
+	producing := requireFileBroker(t, svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy(), Clock: clk})
 	seen := consumer(t, consuming, clk, accept)
 	clk.BlockUntil(1)
 	publish(t, producing, "through the other broker")
