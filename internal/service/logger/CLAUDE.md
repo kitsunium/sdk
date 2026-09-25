@@ -108,7 +108,9 @@ Logger ── Handler (genericHandler / TextHandler)
   could delete or rotate while the process ran. The owner stays a `*loggerImpl`,
   so `Build`/`LogAttrs` keep their fast path; `With`/`WithGroup` build fresh
   values that own nothing, so closing a child never pulls the writers out from
-  under its parent. `TestAnOwningLoggerReleasesWhatItOwnsOnce`.
+  under its parent. That includes `WithGroup("")`, whose no-op hands the
+  receiver back — except from an owner, which answers with a non-owning twin
+  rather than itself. `TestAnOwningLoggerReleasesWhatItOwnsOnce`.
 - **A `!race` alloc guard covers this.** `TestT34TraceCorrelationAddsNoAllocation`
   in `pkg/v1/logger` asserts **exactly 1** alloc/op on all three emission paths,
   in and out of a span — stricter than `TestV116BuildSendAllocatesOnePerEmit`,

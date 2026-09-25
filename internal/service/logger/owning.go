@@ -63,8 +63,9 @@ func Owning(lg corelogger.Logger, owned io.Closer) corelogger.Logger {
 // calls — and reports the first release's outcome.
 //
 // A Logger that owns nothing returns nil: every Logger derived with With or
-// WithGroup shares its parent's writers and owns none of them, so closing a
-// child can never pull the files out from under its parent or its siblings.
+// WithGroup — WithGroup("") included — shares its parent's writers and owns
+// none of them, so closing a child can never pull the files out from under its
+// parent or its siblings.
 // Records logged after the owner's Close are dropped, as a failing write
 // always is (the Logger contract never surfaces one).
 func (l *loggerImpl) Close() error {

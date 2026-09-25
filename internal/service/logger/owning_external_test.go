@@ -37,6 +37,7 @@ type foreignLogger struct{ corelogger.Logger }
 func TestAnOwningLoggerReleasesWhatItOwnsOnce(t *testing.T) {
 	t.Parallel()
 	base, err := svclogger.New(mustNewText(t, &bytes.Buffer{}, level.Info))
+	//: a plain Logger to hand the writers to.
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -45,23 +46,37 @@ func TestAnOwningLoggerReleasesWhatItOwnsOnce(t *testing.T) {
 	owner := svclogger.Owning(base, writers)
 
 	closer, ok := owner.(io.Closer)
+	//: the owner exposes the release.
 	if !ok {
 		t.Fatalf("an owning Logger (%T) does not implement io.Closer", owner)
 	}
-	//: a child shares the writers; closing it must release nothing.
-	child, ok := owner.With(corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}).(io.Closer)
-	if !ok {
-		t.Fatal("a derived Logger does not implement io.Closer")
+	//: every child shares the writers; closing one must release nothing —
+	//: WithGroup("") included, whose no-op used to hand the owner itself back.
+	children := map[string]corelogger.Logger{
+		"With":          owner.With(corelogger.AttrValue{Key: "k", Value: corelogger.StringValue("v")}),
+		"WithGroup":     owner.WithGroup("g"),
+		`WithGroup("")`: owner.WithGroup(""),
 	}
-	if cerr := child.Close(); cerr != nil || writers.calls != 0 {
-		t.Fatalf("closing a derived Logger = %v and released the writers %d time(s), want nil and none", cerr, writers.calls)
+	//: each way of deriving a child.
+	for how, derived := range children {
+		child, isCloser := derived.(io.Closer)
+		//: a child is still this package's Logger, so it has a Close.
+		if !isCloser {
+			t.Fatalf("a Logger derived with %s does not implement io.Closer", how)
+		}
+		//: and that Close owns nothing.
+		if cerr := child.Close(); cerr != nil || writers.calls != 0 {
+			t.Fatalf("closing a Logger derived with %s = %v and released the writers %d time(s), want nil and none", how, cerr, writers.calls)
+		}
 	}
 	//: the owner releases them once, and repeats the first answer.
 	for attempt := range 3 {
+		//: every call repeats the first Close's answer.
 		if cerr := closer.Close(); !errors.Is(cerr, refused) {
 			t.Fatalf("Close attempt %d = %v, want the writers' own answer", attempt+1, cerr)
 		}
 	}
+	//: and the writers saw exactly one release.
 	if writers.calls != 1 {
 		t.Fatalf("the writers were released %d times, want exactly once", writers.calls)
 	}
@@ -75,6 +90,7 @@ func TestAnOwningLoggerReleasesWhatItOwnsOnce(t *testing.T) {
 	}
 	//: a foreign Logger has no Close to carry anything to.
 	foreign := foreignLogger{Logger: base}
+	//: returned as it came, carrying nothing.
 	if got := svclogger.Owning(foreign, writers); got != corelogger.Logger(foreign) {
 		t.Fatalf("Owning(foreign) = %T, want the foreign Logger unchanged", got)
 	}
