@@ -61,10 +61,13 @@ env:
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./entitlement ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
-  # failures by chmod-freezing a directory — both are Unix mechanics with no
-  # Windows equivalent (Windows uses ACLs; chmod 0555 doesn't block the owner).
-  # Run them on the Unix lanes only; the sink still compiles + logs on Windows,
-  # and ACL-based hardening of the Windows file sink is tracked as future work.
+  # failures by chmod-freezing a directory — both are Unix mechanics. They run
+  # here on the Unix lanes (the BSDs compile them below as well); on Windows
+  # the whole-suite step runs them, and there their suites assert what a mode
+  # means on that platform (the one read-only bit, not an ACL) and skip the
+  # chmod injections, naming why (ADR 0095). Listing them for Windows here too
+  # would only run them twice. ACL hardening of the Windows file sinks — a
+  # security descriptor at creation — is named in their CLAUDE.md, not done.
   SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile"
 
 jobs:
@@ -122,14 +125,15 @@ jobs:
       # pure-Go packages on the Linux lane because they "behave identically
       # everywhere"; their TESTS did not — on macOS a Unix socket path past the
       # 104-byte sun_path, a temporary directory under a link (ADR 0094). The
-      # whole suite takes about two minutes there and gates. On Windows it runs
-      # as an inventory, not a gate, until its first clean run makes it one: the
-      # suite has never run there, and what it finds is recorded in ADR 0094.
+      # whole suite takes about two minutes on macOS and gates. It gates on
+      # Windows too: ADR 0094 ran it there as an inventory (continue-on-error)
+      # until a clean run, its first run failed in 19 packages, and ADR 0095
+      # records how each was resolved — production bugs fixed, Unix premises
+      # replaced by what Windows actually promises — and the first clean runs.
       - name: Unit tests — every package on ${{ matrix.name }}
-        # !cancelled(): the inventory runs even when the platform-sensitive gate
-        # above failed — that gate still fails the job, the inventory still reports.
+        # !cancelled(): this runs even when the platform-sensitive gate above
+        # failed, so one run reports both; either failing fails the job.
         if: ${{ !cancelled() && matrix.name != 'linux' }}
-        continue-on-error: ${{ matrix.name == 'windows' }}
         # A test that hangs on a kernel it never ran on must not eat the job.
         timeout-minutes: 12
         shell: bash
