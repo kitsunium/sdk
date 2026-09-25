@@ -16,12 +16,10 @@ bazel_dep(name = "rules_go", version = "0.60.0")
 bazel_dep(name = "gazelle", version = "0.50.0")
 
 # ── Go SDK ─────────────────────────────────────────────────────────────
-# `from_file(go_work=...)` reads the Go toolchain directive out of go.work
-# so the SDK version stays in sync with the module declarations.
 go_sdk = use_extension("@rules_go//go:extensions.bzl", "go_sdk")
 
-# The root go.mod advertises Go 1.27 (major.minor); rules_go expects a
-# literal patch-version string for the SDK download, so we pin explicitly.
+# The patch-level floor go.work and every go.mod declare (`go 1.27.1`): the
+# Bazel SDK is pinned to exactly that version and moves with it.
 go_sdk.download(version = "1.27.1")
 
 # ── Go dependencies ────────────────────────────────────────────────────

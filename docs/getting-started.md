@@ -4,7 +4,7 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 
 ## Requirements
 
-- Go **1.27.1 or newer — mandatory**. Every SDK module declares `go 1.27.1` and `MODULE.bazel` pins the toolchain to 1.27.1, so an older toolchain refuses the build outright — the `go` directive is the requirement, not any single language feature. (The features the SDK does use — `for b.Loop()`, `b.Context()`, range-over-int — landed in 1.22/1.24 and are not what sets the floor.)
+- Go **1.27.1 or newer — mandatory**. Every SDK module declares `go 1.27.1` and `MODULE.bazel` pins the toolchain to 1.27.1. An older `go` command (1.21 or later) with the default `GOTOOLCHAIN=auto` downloads and runs Go 1.27.1 itself; with `GOTOOLCHAIN=local`, or where it cannot download, it refuses the build — the `go` directive is the requirement, not any single language feature. (The features the SDK does use — `for b.Loop()`, `b.Context()`, range-over-int — landed in 1.22/1.24 and are not what sets the floor.)
 - A Go module to import from: `go mod init github.com/<you>/<project>` if you don't have one yet
 
 ## Install
