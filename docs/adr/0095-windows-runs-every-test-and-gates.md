@@ -4,13 +4,13 @@
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) — Decision 5's Windows inventory and §Deferred "Windows at runtime" are superseded: the Windows lane gates; [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) §1 — the canonical root is cleaned into the OS's form, and its single `EvalSymlinks` becomes two
-- **Related**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the inventory this closes — its §Deferred "Windows at runtime", and Decision 5's Windows half), [ADR 0018](0018-sdk-cross-platform-portability.md) (the `UnsupportedPlatform` floor), [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (the DACL reader reused), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (the Windows replacement step), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) (the root spelling)
+- **Related**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the inventory this closes — its §Deferred "Windows at runtime", and Decision 5's Windows half), [ADR 0018](0018-sdk-cross-platform-portability.md) (the `UnsupportedPlatform` floor), [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (the DACL reader reused — and where the queue parts from ADR 0084 §D5), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (the Windows replacement step), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) (the root spelling)
 
 ## Context
 
 ADR 0094 ran every package's tests on `windows-latest` for the first time, as an
 inventory (`continue-on-error`) that would become a gate once clean. Its first
-run (`e2e-cross`, 9d5356b) passed 184 packages and failed 19:
+run, recorded in that ADR's §Deferred, passed 184 packages and failed 19:
 `internal/service/{codec/multipart, logger/sink/file, metrics, net/server,
 net/sse, queue, selfupdate, vcs/git, vfs, writer/journald, writer/rotfile}` and
 `pkg/v1/{cgroup, git, logger, metrics, process, queue, server, signal}`. A later
@@ -59,6 +59,15 @@ skip that hides a bug. Each failure below was classified before it was touched.
      not RUN there: its publisher, `vfs`, refuses Windows by design, so a
      directory the rules accept meets `UNSUPPORTED_PLATFORM` — the platform's
      answer, where it used to be a false verdict on the caller's directory.
+     A list the reader cannot read, or reads only in part, is REFUSED
+     (`why=unverifiable`, the status in `observed`). The lock accepts that
+     case (ADR 0084 §D5), because a wrong refusal there costs a locker on a
+     safe directory; a queue directory wrongly accepted is a planted message
+     a consumer acts on, and the queue refused every Windows directory before
+     this rule, so the refusal takes away nothing that worked. The reader now
+     names every no-verdict answer — a path that is not one and an entry the
+     walk cannot fetch used to come back empty, indistinguishable from a
+     verdict — so a caller can make that choice at all.
    - **`selfupdate`** documented Windows as unsupported for the replacement
      step (ADR 0077) and enforced nothing: it downloaded and authenticated the
      archive, failed to rename over the running executable, fell back to
@@ -73,7 +82,8 @@ skip that hides a bug. Each failure below was classified before it was touched.
      the files lived until a collection ran their finalizers — and on Windows
      could be neither deleted nor rotated. The Logger they return now owns
      the writers and is an `io.Closer` (`svclogger.Owning`); derived Loggers
-     own nothing.
+     own nothing — `WithGroup("")` included, whose no-op would otherwise hand
+     the owner itself back as its child.
 
 3. **Unix premises in tests, replaced by what Windows promises:**
    - **Clock resolution** (`metrics`, `pkg/v1/metrics`, `net/sse`,
@@ -112,7 +122,7 @@ skip that hides a bug. Each failure below was classified before it was touched.
    exactly why, and it follows an assertion of the platform's contract wherever
    one exists.
 
-## Consequences
+## Consequences / Semantics
 
 - A change that breaks a package on Windows fails `e2e-cross` before merge.
 - The Windows job carries the whole suite on every push, as macOS already did.
@@ -133,6 +143,9 @@ None to a published shape; `io.Closer` on a `NewMulti`/`FromConfig` Logger and
   and `QUEUE_DIRECTORY_UNUSABLE` respectively.
 - `net/server`: an auto-sized listener without `SO_REUSEPORT` no longer
   reports a reason; queue refusals gain an `observed` field.
+- `lock` on Windows: a lock directory whose path the DACL reader cannot convert,
+  or whose list it cannot walk to the end, is still accepted — and now LOGGED,
+  as an unreadable list already was, since the reader names both.
 
 ## Alternatives considered
 
@@ -145,6 +158,9 @@ None to a published shape; `io.Closer` on a `NewMulti`/`FromConfig` Logger and
   creation** (`CreateFileW` with `SECURITY_ATTRIBUTES`). The principled closure
   of the `0600` gap on Windows, and a security boundary of its own with no
   local Windows to iterate on; named in the packages, deferred below.
+- **Let the queue fail open on an unreadable list, as the lock does.** One
+  rule for both callers of one reader. But ADR 0084 §D5 is an argument about
+  costs, and the queue's costs are the other way round: see Decision 2.
 - **Refuse `queue.NewFile` on Windows before its directory rules.** It would
   create nothing on a platform that refuses anyway, and leave the rules wrong
   for the day vfs gains a Windows backend; the rules run first instead, and are
@@ -173,11 +189,14 @@ None to a published shape; `io.Closer` on a `NewMulti`/`FromConfig` Logger and
 ## Verification
 
 - `e2e-cross` Windows job, step "Unit tests — every package on windows" —
-  failing packages per run on this branch: 13 at c6baff8 (run 36152499054),
-  7 at 9372219 (36154229595, `net/client` among them: the flaky assumption the
-  first run had passed), 1 at f94fb5a (36156153568), **0 at 4b4aaa0
-  (36156929003)**, still under `continue-on-error`; then green as a gate in the
-  runs the pull request records.
+  failing packages per run of this change, in order: 13
+  ([run 36152499054](https://github.com/kitsunium/sdk/actions/runs/36152499054)),
+  7 ([run 36154229595](https://github.com/kitsunium/sdk/actions/runs/36154229595),
+  `net/client` among them: the flaky assumption the first run had passed), 1
+  ([run 36156153568](https://github.com/kitsunium/sdk/actions/runs/36156153568)),
+  **0** ([run 36156929003](https://github.com/kitsunium/sdk/actions/runs/36156929003)),
+  still under `continue-on-error`; then green as a gate in the runs the pull
+  request records.
 - `GOWORK=off CGO_ENABLED=0 GOOS={windows,linux,darwin} GOARCH=amd64 go vet ./...`
   in all six modules; `go test` and `bazel test` of every touched package on
   darwin/arm64, including the race-off alloc lane for the logger; the repository
