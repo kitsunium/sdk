@@ -114,22 +114,42 @@ that misses.
 
 ## ADR 0097 — secret-aware loading and the provenance report
 
-Measured on a different box from the table above, so only the DELTAS carry
-over: Apple M1 Pro, darwin/arm64, go1.27.1, `-count=5`, median, on the tree
-this section was added with. "Before" is the same tree with the ADR 0097 files
-stashed.
+Measured on a different box from the table above, so compare these rows with
+each other, not with it. This section has its own envelope:
 
-| Benchmark | before | after | What changed |
-|---|---:|---:|---|
-| `LoadWithoutSchema` | 1 688 ns · 1 010 B · 16 allocs | 1 708 ns · 1 075 B · 17 allocs | the layers slice a traced load reads; the secret walk is memoised per TYPE |
-| `LoadSchema` | 3 612 ns · 1 460 B · 32 allocs | 3 625 ns · 1 524 B · 33 allocs | the same slice; a schema resolves its secret keys at construction |
-| `LoadSchemaWithOrigins` | — | 4 794 ns · 2 872 B · 51 allocs | the report: one origin per leaf key, each attributed to its last layer |
+| Dimension | Value |
+|---|---|
+| CPU               | Apple M1 Pro, 10 cores (8 performance + 2 efficiency), `GOMAXPROCS` 10 |
+| RAM               | 16 GiB |
+| OS / kernel       | macOS 26.6.2 (build 25G83), Darwin 25.6.0 |
+| Architecture      | arm64 |
+| Go toolchain      | go1.27.1 darwin/arm64 |
+| Git commits       | before: `1c63300` (`main`, the base of the branch that added ADR 0097); after: `e03e72f` |
+| Generated (UTC)   | 2026-09-25T16:44Z |
+| Load              | a shared box: load average 4.7–5.5 on 10 cores during the run, which the ± column absorbs |
+| Method            | both test binaries built first, then run INTERLEAVED — five rounds of `-test.count 2`, before then after — so a change in the box's load lands on both sides; `-benchtime=1s`; medians, ± and p-values from `benchstat` (Mann-Whitney U), n = 10 per cell |
+
+```sh
+# in a worktree of each commit, from internal/service:
+GOWORK=off go test -c -o config.test ./config/
+# then, five times, alternating the two binaries, from internal/service/config:
+./config.test -test.run '^$' -test.bench '^Benchmark(LoadWithoutSchema|LoadSchema|LoadSchemaWithOrigins)$' -test.benchmem -test.count 2
+benchstat before.txt after.txt
+```
+
+| Benchmark | before (`1c63300`) | after (`e03e72f`) | time, benchstat | What changed |
+|---|---:|---:|---:|---|
+| `LoadWithoutSchema` | 1.713 µs ± 1 % · 1 010 B · 16 allocs | 1.755 µs ± 2 % · 1 074 B · 17 allocs | +2.5 % (p = 0.000) | the layers slice a traced load reads; the secret walk is memoised per TYPE |
+| `LoadSchema` | 3.705 µs ± 2 % · 1 460 B · 32 allocs | 3.730 µs ± 2 % · 1 524 B · 33 allocs | ~ (p = 0.225) | the same slice; a schema resolves its secret keys at construction |
+| `LoadSchemaWithOrigins` | — | 5.122 µs ± 2 % · 2 872 B · 51 allocs | — | the report: one origin per leaf key, each attributed to its last layer |
 
 A schemaless `Load` must know which keys hold a `secret.Value` to bypass the
 environment's JSON coercion for them, and that is a reflection walk over the
-target type. Walked per load, it DOUBLED the load — 3.1 µs and 34 allocations,
-measured before the memo went in — so the answer is memoised per type in a
+target type. Walked per load, it DOUBLED the load — 3.1 µs and 34 allocations
+on this box during development, a version of the code that no longer exists
+and was therefore not re-measured — so the answer is memoised per type in a
 `sync.Map`, the one piece of package state in the loader, holding one entry per
-configuration type a program declares. The report itself costs 1.2 µs and 18
-allocations over `LoadSchema`, on a start-up path that runs once; it is not
-paid by a caller who does not ask for origins.
+configuration type a program declares. What is left is one allocation and
+64 B, the layers slice, and 2.5 % of a schemaless load. The report itself costs
+1.4 µs and 18 allocations over `LoadSchema`, on a start-up path that runs once;
+it is not paid by a caller who does not ask for origins.

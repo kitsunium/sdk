@@ -112,11 +112,12 @@ text, nor any field.
   without a second merge.
 - A numeric secret in the environment loads, exactly; a numeric secret in a file
   is refused loudly, with the fix (quote it) in the verdict's text.
-- Measured on darwin/arm64 (the config `BENCH.md` records the table): a
-  schemaless `Load` goes from 1.69 µs / 16 allocations to 1.71 µs / 17 — the
-  layers slice — once the per-type memo is in; without the memo the walk
-  doubled it, which is why the memo exists. `LoadSchema` gains one allocation.
-  `LoadSchemaWithOrigins` costs 4.79 µs / 51 allocations against 3.63 µs / 33.
+- Measured on darwin/arm64, interleaved runs of `main` and this change (the
+  config `BENCH.md` records the table and its envelope): a schemaless `Load`
+  goes from 1.71 µs / 16 allocations to 1.76 µs / 17 — the layers slice — once
+  the per-type memo is in; without the memo the walk doubled it, which is why
+  the memo exists. `LoadSchema` gains one allocation and no measurable time.
+  `LoadSchemaWithOrigins` costs 5.12 µs / 51 allocations against 3.73 µs / 33.
 - The loader gains one piece of package state: a `sync.Map` from target type to
   its secret keys, one entry per configuration type a program declares.
 
