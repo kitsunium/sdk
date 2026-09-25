@@ -1082,6 +1082,34 @@ codes:
     const: CodePolicyInvalid
     hex: "0x00_02_24_01"
     package: internal/core/gate
+  - code: "0.2.37.1"
+    const: CodeNotFound
+    hex: "0x00_02_25_01"
+    package: internal/core/secret
+  - code: "0.2.37.2"
+    const: CodeInvalidName
+    hex: "0x00_02_25_02"
+    package: internal/core/secret
+  - code: "0.2.37.3"
+    const: CodeReadOnly
+    hex: "0x00_02_25_03"
+    package: internal/core/secret
+  - code: "0.2.37.4"
+    const: CodeStoreUnavailable
+    hex: "0x00_02_25_04"
+    package: internal/core/secret
+  - code: "0.2.37.5"
+    const: CodeValueRefused
+    hex: "0x00_02_25_05"
+    package: internal/core/secret
+  - code: "0.2.37.6"
+    const: CodeEmptyValue
+    hex: "0x00_02_25_06"
+    package: internal/core/secret
+  - code: "0.2.37.7"
+    const: CodeInvalidKeep
+    hex: "0x00_02_25_07"
+    package: internal/core/secret
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -2090,6 +2118,34 @@ codes:
     const: CodeCacheUnwritable
     hex: "0x00_03_43_01"
     package: internal/service/entitlement
+  - code: "0.3.68.1"
+    const: CodeInvalidConfig
+    hex: "0x00_03_44_01"
+    package: internal/service/secret
+  - code: "0.3.68.2"
+    const: CodeRecordUnreadable
+    hex: "0x00_03_44_02"
+    package: internal/service/secret
+  - code: "0.3.68.3"
+    const: CodeEnvRefused
+    hex: "0x00_03_44_03"
+    package: internal/service/secret
+  - code: "0.3.68.4"
+    const: CodeSealInvalid
+    hex: "0x00_03_44_04"
+    package: internal/service/secret
+  - code: "0.3.68.5"
+    const: CodeSignatureInvalid
+    hex: "0x00_03_44_05"
+    package: internal/service/secret
+  - code: "0.3.68.6"
+    const: CodeKeyMaterialInvalid
+    hex: "0x00_03_44_06"
+    package: internal/service/secret
+  - code: "0.3.68.7"
+    const: CodeGenerateFailed
+    hex: "0x00_03_44_07"
+    package: internal/service/secret
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

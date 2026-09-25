@@ -1040,6 +1040,21 @@ rules:
       # findings on functions whose entire body is `return svcsql.New…(cfg)`.
       - "**/internal/service/sql/**"
       - "**/pkg/v1/sql/**"
+      # service/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
+      # (16 each, interfaces), Name (16), PolicySpec (24: Every, Keep and the
+      # generator func) and OnRotate (8) — and every field is a collaborator a
+      # rotator needs or an option a caller must be able to omit. Value
+      # semantics are the contract, as for sql.Config above: NewRotator
+      # validates the struct it was given, and taking *RotatorConfig would let a
+      # caller change the policy after validation passed. The copy happens once
+      # per rotator — one or two in the life of a process, next to a store read
+      # that costs a system call — so the performance concern the rule guards is
+      # not measurable here.
+      #
+      # pkg/v1/secret is included because NewRotator there is a pure forwarder
+      # of the same alias; its whole body is `return svcsecret.NewRotator(cfg)`.
+      - "**/internal/service/secret/**"
+      - "**/pkg/v1/secret/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
@@ -1257,22 +1272,33 @@ rules:
       - "**/internal/core/health/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
-  # — encoding/json forces the asymmetry on core/net.DurationValue.
+  # — encoding/json forces the asymmetry on core/net.DurationValue, and on
+  # core/secret.Value (ADR 0096).
   #
   # MarshalJSON MUST take a value receiver, or a non-pointer struct field of
   # this type will not marshal through it. UnmarshalJSON MUST take a pointer
   # receiver, or it cannot assign. There is no receiver set that satisfies both
   # the rule and encoding/json; the standard library's time.Time carries exactly
-  # the same asymmetry for exactly the same reason. Scoped to core/net.
+  # the same asymmetry for exactly the same reason.
+  #
+  # For secret.Value the value receivers are not merely required, they are the
+  # security property: every rendering method — String, GoString, Format,
+  # MarshalJSON, MarshalText — must be in the method set of the VALUE, or a
+  # Value held in a non-addressable place (a map entry, a struct returned by
+  # value) would be printed by reflection instead of redacted. UnmarshalJSON and
+  # UnmarshalText are the only two that assign. Scoped to the two packages.
   KTN-RECEIVER-MIXPTR:
     exclude:
       - "**/internal/core/net/**"
+      - "**/internal/core/secret/**"
   KTN-VAR-RECVCONS:
     exclude:
       - "**/internal/core/net/**"
+      - "**/internal/core/secret/**"
   KTN-STRUCT-RECVTYPE:
     exclude:
       - "**/internal/core/net/**"
+      - "**/internal/core/secret/**"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #

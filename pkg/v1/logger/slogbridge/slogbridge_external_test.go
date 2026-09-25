@@ -11,6 +11,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/logger/slogbridge"
+	"github.com/kitsunium/sdk/pkg/v1/secret"
 )
 
 // newRecorder wires a Logger onto a MemorySink so a test can assert on the
@@ -603,5 +604,42 @@ func TestBridgedRecordsCarrySDKDecorations(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestASecretRendersItsPlaceholderThroughSlog pins that a secret.Value handed
+// to log/slog is written as its placeholder — through this bridge and through
+// slog's own text and JSON handlers alike.
+//
+// The core type cannot implement slog.LogValuer: no package below this one may
+// import log/slog (ADR 0032). It does not need to. slog's text handler reaches
+// for encoding.TextMarshaler, its JSON handler for json.Marshaler, and this
+// bridge converts an Any payload with fmt — and the Value answers all three
+// with the placeholder. This test is where that claim is checked, because this
+// is the one package allowed to name slog.
+func TestASecretRendersItsPlaceholderThroughSlog(t *testing.T) {
+	t.Parallel()
+	const plain = "slog-secret-5e2c71"
+	value := secret.FromString(plain)
+	var text, encoded bytes.Buffer
+	slog.New(slog.NewTextHandler(&text, nil)).Info("m", "password", value)
+	slog.New(slog.NewJSONHandler(&encoded, nil)).Info("m", "password", value)
+	bridged, sink := newRecorder(t, logger.LevelInfo)
+	bridged.Info("m", "password", value, slog.Any("nested", map[string]secret.Value{"k": value}))
+	renderings := map[string]string{
+		"slog's text handler": text.String(),
+		"slog's JSON handler": encoded.String(),
+	}
+	attrs := attrsOf(t, sink.Records())
+	for _, key := range []string{"password", "nested"} {
+		renderings["the bridge, "+key] = attrs[key].Value.String()
+	}
+	for name, rendered := range renderings {
+		if strings.Contains(rendered, plain) {
+			t.Errorf("%s wrote the secret: %s", name, rendered)
+		}
+		if !strings.Contains(rendered, "redacted") {
+			t.Errorf("%s did not write the placeholder: %s", name, rendered)
+		}
 	}
 }
