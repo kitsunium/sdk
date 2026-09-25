@@ -126,7 +126,9 @@ jobs:
       # as an inventory, not a gate, until its first clean run makes it one: the
       # suite has never run there, and what it finds is recorded in ADR 0094.
       - name: Unit tests — every package on ${{ matrix.name }}
-        if: matrix.name != 'linux'
+        # !cancelled(): the inventory runs even when the platform-sensitive gate
+        # above failed — that gate still fails the job, the inventory still reports.
+        if: ${{ !cancelled() && matrix.name != 'linux' }}
         continue-on-error: ${{ matrix.name == 'windows' }}
         # A test that hangs on a kernel it never ran on must not eat the job.
         timeout-minutes: 12
