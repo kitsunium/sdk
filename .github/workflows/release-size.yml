@@ -1,0 +1,50 @@
+name: Release size
+# The pull-request half of ADR 0135: ask an open pull request the question
+# SDK Release will ask its merge — what size would it publish? — while the
+# answer still costs one label instead of a refused release.
+#
+# A release is sized by the `release:*` label a maintainer sets on the pull
+# request (release:patch, release:minor, release:major; none is a patch). A
+# `Release-bump:` line in a commit message is only a REQUEST: the squash message
+# is composed from the branch commits, so nothing in it says who wrote a line.
+# A request for more than a patch with no label to decide it would stop the
+# release after the merge, so this check fails first and says which label
+# settles it.
+#
+# `pull_request`, never `pull_request_target`: the check needs no secret and no
+# write access, so a fork's pull request runs it with the read-only token like
+# any other. It re-runs on `labeled`/`unlabeled` because a label is the fix.
+#
+# Not a required check today — `bazel` and `post-commit` are (the legacy branch
+# protection and the ruleset each name one). Requiring it is a repository
+# setting, left to the maintainer; unrequired it still turns red on the pull
+# request that would stop the release. See .github/workflows/CLAUDE.md.
+
+on:
+  pull_request:
+    types: [opened, reopened, synchronize, labeled, unlabeled]
+
+concurrency:
+  group: release-size-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  pull-requests: read
+
+jobs:
+  release-size:
+    name: release size — a label decides, a message only asks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      - name: the size this pull request would publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+          # Through the environment, never `${{ }}` in the script text.
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: bash scripts/release/check-pr-size.sh --pr="$PR_NUMBER"

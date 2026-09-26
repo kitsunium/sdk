@@ -299,6 +299,12 @@ docs-dev:
 # terminal. Without it the recipe printed "no majors need bumping" and nothing
 # about WHY — the local twin of #226, where a release run that published nothing
 # left no recoverable reason either.
+#
+# The size is read from the `release:*` labels of the range's merged pull
+# requests (ADR 0135), so the dry run asks GitHub through an authenticated `gh`
+# — a lookup that fails is refused, never previewed as a patch. `BUMP=minor`
+# (or patch, major) states the size instead and asks nothing, exactly as the
+# SDK Release dispatch input does.
 release-dry-run:
 	@rc=0; /bin/bash scripts/release/compute-bumps.sh --dry-run --explain > /tmp/sdk-release-majors.txt || rc=$$?; \
 	if [ "$$rc" -ne 0 ]; then \
@@ -309,7 +315,7 @@ release-dry-run:
 		echo "no majors need bumping"; \
 	else \
 		echo "majors to bump:"; cat /tmp/sdk-release-majors.txt; echo; \
-		/bin/bash scripts/release/cut-tags.sh --dry-run < /tmp/sdk-release-majors.txt; \
+		/bin/bash scripts/release/cut-tags.sh --dry-run $(if $(BUMP),--bump=$(BUMP),) < /tmp/sdk-release-majors.txt; \
 	fi
 
 # `docs-readme` regenerates pkg/v1/<service>/README.md from each

@@ -1,6 +1,6 @@
 # ADR 0089 — A file that cannot cut a release cannot size one
 
-- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`. **Amended 2026-09-15** (§Amendment) — the shared notion moved to `scripts/release/lib/release-scope.sh`, became a category rather than a list of two names, and is now read by **both** rules of `compute-bumps.sh` as well.
+- **Status**: Accepted; implemented in `scripts/release/cut-tags.sh`. **Amended 2026-09-15** (§Amendment) — the shared notion moved to `scripts/release/lib/release-scope.sh`, became a category rather than a list of two names, and is now read by **both** rules of `compute-bumps.sh` as well. **Amended by [ADR 0135](0135-a-release-is-sized-by-a-label-a-maintainer-set.md)** — the scope now gates a pull request's `release:*` label rather than a trailer, and §Deferred's first item (contributor text reaching the trailer parser) is closed without the repository setting it proposed.
 - **Date**: 2026-09-14
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0007](0007-sdk-release-and-versioning.md) §2 (row 4 — the `Release-bump` trailer is scoped to the paths that can *cut* a release, not to `pkg/` alone)

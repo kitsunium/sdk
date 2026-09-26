@@ -1,16 +1,17 @@
-<!-- updated: 2026-09-25T00:00:00Z -->
+<!-- updated: 2026-09-26T00:00:00Z -->
 # .github/workflows/
 
 ## Purpose
 
-CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate) and `sdk-release.yml` (auto-tag after the gate); the remaining three workflows are inherited from the devcontainer-template repo and path-gated on `.devcontainer/**`.
+CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `sdk-release.yml` (auto-tag after the gate) and `release-size.yml` (the size a pull request would publish, asked before it merges); the remaining three workflows are inherited from the devcontainer-template repo and path-gated on `.devcontainer/**`.
 
 ## Workflows
 
 | File | Trigger | Description |
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
-| `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven patch tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). Reads majors from `scripts/release/compute-bumps.sh` and pushes via `scripts/release/cut-tags.sh`. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). The `Release-bump` trailer that sizes a minor is read over the whole range since the last release, not from the checked-out HEAD — a cancelled CI run yields no release, so the trailer-bearing commit is often not HEAD by the time one fires (ADR 0085). |
+| `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). WHETHER comes from `scripts/release/compute-bumps.sh`; HOW BIG is the largest `release:*` label on the merged pull requests of the range, read by `scripts/release/cut-tags.sh` over the whole range since the last release, not from the checked-out HEAD (ADR 0085, ADR 0135). A `Release-bump:` line in a message only asks: unlabelled above a patch, it is refused — settled by labelling the named pull request and re-running, or by dispatching with the `bump` input. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). |
+| `release-size.yml` | pull request opened, reopened, synchronised, labelled or unlabelled | `scripts/release/check-pr-size.sh`: the question `cut-tags.sh` asks a merge, asked of the pull request before it — fails when a branch commit asks for more than a patch and no `release:*` label decides it, naming the label that settles it (ADR 0135). Read-only token, no secret, `pull_request` never `pull_request_target`. Not required: requiring it is a repository setting. |
 | `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows and the three BSDs, then — on macOS and Windows — every package (`go test -short ./...` per module, ADR 0094). Both runs gate: Windows was an inventory (`continue-on-error`) under ADR 0094 until its first clean run, and ADR 0095 records how its 19 failing packages were resolved and made it a gate. |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `docker-images.yml` | weekly + push to `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
@@ -104,14 +105,17 @@ SECOND lane to compile the `//go:build !race` files, after the alloc lane.
 
 ## sdk-release.yml (the SDK release lane)
 
-Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Bazel)` success. Steps:
+Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Bazel)` success, with `contents: write` (tags, releases) and `pull-requests: read` (the labels that size the release). Steps:
 
-1. `actions/checkout@93cb6efe…  # v5` with `fetch-depth: 0` — full history required so `git describe --tags` and `git worktree add <tag>` resolve.
-2. `actions/setup-go@…` + `bazel-contrib/setup-bazel@…` — Bazel is needed for the `rdeps` query inside `compute-bumps.sh`.
-3. Compute majors to bump (`scripts/release/compute-bumps.sh`, or `inputs.force_bumps` on manual dispatch).
-4. Cut tags (`scripts/release/cut-tags.sh`) — strips `replace` lines, verifies `GOWORK=off go mod download`, race-protected re-read.
-5. `gh release create --generate-notes --verify-tag` per pushed tag.
-6. Upload `release-summary-${{ github.run_number }}` artifact — only when majors were bumped. The summary + upload steps are gated `if: always() && steps.compute.outputs.majors != ''`, so a no-op run (empty majors) skips both.
+1. `actions/checkout@93cb6efe…  # v5` with `fetch-depth: 0` — full history, so both scripts can walk the range since the last release.
+2. `actions/setup-go@…` + `bazel-contrib/setup-bazel@…` (with its caches) — Bazel answers the `rdeps` query inside `compute-bumps.sh`; a step reports whether it can start.
+3. **Compute majors to bump** — `compute-bumps.sh --explain --require-bazel`, or `inputs.force_bumps` on manual dispatch. The verdict and its reason go to the log and to the step output `reason`.
+4. **Cut and push tags** — `cut-tags.sh` sizes the release from the `release:*` labels of the range's merged pull requests (ADR 0135), or from `inputs.bump` when dispatched with one (`--bump`, no lookup); rewrites the chain's go.mods, race-protected re-read, atomic push. Exit 65 is a refused size: its stderr names the pull request and both ways out. Exit 3 is a held bootstrap.
+5. **Verify the computed release was actually published** — once a bump was computed, a run that pushed no `pkg/` tag fails (#227 defect 2).
+6. `gh release create --generate-notes --verify-tag` per pushed tag.
+7. **Release summary** — on EVERY run (`if: always()`), to the job summary and a `release-summary-${{ github.run_number }}` artifact: the verdict, the size and where it came from, and one of four renderings — refused (quoting `cut-tags.sh`), nothing to publish, held bootstrap, or the tags pushed.
+
+**When a size is refused** (exit 65): label the pull request the refusal names — `release:minor` to grant the request, `release:patch` to decline it — and re-run the failed job, or dispatch this workflow with `bump` = patch/minor/major. `release_base()` advances only when a release is cut, so the refused merge stays in every later range until one of those happens. Never cut tags by hand: a range chosen to step over one merge steps over every size in it.
 
 Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (NEVER cancel a tag-push mid-flight).
 

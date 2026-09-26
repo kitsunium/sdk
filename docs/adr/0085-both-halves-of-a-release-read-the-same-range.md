@@ -1,6 +1,6 @@
 # ADR 0085 — Both halves of a release read the same range
 
-**Status**: Accepted; implemented in `scripts/release/`.
+**Status**: Accepted; implemented in `scripts/release/`. **Amended by [ADR 0135](0135-a-release-is-sized-by-a-label-a-maintainer-set.md)** — the range, the first-parent walk and largest-wins stand; what is read over them is the `release:*` label of each merged pull request, not a `Release-bump:` trailer.
 **Date**: 2026-09-13
 **Deciders**: kitsunium maintainers
 **Amends**: ADR 0007 §2 (the `Release-bump` trailer is no longer read from the merge commit *only*)
