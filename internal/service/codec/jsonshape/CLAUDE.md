@@ -47,9 +47,20 @@ json/v2's streaming methods by signature so it does not import json/v2.
   drops. A pointer field without either option is written as `null`, so it is
   Nullable, not Optional.
 - **Opaque means the type decides.** `json.Marshaler` / json/v2's `MarshalerTo`
-  → Any; `encoding.TextMarshaler` / `TextAppender` → String; either receiver
-  counts. A struct embedding `time.Time` gains its method and is opaque — the
-  copy it replaces described it as an object with a `Time` member.
+  → Any; `encoding.TextMarshaler` / `TextAppender` → String. A struct
+  embedding `time.Time` gains its method and is opaque — the copy it replaces
+  described it as an object with a `Time` member.
+- **A pointer receiver counts where the engine calls it: on an addressable
+  value.** Under the v1 semantics Go 1.27 keeps, json/v2 skips a pointer
+  method on a value it copied to encode (`forcedAddr`): the root of
+  `json.Marshal(v)`, the fields and array elements under it, every map key and
+  value. A pointer's and a slice's elements are addressable. The walk carries
+  that flag exactly (`shape(t, addressable)`, `receives`), so `Of(T)` is the
+  by-value encoding and `Of(*T)` the by-pointer one. Found by review: the first
+  version counted either receiver everywhere and described a by-value
+  pointer-receiver marshaler as opaque where `json.Marshal` lays it out —
+  `TestShapesMatchWhatEncodingJSONWrites`' two `pointer-receiver methods` cases
+  pin both roots.
   `json.Number` has a `MarshalJSONTo` under this engine and is special-cased:
   a Number, quoted under `,string` because its own method honours the option.
 - **A field keeps its Go field.** `Tag`, `GoName` and `Index` (the full path for

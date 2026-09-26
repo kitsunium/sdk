@@ -386,6 +386,7 @@ func (s *Server) acceptLoop(bound *boundListener, group *StreamGroup, handler co
 func (s *Server) backOff(bound *boundListener, delay time.Duration) bool {
 	timer := s.clk.NewTimer(delay)
 	defer timer.Stop()
+	//: whichever comes first: the wait's end, or the listener closing.
 	select {
 	//: waited out: accept again.
 	case <-timer.C():

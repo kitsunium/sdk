@@ -89,7 +89,8 @@ func TestEachKindIsDescribed(t *testing.T) {
 		{"json.Number", reflect.TypeFor[json.Number](), jsonshape.Number, "", false},
 		{"json.RawMessage writes itself", reflect.TypeFor[json.RawMessage](), jsonshape.Any, "", false},
 		{"a value-receiver Marshaler", reflect.TypeFor[ByValue](), jsonshape.Any, "", false},
-		{"a pointer-receiver Marshaler", reflect.TypeFor[ByPointer](), jsonshape.Any, "", false},
+		{"a pointer-receiver Marshaler encoded by value is laid out", reflect.TypeFor[ByPointer](), jsonshape.Object, "", false},
+		{"a pointer-receiver Marshaler behind a pointer writes itself", reflect.TypeFor[*ByPointer](), jsonshape.Any, "", true},
 		{"a json/v2 MarshalerTo", reflect.TypeFor[Streamed](), jsonshape.Any, "", false},
 		{"a TextMarshaler", reflect.TypeFor[Textual](), jsonshape.String, "", false},
 		{"a TextAppender", reflect.TypeFor[Appended](), jsonshape.String, "", false},
@@ -109,6 +110,7 @@ func TestEachKindIsDescribed(t *testing.T) {
 				c.typ, shape.Kind, shape.Format, shape.Nullable, c.kind, c.format, c.nullable)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -122,6 +124,7 @@ func TestEachKindIsDescribed(t *testing.T) {
 // pointer receiver's method through a pointer, where encoding/json calls it.
 func TestOpaqueTypesAreWhatEncodingJSONWrites(t *testing.T) {
 	t.Parallel()
+	//: each opaque type, encoded.
 	for _, value := range []any{ByValue{}, &ByPointer{}, Textual{}, Appended{}, Streamed{Number: "1"}, netip.MustParseAddr("::1"), time.Unix(0, 0)} {
 		written, err := json.Marshal(value)
 		//: each is encodable.
@@ -175,6 +178,7 @@ func TestMapsAreDescribedByTheirKeys(t *testing.T) {
 			t.Errorf("json.Marshal(%T) error = %v, the shape says %v", c.value, err, c.kind)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

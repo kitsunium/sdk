@@ -94,6 +94,7 @@ func readOption(tag string, opts *tagOptions) string {
 	}
 	option, length, _ := consumeOption(tag, false)
 	tag = tag[length:]
+	//: the options that take a value, then the flags.
 	switch option {
 	//: case:ignore or case:strict.
 	case "case":
@@ -111,6 +112,7 @@ func readOption(tag string, opts *tagOptions) string {
 // setFlag records one of the four options that take no value; any other
 // option is one the engine ignores.
 func setFlag(option string, opts *tagOptions) {
+	//: the four flags; any other option is ignored.
 	switch option {
 	//: the embed option.
 	case "embed":
@@ -155,6 +157,7 @@ func consumeOption(in string, allowQuoted bool) (option string, length int, vali
 		comma = len(in)
 	}
 	first, _ := utf8.DecodeRuneInString(in)
+	//: by the option's first rune.
 	switch {
 	//: an identifier.
 	case first == '_' || unicode.IsLetter(first):
@@ -178,6 +181,7 @@ func consumeQuoted(in string, comma int) (option string, length int, valid bool)
 	escaped := false
 	//: rune by rune after the opening quote; offset counts from it.
 	for offset, r := range in[1:] {
+		//: the rune's role in the quoted string.
 		switch {
 		//: the rune after a backslash keeps it — unless it is a single quote.
 		case escaped:

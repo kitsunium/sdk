@@ -171,8 +171,11 @@ func TestAFailingAcceptWaitsOnTheEnginesClock(t *testing.T) {
 	if err := bound.Close(); err != nil {
 		t.Fatalf("close: %v", err)
 	}
+	//: the loop leaving, or the deadline.
 	select {
+	//: it left.
 	case <-stopped:
+	//: it did not.
 	case <-time.After(serveDeadline):
 		t.Fatal("the accept loop outlived its listener")
 	}
@@ -209,12 +212,15 @@ func TestShutdownDuringABackoffReturnsAtOnce(t *testing.T) {
 		defer cancel()
 		returned <- srv.Shutdown(ctx)
 	}()
+	//: Shutdown returning, or the deadline.
 	select {
+	//: it returned.
 	case err := <-returned:
 		//: a clean drain: the loop left, and nothing was in flight.
 		if err != nil {
 			t.Fatalf("Shutdown() = %v, want nil", err)
 		}
+	//: it did not.
 	case <-time.After(serveDeadline):
 		t.Fatal("Shutdown waited for a backoff the clock never ended")
 	}

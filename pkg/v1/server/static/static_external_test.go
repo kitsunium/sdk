@@ -48,6 +48,7 @@ func TestTheShortestUsefulStaticSite(t *testing.T) {
 		{"/app/assets/app-3f2a9c.js", http.StatusOK, "console.log('app')", static.ImmutableCacheControl},
 		{"/app/assets/missing.js", http.StatusNotFound, "", static.RevalidateCacheControl},
 	}
+	//: each path, over the connection.
 	for _, c := range tests {
 		response, err := http.Get(server.URL + c.path)
 		//: the loopback server answers.

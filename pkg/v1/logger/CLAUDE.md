@@ -161,7 +161,7 @@ ADR 0039 never came into play.
 - Import `github.com/kitsunium/sdk/internal/*` from consumer code. Go's `internal/` rule blocks it AND API-wise stay on `pkg/v1/*` for long-term stability.
 - Set `Version` at runtime from application code. Use the ldflags recipe (or Bazel `--stamp`) so every binary commits its version at link time.
 - Use a `Builder` after `Send` — the next caller will reuse the same struct from the `sync.Pool`.
-- Re-export internal sink / middleware constructors here ad hoc. The current convenience helpers (`Multi`, `ConsoleStderr`, `ConsoleStdout`, `TextEncoder`) are deliberate; richer outputs reach into `internal/service/logger/{sink,middleware}` until contracts stabilise enough for a re-export.
+- Re-export internal sink / middleware constructors here ad hoc. The current convenience helpers (`Multi`, `ConsoleStderr`, `ConsoleStdout`, `TextEncoder`, and `LevelGate` over `writer/levelgate.Floor` — decided in ADR 0132, not ad hoc) are deliberate; richer outputs reach into `internal/service/logger/{sink,middleware}` until contracts stabilise enough for a re-export.
 - Build a parallel `slog.Logger` pointed at the same stream as an SDK Logger.
   Use `slogbridge` so there is one pipeline, one threshold, one format (ADR 0032).
 - Forge SDK errors from consumer code via `errs.Define` — introspect via `pkg/v1/errs` accessors instead.

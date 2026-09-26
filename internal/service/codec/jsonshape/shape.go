@@ -20,9 +20,12 @@
 //
 // A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo —
 // is opaque: Any, whatever it writes. One that writes text — an
-// encoding.TextMarshaler or TextAppender — is a String. Either receiver
-// counts: encoding/json calls a pointer receiver's method whenever the value is
-// addressable, which a value behind a pointer or in a slice always is.
+// encoding.TextMarshaler or TextAppender — is a String. A pointer receiver's
+// method counts only where encoding/json calls it: on an addressable value.
+// Of(T) describes a T encoded by value — json.Marshal(v) — whose root is not
+// addressable, and neither are the fields and array elements under it; a
+// pointer's and a slice's elements are, and a map's values never are. Describe
+// *T for json.Marshal(&v).
 // time.Time is described by what its method writes — a date-time string — and
 // json.Number by what encoding/json writes for it — a number.
 package jsonshape
@@ -143,7 +146,7 @@ type FieldValue struct {
 // caller may keep and change.
 func Of(t reflect.Type) *ShapeValue {
 	//: a fresh walk: nothing on its path yet.
-	return newWalker().shape(t)
+	return newWalker().shape(t, false)
 }
 
 // For describes the values of T on the wire: Of(reflect.TypeFor[T]()).

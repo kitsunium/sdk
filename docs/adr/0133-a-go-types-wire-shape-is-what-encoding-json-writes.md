@@ -69,9 +69,14 @@ members no field names (`Shape.Values` on an Object).
 `time.Time` is a String with Format `date-time`, `time.Duration` an Integer
 with Format `duration-ns`, `json.Number` a Number. A type writing its own JSON
 (`json.Marshaler`, json/v2's `MarshalerTo`) is opaque, `Any`; one writing text
-(`encoding.TextMarshaler`, `TextAppender`) is a String; either receiver counts,
-since `encoding/json` calls a pointer receiver's method whenever the value is
-addressable. A nil pointer, slice, map or interface is `null`, so those shapes
+(`encoding.TextMarshaler`, `TextAppender`) is a String. A POINTER receiver's
+method counts only where `encoding/json` calls it, on an addressable value:
+under the v1 semantics the engine keeps, it skips a pointer method on a value
+it copied to encode it — the root of `json.Marshal(v)`, the fields and array
+elements under it, a map's keys and values — while a pointer's and a slice's
+elements are addressable. So `Of(T)` is the by-value encoding and `Of(*T)` the
+by-pointer one; measured, `json.Marshal(T{})` lays out a type whose
+`MarshalJSON` has a pointer receiver, and `json.Marshal(&T{})` calls it. A nil pointer, slice, map or interface is `null`, so those shapes
 are Nullable; an array never is; `[]byte` is a base64 String and a byte array
 an Array. A map whose key cannot be written as a member name — a bool, a
 struct, a pointer-receiver text key — is Unsupported, as are channels,
@@ -133,14 +138,17 @@ None. `jsonshape` is a new package.
 ## Verification
 
 - `internal/service/codec/jsonshape/differential_external_test.go` —
-  `json.Marshal` is the oracle: for each of sixteen structs (a shallow field
+  `json.Marshal` is the oracle: for each of twenty structs (a shallow field
   hiding a promoted one, untagged and tagged ties, a tie hiding a deeper field,
   a diamond, promotion through a pointer and an unexported struct, an embedded
   non-struct, a named embedding, dashes, omissions over every kind, `,string`,
-  the engine's names and `embed`, a collector), the populated value's members
-  and order, the zero value's members against the non-Optional fields, each
-  member's JSON kind, and the value at each `Index` against what was written
-  under its name — which is what shows the right field won a tie.
+  the engine's names and `embed`, a collector, pointer-receiver marshalers in
+  every container position encoded by value and through a pointer), the
+  populated value's members and order, the zero value's members against the
+  non-Optional fields, each member's JSON value against its shape recursively —
+  items, map values and nested members — and the value at each `Index` against
+  what was written under its name, which is what shows the right field won a
+  tie.
 - `shape_external_test.go` — every kind, opaque types against `json.Marshal`,
   map keys against `json.Marshal`, recursion through a slice, a pointer, a map,
   a pair of types and a pointer type naming itself, the Go field behind a

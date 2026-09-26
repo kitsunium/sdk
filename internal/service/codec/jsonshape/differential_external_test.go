@@ -8,6 +8,7 @@ package jsonshape_test
 import (
 	"bytes"
 	"encoding/json"
+	"maps"
 	"reflect"
 	"slices"
 	"testing"
@@ -153,6 +154,49 @@ type (
 	}
 )
 
+// Types whose method has a POINTER receiver: encoding/json calls it only on an
+// addressable value, so where the value sits decides what is written.
+type (
+	// PtrText writes itself as text through a pointer receiver.
+	PtrText struct {
+		A int `json:"A"`
+	}
+	// PtrJSON writes its own JSON through a pointer receiver.
+	PtrJSON struct {
+		A int `json:"A"`
+	}
+	// Addressing holds them in every position a container gives a value.
+	Addressing struct {
+		Direct  PtrText            `json:"direct"`
+		Pointer *PtrText           `json:"pointer"`
+		Slice   []PtrText          `json:"slice"`
+		Array   [1]PtrText         `json:"array"`
+		Map     map[string]PtrText `json:"map"`
+		JSON    PtrJSON            `json:"json"`
+		JSONs   []PtrJSON          `json:"jsons"`
+		Deep    AddressingInner    `json:"deep"`
+	}
+	// AddressingInner is one struct further down.
+	AddressingInner struct {
+		Leaf PtrText `json:"leaf"`
+	}
+)
+
+// MarshalText writes a fixed text.
+func (*PtrText) MarshalText() ([]byte, error) { return []byte("text"), nil }
+
+// MarshalJSON writes a fixed string.
+func (*PtrJSON) MarshalJSON() ([]byte, error) { return []byte(`"json"`), nil }
+
+// addressing is an Addressing with every position populated.
+func addressing() Addressing {
+	return Addressing{
+		Direct: PtrText{A: 1}, Pointer: &PtrText{A: 2}, Slice: []PtrText{{A: 3}}, Array: [1]PtrText{{A: 4}},
+		Map: map[string]PtrText{"k": {A: 5}}, JSON: PtrJSON{A: 6}, JSONs: []PtrJSON{{A: 7}},
+		Deep: AddressingInner{Leaf: PtrText{A: 8}},
+	}
+}
+
 // runtimeField is one field of a struct built at run time.
 type runtimeField struct {
 	name  string
@@ -237,6 +281,8 @@ func differentialCases() []differentialCase {
 			runtimeField{name: "Last", value: 5},
 		)},
 		{"an embedded collector", WithCollector{Known: 1, Extra: map[string]int{"zeta": 2}}},
+		{"pointer-receiver methods on a value encoded by value", addressing()},
+		{"pointer-receiver methods on a value encoded through a pointer", new(addressing())},
 		{"an embedding's own options are dropped", built(
 			runtimeField{name: "Base", value: Base{ID: 1, Name: "n"}, tag: `json:",omitempty"`, embed: true},
 			runtimeField{name: "Own", value: 2},
@@ -251,6 +297,13 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 		t.Helper()
 		typ := reflect.TypeOf(c.full)
 		shape := jsonshape.Of(typ)
+		value := reflect.ValueOf(c.full)
+		zeroValue := reflect.Zero(typ)
+		//: a root behind a pointer: its fields are those of the struct it
+		//: points at, and its zero is a pointer to a zero struct, not null.
+		if typ.Kind() == reflect.Pointer {
+			value, zeroValue = value.Elem(), reflect.New(typ.Elem())
+		}
 		//: every case is an object.
 		if shape.Kind != jsonshape.Object {
 			t.Fatalf("Kind = %v, want object", shape.Kind)
@@ -270,7 +323,6 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 		if extra := names[len(written):]; len(extra) > 0 && shape.Values == nil {
 			t.Fatalf("json.Marshal wrote extra members %q the shape does not describe", extra)
 		}
-		value := reflect.ValueOf(c.full)
 		//: each field against what was written under its name.
 		for _, field := range shape.Fields {
 			raw, wasWritten := values[field.Name]
@@ -284,7 +336,7 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 			}
 			checkMember(t, field, raw, value)
 		}
-		zero, err := json.Marshal(reflect.Zero(typ).Interface())
+		zero, err := json.Marshal(zeroValue.Interface())
 		//: the zero value is encodable too.
 		if err != nil {
 			t.Fatalf("json.Marshal(zero): %v", err)
@@ -295,6 +347,7 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 			t.Errorf("the zero value wrote %q; the fields not Optional are %q", present, want)
 		}
 	}
+	//: one subtest per struct.
 	for _, c := range differentialCases() {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -307,9 +360,10 @@ func TestShapesMatchWhatEncodingJSONWrites(t *testing.T) {
 // wrote under its name.
 func checkMember(t *testing.T, field jsonshape.FieldValue, raw json.RawMessage, value reflect.Value) {
 	t.Helper()
-	//: the member's JSON kind is the shape's — a quoted one is a string.
-	if !kindMatches(field, raw) {
-		t.Errorf("member %q is %s, the shape says %v (quoted %v)", field.Name, raw, field.Shape.Kind, field.Quoted)
+	//: the member's JSON value has the shape's kinds, all the way down — a
+	//: quoted one is a string.
+	if !memberMatches(field, raw) {
+		t.Errorf("member %q is %s, the shape says %+v (quoted %v)", field.Name, raw, *field.Shape, field.Quoted)
 	}
 	goField := value.Type().FieldByIndex(field.Index)
 	//: the Go field behind the member is reachable through the index.
@@ -326,15 +380,20 @@ func checkMember(t *testing.T, field jsonshape.FieldValue, raw json.RawMessage, 
 	if !behind.CanInterface() || field.Quoted {
 		return
 	}
-	alone, err := json.Marshal(behind.Interface())
+	alone := behind.Interface()
+	//: an addressable field is encoded through its address, as it was in place.
+	if behind.CanAddr() {
+		alone = behind.Addr().Interface()
+	}
+	written, err := json.Marshal(alone)
 	//: every field here is encodable alone.
 	if err != nil {
 		t.Fatalf("member %q: %v", field.Name, err)
 	}
 	//: the value written under the name is the value at the index — which
 	//: is what shows the right field won a tie.
-	if !bytes.Equal(alone, raw) {
-		t.Errorf("member %q: json.Marshal wrote %s, the field at %v holds %s", field.Name, raw, field.Index, alone)
+	if !bytes.Equal(written, raw) {
+		t.Errorf("member %q: json.Marshal wrote %s, the field at %v holds %s", field.Name, raw, field.Index, written)
 	}
 }
 
@@ -402,39 +461,105 @@ func requiredNames(shape *jsonshape.ShapeValue) []string {
 	return names
 }
 
-// kindMatches reports whether raw is a JSON value of the field's kind.
-func kindMatches(field jsonshape.FieldValue, raw json.RawMessage) bool {
-	trimmed := bytes.TrimSpace(raw)
-	//: nothing to judge.
-	if len(trimmed) == 0 {
-		return false
-	}
-	first := trimmed[0]
+// memberMatches reports whether raw is what the field's shape describes: a
+// JSON string when the field is quoted, otherwise valueMatches.
+func memberMatches(field jsonshape.FieldValue, raw json.RawMessage) bool {
 	//: a quoted value is a string, whatever it holds.
 	if field.Quoted {
-		return first == '"'
+		return bytes.HasPrefix(bytes.TrimSpace(raw), []byte{'"'})
 	}
-	switch field.Shape.Kind {
-	//: anything.
-	case jsonshape.Any:
+	return valueMatches(field.Shape, raw)
+}
+
+// valueMatches reports whether raw is a JSON value shape describes, checking
+// an array's elements, a map's values and an object's members recursively. A
+// reference stops the recursion at its kind.
+func valueMatches(shape *jsonshape.ShapeValue, raw json.RawMessage) bool {
+	trimmed := bytes.TrimSpace(raw)
+	//: the answers every shape gives alike.
+	switch {
+	//: nothing to judge.
+	case len(trimmed) == 0:
+		return false
+	//: null, where the shape allows it.
+	case string(trimmed) == "null":
+		return shape.Nullable || shape.Kind == jsonshape.Any
+	//: anything at all.
+	case shape.Kind == jsonshape.Any:
 		return true
-	//: an object.
-	case jsonshape.Object, jsonshape.Map:
-		return first == '{'
-	//: an array.
+	}
+	return containerMatches(shape, trimmed)
+}
+
+// containerMatches checks a non-null value against a shape of a known kind.
+func containerMatches(shape *jsonshape.ShapeValue, trimmed json.RawMessage) bool {
+	//: by kind.
+	switch shape.Kind {
+	//: an object's members, each against its field.
+	case jsonshape.Object:
+		return objectMatches(shape, trimmed)
+	//: a map's values, each against Values.
+	case jsonshape.Map:
+		var members map[string]json.RawMessage
+		return json.Unmarshal(trimmed, &members) == nil && allMatch(shape.Values, slices.Collect(maps.Values(members)))
+	//: an array's elements, each against Items.
 	case jsonshape.Array:
-		return first == '['
+		var elements []json.RawMessage
+		return json.Unmarshal(trimmed, &elements) == nil && allMatch(shape.Items, elements)
 	//: a string.
 	case jsonshape.String:
-		return first == '"'
+		return trimmed[0] == '"'
 	//: a number.
 	case jsonshape.Integer, jsonshape.Number:
-		return first == '-' || (first >= '0' && first <= '9')
+		return trimmed[0] == '-' || (trimmed[0] >= '0' && trimmed[0] <= '9')
 	//: a boolean.
 	case jsonshape.Boolean:
-		return first == 't' || first == 'f'
+		return trimmed[0] == 't' || trimmed[0] == 'f'
 	//: never written.
 	default:
 		return false
 	}
+}
+
+// objectMatches checks an object against an Object shape: every member a
+// field names matches that field, and any other member the collector's Values.
+func objectMatches(shape *jsonshape.ShapeValue, raw json.RawMessage) bool {
+	var members map[string]json.RawMessage
+	//: an object, or nothing matches.
+	if json.Unmarshal(raw, &members) != nil {
+		return false
+	}
+	//: a reference is described further up: its kind is the check.
+	if shape.Ref != "" {
+		return true
+	}
+	fields := make(map[string]jsonshape.FieldValue, len(shape.Fields))
+	//: by wire name.
+	for _, field := range shape.Fields {
+		fields[field.Name] = field
+	}
+	//: member by member.
+	for name, member := range members {
+		field, named := fields[name]
+		//: a member no field names belongs to the collector, if any.
+		if !named && (shape.Values == nil || !valueMatches(shape.Values, member)) {
+			return false
+		}
+		//: a named member against its field.
+		if named && !memberMatches(field, member) {
+			return false
+		}
+	}
+	return true
+}
+
+// allMatch reports whether every value matches shape.
+func allMatch(shape *jsonshape.ShapeValue, values []json.RawMessage) bool {
+	//: element by element; the first mismatch decides.
+	for _, value := range values {
+		if !valueMatches(shape, value) {
+			return false
+		}
+	}
+	return true
 }

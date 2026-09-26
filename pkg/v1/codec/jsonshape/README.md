@@ -25,7 +25,9 @@ Struct members are resolved exactly as encoding/json resolves them: embedded str
 
 ### What a type decides for itself
 
-A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo — is opaque: [Any](<#Any>), whatever it writes. One that writes text — an encoding.TextMarshaler or TextAppender — is a [String](<#String>). Either receiver counts, because encoding/json calls a pointer receiver's method whenever the value is addressable, which a value behind a pointer or in a slice always is. A struct that embeds time.Time gains its MarshalJSON and is opaque too.
+A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo — is opaque: [Any](<#Any>), whatever it writes. One that writes text — an encoding.TextMarshaler or TextAppender — is a [String](<#String>). A struct that embeds time.Time gains its MarshalJSON and is opaque too.
+
+A method with a POINTER receiver counts only where encoding/json calls it: on an addressable value. [Of](<#Of>)\(T\) describes a T encoded by value — json.Marshal\(v\) — whose root is not addressable, and neither are the fields and array elements under it; a pointer's and a slice's elements are, and a map's values never are. For json.Marshal\(&v\), describe \*T.
 
 Three types are described by what is written rather than by their kind: time.Time is a String with Format "date\-time", time.Duration an Integer with Format "duration\-ns", json.Number a Number.
 
@@ -49,7 +51,7 @@ A type that reaches itself is described once; further down, its shape is a refer
 
 
 <a name="Field"></a>
-## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L85>)
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L89>)
 
 Field is one member of an Object, and the Go field behind it.
 
@@ -58,7 +60,7 @@ type Field = svcjsonshape.FieldValue
 ```
 
 <a name="Kind"></a>
-## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L79>)
+## type [Kind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L83>)
 
 Kind is the JSON kind a value takes on the wire; its zero value is Any. It encodes as its lower\-case name.
 
@@ -121,7 +123,7 @@ const Unsupported Kind = svcjsonshape.Unsupported
 ```
 
 <a name="Shape"></a>
-## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L82>)
+## type [Shape](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L86>)
 
 Shape describes the values of one Go type on the wire.
 
@@ -130,7 +132,7 @@ type Shape = svcjsonshape.ShapeValue
 ```
 
 <a name="For"></a>
-### func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L126>)
+### func [For](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L130>)
 
 ```go
 func For[T any]() *Shape
@@ -139,7 +141,7 @@ func For[T any]() *Shape
 For describes the values of T on the wire: Of\(reflect.TypeFor\[T\]\(\)\).
 
 <a name="Of"></a>
-### func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L120>)
+### func [Of](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/jsonshape/jsonshape.go#L124>)
 
 ```go
 func Of(t reflect.Type) *Shape

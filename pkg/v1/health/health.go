@@ -156,7 +156,9 @@
 // [AskConfig.Timeout]) and by the caller's context, follows no redirect, goes
 // through no proxy whatever the environment says, reads at most
 // [MaxAskDrainBytes] of the body and closes it, and no byte of that body ever
-// reaches an error: [AskNotReady] carries the status alone.
+// reaches an error: [AskNotReady] carries the status alone. The body is part of
+// the answer: a process that sends 200 and then stalls until the bound ends
+// has not answered within it, and gets [AskTimeout].
 package health
 
 import (
@@ -350,8 +352,9 @@ func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler {
 
 // Ask asks the process listening on cfg.Addr whether it is ready: one GET of
 // cfg.Path over plain HTTP, the question a container's HEALTHCHECK asks. It
-// returns the status the process answered — zero when it answered nothing —
-// and a nil error exactly when that status is 200; otherwise the error is
+// returns the status the process answered — zero when no whole answer, body
+// included, arrived within the bound — and a nil error exactly when that
+// status is 200; otherwise the error is
 // AskMisconfigured, AskUnreachable, AskTimeout or AskNotReady. See the package
 // documentation for what the exchange refuses to do.
 func Ask(ctx context.Context, cfg AskConfig) (status int, err error) {

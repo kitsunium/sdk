@@ -116,6 +116,7 @@ func TestAFailingTreeIsA500AWrapperSees(t *testing.T) {
 			t.Errorf("GET %s: the wrapper saw %d, want 500", c.target, got)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -130,6 +131,7 @@ func TestAFailingTreeIsA500AWrapperSees(t *testing.T) {
 // what failed.
 func TestARefusedNameIsA404(t *testing.T) {
 	t.Parallel()
+	//: each portable refusal of a name.
 	for _, refusal := range []error{fs.ErrNotExist, fs.ErrInvalid} {
 		handler := build(t, failingFS{MapFS: site(), openFails: "odd.js", openErr: refusal}, static.Config{})
 		//: the name's fault.
@@ -166,6 +168,7 @@ func TestNamesTheOperatingSystemRefusesAre404s(t *testing.T) {
 		"a byte that is not UTF-8":        "/%FF.html",
 		"a backslash":                     "/a%5Cb.html",
 	}
+	//: each name the operating system refuses.
 	for name, target := range targets {
 		//: the client's name, the client's 404.
 		if got := wrappedStatus(handler, target); got != http.StatusNotFound {

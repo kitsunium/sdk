@@ -105,6 +105,7 @@ func (w *fieldWalk) add(current level, field reflect.StructField, fieldIndex int
 // consume stands as an ordinary member.
 func (w *fieldWalk) embedded(current level, field reflect.StructField, candidate *member) bool {
 	promoted, collects, standsAsMember := embed(field, candidate)
+	//: what the embedding became.
 	switch {
 	//: its fields join the next level — explored only from a struct whose
 	//: children are.
@@ -174,7 +175,7 @@ func writable(field reflect.StructField, opts tagOptions) bool {
 		return false
 	}
 	//: methods on an unexported field cannot be called.
-	return !hasAnyMethod(target) && (!opts.omitZero || !implements(target, isZeroerType))
+	return !hasAnyMethod(target) && (!opts.omitZero || !receives(target, isZeroerType, true))
 }
 
 // dominantMembers keeps, for each name, the member encoding/json writes, and
@@ -210,6 +211,7 @@ func dominantMembers(found []*member) []*member {
 // compareTagged orders a member named by its tag before one named by its Go
 // name.
 func compareTagged(a, b *member) int {
+	//: tagged before untagged, else equal.
 	switch {
 	//: tagged first.
 	case a.opts.hasName && !b.opts.hasName:
@@ -249,8 +251,10 @@ func (m *member) optional(root reflect.Type) bool {
 
 // quoted reports whether the ",string" option takes effect: on a bool, a
 // number or a string — through one unnamed pointer — that writes nothing of
-// its own, and on json.Number, whose own method honours the option.
-func (m *member) quoted() bool {
+// its own where it is encoded, and on json.Number, whose own method honours
+// the option. addressable is the field's, and a pointer followed makes what it
+// points at addressable.
+func (m *member) quoted(addressable bool) bool {
 	//: the option is absent.
 	if !m.opts.quoted {
 		return false
@@ -258,16 +262,17 @@ func (m *member) quoted() bool {
 	target := m.typ
 	//: one unnamed pointer is followed, as encoding/json follows it.
 	if target.Name() == "" && target.Kind() == reflect.Pointer {
-		target = target.Elem()
+		target, addressable = target.Elem(), true
 	}
 	//: json.Number writes itself, and quotes itself under the option.
 	if target == numberType {
 		return true
 	}
-	//: any other type writing its own JSON or text ignores the option.
-	if writesJSON(target) || writesText(target) {
+	//: any other type writing its own JSON or text there ignores the option.
+	if writesJSON(target, addressable) || writesText(target, addressable) {
 		return false
 	}
+	//: the kinds the option applies to.
 	switch target.Kind() {
 	//: the kinds the option applies to.
 	case reflect.Bool, reflect.String, reflect.Float32, reflect.Float64,
@@ -284,6 +289,7 @@ func (m *member) quoted() bool {
 // omitempty keeps: false, zero, an empty string, collection or zero-length
 // array, a nil pointer or interface. A struct is never empty.
 func emptiable(t reflect.Type) bool {
+	//: the kinds with an empty value.
 	switch t.Kind() {
 	//: the kinds with an empty value.
 	case reflect.Bool, reflect.String, reflect.Map, reflect.Slice, reflect.Pointer, reflect.Interface,

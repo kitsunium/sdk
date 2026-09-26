@@ -8,6 +8,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/health"
@@ -63,5 +64,34 @@ func TestAskSentinelsAreTheEnginesOwn(t *testing.T) {
 		if code, ok := errs.CodeOf(sentinel); !ok || code == 0 {
 			t.Errorf("%v carries no code", sentinel)
 		}
+	}
+}
+
+// TestAProcessThatStallsAfter200IsNotReady is the end-to-end form of the
+// drain's rule: a process that sends its 200 status line and part of a body,
+// then stops sending, has not answered within the bound. The budget is real
+// here: whatever the machine's speed, the verdict after the fix is a timeout,
+// and before it the probe reported the stalled process ready.
+//
+// Goroutine lifecycle: the handler blocks until the probe hangs up, which the
+// budget ending makes it do; the server's cleanup waits for it.
+func TestAProcessThatStallsAfter200IsNotReady(t *testing.T) {
+	t.Parallel()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		//: part of a body, flushed, and then nothing.
+		if _, err := w.Write([]byte(`{"status":`)); err != nil {
+			return
+		}
+		http.NewResponseController(w).Flush()
+		<-r.Context().Done()
+	}))
+	t.Cleanup(server.Close)
+	status, err := health.Ask(t.Context(), health.AskConfig{
+		Addr: server.Listener.Addr().String(), Path: "/readyz", Timeout: 300 * time.Millisecond,
+	})
+	//: not ready: the answer never finished within the bound.
+	if status != 0 || !errors.Is(err, health.AskTimeout) {
+		t.Fatalf("Ask() = %d, %v; want 0 and ASK_TIMEOUT", status, err)
 	}
 }

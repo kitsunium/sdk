@@ -35,8 +35,12 @@ published by `pkg/v1/health`.
   machine's loopback of the same family: `127.0.0.1` for an empty host and for
   IPv4, `::1` for IPv6. Any other host is dialled as written. The port must be a
   number from 1 to 65535.
-- **Ready means 200.** `status` is what the process answered, zero when it
-  answered nothing, and `err` is nil exactly when `status` is 200.
+- **Ready means 200, answered within the bound.** `status` is what the
+  process answered, zero when no whole answer arrived in time, and `err` is
+  nil exactly when `status` is 200. The body is part of the answer: a process
+  that sends 200 and then stalls until the budget or the caller's context ends
+  has not answered, and gets `ASK_TIMEOUT` — as the kubelet fails an HTTP
+  probe whose body read fails.
 - **No redirect is followed** — a redirect is an answer, reported with its
   status. **No proxy is consulted**, whatever the environment says. **No
   connection is kept.** The response header is bounded to 64 KiB, the body read

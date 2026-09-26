@@ -126,6 +126,7 @@ func TestFloorAppliesEveryFloorInfoIncluded(t *testing.T) {
 			t.Errorf("%s: passed=%v want %v", c.name, passed, c.wantPassed)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

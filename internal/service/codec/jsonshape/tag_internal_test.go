@@ -60,6 +60,7 @@ func TestParseTagReadsWhatTheEngineReads(t *testing.T) {
 			}
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()

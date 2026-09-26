@@ -112,6 +112,7 @@ func TestServesFilesAndDirectoriesByTheirIndex(t *testing.T) {
 			}
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -198,6 +199,7 @@ func TestNoRequestClimbsAboveTheRoot(t *testing.T) {
 		"public/index.html": {Data: []byte("<title>public</title>")},
 	}}
 	handler := build(t, tree, static.Config{SinglePageApp: true})
+	//: every spelling of a climb above the root.
 	for _, target := range []string{
 		"/../secret.txt",
 		"/a/../../secret.txt",
@@ -259,6 +261,7 @@ func TestTheSinglePageFallbackServesOnlyRoutes(t *testing.T) {
 			t.Errorf("GET %s served the shell: %v, want %v", c.target, shell, c.wantShell)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -332,6 +335,7 @@ func TestEveryResponseCarriesTheSecurityHeaders(t *testing.T) {
 			t.Errorf("Referrer-Policy = %q, want %q", got, c.wantReferrer)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -345,6 +349,7 @@ func TestEveryResponseCarriesTheSecurityHeaders(t *testing.T) {
 func TestOnlyGetAndHeadAreAnswered(t *testing.T) {
 	t.Parallel()
 	handler := build(t, site(), static.Config{})
+	//: every method but the two answered.
 	for _, method := range []string{http.MethodPost, http.MethodPut, http.MethodDelete, http.MethodPatch, http.MethodOptions} {
 		response := get(handler, method, "/app.js")
 		//: refused, with the methods that are not.
@@ -432,6 +437,7 @@ func TestNewRefusesWhatItCannotServeSafely(t *testing.T) {
 			t.Errorf("option field = %q, want %q", got, c.option)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -477,5 +483,49 @@ func TestTheZeroHandlerAnswers500WithTheDefaults(t *testing.T) {
 	//: the defaults, never an empty header.
 	if got := response.Header().Get("Referrer-Policy"); got != static.DefaultReferrerPolicy {
 		t.Errorf("Referrer-Policy = %q, want the default", got)
+	}
+}
+
+// TestTheDirectoryRedirectEscapesTheName pins the redirect for a directory
+// whose name holds a character URLs give a meaning to — "?", "#", "%", a space:
+// the Location names that same directory, so following it serves its index
+// instead of another path's, a query or a fragment.
+func TestTheDirectoryRedirectEscapesTheName(t *testing.T) {
+	t.Parallel()
+	tree := fstest.MapFS{}
+	names := []string{"v2?beta", "a#b", "50%", "two words"}
+	//: one directory per name, each with its own index.
+	for _, name := range names {
+		tree[name+"/index.html"] = &fstest.MapFile{Data: []byte("<title>" + name + "</title>")}
+	}
+	handler := build(t, tree, static.Config{})
+	base, err := url.Parse("https://example.com/")
+	//: a fixed, valid URL.
+	if err != nil {
+		t.Fatal(err)
+	}
+	//: each directory, asked for without its trailing slash and with a query.
+	for _, name := range names {
+		target := base.ResolveReference(&url.URL{Path: "/" + name, RawQuery: "tab=2"})
+		redirect := get(handler, http.MethodGet, target.RequestURI())
+		//: a redirect first.
+		if redirect.Code != http.StatusMovedPermanently {
+			t.Fatalf("GET %s = %d, want 301", target.RequestURI(), redirect.Code)
+		}
+		location, err := url.Parse(redirect.Header().Get("Location"))
+		//: a parsable Location.
+		if err != nil {
+			t.Fatalf("Location %q: %v", redirect.Header().Get("Location"), err)
+		}
+		followed := target.ResolveReference(location)
+		//: the same directory, with its slash, and the query kept.
+		if followed.Path != "/"+name+"/" || followed.RawQuery != "tab=2" || followed.Fragment != "" {
+			t.Fatalf("the redirect for %q leads to path %q query %q fragment %q", name, followed.Path, followed.RawQuery, followed.Fragment)
+		}
+		page := get(handler, http.MethodGet, followed.RequestURI())
+		//: and serves that directory's index.
+		if page.Code != http.StatusOK || !strings.Contains(page.Body.String(), "<title>"+name+"</title>") {
+			t.Errorf("following the redirect for %q = %d %q", name, page.Code, page.Body.String())
+		}
 	}
 }

@@ -36,10 +36,14 @@
 //
 // A type that writes its own JSON — json.Marshaler, or json/v2's MarshalerTo
 // — is opaque: [Any], whatever it writes. One that writes text — an
-// encoding.TextMarshaler or TextAppender — is a [String]. Either receiver
-// counts, because encoding/json calls a pointer receiver's method whenever the
-// value is addressable, which a value behind a pointer or in a slice always
-// is. A struct that embeds time.Time gains its MarshalJSON and is opaque too.
+// encoding.TextMarshaler or TextAppender — is a [String]. A struct that
+// embeds time.Time gains its MarshalJSON and is opaque too.
+//
+// A method with a POINTER receiver counts only where encoding/json calls it:
+// on an addressable value. [Of](T) describes a T encoded by value —
+// json.Marshal(v) — whose root is not addressable, and neither are the fields
+// and array elements under it; a pointer's and a slice's elements are, and a
+// map's values never are. For json.Marshal(&v), describe *T.
 //
 // Three types are described by what is written rather than by their kind:
 // time.Time is a String with Format "date-time", time.Duration an Integer

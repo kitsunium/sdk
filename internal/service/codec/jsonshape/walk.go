@@ -27,8 +27,9 @@ func newWalker() *walker {
 	return &walker{path: map[reflect.Type]bool{}}
 }
 
-// shape describes t.
-func (w *walker) shape(t reflect.Type) *ShapeValue {
+// shape describes t, for a value that is addressable where encoding/json
+// meets it or not: only an addressable value has its pointer methods called.
+func (w *walker) shape(t reflect.Type, addressable bool) *ShapeValue {
 	//: a nil interface's type.
 	if t == nil {
 		return &ShapeValue{Kind: Any, Nullable: true}
@@ -44,9 +45,9 @@ func (w *walker) shape(t reflect.Type) *ShapeValue {
 		w.path[t] = true
 		defer delete(w.path, t)
 	}
-	//: a pointer writes its element, or null.
+	//: a pointer writes its element, which it makes addressable, or null.
 	if t.Kind() == reflect.Pointer {
-		element := w.shape(t.Elem())
+		element := w.shape(t.Elem(), true)
 		element.Nullable = true
 		return element
 	}
@@ -55,34 +56,39 @@ func (w *walker) shape(t reflect.Type) *ShapeValue {
 		return known
 	}
 	//: a type that writes itself: the kind is its own business.
-	if t.Kind() != reflect.Interface && writesJSON(t) {
+	if t.Kind() != reflect.Interface && writesJSON(t, addressable) {
 		return named(t, Any)
 	}
 	//: a type that writes itself as text: a string.
-	if t.Kind() != reflect.Interface && writesText(t) {
+	if t.Kind() != reflect.Interface && writesText(t, addressable) {
 		return named(t, String)
 	}
 	//: laid out by reflection.
-	return w.byKind(t)
+	return w.byKind(t, addressable)
 }
 
 // byKind describes a type encoding/json lays out from its kind: the
 // composite kinds here, the scalars in scalar.
-func (w *walker) byKind(t reflect.Type) *ShapeValue {
+//
+// Where a container puts its elements decides their addressability, as in
+// json/v2: a slice's and a pointer's elements are addressable, an array's and
+// a struct's inherit it, a map's values never are.
+func (w *walker) byKind(t reflect.Type, addressable bool) *ShapeValue {
 	shape := named(t, Any)
+	//: the containers here, the scalars in scalar.
 	switch t.Kind() {
 	//: bytes are base64 text; other elements an array; nil is null.
 	case reflect.Slice:
 		w.slice(shape, t)
 	//: always an array — even of bytes — never null.
 	case reflect.Array:
-		shape.Kind, shape.Items = Array, w.shape(t.Elem())
+		shape.Kind, shape.Items = Array, w.shape(t.Elem(), addressable)
 	//: an object keyed by the map's keys, or refused for a key it cannot write.
 	case reflect.Map:
 		w.mapOf(shape, t)
 	//: an object of the struct's members.
 	case reflect.Struct:
-		w.object(shape, t)
+		w.object(shape, t, addressable)
 	//: everything that is not a container.
 	default:
 		scalar(shape, t)
@@ -92,6 +98,7 @@ func (w *walker) byKind(t reflect.Type) *ShapeValue {
 
 // scalar fills shape for a kind that holds no other value.
 func scalar(shape *ShapeValue, t reflect.Type) {
+	//: by kind.
 	switch t.Kind() {
 	//: true or false.
 	case reflect.Bool:
@@ -125,7 +132,7 @@ func (w *walker) slice(shape *ShapeValue, t reflect.Type) {
 		shape.Kind, shape.Format = String, "base64"
 		return
 	}
-	shape.Kind, shape.Items = Array, w.shape(element)
+	shape.Kind, shape.Items = Array, w.shape(element, true)
 }
 
 // mapOf fills shape for a map: an object whose values are the map's, or
@@ -136,21 +143,24 @@ func (w *walker) mapOf(shape *ShapeValue, t reflect.Type) {
 		shape.Kind = Unsupported
 		return
 	}
-	shape.Kind, shape.Nullable, shape.Values = Map, true, w.shape(t.Elem())
+	shape.Kind, shape.Nullable, shape.Values = Map, true, w.shape(t.Elem(), false)
 }
 
 // object fills shape for a struct with its members and, when an embedded map
 // collects extra members, their value shape.
-func (w *walker) object(shape *ShapeValue, t reflect.Type) {
+func (w *walker) object(shape *ShapeValue, t reflect.Type, addressable bool) {
 	shape.Kind = Object
 	written, extra := members(t)
 	//: in the order encoding/json writes them.
 	for _, member := range written {
+		//: a field inherits the struct's addressability, unless an embedded
+		//: pointer on its path makes it addressable.
+		fieldAddressable := addressable || throughPointer(t, member.index)
 		shape.Fields = append(shape.Fields, FieldValue{
 			Name:     member.name,
-			Shape:    w.shape(member.typ),
+			Shape:    w.shape(member.typ, fieldAddressable),
 			Optional: member.optional(t),
-			Quoted:   member.quoted(),
+			Quoted:   member.quoted(fieldAddressable),
 			Rules:    member.tag.Get("validate"),
 			GoName:   member.goName,
 			Tag:      member.tag,
@@ -166,9 +176,9 @@ func (w *walker) object(shape *ShapeValue, t reflect.Type) {
 // extraValues describes the members an embedded fallback collects: a map's
 // values, or anything for a jsontext.Value.
 func (w *walker) extraValues(extra reflect.Type) *ShapeValue {
-	//: a map: its value type.
+	//: a map: its value type, never addressable.
 	if extra.Kind() == reflect.Map {
-		return w.shape(extra.Elem())
+		return w.shape(extra.Elem(), false)
 	}
 	//: jsontext.Value: any JSON value.
 	return &ShapeValue{Kind: Any}
@@ -178,6 +188,7 @@ func (w *walker) extraValues(extra reflect.Type) *ShapeValue {
 // date-time string through its own method, time.Duration an integer count of
 // nanoseconds, json.Number a number from a string.
 func knownShape(t reflect.Type) (*ShapeValue, bool) {
+	//: the three types whose kind would mislead.
 	switch t {
 	//: RFC 3339, through its MarshalJSON.
 	case timeType:
@@ -210,9 +221,10 @@ func keyWritable(t reflect.Type) bool {
 		t, addressable = t.Elem(), true
 	}
 	//: text by value, or by pointer behind a pointer key.
-	if t.Implements(textMarshalerType) || t.Implements(textAppenderType) || (addressable && writesText(t)) {
+	if writesText(t, addressable) {
 		return true
 	}
+	//: the kinds encoding/json writes as text.
 	switch t.Kind() {
 	//: written as its text.
 	case reflect.String, reflect.Interface,
@@ -229,6 +241,7 @@ func keyWritable(t reflect.Type) bool {
 // refKind is the kind of a type referenced rather than described again,
 // computed without walking it.
 func refKind(t reflect.Type) Kind {
+	//: the kind a reference stands for.
 	switch t.Kind() {
 	//: a recursive struct.
 	case reflect.Struct:

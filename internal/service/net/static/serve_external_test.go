@@ -20,6 +20,7 @@ import (
 func TestHeadAnswersWhatGetWouldWithoutTheBody(t *testing.T) {
 	t.Parallel()
 	handler := build(t, site(), static.Config{SinglePageApp: true})
+	//: every kind of answer, asked both ways.
 	for _, target := range []string{"/app.js", "/", "/guide", "/guide/", "/settings", "/missing.js"} {
 		fetched := get(handler, http.MethodGet, target)
 		headed := get(handler, http.MethodHead, target)
@@ -97,6 +98,7 @@ func TestPinnedTypesDoNotDependOnTheHost(t *testing.T) {
 		"style.css":  {Data: []byte("x")},
 		"code.wasm":  {Data: []byte("\x00asm")},
 	}, static.Config{})
+	//: each pinned type, served.
 	for target, want := range map[string]string{
 		"/app.js":     builtin[".js"],
 		"/module.mjs": builtin[".mjs"],

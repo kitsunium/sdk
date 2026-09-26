@@ -23,6 +23,7 @@ import (
 	"io"
 	"io/fs"
 	"net/http"
+	"net/url"
 	"path"
 	"strings"
 )
@@ -164,6 +165,7 @@ func cleanName(requestPath string) string {
 // serveName serves what name is: a file, a directory, or nothing.
 func (h *Handler) serveName(w http.ResponseWriter, r *http.Request, name string, slash bool) {
 	file, info, found := open(h.fsys, name)
+	//: what the name is decides how it is answered.
 	switch {
 	//: a directory, served by its index.html or not at all.
 	case found == present && info.IsDir():
@@ -193,6 +195,7 @@ func (h *Handler) serveName(w http.ResponseWriter, r *http.Request, name string,
 func (h *Handler) serveDirectory(w http.ResponseWriter, r *http.Request, name string, slash bool) {
 	index := path.Join(name, indexName)
 	file, info, found := open(h.fsys, index)
+	//: what the index is decides how the directory is answered.
 	switch {
 	//: the index, served as the directory.
 	case found == present && info.Mode().IsRegular():
@@ -226,6 +229,7 @@ func (h *Handler) fallback(w http.ResponseWriter, r *http.Request, name string) 
 		return
 	}
 	file, info, found := open(h.fsys, indexName)
+	//: what the shell is decides how the route is answered.
 	switch {
 	//: the application's shell, for its client-side router.
 	case found == present && info.Mode().IsRegular():
@@ -247,9 +251,11 @@ func (h *Handler) fallback(w http.ResponseWriter, r *http.Request, name string) 
 // redirectToDirectory sends a directory named without its trailing slash to
 // the name with one. The Location is relative, so it stays right behind
 // http.StripPrefix, and starts with "./", so no directory name can make it
-// read as another host or a scheme.
+// read as another host or a scheme. The name is escaped as one path segment:
+// a directory called "v2?beta" or "a#b" is redirected to itself, not to a
+// query or a fragment of another path.
 func redirectToDirectory(w http.ResponseWriter, r *http.Request, name string) {
-	location := "./" + path.Base(name) + "/"
+	location := "./" + url.PathEscape(path.Base(name)) + "/"
 	//: the query travels with the redirect.
 	if r.URL.RawQuery != "" {
 		location += "?" + r.URL.RawQuery

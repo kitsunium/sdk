@@ -87,8 +87,8 @@ type askRequest struct {
 
 // Ask asks the process listening on cfg.Addr whether it is ready, as a
 // container's HEALTHCHECK does: one GET of cfg.Path over plain HTTP. It
-// returns the status the process answered — zero when it answered nothing —
-// and a nil error exactly when that status is 200.
+// returns the status the process answered — zero when no whole answer arrived
+// within the bound — and a nil error exactly when that status is 200.
 //
 // Otherwise the error says why, by code:
 //
@@ -96,7 +96,9 @@ type askRequest struct {
 //   - [AskUnreachable]: the connection or the request failed; the
 //     transport's error is the cause.
 //   - [AskTimeout]: the budget, or the caller's context, ended before an
-//     answer; a caller's own context error stays in the chain.
+//     answer — or while its body was still arriving: a process that sends
+//     200 and then stalls has not answered within the bound. A caller's own
+//     context error stays in the chain.
 //   - [AskNotReady]: the process answered another status, carried by the
 //     status field. A redirect is such an answer: none is followed, so a
 //     probe cannot be sent elsewhere.
@@ -236,6 +238,7 @@ func armAsk(clk clock.Timed, budget time.Duration, cancel context.CancelCauseFun
 	released := make(chan struct{})
 	go func() {
 		defer timer.Stop()
+		//: whichever comes first: the budget, or the Ask returning.
 		select {
 		//: no answer within the budget.
 		case <-timer.C():
@@ -270,6 +273,15 @@ func (r askRequest) send(ctx context.Context) (status int, err error) {
 	client := askClient()
 	//: no connection outlives the Ask.
 	defer client.CloseIdleConnections()
+	//: the exchange on this client.
+	return r.exchange(ctx, client)
+}
+
+// exchange sends the GET on client and reads the answer: the status, and the
+// body drained within MaxAskDrainBytes. A drain the Ask's own bound cut short
+// is no answer: the budget or the caller's context ended while the process was
+// still sending, so the verdict is the timeout, not the status line.
+func (r askRequest) exchange(ctx context.Context, client *http.Client) (status int, err error) {
 	request, err := http.NewRequestWithContext(ctx, http.MethodGet, r.url, nil)
 	//: unreachable: the URL was built from a validated target and path.
 	if err != nil {
@@ -282,7 +294,12 @@ func (r askRequest) send(ctx context.Context) (status int, err error) {
 		//: AskTimeout or AskUnreachable.
 		return 0, r.unanswered(ctx, err)
 	}
-	discard(response.Body)
+	drainErr := discard(response.Body)
+	//: the bound ended during the drain: not an answer within it.
+	if drainErr != nil && ctx.Err() != nil {
+		//: AskTimeout, with the drain's error as the cause.
+		return 0, r.unanswered(ctx, drainErr)
+	}
 	//: 200 is ready, and only 200.
 	if response.StatusCode != http.StatusOK {
 		//: AskNotReady, carrying the status and nothing of the body.
@@ -302,18 +319,21 @@ func keepRedirect(next *http.Request, previous []*http.Request) error {
 	return http.ErrUseLastResponse
 }
 
-// discard reads at most MaxAskDrainBytes of body and closes it. What the
-// drain or the close return changes nothing: the status is already the
-// answer, and the body is never read into anything.
-func discard(body io.ReadCloser) {
-	//: a failed or cut drain only means the connection closes less politely.
-	if _, err := io.CopyN(io.Discard, body, MaxAskDrainBytes); err != nil && !errors.Is(err, io.EOF) {
-		//: the close below runs either way.
+// discard reads at most MaxAskDrainBytes of body, closes it, and returns what
+// stopped the drain early: nil for a body that ended or reached the bound.
+// The body is never read into anything; a close failure leaves nothing to
+// release, since keep-alive is off.
+func discard(body io.ReadCloser) error {
+	_, drainErr := io.CopyN(io.Discard, body, MaxAskDrainBytes)
+	//: the connection is closed whatever the drain did.
+	if closeErr := body.Close(); closeErr != nil {
+		//: nothing held: the drain's verdict is the one that matters.
 	}
-	//: a close failure leaves nothing to release: keep-alive is off.
-	if err := body.Close(); err != nil {
-		//: nothing held.
+	//: a body shorter than the bound ends in EOF, which is its end.
+	if errors.Is(drainErr, io.EOF) {
+		return nil
 	}
+	return drainErr
 }
 
 // unanswered classifies an exchange that produced no answer.

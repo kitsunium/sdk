@@ -132,6 +132,7 @@ func TestAskIsReadyOnlyOnTwoHundred(t *testing.T) {
 			}
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -327,6 +328,7 @@ func TestAskDialsTheLoopbackForAnUnspecifiedHost(t *testing.T) {
 	t.Parallel()
 	ready := http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) { w.WriteHeader(http.StatusOK) })
 	port := serveOnLoopback(t, ready)
+	//: each spelling of an unspecified IPv4 host.
 	for _, listen := range []string{":" + port, "0.0.0.0:" + port, "[::ffff:0.0.0.0]:" + port} {
 		status, err := health.Ask(t.Context(), health.AskConfig{Addr: listen, Path: "/readyz", Clock: frozen()})
 		//: answered over IPv4's loopback.
@@ -395,6 +397,7 @@ func TestAskRefusesAConfigurationBeforeDialling(t *testing.T) {
 			t.Errorf("argument field = %q, want %q", got, c.argument)
 		}
 	}
+	//: one subtest per case.
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			runCase(t, c)

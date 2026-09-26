@@ -37,7 +37,10 @@ Stdlib only. Written against `net/http`'s own interfaces, so it works in any
   shell.** `http.FileServerFS` lists. A directory named without its trailing
   slash is redirected first, so the page's relative links resolve inside it; the
   `Location` is RELATIVE (right behind `http.StripPrefix`, where the handler never
-  sees the prefix) and starts with `./` (no directory name can make it read as a
+  sees the prefix), escapes the name as one path segment (a directory called
+  `v2?beta` or `a#b` is redirected to itself, not to a query or a fragment —
+  found by review, `TestTheDirectoryRedirectEscapesTheName`) and starts with
+  `./` (no directory name can make it read as a
   host or a scheme). The root, which `StripPrefix` can hand over as `""`, is
   served in place: there is no redirect this handler could aim.
 - **The fallback serves only routes.** A path with no extension that names

@@ -84,6 +84,7 @@ func stream(w http.ResponseWriter, r *http.Request, name string, file fs.File, i
 // refused by the browser, and a WebAssembly module without application/wasm
 // cannot be compiled while it streams.
 func pinnedType(extension string) (contentType string, pinned bool) {
+	//: the extension, case-insensitively, as the host tables compare it.
 	switch strings.ToLower(extension) {
 	//: a page.
 	case ".html", ".htm":

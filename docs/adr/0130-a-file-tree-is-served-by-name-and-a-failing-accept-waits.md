@@ -27,7 +27,7 @@ operator alerts on and a framework turns into a failed span. The console's
 hand-written copy fell back to its shell for every unreadable name, so a
 missing script was answered with HTML. And the standard library lets a host's
 `/etc/mime.types` or Windows registry override its own MIME table — Go itself
-special-cases the registry's `.js = text/plain` (golang/go#32350) — which under
+special-cases the registry's `.js = text/plain` ([the registry's `.js` type, golang/go issue 32350](https://github.com/golang/go/issues/32350)) — which under
 `nosniff` is a script the browser refuses to run.
 
 Separately, a review of the same framework measured the engine's accept loop on
@@ -51,8 +51,9 @@ A new service package, `internal/service/net/static`, published as
   single-page shell. A directory named without its trailing slash is first
   redirected to it, so the page's relative links resolve inside it; the
   `Location` is relative (it stays right behind `http.StripPrefix`, where the
-  handler never sees the prefix) and starts with `./` (no directory name makes
-  it read as a host or a scheme).
+  handler never sees the prefix), escapes the name as one path segment (a
+  directory called `v2?beta` must not become a query) and starts with `./` (no
+  directory name makes it read as a host or a scheme).
 - **The fallback serves routes only.** With `SinglePageApp`, a path with no
   extension that names nothing gets the root's index.html with 200; a path with
   one stays a 404.
