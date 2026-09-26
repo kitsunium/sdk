@@ -37,10 +37,14 @@
 // that matched nothing, and read as empty it would start the program on its
 // defaults without a word. A layer that is optional by design — one document
 // per environment, where some environments have none — is the caller's
-// decision, one fs.Stat away:
+// decision, one fs.Stat away, and only an absence makes it optional:
 //
-//	if _, err := fs.Stat(files, "config/"+env+".yaml"); err == nil {
-//	    sources = append(sources, config.FSSource(files, "yaml", "config/"+env+".yaml"))
+//	name := "config/" + env + ".yaml"
+//	switch _, err := fs.Stat(files, name); {
+//	case err == nil:
+//	    sources = append(sources, config.FSSource(files, "yaml", name))
+//	case !errors.Is(err, fs.ErrNotExist):
+//	    return err // present but unreadable is not the optional absence
 //	}
 //
 // # The schema: required keys, defaults, and a closed vocabulary

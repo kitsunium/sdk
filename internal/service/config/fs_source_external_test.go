@@ -3,9 +3,11 @@
 package config_test
 
 import (
+	"io/fs"
 	"os"
 	"path/filepath"
 	"reflect"
+	"sync/atomic"
 	"testing"
 	"testing/fstest"
 
@@ -204,5 +206,62 @@ func TestFSSourceLayeredUnderTheEnvironment(t *testing.T) {
 	}
 	if base.Port != 8080 || base.Host != "kitsune" || base.Database.MaxConns != 16 {
 		t.Errorf("config.yaml alone decoded %+v", base)
+	}
+}
+
+// permissiveFS is an fs.ReadFileFS that answers every name it is given,
+// "../escape.json" included, and counts how often it was asked. fs.ReadFile
+// hands a name straight to ReadFile, so it is what an implementation that
+// resolved a climbing name would look like.
+type permissiveFS struct {
+	reads *atomic.Int64
+}
+
+// Open is never used: fs.ReadFile prefers ReadFile.
+func (permissiveFS) Open(string) (fs.File, error) { return nil, fs.ErrNotExist }
+
+// ReadFile returns a valid document for any name, and counts the call.
+func (p permissiveFS) ReadFile(string) ([]byte, error) {
+	p.reads.Add(1)
+	return []byte(`{"port": 1}`), nil
+}
+
+// TestFSSourceRefusesANameBeforeAskingTheFilesystem pins that the name rule is
+// the source's own and not the filesystem's: a name outside fs.ValidPath is
+// refused before anything is read, even from a filesystem that would answer
+// it.
+func TestFSSourceRefusesANameBeforeAskingTheFilesystem(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		path string
+	}
+	tests := []tc{
+		{name: "a name that climbs out", path: "../escape.json"},
+		{name: "a rooted name", path: "/etc/app.json"},
+		{name: "an empty name", path: ""},
+		{name: "a name with a dot element", path: "config/./app.json"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		reads := &atomic.Int64{}
+		got, err := cfg.FSSource(permissiveFS{reads: reads}, "json", c.path).Load()
+		if !errs.HasCode(err, coreconfig.CodeConfigSourceFailed) || got != nil {
+			t.Fatalf("Load(%s) = %v, %v; want CONFIG_SOURCE_FAILED and nothing", c.name, got, err)
+		}
+		if n := reads.Load(); n != 0 {
+			t.Errorf("Load(%s) asked the filesystem %d time(s) for a name it refuses", c.name, n)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: the control: a valid name IS read from the same filesystem.
+	reads := &atomic.Int64{}
+	if _, err := cfg.FSSource(permissiveFS{reads: reads}, "json", "config/app.json").Load(); err != nil || reads.Load() != 1 {
+		t.Fatalf("a valid name = %v after %d read(s), want nil after 1", err, reads.Load())
 	}
 }

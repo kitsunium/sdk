@@ -31,7 +31,9 @@ type fsSource struct {
 //	source := config.FSSource(files, "yaml", "config/config.yaml")
 //
 // path is an io/fs name — slash-separated and unrooted, fs.ValidPath — and a
-// name that is not one is refused when the source loads.
+// name that is not one is refused when the source loads, before the
+// filesystem is asked: an fs.ReadFileFS receives the name as given, and one
+// that resolved "../x" would otherwise read outside the tree.
 //
 // A file the filesystem does not hold is REFUSED, exactly as FileSource
 // refuses a path it cannot open, and never read as an empty layer. The two are
@@ -55,7 +57,14 @@ func (s fsSource) Load() (values map[string]any, err error) {
 		//: CONFIG_SOURCE_FAILED, naming what was missing.
 		return nil, kerrs.Wrap(coreconfig.ConfigSourceFailed, kerrs.WrapParams{}, kerrs.String("fs", "nil"))
 	}
-	//: read the raw file bytes; fs.ReadFile applies the fs.ValidPath rule.
+	//: an io/fs name, checked here: fs.ReadFile hands the name straight to
+	//: a ReadFileFS, and an implementation that resolved "../x" would read
+	//: what this source promises to refuse.
+	if !fs.ValidPath(s.path) {
+		//: CONFIG_SOURCE_FAILED, naming the name, before anything is read.
+		return nil, kerrs.Wrap(coreconfig.ConfigSourceFailed, kerrs.WrapParams{}, kerrs.String("path", s.path))
+	}
+	//: read the raw file bytes.
 	data, err := fs.ReadFile(s.fsys, s.path)
 	//: an unreadable file — absent included — is a source failure.
 	if err != nil {
