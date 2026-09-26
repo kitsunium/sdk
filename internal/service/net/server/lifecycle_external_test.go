@@ -446,10 +446,9 @@ func TestServer_Close(t *testing.T) {
 			t.Fatalf("phase = %v, want stopped", phase)
 		}
 		//: the port is genuinely free, which is what makes a restart on the same
-		//: address possible.
-		if _, err := stdnet.DialTimeout("tcp", addr, 500*time.Millisecond); err == nil {
-			t.Fatal("the listener still accepted a connection after Close")
-		}
+		//: address possible: it binds again at once. Dialling the freed port
+		//: proves nothing — another test's listener on 127.0.0.1:0 may just
+		//: have been given it, and would answer.
 		again, err := stdnet.Listen("tcp", addr)
 		if err != nil {
 			t.Fatalf("%s is still held after Close: %v", addr, err)

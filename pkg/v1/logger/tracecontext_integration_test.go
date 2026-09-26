@@ -4,6 +4,7 @@ package logger_test
 
 import (
 	"context"
+	"math"
 	"runtime"
 	"runtime/debug"
 	"testing"
@@ -17,6 +18,10 @@ import (
 // base-two logarithm, which is what the old form of these assertions could not
 // see at all.
 const traceRuns int = 2000
+
+// traceWindows is how many windows traceMallocsOver measures, keeping the
+// smallest: enough for the runtime's own allocations to miss one of them.
+const traceWindows int = 5
 
 // traceAllocSink defeats dead-code elimination in the extraction probe. It is
 // TYPED rather than an any: assigning a 24-byte struct into an interface boxes
@@ -66,14 +71,24 @@ func traceMallocsOver(runs int, f func()) uint64 {
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
 	//: warm the recycler so the measured runs hit the pooled builder.
 	f()
-	var before, after runtime.MemStats
-	runtime.ReadMemStats(&before)
-	for range runs {
-		f()
+	//: Mallocs counts every goroutine's allocations, and the runtime or a timer
+	//: can allocate inside a window even at GOMAXPROCS 1 — on macOS and Windows
+	//: often enough to fail an exact count. Such noise only ever ADDS, so the
+	//: smallest of a few windows is still the exact cost of f: a regression
+	//: shows in every window, and in their minimum.
+	best := uint64(math.MaxUint64)
+	//: each window measures the same runs; the smallest is kept.
+	for range traceWindows {
+		var before, after runtime.MemStats
+		runtime.ReadMemStats(&before)
+		for range runs {
+			f()
+		}
+		runtime.ReadMemStats(&after)
+		//: Mallocs is cumulative and monotonic, so the difference is the total.
+		best = min(best, after.Mallocs-before.Mallocs)
 	}
-	runtime.ReadMemStats(&after)
-	//: Mallocs is cumulative and monotonic, so the difference is the total.
-	return after.Mallocs - before.Mallocs
+	return best
 }
 
 // TestT34TraceCorrelationAddsNoAllocation is the hard constraint of the trace
