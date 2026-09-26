@@ -104,7 +104,7 @@ drives each restart with a `ManualClock` and asserts "not one nanosecond early".
 The package's existing audit (`TestPackageNeverWaitsOnTheWallClock`) covers the
 new files, production and tests alike.
 
-## Consequences
+## Consequences / Semantics
 
 - kit's `Service.Go` becomes a `Supervisor` whose events feed kit's loop state.
   Its hand-written `supervise` loop, `backoff(n)`, the `healthyRun` constant

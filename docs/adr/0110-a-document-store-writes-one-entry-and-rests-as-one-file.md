@@ -149,7 +149,7 @@ fold succeeds, and the entries stay.
   mutex and a device flush, and a flush a caller walked away from still
   happens.
 
-## Consequences
+## Consequences / Semantics
 
 - kit's `Store[T]` wraps a `docstore.Store[T]`:
   - it opens one at start, with `FS` set to kit's data `vfs.FullFS` and `Path`

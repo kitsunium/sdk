@@ -124,7 +124,7 @@ refuses. This is the transport a development server delivers through, where
 non-positive `keep` clamps to `DefaultCaptureKeep` (200), a mailbox a person
 can scroll.
 
-## Consequences
+## Consequences / Semantics
 
 - kit's `Mailer` becomes a `mail.Spool`, and its `smtpTransport`,
   `mailBackoff`, `deliveredMemory` ring, lease parking and panic recovery move
