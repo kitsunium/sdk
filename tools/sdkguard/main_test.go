@@ -1249,14 +1249,18 @@ func Test_normalizeRoot(t *testing.T) {
 		in   string
 		want string
 	}
+	// normalizeRoot answers in the host's separator — filepath.Clean's — because
+	// the root it returns is walked with filepath.WalkDir and prefixes every
+	// finding's path. On Windows "/tmp/x/..." is therefore \tmp\x, which the
+	// wants below spell with filepath.FromSlash rather than assume Unix.
 	tests := []tc{
 		{"empty means here", "", "."},
 		{"ellipsis alone means here", "...", "."},
 		{"dot-slash-ellipsis", "./...", "."},
-		{"filesystem root survives", "/", "/"},
-		{"recursive filesystem root survives", "/...", "/"},
+		{"filesystem root survives", "/", filepath.FromSlash("/")},
+		{"recursive filesystem root survives", "/...", filepath.FromSlash("/")},
 		{"relative dir loses the trailing separator", "foo/...", "foo"},
-		{"absolute dir", "/tmp/x/...", "/tmp/x"},
+		{"absolute dir", "/tmp/x/...", filepath.FromSlash("/tmp/x")},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

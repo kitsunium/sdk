@@ -31,6 +31,7 @@ Measured before deciding, on linux/386 with go1.27.1: the four modules the 32-bi
 ## Consequences / Semantics
 
 - `test-386` runs eight modules instead of four; `cross-build` and the macOS/Windows package job run eight instead of six; the local audit eight instead of five.
+- The first run of `tools/` on Windows failed on two tests, and both were Unix premises in the tests rather than defects in the tools: `genindex` expected `/repo` where `filepath.Abs` rightly answers `D:\repo`, and `sdkguard` expected `normalizeRoot` to answer in forward slashes where `filepath.Clean` answers in the host's separator — the form `filepath.WalkDir` and the finding paths use. The tests now state what each OS promises, the way ADR 0095 answered Windows for the workspace modules.
 - The root `CLAUDE.md`'s "counting go.mod files yields seven" had drifted to eight when `tools/sdkguard` arrived; it now names the census instead of a number.
 - A module that genuinely cannot run somewhere (a platform its code does not support at all) is the one case that needs an edit, and the edit is an exclusion with a reason next to the loop — visible in review, unlike an omission.
 
