@@ -90,6 +90,27 @@ func TestSendRefusesWhatTheTransportWould(t *testing.T) {
 	}
 }
 
+// TestSendRefusesAnEmptyIdentifier pins the guard on Config.NewID: the spool
+// drops a mail whose identifier it delivered already, so an empty identifier
+// would make every later empty one a redelivery. Send refuses it, and nothing
+// is queued.
+func TestSendRefusesAnEmptyIdentifier(t *testing.T) {
+	t.Parallel()
+	s, _, rec := newSpool(t, spool.Config{
+		Transport: svcmail.NewCapture(0),
+		From:      coremail.AddressValue{Addr: "members@example.com"},
+		NewID:     func() (string, error) { return "", nil },
+	})
+	if _, err := s.Send(context.Background(), message("Hi")); !errs.HasCode(err, spool.CodeSpoolMisconfigured) {
+		t.Fatalf("Send() with an empty identifier = %v, want SpoolMisconfigured", err)
+	}
+	select {
+	case event := <-rec.events:
+		t.Fatalf("a refused mail produced %v", event.Kind)
+	default:
+	}
+}
+
 // TestRetriesOnTheBackoffThenDeadLetters is kit's failing-relay case: each
 // attempt fails, the next waits a doubling backoff on the spool's clock — not
 // a nanosecond early — and the last one dead-letters the mail with its

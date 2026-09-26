@@ -15,7 +15,7 @@ var (
 	// SpoolMisconfigured refuses a spool that could never deliver.
 	SpoolMisconfigured = errs.Define(CodeSpoolMisconfigured, "SPOOL_MISCONFIGURED",
 		"The mail spool cannot run as configured",
-		"service/mail/spool: New refused its Config; the fields name the setting and the problem",
+		"service/mail/spool: New refused its Config, or Send got an empty identifier from Config.NewID; the fields name the setting and the problem",
 		errs.WithExitCode(exitConfig))
 
 	// SpoolClosed refuses a Send after Close.

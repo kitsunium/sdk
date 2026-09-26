@@ -47,8 +47,10 @@ The composer mints no Message-ID, and that stays right for a single send
 (RFC 6409 §8.2). A submission server that adds one per submission gives every
 retry a different identity, though, and only the spool knows there will be
 retries. The identifier is a ULID from `service/id`, or `Config.NewID`'s, and
-the domain is the caller's own. `Send` returns once the mail is in the queue,
-on disk with a `Dir`.
+the domain is the caller's own. An empty identifier is `SPOOL_MISCONFIGURED`
+at `Send`, because the spool drops a mail whose identifier it delivered
+already (D4). `Send` returns once the mail is in the queue, on disk with a
+`Dir`.
 
 ### D3 — a retry PARKS the mail; only the last attempt nacks
 

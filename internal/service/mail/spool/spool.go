@@ -179,7 +179,8 @@ func maxMessageBytes(configured int) int {
 // at the sender's domain, which every attempt keeps.
 //
 // A refusal is the mail domain's own typed verdict (HeaderInjection,
-// InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge), or
+// InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge),
+// SpoolMisconfigured for an empty identifier from Config.NewID, or
 // SpoolClosed; nothing is queued.
 func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string, err error) {
 	s.mu.RLock()
@@ -228,6 +229,12 @@ func (s *Spool) stamp(ctx context.Context, msg coremail.MessageValue) (spooledVa
 	if idErr != nil {
 		//: the generator's own typed verdict.
 		return spooledValue{}, idErr
+	}
+	//: an empty identifier is one every later empty one would repeat, and the
+	//: spool drops a mail whose identifier it delivered already.
+	if id == "" {
+		//: SpoolMisconfigured, naming the setting.
+		return spooledValue{}, misconfigured("NewID", "returned an empty identifier")
 	}
 	//: the Message-ID every attempt carries, so a receiver can tell a retry
 	//: from a new mail.
