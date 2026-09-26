@@ -16,6 +16,37 @@
 // codec (e.g. pkg/v1/codec) so it is registered. Failures surface typed
 // sentinels (SourceFailed / DecodeFailed / ValidationFailed / WatchFailed).
 //
+// # A configuration carried in the binary
+//
+// [FSSource] is [FileSource] over an io/fs.FS, for a program whose committed
+// configuration travels inside it:
+//
+//	//go:embed config
+//	var files embed.FS
+//
+//	err := config.Load(&c,
+//	    config.FSSource(files, "yaml", "config/config.yaml"),
+//	    config.EnvSource("APP"), // the environment still wins
+//	)
+//
+// It dispatches through the same codecs, refuses with the same SourceFailed,
+// and describes itself the same way — a traced load reports its keys under
+// the layer "file" with the path as given. A file the filesystem does not hold
+// is refused, as FileSource refuses one it cannot open, and never read as an
+// empty layer: absent from an embedded tree usually means an embed pattern
+// that matched nothing, and read as empty it would start the program on its
+// defaults without a word. A layer that is optional by design — one document
+// per environment, where some environments have none — is the caller's
+// decision, one fs.Stat away, and only an absence makes it optional:
+//
+//	name := "config/" + env + ".yaml"
+//	switch _, err := fs.Stat(files, name); {
+//	case err == nil:
+//	    sources = append(sources, config.FSSource(files, "yaml", name))
+//	case !errors.Is(err, fs.ErrNotExist):
+//	    return err // present but unreadable is not the optional absence
+//	}
+//
 // # The schema: required keys, defaults, and a closed vocabulary
 //
 // [NewSchema] compiles a [SchemaSpec] into a [Schema]: which keys the
@@ -124,6 +155,7 @@
 package config
 
 import (
+	"io/fs"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
@@ -164,7 +196,7 @@ type Origin = coreconfig.OriginValue
 
 // Describer is the public alias for the optional sibling of [Source] through
 // which a source names its layer and, per key, the detail behind it.
-// EnvSource, FileSource and Schema.Source implement it.
+// EnvSource, FileSource, FSSource and Schema.Source implement it.
 type Describer = coreconfig.Describer
 
 // Schema is the public alias for a compiled configuration shape: the default
@@ -277,6 +309,17 @@ func EnvSource(prefix string) Source {
 func FileSource(format, path string) Source {
 	//: delegate, converting the format name to the codec key type.
 	return svcconfig.FileSource(codec.Format(format), path)
+}
+
+// FSSource returns a Source reading path inside fsys and parsing it as format
+// — [FileSource] over an io/fs.FS, such as an embed.FS. path is an io/fs name:
+// slash-separated and unrooted. It fails with SourceFailed exactly where
+// FileSource does, a file fsys does not hold included, and a nil fsys is
+// refused when the source loads. A traced load reports it as [LayerFile] with
+// path as the detail.
+func FSSource(fsys fs.FS, format, path string) Source {
+	//: delegate, converting the format name to the codec key type.
+	return svcconfig.FSSource(fsys, codec.Format(format), path)
 }
 
 // PollWatcher returns a cross-OS Watcher that polls path every interval.

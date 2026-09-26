@@ -1,6 +1,6 @@
 # ADR 0097 — a load says where each value came from, and a secret field is loaded as written
 
-- **Status**: Accepted
+- **Status**: Accepted. **Amended 2026-09-26** (§Amendment) — `FSSource`, a `FileSource` over an `io/fs.FS`, describes itself as a file; a file the filesystem does not hold is refused, as it is on disk.
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0028](0028-sdk-config-domain.md) (the `config` domain), [ADR 0061](0061-sdk-config-schema.md) (the schema this reuses the vocabulary of), [ADR 0096](0096-a-secret-is-a-value-no-rendering-writes-down.md) (the `secret.Value` a field holds), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a sibling, not a widened `Source`), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (new shapes, published)
@@ -150,6 +150,33 @@ None. Four names are added to `pkg/v1/config` (`Origin`, `Describer`,
 - **Report `Secret` from a struct tag** (`secret:"true"`). Rejected: the type is
   the declaration. A tag can be forgotten on a field that still holds a
   password; a `secret.Value` field cannot be printed by accident either way.
+
+## Amendment — 2026-09-26: a file inside an `fs.FS` is a file
+
+§2 names the in-tree describers. A fourth joins them without changing the
+decision: `FSSource(fsys, format, path)` is `FileSource` over an `io/fs.FS`,
+for a program that carries its committed configuration inside its own binary
+(`//go:embed config`). It answers `("file", <the path as given>)`, exactly as
+`FileSource` does, so a traced load reports an embedded document under the
+layer an operator already reads as "a file" — the Layer vocabulary does not
+grow a kind for where the bytes were stored.
+
+The two file sources share the codec dispatch and the verdicts: every way the
+bytes cannot be read or parsed is `CONFIG_SOURCE_FAILED`, and a file the
+filesystem does not hold is one of them — refused, never an empty layer. Absent
+from an embedded tree usually means an embed pattern that matched nothing, or a
+file renamed and not re-embedded; read as empty, it would start the program on
+its defaults with nothing said, which is the failure ADR 0061 refuses for an
+unknown key. A layer that is optional by design — one document per environment,
+where some environments have none — is the caller's decision, one `fs.Stat`
+away. A nil `fsys` is refused when the source loads, rather than panicking.
+
+`Source`, `Describer` and every existing constructor are unchanged; one name is
+added to `pkg/v1/config`. Verified in
+`internal/service/config/fs_source_external_test.go` (JSON and YAML documents in
+an `fstest.MapFS`, every refusal, the equivalence with `FileSource` over
+`os.DirFS`, and a traced load layering two embedded documents under an
+`EnvSource`) and through the public names in `pkg/v1/config`.
 
 ## Deferred
 

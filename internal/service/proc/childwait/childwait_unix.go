@@ -42,7 +42,7 @@ func (l *ledger) reapAny() (pid int, err error) {
 		return pid, err
 	}
 	//: a child was collected — give its status to whoever claimed it.
-	l.deliver(pid, status)
+	l.deliver(pid, &status)
 	//: report the collected pid.
 	return pid, nil
 }

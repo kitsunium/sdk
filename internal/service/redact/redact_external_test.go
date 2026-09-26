@@ -286,3 +286,125 @@ func TestTheShallowestFieldDecides(t *testing.T) {
 		}
 	}
 }
+
+// The structs below each make encoding/json choose between fields of one
+// member name. None of their member names is a default secret word, so only
+// the plan can hide what they declare.
+type (
+	// tieDetail declares a secret one level down, so its plan is not itself
+	// a secret: a tie decided by "the stricter plan" drops it.
+	tieDetail struct {
+		Kind string `json:"kind"`
+		Memo string `json:"memo" redact:"secret"`
+	}
+	// plainSide and taggedSide each hold a field encoding/json names
+	// "Field" — untagged in the first, by its tag in the second.
+	plainSide struct {
+		Field string
+	}
+	taggedSide struct {
+		Alias tieDetail `json:"Field"`
+	}
+	// taggedWinsTie embeds both side by side: the two fields tie at one
+	// depth, and encoding/json writes the TAGGED one.
+	taggedWinsTie struct {
+		plainSide
+		taggedSide
+	}
+	// memoHolder declares its one member secret.
+	memoHolder struct {
+		Memo string `json:"memo" redact:"secret"`
+	}
+	// namedUnexported embeds an unexported struct under a json name, which
+	// encoding/json writes whole under that name.
+	namedUnexported struct {
+		memoHolder `json:"held"`
+		Shown      string `json:"shown"`
+	}
+	// flattenedA and flattenedB both write their own JSON; embedded side by
+	// side, neither method is promoted, and encoding/json flattens both.
+	flattenedA struct {
+		Memo string `json:"memo_a" redact:"secret"`
+	}
+	flattenedB struct {
+		Other string `json:"other"`
+	}
+	bothWriteTheirOwn struct {
+		flattenedA
+		flattenedB
+	}
+	// twiceEmbedded embeds memoHolder twice at one depth: the two fields of
+	// the same name cancel out, and encoding/json writes neither.
+	holderA       struct{ memoHolder }
+	holderB       struct{ memoHolder }
+	twiceEmbedded struct {
+		holderA
+		holderB
+	}
+)
+
+// MarshalJSON writes flattenedA as a string when it is marshalled alone.
+func (flattenedA) MarshalJSON() ([]byte, error) { return []byte(`"a"`), nil }
+
+// MarshalJSON writes flattenedB as a string when it is marshalled alone.
+func (flattenedB) MarshalJSON() ([]byte, error) { return []byte(`"b"`), nil }
+
+// TestThePlanFollowsTheFieldEncodingJSONWrites pins the plan to the field
+// json.Marshal itself selects under each name. A plan that approximates the
+// selection applies a declaration to the wrong value, or to no value: a
+// tagged field winning a tie, an unexported struct written under a name, and
+// two self-marshalling structs flattened side by side all carried a declared
+// secret past the redactor before the selection was encoding/json's own.
+func TestThePlanFollowsTheFieldEncodingJSONWrites(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// value is marshalled by encoding/json and by the redactor.
+		value any
+		// secret is a declared secret encoding/json writes; "" when none is.
+		secret string
+		// shown is a value that is not secret and must stay visible.
+		shown string
+	}
+	tests := []tc{
+		{name: "a tagged field wins a tie", value: taggedWinsTie{plainSide{Field: "untagged-loses"}, taggedSide{Alias: tieDetail{Kind: "kind-shown", Memo: "m3mo-in-tie"}}}, secret: "m3mo-in-tie", shown: "kind-shown"},
+		{name: "an unexported struct written under its name", value: namedUnexported{memoHolder: memoHolder{Memo: "m3mo-held"}, Shown: "shown-value"}, secret: "m3mo-held", shown: "shown-value"},
+		{name: "two self-marshalling structs flattened", value: bothWriteTheirOwn{flattenedA{Memo: "m3mo-flat"}, flattenedB{Other: "other-shown"}}, secret: "m3mo-flat", shown: "other-shown"},
+		{name: "a struct embedded twice cancels out", value: twiceEmbedded{holderA{memoHolder{Memo: "never-written"}}, holderB{memoHolder{Memo: "never-written"}}}},
+	}
+	r := redact.NewRedactor(redact.Config{})
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		wire, err := json.Marshal(c.value)
+		if err != nil {
+			t.Fatalf("%s: json.Marshal = %v", c.name, err)
+		}
+		//: the premise: encoding/json writes the secret, or writes nothing
+		//: of that name at all.
+		if c.secret != "" && !strings.Contains(string(wire), c.secret) {
+			t.Fatalf("%s: encoding/json wrote %s — the case no longer exercises the selection", c.name, wire)
+		}
+		got, err := r.Value(c.value, 4096)
+		if err != nil {
+			t.Fatalf("%s: Value() = %v", c.name, err)
+		}
+		//: the declared secret encoding/json wrote is replaced.
+		if c.secret != "" && strings.Contains(string(got.JSON), c.secret) {
+			t.Errorf("%s: %s shows the declared secret (encoding/json wrote %s)", c.name, got.JSON, wire)
+		}
+		//: and nothing undeclared is hidden with it.
+		if c.shown != "" && !strings.Contains(string(got.JSON), c.shown) {
+			t.Errorf("%s: %s hides %q, which nothing declares", c.name, got.JSON, c.shown)
+		}
+		//: a name encoding/json writes nothing under stays absent.
+		if c.secret == "" && !bytes.Equal(got.JSON, wire) {
+			t.Errorf("%s: Value wrote %s, encoding/json %s", c.name, got.JSON, wire)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

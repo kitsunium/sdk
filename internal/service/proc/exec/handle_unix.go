@@ -126,6 +126,24 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 	return h.waitVal, h.waitErr
 }
 
+// waiter is what collectExit needs from the process it reaps: its own wait,
+// and nothing else. Production hands it an *os.Process; the narrower type is
+// the statement that collecting an exit status neither signals nor releases
+// the process — the caller decides that from the swept flag.
+type waiter interface {
+	// Wait blocks until the process exits and returns its state.
+	Wait() (*os.ProcessState, error)
+}
+
+// releaser is what an aborted spawn needs from the child it abandons: its own
+// wait, to reap it, and the release of its handle when a sweep reaped it
+// first. Production hands it an *os.Process.
+type releaser interface {
+	waiter
+	// Release frees the process handle without waiting for the process.
+	Release() error
+}
+
 // collectExit obtains proc's exit status from whichever waiter took it, and
 // ends the claim. Without a running reaper that is always proc's own wait, and
 // nothing changes from a plain os.Process.Wait. With one, a sweep may collect
@@ -135,7 +153,7 @@ func (h *handle) Wait() (exit coreproc.ExitValue, err error) {
 // completed, so the caller must Release proc. err is the wait's own error only
 // when the status is truly unobservable: something outside the SDK reaped the
 // child, or wait4 failed for another reason.
-func collectExit(proc *os.Process, claim *childwait.Claim) (exit coreproc.ExitValue, swept bool, err error) {
+func collectExit(proc waiter, claim *childwait.Claim) (exit coreproc.ExitValue, swept bool, err error) {
 	//: a sweep already took the child: do not wait by pid for a process that is
 	//: gone, whose pid may by now be another process's.
 	if status, ok := claim.Collected(); ok {

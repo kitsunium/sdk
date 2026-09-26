@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "env_source.go",
         "file_source.go",
+        "fs_source.go",
         "load.go",
         "merge.go",
         "origins.go",
@@ -51,6 +52,7 @@ go_test(
         "env_source_internal_test.go",
         "file_source_external_test.go",
         "file_source_internal_test.go",
+        "fs_source_external_test.go",
         "load_external_test.go",
         "load_internal_test.go",
         "merge_internal_test.go",
@@ -71,6 +73,7 @@ go_test(
         "//internal/core/validation",
         "//internal/kernel/errs",
         "//internal/service/codec/json",
+        "//internal/service/codec/yaml",
         "//internal/service/validation",
     ],
 )

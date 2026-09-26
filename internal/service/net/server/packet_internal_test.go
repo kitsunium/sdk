@@ -289,3 +289,45 @@ func Test_packet_reset(t *testing.T) {
 		})
 	}
 }
+
+// Test_packet_keptPastItsLoop pins what a handler that kept its Packet finds
+// once the read loop has ended and reset it. The port bounds only Data to the
+// handler's call, so a later Reply or To is legitimate; it must answer as the
+// closed socket would — net.ErrClosed, no local address — and never reach the
+// socket the reset dropped.
+func Test_packet_keptPastItsLoop(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// payload is what the handler would reply with.
+		payload []byte
+	}
+	tests := []tc{
+		{name: "a reply with a payload", payload: []byte("late")},
+		{name: "an empty reply", payload: nil},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		p := &packet{
+			conn: &fakePacketConn{local: &stdnet.UDPAddr{IP: stdnet.IPv4(127, 0, 0, 1), Port: 5060}},
+			from: &stdnet.UDPAddr{IP: stdnet.IPv4(192, 0, 2, 7), Port: 5060},
+		}
+		p.reset()
+		n, err := p.Reply(c.payload)
+		//: the closed-socket answer, with nothing written.
+		if !errors.Is(err, stdnet.ErrClosed) || n != 0 {
+			t.Errorf("%s: Reply after the loop ended = (%d, %v), want (0, net.ErrClosed)", c.name, n, err)
+		}
+		//: no socket, so no local address.
+		if to := p.To(); to != nil {
+			t.Errorf("%s: To after the loop ended = %v, want nil", c.name, to)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

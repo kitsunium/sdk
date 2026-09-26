@@ -122,7 +122,7 @@ func (l *ledger) track(pid int) *Claim {
 // spawn forked it, that spawn's claim must be in place — replacing any older
 // claim on a recycled pid — before the lookup can say whose status this is.
 // A pid still unclaimed then was an orphan's, and its status has no owner.
-func (l *ledger) deliver(pid int, status StatusValue) {
+func (l *ledger) deliver(pid int, status *StatusValue) {
 	//: wait out every spawn that may have forked pid without claiming it yet.
 	l.spawning.Lock()
 	//: reopen the gate once the lookup below is conclusive.
@@ -131,9 +131,10 @@ func (l *ledger) deliver(pid int, status StatusValue) {
 	l.handOver(pid, status)
 }
 
-// handOver stores status on the claim for pid and retires the claim from the
-// ledger, reporting whether a claim existed.
-func (l *ledger) handOver(pid int, status StatusValue) bool {
+// handOver stores a copy of status on the claim for pid and retires the claim
+// from the ledger, reporting whether a claim existed. status is read, never
+// kept: the claim holds its own copy.
+func (l *ledger) handOver(pid int, status *StatusValue) bool {
 	//: the claim and its fields are guarded by mu.
 	l.mu.Lock()
 	//: release mu on both paths.
@@ -145,7 +146,7 @@ func (l *ledger) handOver(pid int, status StatusValue) bool {
 		return false
 	}
 	claim.collected = true
-	claim.status = status
+	claim.status = *status
 	//: the pid is free now; a later child with the same pid is someone else.
 	delete(l.claims, pid)
 	//: the owner will find the status on its claim.

@@ -7,7 +7,7 @@ Aliases the `Source`/`Validator`/`Watcher` port, the `Default`/`Schema`/`SchemaS
 schema shapes and the `Origin`/`Describer` provenance pair, exposes the generic
 `Load[T]` and `LoadSchema[T]` and their traced twins `LoadWithOrigins[T]` /
 `LoadSchemaWithOrigins[T]`, the `NewSchema` compiler, the
-`EnvSource`/`FileSource`/`PollWatcher` constructors, the `Layer*` names, and the
+`EnvSource`/`FileSource`/`FSSource`/`PollWatcher` constructors, the `Layer*` names, and the
 sentinels. Stdlib-only → dep-light; cross-OS (poll watcher).
 
 ## Surface
@@ -22,15 +22,18 @@ sentinels. Stdlib-only → dep-light; cross-OS (poll watcher).
 | `LoadSchema[T](target, schema, sources...)` | defaults **under** every source, key pass before the decode, constraints after |
 | `Schema.Check(v)` | the full located report (messages the error does not carry) |
 | `LoadWithOrigins[T]` / `LoadSchemaWithOrigins[T]` | the same loads, plus one `Origin` per leaf key: the layer that supplied its final value and the variable or path behind it — never the value (ADR 0097) |
-| `Origin` / `Describer` | aliases onto `core/config.OriginValue` / `Describer`; `EnvSource`, `FileSource` and `Schema.Source` implement `Describer` |
+| `Origin` / `Describer` | aliases onto `core/config.OriginValue` / `Describer`; `EnvSource`, `FileSource`, `FSSource` and `Schema.Source` implement `Describer` |
 | `LayerDefault` / `LayerFile` / `LayerEnv` / `LayerSource` | the layer names a traced load reports; a source may name its own |
 | `EnvSource(prefix)` / `FileSource(format, path)` / `PollWatcher(path, interval)` | constructors |
+| `FSSource(fsys, format, path)` | `FileSource` over an `io/fs.FS` — a configuration embedded in the binary; same codecs, same `SourceFailed` (a file the FS does not hold included), reported as `LayerFile` with the path as given (ADR 0097 §Amendment) |
 | `SourceFailed` / `DecodeFailed` / `ValidationFailed` / `WatchFailed` / `SchemaInvalid` / `KeyMissing` / `UnknownKey` | sentinels |
 
 ## Conventions
 
 - **Type aliases, not new types**; `Load` is generic + delegates.
-- **`FileSource` needs the codec registered** — blank-import `pkg/v1/codec` (or the format's package).
+- **`FileSource` and `FSSource` need the codec registered** — blank-import `pkg/v1/codec` (or the format's package).
+- **A missing file is `SourceFailed`, never an empty layer**, on disk and in an
+  `fs.FS` alike; an optional layer is the caller's `fs.Stat`.
 - Env values are JSON-coerced **only when the whole value is one complete JSON
   document** (numbers/bools typed); anything else keeps its exact string, so
   `0A0A01`, `1500ms`, `10.45.0.0/16` and `2026-09-03` survive intact. Cross-OS
