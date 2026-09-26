@@ -135,9 +135,32 @@
 // single component begins closing. That ordering is what lets an orchestrator
 // withdraw the replica from routing before the drain begins, instead of
 // draining against traffic that keeps arriving.
+//
+// # Asking a running process
+//
+// [Ask] is the other end: the question a container's HEALTHCHECK asks, from a
+// binary that ships in an image with no shell and no curl to ask it with. The
+// same executable answers it as a subcommand:
+//
+//	status, err := health.Ask(ctx, health.AskConfig{Addr: ":4000", Path: "/readyz"})
+//	if err != nil {
+//		fmt.Fprintln(os.Stderr, err) // why: ASK_UNREACHABLE, ASK_TIMEOUT, ASK_NOT_READY
+//		os.Exit(1)
+//	}
+//
+// Addr is the address the process LISTENS on, spelled as its listener was
+// given it; a host that names no particular address — empty, 0.0.0.0, :: — is
+// dialled on this machine's loopback of the same family, since no connection
+// can be made to an unspecified address. Ready means one thing: the process
+// answered 200. The exchange is bounded by [DefaultAskTimeout] (or
+// [AskConfig.Timeout]) and by the caller's context, follows no redirect, goes
+// through no proxy whatever the environment says, reads at most
+// [MaxAskDrainBytes] of the body and closes it, and no byte of that body ever
+// reaches an error: [AskNotReady] carries the status alone.
 package health
 
 import (
+	"context"
 	"net/http"
 	"time"
 
@@ -169,6 +192,14 @@ const (
 	// MaxCacheAge is the ceiling on ReadinessCheck.MaxAge. Above it, a
 	// registration is refused rather than clamped.
 	MaxCacheAge time.Duration = svchealth.MaxCacheAge
+	// DefaultAskTimeout is the budget an Ask gets when AskConfig.Timeout is
+	// zero: three seconds, an order of magnitude under Docker's own
+	// HEALTHCHECK timeout, so a probe that gets no answer says why first.
+	DefaultAskTimeout time.Duration = svchealth.DefaultAskTimeout
+	// MaxAskDrainBytes is how much of a response body Ask reads before it
+	// closes the connection: enough for any readiness answer to end politely,
+	// and a bound on one that never ends.
+	MaxAskDrainBytes int64 = svchealth.MaxAskDrainBytes
 )
 
 // Check is the public alias for the ctx-aware body of a startup or readiness
@@ -212,6 +243,11 @@ type Config = svchealth.Config
 // HandlerConfig is the public alias for a handler's body verbosity.
 type HandlerConfig = svchealth.HandlerConfig
 
+// AskConfig is the public alias for where a process listens and which path
+// answers whether it is ready: Addr and Path are required, Timeout and Clock
+// have working zeros.
+type AskConfig = svchealth.AskConfig
+
 var (
 	// InvalidCheck is returned by every Add for a check that could never run
 	// — an empty Name or a nil Check. The "missing" field names which.
@@ -246,6 +282,21 @@ var (
 	// NotifyFailed reaches Config.OnNotifyError when an opt-in sd_notify
 	// datagram could not be delivered.
 	NotifyFailed = svchealth.NotifyFailed
+	// AskMisconfigured refuses an Ask no answer could satisfy — an address
+	// with no usable port, a path that is not absolute, a negative timeout —
+	// before anything is dialled. The "argument" field names which.
+	AskMisconfigured = svchealth.AskMisconfigured
+	// AskUnreachable reports an Ask the process never answered because the
+	// connection or the request failed; the transport's error is the cause.
+	AskUnreachable = svchealth.AskUnreachable
+	// AskTimeout reports an Ask with no answer when its budget, or the
+	// caller's context, ended. A caller's own context error stays in the
+	// chain, so errors.Is answers context.Canceled or DeadlineExceeded too.
+	AskTimeout = svchealth.AskTimeout
+	// AskNotReady reports an Ask the process answered with a status other
+	// than 200 — a redirect included, since none is followed. The "status"
+	// field carries it; the body never does.
+	AskNotReady = svchealth.AskNotReady
 )
 
 // New returns a Health. It cannot fail: a nil cfg.Clock falls back to the wall
@@ -295,4 +346,15 @@ func NewReadinessHandler(registry Health, cfg HandlerConfig) http.Handler {
 func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler {
 	//: delegate to the service handler.
 	return svchealth.NewLivenessHandler(registry, cfg)
+}
+
+// Ask asks the process listening on cfg.Addr whether it is ready: one GET of
+// cfg.Path over plain HTTP, the question a container's HEALTHCHECK asks. It
+// returns the status the process answered — zero when it answered nothing —
+// and a nil error exactly when that status is 200; otherwise the error is
+// AskMisconfigured, AskUnreachable, AskTimeout or AskNotReady. See the package
+// documentation for what the exchange refuses to do.
+func Ask(ctx context.Context, cfg AskConfig) (status int, err error) {
+	//: delegate to the service probe.
+	return svchealth.Ask(ctx, cfg)
 }

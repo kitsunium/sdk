@@ -23,6 +23,7 @@ alias(
 go_test(
     name = "health_test",
     srcs = [
+        "ask_external_test.go",
         "health_bench_test.go",
         "health_external_test.go",
     ],

@@ -55,10 +55,12 @@ go_library(
         "//internal/core/net",
         "//internal/core/proc",
         "//internal/kernel/buffer",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
         "//internal/kernel/worker",
         "//internal/service/proc/sdlisten",
+        "//internal/service/resilience",
     ],
 )
 
@@ -74,6 +76,7 @@ alias(
 go_test(
     name = "server_test",
     srcs = [
+        "accept_backoff_internal_test.go",
         "adopt_internal_test.go",
         "batch_bench_test.go",
         "batch_internal_test.go",
@@ -125,6 +128,7 @@ go_test(
     deps = [
         "//internal/core/net",
         "//internal/core/proc",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/worker",
     ],

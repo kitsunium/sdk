@@ -31,3 +31,21 @@ const CodeDraining errs.Code = 0x00_03_3B_05 // 0.3.59.5
 // CodeNotifyFailed identifies an opt-in sd_notify datagram that could not be
 // delivered.
 const CodeNotifyFailed errs.Code = 0x00_03_3B_06 // 0.3.59.6
+
+// CodeAskMisconfigured identifies an Ask refused before anything was dialled:
+// an address with no usable port, a path that is not absolute, a negative
+// timeout (ADR 0131).
+const CodeAskMisconfigured errs.Code = 0x00_03_3B_07 // 0.3.59.7
+
+// CodeAskUnreachable identifies an Ask that got no answer because the
+// connection or the request failed: refused, reset, no route, a name that does
+// not resolve.
+const CodeAskUnreachable errs.Code = 0x00_03_3B_08 // 0.3.59.8
+
+// CodeAskTimeout identifies an Ask whose budget, or whose caller's context,
+// ended before the process answered.
+const CodeAskTimeout errs.Code = 0x00_03_3B_09 // 0.3.59.9
+
+// CodeAskNotReady identifies an Ask the process answered with a status other
+// than 200 — a redirect included, since none is followed.
+const CodeAskNotReady errs.Code = 0x00_03_3B_0A // 0.3.59.10

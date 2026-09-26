@@ -3,6 +3,11 @@
 // MinLevel floor for the writer factories (console, file, s3, cloudwatch)
 // without the route middleware's NoMatch error — a below-threshold record is a
 // successful no-op, not a failure, so it never pollutes a multi fan-out.
+//
+// Two constructors share the one gate. New is the writer configuration's: its
+// Info is the zero value of MinLevel and means "inherit the handler's level",
+// so New returns the sink unwrapped there. Floor is everyone else's: the floor
+// it is given is the floor it applies, Info included (ADR 0132).
 package levelgate
 
 import (
@@ -34,6 +39,25 @@ func New(inner corelogger.Sink, min level.Level) corelogger.Sink {
 		return inner
 	}
 	//: a real floor was requested — install the gate.
+	return &gateSink{inner: inner, min: min}
+}
+
+// Floor wraps inner so only records with Level >= min reach it, for every min —
+// Info included. It is the gate without New's reading of Info as "inherit":
+// that reading belongs to a writer configuration, whose zero MinLevel must not
+// narrow anything, and a caller who names a floor outside one means the floor
+// it named. A nil inner yields nil, which a fan-out skips and NewWithSink
+// refuses, rather than a gate that fails on its first record.
+//
+// IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
+// gateSink type stays unexported.
+func Floor(inner corelogger.Sink, min level.Level) corelogger.Sink {
+	//: a gate over nothing is nothing, not a panic deferred to the first write.
+	if inner == nil {
+		//: nil: skipped by a fan-out, refused by NewWithSink.
+		return nil
+	}
+	//: the gate, whatever the floor.
 	return &gateSink{inner: inner, min: min}
 }
 

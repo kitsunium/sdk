@@ -28,6 +28,19 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 
 The `PP` slots above are authoritative — verified against each `codes.go`. New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
 
+`jsonshape/` is not a codec either (ADR 0133): it encodes nothing, and describes
+how values of a Go type look under `encoding/json` — the members an object has,
+resolved by the Go 1.27 engine's own rules, which may be missing or null, and the
+Go field behind each. It declares no codes and is reached through
+`pkg/v1/codec/jsonshape`.
+
+Three of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
+`pkg/v1/codec/yaml` and `pkg/v1/codec/toml` each blank-import their own package
+here and nothing else (ADR 0134), so a program reading YAML configuration links
+`yaml.v3` and not the MongoDB driver. A codec package registers itself in its own
+initialisation, which Go runs once, so being imported by both a per-format
+facade and `pkg/v1/codec` registers it once.
+
 `strictjson/` sits in this tree and is deliberately NOT a codec (ADR 0102): it
 registers no Format and implements no `core/codec.Codec`, because what it adds —
 a per-call byte bound, the refusal of unknown and case-variant members, of
@@ -79,10 +92,12 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 - `flatbuffers/` — see `flatbuffers/CLAUDE.md`
 - `form/`        — see `form/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
+- `jsonshape/`   — see `jsonshape/CLAUDE.md` (not a codec — ADR 0133)
 - `msgpack/`     — see `msgpack/CLAUDE.md`
 - `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
+- `strictjson/`  — see `strictjson/CLAUDE.md` (not a codec — ADR 0102)
 - `tlv/`         — see `tlv/CLAUDE.md`
 - `toml/`        — see `toml/CLAUDE.md`
 - `xml/`         — see `xml/CLAUDE.md`

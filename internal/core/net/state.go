@@ -22,6 +22,13 @@ type StateValue struct {
 	// indistinguishable from a complete message to the handler receiving it. A
 	// read loop has nobody to return an error to, so this counter is the report.
 	OversizedPackets uint64 `json:"oversized_packets"`
+	// AcceptBackoffs is the number of times an accept loop waited after Accept
+	// failed with anything but its listener closing — the process out of file
+	// descriptors, typically, with connections still queued. Retrying at once
+	// would spin a core per listener while the condition lasts; each wait is
+	// 5 ms, doubling to 1 s, and the next accepted connection starts the curve
+	// over. A count that keeps rising is a server that cannot accept.
+	AcceptBackoffs uint64 `json:"accept_backoffs"`
 }
 
 // Degraded reports whether any listener fell back from a requested

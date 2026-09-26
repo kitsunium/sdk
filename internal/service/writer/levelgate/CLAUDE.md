@@ -13,7 +13,7 @@ must never surface as a fan-out failure.
 
 | File | Role |
 |---|---|
-| `gate.go` | `gateSink` + `New(inner, min)` + `Write` / `Flush` / `Close` |
+| `gate.go` | `gateSink` + `New(inner, min)` + `Floor(inner, min)` + `Write` / `Flush` / `Close` |
 
 No `codes.go` / `errors.go` — the gate never originates an error.
 
@@ -27,6 +27,13 @@ No `codes.go` / `errors.go` — the gate never originates an error.
   spurious failure for a deliberately-dropped record.
 - `Flush` / `Close` delegate verbatim — the gate buffers nothing and owns no
   resources.
+- `Floor(inner, min)` is the same gate WITHOUT the inherit sentinel: the floor
+  it is given is the floor it applies, Info included, and a nil `inner` yields
+  nil (skipped by `multi`, refused by `NewWithSink`). It exists for a caller
+  outside a writer configuration — `pkg/v1/logger.LevelGate` — who names a
+  floor and means it; reading Info as "inherit" there let every Debug record
+  through (ADR 0132). `New` keeps its reading: a writer config's zero
+  `MinLevel` must not narrow anything.
 
 ## Cost
 
@@ -77,9 +84,10 @@ does a severity floor cost the records it discards".
 
 ## Do NOT
 
-- Use this to express a per-writer floor of exactly `Info` while the handler
-  global is lower — `min == Info` is the "inherit" sentinel and is unwrapped.
-  Restrict via a higher level (`Warn` / `Error`) instead.
+- Use `New` to express a per-writer floor of exactly `Info` while the handler
+  global is lower — `min == Info` is its "inherit" sentinel and is unwrapped.
+  Inside a writer configuration, restrict via a higher level (`Warn` /
+  `Error`); anywhere else, use `Floor`, which applies `Info` as a floor.
 - Add buffering or I/O here — the gate is a pure pass-through filter.
 - Make the floor dynamic by holding a `level.Leveler`. It was built and measured
   (`BENCH.md` §3): the atomic load is FREE — a `*level.Var` held concretely is

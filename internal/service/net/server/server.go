@@ -13,6 +13,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
@@ -68,6 +69,12 @@ type Server struct {
 	// read loop has nobody to hand an error to, so this counter is how the drop
 	// is reported instead of hidden.
 	oversized atomic.Uint64
+	// acceptBackoffs counts the waits accept loops took after a failed Accept —
+	// descriptor exhaustion, typically — so a server that is failing to accept
+	// says so in State instead of spinning a core per listener.
+	acceptBackoffs atomic.Uint64
+	// clk is the engine's clock: what an accept loop's backoff waits on.
+	clk clock.Timed
 	// connPool recycles the per-connection struct so a steady-state accept
 	// loop allocates nothing per connection.
 	connPool *recycler.Pool[*conn]
@@ -109,6 +116,7 @@ func New(opts ...Option) *Server {
 		live:         make(map[uint64]stdnet.Conn, expectedLiveConns),
 		drainTimeout: defaultDrainTimeout,
 		connPool:     recycler.NewPool(newPooledConn),
+		clk:          clock.System,
 	}
 	//: options apply in order, so a later one deliberately wins.
 	for _, opt := range opts {
@@ -203,5 +211,6 @@ func (s *Server) State() corenet.StateValue {
 		TotalConns:       s.total.Load(),
 		RejectedConns:    s.rejected.Load(),
 		OversizedPackets: s.oversized.Load(),
+		AcceptBackoffs:   s.acceptBackoffs.Load(),
 	}
 }

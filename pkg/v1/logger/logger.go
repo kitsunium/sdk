@@ -47,7 +47,7 @@
 //	| Group               | Symbols                                                                     | Role |
 //	|---------------------|------------------------------------------------------------------------------|------|
 //	| Construction        | Default, DefaultMulti(path), NewText(Config), NewWithSink(SinkConfig)        | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. DefaultMulti fans console+file from one call (blank-import the writer pkg). |
-//	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…)             | Native + io.Writer adapter + fan-out; bring custom Sink for DB/etc. |
+//	| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…), LevelGate  | Native + io.Writer adapter + fan-out + a per-branch floor; bring custom Sink for DB/etc. |
 //	| Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 //	| Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
 //	| Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 0 alloc steady-state on Build |
@@ -91,6 +91,24 @@
 // A nil Sink returns [SinkConfigRequired]. Both [NewText] and
 // [NewWithSink] decorate every emitted record with the
 // "framework_version" attribute (see [FrameworkVersion]).
+//
+// # One logger, two floors
+//
+// [SinkConfig].MinLevel is the floor of the whole pipeline. When one
+// branch of a fan-out should see less than another — the terminal at
+// the application's level, an in-process viewer at every level — set
+// the pipeline's floor to the lowest and gate the narrower branch with
+// [LevelGate]:
+//
+//	sink := logger.Multi(
+//	    logger.LevelGate(logger.ConsoleStderr(), logger.LevelInfo), // Info and above
+//	    viewer, // everything, Debug included
+//	)
+//	lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, MinLevel: logger.LevelDebug})
+//
+// The gate applies the floor it is given, Info included; a dropped
+// record is a successful no-op, so it never surfaces as a fan-out
+// failure.
 //
 // # Builder hot path
 //

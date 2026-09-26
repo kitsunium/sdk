@@ -6,10 +6,11 @@
 The network domain's contract layer (ADR 0029): the ports, immutable value types
 and **every** `0.2.11.*` sentinel for both faces of the domain — inbound
 (listeners, connection and datagram handlers, the Server-Sent Events frame, the
-WebSocket wire format) and outbound (the guarded HTTP transport). Concrete
-behaviour lives in `internal/service/net/{tlsid,client,server,sse,websocket}`;
-the public façades are `pkg/v1/{tlsid,client,server}`, `pkg/v1/server/sse` and
-`pkg/v1/server/websocket`.
+WebSocket wire format, the static file handler's one refusal) and outbound (the
+guarded HTTP transport). Concrete behaviour lives in
+`internal/service/net/{tlsid,client,server,sse,websocket,static}`; the public
+façades are `pkg/v1/{tlsid,client,server}`, `pkg/v1/server/sse`,
+`pkg/v1/server/websocket` and `pkg/v1/server/static`.
 
 This package follows the **`proc` shape** (ADR 0016): one core sibling owns one
 code block and declares every sentinel; service implementations and façades
@@ -25,7 +26,7 @@ name.
 
 | File | Surface |
 |---|---|
-| `codes.go` | the 33 `Code` constants, `0.2.11.1` – `0.2.11.33` |
+| `codes.go` | the 34 `Code` constants, `0.2.11.1` – `0.2.11.34` |
 | `errors.go` | the matching `*errs.Error` sentinels + the local sysexits constants |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
 | `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentity` |
@@ -268,8 +269,9 @@ the close reason as a string once per connection.
 | 0.2.11.31 | `WSInvalidPayload` | 65 |
 | 0.2.11.32 | `WSConnClosed` | 69 |
 | 0.2.11.33 | `WSConnMisconfigured` | 78 |
+| 0.2.11.34 | `StaticMisconfigured` | 78 |
 
-`0.2.11.34` – `0.2.11.255` reserved.
+`0.2.11.35` – `0.2.11.255` reserved.
 
 ## Imports allowed
 

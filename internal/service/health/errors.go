@@ -80,4 +80,37 @@ var (
 	NotifyFailed = errs.Define(CodeNotifyFailed, "NOTIFY_FAILED",
 		"The readiness notification could not be delivered",
 		"service/health: sd_notify send failed; the field carries the state that was being sent")
+
+	// AskMisconfigured refuses an Ask that could never get an answer: the
+	// address has no host:port shape or no port in 1–65535, the path is not
+	// absolute, or the timeout is negative. Nothing is dialled; the argument
+	// field names which.
+	AskMisconfigured = errs.Define(CodeAskMisconfigured, "ASK_MISCONFIGURED",
+		"The readiness probe was given an address, path or timeout it cannot use",
+		"service/health: Ask refused its configuration before dialling; the argument field names what",
+		errs.WithExitCode(exitConfig))
+
+	// AskUnreachable reports an Ask that got no answer because the connection
+	// or the request failed. The transport's own error is the cause.
+	AskUnreachable = errs.Define(CodeAskUnreachable, "ASK_UNREACHABLE",
+		"The process could not be reached",
+		"service/health: the connection or the request failed before any answer; the cause is the transport's",
+		errs.WithExitCode(exitUnavailable))
+
+	// AskTimeout reports an Ask with no answer when its budget ran out. A
+	// caller whose own context ended first gets the same code, with the
+	// context's error in the chain — the precedent CheckTimeout set for a
+	// departed caller.
+	AskTimeout = errs.Define(CodeAskTimeout, "ASK_TIMEOUT",
+		"The process did not answer the readiness probe in time",
+		"service/health: the budget or the caller's context ended before an answer arrived",
+		errs.WithExitCode(exitUnavailable))
+
+	// AskNotReady reports an Ask the process answered with a status other than
+	// 200. The status field carries it; the body was drained and discarded and
+	// no byte of it is in the error.
+	AskNotReady = errs.Define(CodeAskNotReady, "ASK_NOT_READY",
+		"The process answered that it is not ready",
+		"service/health: the process answered a status other than 200; the status field carries it",
+		errs.WithExitCode(exitUnavailable))
 )

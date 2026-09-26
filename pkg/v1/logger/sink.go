@@ -1,8 +1,8 @@
-// Package logger — exposes the Sink port and the multi-sink helper
-// alongside the encoder-aware constructor NewWithSink. Together they let
-// consumers replace the default text-on-stderr wiring (NewText / Default)
-// with arbitrary fan-out / async / file / syslog topologies — without
-// reaching into internal/* packages.
+// Package logger — exposes the Sink port, the multi-sink helper and the
+// per-branch level gate alongside the encoder-aware constructor NewWithSink.
+// Together they let consumers replace the default text-on-stderr wiring
+// (NewText / Default) with arbitrary fan-out / async / file / syslog
+// topologies — without reaching into internal/* packages.
 package logger
 
 import (
@@ -14,6 +14,7 @@ import (
 	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/service/logger/sink/console"
+	"github.com/kitsunium/sdk/internal/service/writer/levelgate"
 )
 
 // Sink is the stable alias for the internal core.Sink port. Consumers
@@ -86,6 +87,25 @@ func NewWithSink(cfg SinkConfig) (lg Logger, err error) {
 func Multi(branches ...Sink) Sink {
 	//: delegate to the internal fan-out implementation.
 	return multi.New(branches...)
+}
+
+// LevelGate returns a Sink that passes to sink the records whose level is at
+// or above min and drops the others, delegating Flush and Close. It is how one
+// branch of a [Multi] fan-out sees less than another: the pipeline's
+// [SinkConfig].MinLevel is set to the lowest level any branch wants, and the
+// narrower branches are gated.
+//
+// The floor is the one given, for every level — Info included. A dropped
+// record reports success (every byte accepted, no error), so a fan-out never
+// counts it as a failed write. The gate holds nothing of its own: Flush and
+// Close reach sink unchanged, and closing the gate closes sink.
+//
+// A nil sink yields nil, which [Multi] skips and [NewWithSink] refuses with
+// [SinkConfigRequired].
+func LevelGate(sink Sink, min Level) Sink {
+	//: the internal gate without the writer configuration's reading of Info
+	//: as "inherit": a caller's floor is the floor applied.
+	return levelgate.Floor(sink, min)
 }
 
 // NewWriterSink wraps an arbitrary [io.Writer] in a [Sink] so callers can

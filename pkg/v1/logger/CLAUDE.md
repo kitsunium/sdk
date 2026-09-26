@@ -12,7 +12,9 @@ logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config stru
                  NewText, Default, Debug|Info|Warn|Error emission helpers,
                  String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any Attr constructors
 sink.go        — Sink / Record / Encoder aliases, SinkConfig struct, NewWithSink,
-                 Multi fan-out helper, ConsoleStderr|ConsoleStdout, TextEncoder
+                 Multi fan-out helper, LevelGate (a per-branch floor over
+                 writer/levelgate.Floor — ADR 0132), ConsoleStderr|ConsoleStdout,
+                 TextEncoder
                  (ConsoleConfig{} / StreamStderr is the zero value — ADR 0030)
 writer.go      — WriterName / *Config aliases, WriterSpec, NewMulti (named writers;
                  the Logger it returns owns them and is an io.Closer)

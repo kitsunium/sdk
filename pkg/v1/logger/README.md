@@ -45,7 +45,7 @@ Three construction paths, three native sinks, six middleware kinds, nine Attr ct
 | Group               | Symbols                                                                     | Role |
 |---------------------|------------------------------------------------------------------------------|------|
 | Construction        | Default, DefaultMulti(path), NewText(Config), NewWithSink(SinkConfig)        | Wire a Logger from explicit knobs OR a one-liner. Config has Writer (single) + Writers ([]io.Writer fan-out) — pick one. DefaultMulti fans console+file from one call (blank-import the writer pkg). |
-| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…)             | Native + io.Writer adapter + fan-out; bring custom Sink for DB/etc. |
+| Sinks (native)      | ConsoleStderr, ConsoleStdout, NewWriterSink(w), Multi(branches…), LevelGate  | Native + io.Writer adapter + fan-out + a per-branch floor; bring custom Sink for DB/etc. |
 | Middleware          | multi, async, route, failover, sample, recover                               | Compose around a base Sink; same Sink interface chainable |
 | Encoders            | TextEncoder                                                                  | key=value lines on system clock (JSON/structured: internal today) |
 | Emission            | Info / Warn / Error / Debug (variadic), Build(lg,lv) → chain → Send, LogAttrs| 1 alloc on variadic, 0 alloc steady-state on Build |
@@ -83,6 +83,20 @@ lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, Level: logger.LevelD
 ```
 
 A nil Sink returns [SinkConfigRequired](<#WriterRequired>). Both [NewText](<#NewText>) and [NewWithSink](<#NewWithSink>) decorate every emitted record with the "framework\_version" attribute \(see [FrameworkVersion](<#FrameworkVersion>)\).
+
+### One logger, two floors
+
+[SinkConfig](<#SinkConfig>).MinLevel is the floor of the whole pipeline. When one branch of a fan\-out should see less than another — the terminal at the application's level, an in\-process viewer at every level — set the pipeline's floor to the lowest and gate the narrower branch with [LevelGate](<#LevelGate>):
+
+```
+sink := logger.Multi(
+    logger.LevelGate(logger.ConsoleStderr(), logger.LevelInfo), // Info and above
+    viewer, // everything, Debug included
+)
+lg, err := logger.NewWithSink(logger.SinkConfig{Sink: sink, MinLevel: logger.LevelDebug})
+```
+
+The gate applies the floor it is given, Info included; a dropped record is a successful no\-op, so it never surfaces as a fan\-out failure.
 
 ### Builder hot path
 
@@ -135,7 +149,7 @@ Inspect via the accessors in github.com/kitsunium/sdk/pkg/v1/errs.
 
 Package logger — exposes the in\-memory test sink \(NewMemorySink\) and its RecordSnapshot element type so consumers can assert on what was logged.
 
-Package logger — exposes the Sink port and the multi\-sink helper alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
+Package logger — exposes the Sink port, the multi\-sink helper and the per\-branch level gate alongside the encoder\-aware constructor NewWithSink. Together they let consumers replace the default text\-on\-stderr wiring \(NewText / Default\) with arbitrary fan\-out / async / file / syslog topologies — without reaching into internal/\* packages.
 
 Package logger — declares the TopologyConfig DTO consumed by FromConfig. A TopologyConfig is the decoded shape of a logger config file: a global level plus an ordered list of named writer entries. It is a plain data carrier with no behaviour — the construction logic lives in FromConfig.
 
@@ -210,6 +224,7 @@ Package logger — declares the WriterEntryConfig DTO consumed by FromConfig. A 
 - [type Sink](<#Sink>)
   - [func ConsoleStderr\(\) Sink](<#ConsoleStderr>)
   - [func ConsoleStdout\(\) Sink](<#ConsoleStdout>)
+  - [func LevelGate\(sink Sink, min Level\) Sink](<#LevelGate>)
   - [func Multi\(branches ...Sink\) Sink](<#Multi>)
   - [func NewWriterSink\(w io.Writer\) \(sink Sink, err error\)](<#NewWriterSink>)
 - [type SinkConfig](<#SinkConfig>)
@@ -312,7 +327,7 @@ var Version string
 ```
 
 <a name="Debug"></a>
-## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L341>)
+## func [Debug](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L359>)
 
 ```go
 func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -321,7 +336,7 @@ func Debug(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Debug emits a RecordEvent at LevelDebug through lg.
 
 <a name="Error"></a>
-## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L359>)
+## func [Error](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L377>)
 
 ```go
 func Error(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -339,7 +354,7 @@ func FrameworkVersion() string
 FrameworkVersion returns the linked\-in SDK version, or "dev" if unset.
 
 <a name="Info"></a>
-## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L347>)
+## func [Info](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L365>)
 
 ```go
 func Info(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -357,7 +372,7 @@ func LogAttrs(ctx context.Context, lg Logger, lv Level, msg string, attrs []Attr
 LogAttrs is the slice\-overload of Logger.Log that avoids the variadic slice allocation imposed by Logger.Log\(... Attr\). Pre\-built attribute slices flow through this entry point without per\-call boxing.
 
 <a name="Warn"></a>
-## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L353>)
+## func [Warn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L371>)
 
 ```go
 func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
@@ -366,7 +381,7 @@ func Warn(ctx context.Context, lg Logger, msg string, attrs ...Attr)
 Warn emits a RecordEvent at LevelWarn through lg.
 
 <a name="Attr"></a>
-## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L193>)
+## type [Attr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L211>)
 
 Attr is the stable alias for the internal AttrValue key/value pair.
 
@@ -375,7 +390,7 @@ type Attr = corelogger.AttrValue
 ```
 
 <a name="Any"></a>
-### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L414>)
+### func [Any](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L432>)
 
 ```go
 func Any(key string, val any) Attr
@@ -384,7 +399,7 @@ func Any(key string, val any) Attr
 Any builds an Attr carrying an opaque payload. Use the typed helpers when possible — Any disables type\-aware rendering.
 
 <a name="Bool"></a>
-### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L377>)
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L395>)
 
 ```go
 func Bool(key string, val bool) Attr
@@ -393,7 +408,7 @@ func Bool(key string, val bool) Attr
 Bool builds an Attr carrying a boolean value.
 
 <a name="Duration"></a>
-### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L401>)
+### func [Duration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L419>)
 
 ```go
 func Duration(key string, val time.Duration) Attr
@@ -402,7 +417,7 @@ func Duration(key string, val time.Duration) Attr
 Duration builds an Attr carrying a time.Duration value.
 
 <a name="Float64"></a>
-### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L383>)
+### func [Float64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L401>)
 
 ```go
 func Float64(key string, val float64) Attr
@@ -411,7 +426,7 @@ func Float64(key string, val float64) Attr
 Float64 builds an Attr carrying a float64 value.
 
 <a name="Int"></a>
-### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L371>)
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L389>)
 
 ```go
 func Int(key string, val int) Attr
@@ -420,7 +435,7 @@ func Int(key string, val int) Attr
 Int builds an Attr carrying an int value.
 
 <a name="Int64"></a>
-### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L389>)
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L407>)
 
 ```go
 func Int64(key string, val int64) Attr
@@ -429,7 +444,7 @@ func Int64(key string, val int64) Attr
 Int64 builds an Attr carrying an int64 value.
 
 <a name="String"></a>
-### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L365>)
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L383>)
 
 ```go
 func String(key, val string) Attr
@@ -438,7 +453,7 @@ func String(key, val string) Attr
 String builds an Attr carrying a string value.
 
 <a name="Time"></a>
-### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L407>)
+### func [Time](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L425>)
 
 ```go
 func Time(key string, val time.Time) Attr
@@ -447,7 +462,7 @@ func Time(key string, val time.Time) Attr
 Time builds an Attr carrying a time.Time value.
 
 <a name="Uint64"></a>
-### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L395>)
+### func [Uint64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L413>)
 
 ```go
 func Uint64(key string, val uint64) Attr
@@ -496,7 +511,7 @@ type CloudWatchConfig = corewriter.CloudWatchConfig
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L222-L232>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L240-L250>)
 
 Config carries the construction parameters accepted by NewText. Two destination forms are supported — pick the one that fits:
 
@@ -565,7 +580,7 @@ func NewCredentialValue(accessKeyID, secretAccessKey, sessionToken string) Crede
 NewCredentialValue builds a CredentialValue from AWS SigV4 material. An empty sessionToken is valid for long\-lived keys.
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L33>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L34>)
 
 Encoder is the stable alias for the internal service encoder interface. The default text encoder is exposed via TextEncoder; structured output is injected through NewWithSink via SinkConfig.Encoder \(see NewJSONEncoder\) when callers need machine\-readable output.
 
@@ -592,7 +607,7 @@ func NewTextEncoder() Encoder
 NewTextEncoder returns the default human\-readable encoder, rendering each record as "TIME LEVEL msg key=val …\\n" with RFC3339\-millisecond timestamps. It is a named peer of TextEncoder bound to the real system clock.
 
 <a name="TextEncoder"></a>
-### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L141>)
+### func [TextEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L161>)
 
 ```go
 func TextEncoder() Encoder
@@ -682,7 +697,7 @@ const KindUint64 Kind = corelogger.KindUint64
 ```
 
 <a name="Level"></a>
-## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L196>)
+## type [Level](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L214>)
 
 Level is the stable alias for the internal severity type.
 
@@ -753,7 +768,7 @@ type Leveler = level.Leveler
 ```
 
 <a name="Logger"></a>
-## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L190>)
+## type [Logger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L208>)
 
 Logger is the stable alias for the internal core.Logger interface.
 
@@ -762,7 +777,7 @@ type Logger = corelogger.Logger
 ```
 
 <a name="Default"></a>
-### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L301>)
+### func [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L319>)
 
 ```go
 func Default() (lg Logger, err error)
@@ -771,7 +786,7 @@ func Default() (lg Logger, err error)
 Default returns a Logger writing INFO\-and\-above records to os.Stderr. The stderr Writer is supplied explicitly here; NewText itself no longer silently defaults a nil Writer.
 
 <a name="DefaultMulti"></a>
-### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L330>)
+### func [DefaultMulti](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L348>)
 
 ```go
 func DefaultMulti(path string) (lg Logger, err error)
@@ -837,7 +852,7 @@ lg, err := logger.NewMulti(logger.LevelInfo,
 ```
 
 <a name="NewText"></a>
-### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L248>)
+### func [NewText](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/logger.go#L266>)
 
 ```go
 func NewText(cfg Config) (lg Logger, err error)
@@ -856,7 +871,7 @@ lg, err := logger.NewText(logger.Config{
 ```
 
 <a name="NewWithSink"></a>
-### func [NewWithSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L51>)
+### func [NewWithSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L52>)
 
 ```go
 func NewWithSink(cfg SinkConfig) (lg Logger, err error)
@@ -898,7 +913,7 @@ func NewMemorySink() *MemorySink
 NewMemorySink returns an empty MemorySink ready to record received records.
 
 <a name="Record"></a>
-## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L27>)
+## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L28>)
 
 Record is the stable alias for the internal RecordEvent value passed to Sink.Write. Consumers implementing custom Sinks reach for this type rather than reimporting the internal core.logger package.
 
@@ -934,7 +949,7 @@ type S3Config = corewriter.S3Config
 ```
 
 <a name="Sink"></a>
-## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L22>)
+## type [Sink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L23>)
 
 Sink is the stable alias for the internal core.Sink port. Consumers compose Sink instances \(console / file / syslog / async / multi …\) and pass them to NewWithSink to wire a custom transport pipeline.
 
@@ -943,7 +958,7 @@ type Sink = corelogger.Sink
 ```
 
 <a name="ConsoleStderr"></a>
-### func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L126>)
+### func [ConsoleStderr](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L146>)
 
 ```go
 func ConsoleStderr() Sink
@@ -952,7 +967,7 @@ func ConsoleStderr() Sink
 ConsoleStderr returns the stderr console Sink used by Default. Exposed so callers building a Multi\(\) topology can wire stderr alongside richer transports without re\-implementing the convenience constructor.
 
 <a name="ConsoleStdout"></a>
-### func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L133>)
+### func [ConsoleStdout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L153>)
 
 ```go
 func ConsoleStdout() Sink
@@ -960,8 +975,21 @@ func ConsoleStdout() Sink
 
 ConsoleStdout returns the stdout console Sink. Same rationale as ConsoleStderr — exposed for Multi\(\) compositions.
 
+<a name="LevelGate"></a>
+### func [LevelGate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L105>)
+
+```go
+func LevelGate(sink Sink, min Level) Sink
+```
+
+LevelGate returns a Sink that passes to sink the records whose level is at or above min and drops the others, delegating Flush and Close. It is how one branch of a [Multi](<#Multi>) fan\-out sees less than another: the pipeline's [SinkConfig](<#SinkConfig>).MinLevel is set to the lowest level any branch wants, and the narrower branches are gated.
+
+The floor is the one given, for every level — Info included. A dropped record reports success \(every byte accepted, no error\), so a fan\-out never counts it as a failed write. The gate holds nothing of its own: Flush and Close reach sink unchanged, and closing the gate closes sink.
+
+A nil sink yields nil, which [Multi](<#Multi>) skips and [NewWithSink](<#NewWithSink>) refuses with [SinkConfigRequired](<#WriterRequired>).
+
 <a name="Multi"></a>
-### func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L86>)
+### func [Multi](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L87>)
 
 ```go
 func Multi(branches ...Sink) Sink
@@ -970,7 +998,7 @@ func Multi(branches ...Sink) Sink
 Multi is a thin wrapper around the internal multi \(fan\-out\) sink. It broadcasts every record to each branch in order and aggregates per\-sink failures via errors.Join under the FANOUT\_WRITE\_FAILED sentinel.
 
 <a name="NewWriterSink"></a>
-### func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L103>)
+### func [NewWriterSink](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L123>)
 
 ```go
 func NewWriterSink(w io.Writer) (sink Sink, err error)
@@ -989,7 +1017,7 @@ lg, _ := logger.NewWithSink(logger.SinkConfig{
 ```
 
 <a name="SinkConfig"></a>
-## type [SinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L38-L45>)
+## type [SinkConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/sink.go#L39-L46>)
 
 SinkConfig carries the construction parameters accepted by NewWithSink. A zero\-valued SinkConfig\{Sink: s\} is enough to ship records through s at LevelInfo using the default text encoder bound to the real wall clock.
 

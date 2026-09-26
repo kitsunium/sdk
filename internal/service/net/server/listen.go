@@ -7,6 +7,7 @@ import (
 	stdnet "net"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
@@ -197,10 +198,26 @@ type boundListener struct {
 	addr corenet.AddressValue
 	// ln is the live listener.
 	ln stdnet.Listener
+	// made creates closed on first use, so a zero boundListener works.
+	made sync.Once
+	// shut closes closed exactly once, whoever closes the listener first.
+	shut sync.Once
+	// closed is closed when the listener is: it ends an accept loop's backoff,
+	// which is not blocked in Accept and so would not see the closure.
+	closed chan struct{}
 }
 
-// Close releases the listener.
+// closedSignal returns the channel closed when the listener is.
+func (b *boundListener) closedSignal() <-chan struct{} {
+	b.made.Do(func() { b.closed = make(chan struct{}) })
+	//: the same channel for every caller.
+	return b.closed
+}
+
+// Close releases the listener, and tells an accept loop waiting out a backoff.
 func (b *boundListener) Close() error {
+	b.closedSignal()
+	b.shut.Do(func() { close(b.closed) })
 	//: closing is what unblocks the accept loop; there is no other signal that
 	//: reliably interrupts a blocking Accept.
 	return b.ln.Close()

@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "yaml",
+    srcs = ["yaml.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/codec/yaml",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/service/codec/yaml"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":yaml",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "yaml_test",
+    srcs = ["yaml_external_test.go"],
+    deps = [
+        ":yaml",
+        "//internal/core/codec",
+        "//pkg/v1/config",
+    ],
+)

@@ -14,7 +14,7 @@ Public façade: `pkg/v1/server`.
 | File | Surface |
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
-| `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop, the drain |
+| `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
 | `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `Use` |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
@@ -226,6 +226,33 @@ contending on one accept queue. Zero means one per core; one disables it.
   rows for one address would read as N addresses.
 - **On this machine it buys nothing.** `BENCH.md` §4 reports the null result and
   the two tests that prove it is a null result rather than a broken comparison.
+
+## A failing accept waits
+
+An `Accept` that fails for any reason but its listener closing — the process out
+of file descriptors, typically, with connections still queued — used to be
+retried AT ONCE: one core spinning per accept loop, measured at 1.16 s of CPU per
+second on Linux by a review of a downstream framework, and N cores with N shards.
+`acceptLoop` now waits first (ADR 0130):
+
+- **The curve is net/http's**: 5 ms, doubling, held at 1 s, started over by the
+  next accepted connection — drawn from `service/resilience`'s published
+  `BackoffValue` (ADR 0103), not a fourth hand-written copy. Temporary or not,
+  every failure but `net.ErrClosed` waits.
+- **The wait is on the engine's clock** — `Server.clk`, `clock.System` unless an
+  internal test sets a manual one — so `TestAFailingAcceptWaitsOnTheEnginesClock`
+  asserts each wait to the nanosecond and that no `Accept` happens while the
+  clock stands still. It is the only wait the engine takes on that clock; the
+  drain's poll is still on the wall clock.
+- **A listener closed during a wait ends it at once.** The loop is not blocked in
+  `Accept` then, so closing the socket alone would not reach it; `boundListener`
+  carries a `closed` channel its `Close` closes (zero-value safe, created under a
+  `sync.Once`), which the wait selects on —
+  `TestShutdownDuringABackoffReturnsAtOnce` shuts down while the clock never
+  moves.
+- **Every wait is counted** in `State.AcceptBackoffs`, beside the other counters:
+  a count that keeps rising is a server that cannot accept, visible without a
+  profiler.
 
 ## Connection ceiling
 
