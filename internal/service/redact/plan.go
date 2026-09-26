@@ -117,7 +117,7 @@ func (r *Redactor) build(t reflect.Type, seen map[reflect.Type]*plan) *plan {
 		}
 		built := &plan{members: map[string]*plan{}}
 		seen[t] = built
-		r.fields(built, t, seen, map[reflect.Type]bool{t: true})
+		r.fields(built, t, seen)
 		//: the struct's plan.
 		return built
 	//: an array, unless it is the bytes encoding/json writes as base64.
@@ -152,73 +152,19 @@ func (r *Redactor) below(element reflect.Type, seen map[reflect.Type]*plan) *pla
 	return nil
 }
 
-// fields adds the members of struct t to p, promoting the fields of embedded
-// structs the way encoding/json does. embedded guards against an embedding
-// cycle.
-func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan, embedded map[reflect.Type]bool) {
-	walk := &fieldWalk{plan: p, seen: seen, visited: embedded, depthOf: map[string]int{}}
-	r.collect(walk, t, 0)
-}
-
-// fieldWalk is one struct's members being planned, across the structs it
-// embeds: the plan being filled, the plans already built per type, the
-// embedded types already visited, and how deep each member name was first
-// found.
-type fieldWalk struct {
-	// plan is the struct's plan, whose members the walk fills.
-	plan *plan
-	// seen holds the plan built for each type so far, cycles included.
-	seen map[reflect.Type]*plan
-	// visited holds every embedded struct type already promoted.
-	visited map[reflect.Type]bool
-	// depthOf records the embedding depth each member name was found at first.
-	depthOf map[string]int
-}
-
-// collect adds the fields of t, found depth embeddings below the struct being
-// planned, to the walk's plan.
-//
-// encoding/json writes, for one name, the field found at the SHALLOWEST depth,
-// whatever the declaration order — so a deeper promoted field never replaces a
-// shallower member's plan, and a shallower field replaces a deeper one's, even
-// a field that declares nothing (its value is the one written, and a deeper
-// plan would be applied to the wrong value). Two fields at one depth are
-// ambiguous: encoding/json writes neither, or the tagged one; the plan keeps
-// the stricter of the two, so a secret is never lost to a tie.
-func (r *Redactor) collect(walk *fieldWalk, t reflect.Type, depth int) {
-	//: every field, in declaration order.
-	for field := range t.Fields() {
-		r.place(walk, field, depth)
+// fields adds to p the plan of every member encoding/json writes for struct t:
+// for each member name, the plan of the one field encoding/json itself selects
+// (writtenFields). A member that declares nothing keeps no plan, so only its
+// name is judged. seen holds the plans being built, so a recursive type shares
+// its own plan instead of walking forever.
+func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan) {
+	//: one member per name, the field encoding/json writes under it.
+	for _, written := range writtenFields(t) {
+		//: a member that declares nothing keeps no plan.
+		if member := r.memberPlan(written.field, seen); member != nil {
+			p.members[written.name] = member
+		}
 	}
-}
-
-// place plans one field of a struct found depth embeddings below the struct
-// being planned — or, for an embedded struct, the fields it promotes.
-func (r *Redactor) place(walk *fieldWalk, field reflect.StructField, depth int) {
-	name, promoted, visible := jsonName(field)
-	//: encoding/json does not write it.
-	if !visible {
-		return
-	}
-	//: an embedded struct without a name: its fields are this object's, one
-	//: level deeper.
-	if promoted {
-		r.promote(walk, field.Type, depth+1)
-		return
-	}
-	found, taken := walk.depthOf[name]
-	//: a shallower field of that name is the one written.
-	if taken && found < depth {
-		return
-	}
-	member := r.memberPlan(field, walk.seen)
-	//: a tie keeps the stricter plan.
-	if taken && found == depth {
-		walk.tie(name, member)
-		return
-	}
-	walk.depthOf[name] = depth
-	walk.set(name, member)
 }
 
 // memberPlan is the plan of one member: the whole member replaced when the
@@ -232,84 +178,6 @@ func (r *Redactor) memberPlan(field reflect.StructField, seen map[reflect.Type]*
 	}
 	//: a member whose own type declares something below it.
 	return r.build(field.Type, seen)
-}
-
-// tie resolves two fields of one name at one depth: a secret already planned
-// stays secret, and otherwise the new plan wins only when it hides something.
-func (w *fieldWalk) tie(name string, member *plan) {
-	//: a secret already planned stays secret.
-	if current := w.plan.members[name]; current != nil && current.secret {
-		return
-	}
-	//: otherwise the new plan only when it hides something.
-	if member != nil && member.secret {
-		w.plan.members[name] = member
-	}
-}
-
-// set records the shallowest field of a name so far: its plan, or none.
-func (w *fieldWalk) set(name string, member *plan) {
-	//: a member with something to hide keeps its plan.
-	if member != nil {
-		w.plan.members[name] = member
-		return
-	}
-	//: a member with nothing to hide replaces any deeper field's plan.
-	delete(w.plan.members, name)
-}
-
-// promote adds the fields of an embedded struct to the walk's plan, one depth
-// further.
-func (r *Redactor) promote(walk *fieldWalk, embedded reflect.Type, depth int) {
-	//: through the pointer, as encoding/json does.
-	if embedded.Kind() == reflect.Pointer {
-		embedded = embedded.Elem()
-	}
-	//: each embedded type once, so a cycle of embeddings ends.
-	if walk.visited[embedded] {
-		return
-	}
-	walk.visited[embedded] = true
-	r.collect(walk, embedded, depth)
-}
-
-// jsonName returns the member name encoding/json writes field under, whether
-// the field is an embedded struct whose fields are promoted instead, and
-// whether it is written at all.
-func jsonName(field reflect.StructField) (name string, promoted, visible bool) {
-	tag := field.Tag.Get("json")
-	//: `json:"-"` is never written; `json:"-,"` is a member named "-" —
-	//: the whole tag is compared, exactly as encoding/json does.
-	if tag == "-" {
-		//: invisible.
-		return "", false, false
-	}
-	tagName, _, _ := strings.Cut(tag, ",")
-	//: an embedded field with no name of its own.
-	if field.Anonymous && tagName == "" {
-		embedded := field.Type
-		//: through the pointer.
-		if embedded.Kind() == reflect.Pointer {
-			embedded = embedded.Elem()
-		}
-		//: a struct that lays itself out by reflection is flattened into
-		//: its parent — even when its own type is unexported.
-		if embedded.Kind() == reflect.Struct && !writesOwnJSON(embedded) {
-			//: promoted.
-			return "", true, true
-		}
-	}
-	//: an unexported field is never written.
-	if !field.IsExported() {
-		//: invisible.
-		return "", false, false
-	}
-	//: the Go name when the tag gives none.
-	if tagName == "" {
-		tagName = field.Name
-	}
-	//: a member of its own.
-	return tagName, false, true
 }
 
 // declared reports whether a field is secret by declaration: the Redactor's

@@ -8,6 +8,18 @@ import (
 	"unicode/utf8"
 )
 
+// The four layouts a field can have, as Test_jsonName states its
+// expectations: one value rather than three booleans.
+const (
+	skipped   layout = iota // never written
+	flattened               // an embedded struct whose fields are promoted
+	untagged                // written under its Go name
+	tagged                  // written under the name its json tag gives
+)
+
+// layout is how encoding/json treats one struct field.
+type layout uint8
+
 // Test_escapedLength pins the one invariant the exact bound rests on: the
 // length the copier budgets for a character is the length it writes, for
 // every class of character — the short escapes, the \u escapes, the line
@@ -32,35 +44,41 @@ func Test_escapedLength(t *testing.T) {
 // Test_jsonName pins the encoding/json layout rules the plan follows: a
 // field it does not write is not a member, "-," is a member named "-", an
 // embedded struct without a name is flattened — through a pointer, and even
-// when its own type is unexported. The fields are built by hand, because a
-// struct literal with a `json:"-,"` tag is what linters are right to question
-// everywhere except in the test of the one reader that must honour it.
+// when its own type is unexported — an unexported embedded struct WITH a name
+// is a member of its own, an embedded non-struct is a member when exported and
+// nothing otherwise, and a name taken from the tag says so. The fields are
+// built by hand, because a struct literal with a `json:"-,"` tag is what
+// linters are right to question everywhere except in the test of the one
+// reader that must honour it.
 func Test_jsonName(t *testing.T) {
 	t.Parallel()
 	type hidden struct{ Inner string }
 	type Visible struct{ Inner string }
+	type word string
+	type Word string
 	stringType := reflect.TypeFor[string]()
 	type tc struct {
-		field        reflect.StructField
-		wantName     string
-		wantPromoted bool
-		wantVisible  bool
+		field      reflect.StructField
+		wantName   string
+		wantLayout layout
 	}
 	tests := []tc{
-		{reflect.StructField{Name: "hidden", PkgPath: "p", Type: reflect.TypeFor[hidden](), Anonymous: true}, "", true, true},
-		{reflect.StructField{Name: "Visible", Type: reflect.TypeFor[*Visible](), Anonymous: true}, "", true, true},
-		{reflect.StructField{Name: "Named", Type: reflect.TypeFor[Visible](), Tag: `json:"named"`}, "named", false, true},
-		{reflect.StructField{Name: "Skipped", Type: stringType, Tag: `json:"-"`}, "", false, false},
-		{reflect.StructField{Name: "Dash", Type: stringType, Tag: `json:"-,"`}, "-", false, true},
-		{reflect.StructField{Name: "unexposed", PkgPath: "p", Type: stringType}, "", false, false},
-		{reflect.StructField{Name: "Plain", Type: stringType}, "Plain", false, true},
+		{reflect.StructField{Name: "hidden", PkgPath: "p", Type: reflect.TypeFor[hidden](), Anonymous: true}, "", flattened},
+		{reflect.StructField{Name: "Visible", Type: reflect.TypeFor[*Visible](), Anonymous: true}, "", flattened},
+		{reflect.StructField{Name: "hiddenNamed", PkgPath: "p", Type: reflect.TypeFor[hidden](), Anonymous: true, Tag: `json:"in"`}, "in", tagged},
+		{reflect.StructField{Name: "word", PkgPath: "p", Type: reflect.TypeFor[word](), Anonymous: true}, "", skipped},
+		{reflect.StructField{Name: "Word", Type: reflect.TypeFor[Word](), Anonymous: true}, "Word", untagged},
+		{reflect.StructField{Name: "Named", Type: reflect.TypeFor[Visible](), Tag: `json:"named"`}, "named", tagged},
+		{reflect.StructField{Name: "Skipped", Type: stringType, Tag: `json:"-"`}, "", skipped},
+		{reflect.StructField{Name: "Dash", Type: stringType, Tag: `json:"-,"`}, "-", tagged},
+		{reflect.StructField{Name: "unexposed", PkgPath: "p", Type: stringType}, "", skipped},
+		{reflect.StructField{Name: "Plain", Type: stringType}, "Plain", untagged},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		name, promoted, visible := jsonName(c.field)
-		if name != c.wantName || promoted != c.wantPromoted || visible != c.wantVisible {
-			t.Errorf("jsonName(%s) = %q, %v, %v; want %q, %v, %v",
-				c.field.Name, name, promoted, visible, c.wantName, c.wantPromoted, c.wantVisible)
+		name, isTagged, promoted, visible := jsonName(c.field)
+		if got := layoutOf(isTagged, promoted, visible); name != c.wantName || got != c.wantLayout {
+			t.Errorf("jsonName(%s) = %q, %s; want %q, %s", c.field.Name, name, got, c.wantName, c.wantLayout)
 		}
 	}
 	for _, c := range tests {
@@ -68,6 +86,25 @@ func Test_jsonName(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// String names the layout in a failure message.
+func (l layout) String() string {
+	return [...]string{"skipped", "flattened", "untagged", "tagged"}[l]
+}
+
+// layoutOf folds jsonName's three booleans into the layout they describe.
+func layoutOf(isTagged, promoted, visible bool) layout {
+	switch {
+	case !visible:
+		return skipped
+	case promoted:
+		return flattened
+	case isTagged:
+		return tagged
+	default:
+		return untagged
 	}
 }
 

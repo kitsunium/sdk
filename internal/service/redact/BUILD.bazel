@@ -8,6 +8,7 @@ go_library(
         "attrs.go",
         "codes.go",
         "errors.go",
+        "fields.go",
         "json.go",
         "plan.go",
         "redact.go",

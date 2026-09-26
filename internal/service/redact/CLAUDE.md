@@ -16,7 +16,8 @@ attribute shape. Code range `0.3.73.*`.
 | File | Role |
 |---|---|
 | `redact.go` | package doc, `Placeholder` / `Ellipsis` / `MinBytes`, `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
-| `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, walked the way `encoding/json` lays it out, cached per `Redactor` |
+| `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
+| `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
 | `json.go` | `DocumentValue`, `JSON`, `Value`, and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
 | `text.go` | `Text`, the URL-credential pattern, `clip` |
 | `attrs.go` | `Attrs` — an iterator over `(dotted key, text)` pairs, `Unencodable`, and the per-kind rendering |
@@ -66,11 +67,19 @@ attribute shape. Code range `0.3.73.*`.
 - **A malformed document is refused, not shown as a fragment.** A partial copy
   of something that does not parse cannot be trusted to have had its secrets
   recognised.
-- **A plan follows encoding/json's dominance rule.** For one member name the
-  shallowest field is the one written, whatever the declaration order, so a
-  deeper promoted field never replaces a shallower member's plan and a
-  shallower one replaces a deeper one's; two fields at one depth keep the
-  stricter plan, so a tie never loses a secret — `TestTheShallowestFieldDecides`.
+- **A plan applies to the field encoding/json WROTE, selected by its own
+  rules.** `Value` marshals with `encoding/json` and redacts the result by
+  member name, so the plan must pick, for each name, the very field
+  `json.Marshal` picked: embedded structs expanded one level at a time and each
+  type once; the shallowest fields of a name compete; of several, a single
+  tagged one wins, otherwise none is written; a type embedded twice at one level
+  cancels out; an embedded struct is flattened by its kind, even one that writes
+  its own JSON when two such sit side by side; an unexported embedded struct
+  WITH a json name is written whole under it. An earlier approximation — "the
+  stricter plan wins a tie", promotion refused to self-marshalling structs, an
+  unexported named embedding ignored — let a declared secret through in all
+  three cases (`TestThePlanFollowsTheFieldEncodingJSONWrites`, each case
+  checked against `json.Marshal`'s own output; `TestTheShallowestFieldDecides`).
 - **Every text `Attrs` hands out is cut**, a timestamp or a number as much as a
   string — `TestAttrsBoundEveryKind`; `TestDeepNestingStaysWithinTheBound` pins
   the copier against a document that is all structure.
