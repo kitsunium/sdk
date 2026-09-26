@@ -25,13 +25,13 @@
 //
 // SECOND — expiring a lease does not stop its old holder. If A's goroutine
 // stalls for longer than the TTL and B acquires the lock, A resumes with no
-// idea anything happened. So [Lease.Release] releases only a lock this holder
+// idea anything happened. So [Lease].Release releases only a lock this holder
 // STILL holds — a lease that was taken over releases nothing and reports
-// [LockNotHeld] — and [Lease.Extend] renews a lease for work that outlives its
+// [LockNotHeld] — and [Lease].Extend renews a lease for work that outlives its
 // TTL. A failed Extend is not a warning to log past: it is the SDK telling a
 // caller it is already inside someone else's section.
 //
-// THIRD — every acquisition carries a FENCING TOKEN. [Lease.Fence] returns a
+// THIRD — every acquisition carries a FENCING TOKEN. [Lease].Fence returns a
 // uint64 that strictly increases with every acquisition of that name. Pass it
 // to the protected resource and have the resource refuse the lower one, and
 // the scenario above turns from silent corruption into a rejected write.
@@ -287,7 +287,7 @@ func NewFileLocker(cfg FileConfig) (locker Locker, err error) {
 // CANCELLED the instant the lease stops being held, plus the function that
 // ends the renewal.
 //
-// The loss arrives as a cancellation because [Lease.Extend] returning an error
+// The loss arrives as a cancellation because [Lease].Extend returning an error
 // only helps a caller currently calling it — and the caller that needs the
 // news is the one already inside the critical section. context.Cause names it.
 //

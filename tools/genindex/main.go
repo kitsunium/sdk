@@ -15,6 +15,12 @@
 //	    -input ../pkg/v1 \
 //	    -output ../docs/site/src/data/symbols.json \
 //	    -url-base /v1/local
+//
+// With -check-doclinks it emits no index: it walks the directories given as
+// arguments and fails on every same-package doc link — a name, or a type and a
+// member, in square brackets — that names no symbol the package declares, which
+// go/doc renders as literal bracketed text (ADR 0138). `make lint-check` runs it
+// over the repository.
 package main
 
 import (
@@ -46,7 +52,13 @@ func main() {
 	module := flag.String("module", "github.com/kitsunium/sdk/pkg/v1", "Go module path of -input")
 	repoRoot := flag.String("repo-root", "", "filesystem path of the repo root (used to compute the source path; defaults to two levels above -input)")
 	sourceURLPrefix := flag.String("source-url-prefix", "", "if set, build SourceURL = prefix + repo-relative-path#L<line> (e.g. https://github.com/kitsunium/sdk/blob/<sha>/)")
+	checkLinks := flag.Bool("check-doclinks", false, "emit no index; fail on every same-package doc link under the directories given as arguments that names no declared symbol (ADR 0138)")
 	flag.Parse()
+
+	//: the check mode reads directories from the arguments and emits nothing.
+	if *checkLinks {
+		os.Exit(runDocLinkCheck(flag.Args(), os.Stderr))
+	}
 
 	//: without a module root there is nothing to index.
 	if *input == "" {

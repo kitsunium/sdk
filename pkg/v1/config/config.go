@@ -110,7 +110,7 @@
 // A message never contains the value that was refused. A configuration value is
 // routinely a password, a token or a connection string, and a validation
 // message is the one error message designed to reach a human. The error carries
-// the violation count, the first rule and the offending keys; [Schema.Check]
+// the violation count, the first rule and the offending keys; [Schema].Check
 // returns the full report when per-key messages are wanted.
 //
 // A schema that contradicts itself — a default outside the bounds it also
@@ -119,7 +119,7 @@
 // any source is read. A schema that declares nothing is legitimate and accepts
 // (and still refuses an unknown key).
 //
-// [SchemaSpec].Rule and [Schema.Check] speak in the vocabulary of
+// [SchemaSpec].Rule and [Schema].Check speak in the vocabulary of
 // pkg/v1/validation: a rule is a validation.Constraint and a report is a
 // validation.Report. They are the same types, not converted ones — this domain
 // composes that engine rather than reimplementing it, and a rule written for an

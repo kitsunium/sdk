@@ -159,7 +159,7 @@ every other codec.
 |---|---|
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
-| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + `make guard`) |
+| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + `make guard` + `make doclinks`) |
 | Vulnerability scan | `make vuln-install && make vuln-check` — govulncheck over every module, fails on a reachable vulnerability (ADR 0136); online, so not part of `make lint` |
 | Local test suite | `make build && make test` (build prep + race tests) |
 | Allocation gates | `make test-alloc` — race-off pass; the ONLY lane that runs `//go:build !race` tests (targets in `tools/alloc-lane-targets.txt`, see rule 12) |
@@ -236,6 +236,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 | `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
 | `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + ktn-linter + alloc-lane coverage + `make guard` |
 | `make guard` | `tools/sdkguard` over the SDK's own tree at invariant level (ADR 0033); no network — `-version-check=off` |
+| `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
 
 ## Reference
 
@@ -354,5 +355,6 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0135 — a release is sized by a label a maintainer set, never by text a merge composed: the squash message the release read is composed from contributor commits (`COMMIT_MESSAGES`), so the `Release-bump:` trailer was both buried (#217) and settable by a contributor (#224), and the refusal of the buried shape could only be passed by cutting tags by hand. The size is now the largest `release:patch|minor|major` label on the merged pull requests behind the range's first-parent commits that can cut a release; a label decides both ways; a message only asks, and an unlabelled request above a patch is refused before anything is tagged; the way out is a label and a re-run, or SDK Release's `bump` input (`cut-tags.sh --bump`); `check-pr-size.sh` runs the same rule on every pull request — `docs/adr/0135-a-release-is-sized-by-a-label-a-maintainer-set.md`
 - ADR 0136 — every module is scanned for the vulnerabilities it reaches, and a reachable one blocks the merge: nothing scanned the SDK since ADR 0004 retired the old pipeline's govulncheck jobs (#210); `make vuln-check` runs `govulncheck` in source mode in every module of the census, `GOWORK=off`, and fails on a reachable symbol or on a scan that did not complete — never on an imported-but-uncalled package — in the required `bazel` job and daily in `vuln-scan.yml`; the standard library is in, the scanner is pinned once in the Makefile — `docs/adr/0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md`
 - ADR 0137 — a lane that loops over modules reads the census, and names what it skips: four hand-written module lists had drifted and none reached `tools/genindex` or `tools/sdkguard` (#242); `scripts/ci/go-modules.sh` prints every module whose go.mod git tracks and cross-build, test-386, the macOS/Windows package job, the local audit and the vulnerability gate read it — `docs/adr/0137-a-lane-that-loops-over-modules-reads-the-census.md`
+- ADR 0138 — a doc link resolves or it is not written, and a facade links the alias: 152 same-package doc links rendered as literal bracketed text, 129 of them `[Type.Member]` over a `pkg/v1` alias whose members go/doc does not collect (#241); they are written `[Type].Member`, the 23 wrong names are corrected, and `tools/genindex -check-doclinks` — run by `make doclinks` inside `make lint-check` — fails on any new one at the line that writes it — `docs/adr/0138-a-doc-link-resolves-or-it-is-not-written.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

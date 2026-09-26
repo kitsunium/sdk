@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -106,7 +106,8 @@ lint:
 
 # `lint-check` and `lint-ktn-check` are the parts of `lint` a CI runner can
 # execute on its own: a Go toolchain and two pinned binaries, no Bazel, no
-# gazelle.
+# gazelle. `lint-check` also runs `doclinks` (ADR 0138), which needs nothing but
+# the toolchain either.
 #
 # They exist as named targets because of #236. Five of the eight checks `lint`
 # performs were already invoked by bazel-ci.yml as direct `bash …` steps
@@ -141,12 +142,25 @@ lint-check:
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard
+	# Every same-package doc link resolves (ADR 0138).
+	$(MAKE) --no-print-directory doclinks
 
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
 # style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
 lint-ktn-check:
 	ktn-linter lint --skip-phases=tests ./...
+
+# `doclinks` fails on every same-package doc link in the repository that names
+# no symbol its package declares — go/doc renders one as literal bracketed text
+# on pkg.go.dev, in `go doc` and in the generated READMEs, and nothing else
+# notices (#241). The dominant cause is structural, not a typo: a pkg/v1 facade
+# ALIASES its types and go/doc collects methods and fields from the package's own
+# declarations, so a member of an aliased type is written `[Type].Member`
+# (ADR 0138). tools/genindex already walks packages through go/doc for the docs
+# site, so the check is a mode of it: stdlib-only, GOWORK=off, no network.
+doclinks:
+	cd tools/genindex && GOWORK=off go run . -check-doclinks $(CURDIR)
 
 # `guard` runs tools/sdkguard over the SDK's own tree at the invariant level.
 #

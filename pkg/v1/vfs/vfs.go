@@ -30,7 +30,7 @@
 //
 // # WriteAtomic, and what it promises when it fails
 //
-// [AtomicWriter.WriteAtomic] writes into a temporary in the SAME directory,
+// [AtomicWriter].WriteAtomic writes into a temporary in the SAME directory,
 // flushes it to the device, renames it over the target, and then flushes the
 // directory entry. Each step is there for a reason the previous one does not
 // cover: the same directory means the rename cannot cross a device, the file

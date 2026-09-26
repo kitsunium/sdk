@@ -35,11 +35,11 @@
 //
 // # The policy refuses to be unsafe
 //
-// [Policy.Validate] reports every fault at once rather than the first, and two
+// [Policy].Validate reports every fault at once rather than the first, and two
 // of them are lockouts rather than typos: a policy that exempts nothing cannot
 // be repaired from inside the binary, and a policy that gates its own recovery
 // command leaves a machine whose entitlement lapsed with no path back short of
-// reinstalling. [Policy.RecoveryPaths] is what turns the second from a comment
+// reinstalling. [Policy].RecoveryPaths is what turns the second from a comment
 // into a construction-time refusal.
 package gate
 

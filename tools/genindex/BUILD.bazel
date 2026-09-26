@@ -4,6 +4,7 @@ go_library(
     name = "genindex_lib",
     srcs = [
         "collect.go",
+        "doclinks.go",
         "emit.go",
         "index.go",
         "main.go",
@@ -22,6 +23,9 @@ go_binary(
 
 go_test(
     name = "genindex_test",
-    srcs = ["main_test.go"],
+    srcs = [
+        "doclinks_test.go",
+        "main_test.go",
+    ],
     embed = [":genindex_lib"],
 )

@@ -59,13 +59,13 @@ const Unlimited int = math.MaxInt
 // Group runs tasks concurrently under one context and one wait point.
 //
 // The zero value is NOT usable — construct with [New], which hands back the
-// context the tasks receive alongside it. A Group is used once: after [Wait]
-// has returned, submit to a new one.
+// context the tasks receive alongside it. A Group is used once: after
+// [Group.Wait] has returned, submit to a new one.
 //
-// [Go] may be called from any goroutine. [Wait] may not run concurrently with
-// [Go] — "have all submissions been made" is a question only the submitter can
-// answer, and a Group that guessed would report a total that was true for an
-// instant.
+// [Group.Go] may be called from any goroutine. [Group.Wait] may not run
+// concurrently with [Group.Go] — "have all submissions been made" is a
+// question only the submitter can answer, and a Group that guessed would
+// report a total that was true for an instant.
 type Group struct {
 	// ctx is handed to every task. It is stored rather than closed over so a
 	// task signature can name it, which is what stops a caller from wiring the

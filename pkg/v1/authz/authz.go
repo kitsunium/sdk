@@ -48,7 +48,7 @@
 // **Abstention is a real answer.** [Decision] has three states, not two.
 // [NewRBAC] answers [Abstain] — never [Deny] — for a request it has no grant
 // for, so composing it with another policy does not veto everything that other
-// policy exists to permit. Read a verdict with [Decision.Granted], never with
+// policy exists to permit. Read a verdict with [Decision].Granted, never with
 // `!= Deny`, which is true for [Abstain].
 //
 // **An absent attribute is not a false one.** `department == "finance"` on a

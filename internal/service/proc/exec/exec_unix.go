@@ -314,7 +314,7 @@ func appendExtraFiles(std, extra []*os.File) []*os.File {
 }
 
 // buildArgv returns the argv for the spawn: the caller-supplied Args verbatim,
-// or [Path] when Args is empty (the port's argv[0] default).
+// or [coreproc.Spec.Path] when Args is empty (the port's argv[0] default).
 func buildArgv(spec coreproc.Spec) []string {
 	//: an empty Args defaults argv to the executable path alone.
 	if len(spec.Args) == 0 {

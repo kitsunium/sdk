@@ -37,7 +37,7 @@ srv.Group("api",
 ).Use(mw).Handle(handler)
 ```
 
-[Group](<#Group>) returns the group rather than a \(group, error\) pair on purpose: a declaration mistake — a duplicate name, an unusable address, a missing handler — is recorded and reported by \[Server.Start\]. The declaration chain stays readable, and nothing is swallowed.
+[Group](<#Group>) returns the group rather than a \(group, error\) pair on purpose: a declaration mistake — a duplicate name, an unusable address, a missing handler — is recorded and reported by [Server](<#Server>).Start. The declaration chain stays readable, and nothing is swallowed.
 
 ### TLS and mutual TLS
 
@@ -45,9 +45,9 @@ One option covers both. A [github.com/kitsunium/sdk/pkg/v1/tlsid.Identity](<http
 
 ### Lifecycle
 
-\[Server.Start\] returns once every listener is bound, so a nil error means the ports are open. \[Server.Serve\] starts, blocks until the context is cancelled, then drains. \[Server.Shutdown\] stops accepting and waits for in\-flight work within a budget, severing what remains when the budget expires — a shutdown that never returns is worse than one that admits it gave up.
+[Server](<#Server>).Start returns once every listener is bound, so a nil error means the ports are open. [Server](<#Server>).Serve starts, blocks until the context is cancelled, then drains. [Server](<#Server>).Shutdown stops accepting and waits for in\-flight work within a budget, severing what remains when the budget expires — a shutdown that never returns is worse than one that admits it gave up.
 
-\[Server.State\] reports the phase, the addresses actually bound, and whether any listener fell back from a requested optimisation. A silent degradation is indistinguishable from a working server, so it is surfaced rather than logged once at startup.
+[Server](<#Server>).State reports the phase, the addresses actually bound, and whether any listener fell back from a requested optimisation. A silent degradation is indistinguishable from a working server, so it is surfaced rather than logged once at startup.
 
 An Accept that fails for any reason but its listener closing — the process out of file descriptors, typically — is retried after a wait, never at once: 5 ms, doubling, held at one second, started over by the next accepted connection, as net/http's own Serve does. Retrying at once would spin a core per listener for as long as the condition lasts. A shutdown during a wait ends it at once, and [State](<#State>).AcceptBackoffs counts the waits, so a server that cannot accept says so.
 
@@ -269,7 +269,7 @@ func MaxPacketSize(n int) GroupOption
 
 MaxPacketSize caps the datagram size a group accepts.
 
-A larger datagram is dropped and counted in \[State.OversizedPackets\], never delivered. Truncating would hand the handler a prefix indistinguishable from a complete message, which is a correctness problem rather than a capacity one; a drop it can observe in State is the honest answer.
+A larger datagram is dropped and counted in [State](<#State>).OversizedPackets, never delivered. Truncating would hand the handler a prefix indistinguishable from a complete message, which is a correctness problem rather than a capacity one; a drop it can observe in State is the honest answer.
 
 <a name="ReadBufferSize"></a>
 ### func [ReadBufferSize](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/server.go#L287>)

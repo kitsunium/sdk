@@ -90,7 +90,7 @@
 //
 // # Where the output goes
 //
-// [Config.Output] (a command's own output) and [Config.ErrOutput] (help and
+// [Config].Output (a command's own output) and [Config].ErrOutput (help and
 // usage) both default to os.Stderr, and neither defaults to os.Stdout. ADR
 // 0030 makes stdout a protocol channel that no SDK default may claim; a tool
 // that emits a document sets Output: os.Stdout in main, on one visible line,
@@ -220,7 +220,7 @@ func FlagSource(invocation Invocation) *FlagSourceValue {
 	return svccli.FlagSource(invocation)
 }
 
-// Status is the process exit status for what [Executor.Execute] returned: 0
+// Status is the process exit status for what [Executor].Execute returned: 0
 // when err is nil, and errs.ExitCodeOf(err) otherwise.
 //
 // It is a guard on the SDK's existing convention and not a second one.
@@ -241,7 +241,7 @@ func Status(err error) int {
 	return kerrs.ExitCodeOf(err)
 }
 
-// Execute is the one-line form of [New] followed by [Executor.Execute]. It
+// Execute is the one-line form of [New] followed by [Executor].Execute. It
 // returns the same errors both would: a construction refusal carries EX_CONFIG
 // (78), so a caller that only wants a status can pass the result straight to
 // [Status].

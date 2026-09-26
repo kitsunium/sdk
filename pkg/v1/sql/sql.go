@@ -101,7 +101,7 @@
 // back. Write ONE DDL statement per migration on MySQL and the failure is
 // atomic by construction. See ADR 0055 D8.
 //
-// [Migrator.Plan] is the dry run: it reports what [Migrator.Up] would apply,
+// [Migrator].Plan is the dry run: it reports what [Migrator].Up would apply,
 // applies nothing and takes no lock. [Irreversible] is how a migration says
 // out loud that it cannot be rolled back — a nil Down is refused, because "I
 // forgot the reversal" and "there is no reversal" are the same nil.
@@ -298,7 +298,7 @@ func Statements(stmts ...string) Step {
 
 // Transact runs fn inside a transaction with the driver's default isolation.
 //
-// It is the ergonomic form of [Transactor.Transact] for the common case. The
+// It is the ergonomic form of [Transactor].Transact for the common case. The
 // port itself keeps the options parameter so it never needs a second method
 // (ADR 0039); this helper keeps the call site short.
 func Transact(ctx context.Context, tm Transactor, fn TxFunc) error {

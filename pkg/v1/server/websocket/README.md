@@ -34,9 +34,9 @@ It is written against net/http's own interfaces, so it works in any http.Handler
 
 ### Messages, not frames
 
-\[Conn.Receive\] returns whole messages. Fragmentation is the sender's private choice of chunk size, not a semantic boundary, so surfacing it would put an implementation detail of the peer's writer into every consumer. Control frames — Ping, Pong, Close — are answered underneath and never surface as messages: they are transport, not payload.
+[Conn](<#Conn>).Receive returns whole messages. Fragmentation is the sender's private choice of chunk size, not a semantic boundary, so surfacing it would put an implementation detail of the peer's writer into every consumer. Control frames — Ping, Pong, Close — are answered underneath and never surface as messages: they are transport, not payload.
 
-The returned [Message](<#Message>).Data aliases the connection's reassembly buffer and is valid until the next \[Conn.Receive\]. Keep it longer and you must copy it. That is what makes a steady\-state read allocate nothing.
+The returned [Message](<#Message>).Data aliases the connection's reassembly buffer and is valid until the next [Conn](<#Conn>).Receive. Keep it longer and you must copy it. That is what makes a steady\-state read allocate nothing.
 
 ### What is refused, and why refusing is the specification
 
@@ -66,7 +66,7 @@ Behind a proxy that terminates TLS, the request reaches this server in plaintext
 
 ### One goroutine always reads
 
-Every connection needs exactly one goroutine looping on \[Conn.Receive\] for its whole life — including a connection the handler only ever writes to. That loop is where the peer's Ping is answered \(RFC 6455 §5.5.2\), where its Close is replied to \(§5.5.1\), and the only place the heartbeat can see that the peer is alive. A handler that pushes runs it in a goroutine of its own and discards what it reads:
+Every connection needs exactly one goroutine looping on [Conn](<#Conn>).Receive for its whole life — including a connection the handler only ever writes to. That loop is where the peer's Ping is answered \(RFC 6455 §5.5.2\), where its Close is replied to \(§5.5.1\), and the only place the heartbeat can see that the peer is alive. A handler that pushes runs it in a goroutine of its own and discards what it reads:
 
 ```
 func push(w http.ResponseWriter, r *http.Request) {
@@ -101,9 +101,9 @@ The reading goroutine needs no joining: the deferred Close ends the connection, 
 
 ### Liveness and shutdown
 
-A peer that vanishes without closing leaves a socket that is perfectly readable and will simply never produce another byte. The heartbeat is the only thing that turns that silence into an ending: every [PingInterval](<#PingInterval>) it sends a Ping, and one interval later it ends the connection if the handler has READ no frame since. It counts frames the handler has read, not frames that arrived — a Pong the peer sent on time is silence to it until \[Conn.Receive\] reads it — so a connection nobody reads is ended within two intervals, about a minute at [DefaultPingInterval](<#DefaultPingInterval>), however healthy the peer is. Zero is clamped to [DefaultPingInterval](<#DefaultPingInterval>) rather than meaning "never", and "never" is spelled [WithoutPing](<#WithoutPing>).
+A peer that vanishes without closing leaves a socket that is perfectly readable and will simply never produce another byte. The heartbeat is the only thing that turns that silence into an ending: every [PingInterval](<#PingInterval>) it sends a Ping, and one interval later it ends the connection if the handler has READ no frame since. It counts frames the handler has read, not frames that arrived — a Pong the peer sent on time is silence to it until [Conn](<#Conn>).Receive reads it — so a connection nobody reads is ended within two intervals, about a minute at [DefaultPingInterval](<#DefaultPingInterval>), however healthy the peer is. Zero is clamped to [DefaultPingInterval](<#DefaultPingInterval>) rather than meaning "never", and "never" is spelled [WithoutPing](<#WithoutPing>).
 
-\[Conn.Done\] closes when the peer sends Close, when the socket dies, when the heartbeat gives up, when the handler closes it, or when the server begins draining — in which case the connection sends a 1001 "going away" of its own accord. \[Conn.Receive\] and \[Conn.Send\] refuse from the same instant, so the reading loop and a pushing loop both terminate too.
+[Conn](<#Conn>).Done closes when the peer sends Close, when the socket dies, when the heartbeat gives up, when the handler closes it, or when the server begins draining — in which case the connection sends a 1001 "going away" of its own accord. [Conn](<#Conn>).Receive and [Conn](<#Conn>).Send refuse from the same instant, so the reading loop and a pushing loop both terminate too.
 
 ### Clients
 
@@ -162,7 +162,7 @@ const DefaultWriteTimeout time.Duration = svcws.DefaultWriteTimeout
 const GUID string = corenet.WSGUID
 ```
 
-<a name="MaxControlPayload"></a>MaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's payload, and therefore on a \[Conn.Ping\] payload or a close reason.
+<a name="MaxControlPayload"></a>MaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's payload, and therefore on a [Conn](<#Conn>).Ping payload or a close reason.
 
 ```go
 const MaxControlPayload int = corenet.WSMaxControlPayload
@@ -238,7 +238,7 @@ CloseCode is the status code a Close frame carries \(RFC 6455 §7.4\).
 type CloseCode = corenet.WSCloseCode
 ```
 
-<a name="CloseNormal"></a>The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus](<#CloseNormal>), [CloseAbnormal](<#CloseNormal>) and [CloseTLSHandshake](<#CloseNormal>) describe the ABSENCE of a close frame: they may be observed through \[Conn.PeerCloseCode\] and must never be sent, which \[Conn.CloseWith\] enforces — as it refuses [CloseExtensionRequired](<#CloseNormal>), the one code only a client may open a closing handshake with.
+<a name="CloseNormal"></a>The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus](<#CloseNormal>), [CloseAbnormal](<#CloseNormal>) and [CloseTLSHandshake](<#CloseNormal>) describe the ABSENCE of a close frame: they may be observed through [Conn](<#Conn>).PeerCloseCode and must never be sent, which [Conn](<#Conn>).CloseWith enforces — as it refuses [CloseExtensionRequired](<#CloseNormal>), the one code only a client may open a closing handshake with.
 
 ```go
 const (
@@ -275,7 +275,7 @@ const (
 
 Conn is one upgraded WebSocket connection.
 
-Exactly one goroutine loops on \[Conn.Receive\] for the connection's whole life. Never two: the protocol is a single ordered frame stream, so two readers would each take half of a message. Never zero: that loop is also where Pings are answered, where the peer's Close is replied to and where the heartbeat sees the peer alive, so a connection nobody reads is ended within two ping intervals — see the package documentation for the push\-handler shape. Writes are safe for concurrent use.
+Exactly one goroutine loops on [Conn](<#Conn>).Receive for the connection's whole life. Never two: the protocol is a single ordered frame stream, so two readers would each take half of a message. Never zero: that loop is also where Pings are answered, where the peer's Close is replied to and where the heartbeat sees the peer alive, so a connection nobody reads is ended within two ping intervals — see the package documentation for the push\-handler shape. Writes are safe for concurrent use.
 
 ```go
 type Conn = svcws.Conn
@@ -292,7 +292,7 @@ Upgrade completes the RFC 6455 opening handshake and returns the connection.
 
 On failure it has ALREADY written the HTTP response — a 426 carrying the version this server speaks, a 400, a 403 or a 405 as the fault requires — so the handler should simply return.
 
-The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until \[Conn.Close\].
+The socket is taken over from net/http. It is no longer the HTTP server's to close, nor this SDK's listener engine's: it is the handler's until [Conn](<#Conn>).Close.
 
 <a name="Message"></a>
 ## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L275>)
@@ -367,7 +367,7 @@ PingInterval sets how often the connection pings an otherwise silent peer.
 
 Zero does not mean "never": it is clamped to [DefaultPingInterval](<#DefaultPingInterval>), because a connection with the heartbeat silently disabled works perfectly on loopback and then stops noticing peers that vanish — which is how a mobile client normally leaves. A negative interval is refused; "never" is [WithoutPing](<#WithoutPing>).
 
-The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on \[Conn.Receive\]; a connection nobody reads is ended within two intervals, however healthy the peer.
+The heartbeat counts frames the handler has READ, so it keeps a connection open only while one goroutine loops on [Conn](<#Conn>).Receive; a connection nobody reads is ended within two intervals, however healthy the peer.
 
 <a name="Subprotocols"></a>
 ### func [Subprotocols](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/server/websocket/websocket.go#L309>)

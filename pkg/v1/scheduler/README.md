@@ -25,7 +25,7 @@ err = sched.Run(ctx) // blocks until ctx is cancelled, then drains
 
 ### What is refused, and when
 
-A [Scheduler](<#Scheduler>) with no entries is legitimate — it runs empty and waits for its context, which is what a service with every job behind a feature flag looks like. An unusable ENTRY is not: an empty name, a nil Job or a nil Schedule is refused by \[Scheduler.Add\], and an unusable cron expression is refused by [Parse](<#Parse>). The two are different questions and the SDK answers them differently on purpose \(ADR 0031\).
+A [Scheduler](<#Scheduler>) with no entries is legitimate — it runs empty and waits for its context, which is what a service with every job behind a feature flag looks like. An unusable ENTRY is not: an empty name, a nil Job or a nil Schedule is refused by [Scheduler](<#Scheduler>).Add, and an unusable cron expression is refused by [Parse](<#Parse>). The two are different questions and the SDK answers them differently on purpose \(ADR 0031\).
 
 [Parse](<#Parse>) refuses by name rather than by guessing. Six\- and seven\-field expressions \(the seconds and year dialects\), @reboot, @every, the Quartz operators L, W, \# and ?, a step written over a single value, an inverted range, 7 for Sunday, and any expression that matches no date on the calendar — "0 0 30 2 \*" — all come back as a typed error at construction. Fixed intervals are [Every](<#Every>), which is a different idea from a calendar expression and has a different name for that reason.
 
@@ -40,15 +40,15 @@ Around a DST transition the rules are fixed and documented rather than emergent:
 
 ### Missed deadlines, and overlap
 
-The scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its slot past the next deadline, the job runs once for the most recent due instant and \[Result.Missed\] reports how many older ones were dropped. It never replays them: a process that was down for a day would come back to a burst of stale work at the worst possible moment. Fires missed while the process was not running are invisible — this scheduler keeps no state across restarts.
+The scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its slot past the next deadline, the job runs once for the most recent due instant and [Result](<#Result>).Missed reports how many older ones were dropped. It never replays them: a process that was down for a day would come back to a burst of stale work at the worst possible moment. Fires missed while the process was not running are invisible — this scheduler keeps no state across restarts.
 
-When a run has not returned by the next deadline, the default is to SKIP that fire and report it as \[Result.Skipped\]. Queueing grows without bound behind a persistently slow job; running copies in parallel duplicates a side effect the SDK cannot know is safe. A caller who knows concurrent copies are safe says so with \[Entry.AllowOverlap\] — an in\-code assertion, like resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
+When a run has not returned by the next deadline, the default is to SKIP that fire and report it as [Result](<#Result>).Skipped. Queueing grows without bound behind a persistently slow job; running copies in parallel duplicates a side effect the SDK cannot know is safe. A caller who knows concurrent copies are safe says so with [Entry](<#Entry>).AllowOverlap — an in\-code assertion, like resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
 
 ### What is guaranteed
 
 A job is never fired EARLY. Lateness has no upper bound: it is whatever the platform's timer resolution, the machine's load and the OS's scheduling impose, and on a machine that suspends it is unbounded. This is why cron's finest field here is the minute and why a seconds field is refused — a six\-field expression would promise a resolution no GOOS in the SDK's support matrix delivers uniformly \(ADR 0018\).
 
-A failing job never stops the scheduler and never affects another entry. A PANICKING job is recovered, reported as [JobPanicked](<#InvalidEntry>) in \[Result.Err\], and the scheduler keeps running — one job's bug must not take the process down. The \[Config.OnResult\] hook is the caller's own code and is deliberately NOT recovered.
+A failing job never stops the scheduler and never affects another entry. A PANICKING job is recovered, reported as [JobPanicked](<#InvalidEntry>) in [Result](<#Result>).Err, and the scheduler keeps running — one job's bug must not take the process down. The [Config](<#Config>).OnResult hook is the caller's own code and is deliberately NOT recovered.
 
 ## Index
 

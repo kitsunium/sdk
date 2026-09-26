@@ -31,14 +31,14 @@
 //
 // # Messages, not frames
 //
-// [Conn.Receive] returns whole messages. Fragmentation is the sender's private
+// [Conn].Receive returns whole messages. Fragmentation is the sender's private
 // choice of chunk size, not a semantic boundary, so surfacing it would put an
 // implementation detail of the peer's writer into every consumer. Control
 // frames — Ping, Pong, Close — are answered underneath and never surface as
 // messages: they are transport, not payload.
 //
 // The returned [Message].Data aliases the connection's reassembly buffer and is
-// valid until the next [Conn.Receive]. Keep it longer and you must copy it.
+// valid until the next [Conn].Receive. Keep it longer and you must copy it.
 // That is what makes a steady-state read allocate nothing.
 //
 // # What is refused, and why refusing is the specification
@@ -99,7 +99,7 @@
 //
 // # One goroutine always reads
 //
-// Every connection needs exactly one goroutine looping on [Conn.Receive] for
+// Every connection needs exactly one goroutine looping on [Conn].Receive for
 // its whole life — including a connection the handler only ever writes to.
 // That loop is where the peer's Ping is answered (RFC 6455 §5.5.2), where its
 // Close is replied to (§5.5.1), and the only place the heartbeat can see that
@@ -144,15 +144,15 @@
 // sends a Ping, and one interval later it ends the connection if the handler
 // has READ no frame since. It counts frames the handler has read, not frames
 // that arrived — a Pong the peer sent on time is silence to it until
-// [Conn.Receive] reads it — so a connection nobody reads is ended within two
+// [Conn].Receive reads it — so a connection nobody reads is ended within two
 // intervals, about a minute at [DefaultPingInterval], however healthy the peer
 // is. Zero is clamped to [DefaultPingInterval] rather than meaning "never", and
 // "never" is spelled [WithoutPing].
 //
-// [Conn.Done] closes when the peer sends Close, when the socket dies, when the
+// [Conn].Done closes when the peer sends Close, when the socket dies, when the
 // heartbeat gives up, when the handler closes it, or when the server begins
 // draining — in which case the connection sends a 1001 "going away" of its own
-// accord. [Conn.Receive] and [Conn.Send] refuse from the same instant, so the
+// accord. [Conn].Receive and [Conn].Send refuse from the same instant, so the
 // reading loop and a pushing loop both terminate too.
 //
 // # Clients
@@ -181,7 +181,7 @@ const GUID string = corenet.WSGUID
 const Version string = corenet.WSVersion
 
 // MaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
-// payload, and therefore on a [Conn.Ping] payload or a close reason.
+// payload, and therefore on a [Conn].Ping payload or a close reason.
 const MaxControlPayload int = corenet.WSMaxControlPayload
 
 // DefaultPingInterval is the heartbeat cadence a connection uses when the
@@ -201,8 +201,8 @@ const DefaultMaxFrameSize int64 = svcws.DefaultMaxFrameSize
 
 // The close codes RFC 6455 §7.4.1 defines. [CloseNoStatus], [CloseAbnormal] and
 // [CloseTLSHandshake] describe the ABSENCE of a close frame: they may be
-// observed through [Conn.PeerCloseCode] and must never be sent, which
-// [Conn.CloseWith] enforces — as it refuses [CloseExtensionRequired], the one
+// observed through [Conn].PeerCloseCode and must never be sent, which
+// [Conn].CloseWith enforces — as it refuses [CloseExtensionRequired], the one
 // code only a client may open a closing handshake with.
 const (
 	// CloseNormal is a completed purpose, on either side.
@@ -262,7 +262,7 @@ var (
 
 // Conn is one upgraded WebSocket connection.
 //
-// Exactly one goroutine loops on [Conn.Receive] for the connection's whole
+// Exactly one goroutine loops on [Conn].Receive for the connection's whole
 // life. Never two: the protocol is a single ordered frame stream, so two
 // readers would each take half of a message. Never zero: that loop is also
 // where Pings are answered, where the peer's Close is replied to and where the
@@ -288,7 +288,7 @@ type Option = svcws.Option
 //
 // The socket is taken over from net/http. It is no longer the HTTP server's to
 // close, nor this SDK's listener engine's: it is the handler's until
-// [Conn.Close].
+// [Conn].Close.
 func Upgrade(w http.ResponseWriter, r *http.Request, opts ...Option) (conn *Conn, err error) {
 	//: the service layer owns the wiring; this facade only forwards.
 	return svcws.Upgrade(w, r, opts...)
@@ -340,7 +340,7 @@ func MaxFrameSize(n int64) Option {
 // normally leaves. A negative interval is refused; "never" is [WithoutPing].
 //
 // The heartbeat counts frames the handler has READ, so it keeps a connection
-// open only while one goroutine loops on [Conn.Receive]; a connection nobody
+// open only while one goroutine loops on [Conn].Receive; a connection nobody
 // reads is ended within two intervals, however healthy the peer.
 func PingInterval(d time.Duration) Option {
 	//: forwarded unchanged.

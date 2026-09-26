@@ -25,7 +25,7 @@ type Spec struct {
 	// entry ("." or an empty one) is refused with exec.ErrDot.
 	Path string
 	// Args is the full argv including argv[0]; when empty the service uses
-	// [Path] — the name as written, not the resolved file — as the sole
+	// [Spec.Path] — the name as written, not the resolved file — as the sole
 	// argument.
 	Args []string
 	// Dir is the working directory; empty means inherit the parent's.

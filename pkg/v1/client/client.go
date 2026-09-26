@@ -10,7 +10,7 @@
 // site. A caller cannot construct a request that skips it, because there is no
 // path to the network that does not pass through the transport. "This client is
 // read-only" therefore stops being a convention the next contributor has to
-// remember and becomes a property of the code — which is why [Client.HTTP] can
+// remember and becomes a property of the code — which is why [Client].HTTP can
 // safely hand the underlying *http.Client to a third-party SDK without
 // forfeiting the guarantee.
 //

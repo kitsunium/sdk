@@ -39,19 +39,19 @@ Startup is not a third flavour of readiness. It is the state in which the proces
 
 - While a [StartupCheck](<#StartupCheck>) has yet to pass, the liveness probe reports healthy WITHOUT running anything, and readiness reports not\-ready without running anything. A slow start therefore cannot become a restart loop. The price is stated: a process wedged during startup is never killed by liveness, and the startup probe's own failure is the signal an orchestrator must act on.
 - A startup check runs until it passes ONCE and is then never run again.
-- After \[Health.Drain\], readiness reports not\-ready permanently while liveness keeps answering — so the replica is withdrawn from routing rather than killed while it finishes its work.
+- After [Health](<#Health>).Drain, readiness reports not\-ready permanently while liveness keeps answering — so the replica is withdrawn from routing rather than killed while it finishes its work.
 
 ### What a timeout means
 
 Every check has a budget, and a check that has not answered by then is a FAILURE, not an unknown. A probe exists to answer within a bounded time, and "I could not answer" is operationally the same as "no" for whoever must decide about routing. What is preserved is the distinction: the result carries TimedOut, which separates "the dependency said no" from "the dependency said nothing".
 
-A non\-positive \[StartupCheck.Timeout\] clamps to \[Config.DefaultTimeout\], and a non\-positive one there clamps to [DefaultCheckTimeout](<#StatusUnhealthy>) \(1s\). Zero is never read as "no time at all": that would turn a forgotten line into a probe where every check fails before it runs.
+A non\-positive [StartupCheck](<#StartupCheck>).Timeout clamps to [Config](<#Config>).DefaultTimeout, and a non\-positive one there clamps to [DefaultCheckTimeout](<#StatusUnhealthy>) \(1s\). Zero is never read as "no time at all": that would turn a forgotten line into a probe where every check fails before it runs.
 
 The budget bounds the WAIT. Nothing kills a check's goroutine — Go cannot — and nothing it holds is closed on its behalf. A check that outlives its budget keeps exactly ONE goroutine until it returns, because the next probe joins that same run instead of starting a second: an endpoint polled every ten seconds against a dependency call with no deadline must not accumulate a goroutine every ten seconds.
 
 ### What a cached answer means
 
-\[ReadinessCheck.MaxAge\] replays the last SUCCESS for up to that long, so an expensive check is not paid for on every poll. Three bounds keep it from becoming a lie:
+[ReadinessCheck](<#ReadinessCheck>).MaxAge replays the last SUCCESS for up to that long, so an expensive check is not paid for on every poll. Three bounds keep it from becoming a lie:
 
 - It is OFF by default. A probe that silently replays a measurement nobody asked it to keep is the more surprising of the two behaviours.
 - A value above [MaxCacheAge](<#StatusUnhealthy>) \(30s\) is REFUSED at registration, never clamped. Serving 30s to a caller who asked for five minutes is the same lie in a smaller size.
@@ -69,7 +69,7 @@ A registry with NO checks is legitimate and answers healthy. The process replyin
 
 ### What the handler exposes, and what it hides
 
-The body is \`\{"status":"healthy"\}\` and nothing else unless \[HandlerConfig.Detail\] is set. Even then, a check contributes its name, its status, its timing and a reason drawn from the errs Public half — never a raw error, never a Private, never a field. A caller's own typed error keeps its identity through origin\-wins, so a wire\-safe message they wrote is what a stranger reads; a plain error such as \`dial tcp 10.0.3.14:5432: connect: connection refused\` is replaced wholesale rather than trimmed. The full error goes to \[Config.OnReport\], which is the caller's own log.
+The body is \`\{"status":"healthy"\}\` and nothing else unless [HandlerConfig](<#HandlerConfig>).Detail is set. Even then, a check contributes its name, its status, its timing and a reason drawn from the errs Public half — never a raw error, never a Private, never a field. A caller's own typed error keeps its identity through origin\-wins, so a wire\-safe message they wrote is what a stranger reads; a plain error such as \`dial tcp 10.0.3.14:5432: connect: connection refused\` is replaced wholesale rather than trimmed. The full error goes to [Config](<#Config>).OnReport, which is the caller's own log.
 
 The handlers write to the ResponseWriter and nowhere else — never stdout, which may be the process's protocol channel \(ADR 0030\). Responses carry Cache\-Control: no\-store, only GET and HEAD are answered, and the query string is never read.
 

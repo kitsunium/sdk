@@ -10,7 +10,7 @@ Single-purpose scripts, data files and small Go programs the build tooling calls
 | Path | Called by | Emits |
 |---|---|---|
 | `workspace_status.sh` | `bazel build --stamp` (via `workspace_status_command` in `.bazelrc`) | `STABLE_VERSION <git-sha>` to stdout, falling back to `STABLE_VERSION dev` outside a git checkout |
-| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild` | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal |
+| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it (ADR 0138) |
 | `sdkguard/` (Go program, stdlib-only) | a consumer's CI / `make`, or `go run github.com/kitsunium/sdk/tools/sdkguard@latest` | diagnostics on stderr in `file:line:col` form; exit 1 on findings, 2 on tool error — see `tools/sdkguard/CLAUDE.md` |
 | `alloc-lane-targets.txt` (plain list, `#` comments) | `make test-alloc`, the `bazel-ci.yml` alloc step, and `scripts/pre-commit/check-alloc-lane-coverage.sh` | nothing — it IS the data: one Bazel test target per line for `bazel test --config=alloc` |
 
@@ -72,6 +72,7 @@ cat $(bazel info output_path)/volatile-status.txt $(bazel info output_path)/stab
 
 # genindex
 cd tools/genindex && GOWORK=off go vet ./...
+GOWORK=off go run . -check-doclinks "$(git rev-parse --show-toplevel)"   # = make doclinks
 GOWORK=off go run . -input ../../pkg/v1 -module github.com/kitsunium/sdk/pkg/v1 \
   -url-base /local/v1 -repo-root /workspace -source-url-prefix https://github.com/kitsunium/sdk/blob/main
 ```

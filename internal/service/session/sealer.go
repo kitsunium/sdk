@@ -64,7 +64,7 @@ func NewSealer(key corecrypto.Key, purpose string) (seal coresession.Sealer, err
 // Seal renders id as an opaque string safe to use verbatim as a cookie value.
 //
 // The output is unpadded base64url over the crypto domain's self-describing box
-// ([Version][alg-id][nonce][ciphertext||tag]), so every character is in RFC
+// ([version][alg-id][nonce][ciphertext||tag]), so every character is in RFC
 // 6265's cookie-octet set and no further escaping is needed. Nothing but the
 // identifier goes inside: a sealed value carrying its own expiry would be a
 // token, and would inherit a token's revocation problem.

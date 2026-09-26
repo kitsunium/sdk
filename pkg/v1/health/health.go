@@ -49,7 +49,7 @@
 //     killed by liveness, and the startup probe's own failure is the signal an
 //     orchestrator must act on.
 //   - A startup check runs until it passes ONCE and is then never run again.
-//   - After [Health.Drain], readiness reports not-ready permanently while
+//   - After [Health].Drain, readiness reports not-ready permanently while
 //     liveness keeps answering — so the replica is withdrawn from routing
 //     rather than killed while it finishes its work.
 //
@@ -62,7 +62,7 @@
 // carries TimedOut, which separates "the dependency said no" from "the
 // dependency said nothing".
 //
-// A non-positive [StartupCheck.Timeout] clamps to [Config.DefaultTimeout], and
+// A non-positive [StartupCheck].Timeout clamps to [Config].DefaultTimeout, and
 // a non-positive one there clamps to [DefaultCheckTimeout] (1s). Zero is never
 // read as "no time at all": that would turn a forgotten line into a probe
 // where every check fails before it runs.
@@ -76,7 +76,7 @@
 //
 // # What a cached answer means
 //
-// [ReadinessCheck.MaxAge] replays the last SUCCESS for up to that long, so an
+// [ReadinessCheck].MaxAge replays the last SUCCESS for up to that long, so an
 // expensive check is not paid for on every poll. Three bounds keep it from
 // becoming a lie:
 //
@@ -110,13 +110,13 @@
 // # What the handler exposes, and what it hides
 //
 // The body is `{"status":"healthy"}` and nothing else unless
-// [HandlerConfig.Detail] is set. Even then, a check contributes its name, its
+// [HandlerConfig].Detail is set. Even then, a check contributes its name, its
 // status, its timing and a reason drawn from the errs Public half — never a
 // raw error, never a Private, never a field. A caller's own typed error keeps
 // its identity through origin-wins, so a wire-safe message they wrote is what
 // a stranger reads; a plain error such as `dial tcp 10.0.3.14:5432: connect:
 // connection refused` is replaced wholesale rather than trimmed. The full
-// error goes to [Config.OnReport], which is the caller's own log.
+// error goes to [Config].OnReport, which is the caller's own log.
 //
 // The handlers write to the ResponseWriter and nowhere else — never stdout,
 // which may be the process's protocol channel (ADR 0030). Responses carry

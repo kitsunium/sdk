@@ -47,7 +47,7 @@
 //
 // RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes
 // the only one that cannot leak: the addresses become RCPT TO commands and no
-// header names them. [Message.Envelope] is where that happens, and the
+// header names them. [Message].Envelope is where that happens, and the
 // composed bytes are asserted not to contain a blind recipient.
 //
 // # The MIME structure follows from the fields
@@ -67,7 +67,7 @@
 //
 // # TLS is a decision, and its zero value is refused
 //
-// [SMTPConfig.TLS] has no default. Choosing encryption silently would break
+// [SMTPConfig].TLS has no default. Choosing encryption silently would break
 // every caller pointing at a plaintext relay on a private segment; choosing
 // none silently would ship everyone else's credentials in the clear. So the
 // zero value returns [InvalidConfig] at construction and the caller writes
@@ -105,7 +105,7 @@
 //
 // # What this package does NOT promise
 //
-// A nil error from [Transport.Send] means the next hop ACCEPTED the message.
+// A nil error from [Transport].Send means the next hop ACCEPTED the message.
 // It is not delivery: SMTP accepts responsibility hop by hop (RFC 5321 §6.1),
 // and the hop that eventually refuses says so in a bounce, hours later, to the
 // envelope's return path.

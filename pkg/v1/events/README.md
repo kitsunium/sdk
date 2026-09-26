@@ -47,15 +47,15 @@ What this package is for is the other case, which is far more common: one fact w
 
 ### Ordering
 
-Listeners for one event type run in ascending \[Handler.Priority\] — lower first, as with every stdlib comparator — and listeners at the SAME priority run in registration order. Both halves are promises. A bus whose ties resolved by map iteration would run the same program in a different order every time, and a listener set that works today would be the same code that fails tomorrow.
+Listeners for one event type run in ascending [Handler](<#Handler>).Priority — lower first, as with every stdlib comparator — and listeners at the SAME priority run in registration order. Both halves are promises. A bus whose ties resolved by map iteration would run the same program in a different order every time, and a listener set that works today would be the same code that fails tomorrow.
 
 ### Stopping the dispatch
 
-A listener stops the remaining listeners by returning [Halt](<#Halt>). Only a listener whose registration set \[Handler.MayHalt\] may do so; from any other listener the attempt is refused as [HaltNotPermitted](<#Halt>), the dispatch CONTINUES, and the refusal is reported.
+A listener stops the remaining listeners by returning [Halt](<#Halt>). Only a listener whose registration set [Handler](<#Handler>).MayHalt may do so; from any other listener the attempt is refused as [HaltNotPermitted](<#Halt>), the dispatch CONTINUES, and the refusal is reported.
 
 The permission is a field at the registration site rather than a power every listener has, because a veto is an authority and an authority nobody wrote down is one nobody reviews. \`MayHalt: true\` is in the diff, in the review and in grep, next to the name of the listener that holds it.
 
-A halt is not a failure. \[Bus.Publish\] returns a nil error for a dispatch whose only remarkable event was a halt, and reports it through \[Dispatch.Halted\], \[Dispatch.HaltedBy\] and \[Dispatch.Skipped\].
+A halt is not a failure. [Bus](<#Bus>).Publish returns a nil error for a dispatch whose only remarkable event was a halt, and reports it through [Dispatch](<#Dispatch>).Halted, [Dispatch](<#Dispatch>).HaltedBy and [Dispatch](<#Dispatch>).Skipped.
 
 ### Typing
 

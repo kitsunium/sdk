@@ -28,14 +28,14 @@
 //   - [Gauge] — a sampled reading with no arithmetic behind it. Temperature,
 //     a configured limit.
 //   - [Histogram] — a bucketed distribution. Latency, payload size.
-//   - [FullMeter.ObservableCounter], [FullMeter.ObservableUpDownCounter] and
-//     [FullMeter.ObservableGauge] — a callback read once per [Meter.Collect],
+//   - [FullMeter].ObservableCounter, [FullMeter].ObservableUpDownCounter and
+//     [FullMeter].ObservableGauge — a callback read once per [Meter].Collect,
 //     for a value that already exists somewhere and only needs reading
 //     (runtime.NumGoroutine(), a cache size). The callback reports the
 //     ABSOLUTE value; the SDK differences it when the meter is a delta reader.
 //
 // A Counter and an UpDownCounter both produce a [SumMetric] in the snapshot,
-// told apart by [SumMetric.Monotonic]. That is the OTel data model's own
+// told apart by [SumMetric].Monotonic. That is the OTel data model's own
 // economy: monotonicity is a FIELD of a sum, not a second point type.
 //
 // [Meter] itself carries only the three instruments and Collect it shipped
@@ -114,7 +114,7 @@
 //     an unconfigured [Meter] does, because an in-memory meter accumulates into
 //     atomics and never resets them.
 //   - [TemporalityDelta] — the point covers only the window since the previous
-//     collection. [Meter.Collect] then CONSUMES what it reports, so a delta
+//     collection. [Meter].Collect then CONSUMES what it reports, so a delta
 //     meter has exactly one reader.
 //
 // [TemporalityUnspecified] is the zero value and resolves to cumulative; there

@@ -35,14 +35,14 @@
 // The format has no escape mechanism. A line terminator inside a value is not
 // quoted, it SPLITS the value across several "data:" lines, which the client
 // rejoins with "\n" — so a multi-line payload is expressible and exact. The
-// same absence of escaping makes a terminator inside [Event.ID] or
-// [Event.Name] unrepresentable, and those are refused rather than truncated: a
+// same absence of escaping makes a terminator inside [Event].ID or
+// [Event].Name unrepresentable, and those are refused rather than truncated: a
 // silently shortened id is a resume token pointing at the wrong place.
 //
 // # Reconnection, and what the SDK does not do
 //
 // A client stores the last non-empty id it saw and sends it back in the
-// Last-Event-ID header when it reconnects. [Stream.LastEventID] hands that
+// Last-Event-ID header when it reconnects. [Stream].LastEventID hands that
 // cursor to the handler. Nothing is replayed from it, on purpose.
 //
 // A replay buffer held by the stream would be empty at exactly the moment a
@@ -65,8 +65,8 @@
 //
 // # Shutdown
 //
-// [Stream.Done] closes when the client disconnects, when the handler calls
-// [Stream.Close], or when the server begins draining. [Stream.Send] refuses
+// [Stream].Done closes when the client disconnects, when the handler calls
+// [Stream].Close, or when the server begins draining. [Stream].Send refuses
 // once it has, so a handler that only ever calls Send in a loop terminates too.
 // Both halves matter: without the second, one handler shape could still hold a
 // graceful shutdown open until its budget expired.
@@ -96,7 +96,7 @@ const ContentType string = corenet.SSEContentType
 // the id of the last event it processed.
 const LastEventIDHeader string = corenet.SSELastEventIDHeader
 
-// MinRetry is the shortest reconnection hint [Event.Retry] can carry. The wire
+// MinRetry is the shortest reconnection hint [Event].Retry can carry. The wire
 // field is an integer millisecond count, so anything shorter would round to
 // zero — which does not mean "very soon", it means "reconnect immediately".
 const MinRetry time.Duration = corenet.SSEMinRetry

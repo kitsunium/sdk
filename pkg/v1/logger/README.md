@@ -100,7 +100,7 @@ The gate applies the floor it is given, Info included; a dropped record is a suc
 
 ### Builder hot path
 
-[Build](<#Build>) returns a chainable, sync.Pool\-backed [Builder](<#Builder>) whose steady\-state per\-call cost is one heap allocation per emit: the pool recycles the Builder and its attrs scratchpad, but the handler clones that scratchpad on every \[Builder.Send\], so one slice escapes. Callers MUST NOT use a Builder after \[Builder.Send\] — it returns to the recycler.
+[Build](<#Build>) returns a chainable, sync.Pool\-backed [Builder](<#Builder>) whose steady\-state per\-call cost is one heap allocation per emit: the pool recycles the Builder and its attrs scratchpad, but the handler clones that scratchpad on every [Builder](<#Builder>).Send, so one slice escapes. Callers MUST NOT use a Builder after [Builder](<#Builder>).Send — it returns to the recycler.
 
 ```
 logger.Build(lg, logger.LevelInfo).
@@ -109,11 +109,11 @@ logger.Build(lg, logger.LevelInfo).
     Send(ctx, "user logged in")
 ```
 
-[LogAttrs](<#LogAttrs>) is the slice overload that avoids the variadic\-slice allocation in \[Logger.Log\].
+[LogAttrs](<#LogAttrs>) is the slice overload that avoids the variadic\-slice allocation in [Logger](<#Logger>).Log.
 
 ### Trace correlation
 
-Every Logger this package builds stamps the span in scope onto every record it emits, as the two TOP\-LEVEL fields OpenTelemetry prescribes for non\-OTLP log formats: \[TraceIDKey\] \("trace\_id", 32 lowercase hex digits\) and \[SpanIDKey\] \("span\_id", 16\). Populating the context is the trace domain's job — the inbound HTTP middleware in github.com/kitsunium/sdk/pkg/v1/trace, or an explicit trace.ContextWithSpanContext:
+Every Logger this package builds stamps the span in scope onto every record it emits, as the two TOP\-LEVEL fields OpenTelemetry prescribes for non\-OTLP log formats: "trace\_id" \(32 lowercase hex digits\) and "span\_id" \(16\). Populating the context is the trace domain's job — the inbound HTTP middleware in github.com/kitsunium/sdk/pkg/v1/trace, or an explicit trace.ContextWithSpanContext:
 
 ```
 ctx = trace.ContextWithSpanContext(ctx, spanContext)
@@ -122,8 +122,8 @@ logger.Info(ctx, lg, "served") // → … trace_id=4bf9… span_id=00f0…
 
 Three properties are worth knowing:
 
-- They are record FIELDS \([Record](<#Record>).TraceContext\), not attributes, so \[Logger.WithGroup\] never renames them to "http.trace\_id" and a Sink can read the identity off the record instead of parsing it back out of a formatted line.
-- Both names are RESERVED at the top level. An attribute called "trace\_id" or "span\_id" renders as "attr.trace\_id" / "attr.span\_id", because two fields of one name let a decoder keep the caller's value as the line's correlation. It is renamed and never dropped, and a key under \[Logger.WithGroup\] already carries its prefix and is untouched. The whole "attr." namespace is reserved with them, so a key already inside it is prefixed again — otherwise the rename would not be one\-to\-one and two of your own keys could collide. To log somebody else's identifier, name it for what it is: logger.String\("upstream\_trace\_id", id\).
+- They are record FIELDS \([Record](<#Record>).TraceContext\), not attributes, so [Logger](<#Logger>).WithGroup never renames them to "http.trace\_id" and a Sink can read the identity off the record instead of parsing it back out of a formatted line.
+- Both names are RESERVED at the top level. An attribute called "trace\_id" or "span\_id" renders as "attr.trace\_id" / "attr.span\_id", because two fields of one name let a decoder keep the caller's value as the line's correlation. It is renamed and never dropped, and a key under [Logger](<#Logger>).WithGroup already carries its prefix and is untouched. The whole "attr." namespace is reserved with them, so a key already inside it is prefixed again — otherwise the rename would not be one\-to\-one and two of your own keys could collide. To log somebody else's identifier, name it for what it is: logger.String\("upstream\_trace\_id", id\).
 - When no span is in scope NOTHING is emitted — not an empty value and not the all\-zero identifier, both of which W3C Trace Context declares invalid. Most lines a service logs are outside a request, and an unjoinable trace\_id on all of them would make the field useless as a filter.
 - It costs no extra allocation: the hot path stays at exactly one heap allocation per emit, with a span and without. The identifiers are hex\-encoded straight into the encoder's buffer and never become a Go string. Measured in BENCH.md.
 

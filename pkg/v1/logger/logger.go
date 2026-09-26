@@ -115,8 +115,8 @@
 // [Build] returns a chainable, sync.Pool-backed [Builder] whose
 // steady-state per-call cost is one heap allocation per emit: the pool
 // recycles the Builder and its attrs scratchpad, but the handler clones
-// that scratchpad on every [Builder.Send], so one slice escapes.
-// Callers MUST NOT use a Builder after [Builder.Send] — it returns to
+// that scratchpad on every [Builder].Send, so one slice escapes.
+// Callers MUST NOT use a Builder after [Builder].Send — it returns to
 // the recycler.
 //
 //	logger.Build(lg, logger.LevelInfo).
@@ -125,14 +125,14 @@
 //	    Send(ctx, "user logged in")
 //
 // [LogAttrs] is the slice overload that avoids the variadic-slice
-// allocation in [Logger.Log].
+// allocation in [Logger].Log.
 //
 // # Trace correlation
 //
 // Every Logger this package builds stamps the span in scope onto
 // every record it emits, as the two TOP-LEVEL fields OpenTelemetry
-// prescribes for non-OTLP log formats: [TraceIDKey] ("trace_id", 32
-// lowercase hex digits) and [SpanIDKey] ("span_id", 16). Populating
+// prescribes for non-OTLP log formats: "trace_id" (32 lowercase hex
+// digits) and "span_id" (16). Populating
 // the context is the trace domain's job — the inbound HTTP middleware
 // in github.com/kitsunium/sdk/pkg/v1/trace, or an explicit
 // trace.ContextWithSpanContext:
@@ -143,14 +143,14 @@
 // Three properties are worth knowing:
 //
 //   - They are record FIELDS ([Record].TraceContext), not attributes,
-//     so [Logger.WithGroup] never renames them to "http.trace_id" and
+//     so [Logger].WithGroup never renames them to "http.trace_id" and
 //     a Sink can read the identity off the record instead of parsing
 //     it back out of a formatted line.
 //   - Both names are RESERVED at the top level. An attribute called
 //     "trace_id" or "span_id" renders as "attr.trace_id" /
 //     "attr.span_id", because two fields of one name let a decoder
 //     keep the caller's value as the line's correlation. It is
-//     renamed and never dropped, and a key under [Logger.WithGroup]
+//     renamed and never dropped, and a key under [Logger].WithGroup
 //     already carries its prefix and is untouched. The whole "attr."
 //     namespace is reserved with them, so a key already inside it is
 //     prefixed again — otherwise the rename would not be one-to-one

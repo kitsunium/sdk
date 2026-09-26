@@ -19,8 +19,8 @@
 // # What it makes impossible
 //
 // **A partial start that leaks.** If the fourth component of six fails, the
-// three that are up are stopped, in reverse, before [Lifecycle.Start] returns
-// — through the same code path an ordinary [Lifecycle.Stop] uses, not a second
+// three that are up are stopped, in reverse, before [Lifecycle].Start returns
+// — through the same code path an ordinary [Lifecycle].Stop uses, not a second
 // copy of it. The component that failed is deliberately NOT stopped: its Start
 // returned an error, so it never handed back a running thing, and a Stop on a
 // half-constructed component is how a double-close gets written. A Start that
@@ -32,7 +32,7 @@
 // made it necessary.
 //
 // **A shutdown budget one component can spend on everyone's behalf.**
-// [Config.StopTimeout] is the budget ONE component gets, not a budget for the
+// [Config].StopTimeout is the budget ONE component gets, not a budget for the
 // whole shutdown. A component that will not finish is abandoned at its own
 // deadline and the shutdown continues; every component before it in the
 // reverse order still gets its full budget. The price is stated rather than
@@ -47,14 +47,14 @@
 //     otherwise have — and it is what a cooperative Stop selects on.
 //   - The lifecycle stops WAITING and moves to the next component.
 //   - A [StopTimeout] error naming the component is collected into the
-//     aggregate that [Lifecycle.Stop] returns.
+//     aggregate that [Lifecycle].Stop returns.
 //
 // The goroutine is not killed, because Go cannot kill one, and nothing the
 // component owns is closed on its behalf. Severing a resource under live work
 // is how an unfinishable stream used to take a whole HTTP drain down with it;
 // a budget that expires must not cut short what was about to finish.
 //
-// A non-positive [Config.StopTimeout] CLAMPS to [DefaultStopTimeout] (30s).
+// A non-positive [Config].StopTimeout CLAMPS to [DefaultStopTimeout] (30s).
 // It is never read as "stop immediately": a zero there is what an unset field
 // looks like, and reporting a timeout for components that were about to
 // succeed is not a shutdown policy.
@@ -105,10 +105,10 @@
 //
 // # Errors
 //
-// A failed [Lifecycle.Start] returns an errors.Join carrying [StartFailed]
+// A failed [Lifecycle].Start returns an errors.Join carrying [StartFailed]
 // AND the component's own error, side by side rather than one wrapping the
 // other — so errs.HasCode(err, CodeStartFailed) and the caller's own
-// errors.Is both answer. [Lifecycle.Stop] aggregates the same way, one entry
+// errors.Is both answer. [Lifecycle].Stop aggregates the same way, one entry
 // per component that failed or overran.
 //
 // A component that PANICS is recovered and reported as [ComponentPanicked]

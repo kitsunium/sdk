@@ -48,7 +48,7 @@
 //
 // # Stampede protection stops at the process boundary
 //
-// [Loader.Load] guarantees ONE fill per key across every goroutine in THIS
+// [Loader].Load guarantees ONE fill per key across every goroutine in THIS
 // process. It does not coordinate across replicas. Ten instances of a service
 // each running this still send ten concurrent requests to the origin when a
 // hot key expires — so a fleet's worst-case origin load falls by the

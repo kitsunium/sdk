@@ -23,9 +23,9 @@ A lock that reports success it cannot back is worse than no lock at all: a calle
 
 FIRST — a zero TTL is REFUSED at construction. It is not read as "expires immediately" and not as "never expires". Both are defensible, they are opposites, and a locker built on the first grants every Acquire while excluding nobody — indistinguishable, from outside, from a lock nobody contends \(ADR 0031\).
 
-SECOND — expiring a lease does not stop its old holder. If A's goroutine stalls for longer than the TTL and B acquires the lock, A resumes with no idea anything happened. So \[Lease.Release\] releases only a lock this holder STILL holds — a lease that was taken over releases nothing and reports [LockNotHeld](<#LockMisconfigured>) — and \[Lease.Extend\] renews a lease for work that outlives its TTL. A failed Extend is not a warning to log past: it is the SDK telling a caller it is already inside someone else's section.
+SECOND — expiring a lease does not stop its old holder. If A's goroutine stalls for longer than the TTL and B acquires the lock, A resumes with no idea anything happened. So [Lease](<#Lease>).Release releases only a lock this holder STILL holds — a lease that was taken over releases nothing and reports [LockNotHeld](<#LockMisconfigured>) — and [Lease](<#Lease>).Extend renews a lease for work that outlives its TTL. A failed Extend is not a warning to log past: it is the SDK telling a caller it is already inside someone else's section.
 
-THIRD — every acquisition carries a FENCING TOKEN. \[Lease.Fence\] returns a uint64 that strictly increases with every acquisition of that name. Pass it to the protected resource and have the resource refuse the lower one, and the scenario above turns from silent corruption into a rejected write.
+THIRD — every acquisition carries a FENCING TOKEN. [Lease](<#Lease>).Fence returns a uint64 that strictly increases with every acquisition of that name. Pass it to the protected resource and have the resource refuse the lower one, and the scenario above turns from silent corruption into a rejected write.
 
 ### What this package does not guarantee
 
@@ -164,7 +164,7 @@ func Keepalive(ctx context.Context, lease Lease, cfg KeepaliveConfig) (guarded c
 
 Keepalive renews lease in the background and returns a context that is CANCELLED the instant the lease stops being held, plus the function that ends the renewal.
 
-The loss arrives as a cancellation because \[Lease.Extend\] returning an error only helps a caller currently calling it — and the caller that needs the news is the one already inside the critical section. context.Cause names it.
+The loss arrives as a cancellation because [Lease](<#Lease>).Extend returning an error only helps a caller currently calling it — and the caller that needs the news is the one already inside the critical section. context.Cause names it.
 
 ```
 guarded, stop, err := lock.Keepalive(ctx, lease, lock.KeepaliveConfig{Every: ttl / 3})

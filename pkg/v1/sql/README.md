@@ -82,7 +82,7 @@ Each migration runs in its own transaction together with its version\-table row,
 
 On MySQL and MariaDB that guarantee does not hold, and it is not something this SDK can fix: DDL causes an IMPLICIT COMMIT, so a migration whose second statement fails leaves the first one applied while its version row is rolled back. Write ONE DDL statement per migration on MySQL and the failure is atomic by construction. See ADR 0055 D8.
 
-\[Migrator.Plan\] is the dry run: it reports what \[Migrator.Up\] would apply, applies nothing and takes no lock. [Irreversible](<#Irreversible>) is how a migration says out loud that it cannot be rolled back — a nil Down is refused, because "I forgot the reversal" and "there is no reversal" are the same nil.
+[Migrator](<#Migrator>).Plan is the dry run: it reports what [Migrator](<#Migrator>).Up would apply, applies nothing and takes no lock. [Irreversible](<#Irreversible>) is how a migration says out loud that it cannot be rolled back — a nil Down is refused, because "I forgot the reversal" and "there is no reversal" are the same nil.
 
 ### Errors
 
@@ -208,7 +208,7 @@ func Transact(ctx context.Context, tm Transactor, fn TxFunc) error
 
 Transact runs fn inside a transaction with the driver's default isolation.
 
-It is the ergonomic form of \[Transactor.Transact\] for the common case. The port itself keeps the options parameter so it never needs a second method \(ADR 0039\); this helper keeps the call site short.
+It is the ergonomic form of [Transactor](<#Transactor>).Transact for the common case. The port itself keeps the options parameter so it never needs a second method \(ADR 0039\); this helper keeps the call site short.
 
 <a name="Checker"></a>
 ## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L165>)

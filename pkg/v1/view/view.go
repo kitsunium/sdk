@@ -75,7 +75,7 @@
 //
 // # Rendering is all-or-nothing
 //
-// [Renderer.Render] returns a []byte. It does not take an io.Writer, and that
+// [Renderer].Render returns a []byte. It does not take an io.Writer, and that
 // is what the port is shaped by: template execution writes incrementally and
 // can fail halfway, so handed an http.ResponseWriter it would have flushed the
 // status line, the headers and a plausible prefix of the page before reporting
@@ -121,7 +121,7 @@ const (
 	// UTF-8.
 	ContentTypeHTML string = coreview.ContentTypeHTML
 
-	// DefaultMaxBytes is the ceiling [Config.MaxBytes] clamps to when it is not
+	// DefaultMaxBytes is the ceiling [Config].MaxBytes clamps to when it is not
 	// positive: 8 MiB. There is deliberately no spelling for "unlimited".
 	DefaultMaxBytes int = coreview.DefaultMaxBytes
 )

@@ -70,7 +70,7 @@ Asking for it is not a failure: \-h writes the help and Execute returns nil. A b
 
 ### Where the output goes
 
-\[Config.Output\] \(a command's own output\) and \[Config.ErrOutput\] \(help and usage\) both default to os.Stderr, and neither defaults to os.Stdout. ADR 0030 makes stdout a protocol channel that no SDK default may claim; a tool that emits a document sets Output: os.Stdout in main, on one visible line, and its help still stays on stderr where it cannot corrupt the document.
+[Config](<#Config>).Output \(a command's own output\) and [Config](<#Config>).ErrOutput \(help and usage\) both default to os.Stderr, and neither defaults to os.Stdout. ADR 0030 makes stdout a protocol channel that no SDK default may claim; a tool that emits a document sets Output: os.Stdout in main, on one visible line, and its help still stays on stderr where it cannot corrupt the document.
 
 ### What it composes rather than reimplements
 
@@ -159,7 +159,7 @@ var (
 func Execute(ctx context.Context, cfg Config, root Command, args []string) error
 ```
 
-Execute is the one\-line form of [New](<#New>) followed by \[Executor.Execute\]. It returns the same errors both would: a construction refusal carries EX\_CONFIG \(78\), so a caller that only wants a status can pass the result straight to [Status](<#Status>).
+Execute is the one\-line form of [New](<#New>) followed by [Executor](<#Executor>).Execute. It returns the same errors both would: a construction refusal carries EX\_CONFIG \(78\), so a caller that only wants a status can pass the result straight to [Status](<#Status>).
 
 <a name="Status"></a>
 ## func [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/cli/cli.go#L234>)
@@ -168,7 +168,7 @@ Execute is the one\-line form of [New](<#New>) followed by \[Executor.Execute\].
 func Status(err error) int
 ```
 
-Status is the process exit status for what \[Executor.Execute\] returned: 0 when err is nil, and errs.ExitCodeOf\(err\) otherwise.
+Status is the process exit status for what [Executor](<#Executor>).Execute returned: 0 when err is nil, and errs.ExitCodeOf\(err\) otherwise.
 
 It is a guard on the SDK's existing convention and not a second one. errs.ExitCodeOf answers "what status does THIS ERROR map to", so it returns the EX\_SOFTWARE default \(70\) for a nil it was never meant to be handed — which is correct for an accessor and catastrophic at a CLI boundary, where success is the common case. This is the one place in the SDK where nil has to mean 0, so this is where the guard lives.
 
