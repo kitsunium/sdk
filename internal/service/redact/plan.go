@@ -156,11 +156,27 @@ func (r *Redactor) below(element reflect.Type, seen map[reflect.Type]*plan) *pla
 // structs the way encoding/json does. embedded guards against an embedding
 // cycle.
 func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan, embedded map[reflect.Type]bool) {
-	r.collect(p, t, seen, embedded, 0, map[string]int{})
+	walk := &fieldWalk{plan: p, seen: seen, visited: embedded, depthOf: map[string]int{}}
+	r.collect(walk, t, 0)
+}
+
+// fieldWalk is one struct's members being planned, across the structs it
+// embeds: the plan being filled, the plans already built per type, the
+// embedded types already visited, and how deep each member name was first
+// found.
+type fieldWalk struct {
+	// plan is the struct's plan, whose members the walk fills.
+	plan *plan
+	// seen holds the plan built for each type so far, cycles included.
+	seen map[reflect.Type]*plan
+	// visited holds every embedded struct type already promoted.
+	visited map[reflect.Type]bool
+	// depthOf records the embedding depth each member name was found at first.
+	depthOf map[string]int
 }
 
 // collect adds the fields of t, found depth embeddings below the struct being
-// planned, to p. depthOf records how deep each member name was first found.
+// planned, to the walk's plan.
 //
 // encoding/json writes, for one name, the field found at the SHALLOWEST depth,
 // whatever the declaration order — so a deeper promoted field never replaces a
@@ -169,67 +185,92 @@ func (r *Redactor) fields(p *plan, t reflect.Type, seen map[reflect.Type]*plan, 
 // plan would be applied to the wrong value). Two fields at one depth are
 // ambiguous: encoding/json writes neither, or the tagged one; the plan keeps
 // the stricter of the two, so a secret is never lost to a tie.
-func (r *Redactor) collect(p *plan, t reflect.Type, seen map[reflect.Type]*plan, embedded map[reflect.Type]bool, depth int, depthOf map[string]int) {
+func (r *Redactor) collect(walk *fieldWalk, t reflect.Type, depth int) {
 	//: every field, in declaration order.
 	for field := range t.Fields() {
-		name, promoted, visible := jsonName(field)
-		//: encoding/json does not write it.
-		if !visible {
-			continue
-		}
-		//: an embedded struct without a name: its fields are this object's,
-		//: one level deeper.
-		if promoted {
-			r.promote(p, field.Type, seen, embedded, depth+1, depthOf)
-			continue
-		}
-		found, taken := depthOf[name]
-		//: a shallower field of that name is the one written.
-		if taken && found < depth {
-			continue
-		}
-		var member *plan
-		//: secret by declaration: the whole member is replaced.
-		if r.declared(field) {
-			member = &plan{secret: true}
-		} else {
-			//: a member whose own type declares something below it.
-			member = r.build(field.Type, seen)
-		}
-		//: a tie keeps the stricter plan.
-		if taken && found == depth {
-			//: a secret already planned stays secret.
-			if current := p.members[name]; current != nil && current.secret {
-				continue
-			}
-			//: otherwise the new plan only when it hides something.
-			if member != nil && member.secret {
-				p.members[name] = member
-			}
-			continue
-		}
-		depthOf[name] = depth
-		//: the shallowest field so far: its plan, or none.
-		if member != nil {
-			p.members[name] = member
-		} else {
-			delete(p.members, name)
-		}
+		r.place(walk, field, depth)
 	}
 }
 
-// promote adds the fields of an embedded struct to p, one depth further.
-func (r *Redactor) promote(p *plan, embedded reflect.Type, seen map[reflect.Type]*plan, visited map[reflect.Type]bool, depth int, depthOf map[string]int) {
+// place plans one field of a struct found depth embeddings below the struct
+// being planned — or, for an embedded struct, the fields it promotes.
+func (r *Redactor) place(walk *fieldWalk, field reflect.StructField, depth int) {
+	name, promoted, visible := jsonName(field)
+	//: encoding/json does not write it.
+	if !visible {
+		return
+	}
+	//: an embedded struct without a name: its fields are this object's, one
+	//: level deeper.
+	if promoted {
+		r.promote(walk, field.Type, depth+1)
+		return
+	}
+	found, taken := walk.depthOf[name]
+	//: a shallower field of that name is the one written.
+	if taken && found < depth {
+		return
+	}
+	member := r.memberPlan(field, walk.seen)
+	//: a tie keeps the stricter plan.
+	if taken && found == depth {
+		walk.tie(name, member)
+		return
+	}
+	walk.depthOf[name] = depth
+	walk.set(name, member)
+}
+
+// memberPlan is the plan of one member: the whole member replaced when the
+// field is secret by declaration, else whatever its own type declares below
+// it — nil when that is nothing.
+func (r *Redactor) memberPlan(field reflect.StructField, seen map[reflect.Type]*plan) *plan {
+	//: secret by declaration: the whole member is replaced.
+	if r.declared(field) {
+		//: replaced, whatever it holds.
+		return &plan{secret: true}
+	}
+	//: a member whose own type declares something below it.
+	return r.build(field.Type, seen)
+}
+
+// tie resolves two fields of one name at one depth: a secret already planned
+// stays secret, and otherwise the new plan wins only when it hides something.
+func (w *fieldWalk) tie(name string, member *plan) {
+	//: a secret already planned stays secret.
+	if current := w.plan.members[name]; current != nil && current.secret {
+		return
+	}
+	//: otherwise the new plan only when it hides something.
+	if member != nil && member.secret {
+		w.plan.members[name] = member
+	}
+}
+
+// set records the shallowest field of a name so far: its plan, or none.
+func (w *fieldWalk) set(name string, member *plan) {
+	//: a member with something to hide keeps its plan.
+	if member != nil {
+		w.plan.members[name] = member
+		return
+	}
+	//: a member with nothing to hide replaces any deeper field's plan.
+	delete(w.plan.members, name)
+}
+
+// promote adds the fields of an embedded struct to the walk's plan, one depth
+// further.
+func (r *Redactor) promote(walk *fieldWalk, embedded reflect.Type, depth int) {
 	//: through the pointer, as encoding/json does.
 	if embedded.Kind() == reflect.Pointer {
 		embedded = embedded.Elem()
 	}
 	//: each embedded type once, so a cycle of embeddings ends.
-	if visited[embedded] {
+	if walk.visited[embedded] {
 		return
 	}
-	visited[embedded] = true
-	r.collect(p, embedded, seen, visited, depth, depthOf)
+	walk.visited[embedded] = true
+	r.collect(walk, embedded, depth)
 }
 
 // jsonName returns the member name encoding/json writes field under, whether

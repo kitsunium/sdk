@@ -157,6 +157,10 @@ func spawnAndWait(t *testing.T, runs, workers int, late, signal bool) []string {
 // collected it (late) or keeps signalling it until Wait returns (signal), then
 // Waits. It returns "" when Wait reported exactly exit 0, and a description of
 // what it reported otherwise.
+//
+// Goroutine lifecycle: with signal set, one hammer goroutine signals the child
+// until spawnOne returns — the deferred close of stop ends it — so none
+// outlives the run it belongs to.
 func spawnOne(ctx context.Context, i int, late, signal bool) string {
 	p, err := svcexec.Start(ctx, coreproc.Spec{
 		Path: handoffShell,
@@ -201,9 +205,12 @@ func hammer(p coreproc.Process, stop <-chan struct{}) {
 		//: Wait has returned; the test is over for this child.
 		case <-stop:
 			return
-		//: keep the signal path busy.
+		//: keep the signal path busy; a leader already gone is an accepted
+		//: outcome, not a failure, so a refused signal just goes round again.
 		default:
-			_ = p.Signal(coreproc.Signal(0))
+			if sigErr := p.Signal(coreproc.Signal(0)); sigErr != nil {
+				continue
+			}
 		}
 	}
 }

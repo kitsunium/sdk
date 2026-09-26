@@ -72,8 +72,8 @@ func releaseOnCleanup(t *testing.T, file *os.File) {
 
 // socketDir returns a directory for the Unix sockets a test binds, removed when
 // the test ends. Not t.TempDir(): that path carries the test's name, and on
-// macOS $TMPDIR is already long — a socket path past the 104 bytes its sun_path
-// holds (108 on Linux) fails to bind with EINVAL.
+// macOS $TMPDIR is already long — a socket path longer than its sun_path field
+// (104 characters on macOS, 108 on Linux) fails to bind with EINVAL.
 func socketDir(t *testing.T) string {
 	t.Helper()
 	dir, err := os.MkdirTemp("", "sock")

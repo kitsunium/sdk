@@ -39,17 +39,26 @@ func pending(l *ledger) int {
 // spawnInFlight starts a spawn of pid on l whose fork has happened but whose
 // claim has not been registered yet. It returns once the fork is in, with a
 // function that lets the spawn finish and returns the claim it registered.
-func spawnInFlight(l *ledger, pid int) (finish func() *Claim) {
+//
+// Goroutine lifecycle: one goroutine per call runs the spawn. It is parked in
+// the scripted fork until finish releases it, and finish returns only after
+// it has sent its claim — so no spawn outlives the helper's caller.
+func spawnInFlight(t *testing.T, l *ledger, pid int) (finish func() *Claim) {
+	t.Helper()
 	forked := make(chan struct{})
 	release := make(chan struct{})
 	claimed := make(chan *Claim, 1)
 	go func() {
 		//: the fork has happened and the pid exists, but it is not claimed.
-		_, claim, _ := l.spawn(func() (*os.Process, error) {
+		_, claim, err := l.spawn(func() (*os.Process, error) {
 			close(forked)
 			<-release
 			return fakeProcess(pid), nil
 		})
+		//: the scripted fork cannot fail, so an error is the ledger's own.
+		if err != nil {
+			t.Errorf("spawn of pid %d: %v", pid, err)
+		}
 		claimed <- claim
 	}()
 	<-forked
@@ -65,7 +74,7 @@ func spawnInFlight(l *ledger, pid int) (finish func() *Claim) {
 func deliverAsync(l *ledger, pid int) <-chan struct{} {
 	delivered := make(chan struct{})
 	go func() {
-		l.deliver(pid, StatusValue{})
+		l.deliver(pid, &StatusValue{})
 		close(delivered)
 	}()
 	//: the caller watches the channel to learn when the hand-off returned.
@@ -98,7 +107,7 @@ func TestDeliverWaitsForASpawnInFlight(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		l := newLedger()
-		finish := spawnInFlight(l, fakePid)
+		finish := spawnInFlight(t, l, fakePid)
 		delivered := deliverAsync(l, fakePid)
 		requireBlocked(t, delivered, c.name+": deliver returned while the spawn that forked the pid had not claimed it — the status went to nobody")
 		claim := finish()
@@ -138,7 +147,7 @@ func TestDeliverSkipsAClaimTheRecycledPidOutlived(t *testing.T) {
 		l := newLedger()
 		//: the old child's claim, never reclaimed: an outsider reaped it.
 		stale := l.track(fakePid)
-		finish := spawnInFlight(l, fakePid)
+		finish := spawnInFlight(t, l, fakePid)
 		delivered := deliverAsync(l, fakePid)
 		requireBlocked(t, delivered, c.name+": deliver answered while the spawn of the recycled pid was in flight — it could only have used the stale claim")
 		fresh := finish()
@@ -170,6 +179,11 @@ func TestDeliverSkipsAClaimTheRecycledPidOutlived(t *testing.T) {
 // fails with ECHILD the instant the kernel hands the zombie to the sweep, which
 // is BEFORE the sweep has returned to hand the status over. An owner reading
 // its claim at that instant would find it empty and call the status lost.
+//
+// Goroutine lifecycle: each case runs the owner's Reclaim on one goroutine,
+// which blocks on the sweep lock the case holds and ends once the case hands
+// the status over and releases it; the case reads its verdict before
+// returning, so the goroutine never outlives it.
 func TestReclaimWaitsForTheHandOver(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -191,7 +205,7 @@ func TestReclaimWaitsForTheHandOver(t *testing.T) {
 			close(done)
 		}()
 		requireBlocked(t, done, c.name+": Reclaim answered while the sweep that took the child was still handing it over")
-		l.handOver(fakePid, StatusValue{})
+		l.handOver(fakePid, &StatusValue{})
 		l.sweeping.Unlock()
 		//: the owner now finds the status the sweep collected.
 		if ok := <-reclaimed; !ok {
@@ -228,7 +242,7 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 		}, false},
 		{"a sweep collected the child", func(l *ledger) *Claim {
 			c := l.track(fakePid)
-			l.deliver(fakePid, StatusValue{})
+			l.deliver(fakePid, &StatusValue{})
 			return c
 		}, true},
 		{"something outside the SDK collected the child", func(l *ledger) *Claim {
@@ -240,7 +254,7 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 			return c
 		}, false},
 		{"an orphan nobody claimed", func(l *ledger) *Claim {
-			l.deliver(fakePid, StatusValue{})
+			l.deliver(fakePid, &StatusValue{})
 			//: a child spawned later with the recycled pid starts clean.
 			return l.track(fakePid)
 		}, false},
@@ -249,7 +263,7 @@ func TestTheLedgerEndsEveryClaim(t *testing.T) {
 			fresh := l.track(fakePid)
 			stale.Release()
 			//: the release must not have dropped the newer child's claim.
-			l.deliver(fakePid, StatusValue{})
+			l.deliver(fakePid, &StatusValue{})
 			//: the stale claim must not be the one that was filled.
 			if _, ok := stale.Collected(); ok {
 				return nil

@@ -26,6 +26,9 @@ func (s *Server) readLoop(bound *boundPacketConn, group *PacketGroup, handler co
 	slots := newSlots(batchSize(group.limits), ceiling)
 	reader := newDatagramSource(bound.pc)
 	held := &packet{conn: bound.pc, group: group.name}
+	//: a handler that kept the Packet past its call must not pin the socket
+	//: or the last read buffer once the loop is gone.
+	defer held.reset()
 	//: read until the socket is closed beneath us.
 	for {
 		count, err := reader.readBatch(slots)

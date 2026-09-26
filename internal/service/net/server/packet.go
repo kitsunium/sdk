@@ -63,8 +63,9 @@ func (p *packet) Reply(b []byte) (n int, err error) {
 	return p.conn.WriteTo(b, p.from)
 }
 
-// reset clears the datagram so the pool can hand it out again. It must drop
-// every reference or a pooled entry would pin a closed socket and a read buffer.
+// reset clears the datagram when its read loop ends. It must drop every
+// reference: a handler that kept the Packet past its call would otherwise pin
+// the closed socket and the last read buffer for as long as it holds it.
 func (p *packet) reset() {
 	p.data = nil
 	p.from = nil

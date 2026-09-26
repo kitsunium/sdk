@@ -149,27 +149,44 @@ func spawn(spec coreproc.Spec, sio *stdioState) (started *os.Process, claim *chi
 		//: wrap the StartProcess cause under the central SPAWN_FAILED fields.
 		return nil, nil, wrapSpawn(sErr, errs.String("path", spec.Path))
 	}
-	//: a trampolined spawn blocks on the handshake until the child execs the
-	//: target (EOF) or reports a pre-exec failure (typed RLIMIT_FAILED/SPAWN_FAILED).
-	if hs != nil {
-		//: surface a trampoline pre-exec failure as the typed sentinel.
-		if awaitErr := hs.await(); awaitErr != nil {
-			//: reap the exited trampoline child so it leaves no zombie — through
-			//: the claim, since a running reaper may already have collected it.
-			_, swept, wErr := collectExit(proc, claim)
-			swallowErr(wErr)
-			//: a swept status left proc unwaited; no handle exists yet to race it.
-			if swept {
-				swallowErr(proc.Release())
-			}
-			//: release the stdio fds so the aborted spawn leaks nothing.
-			sio.closeAll()
-			//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.
-			return nil, nil, awaitErr
-		}
+	//: a trampolined spawn that failed before exec leaves nothing to hand back.
+	if awaitErr := awaitTrampoline(hs, proc, claim, sio); awaitErr != nil {
+		//: surface the trampoline's typed RLIMIT_FAILED / SPAWN_FAILED.
+		return nil, nil, awaitErr
 	}
 	//: the forked, live OS process, still awaiting post-start attributes.
 	return proc, claim, nil
+}
+
+// awaitTrampoline blocks a trampolined spawn on its handshake until the child
+// execs the target (EOF, nil) or reports a pre-exec failure, which it returns
+// as the typed RLIMIT_FAILED / SPAWN_FAILED after cleaning up: the exited
+// trampoline child is reaped — through the claim, since a running reaper may
+// already have collected it — and the stdio fds are released, so the aborted
+// spawn leaks nothing. A spawn with no trampoline has no handshake: nil.
+func awaitTrampoline(hs *handshake, proc releaser, claim *childwait.Claim, sio *stdioState) error {
+	//: an untrampolined spawn exec'd the target directly.
+	if hs == nil {
+		//: nothing to wait for.
+		return nil
+	}
+	awaitErr := hs.await()
+	//: EOF: the child exec'd the target.
+	if awaitErr == nil {
+		//: the spawn stands.
+		return nil
+	}
+	//: reap the exited trampoline child so it leaves no zombie.
+	_, swept, wErr := collectExit(proc, claim)
+	swallowErr(wErr)
+	//: a swept status left proc unwaited; no handle exists yet to race it.
+	if swept {
+		swallowErr(proc.Release())
+	}
+	//: release the stdio fds so the aborted spawn leaks nothing.
+	sio.closeAll()
+	//: the trampoline's typed failure.
+	return awaitErr
 }
 
 // forkClaimed forks/execs through the child ledger, so the child's exit status
