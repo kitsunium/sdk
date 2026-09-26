@@ -211,7 +211,7 @@ jobs:
       - name: install ktn-linter (pinned)
         if: steps.ktncred.outputs.present == 'true'
         env:
-          KTN_LINTER_VERSION: v1.11.2
+          KTN_LINTER_VERSION: v1.45.4
           # The archive's digest, pinned HERE and not read from the
           # checksums.txt published beside it. Whoever can replace the archive
           # can replace the manifest next to it, so a checksum fetched from the
@@ -220,10 +220,13 @@ jobs:
           # trust model as the SHA-pinned actions above: the artefact this
           # commit was reviewed against is the artefact CI runs.
           #
-          # Measured: two independent downloads of v1.11.2 produced this digest,
+          # Measured: two independent downloads of v1.45.4 produced this digest,
           # and it matches the release manifest — which is a cross-check, not
-          # the proof.
-          KTN_LINTER_SHA256: 7a05c0558a897c27c1ac98eed8f16713f87bf22e75106d09ec254c8a7c597898
+          # the proof. v1.45.4 is the build the tree is kept clean under
+          # (`make lint-ktn-check` exits 0 on it); the previous pin, v1.11.2,
+          # was 34 releases older, so the day the secret arrived this step
+          # would have judged the tree with rules nobody had run against it.
+          KTN_LINTER_SHA256: e44eae78eb3572725935d967624777384b9a01be84bdc8b556f01eb8bc0f9a4a
           GH_TOKEN: ${{ secrets.KTN_LINTER_TOKEN }}
         run: |
           mkdir -p "$RUNNER_TEMP/ktn"
@@ -249,7 +252,7 @@ jobs:
       - name: assert ktn-linter is the pinned build
         if: steps.ktncred.outputs.present == 'true'
         env:
-          KTN_LINTER_VERSION: v1.11.2
+          KTN_LINTER_VERSION: v1.45.4
         run: |
           got="$(ktn-linter --version)"
           case "$got" in
