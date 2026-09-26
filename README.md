@@ -4,7 +4,7 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **58 packages**: 53 at the top level, plus five nested ones
+`pkg/v1` ships **59 packages**: 54 at the top level, plus five nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
 `codec/strictjson`). They are grouped below by the job they do, and each links
 to its own generated `README.md`.
@@ -24,7 +24,7 @@ to its own generated `README.md`.
 | Package | What it does |
 |---|---|
 | [`config`](./pkg/v1/config) | env + file layering, typed decode, cross-OS poll-watch, and a **schema**: a missing required key fails at startup with every missing key named at once, an unknown key is refused by default, and a default is a layer *under* every source so `timeout = 0` stays 0. |
-| [`lifecycle`](./pkg/v1/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. |
+| [`lifecycle`](./pkg/v1/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. A **supervisor** keeps a component's loop running: restarted after an error, an early return or a panic, on a growing backoff, and joined on stop. |
 | [`cli`](./pkg/v1/cli) | Sub-commands, generated help and a typed exit status on the stdlib `flag`, with zero dependencies. `flag.ExitOnError` is refused by name — nothing here can end your process. |
 | [`events`](./pkg/v1/events) | In-process **synchronous** bus keyed on the event's concrete Go type. Not a queue: no durability, no retry, no dead-letter path, and deliberately no async mode. |
 | [`queue`](./pkg/v1/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. An idle consumer sleeps until a publication, a retry falling due or a lapsed lease wakes it, so the poll only bounds what another process publishes. |
@@ -45,7 +45,7 @@ to its own generated `README.md`.
 | [`tlsid`](./pkg/v1/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
 | [`view`](./pkg/v1/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
 | [`i18n`](./pkg/v1/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
-| [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. |
+| [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure, and never sent twice once delivered — every retry under the same Message-ID. |
 
 ### Data and security
 
@@ -61,6 +61,7 @@ to its own generated `README.md`.
 | [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
 | [`sql`](./pkg/v1/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
 | [`vfs`](./pkg/v1/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
+| [`docstore`](./pkg/v1/docstore) | Typed, keyed JSON documents with unique and multi-valued indexes, in memory or on a filesystem. A write is durable before it returns and costs the same at a hundred documents or a hundred thousand: it publishes one small file, and the store rests as ONE readable snapshot. |
 | [`redact`](./pkg/v1/redact) | Values, JSON documents, text and log attributes shown with their secrets replaced — a name that says it is one, a field declared secret, a URL's credentials — within an **exact** byte bound, never touching the input. What it does not recognise is stated, because it is a display filter and not an access control. |
 
 ### Process, platform and distribution
