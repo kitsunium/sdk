@@ -18,7 +18,7 @@ second implementation would satisfy, so the values are the engine's (ADR 0074).
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
 | `config.go` | `Config[T]` (`Key`, `FS`, `Path`, `FoldAt`), `IndexSpec[T]`, `Unique`, `Index`, `DefaultFoldAt`; the refusals (`StoreMisconfigured`) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` (outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`; `encodeCause` |
-| `index.go` | the index maps (`entries`, `owned`), `uniqueTaken`, `file` / `unfile`, `rebuild` on open (a broken unique index or a panicking key function refuses the open) |
+| `index.go` | the index maps (`entries`, `owned`), `uniqueTaken`, `file` / `unfile`, `rebuild` on open: every document decoded, checked against its own `Key` (`LOAD_FAILED` otherwise, naming the file via `origin`) and filed; a broken unique index or a panicking key function refuses the open |
 | `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `removeFolded` / `recordFold`, `encodeSnapshot` |
 | `load.go` | `load`: the directories, `readSnapshot`, `readOverlay` / `replay`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable, outside every lock |
@@ -62,6 +62,11 @@ second implementation would satisfy, so the values are the engine's (ADR 0074).
   unique index that does not hold would be a lie every `Lookup` tells. The
   fold at open comes after the rebuild, so a refused open leaves the snapshot
   an operator has to repair byte for byte — `TestARefusedOpenWritesNothing`.
+- **A store opens only over documents it can serve.** Every document is
+  decoded at open, with or without indexes, and must sit under the key its own
+  `Key` gives: a document filed under another key would be served under one
+  identity while `Update` refused it as a rename. A snapshot that is JSON
+  `null` is refused too — it decodes into no map without an error.
 - **The key never reaches an error.** A store key is routinely an e-mail
   address; an index key routinely the hash of a token. Every refusal names the
   store and the index, never a key, and a decoding failure names the field and

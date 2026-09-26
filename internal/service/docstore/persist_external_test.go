@@ -178,7 +178,8 @@ func TestLeftoversAndStrangers(t *testing.T) {
 }
 
 // TestFilesThatAreNotAStore pins LoadFailed for every file Open cannot trust
-// — and that no refusal quotes what the file held.
+// — and that no refusal quotes what the file held. Each is refused with the
+// indexes and without them: checking a document's key is not an index's job.
 func TestFilesThatAreNotAStore(t *testing.T) {
 	t.Parallel()
 	const secret = "s3cr3t-in-the-file"
@@ -190,9 +191,12 @@ func TestFilesThatAreNotAStore(t *testing.T) {
 		{"a snapshot that is not JSON", map[string]string{snapshotPath: "{" + secret}},
 		{"a snapshot that is not an object", map[string]string{snapshotPath: `["` + secret + `"]`}},
 		{"a snapshot with an empty key", map[string]string{snapshotPath: `{"": {"id": "` + secret + `"}}`}},
+		{"a snapshot that is null", map[string]string{snapshotPath: " null\n"}},
+		{"a snapshot holding a document under another key", map[string]string{snapshotPath: `{"acc_1": {"id": "` + secret + `"}}`}},
 		{"an entry that is not JSON", map[string]string{overlayPath + "/" + validName: secret}},
 		{"an entry under another key's name", map[string]string{overlayPath + "/" + validName: `{"key": "acc_2", "doc": {"id": "` + secret + `"}}`}},
 		{"an entry without a document", map[string]string{overlayPath + "/" + validName: `{"key": "acc_1"}`}},
+		{"an entry holding a document under another key", map[string]string{overlayPath + "/" + validName: `{"key": "acc_1", "doc": {"id": "` + secret + `"}}`}},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
@@ -201,10 +205,13 @@ func TestFilesThatAreNotAStore(t *testing.T) {
 			for name, content := range c.files {
 				must(t, fsys.WriteAtomic(name, []byte(content), 0o600))
 			}
-			_, err := openWith(accountConfig(fsys))
-			requireCode(t, err, docstore.CodeLoadFailed, c.name)
-			if quotes(err.Error()+errs.PublicOf(err)+errs.PrivateOf(err)+fieldsText(err), secret) {
-				t.Errorf("%s: the refusal quotes the file: %s", c.name, fieldsText(err))
+			_, indexed := openWith(accountConfig(fsys))
+			_, plain := docstore.Open(accountConfig(fsys))
+			for _, err := range []error{indexed, plain} {
+				requireCode(t, err, docstore.CodeLoadFailed, c.name)
+				if quotes(err.Error()+errs.PublicOf(err)+errs.PrivateOf(err)+fieldsText(err), secret) {
+					t.Errorf("%s: the refusal quotes the file: %s", c.name, fieldsText(err))
+				}
 			}
 		})
 	}

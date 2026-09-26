@@ -72,6 +72,12 @@ func (s *Store[T]) readSnapshot() (found bool, err error) {
 		return false, kerrs.Wrap(LoadFailed, kerrs.WrapParams{},
 			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr)))
 	}
+	//: a JSON null decodes without an error into no map at all: a file that
+	//: says nothing is not an empty store.
+	if object == nil {
+		//: LoadFailed, naming the file.
+		return false, loadFailed(s.path, "is null, not a snapshot", nil)
+	}
 	//: every document under its key.
 	for key, document := range object {
 		//: a document nobody could ask for.
@@ -154,6 +160,20 @@ func (s *Store[T]) replay(name string) error {
 	s.pending[name] = struct{}{}
 	//: replayed.
 	return nil
+}
+
+// origin names the file a loaded document came from: its overlay entry when
+// one was replayed for its key, the snapshot otherwise. The entry's name is a
+// digest, so it says nothing about the key.
+func (s *Store[T]) origin(key string) string {
+	name := entryName(key)
+	//: replayed over the snapshot.
+	if _, replayed := s.pending[name]; replayed {
+		//: the entry.
+		return path.Join(s.overlay, name)
+	}
+	//: as the snapshot held it.
+	return s.path
 }
 
 // loadFailed is LoadFailed naming a file or directory and its problem, with

@@ -177,16 +177,14 @@ func (s *Store[T]) unfile(owner string) {
 	}
 }
 
-// rebuild files every document in every index, when the store opens. A
-// document that no longer decodes, two documents sharing a key in a unique
-// index, or a key function that panics refuses the open: a unique index that
-// does not hold would be a lie every Lookup tells.
+// rebuild checks every loaded document and files it in every index, when the
+// store opens. It refuses the open for a document that no longer decodes
+// (DocumentUndecodable), one stored under another key than the one its own
+// Key gives (LoadFailed: the store would answer under a key its own Update
+// refuses), two documents sharing a key in a unique index, or a key function
+// that panics (IndexBroken: a unique index that does not hold would be a lie
+// every Lookup tells).
 func (s *Store[T]) rebuild() (err error) {
-	//: a store without indexes decodes nothing on open.
-	if len(s.indexes) == 0 {
-		//: nothing to rebuild.
-		return nil
-	}
 	defer func() {
 		recovered := recover()
 		//: the ordinary path.
@@ -205,6 +203,12 @@ func (s *Store[T]) rebuild() (err error) {
 		if decodeErr != nil {
 			//: DocumentUndecodable.
 			return decodeErr
+		}
+		//: a document filed under a key its own Key does not give — an edited
+		//: file, or a key function that changed.
+		if s.key(v) != key {
+			//: LoadFailed, naming the file and never either key.
+			return loadFailed(s.origin(key), "holds a document under another key than its own", nil)
 		}
 		keys := s.indexKeys(v)
 		//: two documents under one unique key.

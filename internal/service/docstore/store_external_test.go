@@ -211,9 +211,11 @@ type readAs struct {
 	Stock int    `json:"stock"`
 }
 
-// TestADocumentTheTypeNoLongerFits pins DocumentUndecodable: a document an
-// older program wrote, read as a type it no longer fits, is refused — without
-// the stored value in any text of the error.
+// TestADocumentTheTypeNoLongerFits pins DocumentUndecodable: a store opened,
+// as a type they no longer fit, over documents an older program wrote is
+// refused at Open — without indexes too, since every document is decoded to
+// check the key it is stored under — and no text of the refusal carries the
+// stored value.
 func TestADocumentTheTypeNoLongerFits(t *testing.T) {
 	t.Parallel()
 	fsys := memFS()
@@ -221,15 +223,11 @@ func TestADocumentTheTypeNoLongerFits(t *testing.T) {
 	must(t, err)
 	must(t, older.Put(storedAs{ID: "item_1", Stock: "s3cr3t-quantity"}))
 	must(t, older.Close())
-	newer, err := docstore.Open(docstore.Config[readAs]{Key: func(v readAs) string { return v.ID }, FS: fsys, Path: "shop/items.json"})
-	must(t, err)
-	_, getErr := newer.Get("item_1")
-	requireCode(t, getErr, docstore.CodeDocumentUndecodable, "Get of a document the type no longer fits")
-	if quotes(errs.PublicOf(getErr)+errs.PrivateOf(getErr)+getErr.Error()+fieldsText(getErr), "s3cr3t-quantity") {
-		t.Fatalf("the refusal quotes the stored value: %v %v", getErr, errs.FieldsOf(getErr))
+	_, openErr := docstore.Open(docstore.Config[readAs]{Key: func(v readAs) string { return v.ID }, FS: fsys, Path: "shop/items.json"})
+	requireCode(t, openErr, docstore.CodeDocumentUndecodable, "an open over a document the type no longer fits")
+	if quotes(errs.PublicOf(openErr)+errs.PrivateOf(openErr)+openErr.Error()+fieldsText(openErr), "s3cr3t-quantity") {
+		t.Fatalf("the refusal quotes the stored value: %v %v", openErr, errs.FieldsOf(openErr))
 	}
-	_, listErr := newer.List()
-	requireCode(t, listErr, docstore.CodeDocumentUndecodable, "List over a document the type no longer fits")
 }
 
 // fieldsText renders an error's fields for a leak check.

@@ -97,3 +97,9 @@ read: 1.1 µs.
 0.19 ms for 100 documents and 20.9 ms for 10 000. That is the price of indexes
 that are rebuilt rather than persisted (ADR 0110 §Alternatives), and it is paid
 once per process.
+
+These rows predate one change to `Open`: it now also calls `Key` once per
+document, to check the key the document is stored under (ADR 0110 §D6). A rerun
+on this machine allocated exactly as before (1 511 and 140 692 allocations per
+open). Its timings are not quoted here because the machine was loaded (load
+average 55) and they would measure the load.

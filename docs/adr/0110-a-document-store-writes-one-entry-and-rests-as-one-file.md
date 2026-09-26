@@ -74,7 +74,8 @@ amortised; `BENCH.md` has the table and its envelope):
 On a real disk, the cost is the device's two flushes: **11.0 ms** at 100
 documents and **11.0 ms** at 10 000. That is flat, and it is the same
 `fsync` pair a durable queue publish pays (ADR 0054). Opening decodes every
-document to rebuild the indexes: 0.19 ms at 100 documents, 21 ms at 10 000.
+document, to check it (D6) and rebuild the indexes: 0.19 ms at 100 documents,
+21 ms at 10 000.
 
 ### D3 — replay is order-free and idempotent, by construction
 
@@ -130,6 +131,16 @@ fold succeeds, and the entries stay.
     key function (`INDEX_BROKEN`);
   - hooks called with the key once the write is durable, outside every lock,
     registered and removed at any time.
+- **Stricter than kit's store, at open:** a store opens only over documents
+  it can serve.
+  - Every document is decoded, with or without indexes: `DOCUMENT_UNDECODABLE`
+    comes at open, not at the first read. kit decoded only when it had
+    indexes.
+  - A document must sit under the key its own `Key` gives. Otherwise the store
+    would answer under a key that its own `Update` refuses as a rename, so the
+    open is `LOAD_FAILED`, naming the file and neither key. kit checked no key.
+  - A snapshot that is JSON `null` is `LOAD_FAILED`. `null` decodes into no
+    map without an error, and a file that says nothing is not an empty store.
 - **Never in a refusal:** a store key is routinely an e-mail address, and an
   index key the hash of a token. No refusal quotes either one. A decoding
   failure names the field and the Go type, never the value, whose digits
@@ -192,19 +203,20 @@ facade `pkg/v1/docstore`.
 
 - `internal/service/docstore`:
   - `store_external_test.go`: the modes, `Update`, the hooks, `Entries`, a
-    closed store, a document the type no longer fits (the value in no text).
+    closed store, an open over a document the type no longer fits (the value
+    in no text).
   - `index_external_test.go`, kit's cases ported: the unique index without the
     key in the refusal, `Find`/`Filter`, thirty-two concurrent writers of one
     key with exactly one winning, the rebuild on open and its refusal, a
     panicking key function, every configuration refused.
   - `persist_external_test.go`: durable before a write returns, one snapshot
     after `Close`, a fold interrupted at three points loading the same
-    documents, a framework's bare snapshot, leftovers and strangers, six files
-    `Open` refuses (their content in no text), a refused open that writes
-    nothing, fold thresholds,
-    `PERSIST_FAILED` and `WRITE_UNCONFIRMED`, a failed automatic fold, the
-    store over the operating system's filesystem (0600 files, 0700
-    directories).
+    documents, a framework's bare snapshot, leftovers and strangers, nine
+    files `Open` refuses with and without indexes (a null snapshot and a
+    document under another key among them, their content in no text), a
+    refused open that writes nothing, fold thresholds, `PERSIST_FAILED` and
+    `WRITE_UNCONFIRMED`, a failed automatic fold, the store over the operating
+    system's filesystem (0600 files, 0700 directories).
   - `concurrency_external_test.go`: readers answered while a publication is
     held at a gate; every call at once under the race detector.
   - `docstore_bench_test.go` and `BENCH.md`.

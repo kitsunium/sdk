@@ -16,7 +16,10 @@
 // per key and refuses a write that would file a second, Index files any
 // number. Lookup reads a unique index, Find reads any index, Filter reads
 // every document. The indexes are rebuilt when the store opens, and a load
-// whose documents break a unique index is refused rather than served.
+// whose documents break a unique index is refused rather than served. So is
+// a load holding a document the type no longer decodes, or one stored under
+// another key than its own Key gives: a store opens only over documents it
+// can serve.
 //
 // # How it persists, and what that costs
 //
