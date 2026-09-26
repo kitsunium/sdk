@@ -1,0 +1,59 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "profiling",
+    srcs = [
+        "canonical.go",
+        "capture.go",
+        "codes.go",
+        "errors.go",
+        "fold.go",
+        "goroutine.go",
+        "group.go",
+        "labels.go",
+        "parse.go",
+        "profile.go",
+        "profiling.go",
+        "resolve.go",
+        "tables.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/profiling",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":profiling",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "profiling_test",
+    srcs = [
+        "capture_external_test.go",
+        "fold_external_test.go",
+        "goroutine_external_test.go",
+        "group_external_test.go",
+        "labels_internal_test.go",
+        "parse_external_test.go",
+    ],
+    embed = [":profiling"],
+    deps = ["//internal/kernel/errs"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
