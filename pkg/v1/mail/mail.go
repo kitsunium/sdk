@@ -210,7 +210,8 @@ const (
 	// SpoolConfig.SendTimeout is not positive.
 	DefaultSpoolSendTimeout time.Duration = svcspool.DefaultSendTimeout
 	// DefaultSpoolRetryBase and DefaultSpoolRetryMax bound the wait between
-	// attempts when SpoolConfig.Backoff is zero.
+	// attempts when SpoolConfig.Backoff is zero; DefaultSpoolRetryBase is
+	// also the first wait of a curve that sets no BaseDelay.
 	DefaultSpoolRetryBase time.Duration = svcspool.DefaultRetryBase
 	DefaultSpoolRetryMax  time.Duration = svcspool.DefaultRetryMax
 	// DefaultSpoolMaxMessageBytes bounds one spooled mail when

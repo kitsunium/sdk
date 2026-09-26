@@ -62,9 +62,11 @@ A run that returns before its context ends is a failure, however it ends:
 The next run waits `Backoff.Delay(failures)`. The zero `BackoffValue` would
 retry at once, which for a loop means a hot loop, so the zero is CLAMPED
 (ADR 0031) to `DefaultRestartBase`–`DefaultRestartMax`: one second, doubling,
-up to one minute. A run that lasted `HealthyAfter` (default
-`DefaultHealthyRun`, one minute) was working, so its end starts the count
-again. Its failure waits the first backoff, not the next one.
+up to one minute. A curve that sets a ceiling or a factor but no `BaseDelay`
+would restart at once too, so its base is `DefaultRestartBase`, with the
+caller's ceiling, factor and jitter kept. A run that lasted `HealthyAfter`
+(default `DefaultHealthyRun`, one minute) was working, so its end starts the
+count again. Its failure waits the first backoff, not the next one.
 
 A run that ends because the supervision is stopping, and returns its
 context's error, is the way out and not a failure. It is reported with a nil
@@ -158,7 +160,8 @@ new serials in the block `service/lifecycle` already owns.
   - `Start` after `Stop` supervises again, and `Start`'s values reach the run
     while its cancellation ends nothing;
   - `Component()` inside a `Lifecycle`;
-  - a custom curve with its ceiling;
+  - a custom curve with its ceiling, and a curve without a base, which starts
+    from `DefaultRestartBase`;
   - the two refusals.
 - `pkg/v1/lifecycle`: the same through public names.
 

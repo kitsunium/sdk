@@ -71,7 +71,9 @@ type Config struct {
 	// address when set.
 	From coremail.AddressValue
 	// Backoff is the wait before each retry: Backoff.Delay(attempt). The zero
-	// value is the DefaultRetryBase–DefaultRetryMax curve.
+	// value is the DefaultRetryBase–DefaultRetryMax curve, and a curve without
+	// a positive BaseDelay starts from DefaultRetryBase under its own ceiling:
+	// a failed mail is never retried at once.
 	Backoff svcres.BackoffValue
 	// MaxAttempts is how many deliveries a mail gets before it is
 	// dead-lettered with its last failure. It is REQUIRED: zero reads as

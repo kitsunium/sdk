@@ -69,7 +69,8 @@ That count lives with the mail, survives a crash, and decides the dead letter.
 The last attempt returns its error, and the nack dead-letters the mail WITH
 that failure: reason, wire-safe cause, code. A lapsed lease would carry
 `LEASE_EXPIRED` instead. The backoff's zero clamps to one second, doubling to
-five minutes. `MaxAttempts` is REQUIRED, because its zero reads as "unlimited"
+five minutes, and a curve without a `BaseDelay` starts from one second under
+its own ceiling. `MaxAttempts` is REQUIRED, because its zero reads as "unlimited"
 or as "none", two opposites (ADR 0031's refusal half).
 
 ### D4 — never sent twice by this process; the one duplicate left, named
@@ -171,6 +172,7 @@ in `pkg/v1/mail`.
   - a mail queued then delivered, with the sender, the Date, the Message-ID
     and the attempt in the context;
   - the three early refusals;
+  - a curve without a base, whose first retry is still a second away;
   - retries at 1 s then 2 s, not a nanosecond early, then a dead letter with
     its reason, cause and code, and one Message-ID across attempts;
   - a relay slower than the lease whose redelivery is dropped;

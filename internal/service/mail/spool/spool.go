@@ -160,6 +160,11 @@ func resolve(cfg *Config) *Spool {
 	if s.backoff == (svcres.BackoffValue{}) {
 		s.backoff = svcres.BackoffValue{BaseDelay: DefaultRetryBase, MaxDelay: DefaultRetryMax}
 	}
+	//: so would a curve without a base, whatever else it sets. The caller's
+	//: ceiling, factor and jitter are kept.
+	if s.backoff.BaseDelay <= 0 {
+		s.backoff.BaseDelay = DefaultRetryBase
+	}
 	//: an unset bound on an attempt is the default one.
 	if s.sendTimeout <= 0 {
 		s.sendTimeout = DefaultSendTimeout

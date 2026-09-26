@@ -386,6 +386,25 @@ func TestACustomBackoffIsTheCurve(t *testing.T) {
 	}
 }
 
+// TestACurveWithoutABaseNeverRestartsAtOnce pins the clamp on a partial
+// curve: a Backoff with a ceiling and a factor but no BaseDelay would restart
+// at once — a hot loop — so it starts from DefaultRestartBase, and the
+// caller's factor still shapes it.
+func TestACurveWithoutABaseNeverRestartsAtOnce(t *testing.T) {
+	t.Parallel()
+	s := newScript("error", "error")
+	sup, clk, _ := newSupervisor(t, s.run, svclc.SupervisorConfig{
+		Backoff: svcres.BackoffValue{MaxDelay: time.Hour, Multiplier: 3},
+	})
+	if err := sup.Start(context.Background()); err != nil {
+		t.Fatalf("Start() = %v", err)
+	}
+	<-s.started
+	restartAfter(t, clk, s, 2, svclc.DefaultRestartBase)
+	restartAfter(t, clk, s, 3, 3*svclc.DefaultRestartBase)
+	stop(t, sup)
+}
+
 // TestNewSupervisorRefuses pins the two refusals: no name, no function.
 func TestNewSupervisorRefuses(t *testing.T) {
 	t.Parallel()

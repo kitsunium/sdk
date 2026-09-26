@@ -48,7 +48,9 @@ type SupervisorConfig struct {
 	// observes nothing: the supervisor writes nothing anywhere itself.
 	Observe func(SupervisionEventValue)
 	// Backoff is the wait before the n-th consecutive restart. The zero
-	// value is the [DefaultRestartBase]–[DefaultRestartMax] curve.
+	// value is the [DefaultRestartBase]–[DefaultRestartMax] curve, and a curve
+	// without a positive BaseDelay starts from [DefaultRestartBase] under its
+	// own ceiling: a supervisor never restarts at once.
 	Backoff svcres.BackoffValue
 	// HealthyAfter is how long a run must last for its end to reset the
 	// consecutive-failure count. Not positive means [DefaultHealthyRun].
@@ -82,6 +84,11 @@ func (c *SupervisorConfig) resolved() (clk clock.Timed, backoff svcres.BackoffVa
 	//: a zero curve would be a hot loop.
 	if backoff == (svcres.BackoffValue{}) {
 		backoff = svcres.BackoffValue{BaseDelay: DefaultRestartBase, MaxDelay: DefaultRestartMax}
+	}
+	//: so would a curve without a base, whatever else it sets: it restarts at
+	//: once. The caller's ceiling, factor and jitter are kept.
+	if backoff.BaseDelay <= 0 {
+		backoff.BaseDelay = DefaultRestartBase
 	}
 	//: an unset threshold is the default one.
 	if healthy <= 0 {

@@ -14,6 +14,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/mail"
 	"github.com/kitsunium/sdk/internal/service/mail/spool"
+	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // TestAMailIsQueuedThenDelivered pins the ordinary path: Send stamps the
@@ -87,6 +88,25 @@ func TestSendRefusesWhatTheTransportWould(t *testing.T) {
 	case event := <-rec.events:
 		t.Fatalf("a refused mail produced %v", event.Kind)
 	default:
+	}
+}
+
+// TestACurveWithoutABaseNeverRetriesAtOnce pins the clamp on a partial
+// curve: a Backoff with a ceiling and a factor but no BaseDelay would redial a
+// dead relay at once, so the first retry is due DefaultRetryBase later.
+func TestACurveWithoutABaseNeverRetriesAtOnce(t *testing.T) {
+	t.Parallel()
+	s, _, rec := newSpool(t, spool.Config{
+		Transport: &scripted{fail: relayDown},
+		From:      coremail.AddressValue{Addr: "members@example.com"},
+		Backoff:   svcres.BackoffValue{MaxDelay: time.Hour, Multiplier: 3},
+	})
+	if _, err := s.Send(context.Background(), message("Hi")); err != nil {
+		t.Fatalf("Send() = %v", err)
+	}
+	rec.expect(t, spool.EventQueued)
+	if retry := rec.expect(t, spool.EventRetrying); retry.Next.Sub(retry.At) != spool.DefaultRetryBase {
+		t.Fatalf("the first retry is due %s later, want %s", retry.Next.Sub(retry.At), spool.DefaultRetryBase)
 	}
 }
 

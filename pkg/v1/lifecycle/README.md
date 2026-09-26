@@ -103,7 +103,8 @@ const (
     // Config.StopTimeout clamps to.
     DefaultStopTimeout time.Duration = svclc.DefaultStopTimeout
     // DefaultRestartBase is the supervisor's first restart backoff when
-    // SupervisorConfig.Backoff is zero; it doubles from there.
+    // SupervisorConfig.Backoff is zero, or sets no BaseDelay; it doubles from
+    // there.
     DefaultRestartBase time.Duration = svclc.DefaultRestartBase
     // DefaultRestartMax is the supervisor's longest restart backoff when
     // SupervisorConfig.Backoff is zero.
@@ -170,7 +171,7 @@ var (
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L252>)
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L253>)
 
 ```go
 func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
@@ -179,7 +180,7 @@ func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
 Run starts every component, waits for ctx or one of cfg.Signals, then stops them in reverse order. See the package documentation for what the opt\-in fields wire, and what the zero RunConfig deliberately does not.
 
 <a name="Component"></a>
-## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L167>)
+## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L168>)
 
 Component is the public alias for one named Start/Stop registration.
 
@@ -188,7 +189,7 @@ type Component = corelc.ComponentValue
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L181>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L182>)
 
 Config is the public alias for the engine's construction parameters.
 
@@ -197,7 +198,7 @@ type Config = svclc.Config
 ```
 
 <a name="Lifecycle"></a>
-## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L164>)
+## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L165>)
 
 Lifecycle is the public alias for the ordered start/stop contract.
 
@@ -206,7 +207,7 @@ type Lifecycle = corelc.Lifecycle
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L244>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L245>)
 
 ```go
 func New(cfg Config) Lifecycle
@@ -215,7 +216,7 @@ func New(cfg Config) Lifecycle
 New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the wall clock, a non\-positive cfg.StopTimeout to DefaultStopTimeout, and a nil cfg.OnTransition to no observation. What can fail fails at Add.
 
 <a name="Phase"></a>
-## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L174>)
+## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L175>)
 
 Phase is the public alias for which half of a component a Transition reports.
 
@@ -224,7 +225,7 @@ type Phase = corelc.Phase
 ```
 
 <a name="RunConfig"></a>
-## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L184>)
+## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L185>)
 
 RunConfig is the public alias for Run's opt\-in supervision wiring.
 
@@ -233,7 +234,7 @@ type RunConfig = svclc.RunConfig
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L178>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L179>)
 
 Signal is the public alias for a typed OS signal, re\-exported here so a caller wiring RunConfig.Signals needs no second import.
 
@@ -242,7 +243,7 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Start"></a>
-## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L158>)
+## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L159>)
 
 Start is the public alias for the ctx\-aware bring\-up half of a component.
 
@@ -251,7 +252,7 @@ type Start = corelc.Start
 ```
 
 <a name="Stop"></a>
-## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L161>)
+## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L162>)
 
 Stop is the public alias for the ctx\-aware teardown half of a component.
 
@@ -260,7 +261,7 @@ type Stop = corelc.Stop
 ```
 
 <a name="SupervisionEvent"></a>
-## type [SupervisionEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L196>)
+## type [SupervisionEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L197>)
 
 SupervisionEvent is the public alias for one thing a supervisor did, as its observer is told.
 
@@ -269,7 +270,7 @@ type SupervisionEvent = svclc.SupervisionEventValue
 ```
 
 <a name="SupervisionPhase"></a>
-## type [SupervisionPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L199>)
+## type [SupervisionPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L200>)
 
 SupervisionPhase is the public alias for what a SupervisionEvent reports.
 
@@ -278,7 +279,7 @@ type SupervisionPhase = svclc.SupervisionPhase
 ```
 
 <a name="Supervisor"></a>
-## type [Supervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L188>)
+## type [Supervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L189>)
 
 Supervisor is the public alias for a function run until stopped and restarted after every early end: Start, Stop, Component.
 
@@ -287,7 +288,7 @@ type Supervisor = svclc.Supervisor
 ```
 
 <a name="NewSupervisor"></a>
-### func [NewSupervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L261>)
+### func [NewSupervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L262>)
 
 ```go
 func NewSupervisor(name string, run func(ctx context.Context) error, cfg SupervisorConfig) (*Supervisor, error)
@@ -296,7 +297,7 @@ func NewSupervisor(name string, run func(ctx context.Context) error, cfg Supervi
 NewSupervisor builds a supervisor named name over run, tuned by cfg — whose zero value is a working supervisor. run must return when its context ends; returning earlier, or panicking, restarts it after the backoff. It starts nothing: Start does, or the Lifecycle it is a Component of.
 
 <a name="SupervisorConfig"></a>
-## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L192>)
+## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L193>)
 
 SupervisorConfig is the public alias for a supervisor's optional tuning: Clock, Observe, Backoff, HealthyAfter.
 
@@ -305,7 +306,7 @@ type SupervisorConfig = svclc.SupervisorConfig
 ```
 
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L170>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L171>)
 
 Transition is the public alias for one reported component move.
 

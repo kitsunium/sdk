@@ -135,7 +135,8 @@ const (
 	// Config.StopTimeout clamps to.
 	DefaultStopTimeout time.Duration = svclc.DefaultStopTimeout
 	// DefaultRestartBase is the supervisor's first restart backoff when
-	// SupervisorConfig.Backoff is zero; it doubles from there.
+	// SupervisorConfig.Backoff is zero, or sets no BaseDelay; it doubles from
+	// there.
 	DefaultRestartBase time.Duration = svclc.DefaultRestartBase
 	// DefaultRestartMax is the supervisor's longest restart backoff when
 	// SupervisorConfig.Backoff is zero.
