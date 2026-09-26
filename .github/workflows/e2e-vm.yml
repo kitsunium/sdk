@@ -228,13 +228,29 @@ jobs:
           done
           [ -n "${IP:-}" ] || { echo "::error::no IP after 300s"; exit 1; }
 
+      # When SSH never answers, say WHICH of three different things happened
+      # rather than widening the window blind (#118: windows-11 had an IP and
+      # no SSH after 300s, and 600s would change nothing if sshd is not
+      # started in the base snapshot). The last ssh error is kept instead of
+      # discarded, and port 22 is probed from the runner: closed or filtered
+      # means no sshd is listening; open means sshd runs and refuses us, which
+      # is a key or account problem.
       - name: Wait for SSH
         run: |
+          IP=${{ steps.ip.outputs.ip }}
+          last=""
           for i in $(seq 1 60); do
-            ssh ${SSH_OPTS} ${{ matrix.user }}@${{ steps.ip.outputs.ip }} true 2>/dev/null && exit 0
+            if last=$(ssh ${SSH_OPTS} ${{ matrix.user }}@"$IP" true 2>&1); then exit 0; fi
             sleep 5
           done
-          echo "::error::SSH never came up after 300s"; exit 1
+          echo "::error::SSH never came up after 300s on ${{ matrix.name }} ($IP)"
+          echo "last ssh error: ${last:-<none>}"
+          if timeout 5 bash -c "exec 3<>/dev/tcp/$IP/22" 2>/dev/null; then
+            echo "::error::port 22 is OPEN on $IP: sshd runs and refuses this runner — check the key and the account '${{ matrix.user }}' in the base snapshot"
+          else
+            echo "::error::port 22 is closed or filtered on $IP: no sshd listening — check that sshd starts at boot in the base snapshot before widening this window"
+          fi
+          exit 1
 
       # ── 4. Ship the binaries to the VM and run them on the real kernel ──────
       - name: Run conformance + test suites on ${{ matrix.name }}
@@ -262,6 +278,9 @@ jobs:
           fail=0
           # Headline: the conformance binary exercises the WHOLE public API and
           # exits non-zero if any supported behaviour is wrong on this kernel.
+          # Each of its checks is bounded by harness.CheckTimeout: a check that
+          # hangs is a FAIL row named by its position, with every goroutine's
+          # stack printed before the table (#118).
           conf="conformance.run${EXT}"
           run_one "conformance" "$(launch "$conf")" || fail=1
           # Then the per-package test suites (a target with only Unix-only suites
@@ -270,7 +289,15 @@ jobs:
             name=$(basename "$bin")
             # -test.short keeps each per-OS run quick; suites self-gate on /bin/sh
             # and UnsupportedPlatform and skip cleanly where unsupported.
-            run_one "$name" "$(launch "$name") -test.v -test.short" || fail=1
+            #
+            # -test.timeout: a test binary run directly has NO timeout (only
+            # `go test` passes one), so a hung suite ran until the job's cap and
+            # was cancelled with nothing in the log — debian-systemd and
+            # fedora-systemd did exactly that (#118). Bounded, a hang panics with
+            # every goroutine's stack and the name of the running test, and the
+            # next suite still runs. Three minutes is far above a real kernel's
+            # few seconds per suite.
+            run_one "$name" "$(launch "$name") -test.v -test.short -test.timeout=3m" || fail=1
             echo "::endgroup::"
           done
           echo "::endgroup::"
