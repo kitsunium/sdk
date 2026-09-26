@@ -19,32 +19,39 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 - Security fixes in `internal/*` propagate via minor bumps on the module concerned — no `pkg/v1` changes required because it only re-exports.
 - Adding a `…/pkg/v2` module is a dedicated ADR.
 
-### Sizing a release — the `Release-bump` trailer
+### Sizing a release — the `release:*` label (ADR 0135)
 
-A change to `pkg/` cuts a **patch** by default. Anything that adds an exported
-symbol needs `Release-bump: minor`, and ADR 0007 §2 counts it only on a commit
-that itself touches `pkg/`.
+A change to `pkg/` (or to `internal/` that reaches it) cuts a **patch** by
+default. Anything that adds an exported symbol needs a **minor**, and the size is
+set by a maintainer as a LABEL on the pull request — `release:minor` (or
+`release:major`, or `release:patch` to decline a request) — before the merge,
+never by text in a commit message. The release reads the label when it runs,
+right after CI passes on `main`; a label added once a release is cut sizes
+nothing.
 
-Three rules, each of which has already been broken here:
+    gh pr edit <number> --add-label release:minor
 
-- **It must be a real git trailer**, i.e. in the message's LAST paragraph with
-  nothing after it. `git interpret-trailers` reads that paragraph only, so a
-  `Release-bump:` with prose below it is invisible to the tooling and the
-  release silently degrades to a patch. That is how `pkg/v0.4.0` failed to
-  exist the first time (ADR 0085), and `cut-tags.sh` now refuses rather than
-  degrading.
-- **Exactly once across the whole squashed message.** GitHub's squash
-  concatenates every branch commit's body, so a trailer on two commits of one
-  PR arrives as two occurrences of which git parses one — and `cut-tags.sh`
-  refuses that too, deliberately: reading a trailer from anywhere in the body
-  would let a contributor set the release size from a branch commit, which is
-  the smuggling ADR 0007 §2 exists to prevent. **Put it on the last commit of
-  the branch, and only there.**
-- **A refusal is not a hiccup, it is a deadlock.** `release_base()` only
-  advances when a release cuts, so a commit the guard refuses stays inside
-  every future range and every later release fails until a tag moves past it.
-  Check before merging: `git log -1 --format='%(trailers:key=Release-bump,valueonly)'`
-  must print the value. If it prints nothing, the trailer is not one.
+Why a label and not the `Release-bump:` trailer this section used to describe:
+the repository squash-merges with `COMMIT_MESSAGES`, so the message the release
+reads is composed from the branch commits. That text buried maintainer trailers
+(`pkg/v0.1.35` and `pkg/v0.3.4` shipped as patches that had asked for a minor)
+and let a contributor set the size, and nothing in a message says who wrote a
+line. A label can only be applied by an account with triage or write access.
+
+What still happens to a `Release-bump:` line:
+
+- **It is a request, not a decision.** A merge whose message asks for more than
+  a patch, with no label to decide it, STOPS the release — publishing the patch
+  would lose a request somebody may have meant. The `Release size` check on the
+  pull request fails for the same reason before the merge, naming the label that
+  settles it. Writing the line in the merge dialog is still only a request: the
+  check cannot see that text, the release job can, and it refuses.
+- **A label always wins.** `release:patch` on a pull request whose commits ask
+  for a minor is how a contributor's request is declined.
+- **A refused release is not a deadlock.** Label the pull request the refusal
+  names and re-run the failed job, or dispatch SDK Release with `bump` =
+  patch/minor/major. Both are written in the refusal itself; neither is a
+  hand-run `cut-tags.sh --range`.
 
 ## Conventions
 
@@ -53,6 +60,7 @@ Three rules, each of which has already been broken here:
   - **No ⇒ it belongs to the engine, and the alias points at `internal/service/*`.** That covers an engine's HANDLE (`client.Client`, `server.Server`, `server.Group`, `net/websocket.Conn`, `logger.Builder`, `i18n.Printer`), its `Option` closures over that handle's own struct (`server.Option`, `sse.Option`, `cgroup.Option`, `reaper.Option`), and — the largest group, about forty of the 69 — a single engine's CONSTRUCTION PARAMETERS: `sql.Config`, `session.FileConfig`, `queue.FileConfig`, `lock.FileConfig`, `health.Config`, `lifecycle.RunConfig`, `token.IssuerConfig`, `mail.SMTPConfig`, `metrics.OTLPHTTPConfig`, the five `resilience` policy configs. They name a `*sql.DB`, a directory, a file mode policy, an SMTP TLS mode — one implementation's vocabulary, which is exactly what core must not carry. Hoisting them would make the contract layer describe one backend, and a second backend would inherit fields meaning nothing to it.
 
   What is STILL a defect: a type the port speaks that is nevertheless declared in a service package. That puts one concept on both sides of the boundary and lets the halves drift. The count of service aliases is not the measure — the ownership question is.
+- **A member of an aliased type is linked as `[Type].Member`, never `[Type.Member]`** (ADR 0138). go/doc collects methods and fields from the declarations of the package it documents, and an alias declares none, so `[Broker.Publish]` renders as literal bracketed text on pkg.go.dev and in the generated README while `[Broker].Publish` links the alias and reads the same. `make doclinks` (part of `make lint-check`) fails on the first form.
 - Public functions are thin wrappers: validation + delegation. No business logic in this layer.
 - **No constructors for internal types — except the error model.** The concrete `*errs.Error` type stays unexported, but since ADR 0019 the error *model* is constructable through the public facade: `pkg/v1/errs.New` / `Wrap` (+ `Field` helpers `String`/`Int`/…, `WrapParams`, `MinAppMajor`/`MaxMajor`) mint typed errors validated at runtime (returning a typed `CodeInvalid*` error, never panicking). Consumers still cannot forge an `*errs.Error` by struct literal — they go through the validated constructors. Deliberate exception: the error model is meant to be shared (downstreams migrate off `fmt.Errorf` onto it); every *other* internal type (logger handlers, codec internals) keeps its constructors private. Introspection is unchanged via `pkg/v1/errs.*Of(err)` (`CodeOf`, `ReasonOf`, `PublicOf`, `PrivateOf`, `HTTPStatusOf`, `ExitCodeOf`, `HasCode`, `HasReason`); `CodeOf` returns the typed `Code` — octets compose via `code.Layer()` / `code.Major()` / `code.Package()` / `code.Serial()`.
 - **ldflags injection.** `pkg/v1/logger.Version` is the single injection point; all other packages read via `logger.FrameworkVersion()`, which falls back to the `"dev"` sentinel when unset.

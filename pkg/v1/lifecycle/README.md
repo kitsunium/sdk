@@ -24,11 +24,11 @@ if err := lifecycle.Run(ctx, app, lifecycle.RunConfig{Signals: []lifecycle.Signa
 
 ### What it makes impossible
 
-\*\*A partial start that leaks.\*\* If the fourth component of six fails, the three that are up are stopped, in reverse, before \[Lifecycle.Start\] returns — through the same code path an ordinary \[Lifecycle.Stop\] uses, not a second copy of it. The component that failed is deliberately NOT stopped: its Start returned an error, so it never handed back a running thing, and a Stop on a half\-constructed component is how a double\-close gets written. A Start that fails owns what it acquired, exactly as a Go constructor does.
+\*\*A partial start that leaks.\*\* If the fourth component of six fails, the three that are up are stopped, in reverse, before [Lifecycle](<#Lifecycle>).Start returns — through the same code path an ordinary [Lifecycle](<#Lifecycle>).Stop uses, not a second copy of it. The component that failed is deliberately NOT stopped: its Start returned an error, so it never handed back a running thing, and a Stop on a half\-constructed component is how a double\-close gets written. A Start that fails owns what it acquired, exactly as a Go constructor does.
 
 The unwind also runs when the start failed BECAUSE the context was cancelled: each Stop is called with a context derived by context.WithoutCancel, so a cleanup is never driven by the cancellation that made it necessary.
 
-\*\*A shutdown budget one component can spend on everyone's behalf.\*\* \[Config.StopTimeout\] is the budget ONE component gets, not a budget for the whole shutdown. A component that will not finish is abandoned at its own deadline and the shutdown continues; every component before it in the reverse order still gets its full budget. The price is stated rather than hidden: a Stop of n components returns in at most n × StopTimeout.
+\*\*A shutdown budget one component can spend on everyone's behalf.\*\* [Config](<#Config>).StopTimeout is the budget ONE component gets, not a budget for the whole shutdown. A component that will not finish is abandoned at its own deadline and the shutdown continues; every component before it in the reverse order still gets its full budget. The price is stated rather than hidden: a Stop of n components returns in at most n × StopTimeout.
 
 ### What "the budget expired" means
 
@@ -36,11 +36,11 @@ Exactly three things, and deliberately nothing more:
 
 - The context handed to that component's Stop is cancelled. That is an ANNOUNCEMENT — the one piece of information the component cannot otherwise have — and it is what a cooperative Stop selects on.
 - The lifecycle stops WAITING and moves to the next component.
-- A [StopTimeout](<#InvalidComponent>) error naming the component is collected into the aggregate that \[Lifecycle.Stop\] returns.
+- A [StopTimeout](<#InvalidComponent>) error naming the component is collected into the aggregate that [Lifecycle](<#Lifecycle>).Stop returns.
 
 The goroutine is not killed, because Go cannot kill one, and nothing the component owns is closed on its behalf. Severing a resource under live work is how an unfinishable stream used to take a whole HTTP drain down with it; a budget that expires must not cut short what was about to finish.
 
-A non\-positive \[Config.StopTimeout\] CLAMPS to [DefaultStopTimeout](<#PhaseStart>) \(30s\). It is never read as "stop immediately": a zero there is what an unset field looks like, and reporting a timeout for components that were about to succeed is not a shutdown policy.
+A non\-positive [Config](<#Config>).StopTimeout CLAMPS to [DefaultStopTimeout](<#PhaseStart>) \(30s\). It is never read as "stop immediately": a zero there is what an unset field looks like, and reporting a timeout for components that were about to succeed is not a shutdown policy.
 
 ### What it deliberately does not do
 
@@ -63,7 +63,7 @@ Stop cancels the function's context and waits for it to return — the Lifecycle
 
 ### Errors
 
-A failed \[Lifecycle.Start\] returns an errors.Join carrying [StartFailed](<#InvalidComponent>) AND the component's own error, side by side rather than one wrapping the other — so errs.HasCode\(err, CodeStartFailed\) and the caller's own errors.Is both answer. \[Lifecycle.Stop\] aggregates the same way, one entry per component that failed or overran.
+A failed [Lifecycle](<#Lifecycle>).Start returns an errors.Join carrying [StartFailed](<#InvalidComponent>) AND the component's own error, side by side rather than one wrapping the other — so errs.HasCode\(err, CodeStartFailed\) and the caller's own errors.Is both answer. [Lifecycle](<#Lifecycle>).Stop aggregates the same way, one entry per component that failed or overran.
 
 A component that PANICS is recovered and reported as [ComponentPanicked](<#InvalidComponent>) with the panic value in a field. A panic escaping a Start would skip the unwind entirely and leak every component already up, which is the failure this domain exists to prevent.
 

@@ -15,7 +15,7 @@ e2e/
 ├── go.mod              own module (github.com/kitsunium/sdk/e2e); replace → ../pkg + ../internal/*
 ├── main.go            orchestrator: conformanceGroups() lists every domain, exit = Fail count
 ├── harness/           the runner
-│   ├── harness.go      Status, Result, Run, safeRun, report (table + summary)
+│   ├── harness.go      Status, Result, Run, watchedRun (CheckTimeout), safeRun, report (table + summary)
 │   └── checkgroup.go   Check, CheckGroup — a domain's named group of checks
 └── checks/            one file per domain group; each exports func <Domain>() harness.CheckGroup
     ├── codec.go        Marshal/Unmarshal round-trip per Format
@@ -40,7 +40,13 @@ e2e/
   from `/sys/fs/cgroup`; an rlimit check reads `ulimit -n` from a spawned shell.
   A nil error is not proof.
 - **Never hang, never panic.** Bounded deadlines on any blocking receive;
-  `harness.Run` wraps each check in a panic-recover.
+  `harness.Run` wraps each check in a panic-recover AND a `CheckTimeout`
+  watchdog (one minute): a check still running then is a FAIL row named by its
+  position (`check 2 of 5`), and every goroutine's stack is printed before the
+  table, naming the stuck function. The rule was already written and a check
+  hung anyway — debian-systemd and fedora-systemd ran to e2e-vm's 25-minute cap
+  with no output, because the table prints only after every check returns
+  (#118). The hung goroutine is abandoned, not stopped; the run moves on.
 - **The tree is linted like the rest of the SDK** (`ktn-linter`, phases 1-8). It
   used to be excluded as "a runtime test harness, not library code"; the rules
   turned out to apply, and the exemption was mostly hiding missing tests. The

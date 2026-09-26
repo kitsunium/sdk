@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check
+.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -106,7 +106,8 @@ lint:
 
 # `lint-check` and `lint-ktn-check` are the parts of `lint` a CI runner can
 # execute on its own: a Go toolchain and two pinned binaries, no Bazel, no
-# gazelle.
+# gazelle. `lint-check` also runs `doclinks` (ADR 0138), which needs nothing but
+# the toolchain either.
 #
 # They exist as named targets because of #236. Five of the eight checks `lint`
 # performs were already invoked by bazel-ci.yml as direct `bash …` steps
@@ -141,12 +142,25 @@ lint-check:
 	# The SDK is bound by the invariants it imposes on consumers. Running the
 	# guard here is what keeps ADR 0033 from being a tool nobody executes.
 	$(MAKE) --no-print-directory guard
+	# Every same-package doc link resolves (ADR 0138).
+	$(MAKE) --no-print-directory doclinks
 
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
 # style-only test rules (TEST-TABLE/TEST-CONTEXT) that block no CI lane.
 lint-ktn-check:
 	ktn-linter lint --skip-phases=tests ./...
+
+# `doclinks` fails on every same-package doc link in the repository that names
+# no symbol its package declares — go/doc renders one as literal bracketed text
+# on pkg.go.dev, in `go doc` and in the generated READMEs, and nothing else
+# notices (#241). The dominant cause is structural, not a typo: a pkg/v1 facade
+# ALIASES its types and go/doc collects methods and fields from the package's own
+# declarations, so a member of an aliased type is written `[Type].Member`
+# (ADR 0138). tools/genindex already walks packages through go/doc for the docs
+# site, so the check is a mode of it: stdlib-only, GOWORK=off, no network.
+doclinks:
+	cd tools/genindex && GOWORK=off go run . -check-doclinks $(CURDIR)
 
 # `guard` runs tools/sdkguard over the SDK's own tree at the invariant level.
 #
@@ -178,6 +192,35 @@ ci-gates-check:
 
 release-scripts-check:
 	bash scripts/release/release-scripts-test.sh
+
+# `ci-scripts-check` runs scripts/ci/*.bats: the module census every
+# module-looping lane reads (scripts/ci/go-modules.sh, ADR 0137) and the
+# govulncheck gate built on it (scripts/ci/vuln-check.sh, ADR 0136). The census
+# exists because three hand-written module lists had drifted apart and none of
+# them named tools/genindex or tools/sdkguard (#242); its suite is what keeps a
+# fourth list from coming back.
+ci-scripts-check:
+	bash scripts/ci-scripts-test.sh
+
+# `vuln-check` runs govulncheck in source mode over every module of the census,
+# one module at a time, and fails on a vulnerable symbol any of them REACHES —
+# not on one it merely imports (ADR 0136, #210). The standard library is in the
+# scan; a finding there is settled by moving the go line and MODULE.bazel's
+# go_sdk together. It needs the vulnerability database at vuln.go.dev, so unlike
+# `make lint` it needs the network — which is why it is its own target and not
+# part of `lint`.
+#
+# The scanner is pinned here and nowhere else. `vuln-install` installs exactly
+# this build (a module version is verified against the checksum database, so
+# the pin is the integrity check), and `vuln-check` refuses any other: a lane
+# that followed `latest` would change its verdict with no commit moving.
+GOVULNCHECK_VERSION := v1.8.0
+
+vuln-install:
+	go install golang.org/x/vuln/cmd/govulncheck@$(GOVULNCHECK_VERSION)
+
+vuln-check:
+	GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION) bash scripts/ci/vuln-check.sh
 
 # `hooks-check` runs scripts/test-commit-msg-hook.bats against .githooks/. The
 # commit-msg hook is the no-AI-attribution enforcement, and it shipped with a
@@ -299,6 +342,12 @@ docs-dev:
 # terminal. Without it the recipe printed "no majors need bumping" and nothing
 # about WHY — the local twin of #226, where a release run that published nothing
 # left no recoverable reason either.
+#
+# The size is read from the `release:*` labels of the range's merged pull
+# requests (ADR 0135), so the dry run asks GitHub through an authenticated `gh`
+# — a lookup that fails is refused, never previewed as a patch. `BUMP=minor`
+# (or patch, major) states the size instead and asks nothing, exactly as the
+# SDK Release dispatch input does.
 release-dry-run:
 	@rc=0; /bin/bash scripts/release/compute-bumps.sh --dry-run --explain > /tmp/sdk-release-majors.txt || rc=$$?; \
 	if [ "$$rc" -ne 0 ]; then \
@@ -309,7 +358,7 @@ release-dry-run:
 		echo "no majors need bumping"; \
 	else \
 		echo "majors to bump:"; cat /tmp/sdk-release-majors.txt; echo; \
-		/bin/bash scripts/release/cut-tags.sh --dry-run < /tmp/sdk-release-majors.txt; \
+		/bin/bash scripts/release/cut-tags.sh --dry-run $(if $(BUMP),--bump=$(BUMP),) < /tmp/sdk-release-majors.txt; \
 	fi
 
 # `docs-readme` regenerates pkg/v1/<service>/README.md from each

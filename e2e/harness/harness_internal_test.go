@@ -2,9 +2,11 @@
 package harness
 
 import (
+	"bytes"
 	"errors"
 	"strings"
 	"testing"
+	"time"
 )
 
 // failingWriter is an io.Writer that always refuses, so the report's
@@ -93,6 +95,122 @@ func Test_safeRun(t *testing.T) {
 		//: a contained panic must say what it was, or the row is unactionable.
 		if c.wantName == "panic" && got.Detail == "" {
 			t.Error("the contained panic carried no detail")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// hangingCheckUntil is a check that blocks until release is closed — a stand-in
+// for the sd_notify or cgroup check that ran until e2e-vm's 25-minute cap. The
+// suite closes release at cleanup, so the abandoned goroutine does not outlive
+// the test that planted it.
+func hangingCheckUntil(release <-chan struct{}) Check {
+	return func() Result {
+		<-release
+		//: only reached once the test lets go.
+		return Passed("sdnotify", "late", "released")
+	}
+}
+
+// Test_watchedRun pins the watchdog (#118): a check that does not return in time
+// is a Fail named by its position, and every goroutine's stack is written out —
+// the stuck function among them — while a check that returns in time keeps its
+// own verdict. Before it, a hung check left a job cancelled at its cap with no
+// line of output, because the table is printed only after every check returns.
+func Test_watchedRun(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// hang is whether the check blocks past the bound.
+		hang bool
+		// wantStatus is the recorded outcome.
+		wantStatus Status
+		// wantName is the recorded check name.
+		wantName string
+		// wantDump is whether a goroutine dump must be written.
+		wantDump bool
+	}
+	tests := []tc{
+		{name: "a check that returns in time", wantStatus: Pass, wantName: "roundtrip"},
+		{name: "a check that hangs", hang: true, wantStatus: Fail, wantName: "check 2 of 3", wantDump: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		check := func() Result { return Passed("sdnotify", "roundtrip", "ok") }
+		if c.hang {
+			check = hangingCheckUntil(release)
+		}
+		var out bytes.Buffer
+
+		got := watchedRun(&out, "sdnotify", "check 2 of 3", check, 50*time.Millisecond)
+
+		if got.Status != c.wantStatus || got.Name != c.wantName {
+			t.Fatalf("watchedRun = %v %q, want %v %q", got.Status, got.Name, c.wantStatus, c.wantName)
+		}
+		if got.Domain != "sdnotify" {
+			t.Errorf("Domain = %q, want the registering domain", got.Domain)
+		}
+		dumped := strings.Contains(out.String(), "goroutine ")
+		if dumped != c.wantDump {
+			t.Fatalf("goroutine dump written = %v, want %v:\n%s", dumped, c.wantDump, out.String())
+		}
+		//: the dump is only worth writing if it names the function that is stuck.
+		if c.wantDump && !strings.Contains(out.String(), "hangingCheckUntil") {
+			t.Errorf("the dump does not name the stuck check:\n%s", out.String())
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_runWithin pins that a hung check costs its own row and nothing else: the
+// checks after it still run, and the run's exit code counts it.
+func Test_runWithin(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// wantFails is the count Run returns.
+		wantFails int
+	}
+	tests := []tc{{name: "one hung check among three", wantFails: 1}}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		release := make(chan struct{})
+		t.Cleanup(func() { close(release) })
+		ran := false
+		groups := []CheckGroup{{Domain: "sdnotify", Checks: []Check{
+			func() Result { return Passed("sdnotify", "a", "ok") },
+			hangingCheckUntil(release),
+			func() Result {
+				ran = true
+				return Passed("sdnotify", "c", "ok")
+			},
+		}}}
+		var out bytes.Buffer
+
+		fails := runWithin(&out, groups, 50*time.Millisecond)
+
+		if fails != c.wantFails {
+			t.Fatalf("runWithin = %d fails, want %d:\n%s", fails, c.wantFails, out.String())
+		}
+		if !ran {
+			t.Fatal("the check after the hung one never ran")
+		}
+		if !strings.Contains(out.String(), "check 2 of 3") {
+			t.Errorf("the table does not name the hung check:\n%s", out.String())
 		}
 	}
 	for _, c := range tests {

@@ -163,8 +163,8 @@ func creationFlags(spec coreproc.Spec) uint32 {
 	return flags
 }
 
-// buildArgv returns the child argv: just [Path] when Args is empty, else Args
-// verbatim (Args[0] is argv[0], matching the Unix build).
+// buildArgv returns the child argv: just [coreproc.Spec.Path] when Args is
+// empty, else Args verbatim (Args[0] is argv[0], matching the Unix build).
 func buildArgv(spec coreproc.Spec) []string {
 	//: an empty Args defaults argv to the program path alone.
 	if len(spec.Args) == 0 {

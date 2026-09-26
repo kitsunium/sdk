@@ -1240,12 +1240,17 @@ func Test_defaultRepoRoot(t *testing.T) {
 		// want is the resolved repository root; empty means "derive it".
 		want string
 	}
+	// root is absolute on every host. "/repo" is not on Windows: filepath.Abs
+	// puts the current drive in front of it and the derived root comes back as
+	// D:\repo, which is the right answer there and was a wrong expectation here
+	// until the Windows lane first ran this module's tests.
+	root := filepath.Join(os.TempDir(), "repo")
 	tests := []tc{
 		//: an explicit root always wins, verbatim.
 		{name: "an explicit root", configured: "/repo", input: "/repo/pkg/v1", want: "/repo"},
 		{name: "an explicit relative root", configured: "../..", input: "pkg/v1", want: "../.."},
-		{name: "derived from the input", input: "/repo/pkg/v1", want: "/repo"},
-		{name: "derived from a shallow input", input: "/repo/a/b", want: "/repo"},
+		{name: "derived from the input", input: filepath.Join(root, "pkg", "v1"), want: root},
+		{name: "derived from a shallow input", input: filepath.Join(root, "a", "b"), want: root},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

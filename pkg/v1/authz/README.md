@@ -44,7 +44,7 @@ if err := authz.Check(ctx, policy, req); err != nil {
 
 \*\*Refusal wins a conflict.\*\* [DenyOverrides](<#DenyOverrides>) is the only combining algorithm, and it is not configurable. Permit\-overrides, first\-applicable and only\-one\-applicable are refused by name: under deny\-overrides a wrong rule set produces a request that should have been allowed and was not, which is reported within the hour; under permit\-overrides it produces one that should have been refused and was not, which is reported by whoever exploits it.
 
-\*\*Abstention is a real answer.\*\* [Decision](<#Decision>) has three states, not two. [NewRBAC](<#NewRBAC>) answers [Abstain](<#Abstain>) — never [Deny](<#Abstain>) — for a request it has no grant for, so composing it with another policy does not veto everything that other policy exists to permit. Read a verdict with \[Decision.Granted\], never with \`\!= Deny\`, which is true for [Abstain](<#Abstain>).
+\*\*Abstention is a real answer.\*\* [Decision](<#Decision>) has three states, not two. [NewRBAC](<#NewRBAC>) answers [Abstain](<#Abstain>) — never [Deny](<#Abstain>) — for a request it has no grant for, so composing it with another policy does not veto everything that other policy exists to permit. Read a verdict with [Decision](<#Decision>).Granted, never with \`\!= Deny\`, which is true for [Abstain](<#Abstain>).
 
 \*\*An absent attribute is not a false one.\*\* \`department == "finance"\` on a subject with no department is not a comparison that failed — it is one that never happened. Every built\-in condition reports it as an error, every combinator treats that error as absorbing \(including [Not](<#Not>), which propagates it instead of inverting it\), and the rule's effect is irrelevant: the request is refused.
 

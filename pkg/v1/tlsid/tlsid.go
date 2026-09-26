@@ -5,8 +5,8 @@
 //
 // An Identity is opaque and redacts itself: its String and GoString output is
 // always "<redacted>", so an accidental %v, %s or %#v cannot spill key material
-// into a log line. The only way out is [Identity.ClientConfig] or
-// [Identity.ServerConfig], each of which mints a fresh *tls.Config, so one
+// into a log line. The only way out is [Identity].ClientConfig or
+// [Identity].ServerConfig, each of which mints a fresh *tls.Config, so one
 // caller's mutation can never reach another.
 //
 // The package exists to close a specific, widely-repeated bug. The standard

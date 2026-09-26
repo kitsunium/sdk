@@ -65,9 +65,9 @@ const attrBase int = 16
 
 // openLockFile opens the lock file, refusing a reparse point planted at path.
 //
-// It reports [LockPathRedirected] for an indirection and [LockBackendFailed]
-// for anything else, which is the same pair the Unix half reports — the
-// sentinel is the contract, the mechanism is not.
+// It reports [LockPathRedirected] for an indirection and
+// [corelock.LockBackendFailed] for anything else, which is the same pair the
+// Unix half reports — the sentinel is the contract, the mechanism is not.
 func openLockFile(path string) (file *os.File, err error) {
 	opened, openErr := os.OpenFile(path, os.O_CREATE|os.O_RDWR|openReparsePoint, lockFileMode)
 	//: the open failed. A junction is refused here rather than below, because

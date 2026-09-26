@@ -24,9 +24,9 @@ A [Meter](<#Meter>) mints four synchronous instruments and registers three async
 - [UpDownCounter](<#UpDownCounter>) — a NON\-MONOTONIC sum. In\-flight requests, queue depth. Additive like a counter, but Add may be negative and Dec exists.
 - [Gauge](<#Gauge>) — a sampled reading with no arithmetic behind it. Temperature, a configured limit.
 - [Histogram](<#Histogram>) — a bucketed distribution. Latency, payload size.
-- \[FullMeter.ObservableCounter\], \[FullMeter.ObservableUpDownCounter\] and \[FullMeter.ObservableGauge\] — a callback read once per \[Meter.Collect\], for a value that already exists somewhere and only needs reading \(runtime.NumGoroutine\(\), a cache size\). The callback reports the ABSOLUTE value; the SDK differences it when the meter is a delta reader.
+- [FullMeter](<#FullMeter>).ObservableCounter, [FullMeter](<#FullMeter>).ObservableUpDownCounter and [FullMeter](<#FullMeter>).ObservableGauge — a callback read once per [Meter](<#Meter>).Collect, for a value that already exists somewhere and only needs reading \(runtime.NumGoroutine\(\), a cache size\). The callback reports the ABSOLUTE value; the SDK differences it when the meter is a delta reader.
 
-A Counter and an UpDownCounter both produce a [SumMetric](<#SumMetric>) in the snapshot, told apart by \[SumMetric.Monotonic\]. That is the OTel data model's own economy: monotonicity is a FIELD of a sum, not a second point type.
+A Counter and an UpDownCounter both produce a [SumMetric](<#SumMetric>) in the snapshot, told apart by [SumMetric](<#SumMetric>).Monotonic. That is the OTel data model's own economy: monotonicity is a FIELD of a sum, not a second point type.
 
 [Meter](<#Meter>) itself carries only the three instruments and Collect it shipped with; UpDownCounter and the observables live on the sibling interfaces [UpDownMeter](<#UpDownMeter>) and [AsyncMeter](<#AsyncMeter>), because a published Go interface cannot grow a method without breaking every downstream implementer \(ADR 0039\). [FullMeter](<#FullMeter>) is the union, and it is what [NewMeter](<#NewMeter>) returns.
 
@@ -70,7 +70,7 @@ Homogeneous ARRAY attributes, which the OTel model also allows, are not implemen
 [Temporality](<#Temporality>) says which window a reported number covers, and it is the one fact a metric value cannot carry by itself:
 
 - [TemporalityCumulative](<#TemporalityCumulative>) — the point covers everything since the meter started. Successive collections repeat the start timestamp. This is what an unconfigured [Meter](<#Meter>) does, because an in\-memory meter accumulates into atomics and never resets them.
-- [TemporalityDelta](<#TemporalityDelta>) — the point covers only the window since the previous collection. \[Meter.Collect\] then CONSUMES what it reports, so a delta meter has exactly one reader.
+- [TemporalityDelta](<#TemporalityDelta>) — the point covers only the window since the previous collection. [Meter](<#Meter>).Collect then CONSUMES what it reports, so a delta meter has exactly one reader.
 
 [TemporalityUnspecified](<#TemporalityUnspecified>) is the zero value and resolves to cumulative; there is no setting that leaves it undecided \(ADR 0031\).
 

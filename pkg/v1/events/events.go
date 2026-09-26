@@ -49,7 +49,7 @@
 //
 // # Ordering
 //
-// Listeners for one event type run in ascending [Handler.Priority] — lower
+// Listeners for one event type run in ascending [Handler].Priority — lower
 // first, as with every stdlib comparator — and listeners at the SAME priority
 // run in registration order. Both halves are promises. A bus whose ties
 // resolved by map iteration would run the same program in a different order
@@ -59,7 +59,7 @@
 // # Stopping the dispatch
 //
 // A listener stops the remaining listeners by returning [Halt]. Only a
-// listener whose registration set [Handler.MayHalt] may do so; from any other
+// listener whose registration set [Handler].MayHalt may do so; from any other
 // listener the attempt is refused as [HaltNotPermitted], the dispatch
 // CONTINUES, and the refusal is reported.
 //
@@ -68,9 +68,9 @@
 // down is one nobody reviews. `MayHalt: true` is in the diff, in the review
 // and in grep, next to the name of the listener that holds it.
 //
-// A halt is not a failure. [Bus.Publish] returns a nil error for a dispatch
+// A halt is not a failure. [Bus].Publish returns a nil error for a dispatch
 // whose only remarkable event was a halt, and reports it through
-// [Dispatch.Halted], [Dispatch.HaltedBy] and [Dispatch.Skipped].
+// [Dispatch].Halted, [Dispatch].HaltedBy and [Dispatch].Skipped.
 //
 // # Typing
 //

@@ -47,7 +47,7 @@
 //
 // RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes
 // the only one that cannot leak: the addresses become RCPT TO commands and no
-// header names them. [Message.Envelope] is where that happens, and the
+// header names them. [Message].Envelope is where that happens, and the
 // composed bytes are asserted not to contain a blind recipient.
 //
 // # The MIME structure follows from the fields
@@ -67,7 +67,7 @@
 //
 // # TLS is a decision, and its zero value is refused
 //
-// [SMTPConfig.TLS] has no default. Choosing encryption silently would break
+// [SMTPConfig].TLS has no default. Choosing encryption silently would break
 // every caller pointing at a plaintext relay on a private segment; choosing
 // none silently would ship everyone else's credentials in the clear. So the
 // zero value returns [InvalidConfig] at construction and the caller writes
@@ -105,7 +105,7 @@
 //
 // # What this package does NOT promise
 //
-// A nil error from [Transport.Send] means the next hop ACCEPTED the message.
+// A nil error from [Transport].Send means the next hop ACCEPTED the message.
 // It is not delivery: SMTP accepts responsibility hop by hop (RFC 5321 §6.1),
 // and the hop that eventually refuses says so in a bounce, hours later, to the
 // envelope's return path.
@@ -124,17 +124,17 @@
 // # A durable outbox: the Spool
 //
 // A transport sends once, synchronously, and a relay that is down makes that
-// the caller's problem. [NewSpool] is the outbox between them: [Spool.Send]
+// the caller's problem. [NewSpool] is the outbox between them: [Spool].Send
 // validates a mail — refusing at the call site everything the transport would
 // refuse later — stamps what a retry must not change (the sender from
 // [SpoolConfig].From when the mail names none, the Date, and a Message-ID made
 // of the spool's identifier at the sender's domain), and returns once the mail
 // is queued: durable, in a directory that outlives the process, when
-// [SpoolConfig].Dir is set. [Spool.Run] hands each mail to the transport, one
+// [SpoolConfig].Dir is set. [Spool].Run hands each mail to the transport, one
 // at a time, and a failure waits a backoff that grows with the attempt — one
 // second, doubling, to five minutes by default — before the next; after
 // [SpoolConfig].MaxAttempts the mail is dead-lettered with its last failure,
-// readable through [Spool.DeadLetters].
+// readable through [Spool].DeadLetters.
 //
 //	outbox, err := mail.NewSpool(mail.SpoolConfig{
 //		Transport:   transport,

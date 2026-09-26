@@ -19,7 +19,7 @@
 // placeholder string, so a configuration dumped for a --show-config flag does
 // not leak), encoding.TextMarshaler (so TOML, YAML and log/slog's text handler
 // agree), and log/slog's JSON handler: every one writes [Redacted]. The bytes
-// come out only through [Value.Reveal] and [Value.RevealString].
+// come out only through [Value].Reveal and [Value].RevealString.
 //
 // A Value decodes from a JSON string or from text, so config.Load
 // (pkg/v1/config) fills a Value field from a file or the environment exactly as it fills a string —
@@ -30,7 +30,7 @@
 // configuration was loaded as a real one.
 //
 // == does not compile on a Value and neither does using one as a map key; use
-// [Value.Equal], which compares in constant time.
+// [Value].Equal, which compares in constant time.
 //
 // # Stores
 //

@@ -46,7 +46,7 @@ A hit promotes the entry in the recency order and moves the counters, so a read 
 
 ### Stampede protection stops at the process boundary
 
-\[Loader.Load\] guarantees ONE fill per key across every goroutine in THIS process. It does not coordinate across replicas. Ten instances of a service each running this still send ten concurrent requests to the origin when a hot key expires — so a fleet's worst\-case origin load falls by the concurrency factor within an instance, not to one. Cross\-process collapsing needs a shared lease, which is a distributed system and not something a cache can promise. Size the origin against the number of replicas, not against the number of requests.
+[Loader](<#Loader>).Load guarantees ONE fill per key across every goroutine in THIS process. It does not coordinate across replicas. Ten instances of a service each running this still send ten concurrent requests to the origin when a hot key expires — so a fleet's worst\-case origin load falls by the concurrency factor within an instance, not to one. Cross\-process collapsing needs a shared lease, which is a distributed system and not something a cache can promise. Size the origin against the number of replicas, not against the number of requests.
 
 ### Nothing across tiers is atomic
 

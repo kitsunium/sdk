@@ -44,7 +44,7 @@
 //
 // If you want several things to happen right now, on your goroutine, inside
 // your transaction, you want events and this package will be slower and
-// harder for no benefit: [Broker.Publish] on a durable broker costs a disk
+// harder for no benefit: [Broker].Publish on a durable broker costs a disk
 // flush, because that flush IS the guarantee.
 //
 // # Delivery is AT LEAST ONCE, and you must handle duplicates
@@ -54,10 +54,10 @@
 // advertises the first is selling you the second with your half left as an
 // exercise. This one says so instead — in three places you cannot miss:
 //
-//   - [Delivery.Deliveries] is a field of every delivery. It counts from 1,
+//   - [Delivery].Deliveries is a field of every delivery. It counts from 1,
 //     and a value above 1 means these bytes have been handled before, by you
 //     or by a consumer in another process.
-//   - [ConsumerConfig.HandlerIsIdempotent] must be set to true. Its zero
+//   - [ConsumerConfig].HandlerIsIdempotent must be set to true. Its zero
 //     value is refused, so a handler cannot acquire the promise by omission,
 //     and `grep -rn HandlerIsIdempotent` enumerates every place in your
 //     codebase where somebody made it.
@@ -81,22 +81,22 @@
 //
 // A consumer that is SIGKILLed mid-handler holds a lease it will never
 // release. Nothing is lost: the lease lapses after
-// [Policy.VisibilityTimeout] and the next consumer to look — in any process
-// on that machine — picks the message up with [Delivery.Deliveries]
+// [Policy].VisibilityTimeout and the next consumer to look — in any process
+// on that machine — picks the message up with [Delivery].Deliveries
 // incremented. That timeout is therefore how long a dead consumer's work sits
 // idle, and it is the one number worth thinking about when you wire this.
 //
 // A message whose consumers keep dying is dead-lettered like any other, by
-// the same [Policy.MaxDeliveries] count, so a payload that crashes the
+// the same [Policy].MaxDeliveries count, so a payload that crashes the
 // process cannot loop forever taking every consumer with it.
 //
 // # The dead-letter store keeps the cause
 //
-// After [Policy.MaxDeliveries] attempts the message is moved to the
+// After [Policy].MaxDeliveries attempts the message is moved to the
 // dead-letter store together with why: the failure's reason, its dotted-quad
 // code, and its wire-safe Public half. The log-only Private half is NOT kept
 // — a dead-letter store is read by whoever is investigating, often not the
-// process or even the trust domain that failed — and [Message.ID] is the join
+// process or even the trust domain that failed — and [Message].ID is the join
 // key back to the log line that has it.
 //
 // Read them with the [DeadLetterReader] capability, which both brokers here
@@ -109,14 +109,14 @@
 //
 // # Zero values are safe or refused, never inert
 //
-// [Policy.VisibilityTimeout] and [Policy.MaxDeliveries] are REFUSED at zero,
+// [Policy].VisibilityTimeout and [Policy].MaxDeliveries are REFUSED at zero,
 // because each has two natural readings that are opposites and one of each
 // pair silently destroys the guarantee — "redeliver instantly" against "never
 // redeliver", "unlimited attempts" against "no attempts". Any value the SDK
 // invented would be arbitrary, and a lease lifetime belongs to the work being
 // protected.
 //
-// [Policy.RetryDelay] and [Policy.MaxMessageBytes] are CLAMPED, because their
+// [Policy].RetryDelay and [Policy].MaxMessageBytes are CLAMPED, because their
 // zeros have one reading each and it is harmless: no extra delay, and
 // [DefaultMaxMessageBytes].
 //
@@ -171,17 +171,17 @@ import (
 )
 
 // DefaultMaxMessageBytes is the payload bound applied when
-// [Policy.MaxMessageBytes] is left at zero: one mebibyte.
+// [Policy].MaxMessageBytes is left at zero: one mebibyte.
 const DefaultMaxMessageBytes int = corequeue.DefaultMaxMessageBytes
 
-// MaxDeadlineOffset is the ceiling on [Policy.VisibilityTimeout] and
-// [Policy.RetryDelay]: a century, refused above it rather than clamped,
+// MaxDeadlineOffset is the ceiling on [Policy].VisibilityTimeout and
+// [Policy].RetryDelay: a century, refused above it rather than clamped,
 // because a deadline past 2262 cannot be written into the durable broker's
 // file names and read back.
 const MaxDeadlineOffset time.Duration = corequeue.MaxDeadlineOffset
 
 // DefaultPollInterval is how long an idle worker waits before asking again
-// when [ConsumerConfig.PollInterval] is left at zero. With a [Waker] broker it
+// when [ConsumerConfig].PollInterval is left at zero. With a [Waker] broker it
 // bounds only how late another process's publication is noticed.
 const DefaultPollInterval time.Duration = svcqueue.DefaultPollInterval
 
@@ -208,7 +208,7 @@ type Lease = corequeue.LeaseValue
 // parse it and do not construct one.
 type Receipt = corequeue.ReceiptValue
 
-// Nack is the public alias for what [Broker.Nack] decided: retried, or
+// Nack is the public alias for what [Broker].Nack decided: retried, or
 // dead-lettered.
 type Nack = corequeue.NackValue
 

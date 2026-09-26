@@ -19,11 +19,11 @@ db, err := sql.Open("pgx", cfg.Database.RevealString())
 
 ### A Value renders as a placeholder, everywhere
 
-fmt with every verb \(String, GoString and Format are all implemented, so %v, %\+v, %\#v, %s and %q agree\), encoding/json \(MarshalJSON writes the placeholder string, so a configuration dumped for a \-\-show\-config flag does not leak\), encoding.TextMarshaler \(so TOML, YAML and log/slog's text handler agree\), and log/slog's JSON handler: every one writes [Redacted](<#Redacted>). The bytes come out only through \[Value.Reveal\] and \[Value.RevealString\].
+fmt with every verb \(String, GoString and Format are all implemented, so %v, %\+v, %\#v, %s and %q agree\), encoding/json \(MarshalJSON writes the placeholder string, so a configuration dumped for a \-\-show\-config flag does not leak\), encoding.TextMarshaler \(so TOML, YAML and log/slog's text handler agree\), and log/slog's JSON handler: every one writes [Redacted](<#Redacted>). The bytes come out only through [Value](<#Value>).Reveal and [Value](<#Value>).RevealString.
 
 A Value decodes from a JSON string or from text, so config.Load \(pkg/v1/config\) fills a Value field from a file or the environment exactly as it fills a string — and it refuses two inputs, with ValueRefused: a JSON token that is not a string, because a number has been re\-spelled before a decoder sees it \(1e3 arrives as 1000; twenty digits lose their tail to float64\), and the placeholder itself, because finding it on the way in means a rendered configuration was loaded as a real one.
 
-== does not compile on a Value and neither does using one as a map key; use \[Value.Equal\], which compares in constant time.
+== does not compile on a Value and neither does using one as a map key; use [Value](<#Value>).Equal, which compares in constant time.
 
 ### Stores
 

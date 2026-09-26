@@ -10,7 +10,7 @@ Package client is the outbound half of the SDK's network domain \(ADR 0029\): an
 
 ### Why the policy lives in the transport
 
-A [Policy](<#Policy>) is evaluated inside the http.RoundTripper, underneath every call site. A caller cannot construct a request that skips it, because there is no path to the network that does not pass through the transport. "This client is read\-only" therefore stops being a convention the next contributor has to remember and becomes a property of the code — which is why \[Client.HTTP\] can safely hand the underlying \*http.Client to a third\-party SDK without forfeiting the guarantee.
+A [Policy](<#Policy>) is evaluated inside the http.RoundTripper, underneath every call site. A caller cannot construct a request that skips it, because there is no path to the network that does not pass through the transport. "This client is read\-only" therefore stops being a convention the next contributor has to remember and becomes a property of the code — which is why [Client](<#Client>).HTTP can safely hand the underlying \*http.Client to a third\-party SDK without forfeiting the guarantee.
 
 Every default is closed. A conjunction with no members refuses, a path allowlist with no patterns refuses, and a client built with a nil policy is refused outright. An allowlist that lost its contents — a renamed config key, a slice never populated — must close, never quietly become a passthrough.
 

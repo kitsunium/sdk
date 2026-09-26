@@ -29,7 +29,7 @@
 //
 // A SESSION is an opaque handle. The identifier says nothing; every fact about
 // the session lives on the server, in a [Store]. Because the server owns the
-// record, [Store.Destroy] revokes IMMEDIATELY and the next request fails. The
+// record, [Store].Destroy revokes IMMEDIATELY and the next request fails. The
 // price is state: a store, its availability, and a lookup on the request path.
 //
 // Reach for a token when verification must be stateless and a few minutes of
@@ -45,10 +45,10 @@
 // the privilege boundary — and the reason the bug is common is that rotating is
 // usually a separate step somebody has to remember.
 //
-// Here it is not a step. [Store.Regenerate] is the ONLY call that binds a
+// Here it is not a step. [Store].Regenerate is the ONLY call that binds a
 // subject to a session, and it mints a new identifier every time. There is no
 // SetSubject, no Session.WithSubject, and no Save that writes a subject:
-// [Store.Save] compares the subject against the stored record and refuses a
+// [Store].Save compares the subject against the stored record and refuses a
 // mismatch with [FixationRefused]. "Keep this identifier and log this user in"
 // is a sentence with no method.
 //
@@ -58,7 +58,7 @@
 // # Two deadlines, and what happens when they disagree
 //
 // [Config] takes both an IdleTimeout — how long a session may go untouched,
-// refreshed by every [Store.Load] — and an AbsoluteTimeout — how long it may
+// refreshed by every [Store].Load — and an AbsoluteTimeout — how long it may
 // live at all, measured from the instant its identifier was minted.
 //
 // The effective deadline is always the EARLIER of the two. The absolute
@@ -69,7 +69,7 @@
 // unreachable is a sliding expiry the caller believes they configured and does
 // not have (ADR 0031).
 //
-// Rotating does not buy time. [Store.Regenerate] keeps the original ceiling
+// Rotating does not buy time. [Store].Regenerate keeps the original ceiling
 // when the subject is unchanged, so rotating on a timer cannot produce an
 // immortal session. A rotation that CHANGES the subject restarts both clocks,
 // because a privilege boundary produces a genuinely new session and handing it
@@ -79,16 +79,16 @@
 // # The identifier is a secret
 //
 // [ID] is 256 bits from crypto/rand. It redacts itself in %v, %s and %#v;
-// [ID.Reveal] is the only way to its canonical string and is spelled to read
-// like a mistake anywhere that is not building a cookie; [ID.Equal] compares in
-// constant time; and [ID.Digest] is what a store indexes and names files by, so
+// [ID].Reveal is the only way to its canonical string and is spelled to read
+// like a mistake anywhere that is not building a cookie; [ID].Equal compares in
+// constant time; and [ID].Digest is what a store indexes and names files by, so
 // the secret is never a map key, never a filename and never at rest.
 //
 // # Where the SDK stops
 //
 // This package ships the STORE and the SEALING. It does not ship a firewall,
 // access voters, a login convention, or anything that writes an HTTP header.
-// [Sealer.Seal] produces the cookie's VALUE; choosing the cookie's name, Path,
+// [Sealer].Seal produces the cookie's VALUE; choosing the cookie's name, Path,
 // Domain, Max-Age, Secure, HttpOnly and SameSite — and calling http.SetCookie —
 // belongs to the framework, which is the layer that knows what a request is.
 //
@@ -108,7 +108,7 @@
 //
 // [NewFileStore] keeps one sealed file per session in one directory. It seals
 // every record under an AEAD key, binds each record to its own filename, names
-// files by [ID.Digest] so no identifier is ever on disk, requires an owner-only
+// files by [ID].Digest so no identifier is ever on disk, requires an owner-only
 // directory and ASSERTS the mode it gets rather than assuming it, publishes
 // every write through a temporary file and rename(2), and serialises every
 // read-modify-write under one exclusive lock.
@@ -155,7 +155,7 @@ type Session = coresession.SessionValue
 
 // State is the public alias for the exported description [NewSession] builds a
 // [Session] from. It exists so a framework can implement [Store] over its own
-// backend; it is not a way around the fixation rule, since [Store.Save] refuses
+// backend; it is not a way around the fixation rule, since [Store].Save refuses
 // a subject the stored record does not have.
 type State = coresession.StateValue
 
@@ -251,7 +251,7 @@ func NewSealer(key corecrypto.Key, purpose string) (sealer Sealer, err error) {
 	return svcsession.NewSealer(key, purpose)
 }
 
-// ParseID decodes the canonical form produced by [ID.Reveal] — unpadded
+// ParseID decodes the canonical form produced by [ID].Reveal — unpadded
 // base64url over exactly [IDLen] bytes. It is the inbound path: whatever
 // arrives from a cookie reaches the domain through here, and anything that is
 // not exactly that shape is refused before it can be used as a lookup key.

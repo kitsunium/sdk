@@ -40,7 +40,7 @@ The error names the FIELD and never the value — the value is by construction t
 
 ### Bcc reaches the envelope and never a header
 
-RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes the only one that cannot leak: the addresses become RCPT TO commands and no header names them. \[Message.Envelope\] is where that happens, and the composed bytes are asserted not to contain a blind recipient.
+RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes the only one that cannot leak: the addresses become RCPT TO commands and no header names them. [Message](<#Message>).Envelope is where that happens, and the composed bytes are asserted not to contain a blind recipient.
 
 ### The MIME structure follows from the fields
 
@@ -57,7 +57,7 @@ An [Attachment](<#Attachment>) carrying a ContentID is inline and referenceable 
 
 ### TLS is a decision, and its zero value is refused
 
-\[SMTPConfig.TLS\] has no default. Choosing encryption silently would break every caller pointing at a plaintext relay on a private segment; choosing none silently would ship everyone else's credentials in the clear. So the zero value returns [InvalidConfig](<#HeaderInjection>) at construction and the caller writes [TLSStartTLS](<#TLSStartTLS>), [TLSImplicit](<#TLSImplicit>) or [TLSDisabled](<#TLSDisabled>).
+[SMTPConfig](<#SMTPConfig>).TLS has no default. Choosing encryption silently would break every caller pointing at a plaintext relay on a private segment; choosing none silently would ship everyone else's credentials in the clear. So the zero value returns [InvalidConfig](<#HeaderInjection>) at construction and the caller writes [TLSStartTLS](<#TLSStartTLS>), [TLSImplicit](<#TLSImplicit>) or [TLSDisabled](<#TLSDisabled>).
 
 There is deliberately no opportunistic mode. A transport that encrypts when the server offers it and continues in the clear when it does not is one stripped EHLO line away from handing an attacker the whole session — so a server that does not advertise STARTTLS gets [TLSRequired](<#HeaderInjection>) and no message.
 
@@ -79,7 +79,7 @@ An [SMTPConfig](<#SMTPConfig>) never renders its password: every fmt verb \(it i
 
 ### What this package does NOT promise
 
-A nil error from \[Transport.Send\] means the next hop ACCEPTED the message. It is not delivery: SMTP accepts responsibility hop by hop \(RFC 5321 §6.1\), and the hop that eventually refuses says so in a bounce, hours later, to the envelope's return path.
+A nil error from [Transport](<#Transport>).Send means the next hop ACCEPTED the message. It is not delivery: SMTP accepts responsibility hop by hop \(RFC 5321 §6.1\), and the hop that eventually refuses says so in a bounce, hours later, to the envelope's return path.
 
 It is not deliverability either. Whether a message reaches an inbox rather than a spam folder depends on SPF, DKIM and DMARC — records in DNS and a signing key — which are infrastructure decisions with an operational lifetime, not a library call. This package signs nothing and will not pretend the absence of a signature is a detail.
 
@@ -87,7 +87,7 @@ And it is not rendering. Whether a client displays the HTML, the plain text, or 
 
 ### A durable outbox: the Spool
 
-A transport sends once, synchronously, and a relay that is down makes that the caller's problem. [NewSpool](<#NewSpool>) is the outbox between them: \[Spool.Send\] validates a mail — refusing at the call site everything the transport would refuse later — stamps what a retry must not change \(the sender from [SpoolConfig](<#SpoolConfig>).From when the mail names none, the Date, and a Message\-ID made of the spool's identifier at the sender's domain\), and returns once the mail is queued: durable, in a directory that outlives the process, when [SpoolConfig](<#SpoolConfig>).Dir is set. \[Spool.Run\] hands each mail to the transport, one at a time, and a failure waits a backoff that grows with the attempt — one second, doubling, to five minutes by default — before the next; after [SpoolConfig](<#SpoolConfig>).MaxAttempts the mail is dead\-lettered with its last failure, readable through \[Spool.DeadLetters\].
+A transport sends once, synchronously, and a relay that is down makes that the caller's problem. [NewSpool](<#NewSpool>) is the outbox between them: [Spool](<#Spool>).Send validates a mail — refusing at the call site everything the transport would refuse later — stamps what a retry must not change \(the sender from [SpoolConfig](<#SpoolConfig>).From when the mail names none, the Date, and a Message\-ID made of the spool's identifier at the sender's domain\), and returns once the mail is queued: durable, in a directory that outlives the process, when [SpoolConfig](<#SpoolConfig>).Dir is set. [Spool](<#Spool>).Run hands each mail to the transport, one at a time, and a failure waits a backoff that grows with the attempt — one second, doubling, to five minutes by default — before the next; after [SpoolConfig](<#SpoolConfig>).MaxAttempts the mail is dead\-lettered with its last failure, readable through [Spool](<#Spool>).DeadLetters.
 
 ```
 outbox, err := mail.NewSpool(mail.SpoolConfig{

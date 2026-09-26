@@ -33,7 +33,7 @@ There is deliberately no vfs.Walk and no vfs.Glob. The stdlib ones are correct a
 
 ### WriteAtomic, and what it promises when it fails
 
-\[AtomicWriter.WriteAtomic\] writes into a temporary in the SAME directory, flushes it to the device, renames it over the target, and then flushes the directory entry. Each step is there for a reason the previous one does not cover: the same directory means the rename cannot cross a device, the file flush means the rename is not publishing page\-cache, and the directory flush means the name survives a crash alongside the bytes it points at.
+[AtomicWriter](<#AtomicWriter>).WriteAtomic writes into a temporary in the SAME directory, flushes it to the device, renames it over the target, and then flushes the directory entry. Each step is there for a reason the previous one does not cover: the same directory means the rename cannot cross a device, the file flush means the rename is not publishing page\-cache, and the directory flush means the name survives a crash alongside the bytes it points at.
 
 The interesting half is the failure. If WriteAtomic returns [PublishFailed](<#InvalidPath>), the bytes previously at that name are unchanged — byte for byte — and no temporary was left behind. That is not a description of the code, it is an assertion with a test behind it: the SDK sabotages each step in turn and compares a hash of the destination before and after.
 

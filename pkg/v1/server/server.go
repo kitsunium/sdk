@@ -34,7 +34,7 @@
 //
 // [Group] returns the group rather than a (group, error) pair on purpose: a
 // declaration mistake — a duplicate name, an unusable address, a missing
-// handler — is recorded and reported by [Server.Start]. The declaration chain
+// handler — is recorded and reported by [Server].Start. The declaration chain
 // stays readable, and nothing is swallowed.
 //
 // # TLS and mutual TLS
@@ -47,13 +47,13 @@
 //
 // # Lifecycle
 //
-// [Server.Start] returns once every listener is bound, so a nil error means the
-// ports are open. [Server.Serve] starts, blocks until the context is cancelled,
-// then drains. [Server.Shutdown] stops accepting and waits for in-flight work
+// [Server].Start returns once every listener is bound, so a nil error means the
+// ports are open. [Server].Serve starts, blocks until the context is cancelled,
+// then drains. [Server].Shutdown stops accepting and waits for in-flight work
 // within a budget, severing what remains when the budget expires — a shutdown
 // that never returns is worse than one that admits it gave up.
 //
-// [Server.State] reports the phase, the addresses actually bound, and whether
+// [Server].State reports the phase, the addresses actually bound, and whether
 // any listener fell back from a requested optimisation. A silent degradation is
 // indistinguishable from a working server, so it is surfaced rather than logged
 // once at startup.
@@ -313,7 +313,7 @@ type PacketMiddleware = corenet.Middleware[corenet.PacketHandler]
 
 // MaxPacketSize caps the datagram size a group accepts.
 //
-// A larger datagram is dropped and counted in [State.OversizedPackets], never
+// A larger datagram is dropped and counted in [State].OversizedPackets, never
 // delivered. Truncating would hand the handler a prefix indistinguishable from
 // a complete message, which is a correctness problem rather than a capacity
 // one; a drop it can observe in State is the honest answer.

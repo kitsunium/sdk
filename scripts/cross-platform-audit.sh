@@ -20,7 +20,7 @@
 set -uo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$ROOT"
+cd "$ROOT" || exit 1
 
 # GOOS/GOARCH targets. linux+darwin are primary; the BSDs + windows are the
 # portability frontier the SDK must not silently drop.
@@ -33,7 +33,17 @@ PLATFORMS=(
 
 # module dir -> import-path prefix is discovered via `go list`; each module is
 # built with GOWORK=off so its own go.mod + replace directives resolve.
-MODULES=(internal/kernel internal/core internal/service pkg .)
+#
+# The modules are the census (scripts/ci/go-modules.sh, ADR 0137), the same the
+# CI cross-build lane loops over. This list used to be written here, and it had
+# drifted from CI's: five modules against six, and neither named tools/genindex
+# or tools/sdkguard (#242). A census that cannot be read aborts the audit —
+# auditing no module would print an empty table and exit 0.
+census="$(bash "$ROOT/scripts/ci/go-modules.sh")" || exit 1
+MODULES=()
+while IFS= read -r mod; do
+  [[ -n "$mod" ]] && MODULES+=("$mod")
+done <<<"$census"
 
 QUIET=0
 [[ "${1:-}" == "--quiet" ]] && QUIET=1

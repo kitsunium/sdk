@@ -21,8 +21,8 @@
 // the decision untestable and skips every deferred function, which is the same
 // reason `cli` refuses [flag.ExitOnError].
 //
-// [Decide] is a pure classification. The caller runs the verifier, reads the
-// decision, and performs whatever the decision names.
+// The service's Decide is a pure classification. The caller runs the verifier,
+// reads the decision, and performs whatever the decision names.
 //
 // # The exemption list is the security-relevant part
 //

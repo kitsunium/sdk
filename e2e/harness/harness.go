@@ -11,9 +11,36 @@ package harness
 import (
 	"fmt"
 	"io"
+	"runtime"
 	"slices"
 	"strings"
+	"time"
 )
+
+// CheckTimeout bounds how long Run waits for one check.
+//
+// Every check is written never to hang — bounded deadlines on every blocking
+// receive — and on real kernels one hung anyway: the debian-systemd and
+// fedora-systemd legs of e2e-vm.yml ran until the job's 25-minute cap cancelled
+// them, and because the table is printed only once every check has returned,
+// the log said nothing about which check it was (#118). A check still running
+// after this is recorded as a Fail and every goroutine's stack is written out,
+// which names the function that is stuck; the run then moves on. The goroutine
+// is abandoned, not stopped — Go cannot stop one — which a process that is
+// about to print its table and exit can afford.
+//
+// A minute is generous: a check's own deadlines are seconds (sd_notify's
+// receive waits 2 s), and a real kernel runs the whole group in seconds.
+const CheckTimeout time.Duration = time.Minute
+
+// maxStackDump caps the goroutine dump a hung check writes. A process whose
+// goroutines outgrow it has a larger problem than this dump can show, and an
+// unbounded buffer would turn one hang into an out-of-memory as well.
+const maxStackDump int = 16 << 20
+
+// initialStackDump is the first buffer runtime.Stack is given; it doubles until
+// the dump fits or reaches maxStackDump.
+const initialStackDump int = 64 << 10
 
 // Status is the outcome of a single conformance check.
 type Status string
@@ -76,15 +103,26 @@ func Skipped(domain, name, detail string) Result {
 
 // Run executes every suite, writes a per-check table to out, and returns the
 // number of Fail results (0 means the host conforms). UNSUPPORTED and SKIP never
-// count as failures.
+// count as failures. A check that runs past CheckTimeout is a Fail, reported
+// with every goroutine's stack.
 func Run(out io.Writer, groups []CheckGroup) int {
+	//: the documented bound; the suite drives runWithin with a shorter one.
+	return runWithin(out, groups, CheckTimeout)
+}
+
+// runWithin is Run with the per-check bound as a parameter.
+func runWithin(out io.Writer, groups []CheckGroup, timeout time.Duration) int {
 	var results []Result
 	//: collect every check's result across all domains first.
 	for _, group := range groups {
-		//: run each check in the group, guarding against a panicking check.
-		for _, check := range group.Checks {
-			//: a check that panics is recorded as a Fail, never aborts the run.
-			results = append(results, safeRun(group.Domain, check))
+		//: run each check in the group, guarding against a panic and a hang.
+		for index, check := range group.Checks {
+			// A Check carries its name only in the Result it returns, so a
+			// check that never returns is named by its position in its group.
+			label := fmt.Sprintf("check %d of %d", index+1, len(group.Checks))
+			//: a check that panics or hangs is recorded as a Fail, never aborts
+			//: the run and never silences it.
+			results = append(results, watchedRun(out, group.Domain, label, check, timeout))
 		}
 	}
 	//: stable ordering so diffs across machines line up.
@@ -99,6 +137,51 @@ func Run(out io.Writer, groups []CheckGroup) int {
 	})
 	//: the table is printed and the Fail count is the process exit code.
 	return report(out, results)
+}
+
+// watchedRun runs one check under safeRun and gives up on it after timeout.
+//
+// A check that never returns is recorded under label — its position in its
+// group — and the goroutine dump written to out names the function. The
+// channel is buffered, so the abandoned goroutine can still deliver its Result
+// and exit if the check ever returns.
+func watchedRun(out io.Writer, domain, label string, check Check, timeout time.Duration) Result {
+	done := make(chan Result, 1)
+	go func() {
+		//: the verdict, or a Fail if the check panicked.
+		done <- safeRun(domain, check)
+	}()
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+	//: whichever comes first: the check's own verdict or the bound.
+	select {
+	//: the check returned in time.
+	case res := <-done:
+		//: its own verdict.
+		return res
+	//: the check is still running.
+	case <-timer.C:
+		stderrf(out, "\n%s: %s did not finish within %s; every goroutine follows, the stuck check among them\n\n%s\n",
+			domain, label, timeout, allStacks())
+		//: a hang is a failure on this kernel, and it now has a name.
+		return Failed(domain, label, fmt.Sprintf("did not finish within %s (hung); the goroutine dump precedes the table", timeout))
+	}
+}
+
+// allStacks returns the stack of every goroutine, growing its buffer until the
+// dump fits or reaches maxStackDump.
+func allStacks() []byte {
+	buf := make([]byte, initialStackDump)
+	//: runtime.Stack truncates silently, so a full buffer means "grow and retry".
+	for {
+		n := runtime.Stack(buf, true)
+		//: the dump fitted, or the cap is reached and it is as large as allowed.
+		if n < len(buf) || len(buf) >= maxStackDump {
+			//: the dump as captured.
+			return buf[:n]
+		}
+		buf = make([]byte, 2*len(buf))
+	}
 }
 
 // safeRun executes a single check, converting a panic into a Fail Result so one

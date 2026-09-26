@@ -27,9 +27,9 @@ const (
 	// algID is the frozen 1-byte wire identifier embedded in each box header.
 	algID byte = 0x02
 	// nonceLen is XChaCha20's 192-bit nonce; box layout is
-	// [Version][algID][24B nonce][ciphertext||tag].
+	// [version][algID][24B nonce][ciphertext||tag].
 	nonceLen int = chacha20poly1305.NonceSizeX
-	// headerLen is the fixed [Version][algID] prefix length.
+	// headerLen is the fixed [version][algID] prefix length.
 	headerLen int = 2
 	// tagLen is the Poly1305 authentication tag length appended by Seal.
 	tagLen int = chacha20poly1305.Overhead

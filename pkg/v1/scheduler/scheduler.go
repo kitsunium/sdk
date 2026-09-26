@@ -22,7 +22,7 @@
 // A [Scheduler] with no entries is legitimate — it runs empty and waits for
 // its context, which is what a service with every job behind a feature flag
 // looks like. An unusable ENTRY is not: an empty name, a nil Job or a nil
-// Schedule is refused by [Scheduler.Add], and an unusable cron expression is
+// Schedule is refused by [Scheduler].Add, and an unusable cron expression is
 // refused by [Parse]. The two are different questions and the SDK answers them
 // differently on purpose (ADR 0031).
 //
@@ -56,17 +56,17 @@
 //
 // The scheduler SKIPS and COUNTS. When the machine sleeps, or a run holds its
 // slot past the next deadline, the job runs once for the most recent due
-// instant and [Result.Missed] reports how many older ones were dropped. It
+// instant and [Result].Missed reports how many older ones were dropped. It
 // never replays them: a process that was down for a day would come back to a
 // burst of stale work at the worst possible moment. Fires missed while the
 // process was not running are invisible — this scheduler keeps no state across
 // restarts.
 //
 // When a run has not returned by the next deadline, the default is to SKIP
-// that fire and report it as [Result.Skipped]. Queueing grows without bound
+// that fire and report it as [Result].Skipped. Queueing grows without bound
 // behind a persistently slow job; running copies in parallel duplicates a side
 // effect the SDK cannot know is safe. A caller who knows concurrent copies are
-// safe says so with [Entry.AllowOverlap] — an in-code assertion, like
+// safe says so with [Entry].AllowOverlap — an in-code assertion, like
 // resilience.HedgeConfig.Idempotent, whose zero value is the safe answer.
 //
 // # What is guaranteed
@@ -79,9 +79,9 @@
 // matrix delivers uniformly (ADR 0018).
 //
 // A failing job never stops the scheduler and never affects another entry. A
-// PANICKING job is recovered, reported as [JobPanicked] in [Result.Err], and
+// PANICKING job is recovered, reported as [JobPanicked] in [Result].Err, and
 // the scheduler keeps running — one job's bug must not take the process down.
-// The [Config.OnResult] hook is the caller's own code and is deliberately NOT
+// The [Config].OnResult hook is the caller's own code and is deliberately NOT
 // recovered.
 package scheduler
 

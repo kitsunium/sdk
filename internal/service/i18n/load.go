@@ -119,7 +119,7 @@ func readCatalogues(fsys fs.FS, dir string, entries []fs.DirEntry, decoder codec
 	return catalogues, nil
 }
 
-// tagFromFilename parses the base name of a catalogue file into a [Tag].
+// tagFromFilename parses the base name of a catalogue file into a [corei18n.TagValue].
 func tagFromFilename(name string) (tag corei18n.TagValue, err error) {
 	//: strip the extension; "en.json" names English.
 	base := name[:len(name)-len(path.Ext(name))]
@@ -162,7 +162,7 @@ func readCatalogue(fsys fs.FS, name string, decoder codec.Codec) (catalogue Cata
 	return entriesFrom(name, raw)
 }
 
-// entriesFrom converts a decoded catalogue file into [Entry] values.
+// entriesFrom converts a decoded catalogue file into [EntryValue] values.
 func entriesFrom(file string, raw map[string]any) (catalogue Catalogue, err error) {
 	//: one entry per key.
 	catalogue = make(Catalogue, len(raw))
@@ -182,7 +182,7 @@ func entriesFrom(file string, raw map[string]any) (catalogue Catalogue, err erro
 	return catalogue, nil
 }
 
-// entryFrom converts one decoded value into an [Entry].
+// entryFrom converts one decoded value into an [EntryValue].
 //
 // Exactly two shapes are accepted. Anything else — a number, a boolean, a
 // list, a nested map — is refused BY SHAPE rather than coerced, because every
@@ -211,7 +211,7 @@ func entryFrom(file, key string, value any) (entry EntryValue, err error) {
 		errs.String("detail", "entry is neither a pattern nor a map of CLDR forms"))
 }
 
-// countedEntry converts a decoded nested object into a counted [Entry].
+// countedEntry converts a decoded nested object into a counted [EntryValue].
 func countedEntry(file, key string, forms map[string]any) (entry EntryValue, err error) {
 	//: one pattern per declared category.
 	out := make(map[string]string, len(forms))

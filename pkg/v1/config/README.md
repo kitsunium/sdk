@@ -83,11 +83,11 @@ A default is a LAYER, not a post\-decode fallback. It is merged under every sour
 
 A violation names the OPERATOR's key \("database.max\_conns"\), never the Go field, because every format is decoded through a json round trip and the json tag is literally the key they typed.
 
-A message never contains the value that was refused. A configuration value is routinely a password, a token or a connection string, and a validation message is the one error message designed to reach a human. The error carries the violation count, the first rule and the offending keys; \[Schema.Check\] returns the full report when per\-key messages are wanted.
+A message never contains the value that was refused. A configuration value is routinely a password, a token or a connection string, and a validation message is the one error message designed to reach a human. The error carries the violation count, the first rule and the offending keys; [Schema](<#Schema>).Check returns the full report when per\-key messages are wanted.
 
 A schema that contradicts itself — a default outside the bounds it also declares, a key naming no field of the type, the same key twice, a key both required and defaulted — is refused by [NewSchema](<#NewSchema>) with SchemaInvalid, before any source is read. A schema that declares nothing is legitimate and accepts \(and still refuses an unknown key\).
 
-[SchemaSpec](<#SchemaSpec>).Rule and \[Schema.Check\] speak in the vocabulary of pkg/v1/validation: a rule is a validation.Constraint and a report is a validation.Report. They are the same types, not converted ones — this domain composes that engine rather than reimplementing it, and a rule written for an HTTP body is the same value here. The schema describes the SHAPE \(which keys, required or not, and what they default to\); the constraints on a VALUE stay where they already are.
+[SchemaSpec](<#SchemaSpec>).Rule and [Schema](<#Schema>).Check speak in the vocabulary of pkg/v1/validation: a rule is a validation.Constraint and a report is a validation.Report. They are the same types, not converted ones — this domain composes that engine rather than reimplementing it, and a rule written for an HTTP body is the same value here. The schema describes the SHAPE \(which keys, required or not, and what they default to\); the constraints on a VALUE stay where they already are.
 
 ### Where each value came from
 

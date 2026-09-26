@@ -20,9 +20,9 @@ const (
 	// algID is the frozen 1-byte wire identifier embedded in each box header.
 	algID byte = 0x01
 	// nonceLen is GCM's standard 96-bit nonce; box layout is
-	// [Version][algID][12B nonce][ciphertext||tag].
+	// [version][algID][12B nonce][ciphertext||tag].
 	nonceLen int = 12
-	// headerLen is the fixed [Version][algID] prefix length.
+	// headerLen is the fixed [version][algID] prefix length.
 	headerLen int = 2
 	// gcmTagLen is the GCM authentication tag length appended by Seal.
 	gcmTagLen int = 16

@@ -19,7 +19,7 @@ import (
 // 0040 applies: it may still change while the module is v0, said out loud, and
 // not after v1.
 type Config struct {
-	// Output is where a command's OWN output goes. It reaches an [Action] as
+	// Output is where a command's OWN output goes. It reaches a [corecli.Action] as
 	// InvocationValue.Output, so a command never has to reach for a process
 	// stream itself.
 	//

@@ -8,30 +8,25 @@
 # v1.11.1. Wiring a lane touches bazel-ci.yml and is left to a change that owns
 # that file." This is that change.
 #
-# What the suites guard is not cosmetic. compute-bumps.sh and cut-tags.sh
-# decide which tag every merge to main gets, and three of their defects are
-# invisible on review — they produce a plausible version rather than an error:
+# What the suites guard is not cosmetic. compute-bumps.sh, cut-tags.sh and
+# check-pr-size.sh decide which tag every merge to main gets, and three of the
+# defects they have had were invisible on review — each produced a plausible
+# version rather than an error:
 #
-#   1. `separator=,` in a %(trailers:…) format. git parses the trailer OPTION
-#      LIST on commas, so the comma is eaten as the list delimiter and the
-#      separator is left EMPTY. Two repeated trailers are then concatenated
-#      into one field. Measured on git 2.47.3:
-#
-#        $ git log --format="%H %(trailers:key=Release-bump,valueonly,separator=,)"
-#        <sha> minor          # from `Release-bump: mi` + `Release-bump: nor`
-#
-#        $ git log --format="%H %(trailers:key=Release-bump,valueonly,separator=%x1F)"
-#        <sha> mi^_nor        # the two values, kept apart
-#
-#      The first cuts a MINOR release from two halves of a word. Nothing in the
-#      commit, the diff or the run log says so.
+#   1. the release SIZE read out of message text. The squash message is
+#      composed from contributor commits, so a `Release-bump:` trailer could be
+#      buried by them (pkg/v0.1.35 and pkg/v0.3.4 shipped as patches that had
+#      asked for a minor, #217) or written by them (#224). ADR 0135 moved the
+#      size to a maintainer's `release:*` label on the pull request; the suites
+#      drive a gh stub (test-helpers.bash) so the label lookup, a failed lookup
+#      and an absent gh are each a named test.
 #
 #   2. a range walk without --first-parent descends into the commits a merge
-#      brought IN, so a contributor's own `Release-bump: minor` sizes the
-#      release — the exact smuggling ADR 0007 §2 gates against.
+#      brought IN, so a contributor's own commit sizes the release — the exact
+#      smuggling ADR 0007 §2 gates against.
 #
 #   3. the per-commit path check without `-m --first-parent`: a true merge shows
-#      NO files under a plain --name-only, so a maintainer's trailer on one was
+#      NO files under a plain --name-only, so a maintainer's size on one was
 #      scoped against an empty list and counted for nothing.
 #
 # Each is reproduced by a named test, and each test was confirmed to go RED
@@ -105,7 +100,7 @@ if [ -n "${CI:-}" ]; then
   done
   if [ -n "$missing" ]; then
     printf 'release-scripts-test: missing under CI:%s\n' "$missing" >&2
-    printf '  the suites would SKIP their trailer, range-walk and merge-scoping\n' >&2
+    printf '  the suites would SKIP their label, range-walk and merge-scoping\n' >&2
     printf '  cases and report success. A gate that skips is not a gate.\n' >&2
     exit 1
   fi

@@ -77,7 +77,7 @@ const outcomeUnevaluable string = "unevaluable"
 //     rule about, and which must never be read as permission;
 //   - the policy could not be evaluated at all.
 //
-// A caller that needs to tell them apart for alerting calls the [Policy] and
+// A caller that needs to tell them apart for alerting calls the [coreauthz.Policy] and
 // reads the (decision, error) pair directly; Check deliberately flattens them,
 // because the party on the other side of the response must not be able to.
 //

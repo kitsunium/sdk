@@ -45,7 +45,7 @@ type ReadinessCheckValue struct {
 	// surprising of the two behaviours.
 	//
 	// A value above the registry's ceiling is REFUSED at registration
-	// ([StaleCacheWindow]) rather than clamped: the caller asked for a
+	// (the service's StaleCacheWindow) rather than clamped: the caller asked for a
 	// staleness the SDK will not vouch for, and quietly serving a different
 	// number is the same lie in a smaller size.
 	//

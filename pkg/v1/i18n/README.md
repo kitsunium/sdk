@@ -101,7 +101,7 @@ Message patterns are trusted input — they come from catalogue files the develo
 var (
     // InvalidTag is returned by [ParseTag] for a tag outside the
     // `language[-Script][-REGION]` subset. It is NOT what a peculiar
-    // Accept-Language header produces: [Negotiator.Negotiate] skips an
+    // Accept-Language header produces: [Negotiator].Negotiate skips an
     // element it cannot use and never fails.
     InvalidTag = corei18n.InvalidTag
     // InvalidKey is returned for an empty message key, or one carrying a
@@ -315,7 +315,7 @@ type Key = corei18n.Key
 <a name="KeyLister"></a>
 ## type [KeyLister](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/i18n/i18n.go#L161>)
 
-KeyLister is the ADR 0039 sibling that enumerates a catalog's keys, reached by type assertion. \[Store.Missing\] is what it exists for.
+KeyLister is the ADR 0039 sibling that enumerates a catalog's keys, reached by type assertion. [Store](<#Store>).Missing is what it exists for.
 
 ```go
 type KeyLister = corei18n.KeyLister
@@ -353,7 +353,7 @@ It does not check the map against any language's rules — it does not know the 
 <a name="Negotiator"></a>
 ## type [Negotiator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/i18n/i18n.go#L190>)
 
-Negotiator resolves an Accept\-Language header to one of a fixed set of languages. Everything that can be wrong is refused when it is built, so \[Negotiator.Negotiate\] has no failure mode.
+Negotiator resolves an Accept\-Language header to one of a fixed set of languages. Everything that can be wrong is refused when it is built, so [Negotiator](<#Negotiator>).Negotiate has no failure mode.
 
 ```go
 type Negotiator = svci18n.Negotiator
@@ -413,7 +413,7 @@ func NewPrinter(catalog Catalog, tag Tag) (printer *Printer, err error)
 
 NewPrinter returns a [Printer](<#Printer>) rendering tag out of catalog, or refuses.
 
-It resolves the chain and allocates; \[Printer.Render\] walks it and does not. Build one per language at startup and index them by [Tag](<#Tag>) — a request then costs a map lookup, not a construction.
+It resolves the chain and allocates; [Printer](<#Printer>).Render walks it and does not. Build one per language at startup and index them by [Tag](<#Tag>) — a request then costs a map lookup, not a construction.
 
 <a name="Store"></a>
 ## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/i18n/i18n.go#L181>)
@@ -451,7 +451,7 @@ Every check is here, and every failure is a startup failure: [UnsupportedLanguag
 <a name="Tag"></a>
 ## type [Tag](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/i18n/i18n.go#L130>)
 
-Tag is a language, optionally narrowed by a script and a region: \`language\[\-Script\]\[\-REGION\]\` and deliberately nothing else. It is comparable, so it is a map key, and it holds its canonical spelling, so \[Tag.String\] allocates nothing.
+Tag is a language, optionally narrowed by a script and a region: \`language\[\-Script\]\[\-REGION\]\` and deliberately nothing else. It is comparable, so it is a map key, and it holds its canonical spelling, so [Tag](<#Tag>).String allocates nothing.
 
 ```go
 type Tag = corei18n.TagValue

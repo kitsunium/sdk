@@ -22,11 +22,11 @@
 //
 // # Semantics
 //
-// [Reaper.Start] installs an [os/signal] SIGCHLD handler and, on each signal,
+// [Reaper].Start installs an [os/signal] SIGCHLD handler and, on each signal,
 // loops syscall.Wait4 with WNOHANG until it drains every reapable child. Start is
-// idempotent. [Reaper.Stop] performs one final drain and waits for the loop's
+// idempotent. [Reaper].Stop performs one final drain and waits for the loop's
 // goroutine to exit, so a Start/Stop cycle leaks neither zombies nor goroutines
-// and may be repeated. [Reaper.ReapOnce] runs a single non-blocking sweep and is
+// and may be repeated. [Reaper].ReapOnce runs a single non-blocking sweep and is
 // safe to call concurrently with the loop — each child's exit is observed
 // exactly once across whoever sweeps.
 //

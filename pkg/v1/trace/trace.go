@@ -28,7 +28,7 @@
 //	defer span.End()
 //	span.SetAttrs(trace.Int64("amount.cents", 1299))
 //
-// [Recorder.Collect] drains the finished spans; [EncodeOTLPJSON] turns them into
+// [Recorder].Collect drains the finished spans; [EncodeOTLPJSON] turns them into
 // the bytes an OTLP collector accepts, and [NewOTLPHTTPExporter] POSTs them.
 //
 // # Sampling is decided ONCE, at the root

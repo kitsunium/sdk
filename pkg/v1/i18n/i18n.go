@@ -126,7 +126,7 @@ const FormMany Form = corei18n.FormMany
 // Tag is a language, optionally narrowed by a script and a region:
 // `language[-Script][-REGION]` and deliberately nothing else. It is
 // comparable, so it is a map key, and it holds its canonical spelling, so
-// [Tag.String] allocates nothing.
+// [Tag].String allocates nothing.
 type Tag = corei18n.TagValue
 
 // Key names a message inside a catalogue. It is a developer identifier —
@@ -157,7 +157,7 @@ type Args = corei18n.Args
 type Catalog = corei18n.Catalog
 
 // KeyLister is the ADR 0039 sibling that enumerates a catalog's keys, reached
-// by type assertion. [Store.Missing] is what it exists for.
+// by type assertion. [Store].Missing is what it exists for.
 type KeyLister = corei18n.KeyLister
 
 // Fallbacker is the ADR 0039 sibling that names a catalog's fallback language.
@@ -186,7 +186,7 @@ type Printer = svci18n.Printer
 
 // Negotiator resolves an Accept-Language header to one of a fixed set of
 // languages. Everything that can be wrong is refused when it is built, so
-// [Negotiator.Negotiate] has no failure mode.
+// [Negotiator].Negotiate has no failure mode.
 type Negotiator = svci18n.Negotiator
 
 // Plural is one language's CLDR plural specification: the categories it can
@@ -196,7 +196,7 @@ type Plural = svci18n.PluralValue
 var (
 	// InvalidTag is returned by [ParseTag] for a tag outside the
 	// `language[-Script][-REGION]` subset. It is NOT what a peculiar
-	// Accept-Language header produces: [Negotiator.Negotiate] skips an
+	// Accept-Language header produces: [Negotiator].Negotiate skips an
 	// element it cannot use and never fails.
 	InvalidTag = corei18n.InvalidTag
 	// InvalidKey is returned for an empty message key, or one carrying a
@@ -346,7 +346,7 @@ func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback Tag) (store *S
 
 // NewPrinter returns a [Printer] rendering tag out of catalog, or refuses.
 //
-// It resolves the chain and allocates; [Printer.Render] walks it and does not.
+// It resolves the chain and allocates; [Printer].Render walks it and does not.
 // Build one per language at startup and index them by [Tag] — a request then
 // costs a map lookup, not a construction.
 func NewPrinter(catalog Catalog, tag Tag) (printer *Printer, err error) {
