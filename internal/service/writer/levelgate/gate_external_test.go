@@ -90,6 +90,77 @@ func TestGateWrite(t *testing.T) {
 	}
 }
 
+// TestFloorAppliesEveryFloorInfoIncluded pins what separates Floor from New: at
+// Info, New hands the sink back unwrapped — the writer configuration's
+// "inherit" — so a Debug record would pass; Floor gates there like anywhere
+// else. Reusing New for a caller's floor fails the first row.
+func TestFloorAppliesEveryFloorInfoIncluded(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name       string
+		min        level.Level
+		recordLvl  level.Level
+		wantPassed bool
+	}
+	tests := []tc{
+		{"Info floor drops Debug", level.Info, level.Debug, false},
+		{"Info floor passes Info", level.Info, level.Info, true},
+		{"Warn floor drops Info", level.Warn, level.Info, false},
+		{"Debug floor passes Debug", level.Debug, level.Debug, true},
+		{"Error floor passes Error", level.Error, level.Error, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		inner := &recordingSink{}
+		gate := levelgate.Floor(inner, c.min)
+		//: a floor is always a gate, never the sink itself.
+		if gate == corelogger.Sink(inner) {
+			t.Fatalf("%s: Floor returned the sink unwrapped", c.name)
+		}
+		//: a drop is a successful no-op, like New's.
+		if n, err := gate.Write(t.Context(), corelogger.RecordEvent{Level: c.recordLvl}, []byte("xyz")); err != nil || n != 3 {
+			t.Fatalf("%s: Write=(%d,%v) want (3,nil)", c.name, n, err)
+		}
+		//: only at/above-floor records reach the wrapped sink.
+		if passed := inner.writes == 1; passed != c.wantPassed {
+			t.Errorf("%s: passed=%v want %v", c.name, passed, c.wantPassed)
+		}
+	}
+	//: one subtest per case.
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestFloorOverNothingIsNothing pins the nil case: a gate over no sink would
+// fail on its first record, so Floor answers nil, which a fan-out skips.
+func TestFloorOverNothingIsNothing(t *testing.T) {
+	t.Parallel()
+	//: nil in, nil out — never a gate with nothing behind it.
+	if got := levelgate.Floor(nil, level.Warn); got != nil {
+		t.Fatalf("Floor(nil) = %T, want nil", got)
+	}
+}
+
+// TestFloorDelegatesFlushAndClose pins that Floor's gate buffers and owns
+// nothing: both lifecycle calls reach the wrapped sink once.
+func TestFloorDelegatesFlushAndClose(t *testing.T) {
+	t.Parallel()
+	inner := &recordingSink{}
+	gate := levelgate.Floor(inner, level.Info)
+	//: forwarded verbatim.
+	if err := gate.Flush(t.Context()); err != nil || inner.flushes != 1 {
+		t.Errorf("Flush: err=%v flushes=%d want nil,1", err, inner.flushes)
+	}
+	//: forwarded verbatim.
+	if err := gate.Close(); err != nil || inner.closes != 1 {
+		t.Errorf("Close: err=%v closes=%d want nil,1", err, inner.closes)
+	}
+}
+
 func TestGateFlushClose(t *testing.T) {
 	t.Parallel()
 	type tc struct {

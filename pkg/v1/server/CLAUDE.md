@@ -24,7 +24,7 @@ in the dimension that motivated the domain, whatever else it gained.
 | `Conn` | one accepted connection; **embeds `net.Conn`** |
 | `Handler`, `HandlerFunc`, `Middleware`, `Chain` | the handler shape |
 | `PacketGroup`, `Packet`, `PacketHandler`, `PacketHandlerFunc`, `PacketMiddleware`, `ChainPacket` | the datagram half: one handler per packet, the same chain shape |
-| `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting |
+| `State`, `ListenerState`, `Phase`, `Phase*` | lifecycle reporting — and the counters, `AcceptBackoffs` among them: the waits a failing Accept took (ADR 0130) |
 | `Listen`, `Adopt` | where a group listens: an address it binds, or a socket a supervisor passed (`LISTEN_FDNAMES`) — a missing one is `SocketAdoptFailed`, never a silent bind |
 | `TLS` | TLS, or mutual TLS when the identity requires a client certificate |
 | `ReadTimeout`, `WriteTimeout`, `IdleTimeout` | per-operation bounds, refreshed per read/write (per request on an HTTP group) |
@@ -38,10 +38,11 @@ in the dimension that motivated the domain, whatever else it gained.
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
 
-`sse/` is the Server-Sent Events half and `websocket/` is WebSocket (RFC 6455),
-each in its own subpackage — see `pkg/v1/server/sse/CLAUDE.md` and
-`pkg/v1/server/websocket/CLAUDE.md`. Both also record why there is no **client**
-for their protocol and what would have to change in
+`sse/` is the Server-Sent Events half, `websocket/` is WebSocket (RFC 6455) and
+`static/` serves a file tree safely (ADR 0130), each in its own subpackage — see
+`pkg/v1/server/sse/CLAUDE.md`, `pkg/v1/server/websocket/CLAUDE.md` and
+`pkg/v1/server/static/CLAUDE.md`. The first two also record why there is no
+**client** for their protocol and what would have to change in
 `internal/core/net/response.go` for one.
 
 ## Why-this-shape

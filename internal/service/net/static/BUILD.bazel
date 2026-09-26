@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "static",
+    srcs = [
+        "config.go",
+        "lookup.go",
+        "lookup_other.go",
+        "lookup_unix.go",
+        "lookup_windows.go",
+        "serve.go",
+        "static.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/net/static",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":static",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "static_test",
+    srcs = [
+        "lookup_external_test.go",
+        "serve_external_test.go",
+        "static_external_test.go",
+    ],
+    deps = [
+        ":static",
+        "//internal/core/net",
+        "//internal/kernel/errs",
+    ],
+)

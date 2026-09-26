@@ -490,6 +490,10 @@ codes:
     const: CodeWSConnMisconfigured
     hex: "0x00_02_0B_21"
     package: internal/core/net
+  - code: "0.2.11.34"
+    const: CodeStaticMisconfigured
+    hex: "0x00_02_0B_22"
+    package: internal/core/net
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"
@@ -2005,6 +2009,22 @@ codes:
   - code: "0.3.59.6"
     const: CodeNotifyFailed
     hex: "0x00_03_3B_06"
+    package: internal/service/health
+  - code: "0.3.59.7"
+    const: CodeAskMisconfigured
+    hex: "0x00_03_3B_07"
+    package: internal/service/health
+  - code: "0.3.59.8"
+    const: CodeAskUnreachable
+    hex: "0x00_03_3B_08"
+    package: internal/service/health
+  - code: "0.3.59.9"
+    const: CodeAskTimeout
+    hex: "0x00_03_3B_09"
+    package: internal/service/health
+  - code: "0.3.59.10"
+    const: CodeAskNotReady
+    hex: "0x00_03_3B_0A"
     package: internal/service/health
   - code: "0.3.60.1"
     const: CodeUnsupportedLanguage

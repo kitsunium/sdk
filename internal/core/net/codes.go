@@ -154,3 +154,8 @@ const CodeWSConnClosed errs.Code = 0x00_02_0B_20 // 0.2.11.32
 // interpret rather than guess at: a negative ping interval or write budget, or
 // a non-positive size ceiling (ADR 0031).
 const CodeWSConnMisconfigured errs.Code = 0x00_02_0B_21 // 0.2.11.33
+
+// CodeStaticMisconfigured identifies a static file handler refused at
+// construction: no file tree to serve, a security header value the handler
+// will not send, or a Referrer-Policy token no browser recognises (ADR 0130).
+const CodeStaticMisconfigured errs.Code = 0x00_02_0B_22 // 0.2.11.34

@@ -10,6 +10,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcresilience "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // drainPollInterval is how often the drain re-checks the in-flight count.
@@ -329,7 +330,22 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 	return nil
 }
 
+// acceptDelay returns the wait after the failures-th consecutive failed Accept:
+// 5 ms, doubling, held at 1 s — the curve net/http's Serve uses, drawn from the
+// SDK's one published backoff (ADR 0103).
+func acceptDelay(failures int) time.Duration {
+	//: base, ceiling and growth as net/http has them; no jitter.
+	return svcresilience.BackoffValue{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay(failures)
+}
+
 // acceptLoop accepts connections until its listener is closed.
+//
+// An Accept that fails for any reason but the listener closing — the process
+// out of descriptors, typically, with a connection still queued — is retried
+// after a backoff on the engine's clock, never at once: retrying at once spins
+// a core for as long as the condition lasts, one per listener. The backoff
+// starts over at the next accepted connection, and a listener closed during
+// one ends the loop without waiting it out (ADR 0130).
 //
 // Goroutine lifecycle: one per listener, started by bindGroup and owned by the
 // Server. It exits when Close or Shutdown closes the listener; its inFlight
@@ -337,23 +353,47 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 // connection, each of which takes its own token.
 func (s *Server) acceptLoop(bound *boundListener, group *StreamGroup, handler corenet.ConnHandler) {
 	defer s.inFlight.Done()
+	failures := 0
 	//: accept until the listener is closed beneath us.
 	for {
 		raw, err := bound.ln.Accept()
-		//: a closed listener ends the loop; anything else is transient and the
-		//: loop continues, because one failed accept must not stop the server.
+		//: a closed listener ends the loop; anything else waits, then retries,
+		//: because one failed accept must not stop the server — nor spin it.
 		if err != nil {
 			//: the listener was closed by Close or Shutdown.
 			if errors.Is(err, stdnet.ErrClosed) {
 				//: Close or Shutdown ended this loop deliberately.
 				return
 			}
+			failures++
+			s.acceptBackoffs.Add(1)
+			//: closed while waiting: stop now, not at the end of the wait.
+			if !s.backOff(bound, acceptDelay(failures)) {
+				return
+			}
 			continue
 		}
+		failures = 0
 		s.total.Add(1)
 		s.active.Add(1)
 		s.inFlight.Add(1)
 		go s.serve(raw, group, handler)
+	}
+}
+
+// backOff waits delay on the engine's clock, or until the listener closes; it
+// reports whether the loop should accept again.
+func (s *Server) backOff(bound *boundListener, delay time.Duration) bool {
+	timer := s.clk.NewTimer(delay)
+	defer timer.Stop()
+	//: whichever comes first: the wait's end, or the listener closing.
+	select {
+	//: waited out: accept again.
+	case <-timer.C():
+		return true
+	//: Close or Shutdown closed the listener during the wait.
+	case <-bound.closedSignal():
+		return false
 	}
 }
 

@@ -264,4 +264,14 @@ var (
 		"The WebSocket options are not valid",
 		"core/net: a negative interval or budget, or a non-positive size ceiling, was supplied",
 		errs.WithExitCode(exitConfig))
+
+	// StaticMisconfigured is returned when a static file handler is built with
+	// nothing it can serve safely: no file tree, a header value carrying a
+	// control character, or a Referrer-Policy token no browser knows — which a
+	// browser ignores, silently falling back to a weaker default. The "option"
+	// field names which (ADR 0130).
+	StaticMisconfigured = errs.Define(CodeStaticMisconfigured, "STATIC_MISCONFIGURED",
+		"The static file handler configuration is not valid",
+		"core/net: a nil file tree, a header value with a control character, or an unknown Referrer-Policy token",
+		errs.WithExitCode(exitConfig))
 )

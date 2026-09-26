@@ -47,7 +47,8 @@ internal/
                            stdhash, streamaead, x25519)
                    codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
                            form, json, msgpack, multipart, ndjson, pem, tlv, toml,
-                           xml, yaml; + strictjson, a decoder and not a Format)
+                           xml, yaml; + strictjson, a decoder and not a Format;
+                           + jsonshape, a type's wire shape, not a Format)
                    queue  (file broker + memory broker + Consume loop
                            waiting on the Waker sibling)
                    proc   (cgroup, childwait, exec, memlimit, reaper,
@@ -57,7 +58,7 @@ internal/
                            fold onto owners + goroutine dumps, grouped)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
-                   net    (tlsid, client, server, sse, websocket)
+                   net    (tlsid, client, server, sse, websocket, static)
                    mail   (MIME composition + SMTP + memory and capture
                            doubles; spool/ — the durable outbox)
                    metrics (in-memory meter + text/prometheus/otlpjson
@@ -96,7 +97,9 @@ pkg/
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── events/    (in-process synchronous bus — ADR 0053; NOT a queue)
     ├── codec/     (blank-imports all 16 service codecs + transform;
-    │                 + strictjson/ — one document read one way — ADR 0102)
+    │                 + strictjson/ — one document read one way — ADR 0102;
+    │                 + jsonshape/ — a type's wire shape — ADR 0133;
+    │                 + json/, yaml/, toml/ — one format each — ADR 0134)
     ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
     ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
@@ -108,7 +111,8 @@ pkg/
     │                 — Self, Build — ADR 0100)
     ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
     └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
-    └── server/    (+ sse/ — ADR 0029/0043, + websocket/ — ADR 0047)
+    └── server/    (+ sse/ — ADR 0029/0043, + websocket/ — ADR 0047,
+                     + static/ — a file tree served by name — ADR 0130)
     └── secret/    (a Value no rendering writes down, versioned stores, keyring, rotator — ADR 0096)
     └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
     └── profiling/ (the process's CPU, heap and goroutines, folded onto your owners — ADR 0121)
@@ -340,5 +344,10 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 - ADR 0112 — a loop that must keep running is supervised, beside the lifecycle that starts it: `lifecycle.NewSupervisor` restarts a function after every early end (error, nil return, recovered panic) on `resilience.BackoffValue`, reports every run and restart to an observer, joins on `Stop`, waits on the injected clock, and is a `Lifecycle` component — `docs/adr/0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md`
 - ADR 0120 — a state machine keeps an agenda, not a sweep: a new domain (`core/statemachine` `0.2.56.*`, `service/statemachine` `0.3.88.*`, facade `pkg/v1/statemachine`). The caller's `Store[E]` (frozen at five: `Key`/`Get`/`Insert`/`Replace`/`All`, absence an answer — `found`/`inserted`/`replaced` — never an error) stays the source of truth; a `Journal[S]` (frozen at three, variadic) keeps each entity's record — state, entered-at, history — so a delay survives a restart. A `Definition` declares events (`On`), delays (`After`), deadlines (`At`), guards (`When`, asked on each write, never on a clock) and hooks; every mistake is refused at once. Transitions of one entity run one at a time under a per-entity, abandonable lock — OnEnter hooks, write (insert, or replace that never resurrects), step, release, then OnTransition hooks — and nothing is held across a panic; an OnEnter hook firing its own machine is `REENTRANT`, not a deadlock; writes and deletes during a transition land on its flight, and a delete during a read the machine records wins over it. The journal is written one key at a time under a per-key gate and never under the bookkeeping mutex, so a slow journal holds back one entity and a journal or `Report` may read the machine. The loop keeps ONE heap entry per entity with lazy deletion bounded at 2N + 64, evaluates guards on its own goroutine, fires the first declared transition due, one per entity per run, paced by `MinGap`, and backs a failing entity off alone: 4.1 µs per due transition at 100 000 entities where the sweep it replaces searched in 68 ms — `docs/adr/0120-a-state-machine-keeps-an-agenda-not-a-sweep.md`
 - ADR 0121 — a process reads its own profiles, and the attribution is the caller's: `profiling` (service `0.3.89.*`, facade `pkg/v1/profiling`, no core — the attribution is a parameter, not a port). `CaptureCPU` over a window in (0, 5 min], `PROFILER_BUSY` when the runtime's one profiler is taken rather than queued, no partial profile on cancellation; `CaptureHeap` after a collection; `Parse` written from profile.proto with the standard library — strict (a varint past 64 bits refused), bounded at 64 MiB compressed and inflated and at `MaxFrames` (4 Mi) frames built, identical to Google's decoder on real profiles, fuzzed; `Fold` in the sample type's own unit, never rounded, owners plus unattributed equal to the total exactly; `ParseGoroutines` that never fails (flags stripped, wait reasons kept, Windows drives, labels in the runtime's quoting) with the counted profile's labels matched when the headers carry none; `GroupGoroutines`; `CanonicalName`. A heap profile is sampled: tests ask where the bytes are — `docs/adr/0121-a-process-reads-its-own-profiles-and-the-attribution-is-the-callers.md`
+- ADR 0130 — a file tree is served by name and never listed, and a failing accept waits: `server/static` (`New(fsys, Config)` over `internal/service/net/static`) cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types against the host's MIME tables, and answers a NAME the file system refuses 404 and the tree's own failure 500 — measured, `http.FileServerFS` lists, serves POST, sends no header and answers a 300-byte component or a `%00` with a client-triggerable 500; one core sentinel, `STATIC_MISCONFIGURED` `0.2.11.34`. The engine's accept loop retried a failed Accept at once — 1.16 s of CPU per second under descriptor exhaustion — and now waits net/http's curve (5 ms doubling to 1 s, `resilience.BackoffValue`) on its own clock, ended at once by a closed listener, counted in `State.AcceptBackoffs` (amends ADR 0029) — `docs/adr/0130-a-file-tree-is-served-by-name-and-a-failing-accept-waits.md`
+- ADR 0131 — a readiness probe asks the loopback, and believes only 200: `health.Ask` — what a container's HEALTHCHECK runs from an image with no shell and no curl — maps the address the process LISTENS on to the loopback of its family (`::` to `::1`, not `127.0.0.1`), GETs over a fresh transport that never proxies, keeps nothing alive and follows no redirect, reads at most 64 KiB of the body and never quotes it, and bounds the whole on the injected clock (`DefaultAskTimeout`, 3 s); the status comes back, and `ASK_MISCONFIGURED` / `ASK_UNREACHABLE` / `ASK_TIMEOUT` / `ASK_NOT_READY` (`0.3.59.7`–`10`) say why — `docs/adr/0131-a-readiness-probe-asks-the-loopback-and-believes-only-200.md`
+- ADR 0132 — a floor a caller names is the floor applied: `logger.LevelGate(sink, min)` over a new `levelgate.Floor`, the writer gate without the configuration's reading of Info as "inherit" — measured, a branch gated at Info through `levelgate.New` received every Debug record; a drop is a successful no-op, Flush and Close delegate, a nil sink yields nil — `docs/adr/0132-a-floor-a-caller-names-is-the-floor-applied.md`
+- ADR 0133 — a Go type's wire shape is what encoding/json writes: `codec/jsonshape` (`Of` / `For[T]`) describes kinds, members, Optional (encoding's, through an embedded pointer included), Nullable and `,string`, resolving members by json/v2's field walk under the v1 options Go 1.27 builds `encoding/json` with — promotion, dominance, the tag grammar and `embed`, the four spellings where it differs from `GOEXPERIMENT=nojsonv2` measured — with opaque marshalers, and each member's Go field (`GoName`, `Tag`, `Index`) for a framework's own tags; in the codec tree, not `validation`; pinned against `json.Marshal` as the oracle — `docs/adr/0133-a-go-types-wire-shape-is-what-encoding-json-writes.md`
+- ADR 0134 — a program links the codecs it imports: `pkg/v1/codec/json`, `yaml` and `toml` each blank-import ONE service codec and export an untyped `Format`, so a program reading its configuration through `config.FSSource` links `yaml.v3` and not the MongoDB driver `pkg/v1/codec` brings; a codec registers itself in its own initialisation, which Go runs once, so importing a facade beside `pkg/v1/codec` registers it once — `docs/adr/0134-a-program-links-the-codecs-it-imports.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

@@ -64,6 +64,7 @@ go_test(
         "compressed_fuzz_external_test.go",
         "compressed_internal_test.go",
         "fixtures_integration_test.go",
+        "formats_external_test.go",
         "multipart_external_test.go",
         "promote_internal_test.go",
     ],
@@ -73,6 +74,9 @@ go_test(
         "//internal/core/transform",
         "//internal/kernel/errs",
         "//internal/service/codec/flatbuffers",
+        "//pkg/v1/codec/json",
+        "//pkg/v1/codec/toml",
+        "//pkg/v1/codec/yaml",
         "//pkg/v1/errs",
     ],
 )

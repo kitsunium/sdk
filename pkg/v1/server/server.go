@@ -58,6 +58,14 @@
 // indistinguishable from a working server, so it is surfaced rather than logged
 // once at startup.
 //
+// An Accept that fails for any reason but its listener closing — the process
+// out of file descriptors, typically — is retried after a wait, never at once:
+// 5 ms, doubling, held at one second, started over by the next accepted
+// connection, as net/http's own Serve does. Retrying at once would spin a core
+// per listener for as long as the condition lasts. A shutdown during a wait
+// ends it at once, and [State].AcceptBackoffs counts the waits, so a server
+// that cannot accept says so.
+//
 // # Connections that never end
 //
 // A drain waits for in-flight work to finish, which assumes it eventually does.

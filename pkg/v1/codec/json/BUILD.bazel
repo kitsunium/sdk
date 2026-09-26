@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "json",
+    srcs = ["json.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/codec/json",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/service/codec/json"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":json",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "json_test",
+    srcs = ["json_external_test.go"],
+    deps = [
+        ":json",
+        "//internal/core/codec",
+        "//pkg/v1/config",
+    ],
+)

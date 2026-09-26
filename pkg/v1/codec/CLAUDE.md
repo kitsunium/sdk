@@ -88,6 +88,20 @@ facade never documented them, so there was no claim to correct.
 `multipart_external_test.go` imports nothing under `internal/` — it is the
 proof that the three names suffice.
 
+## One format at a time (ADR 0134)
+
+Importing this package registers every format, and so links every codec's
+library — the MongoDB driver for BSON, CBOR, MessagePack, TOML, YAML — into a
+program that may read one of them. `json/`, `yaml/` and `toml/` are facades that
+each blank-import ONE service codec and nothing else: a program that reads its
+configuration through `config.FSSource` imports `pkg/v1/codec/yaml` and links
+`yaml.v3` alone. Each exports only `Format`, an untyped constant that goes into a
+`string` or a `codec.Format` parameter without a conversion. Registration happens
+in the service codec's own initialisation, which Go runs once, so importing a
+per-format facade beside this package registers the format once —
+`TestAFormatImportedTwiceIsRegisteredOnce`. The other thirteen codecs follow
+the same pattern when a consumer needs one of them alone.
+
 ## Conventions
 
 - **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 24 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `Form`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`, `Base58`, `Base62`, `BSON`, `Multipart`) are the contract. Their string values are frozen post-v1.0.0.
@@ -104,7 +118,7 @@ proof that the three names suffice.
 
 - Add a new `Format` constant without registering its service codec under the same name and updating `MODULE.bazel` if a new external dependency is needed.
 - Re-export `corecodec.Register` here — registration is `init()`-driven by service packages; consumers do not register codecs.
-- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/codec`.
+- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/codec`, or on a per-format facade (`json/`, `yaml/`, `toml/`) to link one format.
 - Rename an existing `Format` string value — it's part of the frozen public contract.
 - Surface `errs.PrivateOf` output from codec errors to end users; the Private field names internal package paths.
 
@@ -120,4 +134,8 @@ cd pkg/v1 && GOWORK=off go test -race ./codec/...
 
 ## Subtree
 
-_(none — every codec lives under `internal/service/codec/*` and is reached via the universal dispatch above. The legacy byte-level `baseenc/` subpackage was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`.)_
+Every codec lives under `internal/service/codec/*` and is reached via the universal dispatch above; the legacy byte-level `baseenc/` subpackage was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`. The subpackages are not codecs, or register one:
+
+- `strictjson/` — one JSON document read one way — see `strictjson/CLAUDE.md` (ADR 0102)
+- `jsonshape/` — a Go type's wire shape under encoding/json — see `jsonshape/CLAUDE.md` (ADR 0133)
+- `json/`, `yaml/`, `toml/` — one format registered alone — see their `CLAUDE.md` (ADR 0134)

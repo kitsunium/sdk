@@ -4,19 +4,20 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **59 packages**: 54 at the top level, plus five nested ones
+`pkg/v1` ships **64 packages**: 54 at the top level, plus ten nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
-`codec/strictjson`). They are grouped below by the job they do, and each links
+`server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/json`,
+`codec/yaml`, `codec/toml`). They are grouped below by the job they do, and each links
 to its own generated `README.md`.
 
 ### Observability
 
 | Package | What it does |
 |---|---|
-| [`logger`](./pkg/v1/logger) + [`writer`](./pkg/v1/logger/writer), [`slogbridge`](./pkg/v1/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. |
+| [`logger`](./pkg/v1/logger) + [`writer`](./pkg/v1/logger/writer), [`slogbridge`](./pkg/v1/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. `LevelGate` gives one branch of a fan-out a floor of its own — a terminal at Info, a viewer at Debug. |
 | [`metrics`](./pkg/v1/metrics) | The OpenTelemetry metrics **data model**, implemented from the specification with **zero** `go.opentelemetry.io` imports. Typed attributes whose kind is part of the series identity, explicit delta/cumulative temporality, OTLP/JSON on the wire. The Prometheus exporter is a deliberately lossy connector and says which losses it takes. |
 | [`trace`](./pkg/v1/trace) | Distributed tracing on the OTel trace model + W3C Trace Context, both written from their documents. The sampling decision is taken once at the root and travels in the `sampled` bit, so a trace never has holes. A malformed `traceparent` starts a new trace and never fails a request. |
-| [`health`](./pkg/v1/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. |
+| [`health`](./pkg/v1/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. `Ask` is the other end — the question a container's HEALTHCHECK asks, from a binary in an image with no shell and no curl: ready means 200 and nothing else, and every other outcome has its own code. |
 | [`profiling`](./pkg/v1/profiling) | The process's own CPU, heap and goroutines. A CPU window and the live heap captured through `runtime/pprof` — one CPU profiler per process, so a second capture is refused rather than queued — the pprof format decoded with the standard library, samples folded onto owners **you** name so the parts add up to the total exactly, and the runtime's goroutine dump read into goroutines and grouped. A heap profile is sampled, and the doc says so first. |
 
 ### Application plumbing
@@ -40,7 +41,7 @@ to its own generated `README.md`.
 
 | Package | What it does |
 |---|---|
-| [`server`](./pkg/v1/server) + [`sse`](./pkg/v1/server/sse), [`websocket`](./pkg/v1/server/websocket) | Inbound HTTP with TLS/mTLS identity, per-phase deadlines and policy; Server-Sent Events; and RFC 6455 WebSocket written in the stdlib, whose MUST-fails are enforced rather than tolerated. Draining is **announced** to the handler, never imposed. |
+| [`server`](./pkg/v1/server) + [`sse`](./pkg/v1/server/sse), [`websocket`](./pkg/v1/server/websocket), [`static`](./pkg/v1/server/static) | Inbound HTTP with TLS/mTLS identity, per-phase deadlines and policy; Server-Sent Events; and RFC 6455 WebSocket written in the stdlib, whose MUST-fails are enforced rather than tolerated. `static` serves a file tree — an embedded single-page application — the way `http.FileServerFS` does not: never a directory listing, never HTML for a missing script, and the security headers on every answer. Draining is **announced** to the handler, never imposed. |
 | [`client`](./pkg/v1/client) | The outbound half over the same substrate: policy, per-phase deadlines, call hooks. |
 | [`tlsid`](./pkg/v1/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
 | [`view`](./pkg/v1/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
@@ -51,7 +52,7 @@ to its own generated `README.md`.
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `json`, `yaml` and `toml` register one format each, so a program reading YAML links `yaml.v3` and not the MongoDB driver. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |

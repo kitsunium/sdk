@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "static",
+    srcs = ["static.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/server/static",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/net",
+        "//internal/service/net/static",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":static",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "static_test",
+    srcs = ["static_external_test.go"],
+    deps = [":static"],
+)

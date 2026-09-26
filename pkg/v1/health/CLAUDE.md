@@ -8,6 +8,14 @@ liveness probes, and the two check types that keep them apart.
 `README.md` is generated from the package doc comment (rule 10) — edit
 `health.go`, then `cd pkg/v1 && GOWORK=off go generate ./health/...`.
 
+## Asking a running process
+
+`Ask` (with `AskConfig`, `DefaultAskTimeout`, `MaxAskDrainBytes` and the four
+`Ask*` sentinels) is the client half — what a container's HEALTHCHECK runs in an
+image with no shell and no curl (ADR 0131). It returns the status the process
+answered and a nil error exactly on 200. The address is the one the process
+LISTENS on; an unspecified host is dialled on the loopback of its family.
+
 ## Why-this-shape
 
 The liveness registration takes a **context-free** function and the

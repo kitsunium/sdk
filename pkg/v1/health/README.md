@@ -79,14 +79,30 @@ There are three handler constructors rather than one that reads the probe from t
 
 [Component](<#Component>) adapts a registry to pkg/v1/lifecycle. Add it LAST: added last it starts last, so its startup checks run after everything they depend on is up; and added last it stops FIRST, so readiness flips to not\-ready before a single component begins closing. That ordering is what lets an orchestrator withdraw the replica from routing before the drain begins, instead of draining against traffic that keeps arriving.
 
+### Asking a running process
+
+[Ask](<#Ask>) is the other end: the question a container's HEALTHCHECK asks, from a binary that ships in an image with no shell and no curl to ask it with. The same executable answers it as a subcommand:
+
+```
+status, err := health.Ask(ctx, health.AskConfig{Addr: ":4000", Path: "/readyz"})
+if err != nil {
+	fmt.Fprintln(os.Stderr, err) // why: ASK_UNREACHABLE, ASK_TIMEOUT, ASK_NOT_READY
+	os.Exit(1)
+}
+```
+
+Addr is the address the process LISTENS on, spelled as its listener was given it; a host that names no particular address — empty, 0.0.0.0, :: — is dialled on this machine's loopback of the same family, since no connection can be made to an unspecified address. Ready means one thing: the process answered 200. The exchange is bounded by [DefaultAskTimeout](<#StatusUnhealthy>) \(or \[AskConfig.Timeout\]\) and by the caller's context, follows no redirect, goes through no proxy whatever the environment says, reads at most [MaxAskDrainBytes](<#StatusUnhealthy>) of the body and closes it, and no byte of that body ever reaches an error: [AskNotReady](<#InvalidCheck>) carries the status alone. The body is part of the answer: a process that sends 200 and then stalls until the bound ends has not answered within it, and gets [AskTimeout](<#InvalidCheck>).
+
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func Ask\(ctx context.Context, cfg AskConfig\) \(status int, err error\)](<#Ask>)
 - [func Component\(registry Health, name string\) corelc.ComponentValue](<#Component>)
 - [func NewLivenessHandler\(registry Health, cfg HandlerConfig\) http.Handler](<#NewLivenessHandler>)
 - [func NewReadinessHandler\(registry Health, cfg HandlerConfig\) http.Handler](<#NewReadinessHandler>)
 - [func NewStartupHandler\(registry Health, cfg HandlerConfig\) http.Handler](<#NewStartupHandler>)
+- [type AskConfig](<#AskConfig>)
 - [type Check](<#Check>)
 - [type Config](<#Config>)
 - [type HandlerConfig](<#HandlerConfig>)
@@ -131,6 +147,14 @@ const (
     // MaxCacheAge is the ceiling on ReadinessCheck.MaxAge. Above it, a
     // registration is refused rather than clamped.
     MaxCacheAge time.Duration = svchealth.MaxCacheAge
+    // DefaultAskTimeout is the budget an Ask gets when AskConfig.Timeout is
+    // zero: three seconds, an order of magnitude under Docker's own
+    // HEALTHCHECK timeout, so a probe that gets no answer says why first.
+    DefaultAskTimeout time.Duration = svchealth.DefaultAskTimeout
+    // MaxAskDrainBytes is how much of a response body Ask reads before it
+    // closes the connection: enough for any readiness answer to end politely,
+    // and a bound on one that never ends.
+    MaxAskDrainBytes int64 = svchealth.MaxAskDrainBytes
 )
 ```
 
@@ -173,11 +197,35 @@ var (
     // NotifyFailed reaches Config.OnNotifyError when an opt-in sd_notify
     // datagram could not be delivered.
     NotifyFailed = svchealth.NotifyFailed
+    // AskMisconfigured refuses an Ask no answer could satisfy — an address
+    // with no usable port, a path that is not absolute, a negative timeout —
+    // before anything is dialled. The "argument" field names which.
+    AskMisconfigured = svchealth.AskMisconfigured
+    // AskUnreachable reports an Ask the process never answered because the
+    // connection or the request failed; the transport's error is the cause.
+    AskUnreachable = svchealth.AskUnreachable
+    // AskTimeout reports an Ask with no answer when its budget, or the
+    // caller's context, ended. A caller's own context error stays in the
+    // chain, so errors.Is answers context.Canceled or DeadlineExceeded too.
+    AskTimeout = svchealth.AskTimeout
+    // AskNotReady reports an Ask the process answered with a status other
+    // than 200 — a redirect included, since none is followed. The "status"
+    // field carries it; the body never does.
+    AskNotReady = svchealth.AskNotReady
 )
 ```
 
+<a name="Ask"></a>
+## func [Ask](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L360>)
+
+```go
+func Ask(ctx context.Context, cfg AskConfig) (status int, err error)
+```
+
+Ask asks the process listening on cfg.Addr whether it is ready: one GET of cfg.Path over plain HTTP, the question a container's HEALTHCHECK asks. It returns the status the process answered — zero when no whole answer, body included, arrived within the bound — and a nil error exactly when that status is 200; otherwise the error is AskMisconfigured, AskUnreachable, AskTimeout or AskNotReady. See the package documentation for what the exchange refuses to do.
+
 <a name="Component"></a>
-## func [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L272>)
+## func [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L325>)
 
 ```go
 func Component(registry Health, name string) corelc.ComponentValue
@@ -188,7 +236,7 @@ Component adapts a registry to pkg/v1/lifecycle: its Start runs the startup chec
 Add it LAST — see the package documentation for why one rule covers both directions.
 
 <a name="NewLivenessHandler"></a>
-## func [NewLivenessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L295>)
+## func [NewLivenessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L348>)
 
 ```go
 func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -197,7 +245,7 @@ func NewLivenessHandler(registry Health, cfg HandlerConfig) http.Handler
 NewLivenessHandler serves the liveness probe: 200 unless the process is irrecoverable. Nothing outside the process can make it return 503, because nothing outside the process can be registered on it.
 
 <a name="NewReadinessHandler"></a>
-## func [NewReadinessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L287>)
+## func [NewReadinessHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L340>)
 
 ```go
 func NewReadinessHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -206,7 +254,7 @@ func NewReadinessHandler(registry Health, cfg HandlerConfig) http.Handler
 NewReadinessHandler serves the readiness probe: 200 while the replica can take traffic \(healthy OR degraded\), 503 otherwise — including while starting and after Drain.
 
 <a name="NewStartupHandler"></a>
-## func [NewStartupHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L279>)
+## func [NewStartupHandler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L332>)
 
 ```go
 func NewStartupHandler(registry Health, cfg HandlerConfig) http.Handler
@@ -214,8 +262,17 @@ func NewStartupHandler(registry Health, cfg HandlerConfig) http.Handler
 
 NewStartupHandler serves the startup probe: 200 once every startup check has passed, 503 while any has not.
 
+<a name="AskConfig"></a>
+## type [AskConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L251>)
+
+AskConfig is the public alias for where a process listens and which path answers whether it is ready: Addr and Path are required, Timeout and Clock have working zeros.
+
+```go
+type AskConfig = svchealth.AskConfig
+```
+
 <a name="Check"></a>
-## type [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L176>)
+## type [Check](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L209>)
 
 Check is the public alias for the ctx\-aware body of a startup or readiness check. It is the shape a dependency call has.
 
@@ -224,7 +281,7 @@ type Check = corehealth.Check
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L210>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L243>)
 
 Config is the public alias for the registry's construction parameters.
 
@@ -233,7 +290,7 @@ type Config = svchealth.Config
 ```
 
 <a name="HandlerConfig"></a>
-## type [HandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L213>)
+## type [HandlerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L246>)
 
 HandlerConfig is the public alias for a handler's body verbosity.
 
@@ -242,7 +299,7 @@ type HandlerConfig = svchealth.HandlerConfig
 ```
 
 <a name="Health"></a>
-## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L184>)
+## type [Health](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L217>)
 
 Health is the public alias for the registry contract.
 
@@ -251,7 +308,7 @@ type Health = corehealth.Health
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L254>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L307>)
 
 ```go
 func New(cfg Config) Health
@@ -260,7 +317,7 @@ func New(cfg Config) Health
 New returns a Health. It cannot fail: a nil cfg.Clock falls back to the wall clock, a non\-positive cfg.DefaultTimeout to DefaultCheckTimeout, and nil hooks to no observation. What can fail fails at registration.
 
 <a name="LivenessCheck"></a>
-## type [LivenessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L201>)
+## type [LivenessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L234>)
 
 LivenessCheck is the public alias for process\-local evidence that the process is not irrecoverable.
 
@@ -269,7 +326,7 @@ type LivenessCheck = corehealth.LivenessCheckValue
 ```
 
 <a name="Probe"></a>
-## type [Probe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L190>)
+## type [Probe](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L223>)
 
 Probe is the public alias for which of the three questions is being asked.
 
@@ -278,7 +335,7 @@ type Probe = corehealth.Probe
 ```
 
 <a name="ReadinessCheck"></a>
-## type [ReadinessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L197>)
+## type [ReadinessCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L230>)
 
 ReadinessCheck is the public alias for a check that gates routing. Every dependency check belongs here.
 
@@ -287,7 +344,7 @@ type ReadinessCheck = corehealth.ReadinessCheckValue
 ```
 
 <a name="Report"></a>
-## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L207>)
+## type [Report](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L240>)
 
 Report is the public alias for one probe's whole answer.
 
@@ -296,7 +353,7 @@ type Report = corehealth.ReportValue
 ```
 
 <a name="Result"></a>
-## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L204>)
+## type [Result](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L237>)
 
 Result is the public alias for one check's answer.
 
@@ -305,7 +362,7 @@ type Result = corehealth.ResultValue
 ```
 
 <a name="SelfCheck"></a>
-## type [SelfCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L181>)
+## type [SelfCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L214>)
 
 SelfCheck is the public alias for the body of a LIVENESS check. It takes no context, which is what keeps a dependency call out of the probe that restarts the process.
 
@@ -314,7 +371,7 @@ type SelfCheck = corehealth.SelfCheck
 ```
 
 <a name="StartupCheck"></a>
-## type [StartupCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L193>)
+## type [StartupCheck](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L226>)
 
 StartupCheck is the public alias for a check that gates startup.
 
@@ -323,7 +380,7 @@ type StartupCheck = corehealth.StartupCheckValue
 ```
 
 <a name="Status"></a>
-## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L187>)
+## type [Status](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L220>)
 
 Status is the public alias for a check's or a probe's verdict.
 
@@ -332,7 +389,7 @@ type Status = corehealth.Status
 ```
 
 <a name="Worst"></a>
-### func [Worst](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L261>)
+### func [Worst](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/health/health.go#L314>)
 
 ```go
 func Worst(a, b Status) Status

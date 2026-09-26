@@ -42,6 +42,7 @@ go_library(
         "//internal/service/logger/middleware/multi",
         "//internal/service/logger/sink/console",
         "//internal/service/logger/sink/memory",
+        "//internal/service/writer/levelgate",
     ],
 )
 
@@ -62,6 +63,7 @@ go_test(
         "fanout_integration_test.go",
         "fromconfig_external_test.go",
         "fromconfig_internal_test.go",
+        "levelgate_external_test.go",
         "levelvar_external_test.go",
         "logger_bench_test.go",
         "logger_external_test.go",

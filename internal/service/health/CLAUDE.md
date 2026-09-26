@@ -20,6 +20,7 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 | `component.go` | the `lifecycle` bridge; a not-serving startup report with no error to join still fails `Start` (`STARTUP_PENDING`) |
 | `notify.go` | opt-in `sd_notify`, delegating to `service/proc/sdnotify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`). The send is BOUNDED by the probe's own deadline, else by the budget a check gets (ADR 0072), which is what makes serialising it affordable: an unbounded write to a deaf supervisor held that lock and stopped every later probe from answering |
 | `config.go` | timeouts and staleness, with their ADR 0031 clamps and refusals |
+| `ask.go` | `Ask` / `AskConfig` — the CLIENT half of a probe (ADR 0131): the listen address mapped to the loopback of its family, one GET over a fresh transport that never proxies, keeps nothing alive and follows no redirect, the budget armed on the injected clock and ended by a cancel whose cause is `AskTimeout`, at most `MaxAskDrainBytes` of the body read and closed, never a byte of it in an error. A drain the bound cut short — a process that sent 200 and then stalled — is `ASK_TIMEOUT` with status 0, not a readiness (found by review: the first version reported it ready; `TestAStalledBodyIsATimeoutNotAnAnswer`) |
 
 ## The three behaviours worth knowing
 
@@ -53,7 +54,18 @@ wrong one.
 ## Sentinels (`0.3.59.*`)
 
 `CHECK_FAILED` · `CHECK_TIMEOUT` · `STALE_CACHE_WINDOW` · `STARTUP_PENDING` ·
-`DRAINING` · `NOTIFY_FAILED`
+`DRAINING` · `NOTIFY_FAILED` · `ASK_MISCONFIGURED` · `ASK_UNREACHABLE` ·
+`ASK_TIMEOUT` · `ASK_NOT_READY`
+
+`Ask`'s four follow the same split as the rest: a configuration no answer can
+satisfy is `ASK_MISCONFIGURED` (exit 78) and never dials; no answer is
+`ASK_UNREACHABLE` (the transport's error kept as the cause) or `ASK_TIMEOUT`
+(the budget, or the caller's context, whose error stays in the chain — the
+`CHECK_TIMEOUT`-for-a-departed-caller precedent); an answer other than 200 is
+`ASK_NOT_READY`, with the status as a field and the status returned. A
+redirect is such an answer. `Ask` waits on `AskConfig.Clock` like every other
+budget here, so `TestPackageNeverWaitsOnTheWallClock` covers it and its suite
+drives the timeout with a manual clock.
 
 A departed caller's result is `CHECK_TIMEOUT` with the caller's context error
 as its cause, and an unexplained failing startup report is `STARTUP_PENDING`;

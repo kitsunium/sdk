@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "jsonshape",
+    srcs = [
+        "fields.go",
+        "methods.go",
+        "shape.go",
+        "tag.go",
+        "walk.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/codec/jsonshape",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":jsonshape",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "jsonshape_test",
+    srcs = [
+        "differential_external_test.go",
+        "shape_external_test.go",
+        "tag_internal_test.go",
+    ],
+    embed = [":jsonshape"],
+)

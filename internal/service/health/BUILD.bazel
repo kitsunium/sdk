@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "health",
     srcs = [
+        "ask.go",
         "body.go",
         "codes.go",
         "component.go",
@@ -45,6 +46,8 @@ alias(
 go_test(
     name = "health_test",
     srcs = [
+        "ask_external_test.go",
+        "ask_internal_test.go",
         "component_external_test.go",
         "handler_external_test.go",
         "harness_external_test.go",
@@ -56,8 +59,8 @@ go_test(
         "runner_external_test.go",
     ],
     data = ["//:audit_sources"],
+    embed = [":health"],
     deps = [
-        ":health",
         "//internal/core/health",
         "//internal/core/lifecycle",
         "//internal/kernel/clock",
