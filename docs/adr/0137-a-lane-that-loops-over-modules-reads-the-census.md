@@ -43,7 +43,7 @@ None. No module, package or API changes; lanes run more.
 
 ### Why not add `tools/genindex tools/sdkguard` to the two loops
 
-It closes #242 and keeps the defect: the next module is again in no lane until somebody remembers, and the four loops still disagree with each other. [#242](https://github.com/kitsunium/sdk/issues/242) measured that adding `.` alone would have had the same blind spot.
+It closes [#242](https://github.com/kitsunium/sdk/issues/242) and keeps the defect: the next module is again in no lane until somebody remembers, and the four loops still disagree with each other. [#242](https://github.com/kitsunium/sdk/issues/242) measured that adding `.` alone would have had the same blind spot.
 
 ### Why not `find . -name go.mod`
 

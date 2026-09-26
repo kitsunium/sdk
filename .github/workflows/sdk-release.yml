@@ -243,21 +243,31 @@ jobs:
           # release; automatic runs must NOT blind-cut it — cut-tags exits 3 to
           # signal a held bootstrap (ADR 0009: validate go.sum + clean-room
           # go-get first).
-          flags=""
+          # An ARRAY, each element one argument. The `bump` input is free text
+          # typed into a dispatch form, and expanding it unquoted inside a flags
+          # string would split `patch --range=<other>` into two options that
+          # cut-tags.sh accepts independently — a size and a range nobody meant.
+          # The value is checked here, before it becomes an argument at all, and
+          # then passed as exactly one.
+          args=()
           if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
-            flags="--allow-bootstrap"
+            args+=(--allow-bootstrap)
           fi
-          if [ -n "${BUMP:-}" ]; then
-            flags="$flags --bump=$BUMP"
-          fi
+          case "${BUMP:-}" in
+            "") ;;
+            patch | minor | major) args+=("--bump=$BUMP") ;;
+            *)
+              echo "::error::the bump input must be patch, minor or major (or empty); got '$BUMP'"
+              exit 64
+              ;;
+          esac
           # stderr is kept in a file, then shown: it carries the size and where
           # it came from — or the refusal and the two ways out of it — and the
           # summary below quotes it, so a refused run says why on its own page.
           # A plain redirect rather than `2> >(tee …)`: a process substitution
           # is not waited for, and the summary step could read a file its tee
           # had not finished writing.
-          # shellcheck disable=SC2086
-          printf '%s\n' "$MAJORS" | bash scripts/release/cut-tags.sh $flags 2>/tmp/cut.err | tee /tmp/cut.log
+          printf '%s\n' "$MAJORS" | bash scripts/release/cut-tags.sh ${args[@]+"${args[@]}"} 2>/tmp/cut.err | tee /tmp/cut.log
           rc=${PIPESTATUS[1]}
           cat /tmp/cut.err >&2
           if [ "$rc" -eq 3 ]; then

@@ -5,6 +5,7 @@ package main
 import (
 	"fmt"
 	"go/ast"
+	"go/build"
 	"go/doc"
 	"go/doc/comment"
 	"go/parser"
@@ -22,6 +23,33 @@ import (
 // an aliased Broker resolves nothing there while a link to Broker itself does.
 const docLinkAdvice string = "a member of an ALIASED type cannot be a doc link in the package that aliases it — write [Type].Member, which links the alias and reads the same (ADR 0138)"
 
+// platforms are the targets the cross-build lane compiles (ADR 0137). A
+// package's symbols differ between them — a _windows.go file declares what a
+// _linux.go one does not — and pkg.go.dev renders a package per build context,
+// so a comment is judged against what its package declares on each platform
+// that compiles the file holding it. One table over the union of every file
+// would accept a link to a symbol no single platform has.
+var platforms = []platform{
+	{goos: "linux", goarch: "amd64"},
+	{goos: "linux", goarch: "arm64"},
+	{goos: "linux", goarch: "386"},
+	{goos: "linux", goarch: "arm"},
+	{goos: "darwin", goarch: "arm64"},
+	{goos: "windows", goarch: "amd64"},
+	{goos: "freebsd", goarch: "amd64"},
+	{goos: "openbsd", goarch: "amd64"},
+	{goos: "netbsd", goarch: "amd64"},
+	{goos: "dragonfly", goarch: "amd64"},
+}
+
+// platform is one GOOS/GOARCH pair a doc comment is judged under.
+type platform struct {
+	// goos is the target operating system.
+	goos string
+	// goarch is the target architecture.
+	goarch string
+}
+
 // deadLink is one bracketed name go/doc renders as literal text because the
 // package declares no such symbol.
 type deadLink struct {
@@ -33,6 +61,27 @@ type deadLink struct {
 	col int
 	// text is the link as written, brackets included.
 	text string
+	// on names the platforms the link is dead on, when it resolves on others
+	// that compile the same file; empty when it is dead wherever the file builds.
+	on string
+}
+
+// String renders a platform the way GOOS/GOARCH is written.
+func (p platform) String() string {
+	//: the conventional spelling.
+	return p.goos + "/" + p.goarch
+}
+
+// matches reports whether the go command compiles the named file of dir for
+// this platform: its name suffix and its build constraints, with cgo off, as
+// every lane of this repository builds.
+func (p platform) matches(dir, name string) (bool, error) {
+	ctx := build.Default
+	ctx.GOOS = p.goos
+	ctx.GOARCH = p.goarch
+	ctx.CgoEnabled = false
+	//: the go command's own answer, not a re-implementation of it.
+	return ctx.MatchFile(dir, name)
 }
 
 // pos renders where a link is written in the file:line:col form editors jump to.
@@ -94,7 +143,12 @@ func runDocLinkCheck(roots []string, out io.Writer) int {
 	}
 	//: one line per finding, in the file:line:col form editors jump to.
 	for _, d := range dead {
-		fmt.Fprintf(out, "%s: %s names no symbol this package declares\n", d.pos(), d.text)
+		where := ""
+		//: a link dead on some platforms only says which.
+		if d.on != "" {
+			where = " on " + d.on
+		}
+		fmt.Fprintf(out, "%s: %s names no symbol this package declares%s\n", d.pos(), d.text, where)
 	}
 	fmt.Fprintf(out, "genindex: %d dead doc link(s); %s\n", len(dead), docLinkAdvice)
 	//: at least one link renders as literal text.
@@ -162,7 +216,7 @@ func deadLinksInDir(dir, root string) (dead []deadLink, err error) {
 		return nil, rerr
 	}
 	fset := token.NewFileSet()
-	byPackage := map[string][]*ast.File{}
+	byPackage := map[string][]parsedFile{}
 	//: every production Go file, grouped by the package clause it declares.
 	for _, e := range entries {
 		//: only production Go files are documentation go/doc renders.
@@ -175,13 +229,13 @@ func deadLinksInDir(dir, root string) (dead []deadLink, err error) {
 			//: surface the parse failure.
 			return nil, perr
 		}
-		byPackage[f.Name.Name] = append(byPackage[f.Name.Name], f)
+		byPackage[f.Name.Name] = append(byPackage[f.Name.Name], parsedFile{name: e.Name(), ast: f})
 	}
 	var out []deadLink
 	//: one production package per directory, plus a stray generator file's.
 	for _, files := range byPackage {
 		found, derr := deadLinksInPackage(fset, files, dir, root)
-		//: go/doc only fails on a malformed file set, which the parser accepted.
+		//: a file the go command could not classify, or a malformed file set.
 		if derr != nil {
 			//: surface it to the walk.
 			return nil, derr
@@ -192,42 +246,195 @@ func deadLinksInDir(dir, root string) (dead []deadLink, err error) {
 	return out, nil
 }
 
+// parsedFile is one production file of a package: its base name, which build
+// constraints are matched against, and its syntax tree.
+type parsedFile struct {
+	// name is the file's base name.
+	name string
+	// ast is the parsed file, comments included.
+	ast *ast.File
+}
+
 // isSourceFile reports whether a file name is a production Go file.
 func isSourceFile(name string) bool {
 	//: a _test.go file documents nothing go/doc renders.
 	return strings.HasSuffix(name, ".go") && !strings.HasSuffix(name, "_test.go")
 }
 
-// deadLinksInPackage checks every doc comment of one package against the
-// symbols go/doc resolves for it.
+// deadLinksInPackage checks every doc comment of one package, on every platform
+// that compiles the file holding it, against the symbols go/doc resolves for
+// the package on that platform.
 //
-// The comments are collected BEFORE go/doc sees the files. Building the package
-// without doc.AllDecls removes every unexported top-level declaration from the
-// AST it is given — PreserveAST does not stop that — and with the declaration
-// goes its doc comment, which `go doc -u` and gopls still render. Collected
-// after, those comments were never checked; measured on this repository, that
-// hid dead links in unexported declarations entirely.
-func deadLinksInPackage(fset *token.FileSet, files []*ast.File, dir, root string) (dead []deadLink, err error) {
-	var groups []*ast.CommentGroup
-	//: every doc comment, while the files still hold every declaration.
-	for _, f := range files {
-		groups = append(groups, docComments(f)...)
+// The comments are collected once, before go/doc sees the files, and the
+// package is built with doc.AllDecls|doc.PreserveAST: without AllDecls, go/doc
+// removes every unexported declaration from the AST it is given — PreserveAST
+// does not stop that — and with the declaration goes its doc comment, which
+// `go doc -u` and gopls still render. A first version of this check lost eleven
+// dead links that way. AllDecls resolves exactly the same same-package links: a
+// link's name must be upper-case, so the unexported symbols it adds are ones no
+// link can name.
+func deadLinksInPackage(fset *token.FileSet, files []parsedFile, dir, root string) (dead []deadLink, err error) {
+	check := newPackageCheck(fset, files, dir, root)
+	//: one symbol table per platform, over the files that platform compiles.
+	for _, p := range platforms {
+		//: a file the go command cannot classify cannot be judged honestly.
+		if jerr := check.judgeOn(p); jerr != nil {
+			//: surface it to the caller.
+			return nil, jerr
+		}
 	}
-	//: mode 0: the symbol table is what go/doc renders for the package.
-	pkg, derr := doc.NewFromFiles(fset, files, filepath.ToSlash(dir))
+	//: every dead link the package writes, with the platforms it is dead on.
+	return check.findings(), nil
+}
+
+// packageCheck is one package's doc-link check across the platforms.
+type packageCheck struct {
+	// fset positions every file of the package.
+	fset *token.FileSet
+	// files are the package's production files.
+	files []parsedFile
+	// comments holds each file's doc comments, collected before go/doc runs.
+	comments map[*ast.File][]*ast.CommentGroup
+	// dir is the package directory.
+	dir string
+	// root is the checked root positions are relative to.
+	root string
+	// deadOn lists, per finding, the platforms it is dead on.
+	deadOn map[deadLink][]string
+	// builtOn counts, per finding, the platforms that compile its file.
+	builtOn map[deadLink]int
+	// order is the order findings were first seen in.
+	order []deadLink
+}
+
+// newPackageCheck collects every doc comment of the package while its files
+// still hold every declaration.
+func newPackageCheck(fset *token.FileSet, files []parsedFile, dir, root string) *packageCheck {
+	comments := make(map[*ast.File][]*ast.CommentGroup, len(files))
+	//: each file's doc comments, once, whatever platform later reads them.
+	for _, f := range files {
+		comments[f.ast] = docComments(f.ast)
+	}
+	//: a check with nothing recorded yet.
+	return &packageCheck{
+		fset: fset, files: files, comments: comments, dir: dir, root: root,
+		deadOn: map[deadLink][]string{}, builtOn: map[deadLink]int{},
+	}
+}
+
+// judgeOn checks each comment of each file p compiles against the package's
+// symbols on p.
+func (c *packageCheck) judgeOn(p platform) error {
+	built, ferr := filesFor(p, c.files, c.dir)
+	//: a file whose header cannot be read cannot be placed on a platform.
+	if ferr != nil {
+		//: surface it to the caller.
+		return ferr
+	}
+	//: nothing of this package builds here.
+	if len(built) == 0 {
+		//: no symbol table to judge against.
+		return nil
+	}
+	lookup, serr := symbolsOf(c.fset, built, c.dir)
 	//: without the package's symbol table nothing can be judged.
+	if serr != nil {
+		//: surface it to the caller.
+		return serr
+	}
+	//: each compiled file, each of its doc comments, each dead link in it.
+	for _, f := range built {
+		//: every doc comment the file holds.
+		for _, group := range c.comments[f.ast] {
+			//: every dead link the comment writes, where it writes it.
+			for _, d := range deadInGroup(c.fset, group, lookup, c.root) {
+				c.record(d, p, f)
+			}
+		}
+	}
+	//: this platform is judged.
+	return nil
+}
+
+// record notes that d is dead on p, the first time with how many platforms
+// compile the file that writes it.
+func (c *packageCheck) record(d deadLink, p platform, file parsedFile) {
+	//: first sighting: keep the order and count the file's platforms once.
+	if _, seen := c.deadOn[d]; !seen {
+		c.order = append(c.order, d)
+		c.builtOn[d] = platformsBuilding(file, c.dir)
+	}
+	c.deadOn[d] = append(c.deadOn[d], p.String())
+}
+
+// findings returns one finding per dead link, naming its platforms only when
+// it resolves on some of the platforms that compile it.
+func (c *packageCheck) findings() []deadLink {
+	out := make([]deadLink, 0, len(c.order))
+	//: in the order they were first seen.
+	for _, d := range c.order {
+		//: dead on only part of where the file builds.
+		if len(c.deadOn[d]) < c.builtOn[d] {
+			d.on = strings.Join(c.deadOn[d], ", ")
+		}
+		out = append(out, d)
+	}
+	//: the package's findings.
+	return out
+}
+
+// symbolsOf builds the package from the given files and returns go/doc's own
+// lookup of a same-package link.
+func symbolsOf(fset *token.FileSet, files []parsedFile, dir string) (lookup func(recv, name string) bool, err error) {
+	asts := make([]*ast.File, 0, len(files))
+	//: the files go/doc sees are the ones this platform compiles.
+	for _, f := range files {
+		asts = append(asts, f.ast)
+	}
+	pkg, derr := doc.NewFromFiles(fset, asts, filepath.ToSlash(dir), doc.AllDecls|doc.PreserveAST)
+	//: go/doc only fails on a malformed file set, which the parser accepted.
 	if derr != nil {
 		//: surface it to the caller.
 		return nil, derr
 	}
-	lookup := pkg.Parser().LookupSym
-	var out []deadLink
-	//: each comment go/doc, gopls or pkg.go.dev would render.
-	for _, group := range groups {
-		out = append(out, deadInGroup(fset, group, lookup, root)...)
+	//: the resolution go doc, gopls and pkg.go.dev apply.
+	return pkg.Parser().LookupSym, nil
+}
+
+// filesFor returns the files of a package the go command compiles for p.
+func filesFor(p platform, files []parsedFile, dir string) (built []parsedFile, err error) {
+	var out []parsedFile
+	//: each file answers for itself: name suffix and build constraints.
+	for _, f := range files {
+		ok, merr := p.matches(dir, f.name)
+		//: an unreadable header is a file we cannot place.
+		if merr != nil {
+			//: surface it to the caller.
+			return nil, merr
+		}
+		//: compiled on this platform.
+		if ok {
+			out = append(out, f)
+		}
 	}
-	//: every dead link the package writes.
+	//: the files this platform builds.
 	return out, nil
+}
+
+// platformsBuilding counts the platforms that compile a file. An error here was
+// already reported by filesFor for the same file and platform, so it counts as
+// not building rather than failing twice.
+func platformsBuilding(file parsedFile, dir string) int {
+	n := 0
+	//: every platform the check judges.
+	for _, p := range platforms {
+		//: the same answer filesFor gave.
+		if ok, err := p.matches(dir, file.name); err == nil && ok {
+			n++
+		}
+	}
+	//: how many platforms render this file.
+	return n
 }
 
 // deadInGroup reports the dead same-package links of one doc comment, at the
@@ -393,42 +600,131 @@ func relFile(name, root string) string {
 	return filepath.ToSlash(rel)
 }
 
-// docComments returns every comment group Go treats as documentation: the
-// package clause's, each declaration's and each spec's, and each struct field's
-// and interface method's, which gopls renders on hover.
+// docComments returns every comment group documentation renders: the package
+// clause's, each top-level declaration's and spec's, and the fields and
+// interface methods of each top-level type, which gopls shows on hover.
+//
+// Only TOP-LEVEL declarations. A comment on a function parameter, on a result,
+// or on a field of a struct declared inside a function body is not
+// documentation go/doc, gopls or pkg.go.dev publishes, so a bracketed name
+// there is not a link anybody sees.
 func docComments(f *ast.File) []*ast.CommentGroup {
 	var out []*ast.CommentGroup
-	add := func(g *ast.CommentGroup) {
-		//: a declaration without a comment contributes nothing.
-		if g != nil {
-			out = append(out, g)
-		}
-	}
-	add(f.Doc)
-	ast.Inspect(f, func(n ast.Node) bool {
-		//: the node kinds that carry a doc comment.
-		switch v := n.(type) {
-		//: a grouped or single declaration.
-		case *ast.GenDecl:
-			add(v.Doc)
-		//: a function or method.
+	out = appendDoc(out, f.Doc)
+	//: each top-level declaration, and nothing inside a function body.
+	for _, decl := range f.Decls {
+		//: the two kinds of top-level declaration.
+		switch d := decl.(type) {
+		//: a function or method: its own comment, not its parameters'.
 		case *ast.FuncDecl:
-			add(v.Doc)
-		//: one type in a group.
-		case *ast.TypeSpec:
-			add(v.Doc)
-		//: one const or var in a group.
-		case *ast.ValueSpec:
-			add(v.Doc)
-		//: a struct field or an interface method.
-		case *ast.Field:
-			add(v.Doc)
-		//: every other node carries no doc comment of its own.
+			out = appendDoc(out, d.Doc)
+		//: const, var, type and import declarations.
+		case *ast.GenDecl:
+			out = appendDoc(out, d.Doc)
+			//: each spec of the group.
+			for _, spec := range d.Specs {
+				out = appendSpecDocs(out, spec)
+			}
+		//: a bad declaration carries nothing.
 		default:
 		}
-		//: keep descending: fields sit deep inside type specs.
-		return true
-	})
+	}
 	//: every doc comment of the file.
 	return out
+}
+
+// appendSpecDocs appends a spec's own comment and, for a type, the comments of
+// its fields and interface methods.
+func appendSpecDocs(out []*ast.CommentGroup, spec ast.Spec) []*ast.CommentGroup {
+	//: only type and value specs carry documentation.
+	switch s := spec.(type) {
+	//: a type: its comment, then its members.
+	case *ast.TypeSpec:
+		out = appendDoc(out, s.Doc)
+		//: the members documentation shows as part of the type.
+		return appendMemberDocs(out, s.Type)
+	//: a const or var.
+	case *ast.ValueSpec:
+		//: its comment.
+		return appendDoc(out, s.Doc)
+	//: an import spec documents nothing.
+	default:
+		//: nothing to add.
+		return out
+	}
+}
+
+// appendMemberDocs appends the comments of a type's struct fields and interface
+// methods, descending into nested struct and interface literals — shown as part
+// of the type — and never into a function type, whose parameter comments no
+// documentation renders.
+func appendMemberDocs(out []*ast.CommentGroup, expr ast.Expr) []*ast.CommentGroup {
+	//: the type expressions that hold documented members themselves.
+	switch t := expr.(type) {
+	//: a struct: each field, and whatever its type nests.
+	case *ast.StructType:
+		//: every field of the struct.
+		for _, field := range t.Fields.List {
+			out = appendDoc(out, field.Doc)
+			out = appendMemberDocs(out, field.Type)
+		}
+		//: the struct's members.
+		return out
+	//: an interface: each method or embedded element.
+	case *ast.InterfaceType:
+		//: every element of the method set.
+		for _, method := range t.Methods.List {
+			out = appendDoc(out, method.Doc)
+		}
+		//: the interface's members.
+		return out
+	//: anything else: only what it nests can hold members.
+	default:
+		//: a pointer, slice, array, map or channel of a literal type.
+		for _, inner := range nestedTypes(expr) {
+			out = appendMemberDocs(out, inner)
+		}
+		//: whatever the nested types held.
+		return out
+	}
+}
+
+// nestedTypes returns the type expressions a pointer, array, slice, map or
+// channel type is built from; a named type or a function type nests none that
+// documentation shows.
+func nestedTypes(expr ast.Expr) []ast.Expr {
+	//: the composite type expressions.
+	switch t := expr.(type) {
+	//: a pointer.
+	case *ast.StarExpr:
+		//: the pointed-to type.
+		return []ast.Expr{t.X}
+	//: an array or a slice.
+	case *ast.ArrayType:
+		//: the element type.
+		return []ast.Expr{t.Elt}
+	//: a map.
+	case *ast.MapType:
+		//: key and value.
+		return []ast.Expr{t.Key, t.Value}
+	//: a channel.
+	case *ast.ChanType:
+		//: the element type.
+		return []ast.Expr{t.Value}
+	//: a named type, a function type or anything else.
+	default:
+		//: nothing nested.
+		return nil
+	}
+}
+
+// appendDoc appends a comment group when there is one.
+func appendDoc(out []*ast.CommentGroup, g *ast.CommentGroup) []*ast.CommentGroup {
+	//: a declaration without a comment contributes nothing.
+	if g == nil {
+		//: unchanged.
+		return out
+	}
+	//: the comment, in declaration order.
+	return append(out, g)
 }

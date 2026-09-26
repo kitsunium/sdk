@@ -144,6 +144,33 @@ package a
 			want: []string{"[Missing]"},
 		},
 		{
+			//: go/doc, gopls and pkg.go.dev publish none of these comments.
+			name: "a parameter's and a function-local struct's comments are not documentation",
+			files: map[string]string{"a.go": `// Package a is fine.
+package a
+
+// F is documented, and its parameter comments are not.
+func F(
+	// x links [Nowhere].
+	x int,
+) {
+	type local struct {
+		// Field links [Gone].
+		Field int
+	}
+	_ = local{}
+}
+`},
+		},
+		{
+			//: a file no platform compiles is rendered by none.
+			name: "a file no platform builds is not judged",
+			files: map[string]string{
+				"a.go":   "// Package a is fine.\npackage a\n",
+				"gen.go": "//go:build ignore\n\n// Package main links [Missing].\npackage main\n",
+			},
+		},
+		{
 			//: written twice in one comment: two findings, not four.
 			name: "a link written twice is reported once per line",
 			files: map[string]string{"a.go": `// Package a links [Wait] and
@@ -164,6 +191,74 @@ package a
 
 		if got := deadTexts(dead); !slices.Equal(got, c.want) {
 			t.Fatalf("dead links = %v, want %v", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_checkDocLinks_platforms pins that a comment is judged on each platform
+// that compiles its file, against what the package declares THERE. One symbol
+// table over the union of every file would accept a link to a symbol only a
+// Linux file declares from a comment Windows renders too.
+func Test_checkDocLinks_platforms(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// files is the package staged under the root.
+		files map[string]string
+		// want are the dead links as "text on" pairs, in report order.
+		want []string
+	}
+	linuxOnly := "package a\n\n// OnlyLinux exists on Linux.\nconst OnlyLinux = 1\n"
+	tests := []tc{
+		{
+			name: "a symbol only Linux declares, linked from a file every platform builds",
+			files: map[string]string{
+				"a.go":       "// Package a links [OnlyLinux].\npackage a\n",
+				"a_linux.go": linuxOnly,
+			},
+			want: []string{"[OnlyLinux] darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64"},
+		},
+		{
+			//: the file only builds where the symbol exists.
+			name: "the same link from a Linux file resolves",
+			files: map[string]string{
+				"a.go":       "// Package a is fine.\npackage a\n",
+				"a_linux.go": "package a\n\n// OnlyLinux exists on Linux; see [OnlyLinux].\nconst OnlyLinux = 1\n",
+			},
+		},
+		{
+			//: dead on every platform that builds the file: no platform list.
+			name: "the same link from a Windows file is dead wherever that file builds",
+			files: map[string]string{
+				"a.go":         "// Package a is fine.\npackage a\n",
+				"a_linux.go":   linuxOnly,
+				"a_windows.go": "package a\n\n// W links [OnlyLinux] from Windows.\nconst W = 1\n",
+			},
+			want: []string{"[OnlyLinux] "},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		root := stagePackage(t, c.files)
+
+		dead, err := checkDocLinks(root)
+		if err != nil {
+			t.Fatalf("checkDocLinks = %v, want nil", err)
+		}
+
+		got := make([]string, 0, len(dead))
+		for _, d := range dead {
+			got = append(got, d.text+" "+d.on)
+		}
+		if !slices.Equal(got, c.want) {
+			t.Fatalf("dead links = %q, want %q", got, c.want)
 		}
 	}
 	for _, c := range tests {
@@ -422,6 +517,8 @@ func Test_docComments(t *testing.T) {
 		{name: "package clause only", src: "// Package a.\npackage a\n", want: 1},
 		{name: "a type, its field and a func", src: "package a\n\n// T.\ntype T struct {\n\t// F.\n\tF int\n}\n\n// G.\nfunc G() {\n\t// not documentation\n}\n", want: 3},
 		{name: "a grouped declaration and its specs", src: "package a\n\n// Group.\nconst (\n\t// A.\n\tA = 1\n)\n", want: 2},
+		{name: "a nested struct and an interface method", src: "package a\n\n// T.\ntype T struct {\n\t// F.\n\tF []struct {\n\t\t// G.\n\t\tG int\n\t}\n}\n\n// I.\ntype I interface {\n\t// M.\n\tM()\n}\n", want: 5},
+		{name: "not a parameter's, nor a local struct's", src: "package a\n\n// F.\nfunc F(\n\t// p.\n\tp int,\n) {\n\ttype l struct {\n\t\t// f.\n\t\tf int\n\t}\n\t_ = l{}\n}\n", want: 1},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
