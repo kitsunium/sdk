@@ -147,7 +147,10 @@ jobs:
         run: |
           set -uo pipefail
           fail=0
-          for mod in internal/kernel internal/core internal/service pkg . e2e; do
+          # Every module of the census (ADR 0137) — this loop named six, and
+          # tools/genindex and tools/sdkguard never ran on macOS or Windows.
+          modules="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
+          for mod in $modules; do
             echo "::group::$mod"
             (cd "$mod" && go test -count=1 -short ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
             echo "::endgroup::"

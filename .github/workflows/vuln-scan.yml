@@ -1,0 +1,45 @@
+name: Vulnerability scan
+# The same `make vuln-check` the required `bazel` job runs on every push and
+# pull request (ADR 0136), on a clock: a vulnerability is published against a
+# dependency, not against a commit, so without this the first anybody hears of
+# one is the next unrelated pull request turning red. Daily, and on demand.
+#
+# An alarm, not a gate: it blocks nothing by itself. What it buys is the day
+# between a publication and the pull request that would otherwise discover it.
+
+on:
+  schedule:
+    # 06:17 UTC — off the hour, where scheduled runs queue behind everyone
+    # else's.
+    - cron: "17 6 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: vuln-scan
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  govulncheck:
+    name: govulncheck — every module, reachable symbols
+    if: github.repository == 'kitsunium/sdk'
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+
+      # The toolchain the modules declare: the standard library is part of the
+      # scan, and its version is the toolchain's.
+      - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
+        with:
+          go-version-file: pkg/go.mod
+
+      - name: install govulncheck (pinned)
+        run: make vuln-install
+
+      - name: govulncheck over every module
+        run: make vuln-check

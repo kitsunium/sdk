@@ -43,8 +43,8 @@ jobs:
           repository-cache: true
 
       # setup-bazel only provides a Bazel-sandboxed Go SDK; the README
-      # drift gate + govulncheck run outside Bazel and need a host Go
-      # toolchain on $PATH. SHA matches sdk-release.yml's pin.
+      # drift gate, the lint gate and govulncheck run outside Bazel and need a
+      # host Go toolchain on $PATH. SHA matches sdk-release.yml's pin.
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
           go-version-file: pkg/go.mod
@@ -69,9 +69,9 @@ jobs:
 
       # gomarkdoc is the SOT for the README drift gate (ADR 0008). The
       # devcontainer ships it pre-installed, but a fresh CI runner does
-      # not — install it here so the drift + determinism + govulncheck
-      # steps below all see the same binary the local pre-commit hook
-      # uses. Pinned to v1.1.0, matching .devcontainer/features/languages/go/install.sh.
+      # not — install it here so the drift + determinism steps below both
+      # see the same binary the local pre-commit hook uses. Pinned to
+      # v1.1.0, matching .devcontainer/features/languages/go/install.sh.
       - name: install gomarkdoc
         run: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0
 
@@ -91,8 +91,9 @@ jobs:
       # SSH / knownhosts / repo-write paths gomarkdoc never reaches. We
       # can't bump the deps without a new gomarkdoc release, so scanning
       # the binary blocks every SDK PR on a waiting-for-upstream signal.
-      # The SDK runtime is gated by bazel test (ADR 0004 SoT). Re-enable
-      # this step when gomarkdoc ships a refreshed release.
+      # gomarkdoc is TOOLING: the SDK's own modules are scanned, in source
+      # mode and for reachability, by `make vuln-check` below (ADR 0136).
+      # Re-enable this step when gomarkdoc ships a refreshed release.
 
       - name: build
         run: bazel build --config=ci //...
@@ -160,6 +161,26 @@ jobs:
 
       - name: lint gate — gofumpt + sdkguard
         run: make lint-check
+
+      # govulncheck, in source mode, over every module of the census (#210,
+      # ADR 0136). ADR 0004 retired the old pipeline's four govulncheck jobs
+      # with it, `bazel test` carries no vulnerability database, and from then
+      # on nothing scanned the runtime; Dependabot alerts on the manifest and
+      # cannot tell a vulnerable symbol the SDK calls from one it never reaches.
+      #
+      # BLOCKING, in this job, deliberately. A vulnerability published between
+      # two merges turns every pull request red until a dependency (or the Go
+      # toolchain) moves — and that is the point: the SDK's requirements are the
+      # floor every consumer inherits, so the fix is ours to ship and nothing
+      # else should merge ahead of it. Only a REACHABLE symbol fails the step;
+      # an imported-but-uncalled vulnerable package is reported and passes.
+      # vuln-scan.yml runs the same target every day, so a finding surfaces
+      # without waiting for somebody's pull request.
+      - name: install govulncheck (pinned)
+        run: make vuln-install
+
+      - name: vulnerability gate — govulncheck over every module
+        run: make vuln-check
 
       # The ktn-linter half needs a credential this repository does not have,
       # so it is asked for rather than assumed. Measured on this lane, not
@@ -311,6 +332,14 @@ jobs:
         # After: 0 out of 40. See ADR 0088.
         run: make hooks-check
 
+      - name: CI script regression
+        # scripts/ci/ holds the module census every module-looping lane reads
+        # and the govulncheck gate built on it (ADR 0136, ADR 0137). The census
+        # replaced three hand-written module lists that had drifted apart —
+        # none of them named tools/genindex or tools/sdkguard (#242) — and this
+        # suite includes a row asserting the lanes below still read it.
+        run: make ci-scripts-check
+
       - name: pre-commit guard regression
         # scripts/pre-commit/ holds the commit gates themselves, and ADR 0088
         # recorded its own sweep as INCOMPLETE: two of them pipe into an
@@ -368,6 +397,11 @@ jobs:
       # directives resolve; CGO disabled so the cross-build is hermetic. `go
       # build` never compiles a _test.go; `go vet` type-checks them, so a test
       # calling a helper that one GOOS alone defines fails here (ADR 0094).
+      #
+      # The modules come from the census, never from a list (ADR 0137): `./...`
+      # stops at a nested go.mod, so this lane reached only the six modules it
+      # named and tools/genindex and tools/sdkguard were built by nothing here
+      # (#242). A module git tracks is in this loop the moment it exists.
       - name: cross-build every module, tests included
         env:
           GOOS: ${{ matrix.target.goos }}
@@ -377,7 +411,8 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for mod in internal/kernel internal/core internal/service pkg . e2e; do
+          modules="$(bash scripts/ci/go-modules.sh)"
+          for mod in $modules; do
             echo "::group::$mod ($GOOS/$GOARCH)"
             if (cd "$mod" && go build ./... && go vet ./...); then
               echo "ok"
@@ -418,6 +453,12 @@ jobs:
       # Each module standalone (GOWORK=off) so its own replace directives
       # resolve, exactly as cross-build does; CGO off because a 386 cgo
       # toolchain is not installed and nothing here needs one.
+      #
+      # Every module of the census (ADR 0137). This loop named four and the
+      # other four had never run a test on 386: tools/genindex and
+      # tools/sdkguard (477 passing tests, #242), the root module's
+      # third-party/ tests and e2e's. All four were run on linux/386 before
+      # being added, and pass.
       - name: test every module on linux/386
         env:
           GOARCH: "386"
@@ -426,7 +467,8 @@ jobs:
         run: |
           set -euo pipefail
           fail=0
-          for mod in internal/kernel internal/core internal/service pkg; do
+          modules="$(bash scripts/ci/go-modules.sh)"
+          for mod in $modules; do
             echo "::group::$mod (linux/386)"
             if (cd "$mod" && go test ./...); then
               echo "ok"

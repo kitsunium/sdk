@@ -62,6 +62,12 @@ GATES=(
   # a gate, and this file must not certify one as if it were. Add it here on
   # the same commit that makes the step unconditional (#236).
   lint-check
+  # scripts/ci/*.bats — the module census and the govulncheck gate (ADR 0136,
+  # ADR 0137). A suite nothing runs is not a test suite (ADR 0088).
+  ci-scripts-check
+  # govulncheck over every module, in the required `bazel` job (#210, ADR
+  # 0136). `vuln-install` is its installer, not a gate, and is not listed.
+  vuln-check
 )
 
 fail=0

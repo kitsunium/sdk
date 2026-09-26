@@ -1,6 +1,6 @@
 # ADR 0094 — a test compiles where its package does, and macOS runs every one
 
-- **Status**: Accepted (Decision 5's Windows inventory and §Deferred "Windows at runtime" superseded by [ADR 0095](0095-windows-runs-every-test-and-gates.md): the Windows lane gates)
+- **Status**: Accepted (Decision 5's Windows inventory and §Deferred "Windows at runtime" superseded by [ADR 0095](0095-windows-runs-every-test-and-gates.md): the Windows lane gates; the build bar's module loop amended by [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md): it reads the census instead of naming six modules)
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0018](0018-sdk-cross-platform-portability.md) (the two portability bars this tightens), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a gate is what CI runs and says)

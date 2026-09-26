@@ -1,6 +1,6 @@
 # ADR 0008 — README generation from Go doc comments
 
-**Status**: Accepted
+**Status**: Accepted. Step 6 (govulncheck on the `gomarkdoc` binary) no longer runs: `bazel-ci.yml` removed it, for the reason recorded there, and it never covered SDK code — the SDK's own modules are scanned by [ADR 0136](0136-every-module-is-scanned-for-the-vulnerabilities-it-reaches.md)
 **Date**: 2026-05-22
 **Deciders**: kitsunium maintainers
 **Amends**: ADR 0004 (Bazel SOT — exempted in §Scope)
