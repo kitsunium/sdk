@@ -10,11 +10,18 @@ import (
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
 )
 
+// DefaultCaptureKeep is how many deliveries [NewCapture] keeps when it is
+// given a non-positive number: enough for a person to scroll a mailbox, and a
+// bound on the memory a development server holds for mail nobody will read.
+const DefaultCaptureKeep int = 200
+
 // memoryTransport records what it was asked to send instead of sending it.
 type memoryTransport struct {
 	composer *Composer
-	mutex    sync.RWMutex
 	sent     []coremail.DeliveryValue
+	mutex    sync.RWMutex
+	// keep bounds the record, oldest dropped first; zero keeps everything.
+	keep int
 }
 
 // NewMemory returns a transport that composes every message and keeps the
@@ -36,6 +43,26 @@ type memoryTransport struct {
 func NewMemory() coremail.FullTransport {
 	//: the same composer the SMTP transport builds, with the same defaults.
 	return &memoryTransport{composer: NewComposer(ComposerConfig{})}
+}
+
+// NewCapture returns the transport a development server and a test deliver
+// through: NewMemory's double — it composes every message, refuses what SMTP
+// refuses, dials nothing — keeping only the last keep deliveries, the oldest
+// dropped first. Sent reads them, raw bytes included, for a mailbox to show or
+// a test to read a link from; Reset empties it.
+//
+// NewMemory keeps everything, which is what a test that sends three messages
+// wants; a server that runs for days and captures every mail it would have
+// sent needs a bound. A non-positive keep is [DefaultCaptureKeep]: its zero
+// has one reading, "I did not think about it", and a mailbox of the last two
+// hundred is the answer that needs no explanation (ADR 0031).
+func NewCapture(keep int) coremail.FullTransport {
+	//: an unset bound is the default one, never "unbounded".
+	if keep <= 0 {
+		keep = DefaultCaptureKeep
+	}
+	//: the memory double, bounded.
+	return &memoryTransport{composer: NewComposer(ComposerConfig{}), keep: keep}
 }
 
 // Send composes msg and records the delivery. ctx is honoured — a cancelled
@@ -63,6 +90,10 @@ func (t *memoryTransport) Send(ctx context.Context, msg coremail.MessageValue) e
 	defer t.mutex.Unlock()
 	//: the bytes are this transport's own copy from here on.
 	t.sent = append(t.sent, coremail.DeliveryValue{Envelope: envelope, Raw: raw})
+	//: a capture keeps the newest, and forgets the oldest.
+	if t.keep > 0 && len(t.sent) > t.keep {
+		t.sent = slices.Delete(t.sent, 0, len(t.sent)-t.keep)
+	}
 	//: accepted.
 	return nil
 }

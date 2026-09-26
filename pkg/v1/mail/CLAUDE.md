@@ -3,9 +3,11 @@
 ## Purpose
 
 The public facade for the mail domain (ADR 0064): type aliases over
-`internal/core/mail`, the sentinels from both layers, and three constructors —
-`NewSMTP`, `NewMemory`, `NewComposer` — plus `Compose` and `Validate` for a
-caller that wants the bytes or the verdict without a transport.
+`internal/core/mail`, the sentinels from both layers, and the constructors —
+`NewSMTP`, `NewMemory`, `NewCapture`, `NewComposer` — plus `Compose` and
+`Validate` for a caller that wants the bytes or the verdict without a
+transport. And the durable outbox (ADR 0111): `NewSpool` over
+`internal/service/mail/spool`.
 
 Consumer-facing prose lives in the package doc comment in `mail.go` and is
 rendered into `README.md` by `gomarkdoc` (rule 10 / ADR 0008). This file is the
@@ -21,8 +23,14 @@ maintainer's half.
 | `FullTransport` | alias | the union `NewMemory` returns |
 | `SMTPConfig`, `TLSMode`, `ComposerConfig`, `Composer` | aliases | service-layer types |
 | `TLSUnset`/`TLSStartTLS`/`TLSImplicit`/`TLSDisabled` | constants | the zero is refused |
-| 16 sentinels | vars | 9 from core, 7 from service — `InvalidURL` is `ParseURL`'s |
+| 16 sentinels | vars | 9 from core, 7 from service — `InvalidURL` is `ParseURL`'s — plus the spool's five below |
 | `NewSMTP`, `NewMemory`, `NewComposer`, `Compose`, `Validate`, `ParseURL` | funcs | `ParseURL` reads `smtp://…?tls=…` / `smtps://…` into a config `NewSMTP` accepts, and never quotes the URL in a refusal |
+| `NewCapture(keep)` / `DefaultCaptureKeep` | func / const | `NewMemory`'s double keeping the last `keep` deliveries (200 when not positive) — the development server's transport |
+| `NewSpool`, `SpoolAttemptFrom` | funcs | the durable outbox and the attempt a delivery context carries (ADR 0111) |
+| `Spool`, `SpoolConfig`, `SpoolEvent`, `SpoolEventKind`, `SpoolAttempt`, `SpoolDeadLetter` | aliases | onto `service/mail/spool` — `Spool`, `Config`, `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` |
+| `SpoolQueued` … `SpoolDuplicate` | constants | the five event kinds |
+| `DefaultSpoolSendTimeout`, `DefaultSpoolRetryBase`, `DefaultSpoolRetryMax`, `DefaultSpoolMaxMessageBytes`, `SpoolDeliveredMemory` | constants | the spool's clamps |
+| `SpoolMisconfigured`, `SpoolClosed`, `SpooledMailUndecodable`, `SpooledMailUnencodable`, `TransportPanicked` | vars | the spool's sentinels (`0.3.81.*`) |
 
 Error CODE constants are deliberately not re-exported. `errors.Is(err,
 mail.HeaderInjection)` is the consumer-facing way to match one refusal —

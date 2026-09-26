@@ -1,6 +1,7 @@
 package mail_test
 
 import (
+	"bytes"
 	"context"
 	"strings"
 	"sync"
@@ -152,5 +153,48 @@ func TestMemoryTransportHonoursACancelledContext(t *testing.T) {
 	cancel()
 	if err := transport.Send(ctx, simpleMessage()); !errs.HasCode(err, svcmail.CodeDialFailed) {
 		t.Fatalf("Send(cancelled) = %v, want CodeDialFailed", err)
+	}
+}
+
+// TestNewCaptureKeepsTheNewest pins the capture transport: it composes and
+// refuses exactly as NewMemory does, and keeps only the last keep deliveries,
+// oldest dropped first; a non-positive keep is DefaultCaptureKeep.
+func TestNewCaptureKeepsTheNewest(t *testing.T) {
+	t.Parallel()
+	capture := svcmail.NewCapture(2)
+	for _, subject := range []string{"first", "second", "third"} {
+		msg := coremail.MessageValue{
+			From:    coremail.AddressValue{Addr: "from@example.com"},
+			To:      []coremail.AddressValue{{Addr: "to@example.com"}},
+			Subject: subject, Text: "body",
+		}
+		if err := capture.Send(context.Background(), msg); err != nil {
+			t.Fatalf("Send(%s) = %v", subject, err)
+		}
+	}
+	sent := capture.Sent()
+	if len(sent) != 2 || !bytes.Contains(sent[0].Raw, []byte("Subject: second")) || !bytes.Contains(sent[1].Raw, []byte("Subject: third")) {
+		t.Fatalf("the capture kept %d deliveries: %q", len(sent), sent)
+	}
+	//: the refusals are the memory double's, so they are production's.
+	bad := coremail.MessageValue{From: coremail.AddressValue{Addr: "from@example.com"}, To: []coremail.AddressValue{{Addr: "to@example.com"}}, Subject: "a\r\nBcc: x@example.com", Text: "b"}
+	if err := capture.Send(context.Background(), bad); !errs.HasCode(err, coremail.CodeHeaderInjection) {
+		t.Fatalf("an injected header = %v, want HeaderInjection", err)
+	}
+	capture.Reset()
+	if n := len(capture.Sent()); n != 0 {
+		t.Fatalf("Reset left %d deliveries", n)
+	}
+	if svcmail.DefaultCaptureKeep != 200 {
+		t.Fatalf("DefaultCaptureKeep = %d", svcmail.DefaultCaptureKeep)
+	}
+	unbounded := svcmail.NewCapture(0)
+	for range svcmail.DefaultCaptureKeep + 1 {
+		if err := unbounded.Send(context.Background(), coremail.MessageValue{From: coremail.AddressValue{Addr: "a@example.com"}, To: []coremail.AddressValue{{Addr: "b@example.com"}}, Text: "x"}); err != nil {
+			t.Fatalf("Send() = %v", err)
+		}
+	}
+	if n := len(unbounded.Sent()); n != svcmail.DefaultCaptureKeep {
+		t.Fatalf("a zero keep kept %d, want the default %d", n, svcmail.DefaultCaptureKeep)
 	}
 }
