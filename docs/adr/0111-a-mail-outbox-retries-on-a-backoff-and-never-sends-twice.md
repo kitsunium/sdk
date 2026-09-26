@@ -50,7 +50,10 @@ retries. The identifier is a ULID from `service/id`, or `Config.NewID`'s, and
 the domain is the caller's own. An empty identifier is `SPOOL_MISCONFIGURED`
 at `Send`, because the spool drops a mail whose identifier it delivered
 already (D4). `Send` returns once the mail is in the queue, on disk with a
-`Dir`.
+`Dir`. `Close` waits for the publications in flight and none starts after it,
+so a `Send` racing `Close` either lands or is `SPOOL_CLOSED`. Without that, a
+publication cut off by the queue's closing could fail after its file was
+already written, and the caller would send the mail again.
 
 ### D3 — a retry PARKS the mail; only the last attempt nacks
 
@@ -181,7 +184,9 @@ in `pkg/v1/mail`.
   - a mail that outlives its process and is delivered by the next one as its
     second attempt;
   - a record that is not a mail, dead-lettered;
-  - the refusals and `SpoolClosed`.
+  - the refusals and `SpoolClosed`;
+  - Sends racing `Close` over a directory, each landing or `SpoolClosed`,
+    and a second `Close` that is nil.
 - `internal/service/mail`: `NewCapture` keeps the newest, refuses what
   `NewMemory` refuses, and clamps its zero.
 - `pkg/v1/mail`: the spool through public names.

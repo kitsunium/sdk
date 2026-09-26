@@ -3,12 +3,15 @@ package spool_test
 
 import (
 	"context"
+	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/mail"
 	"github.com/kitsunium/sdk/internal/service/mail/spool"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
@@ -62,6 +65,56 @@ func TestAMailOutlivesItsProcess(t *testing.T) {
 	}
 	if n := len(capture.Sent()); n != 1 {
 		t.Fatalf("%d mails delivered", n)
+	}
+}
+
+// TestASendRacingCloseLandsOrIsRefused pins Close against Sends in flight:
+// Close waits for a publication in progress and none starts after it, so every
+// Send returns nil or SpoolClosed — never the failure of a queue closed under
+// it — and closing twice is closing once.
+//
+// Goroutine lifecycle: one goroutine per sender, each sending until its first
+// refusal; Close makes every one of them end, and the case waits for all of
+// them before it reads their refusals.
+func TestASendRacingCloseLandsOrIsRefused(t *testing.T) {
+	t.Parallel()
+	s := requireDiskSpool(t, spool.Config{
+		Transport: svcmail.NewCapture(0), Dir: t.TempDir(), MaxAttempts: 3,
+		From: coremail.AddressValue{Addr: "members@example.com"},
+	})
+	const senders int = 8
+	refusals := make(chan error, senders)
+	warm := make(chan struct{})
+	var accepted atomic.Int64
+	var wg sync.WaitGroup
+	for range senders {
+		wg.Go(func() {
+			for {
+				if _, err := s.Send(context.Background(), message("Racing")); err != nil {
+					refusals <- err
+					return
+				}
+				//: Close comes once every sender is well into its stream.
+				if accepted.Add(1) == int64(2*senders) {
+					close(warm)
+				}
+			}
+		})
+	}
+	<-warm
+	closeErr := s.Close()
+	wg.Wait()
+	close(refusals)
+	if closeErr != nil {
+		t.Fatalf("Close() = %v", closeErr)
+	}
+	for err := range refusals {
+		if !errs.HasCode(err, spool.CodeSpoolClosed) {
+			t.Errorf("a Send racing Close = %v, want nil or SpoolClosed", err)
+		}
+	}
+	if err := s.Close(); err != nil {
+		t.Fatalf("a second Close() = %v, want nil", err)
 	}
 }
 

@@ -103,7 +103,11 @@ type Spool struct {
 	poll        time.Duration
 	// observing serialises the observer's calls.
 	observing sync.Mutex
-	// mu guards closed and announcing.
+	// closing guards closed and the queue's lifetime: every publication
+	// holds it for reading, and Close for writing, so Close waits for a
+	// publication in flight and none starts after it.
+	closing sync.RWMutex
+	// mu guards announcing.
 	mu     sync.RWMutex
 	closed bool
 }
@@ -193,13 +197,11 @@ func maxMessageBytes(configured int) int {
 // A refusal is the mail domain's own typed verdict (HeaderInjection,
 // InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge),
 // SpoolMisconfigured for an empty identifier from Config.NewID, or
-// SpoolClosed; nothing is queued.
+// SpoolClosed; nothing is queued. A Send racing Close either lands before the
+// queue closes or is SpoolClosed.
 func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string, err error) {
-	s.mu.RLock()
-	closed := s.closed
-	s.mu.RUnlock()
-	//: a closed spool takes nothing.
-	if closed {
+	//: a closed spool takes nothing, and mints nothing for it.
+	if s.isClosed() {
 		//: SpoolClosed.
 		return "", kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
 	}
@@ -219,13 +221,38 @@ func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string,
 	//: delivery waits until the observer has heard it was queued.
 	defer s.announce(record.ID)()
 	//: durable before Send returns, with a Dir.
-	if _, publishErr := s.broker.Publish(ctx, payload); publishErr != nil {
-		//: MessageTooLarge, QueueBackendFailed, or the caller's context.
+	if publishErr := s.publish(ctx, payload); publishErr != nil {
+		//: SpoolClosed, MessageTooLarge, QueueBackendFailed, or the caller's
+		//: context.
 		return "", publishErr
 	}
 	s.emit(&EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta})
 	//: the spool's identifier.
 	return record.ID, nil
+}
+
+// isClosed reports whether Close ran.
+func (s *Spool) isClosed() bool {
+	s.closing.RLock()
+	defer s.closing.RUnlock()
+	//: as Close left it.
+	return s.closed
+}
+
+// publish writes payload into the queue, unless the spool closed meanwhile.
+// It holds closing for reading throughout, so Close waits for it and never
+// closes the queue under it; the observer is told afterwards, outside it.
+func (s *Spool) publish(ctx context.Context, payload []byte) error {
+	s.closing.RLock()
+	defer s.closing.RUnlock()
+	//: Close won the race.
+	if s.closed {
+		//: SpoolClosed.
+		return kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
+	}
+	_, publishErr := s.broker.Publish(ctx, payload)
+	//: nil once the mail is in the queue; the queue's verdict otherwise.
+	return publishErr
 }
 
 // announce registers id as a mail Send is publishing and has not yet told the
@@ -375,13 +402,19 @@ func (s *Spool) DeadLetters(ctx context.Context, maxLetters int) ([]DeadLetterVa
 	return out, nil
 }
 
-// Close refuses every later Send and closes the spool's queue. Stop Run
+// Close refuses every later Send and closes the spool's queue, once the
+// publications in flight have landed. Closing twice is closing once. Stop Run
 // first — cancel its context and wait for it to return — or a delivery may be
 // cut off mid-attempt; the mail it held comes back when its lease lapses.
 func (s *Spool) Close() error {
-	s.mu.Lock()
+	s.closing.Lock()
+	defer s.closing.Unlock()
+	//: the queue is closed already, and a second close of it would fail.
+	if s.closed {
+		//: closed.
+		return nil
+	}
 	s.closed = true
-	s.mu.Unlock()
 	closer, closable := s.broker.(io.Closer)
 	//: a queue with nothing to release.
 	if !closable {

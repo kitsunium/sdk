@@ -54,6 +54,13 @@ Code range `0.3.81.*`.
   failure — rather than the spool owning a goroutine it would have to stop.
 - **Nothing is written anywhere by the spool.** `Observe` gets every event;
   logging is the caller's.
+- **`Close` waits for the publications in flight.** Every publication holds
+  `closing` for reading and `Close` holds it for writing, so a `Send` racing
+  `Close` lands or is `SPOOL_CLOSED`. Before this, a Send cut off by the
+  queue's closing answered `PUBLISH_FAILED`, or `DIRECTORY_SYNC_FAILED` for a
+  mail whose file was already written, which invites a resend
+  (`TestASendRacingCloseLandsOrIsRefused` fails without the lock). The lock is
+  released before the observer is told. A second `Close` is nil.
 - **The observer's calls are serialised, and a mail's `queued` comes first.**
   The consumer can deliver a mail before `Send` has returned, since `Publish`
   wakes it. `Send` therefore registers the mail's identifier in `announcing`
