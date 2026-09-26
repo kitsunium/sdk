@@ -81,9 +81,11 @@ spend everyone else's budget, and it is stated rather than discovered.
   is `STOP_TIMEOUT` — the goroutine is abandoned, never killed, and a later
   `Stop` waits again. A `Start` while the supervision still runs is
   `SUPERVISOR_RUNNING`.
-- **The wall-clock audit covers it**: every wait is `SupervisorConfig.Clock`,
-  and `supervise_external_test.go` drives each restart with `BlockUntil` +
-  `Advance`, asserting "not one nanosecond early".
+- **The wall-clock audit covers it**: every restart wait is on
+  `SupervisorConfig.Clock`, and `supervise_external_test.go` drives each
+  restart with `BlockUntil` + `Advance`, asserting "not one nanosecond early".
+  The one other wait, `Stop`'s join, is bounded by `Stop`'s own context, never
+  by a clock.
 
 ## Conventions
 
