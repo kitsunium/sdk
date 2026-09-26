@@ -210,6 +210,31 @@ func TestFilesThatAreNotAStore(t *testing.T) {
 	}
 }
 
+// TestARefusedOpenWritesNothing pins the order of Open: every check comes
+// before the fold, so an open refused over a broken unique index leaves the
+// snapshot an operator edited byte for byte, and the overlay entry it would
+// have folded where it was.
+func TestARefusedOpenWritesNothing(t *testing.T) {
+	t.Parallel()
+	fsys := memFS()
+	//: one entry pending in the overlay, as a process that died leaves it.
+	crash(t, fsys, func(store *docstore.Store[account]) {
+		must(t, store.Put(account{ID: "acc_3", Email: "third@x.dev"}))
+	})
+	//: the snapshot edited by hand: two documents sharing a unique key.
+	edited := `{"acc_1":{"id":"acc_1","email":"twice@x.dev"},"acc_2":{"id":"acc_2","email":"twice@x.dev"}}`
+	must(t, fsys.WriteAtomic(snapshotPath, []byte(edited), 0o600))
+	pending := overlayEntries(t, fsys)
+	_, err := openWith(accountConfig(fsys))
+	requireCode(t, err, docstore.CodeIndexBroken, "an open over documents breaking a unique index")
+	if after := readFile(t, fsys, snapshotPath); after != edited {
+		t.Fatalf("the refused open rewrote the snapshot:\n%s", after)
+	}
+	if left := overlayEntries(t, fsys); len(left) != 1 || !slices.Equal(left, pending) {
+		t.Fatalf("the refused open changed the overlay: %v, was %v", left, pending)
+	}
+}
+
 // entryNameOf finds the overlay entry name the store gives key, by writing it.
 func entryNameOf(t *testing.T, key string) string {
 	t.Helper()

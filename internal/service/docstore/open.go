@@ -8,7 +8,8 @@ import "encoding/json"
 // without a filesystem, otherwise loaded from it — the snapshot, the overlay
 // replayed on top, the indexes rebuilt, and the overlay folded when it holds
 // anything. It creates the directories the store lives in, 0700, and writes
-// its files 0600.
+// its files 0600. An open it refuses writes no data: the fold comes after
+// every check, so the files an operator must repair are left as they were.
 //
 //	accounts, err := docstore.Open(
 //	    docstore.Config[Account]{Key: Account.ID, FS: data, Path: "members/accounts.json"},
@@ -21,7 +22,20 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
 		//: StoreMisconfigured.
 		return nil, invalid
 	}
-	s := &Store[T]{
+	store := newStore(cfg, indexes)
+	//: LoadFailed, IndexBroken, DocumentUndecodable, PersistFailed or
+	//: WriteUnconfirmed.
+	if openErr := store.open(); openErr != nil {
+		//: no store over files it could not trust or bring to rest.
+		return nil, openErr
+	}
+	//: ready.
+	return store, nil
+}
+
+// newStore builds the empty store a validated cfg and its indexes describe.
+func newStore[T any](cfg Config[T], indexes []IndexSpec[T]) *Store[T] {
+	store := &Store[T]{
 		key:     cfg.Key,
 		fs:      cfg.FS,
 		byName:  make(map[string]*index[T], len(indexes)),
@@ -34,22 +48,39 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
 	//: the indexes, in declaration order.
 	for _, spec := range indexes {
 		ix := newIndex(spec)
-		s.indexes = append(s.indexes, ix)
-		s.byName[spec.Name] = ix
+		store.indexes = append(store.indexes, ix)
+		store.byName[spec.Name] = ix
 	}
+	//: empty, and not loaded yet.
+	return store
+}
+
+// open loads a persistent store, rebuilds the indexes, and writes the resting
+// state only once every check passed: an open it refuses writes no data. Open
+// holds the only reference, so no lock is taken.
+func (s *Store[T]) open() error {
+	needsFold := false
 	//: a persistent store reads what an earlier one left.
 	if s.fs != nil {
-		//: LoadFailed, PersistFailed or WriteUnconfirmed.
-		if loadErr := s.load(); loadErr != nil {
+		var loadErr error
+		needsFold, loadErr = s.load()
+		//: LoadFailed.
+		if loadErr != nil {
 			//: no store over files it could not read.
-			return nil, loadErr
+			return loadErr
 		}
 	}
 	//: the indexes, from whatever was loaded.
 	if rebuildErr := s.rebuild(); rebuildErr != nil {
-		//: IndexBroken or DocumentUndecodable.
-		return nil, rebuildErr
+		//: IndexBroken or DocumentUndecodable, and nothing written.
+		return rebuildErr
 	}
-	//: ready.
-	return s, nil
+	//: already at rest, or in memory.
+	if !needsFold {
+		//: nothing to write.
+		return nil
+	}
+	//: the resting state. PersistFailed or WriteUnconfirmed leaves files that
+	//: still hold every document, and the next Open tries again.
+	return s.fold()
 }

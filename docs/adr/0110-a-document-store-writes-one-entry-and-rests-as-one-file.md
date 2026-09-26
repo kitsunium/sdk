@@ -55,8 +55,11 @@ The overlay is folded back into the snapshot by the write that brings it to as
 many entries as the store holds documents, and never below `DefaultFoldAt`
 (1024). The fold rewrites the snapshot once and removes the entries it now
 contains. `Open` folds when it replayed anything, and `Close` folds too, so a
-closed store is ONE file a person can read. `FoldAt` sets another threshold,
-and a negative one never folds on a write.
+closed store is ONE file a person can read. `Open` folds only after every
+check has passed, so an open it refuses (a broken unique index, a document
+the type no longer fits) leaves the snapshot an operator must repair exactly
+as it was. `FoldAt` sets another threshold, and a negative one never folds on
+a write.
 
 What a write costs, measured on darwin/arm64 over the in-memory filesystem (so
 the device is out of the number and only the store's own work is left, folds
@@ -197,7 +200,8 @@ facade `pkg/v1/docstore`.
   - `persist_external_test.go`: durable before a write returns, one snapshot
     after `Close`, a fold interrupted at three points loading the same
     documents, a framework's bare snapshot, leftovers and strangers, six files
-    `Open` refuses (their content in no text), fold thresholds,
+    `Open` refuses (their content in no text), a refused open that writes
+    nothing, fold thresholds,
     `PERSIST_FAILED` and `WRITE_UNCONFIRMED`, a failed automatic fold, the
     store over the operating system's filesystem (0600 files, 0700
     directories).

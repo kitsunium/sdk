@@ -13,18 +13,19 @@ import (
 )
 
 // load reads what an earlier store left: the directories created if absent,
-// the snapshot, the overlay replayed on top. It then folds when the overlay
-// held anything, when there was no snapshot yet, or when the overlay
-// directory was just created — the snapshot's publication flushes the
-// directory that holds both, which is what makes the new overlay directory
+// the snapshot, the overlay replayed on top. It writes no data: it reports
+// whether Open must fold once the documents are known to be good — when the
+// overlay held anything, when there was no snapshot yet, or when the overlay
+// directory was just created, since the snapshot's publication flushes the
+// directory that holds both, which is what makes a new overlay directory
 // itself durable. Open holds the only reference, so no lock is taken.
-func (s *Store[T]) load() error {
+func (s *Store[T]) load() (needsFold bool, err error) {
 	//: the snapshot's own directory, when it has one.
 	if dir := path.Dir(s.path); dir != "." {
 		//: created 0700 when absent.
 		if mkErr := s.fs.MkdirAll(dir, dirPerm); mkErr != nil {
 			//: LoadFailed, naming the directory.
-			return loadFailed(dir, "cannot be created", mkErr)
+			return false, loadFailed(dir, "cannot be created", mkErr)
 		}
 	}
 	_, statErr := fs.Stat(s.fs, s.overlay)
@@ -32,26 +33,22 @@ func (s *Store[T]) load() error {
 	//: the overlay directory, created 0700 when absent.
 	if mkErr := s.fs.MkdirAll(s.overlay, dirPerm); mkErr != nil {
 		//: LoadFailed, naming the directory.
-		return loadFailed(s.overlay, "cannot be created", mkErr)
+		return false, loadFailed(s.overlay, "cannot be created", mkErr)
 	}
 	snapshotFound, readErr := s.readSnapshot()
 	//: LoadFailed.
 	if readErr != nil {
 		//: no store over a snapshot it could not read.
-		return readErr
+		return false, readErr
 	}
 	//: LoadFailed.
 	if replayErr := s.readOverlay(); replayErr != nil {
 		//: no store over an overlay it could not replay.
-		return replayErr
+		return false, replayErr
 	}
-	//: already at rest: one snapshot, an empty overlay that is durable.
-	if snapshotFound && overlayExisted && len(s.pending) == 0 {
-		//: nothing to write.
-		return nil
-	}
-	//: the resting state, written once at open.
-	return s.fold()
+	//: at rest already — one snapshot, an empty overlay that is durable — or
+	//: not yet.
+	return !snapshotFound || !overlayExisted || len(s.pending) > 0, nil
 }
 
 // readSnapshot loads the snapshot into docs and reports whether there was

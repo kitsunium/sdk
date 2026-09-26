@@ -15,12 +15,12 @@ second implementation would satisfy, so the values are the engine's (ADR 0074).
 | File | Surface |
 |---|---|
 | `docstore.go` | package doc, `Store[T]`, `EntryValue`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode`, `jsonCause` (a decoding failure described without a byte of the document) |
-| `open.go` | `Open[T](Config[T], ...IndexSpec[T])` |
+| `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
 | `config.go` | `Config[T]` (`Key`, `FS`, `Path`, `FoldAt`), `IndexSpec[T]`, `Unique`, `Index`, `DefaultFoldAt`; the refusals (`StoreMisconfigured`) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` (outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`; `encodeCause` |
 | `index.go` | the index maps (`entries`, `owned`), `uniqueTaken`, `file` / `unfile`, `rebuild` on open (a broken unique index or a panicking key function refuses the open) |
 | `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `removeFolded` / `recordFold`, `encodeSnapshot` |
-| `load.go` | `load`: the directories, `readSnapshot`, `readOverlay` / `replay`, the crash leftovers removed, the fold at open when needed |
+| `load.go` | `load`: the directories, `readSnapshot`, `readOverlay` / `replay`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable, outside every lock |
 | `codes.go` / `errors.go` | `0.3.80.1`–`0.3.80.15` |
 | `BENCH.md` | what a write costs as the store grows, against the whole-file rewrite it replaces |
@@ -59,7 +59,9 @@ second implementation would satisfy, so the values are the engine's (ADR 0074).
 - **Indexes are rebuilt, never persisted.** They are derived data, and a
   derived file that could disagree with its source would need a repair path.
   A unique index the documents break refuses the OPEN (`INDEX_BROKEN`): a
-  unique index that does not hold would be a lie every `Lookup` tells.
+  unique index that does not hold would be a lie every `Lookup` tells. The
+  fold at open comes after the rebuild, so a refused open leaves the snapshot
+  an operator has to repair byte for byte — `TestARefusedOpenWritesNothing`.
 - **The key never reaches an error.** A store key is routinely an e-mail
   address; an index key routinely the hash of a token. Every refusal names the
   store and the index, never a key, and a decoding failure names the field and
