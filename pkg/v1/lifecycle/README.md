@@ -50,6 +50,17 @@ There is no autowiring, no reflection over constructors and no container. A conv
 
 Signals and sd\_notify are OPT\-IN fields of [RunConfig](<#RunConfig>), never a default: they are process\-wide, observable side effects, and a library that installs them because it was imported fights the caller's own main. Both delegate to the SDK packages that already implement them.
 
+### A loop that must keep running: the Supervisor
+
+Many components own a loop that runs between their Start and their Stop — a consumer, a sweeper, a watcher — and that loop is where a component dies unnoticed: it returns an error nobody reads, or panics and takes the process with it. [NewSupervisor](<#NewSupervisor>) runs such a function on a goroutine of its own until it is stopped, and restarts it after every early end — an error, a nil return before its context ended, a panic, which it recovers into [RunPanicked](<#InvalidComponent>) — after a backoff: one second, doubling, to a minute by default \([SupervisorConfig](<#SupervisorConfig>).Backoff is the resilience curve, published by pkg/v1/resilience\). A run that lasted [DefaultHealthyRun](<#PhaseStart>) was working, so its end waits the first backoff again. Every run started and ended, every restart scheduled, and the end of the supervision reach [SupervisorConfig](<#SupervisorConfig>).Observe; the supervisor writes nothing anywhere itself.
+
+```
+sweeper, err := lifecycle.NewSupervisor("session-sweeper", sweep, lifecycle.SupervisorConfig{})
+err = app.Add(sweeper.Component()) // Start begins it, Stop cancels and joins it
+```
+
+Stop cancels the function's context and waits for it to return — the Lifecycle budgets that wait like any other Stop — and a function that ignores its context is abandoned at the budget, never killed. Start's context gives every run its values; its cancellation does not end the supervision, because a Lifecycle hands a component the context of its STARTUP. Every wait is on [SupervisorConfig](<#SupervisorConfig>).Clock, so a test drives each restart with a ManualClock instead of sleeping.
+
 ### Errors
 
 A failed \[Lifecycle.Start\] returns an errors.Join carrying [StartFailed](<#InvalidComponent>) AND the component's own error, side by side rather than one wrapping the other — so errs.HasCode\(err, CodeStartFailed\) and the caller's own errors.Is both answer. \[Lifecycle.Stop\] aggregates the same way, one entry per component that failed or overran.
@@ -58,6 +69,7 @@ A component that PANICS is recovered and reported as [ComponentPanicked](<#Inval
 
 ## Index
 
+- [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Run\(ctx context.Context, lc Lifecycle, cfg RunConfig\) error](<#Run>)
 - [type Component](<#Component>)
@@ -69,8 +81,48 @@ A component that PANICS is recovered and reported as [ComponentPanicked](<#Inval
 - [type Signal](<#Signal>)
 - [type Start](<#Start>)
 - [type Stop](<#Stop>)
+- [type SupervisionEvent](<#SupervisionEvent>)
+- [type SupervisionPhase](<#SupervisionPhase>)
+- [type Supervisor](<#Supervisor>)
+  - [func NewSupervisor\(name string, run func\(ctx context.Context\) error, cfg SupervisorConfig\) \(\*Supervisor, error\)](<#NewSupervisor>)
+- [type SupervisorConfig](<#SupervisorConfig>)
 - [type Transition](<#Transition>)
 
+
+## Constants
+
+<a name="PhaseStart"></a>
+
+```go
+const (
+    // PhaseStart reports a call to a component's Start.
+    PhaseStart Phase = corelc.PhaseStart
+    // PhaseStop reports a call to a component's Stop.
+    PhaseStop Phase = corelc.PhaseStop
+    // DefaultStopTimeout is the per-component budget a non-positive
+    // Config.StopTimeout clamps to.
+    DefaultStopTimeout time.Duration = svclc.DefaultStopTimeout
+    // DefaultRestartBase is the supervisor's first restart backoff when
+    // SupervisorConfig.Backoff is zero, or sets no BaseDelay; it doubles from
+    // there.
+    DefaultRestartBase time.Duration = svclc.DefaultRestartBase
+    // DefaultRestartMax is the supervisor's longest restart backoff when
+    // SupervisorConfig.Backoff is zero.
+    DefaultRestartMax time.Duration = svclc.DefaultRestartMax
+    // DefaultHealthyRun is how long a supervised run must last, when
+    // SupervisorConfig.HealthyAfter is not positive, for its end to count as
+    // a first failure again.
+    DefaultHealthyRun time.Duration = svclc.DefaultHealthyRun
+    // SupervisionRunStarted reports a run of the supervised function beginning.
+    SupervisionRunStarted SupervisionPhase = svclc.SupervisionRunStarted
+    // SupervisionRunEnded reports a run returning, or panicking.
+    SupervisionRunEnded SupervisionPhase = svclc.SupervisionRunEnded
+    // SupervisionRestarting reports a restart scheduled after Delay.
+    SupervisionRestarting SupervisionPhase = svclc.SupervisionRestarting
+    // SupervisionStopped reports the end of the supervision.
+    SupervisionStopped SupervisionPhase = svclc.SupervisionStopped
+)
+```
 
 ## Variables
 
@@ -106,11 +158,20 @@ var (
     // ReadinessFailed is returned when an opt-in sd_notify datagram could not
     // be delivered.
     ReadinessFailed = svclc.ReadinessFailed
+    // RunPanicked is the failure of a supervised run that panicked. It was
+    // recovered and the run restarted; the panic value and the stack travel
+    // as fields, never in the Public text.
+    RunPanicked = svclc.RunPanicked
+    // SupervisorMisconfigured refuses a supervisor without a name or a
+    // function.
+    SupervisorMisconfigured = svclc.SupervisorMisconfigured
+    // SupervisorRunning refuses a second Start while a supervision runs.
+    SupervisorRunning = svclc.SupervisorRunning
 )
 ```
 
 <a name="Run"></a>
-## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L184>)
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L253>)
 
 ```go
 func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
@@ -119,7 +180,7 @@ func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error
 Run starts every component, waits for ctx or one of cfg.Signals, then stops them in reverse order. See the package documentation for what the opt\-in fields wire, and what the zero RunConfig deliberately does not.
 
 <a name="Component"></a>
-## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L123>)
+## type [Component](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L168>)
 
 Component is the public alias for one named Start/Stop registration.
 
@@ -128,7 +189,7 @@ type Component = corelc.ComponentValue
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L137>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L182>)
 
 Config is the public alias for the engine's construction parameters.
 
@@ -137,7 +198,7 @@ type Config = svclc.Config
 ```
 
 <a name="Lifecycle"></a>
-## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L120>)
+## type [Lifecycle](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L165>)
 
 Lifecycle is the public alias for the ordered start/stop contract.
 
@@ -146,7 +207,7 @@ type Lifecycle = corelc.Lifecycle
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L176>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L245>)
 
 ```go
 func New(cfg Config) Lifecycle
@@ -155,7 +216,7 @@ func New(cfg Config) Lifecycle
 New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the wall clock, a non\-positive cfg.StopTimeout to DefaultStopTimeout, and a nil cfg.OnTransition to no observation. What can fail fails at Add.
 
 <a name="Phase"></a>
-## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L130>)
+## type [Phase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L175>)
 
 Phase is the public alias for which half of a component a Transition reports.
 
@@ -163,22 +224,8 @@ Phase is the public alias for which half of a component a Transition reports.
 type Phase = corelc.Phase
 ```
 
-<a name="PhaseStart"></a>
-
-```go
-const (
-    // PhaseStart reports a call to a component's Start.
-    PhaseStart Phase = corelc.PhaseStart
-    // PhaseStop reports a call to a component's Stop.
-    PhaseStop Phase = corelc.PhaseStop
-    // DefaultStopTimeout is the per-component budget a non-positive
-    // Config.StopTimeout clamps to.
-    DefaultStopTimeout time.Duration = svclc.DefaultStopTimeout
-)
-```
-
 <a name="RunConfig"></a>
-## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L140>)
+## type [RunConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L185>)
 
 RunConfig is the public alias for Run's opt\-in supervision wiring.
 
@@ -187,7 +234,7 @@ type RunConfig = svclc.RunConfig
 ```
 
 <a name="Signal"></a>
-## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L134>)
+## type [Signal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L179>)
 
 Signal is the public alias for a typed OS signal, re\-exported here so a caller wiring RunConfig.Signals needs no second import.
 
@@ -196,7 +243,7 @@ type Signal = coreproc.Signal
 ```
 
 <a name="Start"></a>
-## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L114>)
+## type [Start](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L159>)
 
 Start is the public alias for the ctx\-aware bring\-up half of a component.
 
@@ -205,7 +252,7 @@ type Start = corelc.Start
 ```
 
 <a name="Stop"></a>
-## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L117>)
+## type [Stop](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L162>)
 
 Stop is the public alias for the ctx\-aware teardown half of a component.
 
@@ -213,8 +260,53 @@ Stop is the public alias for the ctx\-aware teardown half of a component.
 type Stop = corelc.Stop
 ```
 
+<a name="SupervisionEvent"></a>
+## type [SupervisionEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L197>)
+
+SupervisionEvent is the public alias for one thing a supervisor did, as its observer is told.
+
+```go
+type SupervisionEvent = svclc.SupervisionEventValue
+```
+
+<a name="SupervisionPhase"></a>
+## type [SupervisionPhase](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L200>)
+
+SupervisionPhase is the public alias for what a SupervisionEvent reports.
+
+```go
+type SupervisionPhase = svclc.SupervisionPhase
+```
+
+<a name="Supervisor"></a>
+## type [Supervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L189>)
+
+Supervisor is the public alias for a function run until stopped and restarted after every early end: Start, Stop, Component.
+
+```go
+type Supervisor = svclc.Supervisor
+```
+
+<a name="NewSupervisor"></a>
+### func [NewSupervisor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L262>)
+
+```go
+func NewSupervisor(name string, run func(ctx context.Context) error, cfg SupervisorConfig) (*Supervisor, error)
+```
+
+NewSupervisor builds a supervisor named name over run, tuned by cfg — whose zero value is a working supervisor. run must return when its context ends; returning earlier, or panicking, restarts it after the backoff. It starts nothing: Start does, or the Lifecycle it is a Component of.
+
+<a name="SupervisorConfig"></a>
+## type [SupervisorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L193>)
+
+SupervisorConfig is the public alias for a supervisor's optional tuning: Clock, Observe, Backoff, HealthyAfter.
+
+```go
+type SupervisorConfig = svclc.SupervisorConfig
+```
+
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L126>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/lifecycle/lifecycle.go#L171>)
 
 Transition is the public alias for one reported component move.
 

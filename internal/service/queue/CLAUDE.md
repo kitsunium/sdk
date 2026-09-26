@@ -246,6 +246,17 @@ the code.
   would hand a consumer a truncated payload under a receipt naming a file about
   to be renamed away.
 
+## A handler that parks its own message
+
+A handler may extend its OWN lease through `LeaseExtender` and return nil — the
+mail spool (`internal/service/mail/spool`, ADR 0111) does exactly that to wait
+a backoff that grows with the attempt instead of the fixed `RetryDelay`. The
+extension replaces the receipt, so `Consume`'s acknowledgement of the old one
+is refused `LEASE_EXPIRED` by BOTH brokers and ignored by `settle` like every
+lapsed acknowledgement; the message comes back when the new lease lapses, its
+delivery count incremented. That is a contract now: a broker that answered
+`UNKNOWN_RECEIPT` for a replaced receipt would stop `Consume` instead.
+
 ## Do NOT
 
 - Give `Close` any duty beyond releasing descriptors. The durable broker holds

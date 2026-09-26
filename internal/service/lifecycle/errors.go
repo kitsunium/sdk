@@ -9,6 +9,10 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // a less loaded machine may well complete.
 const exitTempFail int = 75
 
+// exitConfig matches sysexits EX_CONFIG (78): a supervisor wired wrong is
+// refused the same way forever, and the fix is at the call site.
+const exitConfig int = 78
+
 var (
 	// StartFailed is joined with the component's own error when a Start
 	// aborts the sequence. It is a SEPARATE error in an errors.Join rather
@@ -57,4 +61,27 @@ var (
 	ReadinessFailed = errs.Define(CodeReadinessFailed, "READINESS_FAILED",
 		"The readiness notification could not be delivered",
 		"service/lifecycle: sd_notify was requested and failed; the field names the state that was not delivered")
+	// RunPanicked is the failure of a supervised run that panicked. The
+	// supervisor recovers it on the run's goroutine, because a panic escaping
+	// there would take the process down with every other goroutine in it;
+	// the recovered value and the stack travel as FIELDS, never as the
+	// origin, so a panic carrying an *errs.Error cannot hijack this code —
+	// and never in the Public text, which a status page may show.
+	RunPanicked = errs.Define(CodeRunPanicked, "RUN_PANICKED",
+		"The supervised function panicked and was recovered",
+		"service/lifecycle: a supervised run panicked; the fields carry the supervisor's name, the panic value and the stack, and the run is restarted after its backoff")
+
+	// SupervisorMisconfigured refuses a supervisor that could never run.
+	SupervisorMisconfigured = errs.Define(CodeSupervisorMisconfigured, "SUPERVISOR_MISCONFIGURED",
+		"The supervisor cannot run as configured",
+		"service/lifecycle: NewSupervisor needs a Name and a Run; the field names which is missing",
+		errs.WithExitCode(exitConfig))
+
+	// SupervisorRunning refuses a second Start while the first supervision
+	// is still running: two loops over one function would be two owners of
+	// whatever it drives.
+	SupervisorRunning = errs.Define(CodeSupervisorRunning, "SUPERVISOR_RUNNING",
+		"The supervisor is already running",
+		"service/lifecycle: Start was called while a supervision is running; Stop it first",
+		errs.WithExitCode(exitConfig))
 )

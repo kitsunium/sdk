@@ -364,6 +364,13 @@ func TestExtendRenewsTheLeaseAndVoidsTheOldReceipt(t *testing.T) {
 			if renewed.Receipt == delivery.Lease.Receipt {
 				t.Fatal("Extend reused the receipt; the deadline is part of the lease's identity")
 			}
+			//: the OLD receipt names nothing now: acknowledging it is refused
+			//: LEASE_EXPIRED — never UNKNOWN_RECEIPT, which would stop Consume —
+			//: and removes nothing. A handler that parks its own message and
+			//: returns nil relies on exactly this (the mail spool, ADR 0111).
+			if ackErr := broker.Ack(t.Context(), delivery.Lease.Receipt); !errs.HasCode(ackErr, corequeue.CodeLeaseExpired) {
+				t.Fatalf("Ack(old receipt) = %v, want CodeLeaseExpired", ackErr)
+			}
 			//: well past the ORIGINAL deadline, and still held.
 			clk.Advance(testVisibility * 2)
 			receiveNone(t, broker)

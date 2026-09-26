@@ -1,0 +1,64 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "docstore",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "docstore.go",
+        "errors.go",
+        "hooks.go",
+        "index.go",
+        "load.go",
+        "open.go",
+        "persist.go",
+        "write.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/docstore",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/vfs",
+        "//internal/kernel/errs",
+        "//internal/service/vfs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":docstore",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "docstore_test",
+    srcs = [
+        "concurrency_external_test.go",
+        "docstore_bench_test.go",
+        "harness_external_test.go",
+        "index_external_test.go",
+        "persist_external_test.go",
+        "store_external_test.go",
+    ],
+    deps = [
+        ":docstore",
+        "//internal/core/proc",
+        "//internal/core/vfs",
+        "//internal/kernel/errs",
+        "//internal/service/vfs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

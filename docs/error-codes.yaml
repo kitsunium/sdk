@@ -1798,6 +1798,18 @@ codes:
     const: CodeReadinessFailed
     hex: "0x00_03_31_05"
     package: internal/service/lifecycle
+  - code: "0.3.49.6"
+    const: CodeRunPanicked
+    hex: "0x00_03_31_06"
+    package: internal/service/lifecycle
+  - code: "0.3.49.7"
+    const: CodeSupervisorMisconfigured
+    hex: "0x00_03_31_07"
+    package: internal/service/lifecycle
+  - code: "0.3.49.8"
+    const: CodeSupervisorRunning
+    hex: "0x00_03_31_08"
+    package: internal/service/lifecycle
   - code: "0.3.50.1"
     const: CodeEntropyFailed
     hex: "0x00_03_32_01"
@@ -2198,6 +2210,86 @@ codes:
     const: CodeValueUnencodable
     hex: "0x00_03_49_02"
     package: internal/service/redact
+  - code: "0.3.80.1"
+    const: CodeDocumentNotFound
+    hex: "0x00_03_50_01"
+    package: internal/service/docstore
+  - code: "0.3.80.2"
+    const: CodeDocumentExists
+    hex: "0x00_03_50_02"
+    package: internal/service/docstore
+  - code: "0.3.80.3"
+    const: CodeUniqueKeyTaken
+    hex: "0x00_03_50_03"
+    package: internal/service/docstore
+  - code: "0.3.80.4"
+    const: CodeDocumentKeyEmpty
+    hex: "0x00_03_50_04"
+    package: internal/service/docstore
+  - code: "0.3.80.5"
+    const: CodeDocumentKeyChanged
+    hex: "0x00_03_50_05"
+    package: internal/service/docstore
+  - code: "0.3.80.6"
+    const: CodeIndexUnknown
+    hex: "0x00_03_50_06"
+    package: internal/service/docstore
+  - code: "0.3.80.7"
+    const: CodeIndexNotUnique
+    hex: "0x00_03_50_07"
+    package: internal/service/docstore
+  - code: "0.3.80.8"
+    const: CodeDocumentUndecodable
+    hex: "0x00_03_50_08"
+    package: internal/service/docstore
+  - code: "0.3.80.9"
+    const: CodeDocumentUnencodable
+    hex: "0x00_03_50_09"
+    package: internal/service/docstore
+  - code: "0.3.80.10"
+    const: CodePersistFailed
+    hex: "0x00_03_50_0A"
+    package: internal/service/docstore
+  - code: "0.3.80.11"
+    const: CodeLoadFailed
+    hex: "0x00_03_50_0B"
+    package: internal/service/docstore
+  - code: "0.3.80.12"
+    const: CodeIndexBroken
+    hex: "0x00_03_50_0C"
+    package: internal/service/docstore
+  - code: "0.3.80.13"
+    const: CodeStoreClosed
+    hex: "0x00_03_50_0D"
+    package: internal/service/docstore
+  - code: "0.3.80.14"
+    const: CodeStoreMisconfigured
+    hex: "0x00_03_50_0E"
+    package: internal/service/docstore
+  - code: "0.3.80.15"
+    const: CodeWriteUnconfirmed
+    hex: "0x00_03_50_0F"
+    package: internal/service/docstore
+  - code: "0.3.81.1"
+    const: CodeSpoolMisconfigured
+    hex: "0x00_03_51_01"
+    package: internal/service/mail/spool
+  - code: "0.3.81.2"
+    const: CodeSpoolClosed
+    hex: "0x00_03_51_02"
+    package: internal/service/mail/spool
+  - code: "0.3.81.3"
+    const: CodeMessageUndecodable
+    hex: "0x00_03_51_03"
+    package: internal/service/mail/spool
+  - code: "0.3.81.4"
+    const: CodeMessageUnencodable
+    hex: "0x00_03_51_04"
+    package: internal/service/mail/spool
+  - code: "0.3.81.5"
+    const: CodeTransportPanicked
+    hex: "0x00_03_51_05"
+    package: internal/service/mail/spool
   - code: "0.3.88.1"
     const: CodeTransitionRefused
     hex: "0x00_03_58_01"

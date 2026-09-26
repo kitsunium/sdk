@@ -871,6 +871,19 @@ rules:
   # would stutter, which the same linter's own naming rules discourage elsewhere.
   KTN-STRUCT-CTOR:
     exclude:
+      # service/mail/spool.Spool is the one main type of package spool, so
+      # Go's convention names its constructor New — spool.New, as server.New
+      # below. NewSpool would stutter at every call site (spool.NewSpool),
+      # which the same linter's naming rules discourage elsewhere (ADR 0111).
+      - "**/internal/service/mail/spool/spool.go"
+      - "internal/service/mail/spool/spool.go"
+      # service/docstore.Store is built by Open, as os.Open and sql.Open build
+      # theirs: the constructor LOADS — the snapshot read, the overlay
+      # replayed, the indexes rebuilt — and "open" is what that is called. A
+      # NewStore beside it would be a second way in, one that either loads too
+      # or builds a store over files it never read (ADR 0110).
+      - "**/internal/service/docstore/docstore.go"
+      - "internal/service/docstore/docstore.go"
       # service/proc/childwait.Claim is MINTED by Spawn, under the ledger's
       # spawning gate, and by nothing else (ADR 0093): the gate is what keeps a
       # sweep from taking the child for an orphan between the fork and the
@@ -1099,6 +1112,14 @@ rules:
     exclude:
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
+      # service/docstore.Store is the word the SDK's storage ports already use
+      # — core/session.Store, core/cache.Store, core/secret.Store — and the
+      # rule only spares them because they are interfaces. The concrete
+      # document store is the same role under the same name; the suffix the
+      # rule infers ("Service") would read docstore.StoreService and name the
+      # one engine differently from every port it sits beside (ADR 0110).
+      - "**/internal/service/docstore/docstore.go"
+      - "internal/service/docstore/docstore.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the

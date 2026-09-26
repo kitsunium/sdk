@@ -1,7 +1,9 @@
 package mail_test
 
 import (
+	"bytes"
 	"context"
+	"fmt"
 	"strings"
 	"sync"
 	"testing"
@@ -152,5 +154,65 @@ func TestMemoryTransportHonoursACancelledContext(t *testing.T) {
 	cancel()
 	if err := transport.Send(ctx, simpleMessage()); !errs.HasCode(err, svcmail.CodeDialFailed) {
 		t.Fatalf("Send(cancelled) = %v, want CodeDialFailed", err)
+	}
+}
+
+// TestNewCaptureKeepsTheNewest pins the capture transport: it keeps only the
+// last keep deliveries, oldest dropped first, a non-positive keep being
+// DefaultCaptureKeep (200); it refuses exactly as NewMemory does, keeping
+// nothing of a refusal; and Reset empties it.
+func TestNewCaptureKeepsTheNewest(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// wantFirst and wantLast are the subjects of the oldest and the
+		// newest delivery kept.
+		wantFirst, wantLast   string
+		keep, sends, wantKept int
+	}
+	tests := []tc{
+		{name: "a bound of two keeps the last two", keep: 2, sends: 3, wantKept: 2, wantFirst: "mail 2", wantLast: "mail 3"},
+		{name: "under its bound it keeps everything", keep: 5, sends: 3, wantKept: 3, wantFirst: "mail 1", wantLast: "mail 3"},
+		{name: "a zero bound is the default one", keep: 0, sends: 201, wantKept: 200, wantFirst: "mail 2", wantLast: "mail 201"},
+		{name: "a negative bound is the default one", keep: -1, sends: 201, wantKept: 200, wantFirst: "mail 2", wantLast: "mail 201"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		capture := svcmail.NewCapture(c.keep)
+		for i := 1; i <= c.sends; i++ {
+			msg := coremail.MessageValue{
+				From:    coremail.AddressValue{Addr: "from@example.com"},
+				To:      []coremail.AddressValue{{Addr: "to@example.com"}},
+				Subject: fmt.Sprintf("mail %d", i), Text: "body",
+			}
+			if err := capture.Send(context.Background(), msg); err != nil {
+				t.Fatalf("Send(mail %d) = %v", i, err)
+			}
+		}
+		sent := capture.Sent()
+		if len(sent) != c.wantKept {
+			t.Fatalf("the capture kept %d deliveries, want %d", len(sent), c.wantKept)
+		}
+		if !bytes.Contains(sent[0].Raw, []byte("Subject: "+c.wantFirst+"\r\n")) || !bytes.Contains(sent[len(sent)-1].Raw, []byte("Subject: "+c.wantLast+"\r\n")) {
+			t.Fatalf("the capture kept %q … %q", sent[0].Raw, sent[len(sent)-1].Raw)
+		}
+		//: the refusals are the memory double's, so they are production's.
+		bad := coremail.MessageValue{From: coremail.AddressValue{Addr: "from@example.com"}, To: []coremail.AddressValue{{Addr: "to@example.com"}}, Subject: "a\r\nBcc: x@example.com", Text: "b"}
+		if err := capture.Send(context.Background(), bad); !errs.HasCode(err, coremail.CodeHeaderInjection) {
+			t.Fatalf("an injected header = %v, want HeaderInjection", err)
+		}
+		if n := len(capture.Sent()); n != c.wantKept {
+			t.Fatalf("a refusal changed what the capture kept: %d deliveries", n)
+		}
+		capture.Reset()
+		if n := len(capture.Sent()); n != 0 {
+			t.Fatalf("Reset left %d deliveries", n)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

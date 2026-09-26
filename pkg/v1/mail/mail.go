@@ -121,6 +121,41 @@
 // guarantees is that the structure is the one the RFCs prescribe for the
 // content supplied.
 //
+// # A durable outbox: the Spool
+//
+// A transport sends once, synchronously, and a relay that is down makes that
+// the caller's problem. [NewSpool] is the outbox between them: [Spool.Send]
+// validates a mail — refusing at the call site everything the transport would
+// refuse later — stamps what a retry must not change (the sender from
+// [SpoolConfig].From when the mail names none, the Date, and a Message-ID made
+// of the spool's identifier at the sender's domain), and returns once the mail
+// is queued: durable, in a directory that outlives the process, when
+// [SpoolConfig].Dir is set. [Spool.Run] hands each mail to the transport, one
+// at a time, and a failure waits a backoff that grows with the attempt — one
+// second, doubling, to five minutes by default — before the next; after
+// [SpoolConfig].MaxAttempts the mail is dead-lettered with its last failure,
+// readable through [Spool.DeadLetters].
+//
+//	outbox, err := mail.NewSpool(mail.SpoolConfig{
+//		Transport:   transport,
+//		Dir:         "/var/lib/app/outbox", // empty: in memory
+//		MaxAttempts: 6,
+//		From:        mail.Address{Name: "App", Addr: "app@example.com"},
+//	})
+//	go outbox.Run(ctx) // or under lifecycle.NewSupervisor
+//	id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body})
+//
+// A redelivery of a mail the spool delivered — its lease lapsed while a slow
+// relay was still accepting it — is recognised by its identifier and dropped.
+// The one duplicate no outbox can prevent is a process
+// that dies between the relay's acceptance and the acknowledgement; the next
+// process sends the mail again under the SAME Message-ID, which is how a
+// receiver recognises it. Every attempt carries its [SpoolAttempt] in its
+// context — the identifier, the count, and what [SpoolConfig].Annotate kept
+// from the Send's context — so a transport can continue the Send's trace, and
+// every mail's fate reaches [SpoolConfig].Observe. The spool writes nothing
+// anywhere itself.
+//
 // # Testing
 //
 // [NewMemory] returns a transport that COMPOSES every message and records the
@@ -131,11 +166,19 @@
 //	box := mail.NewMemory()
 //	_ = service.Notify(ctx, box)      // the code under test
 //	sent := box.Sent()                // envelope + composed the RFC 5322 wire form
+//
+// [NewCapture] is the same double keeping only the last N deliveries — the
+// transport a development server delivers through, where NewMemory would keep
+// every mail for as long as the server runs.
 package mail
 
 import (
+	"context"
+	"time"
+
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
 	svcmail "github.com/kitsunium/sdk/internal/service/mail"
+	svcspool "github.com/kitsunium/sdk/internal/service/mail/spool"
 )
 
 // TLSUnset is the zero value and is refused at construction — neither
@@ -157,6 +200,41 @@ const TLSImplicit TLSMode = svcmail.TLSImplicit
 // TLSDisabled sends in the clear and must be spelled out loud. Credentials are
 // refused with it, at construction.
 const TLSDisabled TLSMode = svcmail.TLSDisabled
+
+// The spool's defaults, and the capture transport's.
+const (
+	// DefaultCaptureKeep is how many deliveries NewCapture keeps when given a
+	// non-positive number.
+	DefaultCaptureKeep int = svcmail.DefaultCaptureKeep
+	// DefaultSpoolSendTimeout bounds one delivery attempt when
+	// SpoolConfig.SendTimeout is not positive.
+	DefaultSpoolSendTimeout time.Duration = svcspool.DefaultSendTimeout
+	// DefaultSpoolRetryBase and DefaultSpoolRetryMax bound the wait between
+	// attempts when SpoolConfig.Backoff is zero; DefaultSpoolRetryBase is
+	// also the first wait of a curve that sets no BaseDelay.
+	DefaultSpoolRetryBase time.Duration = svcspool.DefaultRetryBase
+	DefaultSpoolRetryMax  time.Duration = svcspool.DefaultRetryMax
+	// DefaultSpoolMaxMessageBytes bounds one spooled mail when
+	// SpoolConfig.MaxMessageBytes is zero.
+	DefaultSpoolMaxMessageBytes int = svcspool.DefaultMaxMessageBytes
+	// SpoolDeliveredMemory is how many delivered mails a spool remembers to
+	// drop a redelivery.
+	SpoolDeliveredMemory int = svcspool.DeliveredMemory
+)
+
+// What can happen to a spooled mail.
+const (
+	// SpoolQueued: Send put the mail in the spool.
+	SpoolQueued SpoolEventKind = svcspool.EventQueued
+	// SpoolSent: the transport accepted the mail.
+	SpoolSent SpoolEventKind = svcspool.EventSent
+	// SpoolRetrying: an attempt failed and the next is due at Next.
+	SpoolRetrying SpoolEventKind = svcspool.EventRetrying
+	// SpoolDeadLettered: the last attempt failed; the mail is kept with it.
+	SpoolDeadLettered SpoolEventKind = svcspool.EventDeadLettered
+	// SpoolDuplicate: a redelivery of a mail already delivered was dropped.
+	SpoolDuplicate SpoolEventKind = svcspool.EventDuplicate
+)
 
 // Message is the public alias for one mail, as a value.
 type Message = coremail.MessageValue
@@ -211,6 +289,28 @@ type ComposerConfig = svcmail.ComposerConfig
 // Composer is the public alias for the type that turns a [Message] into
 // the RFC 5322 wire form without sending anything.
 type Composer = svcmail.Composer
+
+// Spool is the public alias for the durable outbox: Send, Run, DeadLetters,
+// Close.
+type Spool = svcspool.Spool
+
+// SpoolConfig is the public alias for a spool's configuration: Transport and
+// MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout,
+// MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
+type SpoolConfig = svcspool.Config
+
+// SpoolEvent is the public alias for one thing that happened to one mail.
+type SpoolEvent = svcspool.EventValue
+
+// SpoolEventKind is the public alias for what a SpoolEvent reports.
+type SpoolEventKind = svcspool.EventKind
+
+// SpoolAttempt is the public alias for what one delivery attempt knows about
+// itself, carried in the context the spool hands its transport.
+type SpoolAttempt = svcspool.AttemptValue
+
+// SpoolDeadLetter is the public alias for a mail the spool gave up on.
+type SpoolDeadLetter = svcspool.DeadLetterValue
 
 var (
 	// HeaderInjection is returned when a header name or value carries CR, LF or
@@ -272,7 +372,43 @@ var (
 	// InvalidURL is returned by [ParseURL] for a URL it cannot read. It names
 	// the clause and never the URL, which carries the password.
 	InvalidURL = svcmail.InvalidURL
+
+	// The spool's own sentinels (0.3.81.*). As for every sentinel of this
+	// package, errors.Is matches one and errs.CodeOf reads its code.
+
+	// SpoolMisconfigured refuses a spool that could never deliver.
+	SpoolMisconfigured = svcspool.SpoolMisconfigured
+	// SpoolClosed refuses a Send after Close.
+	SpoolClosed = svcspool.SpoolClosed
+	// SpooledMailUndecodable reports a spooled record that is not a mail.
+	SpooledMailUndecodable = svcspool.MessageUndecodable
+	// SpooledMailUnencodable refuses a mail Send could not write.
+	SpooledMailUnencodable = svcspool.MessageUnencodable
+	// TransportPanicked is the failure of an attempt whose transport panicked.
+	TransportPanicked = svcspool.TransportPanicked
 )
+
+// NewSpool builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or
+// in memory without one. It starts nothing: Run delivers.
+func NewSpool(cfg SpoolConfig) (*Spool, error) {
+	//: delegate to the service constructor.
+	return svcspool.New(cfg)
+}
+
+// SpoolAttemptFrom returns the attempt a delivery context carries — only a
+// context a Spool handed its transport carries one.
+func SpoolAttemptFrom(ctx context.Context) (attempt SpoolAttempt, ok bool) {
+	//: delegate to the service accessor.
+	return svcspool.AttemptFrom(ctx)
+}
+
+// NewCapture returns NewMemory's double keeping only the last keep deliveries
+// — DefaultCaptureKeep when keep is not positive: the transport a development
+// server and a test deliver through.
+func NewCapture(keep int) FullTransport {
+	//: delegate to the service constructor.
+	return svcmail.NewCapture(keep)
+}
 
 // ParseURL reads smtp://user:password@host:port?tls=starttls|implicit|none, or
 // smtps://…, into an [SMTPConfig] that [NewSMTP] accepts; see the package

@@ -124,3 +124,71 @@ func TestComposeIsAvailableWithoutATransport(t *testing.T) {
 		t.Fatal("Validate accepted a message with no recipients")
 	}
 }
+
+// attemptRecorder is a transport that notes the attempt its context carries
+// and hands the mail on.
+type attemptRecorder struct {
+	next     mail.Transport
+	attempts chan mail.SpoolAttempt
+}
+
+// Send records the attempt, then delivers.
+func (a attemptRecorder) Send(ctx context.Context, msg mail.Message) error {
+	attempt, _ := mail.SpoolAttemptFrom(ctx)
+	a.attempts <- attempt
+	return a.next.Send(ctx, msg)
+}
+
+// TestTheSpoolThroughTheFacade pins the outbox through public names: Send
+// queues and returns the spool's identifier, Run delivers it through the
+// transport with the attempt in the context, the observer is told, and the
+// capture transport keeps the composed mail under the stable Message-ID.
+//
+// Goroutine lifecycle: one goroutine carries Run; cancelling ctx ends it, and
+// the test reads its result from done before closing the spool.
+func TestTheSpoolThroughTheFacade(t *testing.T) {
+	t.Parallel()
+	capture := mail.NewCapture(0)
+	attempts := make(chan mail.SpoolAttempt, 4)
+	events := make(chan mail.SpoolEvent, 8)
+	outbox, err := mail.NewSpool(mail.SpoolConfig{
+		Transport:   attemptRecorder{next: capture, attempts: attempts},
+		MaxAttempts: 3,
+		From:        mail.Address{Name: "App", Addr: "app@example.com"},
+		Observe:     func(e mail.SpoolEvent) { events <- e },
+	})
+	if err != nil {
+		t.Fatalf("NewSpool() = %v", err)
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	done := make(chan error, 1)
+	go func() { done <- outbox.Run(ctx) }()
+	id, err := outbox.Send(context.Background(), mail.Message{
+		To: []mail.Address{{Addr: "user@example.net"}}, Subject: "Welcome", Text: "Hello",
+	})
+	if err != nil {
+		t.Fatalf("Send() = %v", err)
+	}
+	if attempt := <-attempts; attempt.ID != id || attempt.Attempt != 1 {
+		t.Fatalf("the transport saw %+v", attempt)
+	}
+	for _, want := range []mail.SpoolEventKind{mail.SpoolQueued, mail.SpoolSent} {
+		if e := <-events; e.Kind != want || e.ID != id {
+			t.Fatalf("event %v for %s, want %v for %s", e.Kind, e.ID, want, id)
+		}
+	}
+	cancel()
+	if err := <-done; err != nil {
+		t.Fatalf("Run() = %v", err)
+	}
+	if err := outbox.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	sent := capture.Sent()
+	if len(sent) != 1 || !strings.Contains(string(sent[0].Raw), "<"+id+"@example.com>") {
+		t.Fatalf("the capture kept %d mails", len(sent))
+	}
+	if _, err := mail.NewSpool(mail.SpoolConfig{Transport: capture}); !errors.Is(err, mail.SpoolMisconfigured) {
+		t.Fatalf("a spool without an attempt budget = %v, want SpoolMisconfigured", err)
+	}
+}

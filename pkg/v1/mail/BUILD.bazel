@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/core/mail",
         "//internal/service/mail",
+        "//internal/service/mail/spool",
     ],
 )
 

@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "spool",
+    srcs = [
+        "codes.go",
+        "config.go",
+        "deliver.go",
+        "errors.go",
+        "event.go",
+        "ledger.go",
+        "spool.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/mail/spool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/mail",
+        "//internal/core/queue",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/id",
+        "//internal/service/queue",
+        "//internal/service/resilience",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":spool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "spool_test",
+    srcs = [
+        "announce_internal_test.go",
+        "disk_external_test.go",
+        "harness_external_test.go",
+        "spool_external_test.go",
+    ],
+    embed = [":spool"],
+    deps = [
+        "//internal/core/mail",
+        "//internal/core/proc",
+        "//internal/core/queue",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/mail",
+        "//internal/service/queue",
+        "//internal/service/resilience",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
