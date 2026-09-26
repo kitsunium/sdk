@@ -153,7 +153,7 @@
 // dialled on this machine's loopback of the same family, since no connection
 // can be made to an unspecified address. Ready means one thing: the process
 // answered 200. The exchange is bounded by [DefaultAskTimeout] (or
-// [AskConfig.Timeout]) and by the caller's context, follows no redirect, goes
+// [AskConfig].Timeout) and by the caller's context, follows no redirect, goes
 // through no proxy whatever the environment says, reads at most
 // [MaxAskDrainBytes] of the body and closes it, and no byte of that body ever
 // reaches an error: [AskNotReady] carries the status alone. The body is part of

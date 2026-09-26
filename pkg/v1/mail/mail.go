@@ -124,17 +124,17 @@
 // # A durable outbox: the Spool
 //
 // A transport sends once, synchronously, and a relay that is down makes that
-// the caller's problem. [NewSpool] is the outbox between them: [Spool.Send]
+// the caller's problem. [NewSpool] is the outbox between them: [Spool].Send
 // validates a mail — refusing at the call site everything the transport would
 // refuse later — stamps what a retry must not change (the sender from
 // [SpoolConfig].From when the mail names none, the Date, and a Message-ID made
 // of the spool's identifier at the sender's domain), and returns once the mail
 // is queued: durable, in a directory that outlives the process, when
-// [SpoolConfig].Dir is set. [Spool.Run] hands each mail to the transport, one
+// [SpoolConfig].Dir is set. [Spool].Run hands each mail to the transport, one
 // at a time, and a failure waits a backoff that grows with the attempt — one
 // second, doubling, to five minutes by default — before the next; after
 // [SpoolConfig].MaxAttempts the mail is dead-lettered with its last failure,
-// readable through [Spool.DeadLetters].
+// readable through [Spool].DeadLetters.
 //
 //	outbox, err := mail.NewSpool(mail.SpoolConfig{
 //		Transport:   transport,

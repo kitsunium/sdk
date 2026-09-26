@@ -91,7 +91,7 @@ if err != nil {
 }
 ```
 
-Addr is the address the process LISTENS on, spelled as its listener was given it; a host that names no particular address — empty, 0.0.0.0, :: — is dialled on this machine's loopback of the same family, since no connection can be made to an unspecified address. Ready means one thing: the process answered 200. The exchange is bounded by [DefaultAskTimeout](<#StatusUnhealthy>) \(or \[AskConfig.Timeout\]\) and by the caller's context, follows no redirect, goes through no proxy whatever the environment says, reads at most [MaxAskDrainBytes](<#StatusUnhealthy>) of the body and closes it, and no byte of that body ever reaches an error: [AskNotReady](<#InvalidCheck>) carries the status alone. The body is part of the answer: a process that sends 200 and then stalls until the bound ends has not answered within it, and gets [AskTimeout](<#InvalidCheck>).
+Addr is the address the process LISTENS on, spelled as its listener was given it; a host that names no particular address — empty, 0.0.0.0, :: — is dialled on this machine's loopback of the same family, since no connection can be made to an unspecified address. Ready means one thing: the process answered 200. The exchange is bounded by [DefaultAskTimeout](<#StatusUnhealthy>) \(or [AskConfig](<#AskConfig>).Timeout\) and by the caller's context, follows no redirect, goes through no proxy whatever the environment says, reads at most [MaxAskDrainBytes](<#StatusUnhealthy>) of the body and closes it, and no byte of that body ever reaches an error: [AskNotReady](<#InvalidCheck>) carries the status alone. The body is part of the answer: a process that sends 200 and then stalls until the bound ends has not answered within it, and gets [AskTimeout](<#InvalidCheck>).
 
 ## Index
 
