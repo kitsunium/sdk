@@ -1,0 +1,38 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "statemachine",
+    srcs = ["statemachine.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/statemachine",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/statemachine",
+        "//internal/kernel/errs",
+        "//internal/service/statemachine",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":statemachine",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "statemachine_test",
+    srcs = ["statemachine_external_test.go"],
+    deps = [
+        ":statemachine",
+        "//pkg/v1/clock",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

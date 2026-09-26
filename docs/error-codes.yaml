@@ -1110,6 +1110,10 @@ codes:
     const: CodeInvalidKeep
     hex: "0x00_02_25_07"
     package: internal/core/secret
+  - code: "0.2.56.1"
+    const: CodeTriggerUnknown
+    hex: "0x00_02_38_01"
+    package: internal/core/statemachine
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
@@ -2194,6 +2198,118 @@ codes:
     const: CodeValueUnencodable
     hex: "0x00_03_49_02"
     package: internal/service/redact
+  - code: "0.3.88.1"
+    const: CodeTransitionRefused
+    hex: "0x00_03_58_01"
+    package: internal/service/statemachine
+  - code: "0.3.88.2"
+    const: CodeEntityMissing
+    hex: "0x00_03_58_02"
+    package: internal/service/statemachine
+  - code: "0.3.88.3"
+    const: CodeEntityExists
+    hex: "0x00_03_58_03"
+    package: internal/service/statemachine
+  - code: "0.3.88.4"
+    const: CodeKeyEmpty
+    hex: "0x00_03_58_04"
+    package: internal/service/statemachine
+  - code: "0.3.88.5"
+    const: CodeHookFailed
+    hex: "0x00_03_58_05"
+    package: internal/service/statemachine
+  - code: "0.3.88.6"
+    const: CodeHookPanicked
+    hex: "0x00_03_58_06"
+    package: internal/service/statemachine
+  - code: "0.3.88.7"
+    const: CodeHookChangedState
+    hex: "0x00_03_58_07"
+    package: internal/service/statemachine
+  - code: "0.3.88.8"
+    const: CodeHookChangedKey
+    hex: "0x00_03_58_08"
+    package: internal/service/statemachine
+  - code: "0.3.88.9"
+    const: CodeReentrant
+    hex: "0x00_03_58_09"
+    package: internal/service/statemachine
+  - code: "0.3.88.10"
+    const: CodeStoreFailed
+    hex: "0x00_03_58_0A"
+    package: internal/service/statemachine
+  - code: "0.3.88.11"
+    const: CodeJournalFailed
+    hex: "0x00_03_58_0B"
+    package: internal/service/statemachine
+  - code: "0.3.88.12"
+    const: CodeLoopRunning
+    hex: "0x00_03_58_0C"
+    package: internal/service/statemachine
+  - code: "0.3.88.13"
+    const: CodeFunctionPanicked
+    hex: "0x00_03_58_0D"
+    package: internal/service/statemachine
+  - code: "0.3.88.14"
+    const: CodeInitialMissing
+    hex: "0x00_03_58_0E"
+    package: internal/service/statemachine
+  - code: "0.3.88.15"
+    const: CodeEventInvalid
+    hex: "0x00_03_58_0F"
+    package: internal/service/statemachine
+  - code: "0.3.88.16"
+    const: CodeTransitionDuplicate
+    hex: "0x00_03_58_10"
+    package: internal/service/statemachine
+  - code: "0.3.88.17"
+    const: CodeDelayInvalid
+    hex: "0x00_03_58_11"
+    package: internal/service/statemachine
+  - code: "0.3.88.18"
+    const: CodeFunctionMissing
+    hex: "0x00_03_58_12"
+    package: internal/service/statemachine
+  - code: "0.3.88.19"
+    const: CodeStoreMissing
+    hex: "0x00_03_58_13"
+    package: internal/service/statemachine
+  - code: "0.3.88.20"
+    const: CodeWaitAbandoned
+    hex: "0x00_03_58_14"
+    package: internal/service/statemachine
+  - code: "0.3.88.21"
+    const: CodeLoopPanicked
+    hex: "0x00_03_58_15"
+    package: internal/service/statemachine
+  - code: "0.3.89.1"
+    const: CodeWindowInvalid
+    hex: "0x00_03_59_01"
+    package: internal/service/profiling
+  - code: "0.3.89.2"
+    const: CodeProfilerBusy
+    hex: "0x00_03_59_02"
+    package: internal/service/profiling
+  - code: "0.3.89.3"
+    const: CodeCaptureCanceled
+    hex: "0x00_03_59_03"
+    package: internal/service/profiling
+  - code: "0.3.89.4"
+    const: CodeCaptureFailed
+    hex: "0x00_03_59_04"
+    package: internal/service/profiling
+  - code: "0.3.89.5"
+    const: CodeProfileMalformed
+    hex: "0x00_03_59_05"
+    package: internal/service/profiling
+  - code: "0.3.89.6"
+    const: CodeProfileTooLarge
+    hex: "0x00_03_59_06"
+    package: internal/service/profiling
+  - code: "0.3.89.7"
+    const: CodeSampleTypeMissing
+    hex: "0x00_03_59_07"
+    package: internal/service/profiling
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
