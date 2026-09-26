@@ -180,6 +180,8 @@ func TestEveryMalformationIsRefusedByCode(t *testing.T) {
 			b.bytes(2, msg(func(s *pb) { s.int(1, 1).int(2, 1) }))
 		})},
 		{"a corrupt gzip stream", []byte{0x1f, 0x8b, 0x08, 0x00, 0x01}},
+		{"a varint past 64 bits", skipped(0x02)},
+		{"a varint announcing an eleventh byte", append(skipped(0x81), 0x00)},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -193,6 +195,25 @@ func TestEveryMalformationIsRefusedByCode(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// skipped is the fixture followed by field 15 — one Parse skips — holding a
+// ten-byte varint whose last byte is last.
+func skipped(last byte) []byte {
+	out := append(fixture(nil), 15<<3)
+	for range 9 {
+		out = append(out, 0xff)
+	}
+	return append(out, last)
+}
+
+// TestAVarintOfSixtyFourBitsIsRead pins the other side of the tenth byte: a
+// value with its 64th bit set is read, not refused.
+func TestAVarintOfSixtyFourBitsIsRead(t *testing.T) {
+	t.Parallel()
+	if p, err := profiling.Parse(skipped(0x01)); err != nil || len(p.Samples) != 2 {
+		t.Fatalf("Parse() = %v, %v; want the fixture's two samples", p, err)
 	}
 }
 

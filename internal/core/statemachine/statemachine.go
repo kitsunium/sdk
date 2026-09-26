@@ -78,10 +78,13 @@ type Store[E any] interface {
 // memory, and after a restart every entity re-enters its state at the moment
 // the machine opens — which resets every After timer.
 //
-// Implementations MUST be safe for concurrent use. The engine calls them
-// serialised per machine, under the lock that guards its bookkeeping, so an
-// implementation needs no ordering of its own: two saves of one key arrive in
-// the order they were made.
+// Implementations MUST be safe for concurrent use. The engine calls them with
+// no lock of its bookkeeping held, one call at a time PER KEY: two writes of
+// one key arrive in the order the machine made them, and writes of different
+// keys may arrive at once — an implementation that rewrites one file orders
+// those itself. A journal may read the machine, its census or its records; it
+// must not tell it anything — Changed, Deleted, Start or Fire from inside a
+// journal call waits for itself.
 //
 // Save and Delete take several records at once because a machine that opens
 // reconciles every entity in one pass; a journal that rewrites a whole file

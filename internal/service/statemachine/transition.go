@@ -19,6 +19,20 @@ const (
 	hookOnTransition string = "on-transition"
 )
 
+// landing is what the locked part of a transition hands back: the change
+// stored, whether the store no longer held the entity, and the failures it
+// met that are not its own — a journal write, the re-read after a write during
+// the flight — which transition reports once no lock is held, since
+// Config.Report is the caller's code and may call the machine.
+type landing[E any, S comparable] struct {
+	late   error
+	change ChangeValue[E, S]
+	// gone says the store refused the write because the entity was deleted
+	// meanwhile — told apart from a hook's error that merely carries the
+	// same code.
+	gone bool
+}
+
 // pending is a transition decided under its entity's lock and not yet
 // stored.
 type pending[E any, S comparable] struct {
@@ -64,14 +78,14 @@ func (m *StateMachine[E, S]) Start(ctx context.Context, entity E) (E, error) {
 	defer release()
 	p := pending[E, S]{entity: entity, key: key, arrow: m.plan.creation, create: true}
 	m.cfg.sign(ctx, &p)
-	change, err := m.transition(ctx, p, release)
+	landed, err := m.transition(ctx, p, release)
 	//: the hooks, the store or the key refused the creation.
 	if err != nil {
 		//: nothing was stored.
 		return zero, err
 	}
 	//: the entity as the store holds it.
-	return change.Entity, nil
+	return landed.change.Entity, nil
 }
 
 // Fire moves the entity under key along the event transition by that name
@@ -113,14 +127,14 @@ func (m *StateMachine[E, S]) Fire(ctx context.Context, key, event string) (E, er
 	}
 	p := pending[E, S]{entity: entity, key: key, arrow: x}
 	m.cfg.sign(ctx, &p)
-	change, err := m.transition(ctx, p, release)
+	landed, err := m.transition(ctx, p, release)
 	//: a hook or the store refused it; nothing was stored.
 	if err != nil {
 		//: the entity as it was read.
 		return entity, err
 	}
 	//: the entity as the store holds it.
-	return change.Entity, nil
+	return landed.change.Entity, nil
 }
 
 // missingOr is the error of a read that failed or found nothing.
@@ -137,28 +151,31 @@ func missingOr(err error, key string) error {
 // transition stores p, releases the entity's lock and runs the OnTransition
 // hooks. The caller holds the lock and hands its idempotent release over: it
 // is called before the OnTransition hooks, on every path — a panic included.
-func (m *StateMachine[E, S]) transition(ctx context.Context, p pending[E, S], release func()) (ChangeValue[E, S], error) {
-	change, err := m.locked(ctx, p, release)
+// The late failures are reported here, once the lock is released.
+func (m *StateMachine[E, S]) transition(ctx context.Context, p pending[E, S], release func()) (landing[E, S], error) {
+	landed, err := m.locked(ctx, p, release)
+	m.cfg.reportErr(ctx, landed.late)
+	landed.late = nil
 	//: nothing was stored, so there is nothing to plan or announce.
 	if err != nil {
 		//: the refusal, as commit built it.
-		return change, err
+		return landed, err
 	}
 	m.replan(p.key, true)
-	m.announce(ctx, change)
+	m.announce(ctx, landed.change)
 	//: stored and announced.
-	return change, nil
+	return landed, nil
 }
 
 // locked is the part of a transition that holds the entity's lock: the
 // flight, the commit and the settling, with the lock released on the way out
 // whatever happens — a hook's panic is already an error, but a store's is not.
-func (m *StateMachine[E, S]) locked(ctx context.Context, p pending[E, S], release func()) (ChangeValue[E, S], error) {
+func (m *StateMachine[E, S]) locked(ctx context.Context, p pending[E, S], release func()) (landed landing[E, S], err error) {
 	defer release()
 	f := m.book.fly(p.key)
 	//: deferred after the release, so it runs first: the flight lands, and
 	//: a write during it is read, before the lock is given back.
-	defer m.settle(ctx, p.key)
+	defer func() { landed.late = errors.Join(landed.late, m.settle(ctx, p.key, f)) }()
 	//: the hooks, the checks, the write and the step.
 	return m.commit(ctx, p, f)
 }
@@ -166,7 +183,7 @@ func (m *StateMachine[E, S]) locked(ctx context.Context, p pending[E, S], releas
 // commit performs p under the entity's lock: the new state, the OnEnter hooks,
 // the checks, the write and the recorded step. A hook that fails or panics
 // ends it with nothing stored.
-func (m *StateMachine[E, S]) commit(ctx context.Context, p pending[E, S], f *flight) (ChangeValue[E, S], error) {
+func (m *StateMachine[E, S]) commit(ctx context.Context, p pending[E, S], f *flight) (landing[E, S], error) {
 	entity := p.entity
 	*m.plan.state(&entity) = p.arrow.to
 	hctx := within(ctx, m.locks)
@@ -175,28 +192,29 @@ func (m *StateMachine[E, S]) commit(ctx context.Context, p pending[E, S], f *fli
 		//: the first failure cancels the transition.
 		if err := m.enter(hctx, hook, &entity, p); err != nil {
 			//: nothing was stored.
-			return ChangeValue[E, S]{}, err
+			return landing[E, S]{}, err
 		}
 	}
 	//: a hook may change the entity, not where it goes nor what it is.
 	if err := m.unchanged(entity, p); err != nil {
 		//: nothing was stored.
-		return ChangeValue[E, S]{}, err
+		return landing[E, S]{}, err
 	}
 	//: the store has the last word on existence.
-	if err := m.write(ctx, entity, p); err != nil {
-		//: nothing was stored.
-		return ChangeValue[E, S]{}, err
+	if refused, err := m.write(ctx, entity, p); err != nil {
+		//: nothing was stored; a replace the store refused found the entity gone.
+		return landing[E, S]{gone: refused && !p.create}, err
 	}
 	at := m.cfg.clock.Now()
-	m.book.step(ctx, p.key, corestm.StepValue[S]{
+	late := m.book.step(ctx, p.key, corestm.StepValue[S]{
 		Event: p.arrow.event, From: p.arrow.from, To: p.arrow.to, Trigger: p.arrow.trigger, Actor: p.actor, At: at,
 	}, f)
-	//: the change the OnTransition hooks receive.
-	return ChangeValue[E, S]{
+	//: the change the OnTransition hooks receive, and a journal failure to
+	//: report once the lock is released.
+	return landing[E, S]{late: late, change: ChangeValue[E, S]{
 		Entity: entity, At: at, Key: p.key, Event: p.arrow.event, Actor: p.actor,
 		From: p.arrow.from, To: p.arrow.to, Trigger: p.arrow.trigger,
-	}, nil
+	}}, nil
 }
 
 // unchanged refuses an entity whose OnEnter hooks moved its state or its key.
@@ -215,8 +233,10 @@ func (m *StateMachine[E, S]) unchanged(entity E, p pending[E, S]) error {
 	return nil
 }
 
-// write inserts a created entity, or replaces the one the transition read.
-func (m *StateMachine[E, S]) write(ctx context.Context, entity E, p pending[E, S]) error {
+// write inserts a created entity, or replaces the one the transition read,
+// and says whether the store refused it — the key taken, or the entity gone —
+// as opposed to failing.
+func (m *StateMachine[E, S]) write(ctx context.Context, entity E, p pending[E, S]) (refused bool, err error) {
 	operation, write := "replace", m.store.Replace
 	//: a creation expects the key free.
 	if p.create {
@@ -226,15 +246,15 @@ func (m *StateMachine[E, S]) write(ctx context.Context, entity E, p pending[E, S
 	//: the store failed.
 	if err != nil {
 		//: named after the operation.
-		return storeFailure(err, operation)
+		return false, storeFailure(err, operation)
 	}
 	//: the store answered: the key is taken, or the entity is gone.
 	if !stored {
 		//: which one depends on what was asked.
-		return refusedWrite(p.create, p.key)
+		return true, refusedWrite(p.create, p.key)
 	}
 	//: stored.
-	return nil
+	return false, nil
 }
 
 // refusedWrite is the error of a write the store declined.
@@ -249,19 +269,19 @@ func refusedWrite(create bool, key string) error {
 	return errs.Wrap(EntityMissing, errs.WrapParams{}, errs.String("key", key))
 }
 
-// settle ends the entity's flight; when the entity was written meanwhile, it
-// reads it again so the record describes what the store holds. The caller
-// still holds the entity's lock.
-func (m *StateMachine[E, S]) settle(ctx context.Context, key string) {
-	//: nothing arrived during the flight.
-	if !m.book.land(key) {
+// settle ends f, the entity's flight; when the entity was written meanwhile,
+// it reads it again so the record describes what the store holds. The caller
+// still holds the entity's lock, so a failure is returned for it to report
+// later: the transition itself succeeded or failed on its own terms.
+func (m *StateMachine[E, S]) settle(ctx context.Context, key string, f *flight) error {
+	touched, _ := m.book.land(key, f)
+	//: nothing arrived during the flight, or the entity is gone.
+	if !touched {
 		//: the record already says what the transition stored.
-		return
+		return nil
 	}
-	//: reported: the transition itself succeeded or failed on its own terms.
-	if err := m.refresh(ctx, key); err != nil {
-		m.cfg.reportErr(ctx, err)
-	}
+	//: the re-read's failure, if any.
+	return m.refresh(ctx, key)
 }
 
 // enter runs one OnEnter hook with its panic recovered.

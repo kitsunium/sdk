@@ -139,6 +139,34 @@ func TestFoldPicksItsSampleType(t *testing.T) {
 	}
 }
 
+// TestFoldRefusesWhatParseNeverBuilds pins ProfileMalformed — never a panic
+// — for a nil profile and for a hand-built sample short of values.
+func TestFoldRefusesWhatParseNeverBuilds(t *testing.T) {
+	t.Parallel()
+	short := sample("", 7, "main.x")
+	short.Values = short.Values[:1]
+	type tc struct {
+		name string
+		p    *profiling.ProfileValue
+	}
+	cases := []tc{
+		{"a nil profile", nil},
+		{"a sample with no value for the type folded", cpuProfile(sample("", 3, "main.y"), short)},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if f, err := profiling.Fold(c.p, profiling.FoldConfig{SampleType: "cpu"}); !errs.HasCode(err, profiling.CodeProfileMalformed) {
+			t.Fatalf("Fold() = %+v, %v; want PROFILE_MALFORMED", f, err)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestFoldWithoutAttributionAndWithOddConfig pins that a nil Attribute
 // charges everything to nobody, that an unsymbolized frame is left out, and
 // that unusable settings fall back to the defaults.

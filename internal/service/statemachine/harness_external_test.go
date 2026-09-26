@@ -60,6 +60,7 @@ func stateOf(i *Item) *State { return &i.State }
 // hooks does — the machine's own writes included.
 type memStore struct {
 	notify    func(ctx context.Context, key string, deleted bool)
+	afterGet  func(ctx context.Context, key string)
 	failNext  error
 	data      map[string][]byte
 	mu        sync.Mutex
@@ -72,9 +73,13 @@ func newMemStore() *memStore { return &memStore{data: make(map[string][]byte)} }
 // Key is the item's ID.
 func (s *memStore) Key(i Item) string { return i.ID }
 
-// Get decodes the item under key.
-func (s *memStore) Get(_ context.Context, key string) (Item, bool, error) {
+// Get decodes the item under key. A hook set by onNextGet runs once the item
+// is read and before it is returned, as a write racing the read would.
+func (s *memStore) Get(ctx context.Context, key string) (Item, bool, error) {
 	raw, ok, err := s.lookup(key)
+	if hook := s.takeAfterGet(); hook != nil {
+		hook(ctx, key)
+	}
 	if err != nil || !ok {
 		return Item{}, false, err
 	}
@@ -99,6 +104,22 @@ func (s *memStore) lookup(key string) ([]byte, bool, error) {
 	}
 	raw, ok := s.data[key]
 	return raw, ok, nil
+}
+
+// onNextGet sets a hook the next Get runs once it has read the item.
+func (s *memStore) onNextGet(hook func(ctx context.Context, key string)) {
+	s.mu.Lock()
+	s.afterGet = hook
+	s.mu.Unlock()
+}
+
+// takeAfterGet returns the hook for this Get, and clears it.
+func (s *memStore) takeAfterGet() func(ctx context.Context, key string) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	hook := s.afterGet
+	s.afterGet = nil
+	return hook
 }
 
 // panicOnce makes the next read panic.
@@ -288,6 +309,30 @@ func (j *memJournal) record(key string) (corestm.RecordValue[State], bool) {
 	return rec, ok
 }
 
+// hookedJournal is a memJournal whose Save and Delete call before first, with
+// the operation and the keys: a journal that reads the machine, or one that
+// takes its time.
+type hookedJournal struct {
+	*memJournal
+	before func(op string, keys []string)
+}
+
+// Save calls before, then stores records.
+func (j *hookedJournal) Save(ctx context.Context, records ...corestm.RecordValue[State]) error {
+	keys := make([]string, len(records))
+	for i, rec := range records {
+		keys[i] = rec.Key
+	}
+	j.before("save", keys)
+	return j.memJournal.Save(ctx, records...)
+}
+
+// Delete calls before, then forgets records.
+func (j *hookedJournal) Delete(ctx context.Context, keys ...string) error {
+	j.before("delete", keys)
+	return j.memJournal.Delete(ctx, keys...)
+}
+
 // reports collects what Config.Report receives.
 type reports struct {
 	errs []error
@@ -391,6 +436,21 @@ func eventually(t *testing.T, clk advancer, what string, cond func() bool) {
 			clk.Advance(time.Second)
 		}
 		time.Sleep(2 * time.Millisecond)
+	}
+}
+
+// within runs call on a background goroutine and fails the test when it has
+// not returned in ten seconds — a deadlock — returning its error otherwise.
+func within(t *testing.T, what string, call func() error) error {
+	t.Helper()
+	done := make(chan error, 1)
+	go func() { done <- call() }()
+	select {
+	case err := <-done:
+		return err
+	case <-time.After(10 * time.Second):
+		t.Fatalf("%s never returned", what)
+		return nil
 	}
 }
 

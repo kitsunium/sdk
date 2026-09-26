@@ -18,8 +18,15 @@ def := statemachine.Define(func(o *Order) *Status { return &o.Status }).
     OnEnter(Paid, chargeCard).                               // before the store: an error cancels
     OnTransition(publish)                                    // after the store: an error is reported
 
-m, err := statemachine.New(ctx, def, &statemachine.Config[Order, Status]{Store: orders, Journal: records})
-go m.Run(ctx)                                               // fires timers, deadlines and guards
+m, err := statemachine.New(ctx, def, &statemachine.Config[Order, Status]{
+    Store: orders, Journal: records,
+    Report: func(ctx context.Context, err error) { log.Print(err) }, // what no return value carries
+})
+go func() {
+    if err := m.Run(ctx); err != nil {                       // LoopRunning: another loop is going
+        log.Print(err)
+    }
+}()                                                          // fires timers, deadlines and guards
 o, err := m.Start(ctx, Order{ID: "o-1"})                     // Pending, inserted
 o, err = m.Fire(ctx, "o-1", "pay")                           // Paid, replaced
 ```
@@ -30,7 +37,7 @@ The state is a field of your entity and the entity lives in your [Store](<#Store
 
 ### Transitions
 
-Transitions of one entity run one at a time, transitions of different entities concurrently. A transition runs the OnEnter hooks of the state entered, stores the entity, records the step, releases the entity and then runs the OnTransition hooks. A hook that panics fails what it was part of — an OnEnter hook its transition, an OnTransition hook only itself — and never leaves an entity locked. An OnEnter hook may change the entity but not its state or key, and must not fire its own machine \([Reentrant](<#TriggerUnknown>)\); an OnTransition hook may.
+Transitions of one entity run one at a time, transitions of different entities concurrently. A transition runs the OnEnter hooks of the state entered, stores the entity, records the step, releases the entity and then runs the OnTransition hooks. A hook that panics fails what it was part of — an OnEnter hook its transition, an OnTransition hook only itself — and never leaves an entity locked. An OnEnter hook may change the entity but not its state or key, and must not fire its own machine \(Reentrant\); an OnTransition hook may.
 
 ### The loop never polls
 
@@ -65,33 +72,136 @@ It is not a durable workflow runtime: there is no replay, no activity, no compen
 
 ## Constants
 
-<a name="CodeTriggerUnknown"></a>The codes a caller branches on with errs.HasCode.
+<a name="CodeDelayInvalid"></a>CodeDelayInvalid identifies an After with a duration that is not positive \(0.3.88.17\).
 
 ```go
-const (
-    CodeTriggerUnknown      errs.Code = corestm.CodeTriggerUnknown
-    CodeTransitionRefused   errs.Code = svcstm.CodeTransitionRefused
-    CodeEntityMissing       errs.Code = svcstm.CodeEntityMissing
-    CodeEntityExists        errs.Code = svcstm.CodeEntityExists
-    CodeKeyEmpty            errs.Code = svcstm.CodeKeyEmpty
-    CodeHookFailed          errs.Code = svcstm.CodeHookFailed
-    CodeHookPanicked        errs.Code = svcstm.CodeHookPanicked
-    CodeHookChangedState    errs.Code = svcstm.CodeHookChangedState
-    CodeHookChangedKey      errs.Code = svcstm.CodeHookChangedKey
-    CodeReentrant           errs.Code = svcstm.CodeReentrant
-    CodeStoreFailed         errs.Code = svcstm.CodeStoreFailed
-    CodeJournalFailed       errs.Code = svcstm.CodeJournalFailed
-    CodeLoopRunning         errs.Code = svcstm.CodeLoopRunning
-    CodeFunctionPanicked    errs.Code = svcstm.CodeFunctionPanicked
-    CodeInitialMissing      errs.Code = svcstm.CodeInitialMissing
-    CodeEventInvalid        errs.Code = svcstm.CodeEventInvalid
-    CodeTransitionDuplicate errs.Code = svcstm.CodeTransitionDuplicate
-    CodeDelayInvalid        errs.Code = svcstm.CodeDelayInvalid
-    CodeFunctionMissing     errs.Code = svcstm.CodeFunctionMissing
-    CodeStoreMissing        errs.Code = svcstm.CodeStoreMissing
-    CodeWaitAbandoned       errs.Code = svcstm.CodeWaitAbandoned
-    CodeLoopPanicked        errs.Code = svcstm.CodeLoopPanicked
-)
+const CodeDelayInvalid errs.Code = svcstm.CodeDelayInvalid
+```
+
+<a name="CodeEntityExists"></a>CodeEntityExists identifies a Start whose entity's key the store already holds \(0.3.88.3\).
+
+```go
+const CodeEntityExists errs.Code = svcstm.CodeEntityExists
+```
+
+<a name="CodeEntityMissing"></a>CodeEntityMissing identifies a key the store holds no entity under — never there, or deleted while a transition ran \(0.3.88.2\).
+
+```go
+const CodeEntityMissing errs.Code = svcstm.CodeEntityMissing
+```
+
+<a name="CodeEventInvalid"></a>CodeEventInvalid identifies a transition declared with an empty event name, or CreateEvent \(0.3.88.15\).
+
+```go
+const CodeEventInvalid errs.Code = svcstm.CodeEventInvalid
+```
+
+<a name="CodeFunctionMissing"></a>CodeFunctionMissing identifies a nil accessor, guard, instant function, hook or definition \(0.3.88.18\).
+
+```go
+const CodeFunctionMissing errs.Code = svcstm.CodeFunctionMissing
+```
+
+<a name="CodeFunctionPanicked"></a>CodeFunctionPanicked identifies a guard or an instant function that panicked \(0.3.88.13\).
+
+```go
+const CodeFunctionPanicked errs.Code = svcstm.CodeFunctionPanicked
+```
+
+<a name="CodeHookChangedKey"></a>CodeHookChangedKey identifies an OnEnter hook that changed its entity's key \(0.3.88.8\).
+
+```go
+const CodeHookChangedKey errs.Code = svcstm.CodeHookChangedKey
+```
+
+<a name="CodeHookChangedState"></a>CodeHookChangedState identifies an OnEnter hook that changed the state it was entering \(0.3.88.7\).
+
+```go
+const CodeHookChangedState errs.Code = svcstm.CodeHookChangedState
+```
+
+<a name="CodeHookFailed"></a>CodeHookFailed identifies a hook that returned an error \(0.3.88.5\).
+
+```go
+const CodeHookFailed errs.Code = svcstm.CodeHookFailed
+```
+
+<a name="CodeHookPanicked"></a>CodeHookPanicked identifies a hook that panicked, recovered as an error \(0.3.88.6\).
+
+```go
+const CodeHookPanicked errs.Code = svcstm.CodeHookPanicked
+```
+
+<a name="CodeInitialMissing"></a>CodeInitialMissing identifies a definition with no initial state \(0.3.88.14\).
+
+```go
+const CodeInitialMissing errs.Code = svcstm.CodeInitialMissing
+```
+
+<a name="CodeJournalFailed"></a>CodeJournalFailed identifies a Journal method that returned an error \(0.3.88.11\).
+
+```go
+const CodeJournalFailed errs.Code = svcstm.CodeJournalFailed
+```
+
+<a name="CodeKeyEmpty"></a>CodeKeyEmpty identifies an entity handed to Start whose key is empty \(0.3.88.4\).
+
+```go
+const CodeKeyEmpty errs.Code = svcstm.CodeKeyEmpty
+```
+
+<a name="CodeLoopPanicked"></a>CodeLoopPanicked identifies a panic the loop recovered from a store, journal or observer call \(0.3.88.21\).
+
+```go
+const CodeLoopPanicked errs.Code = svcstm.CodeLoopPanicked
+```
+
+<a name="CodeLoopRunning"></a>CodeLoopRunning identifies a Run or a Step asked for while another is going \(0.3.88.12\).
+
+```go
+const CodeLoopRunning errs.Code = svcstm.CodeLoopRunning
+```
+
+<a name="CodeReentrant"></a>CodeReentrant identifies a Start or Fire through the context an OnEnter hook of the same machine was given \(0.3.88.9\).
+
+```go
+const CodeReentrant errs.Code = svcstm.CodeReentrant
+```
+
+<a name="CodeStoreFailed"></a>CodeStoreFailed identifies a Store method that returned an error \(0.3.88.10\).
+
+```go
+const CodeStoreFailed errs.Code = svcstm.CodeStoreFailed
+```
+
+<a name="CodeStoreMissing"></a>CodeStoreMissing identifies a configuration with no store \(0.3.88.19\).
+
+```go
+const CodeStoreMissing errs.Code = svcstm.CodeStoreMissing
+```
+
+<a name="CodeTransitionDuplicate"></a>CodeTransitionDuplicate identifies a second transition declared for one event from one state \(0.3.88.16\).
+
+```go
+const CodeTransitionDuplicate errs.Code = svcstm.CodeTransitionDuplicate
+```
+
+<a name="CodeTransitionRefused"></a>CodeTransitionRefused identifies an event no declared transition takes from the entity's state \(0.3.88.1\).
+
+```go
+const CodeTransitionRefused errs.Code = svcstm.CodeTransitionRefused
+```
+
+<a name="CodeTriggerUnknown"></a>CodeTriggerUnknown identifies a name ParseTrigger does not know \(0.2.56.1\).
+
+```go
+const CodeTriggerUnknown errs.Code = corestm.CodeTriggerUnknown
+```
+
+<a name="CodeWaitAbandoned"></a>CodeWaitAbandoned identifies a caller whose context ended while the entity was busy \(0.3.88.20\).
+
+```go
+const CodeWaitAbandoned errs.Code = svcstm.CodeWaitAbandoned
 ```
 
 <a name="CreateEvent"></a>CreateEvent is the event name of the step that brings a new entity into its initial state; no declared transition may take it.
@@ -118,57 +228,87 @@ const DefaultMinGap time.Duration = svcstm.DefaultMinGap
 
 ```go
 var (
-    // TriggerUnknown refuses a trigger outside the five.
+    // TriggerUnknown refuses a trigger name outside the five.
     TriggerUnknown = corestm.TriggerUnknown
-    // TransitionRefused: no transition by that event leaves the state (409).
+
+    // TransitionRefused is returned when no transition by that event leaves the
+    // entity's state (409); the entity comes back with it.
     TransitionRefused = svcstm.TransitionRefused
-    // EntityMissing: no entity under the key, or deleted meanwhile (404).
+
+    // EntityMissing is returned for a key the store holds no entity under, or one
+    // deleted while the transition ran (404).
     EntityMissing = svcstm.EntityMissing
-    // EntityExists: Start with a key already taken (409).
+
+    // EntityExists is returned by a Start over a key already taken (409).
     EntityExists = svcstm.EntityExists
-    // KeyEmpty: Start with an entity whose key is empty.
+
+    // KeyEmpty is returned by a Start with an entity whose key is empty.
     KeyEmpty = svcstm.KeyEmpty
+
     // HookFailed accompanies a hook's own error, joined beside it.
     HookFailed = svcstm.HookFailed
-    // HookPanicked: a hook panicked and was recovered.
+
+    // HookPanicked is a hook that panicked and was recovered; the value and the
+    // stack are log-only fields.
     HookPanicked = svcstm.HookPanicked
-    // HookChangedState: an OnEnter hook changed the state it was entering.
+
+    // HookChangedState is an OnEnter hook that changed the state it was entering.
     HookChangedState = svcstm.HookChangedState
-    // HookChangedKey: an OnEnter hook changed its entity's key.
+
+    // HookChangedKey is an OnEnter hook that changed its entity's key.
     HookChangedKey = svcstm.HookChangedKey
-    // Reentrant: an OnEnter hook fired its own machine.
+
+    // Reentrant is a Start or Fire through the context an OnEnter hook of the same
+    // machine was given: refused, not deadlocked.
     Reentrant = svcstm.Reentrant
-    // StoreFailed: a Store method returned an error.
+
+    // StoreFailed wraps an error a Store method returned.
     StoreFailed = svcstm.StoreFailed
-    // JournalFailed: a Journal method returned an error.
+
+    // JournalFailed wraps an error a Journal method returned.
     JournalFailed = svcstm.JournalFailed
-    // LoopRunning: Run or Step while another is going.
+
+    // LoopRunning is returned by Run or Step while another is going.
     LoopRunning = svcstm.LoopRunning
-    // FunctionPanicked: a guard or an instant function panicked.
+
+    // FunctionPanicked is a guard or an instant function that panicked; the entity
+    // is retried after its backoff.
     FunctionPanicked = svcstm.FunctionPanicked
-    // InitialMissing: the definition never called Initial.
+
+    // InitialMissing is returned by New for a definition that never called
+    // Initial.
     InitialMissing = svcstm.InitialMissing
-    // EventInvalid: an empty event name, or CreateEvent.
+
+    // EventInvalid is a transition declared with an empty event name, or
+    // CreateEvent.
     EventInvalid = svcstm.EventInvalid
-    // TransitionDuplicate: one event declared twice from one state.
+
+    // TransitionDuplicate is one event declared twice from one state.
     TransitionDuplicate = svcstm.TransitionDuplicate
-    // DelayInvalid: After with a duration that is not positive.
+
+    // DelayInvalid is an After with a duration that is not positive.
     DelayInvalid = svcstm.DelayInvalid
-    // FunctionMissing: a nil accessor, guard, instant function, hook or
+
+    // FunctionMissing is a nil accessor, guard, instant function, hook or
     // definition.
     FunctionMissing = svcstm.FunctionMissing
-    // StoreMissing: Config.Store is nil.
+
+    // StoreMissing is returned by New when Config.Store is nil.
     StoreMissing = svcstm.StoreMissing
-    // WaitAbandoned: the context ended while the entity was busy (503).
+
+    // WaitAbandoned is returned when the context ended while the entity was busy
+    // (503); errors.Is still finds the context's error.
     WaitAbandoned = svcstm.WaitAbandoned
-    // LoopPanicked: the loop recovered a panic of a store, journal or
-    // observer call; that entity is retried after its backoff.
+
+    // LoopPanicked is a panic the loop recovered from a store, journal or observer
+    // call: the entity is retried after its backoff, unless it came from the
+    // observer's end, once the transition was stored.
     LoopPanicked = svcstm.LoopPanicked
 )
 ```
 
 <a name="Change"></a>
-## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L212>)
+## type [Change](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L321>)
 
 Change is a stored transition, as an OnTransition hook receives it.
 
@@ -177,7 +317,7 @@ type Change[E any, S comparable] = svcstm.ChangeValue[E, S]
 ```
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L215>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L324>)
 
 Config parameterises New. Only Store is required.
 
@@ -186,7 +326,7 @@ type Config[E any, S comparable] = svcstm.Config[E, S]
 ```
 
 <a name="Definition"></a>
-## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L206>)
+## type [Definition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L315>)
 
 Definition declares a machine: its states, transitions and hooks.
 
@@ -195,7 +335,7 @@ type Definition[E any, S comparable] = svcstm.MachineSpec[E, S]
 ```
 
 <a name="Define"></a>
-### func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L235>)
+### func [Define](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L344>)
 
 ```go
 func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
@@ -204,7 +344,7 @@ func Define[E any, S comparable](state func(*E) *S) *Definition[E, S]
 Define starts the declaration of a machine over entities of type E. state returns a pointer to the entity's state field.
 
 <a name="Firing"></a>
-## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L219>)
+## type [Firing](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L328>)
 
 Firing is a transition the machine's own loop is about to fire, as Config.Observe is told it.
 
@@ -213,7 +353,7 @@ type Firing[S comparable] = svcstm.FiringValue[S]
 ```
 
 <a name="Journal"></a>
-## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L192>)
+## type [Journal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L301>)
 
 Journal is the port the machine keeps its records in, beside your store. It is frozen at three methods.
 
@@ -222,7 +362,7 @@ type Journal[S comparable] = corestm.Journal[S]
 ```
 
 <a name="LoopEvent"></a>
-## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L228>)
+## type [LoopEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L337>)
 
 LoopEvent is what Config.OnLoop is told about Run.
 
@@ -231,7 +371,7 @@ type LoopEvent = svcstm.LoopEvent
 ```
 
 <a name="LoopEventKind"></a>
-## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L231>)
+## type [LoopEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L340>)
 
 LoopEventKind says what a LoopEvent reports.
 
@@ -239,18 +379,26 @@ LoopEventKind says what a LoopEvent reports.
 type LoopEventKind = svcstm.LoopEventKind
 ```
 
-<a name="LoopRunStarted"></a>The three kinds of LoopEvent.
+<a name="LoopRunEnded"></a>LoopRunEnded reports a run ending: every field is set.
 
 ```go
-const (
-    LoopRunStarted LoopEventKind = svcstm.LoopRunStarted
-    LoopRunEnded   LoopEventKind = svcstm.LoopRunEnded
-    LoopWaiting    LoopEventKind = svcstm.LoopWaiting
-)
+const LoopRunEnded LoopEventKind = svcstm.LoopRunEnded
+```
+
+<a name="LoopRunStarted"></a>LoopRunStarted reports a run starting: Wake and Started are set.
+
+```go
+const LoopRunStarted LoopEventKind = svcstm.LoopRunStarted
+```
+
+<a name="LoopWaiting"></a>LoopWaiting reports the loop re\-armed to wake earlier, at Next, because a write arrived while it slept.
+
+```go
+const LoopWaiting LoopEventKind = svcstm.LoopWaiting
 ```
 
 <a name="Machine"></a>
-## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L222>)
+## type [Machine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L331>)
 
 Machine runs a Definition over a Store. It is safe for concurrent use.
 
@@ -259,7 +407,7 @@ type Machine[E any, S comparable] = svcstm.StateMachine[E, S]
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L243>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L352>)
 
 ```go
 func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *Config[E, S]) (*Machine[E, S], error)
@@ -268,7 +416,7 @@ func New[E any, S comparable](ctx context.Context, def *Definition[E, S], cfg *C
 New checks def and cfg and opens a machine over cfg.Store: it reads the journal and every entity once, reconciles them and schedules what is due. Every problem of the declaration is returned at once, joined.
 
 <a name="Record"></a>
-## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L196>)
+## type [Record](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L305>)
 
 Record is what the machine keeps about one entity: its state, since when, and its latest transitions.
 
@@ -277,7 +425,7 @@ type Record[S comparable] = corestm.RecordValue[S]
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L199>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L308>)
 
 Step is one transition in a Record's history.
 
@@ -286,7 +434,7 @@ type Step[S comparable] = corestm.StepValue[S]
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L188>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L297>)
 
 Store is the port your entities are read and written through. It is frozen at five methods.
 
@@ -295,7 +443,7 @@ type Store[E any] = corestm.Store[E]
 ```
 
 <a name="Transition"></a>
-## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L209>)
+## type [Transition](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L318>)
 
 Transition is a declared transition, as Definition.Transitions reads it back.
 
@@ -304,7 +452,7 @@ type Transition[S comparable] = svcstm.TransitionValue[S]
 ```
 
 <a name="Trigger"></a>
-## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L203>)
+## type [Trigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L312>)
 
 Trigger says what fired a transition: a start, an event, a delay, a deadline or a guard.
 
@@ -312,20 +460,38 @@ Trigger says what fired a transition: a start, an event, a delay, a deadline or 
 type Trigger = corestm.Trigger
 ```
 
-<a name="TriggerStart"></a>The five triggers.
+<a name="TriggerDeadline"></a>TriggerDeadline is the arrival of an instant the entity carries \(Definition.At\).
 
 ```go
-const (
-    TriggerStart    Trigger = corestm.TriggerStart
-    TriggerEvent    Trigger = corestm.TriggerEvent
-    TriggerDelay    Trigger = corestm.TriggerDelay
-    TriggerDeadline Trigger = corestm.TriggerDeadline
-    TriggerGuard    Trigger = corestm.TriggerGuard
-)
+const TriggerDeadline Trigger = corestm.TriggerDeadline
+```
+
+<a name="TriggerDelay"></a>TriggerDelay is a duration the entity spent in its state \(Definition.After\).
+
+```go
+const TriggerDelay Trigger = corestm.TriggerDelay
+```
+
+<a name="TriggerEvent"></a>TriggerEvent is an event a caller fired.
+
+```go
+const TriggerEvent Trigger = corestm.TriggerEvent
+```
+
+<a name="TriggerGuard"></a>TriggerGuard is a guard on the entity that held after a write \(Definition.When\).
+
+```go
+const TriggerGuard Trigger = corestm.TriggerGuard
+```
+
+<a name="TriggerStart"></a>TriggerStart is a Start: the entity entered its initial state.
+
+```go
+const TriggerStart Trigger = corestm.TriggerStart
 ```
 
 <a name="ParseTrigger"></a>
-### func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L250>)
+### func [ParseTrigger](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L359>)
 
 ```go
 func ParseTrigger(name string) (Trigger, error)
@@ -334,7 +500,7 @@ func ParseTrigger(name string) (Trigger, error)
 ParseTrigger reads a trigger's name — "start", "event", "delay", "deadline" or "guard" — as Trigger.String writes it.
 
 <a name="Wake"></a>
-## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L225>)
+## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/statemachine/statemachine.go#L334>)
 
 Wake says why a run of the loop started.
 
@@ -342,14 +508,22 @@ Wake says why a run of the loop started.
 type Wake = svcstm.Wake
 ```
 
-<a name="WakeStart"></a>The three reasons a run starts.
+<a name="WakeChange"></a>WakeChange is a run a write woke the loop for.
 
 ```go
-const (
-    WakeStart  Wake = svcstm.WakeStart
-    WakeDue    Wake = svcstm.WakeDue
-    WakeChange Wake = svcstm.WakeChange
-)
+const WakeChange Wake = svcstm.WakeChange
+```
+
+<a name="WakeDue"></a>WakeDue is a run the loop woke for by itself: a transition fell due.
+
+```go
+const WakeDue Wake = svcstm.WakeDue
+```
+
+<a name="WakeStart"></a>WakeStart is the first run, when Run starts.
+
+```go
+const WakeStart Wake = svcstm.WakeStart
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

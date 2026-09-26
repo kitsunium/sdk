@@ -103,10 +103,11 @@ type decoder struct {
 // runtime/pprof writes, or the same stream uncompressed. It is written from
 // profile.proto with the standard library alone.
 //
-// It refuses input over [MaxProfileBytes], compressed or not, with
-// [ProfileTooLarge], and anything that is not a well-formed profile — a
-// truncated field, a string, function or location index that points nowhere,
-// a sample with the wrong number of values — with [ProfileMalformed]. No
+// It refuses input over [MaxProfileBytes], compressed or not, and stacks
+// that add up to more than [MaxFrames] frames, with [ProfileTooLarge]; and
+// anything that is not a well-formed profile — a truncated field, a varint
+// past 64 bits, a string, function or location index that points nowhere, a
+// sample with the wrong number of values — with [ProfileMalformed]. No
 // refusal quotes the input.
 func Parse(data []byte) (*ProfileValue, error) {
 	//: the compressed input is bounded before anything is read.
@@ -127,7 +128,7 @@ func Parse(data []byte) (*ProfileValue, error) {
 		return nil, err
 	}
 	//: the tables are complete: resolve.
-	return d.resolve()
+	return d.resolve(MaxFrames)
 }
 
 // inflate returns data decompressed when it is gzip, unchanged otherwise.

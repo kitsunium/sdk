@@ -36,6 +36,15 @@ watch — arrives as a sibling interface reached by type assertion.
 every entity at once; a journal that rewrites a whole file does it once per
 call, not once per entity.
 
+**The journal's order is per key.** The engine calls it one call at a time per
+key and never under its bookkeeping mutex, so writes of different keys may
+arrive at once: the port says so, and says a journal may read the machine but
+never tell it anything.
+
+**`RecordValue.History` is a slice, as the core values' collections are**
+(`logger.RecordValue.Attrs`, `mail.MessageValue.To`). The engine hands every
+caller — the journal, `Record`, `Records` — a copy it owns.
+
 **`Trigger` has no text marshalling.** A value-receiver `String` beside a
 pointer-receiver `UnmarshalText` is a receiver mix the linter refuses on a
 non-struct type, so a JSON journal stores the stable NUMBER and `ParseTrigger`

@@ -10,13 +10,18 @@ spec := statemachine.NewMachineSpec(func(o *Order) *Status { return &o.Status })
     At("expire", Paid, Expired, shipBy).                        // an instant the entity carries
     When("ready", Paid, Shipping, packed)                       // a guard, asked on each write
 
-m, err := statemachine.NewStateMachine(ctx, spec, &statemachine.Config[Order, Status]{Store: orders})
-go m.Run(ctx)
-o, err := m.Fire(ctx, "o-1", "pay")
+m, err := statemachine.NewStateMachine(ctx, spec, &statemachine.Config[Order, Status]{
+    Store:  orders,
+    Report: func(ctx context.Context, err error) { log.Print(err) }, // what no return value carries
+})
+go func() { _ = m.Run(ctx) }()                                  // nil once ctx ends
+o, err := m.Start(ctx, Order{ID: "o-1"})                        // Pending, inserted
+o, err = m.Fire(ctx, "o-1", "pay")                              // Paid, replaced
 ```
 
 Transitions of one entity run one at a time; a hook that panics never leaves
-an entity locked. The loop keeps an agenda — one heap entry per entity — and
+an entity locked. The journal is written one key at a time, never under the
+machine's own mutex. The loop keeps an agenda — one heap entry per entity — and
 sleeps until the next transition due or a write: O(log N) to the next due where
 re-reading the store is O(N) (see `BENCH.md`).
 

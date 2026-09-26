@@ -1,13 +1,34 @@
 // Package profiling — hosts the resolver: string indexes into strings,
 // location ids into frames — each location's frames built once and shared by
-// every sample that passes through it — and labels into maps.
+// every sample that passes through it, and counted against MaxFrames when they
+// are built and each time a stack copies them — and labels into maps.
 package profiling
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // resolver resolves a decoder's raw tables.
 type resolver struct {
 	d *decoder
 	// frames caches the frames of each location already resolved.
 	frames map[uint64][]FrameValue
+	// budget is how many more frames may be built or copied, from limit
+	// down.
+	budget int
+	// limit is the whole budget, named in the refusal.
+	limit int
+}
+
+// spend takes n frames from the budget — before they are built or copied,
+// never after — or refuses the profile when fewer remain.
+func (r *resolver) spend(n int) error {
+	//: the frames would take the profile past the bound.
+	if n > r.budget {
+		//: the bound is the field; the input is not quoted.
+		return errs.Wrap(ProfileTooLarge, errs.WrapParams{}, errs.Int("max_frames", r.limit))
+	}
+	r.budget -= n
+	//: within the bound.
+	return nil
 }
 
 // str resolves a string index.
@@ -80,12 +101,17 @@ func (r *resolver) sample(raw *rawSample, types int) (SampleValue, error) {
 		//: a sample a fold could not index.
 		return SampleValue{}, malformed("sample values")
 	}
-	stack := make([]FrameValue, 0, len(raw.locations))
+	stack := make([]FrameValue, 0, min(len(raw.locations), r.budget))
 	//: innermost location first, as the profile orders them.
 	for _, id := range raw.locations {
 		frames, err := r.location(id)
 		//: a location id that points nowhere.
 		if err != nil {
+			//: already typed.
+			return SampleValue{}, err
+		}
+		//: the copy is counted before it is made.
+		if err := r.spend(len(frames)); err != nil {
 			//: already typed.
 			return SampleValue{}, err
 		}
@@ -109,6 +135,11 @@ func (r *resolver) location(id uint64) ([]FrameValue, error) {
 	if !known {
 		//: the id is not repeated.
 		return nil, malformed("location id")
+	}
+	//: the frames are counted before they are built; an address alone is one.
+	if err := r.spend(max(len(loc.lines), 1)); err != nil {
+		//: already typed.
+		return nil, err
 	}
 	var frames []FrameValue
 	//: no symbol was found: the address is all there is.

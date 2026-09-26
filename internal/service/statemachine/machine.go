@@ -91,7 +91,7 @@ func NewStateMachine[E any, S comparable](ctx context.Context, def *MachineSpec[
 	}
 	plan := freeze(def)
 	m := &StateMachine[E, S]{store: cfg.Store, plan: plan, cfg: resolve(cfg), agenda: newAgenda(), locks: newKeyLocks()}
-	m.book = newBook(cfg.Journal, plan.declared(), m.cfg.history, m.cfg.reportErr)
+	m.book = newBook(cfg.Journal, plan.declared(), m.cfg.history)
 	//: the one full read of the store.
 	if err := m.open(ctx); err != nil {
 		//: nothing half-open is handed out.

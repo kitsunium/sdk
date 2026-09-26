@@ -16,17 +16,17 @@ Stdlib only (plus `kernel/errs`). Code range `0.3.89.*`.
 
 | File | Role |
 |---|---|
-| `profiling.go` | package doc; `MaxCPUWindow`, `MaxProfileBytes` |
+| `profiling.go` | package doc; `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` |
 | `capture.go` | `CaptureCPU`, `CaptureHeap` |
 | `profile.go` | `ProfileValue`, `SampleTypeValue`, `SampleValue`, `FrameValue`; the default sample type |
-| `wire.go` | the protocol-buffer wire reader: varints, length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
+| `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
 | `parse.go` | `Parse`: the bound, gzip or raw, the Profile's top-level fields through a reader table |
-| `tables.go` | Sample, Label, Location, Line, Function; `resolve` |
-| `resolve.go` | string, location and function indexes checked and resolved; a location's frames built once and shared |
+| `tables.go` | Sample, Label, Location, Line, Function; `resolve(frames)` |
+| `resolve.go` | string, location and function indexes checked and resolved; a location's frames built once and shared; the frame budget (`spend`) |
 | `fold.go` | `Fold`, `FoldConfig` and its defaults, `FoldedValue`, `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
-| `goroutine.go` | `GoroutineValue`, `Goroutines`, `ParseGoroutines` and the dump parser |
+| `goroutine.go` | `GoroutineValue`, `Goroutines` (over `goroutinesFrom`, the writer injectable), `ParseGoroutines` and the dump parser |
 | `labels.go` | the labels in a dump header (the runtime's quoting) and in the counted profile (`%q`), and their matching by stack |
-| `group.go` | `GroupGoroutines`, `GroupConfig`, `GoroutineGroupValue`, the top frame |
+| `group.go` | `GroupGoroutines`, `GroupConfig`, `GoroutineGroupValue`, the length-prefixed group key, the top frame |
 | `canonical.go` | `CanonicalName` |
 | `codes.go` / `errors.go` | `0.3.89.*`, seven codes |
 
@@ -42,8 +42,17 @@ Stdlib only (plus `kernel/errs`). Code range `0.3.89.*`.
   table is written LAST by runtime/pprof, so nothing resolves before the end:
   `decoder` keeps raw tables and `resolver` checks every index.
 - **Strict and bounded.** A malformed profile is refused, never guessed at; a
-  sample must carry one value per sample type (the fold indexes them); gzip is
-  read through `LimitReader(MaxProfileBytes+1)` and its trailer checked.
+  sample must carry one value per sample type (the fold indexes them, and
+  refuses a hand-built profile that does not, or a nil one); a varint's tenth
+  byte carries the 64th bit alone; gzip is read through
+  `LimitReader(MaxProfileBytes+1)` and its trailer checked.
+- **The bytes do not bound the frames.** A sample names a location by its id
+  and a location stands for all its inlined lines, so a small profile naming
+  one deep location over and over would expand quadratically. `resolver.spend`
+  counts every frame — each location's, once, and each stack's copy — against
+  `MaxFrames` BEFORE it is built, and refuses with `ProfileTooLarge`
+  (`TestTheFramesAreBoundedBeforeTheyAreBuilt` drives `resolve` with a small
+  budget, so the test allocates nothing large).
 - **The fold never rounds.** `Total == Unattributed + Σ Owners[i].Value`
   exactly; units are the caller's to convert.
 - **The CPU profiler is the runtime's, and there is one.** `CaptureCPU` does
@@ -63,7 +72,12 @@ Stdlib only (plus `kernel/errs`). Code range `0.3.89.*`.
   counted profile's columns are aligned by tabwriter, so a frame after a
   shorter address has EMPTY columns: `appendCountFrame` reads non-empty fields
   (`TestTheCountedProfileReadsPastItsAlignmentTabs`) — the copy this replaces
-  split on every tab and read "" on linux/arm64.
+  split on every tab and read "" on linux/arm64. When the counted profile
+  cannot be written the goroutines are returned without labels, never dropped.
+- **The group key has no separator.** Every part — each label marked present
+  or absent, the state, the top frame — is prefixed with its length, so a
+  label value holding a NUL or an "=" cannot merge two groups
+  (`TestNoValueMergesTwoGroups`).
 
 ## Do NOT
 

@@ -163,13 +163,15 @@ var (
 
 	// LoopPanicked is a panic the loop recovered from the caller's own code —
 	// a store method, a journal, an observer — while it looked at one
-	// entity. That entity is retried after its backoff and the loop goes on;
-	// Start and Fire, which run on the caller's goroutine, let such a panic
-	// through, with the entity's lock released. The value and the stack
-	// travel as log-only fields.
+	// entity. When the panic interrupted the entity's pass, the entity is
+	// retried after its backoff; when it came from the observer's end, the
+	// transition was stored already and stands — call=observe-end says so.
+	// Either way the loop goes on. Start and Fire, which run on the caller's
+	// goroutine, let such a panic through, with the entity's lock released.
+	// The value and the stack travel as log-only fields.
 	LoopPanicked = errs.Define(CodeLoopPanicked, "LOOP_PANICKED",
 		"The state machine's loop recovered a panic",
-		"service/statemachine: a store, journal or observer call panicked in the loop; the fields carry the key, the value and the stack")
+		"service/statemachine: a store, journal or observer call panicked in the loop; the fields carry the key, the value, the stack and, for the observer's end, call")
 
 	// WaitAbandoned is returned when the caller's context ended while it
 	// waited for another transition of the same entity to finish. Nothing was

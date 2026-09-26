@@ -62,8 +62,18 @@ type GoroutineValue struct {
 // tracebacklabels=1, the default since Go 1.27); when the headers carry none,
 // they are matched from the labelled goroutine profile by stack — best
 // effort, since the two are taken one after the other.
+//
+// Only the traceback dump can fail it; when the labelled profile cannot be
+// written, the goroutines are returned without their labels.
 func Goroutines() ([]GoroutineValue, error) {
-	dump, err := goroutineProfile(debugTraceback)
+	//: the runtime's own writer, for both dumps.
+	return goroutinesFrom(goroutineProfile)
+}
+
+// goroutinesFrom is Goroutines over a writer of the goroutine profile at a
+// debug level, so the fallback on labels is testable.
+func goroutinesFrom(profile func(debug int) ([]byte, error)) ([]GoroutineValue, error) {
+	dump, err := profile(debugTraceback)
 	//: the runtime could not write its own dump.
 	if err != nil {
 		//: already typed.
@@ -75,11 +85,12 @@ func Goroutines() ([]GoroutineValue, error) {
 		//: complete.
 		return gs, nil
 	}
-	counts, err := goroutineProfile(debugCounts)
-	//: the labelled profile could not be written: the goroutines stand without labels.
+	counts, err := profile(debugCounts)
+	//: the labelled profile could not be written: the goroutines stand
+	//: without labels, which only it could supply.
 	if err != nil {
-		//: already typed.
-		return nil, err
+		//: best effort, as documented.
+		return gs, nil
 	}
 	joinLabels(gs, parseCounts(counts))
 	//: labels matched where a stack allowed it.

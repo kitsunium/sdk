@@ -14,8 +14,15 @@
 //	    OnEnter(Paid, chargeCard).                               // before the store: an error cancels
 //	    OnTransition(publish)                                    // after the store: an error is reported
 //
-//	m, err := statemachine.New(ctx, def, &statemachine.Config[Order, Status]{Store: orders, Journal: records})
-//	go m.Run(ctx)                                               // fires timers, deadlines and guards
+//	m, err := statemachine.New(ctx, def, &statemachine.Config[Order, Status]{
+//	    Store: orders, Journal: records,
+//	    Report: func(ctx context.Context, err error) { log.Print(err) }, // what no return value carries
+//	})
+//	go func() {
+//	    if err := m.Run(ctx); err != nil {                       // LoopRunning: another loop is going
+//	        log.Print(err)
+//	    }
+//	}()                                                          // fires timers, deadlines and guards
 //	o, err := m.Start(ctx, Order{ID: "o-1"})                     // Pending, inserted
 //	o, err = m.Fire(ctx, "o-1", "pay")                           // Paid, replaced
 //
@@ -40,7 +47,7 @@
 // runs the OnTransition hooks. A hook that panics fails what it was part of —
 // an OnEnter hook its transition, an OnTransition hook only itself — and never
 // leaves an entity locked. An OnEnter hook may change the entity but not its
-// state or key, and must not fire its own machine ([Reentrant]); an
+// state or key, and must not fire its own machine (Reentrant); an
 // OnTransition hook may.
 //
 // # The loop never polls
@@ -85,101 +92,203 @@ const DefaultMinGap time.Duration = svcstm.DefaultMinGap
 // Config.MaxHistory is not positive.
 const DefaultMaxHistory int = svcstm.DefaultMaxHistory
 
-// The five triggers.
-const (
-	TriggerStart    Trigger = corestm.TriggerStart
-	TriggerEvent    Trigger = corestm.TriggerEvent
-	TriggerDelay    Trigger = corestm.TriggerDelay
-	TriggerDeadline Trigger = corestm.TriggerDeadline
-	TriggerGuard    Trigger = corestm.TriggerGuard
-)
+// TriggerStart is a Start: the entity entered its initial state.
+const TriggerStart Trigger = corestm.TriggerStart
 
-// The three reasons a run starts.
-const (
-	WakeStart  Wake = svcstm.WakeStart
-	WakeDue    Wake = svcstm.WakeDue
-	WakeChange Wake = svcstm.WakeChange
-)
+// TriggerEvent is an event a caller fired.
+const TriggerEvent Trigger = corestm.TriggerEvent
 
-// The three kinds of LoopEvent.
-const (
-	LoopRunStarted LoopEventKind = svcstm.LoopRunStarted
-	LoopRunEnded   LoopEventKind = svcstm.LoopRunEnded
-	LoopWaiting    LoopEventKind = svcstm.LoopWaiting
-)
+// TriggerDelay is a duration the entity spent in its state (Definition.After).
+const TriggerDelay Trigger = corestm.TriggerDelay
 
-// The codes a caller branches on with errs.HasCode.
-const (
-	CodeTriggerUnknown      errs.Code = corestm.CodeTriggerUnknown
-	CodeTransitionRefused   errs.Code = svcstm.CodeTransitionRefused
-	CodeEntityMissing       errs.Code = svcstm.CodeEntityMissing
-	CodeEntityExists        errs.Code = svcstm.CodeEntityExists
-	CodeKeyEmpty            errs.Code = svcstm.CodeKeyEmpty
-	CodeHookFailed          errs.Code = svcstm.CodeHookFailed
-	CodeHookPanicked        errs.Code = svcstm.CodeHookPanicked
-	CodeHookChangedState    errs.Code = svcstm.CodeHookChangedState
-	CodeHookChangedKey      errs.Code = svcstm.CodeHookChangedKey
-	CodeReentrant           errs.Code = svcstm.CodeReentrant
-	CodeStoreFailed         errs.Code = svcstm.CodeStoreFailed
-	CodeJournalFailed       errs.Code = svcstm.CodeJournalFailed
-	CodeLoopRunning         errs.Code = svcstm.CodeLoopRunning
-	CodeFunctionPanicked    errs.Code = svcstm.CodeFunctionPanicked
-	CodeInitialMissing      errs.Code = svcstm.CodeInitialMissing
-	CodeEventInvalid        errs.Code = svcstm.CodeEventInvalid
-	CodeTransitionDuplicate errs.Code = svcstm.CodeTransitionDuplicate
-	CodeDelayInvalid        errs.Code = svcstm.CodeDelayInvalid
-	CodeFunctionMissing     errs.Code = svcstm.CodeFunctionMissing
-	CodeStoreMissing        errs.Code = svcstm.CodeStoreMissing
-	CodeWaitAbandoned       errs.Code = svcstm.CodeWaitAbandoned
-	CodeLoopPanicked        errs.Code = svcstm.CodeLoopPanicked
-)
+// TriggerDeadline is the arrival of an instant the entity carries
+// (Definition.At).
+const TriggerDeadline Trigger = corestm.TriggerDeadline
+
+// TriggerGuard is a guard on the entity that held after a write
+// (Definition.When).
+const TriggerGuard Trigger = corestm.TriggerGuard
+
+// WakeStart is the first run, when Run starts.
+const WakeStart Wake = svcstm.WakeStart
+
+// WakeDue is a run the loop woke for by itself: a transition fell due.
+const WakeDue Wake = svcstm.WakeDue
+
+// WakeChange is a run a write woke the loop for.
+const WakeChange Wake = svcstm.WakeChange
+
+// LoopRunStarted reports a run starting: Wake and Started are set.
+const LoopRunStarted LoopEventKind = svcstm.LoopRunStarted
+
+// LoopRunEnded reports a run ending: every field is set.
+const LoopRunEnded LoopEventKind = svcstm.LoopRunEnded
+
+// LoopWaiting reports the loop re-armed to wake earlier, at Next, because a
+// write arrived while it slept.
+const LoopWaiting LoopEventKind = svcstm.LoopWaiting
+
+// CodeTriggerUnknown identifies a name ParseTrigger does not know (0.2.56.1).
+const CodeTriggerUnknown errs.Code = corestm.CodeTriggerUnknown
+
+// CodeTransitionRefused identifies an event no declared transition takes from
+// the entity's state (0.3.88.1).
+const CodeTransitionRefused errs.Code = svcstm.CodeTransitionRefused
+
+// CodeEntityMissing identifies a key the store holds no entity under — never
+// there, or deleted while a transition ran (0.3.88.2).
+const CodeEntityMissing errs.Code = svcstm.CodeEntityMissing
+
+// CodeEntityExists identifies a Start whose entity's key the store already
+// holds (0.3.88.3).
+const CodeEntityExists errs.Code = svcstm.CodeEntityExists
+
+// CodeKeyEmpty identifies an entity handed to Start whose key is empty
+// (0.3.88.4).
+const CodeKeyEmpty errs.Code = svcstm.CodeKeyEmpty
+
+// CodeHookFailed identifies a hook that returned an error (0.3.88.5).
+const CodeHookFailed errs.Code = svcstm.CodeHookFailed
+
+// CodeHookPanicked identifies a hook that panicked, recovered as an error
+// (0.3.88.6).
+const CodeHookPanicked errs.Code = svcstm.CodeHookPanicked
+
+// CodeHookChangedState identifies an OnEnter hook that changed the state it
+// was entering (0.3.88.7).
+const CodeHookChangedState errs.Code = svcstm.CodeHookChangedState
+
+// CodeHookChangedKey identifies an OnEnter hook that changed its entity's key
+// (0.3.88.8).
+const CodeHookChangedKey errs.Code = svcstm.CodeHookChangedKey
+
+// CodeReentrant identifies a Start or Fire through the context an OnEnter hook
+// of the same machine was given (0.3.88.9).
+const CodeReentrant errs.Code = svcstm.CodeReentrant
+
+// CodeStoreFailed identifies a Store method that returned an error
+// (0.3.88.10).
+const CodeStoreFailed errs.Code = svcstm.CodeStoreFailed
+
+// CodeJournalFailed identifies a Journal method that returned an error
+// (0.3.88.11).
+const CodeJournalFailed errs.Code = svcstm.CodeJournalFailed
+
+// CodeLoopRunning identifies a Run or a Step asked for while another is going
+// (0.3.88.12).
+const CodeLoopRunning errs.Code = svcstm.CodeLoopRunning
+
+// CodeFunctionPanicked identifies a guard or an instant function that panicked
+// (0.3.88.13).
+const CodeFunctionPanicked errs.Code = svcstm.CodeFunctionPanicked
+
+// CodeInitialMissing identifies a definition with no initial state
+// (0.3.88.14).
+const CodeInitialMissing errs.Code = svcstm.CodeInitialMissing
+
+// CodeEventInvalid identifies a transition declared with an empty event name,
+// or CreateEvent (0.3.88.15).
+const CodeEventInvalid errs.Code = svcstm.CodeEventInvalid
+
+// CodeTransitionDuplicate identifies a second transition declared for one
+// event from one state (0.3.88.16).
+const CodeTransitionDuplicate errs.Code = svcstm.CodeTransitionDuplicate
+
+// CodeDelayInvalid identifies an After with a duration that is not positive
+// (0.3.88.17).
+const CodeDelayInvalid errs.Code = svcstm.CodeDelayInvalid
+
+// CodeFunctionMissing identifies a nil accessor, guard, instant function, hook
+// or definition (0.3.88.18).
+const CodeFunctionMissing errs.Code = svcstm.CodeFunctionMissing
+
+// CodeStoreMissing identifies a configuration with no store (0.3.88.19).
+const CodeStoreMissing errs.Code = svcstm.CodeStoreMissing
+
+// CodeWaitAbandoned identifies a caller whose context ended while the entity
+// was busy (0.3.88.20).
+const CodeWaitAbandoned errs.Code = svcstm.CodeWaitAbandoned
+
+// CodeLoopPanicked identifies a panic the loop recovered from a store, journal
+// or observer call (0.3.88.21).
+const CodeLoopPanicked errs.Code = svcstm.CodeLoopPanicked
 
 var (
-	// TriggerUnknown refuses a trigger outside the five.
+	// TriggerUnknown refuses a trigger name outside the five.
 	TriggerUnknown = corestm.TriggerUnknown
-	// TransitionRefused: no transition by that event leaves the state (409).
+
+	// TransitionRefused is returned when no transition by that event leaves the
+	// entity's state (409); the entity comes back with it.
 	TransitionRefused = svcstm.TransitionRefused
-	// EntityMissing: no entity under the key, or deleted meanwhile (404).
+
+	// EntityMissing is returned for a key the store holds no entity under, or one
+	// deleted while the transition ran (404).
 	EntityMissing = svcstm.EntityMissing
-	// EntityExists: Start with a key already taken (409).
+
+	// EntityExists is returned by a Start over a key already taken (409).
 	EntityExists = svcstm.EntityExists
-	// KeyEmpty: Start with an entity whose key is empty.
+
+	// KeyEmpty is returned by a Start with an entity whose key is empty.
 	KeyEmpty = svcstm.KeyEmpty
+
 	// HookFailed accompanies a hook's own error, joined beside it.
 	HookFailed = svcstm.HookFailed
-	// HookPanicked: a hook panicked and was recovered.
+
+	// HookPanicked is a hook that panicked and was recovered; the value and the
+	// stack are log-only fields.
 	HookPanicked = svcstm.HookPanicked
-	// HookChangedState: an OnEnter hook changed the state it was entering.
+
+	// HookChangedState is an OnEnter hook that changed the state it was entering.
 	HookChangedState = svcstm.HookChangedState
-	// HookChangedKey: an OnEnter hook changed its entity's key.
+
+	// HookChangedKey is an OnEnter hook that changed its entity's key.
 	HookChangedKey = svcstm.HookChangedKey
-	// Reentrant: an OnEnter hook fired its own machine.
+
+	// Reentrant is a Start or Fire through the context an OnEnter hook of the same
+	// machine was given: refused, not deadlocked.
 	Reentrant = svcstm.Reentrant
-	// StoreFailed: a Store method returned an error.
+
+	// StoreFailed wraps an error a Store method returned.
 	StoreFailed = svcstm.StoreFailed
-	// JournalFailed: a Journal method returned an error.
+
+	// JournalFailed wraps an error a Journal method returned.
 	JournalFailed = svcstm.JournalFailed
-	// LoopRunning: Run or Step while another is going.
+
+	// LoopRunning is returned by Run or Step while another is going.
 	LoopRunning = svcstm.LoopRunning
-	// FunctionPanicked: a guard or an instant function panicked.
+
+	// FunctionPanicked is a guard or an instant function that panicked; the entity
+	// is retried after its backoff.
 	FunctionPanicked = svcstm.FunctionPanicked
-	// InitialMissing: the definition never called Initial.
+
+	// InitialMissing is returned by New for a definition that never called
+	// Initial.
 	InitialMissing = svcstm.InitialMissing
-	// EventInvalid: an empty event name, or CreateEvent.
+
+	// EventInvalid is a transition declared with an empty event name, or
+	// CreateEvent.
 	EventInvalid = svcstm.EventInvalid
-	// TransitionDuplicate: one event declared twice from one state.
+
+	// TransitionDuplicate is one event declared twice from one state.
 	TransitionDuplicate = svcstm.TransitionDuplicate
-	// DelayInvalid: After with a duration that is not positive.
+
+	// DelayInvalid is an After with a duration that is not positive.
 	DelayInvalid = svcstm.DelayInvalid
-	// FunctionMissing: a nil accessor, guard, instant function, hook or
+
+	// FunctionMissing is a nil accessor, guard, instant function, hook or
 	// definition.
 	FunctionMissing = svcstm.FunctionMissing
-	// StoreMissing: Config.Store is nil.
+
+	// StoreMissing is returned by New when Config.Store is nil.
 	StoreMissing = svcstm.StoreMissing
-	// WaitAbandoned: the context ended while the entity was busy (503).
+
+	// WaitAbandoned is returned when the context ended while the entity was busy
+	// (503); errors.Is still finds the context's error.
 	WaitAbandoned = svcstm.WaitAbandoned
-	// LoopPanicked: the loop recovered a panic of a store, journal or
-	// observer call; that entity is retried after its backoff.
+
+	// LoopPanicked is a panic the loop recovered from a store, journal or observer
+	// call: the entity is retried after its backoff, unless it came from the
+	// observer's end, once the transition was stored.
 	LoopPanicked = svcstm.LoopPanicked
 )
 

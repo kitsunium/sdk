@@ -23,7 +23,7 @@ next transition due.
 | `Transition`, `Change`, `Firing` | alias | a declared transition, a stored one, one the loop is about to fire |
 | `Wake` + `Wake*`, `LoopEvent`, `LoopEventKind` + `Loop*` | alias / const | what `Config.OnLoop` is told |
 | `CreateEvent`, `DefaultMinGap`, `DefaultMaxHistory` | const | |
-| `Code*` (22) and the sentinels | const / var | `0.2.56.1`, `0.3.88.1`–`0.3.88.21` |
+| `Code*` (22) and the sentinels | const / var | `0.2.56.1`, `0.3.88.1`–`0.3.88.21`; each constant declared on its own, the sentinels in one `var` block |
 
 ## Why-this-shape
 
@@ -38,6 +38,13 @@ next transition due.
   transition — because a reader who assumes otherwise builds the wrong thing.
 - **Method references are plain text in the doc.** gomarkdoc cannot resolve a
   method of a generic alias, and a bracketed link would render as brackets.
+- **Each constant is declared on its own; the sentinels share one block.**
+  gomarkdoc gives a grouped declaration ONE anchor — the first name's — so a
+  constant declared alone gets its own; the sentinels cannot, since
+  KTN-VAR-GROUP wants one `var` block, so the package doc names them in plain
+  text: `[Reentrant]` had led to `TriggerUnknown`, the block's first name.
+- **The example wires `Report` and checks `Run`'s error.** A nil `Report`
+  drops what no return value carries, and an example is what gets copied.
 
 ## README is generated
 

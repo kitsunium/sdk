@@ -25,16 +25,16 @@
 // [CaptureCPU] samples the CPU for a window of at most [MaxCPUWindow]. The
 // runtime has ONE CPU profiler: while it runs — started by another capture or
 // by anyone's pprof.StartCPUProfile, net/http/pprof's included — a capture is
-// refused with [ProfilerBusy], not queued. A context that ends first returns
-// [CaptureCanceled] and no profile. [CaptureHeap] collects garbage, then
+// refused with ProfilerBusy, not queued. A context that ends first returns
+// CaptureCanceled and no profile. [CaptureHeap] collects garbage, then
 // reads the live heap.
 //
 // # Profiles are decoded with the standard library
 //
 // [Parse] reads the pprof format — gzipped or not — written from
 // profile.proto, so the SDK carries no protobuf dependency. It is bounded by
-// [MaxProfileBytes] and refuses anything malformed with [ProfileMalformed]
-// rather than guessing. A [Profile] is plain data: sample types, samples with
+// [MaxProfileBytes] in what it reads and by [MaxFrames] in what it builds, and
+// refuses anything malformed with ProfileMalformed rather than guessing. A [Profile] is plain data: sample types, samples with
 // their stacks — innermost frame first, an inlined call a frame of its own —
 // their values and their labels.
 //
@@ -85,39 +85,81 @@ const MaxProfileBytes int = svcprof.MaxProfileBytes
 // FlameRoot is the name of a flame graph's root frame.
 const FlameRoot string = svcprof.FlameRoot
 
-// Fold's defaults, taken when a FoldConfig field is not positive.
-const (
-	DefaultTopFunctions  int     = svcprof.DefaultTopFunctions
-	DefaultTopPerOwner   int     = svcprof.DefaultTopPerOwner
-	DefaultFlameMinShare float64 = svcprof.DefaultFlameMinShare
-	DefaultFlameMaxDepth int     = svcprof.DefaultFlameMaxDepth
-)
+// MaxFrames bounds the frames Parse builds: each location's once, and every
+// copy a sample's stack makes of them.
+const MaxFrames int = svcprof.MaxFrames
 
-// The codes a caller branches on with errs.HasCode.
-const (
-	CodeWindowInvalid     errs.Code = svcprof.CodeWindowInvalid
-	CodeProfilerBusy      errs.Code = svcprof.CodeProfilerBusy
-	CodeCaptureCanceled   errs.Code = svcprof.CodeCaptureCanceled
-	CodeCaptureFailed     errs.Code = svcprof.CodeCaptureFailed
-	CodeProfileMalformed  errs.Code = svcprof.CodeProfileMalformed
-	CodeProfileTooLarge   errs.Code = svcprof.CodeProfileTooLarge
-	CodeSampleTypeMissing errs.Code = svcprof.CodeSampleTypeMissing
-)
+// DefaultTopFunctions is how many functions Folded.Top lists when
+// FoldConfig.TopFunctions is not positive.
+const DefaultTopFunctions int = svcprof.DefaultTopFunctions
+
+// DefaultTopPerOwner is how many functions each owner's Top lists when
+// FoldConfig.TopPerOwner is not positive.
+const DefaultTopPerOwner int = svcprof.DefaultTopPerOwner
+
+// DefaultFlameMinShare prunes a flame frame costing less than this share of
+// the total when FoldConfig.FlameMinShare is outside (0, 1): half a percent.
+const DefaultFlameMinShare float64 = svcprof.DefaultFlameMinShare
+
+// DefaultFlameMaxDepth is how deep the flame graph goes when
+// FoldConfig.FlameMaxDepth is not positive.
+const DefaultFlameMaxDepth int = svcprof.DefaultFlameMaxDepth
+
+// CodeWindowInvalid identifies a CPU window not positive or over MaxCPUWindow
+// (0.3.89.1).
+const CodeWindowInvalid errs.Code = svcprof.CodeWindowInvalid
+
+// CodeProfilerBusy identifies a CPU capture refused because the process's one
+// CPU profiler is running (0.3.89.2).
+const CodeProfilerBusy errs.Code = svcprof.CodeProfilerBusy
+
+// CodeCaptureCanceled identifies a CPU capture whose context ended before its
+// window (0.3.89.3).
+const CodeCaptureCanceled errs.Code = svcprof.CodeCaptureCanceled
+
+// CodeCaptureFailed identifies a profile runtime/pprof could not write
+// (0.3.89.4).
+const CodeCaptureFailed errs.Code = svcprof.CodeCaptureFailed
+
+// CodeProfileMalformed identifies bytes that are not a well-formed pprof
+// profile, or a hand-built profile Fold cannot read (0.3.89.5).
+const CodeProfileMalformed errs.Code = svcprof.CodeProfileMalformed
+
+// CodeProfileTooLarge identifies a profile over MaxProfileBytes, or whose
+// stacks exceed MaxFrames (0.3.89.6).
+const CodeProfileTooLarge errs.Code = svcprof.CodeProfileTooLarge
+
+// CodeSampleTypeMissing identifies a fold asked for a sample type the profile
+// does not measure (0.3.89.7).
+const CodeSampleTypeMissing errs.Code = svcprof.CodeSampleTypeMissing
 
 var (
-	// WindowInvalid: a CPU window not positive or over MaxCPUWindow (400).
+	// WindowInvalid refuses a CPU window not positive or over MaxCPUWindow (400).
 	WindowInvalid = svcprof.WindowInvalid
-	// ProfilerBusy: the process's one CPU profiler is running (409).
+
+	// ProfilerBusy refuses a CPU capture while the process's one CPU profiler is
+	// running, whoever started it (409).
 	ProfilerBusy = svcprof.ProfilerBusy
-	// CaptureCanceled: the context ended before the window (503).
+
+	// CaptureCanceled is a CPU capture whose context ended before the window
+	// (503); errors.Is still finds the context's error.
 	CaptureCanceled = svcprof.CaptureCanceled
-	// CaptureFailed: runtime/pprof could not write a profile.
+
+	// CaptureFailed wraps an error runtime/pprof returned while writing a
+	// profile.
 	CaptureFailed = svcprof.CaptureFailed
-	// ProfileMalformed: the bytes are not a well-formed pprof profile.
+
+	// ProfileMalformed refuses bytes that are not a well-formed pprof profile —
+	// the field names the part, the input is never quoted — and a nil profile or
+	// a sample short of values handed to Fold.
 	ProfileMalformed = svcprof.ProfileMalformed
-	// ProfileTooLarge: the profile exceeds MaxProfileBytes.
+
+	// ProfileTooLarge refuses a profile over MaxProfileBytes, compressed or
+	// inflated, or whose stacks would take more than MaxFrames frames.
 	ProfileTooLarge = svcprof.ProfileTooLarge
-	// SampleTypeMissing: the profile does not measure that sample type.
+
+	// SampleTypeMissing refuses a fold asked for a sample type the profile does
+	// not measure.
 	SampleTypeMissing = svcprof.SampleTypeMissing
 )
 

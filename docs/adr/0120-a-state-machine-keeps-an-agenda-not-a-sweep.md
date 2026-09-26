@@ -20,7 +20,7 @@ unchanged. Reading it found six defects:
   listed and decoded EVERY entity to find what was due. A wake cost O(N), and
   so did every write, which is why the loop paced itself at one run a second.
   Measured on the population of this ADR's benchmark: 0.5 ms at a thousand
-  entities, 67 ms and 16 MB of garbage at a hundred thousand, per wake.
+  entities, 68 ms and 16 MB of garbage at a hundred thousand, per wake.
 - **A panicking hook locked the machine for good.** An OnEnter hook ran under
   the machine's mutex; a panic unwound past the unlock and every later
   transition blocked. The framework fixed it (its CodeWorkflowHookPanic); the
@@ -62,7 +62,13 @@ Beside the store the machine keeps what the entity does not carry: one
 `RecordValue` per entity — its state, the instant it entered it, its latest
 `StepValue`s (`MaxHistory`, 20 by default) — in memory and in an optional
 `Journal[S]`, frozen at three methods, whose `Save` and `Delete` take several
-records so the opening reconciliation is one call. Without a journal, a
+records so the opening reconciliation is one call. The engine calls the
+journal with no lock of its bookkeeping held, one call at a time PER KEY: a
+key's gate is taken before the bookkeeping mutex and held across the call, so
+two writes of one key reach the journal in the order the machine made them,
+writes of different keys may arrive concurrently, and a slow journal holds
+back only the entity it is writing. A journal may read the machine — its
+census, its records — and must not tell it anything. Without a journal, a
 restart re-enters every entity into its state when the machine opens, which
 restarts every After timer; with one, a delay counts from when the entity
 really entered its state. `Trigger` names what fired a step — start, event,
@@ -104,7 +110,11 @@ Writes and deletes that arrive while a transition holds the entity — very
 often the transition's own write, notified by the store — are recorded on the
 transition's FLIGHT rather than waiting for the lock: a delete keeps the step
 from bringing the record back; a write makes the transition read the entity
-again before it lets go, so the record describes what the store holds.
+again before it lets go, so the record describes what the store holds. A READ
+the machine records — the loop's, and `Changed`'s — is a flight too, one that
+takes deletions only: a delete that lands between the store's answer and the
+record wins, so a read never brings a deleted entity's record back, and a
+writer still waits for the lock.
 
 ### D4 — the agenda: O(log N) to the next transition due
 
@@ -121,8 +131,8 @@ anything is not even marked: a state with only delays is not re-evaluated
 when a field changes.
 
 Measured (`internal/service/statemachine/BENCH.md`): one due transition,
-fired and rescheduled, costs 3.3 µs at a thousand entities and 3.8 µs at a
-hundred thousand; the sweep's search alone cost 0.5 ms and 67 ms.
+fired and rescheduled, costs 3.7 µs at a thousand entities and 4.1 µs at a
+hundred thousand; the sweep's search alone cost 0.48 ms and 68 ms.
 
 ### D5 — the loop sleeps until something is due, and one failure delays one entity
 
@@ -142,12 +152,21 @@ panicked (`FunctionPanicked`), a store or journal call that panicked
 (`LoopPanicked`, recovered per entity so the loop goes on) — holds back THAT
 entity for `Backoff`
 (`resilience.BackoffValue`, 1 s doubling to a minute by default), counted per
-entity; the others are not delayed. A success or a new state clears it.
+entity; the others are not delayed. A success or a new state clears it. An
+entity whose write the store REFUSED because it was gone — deleted with no
+word to the machine — is not a failure: it is forgotten everywhere, record,
+census, journal and agenda, as a read that finds nothing. Only the store's own
+refusal reads that way; a hook's error that merely carries `ENTITY_MISSING`
+fails the transition like any other.
 
 `Observe` brackets each transition the loop fires — the ones no caller can
-wrap — with a context the hooks and the store calls run under; `Report`
-receives every error no return value carries (an OnTransition hook's, a
-journal write's, a loop failure); `OnLoop` is told each run and each re-arm.
+wrap — with a context the hooks and the store calls run under; its end hears
+the outcome only once the agenda has recorded it, so a panic there is
+`LoopPanicked` with `call=observe-end`, reported, and a stored transition is
+never retried. `Report` receives every error no return value carries (an
+OnTransition hook's, a journal write's, a loop failure) and is called with no
+lock of the machine held, so it may read the machine or fire it; `OnLoop` is
+told each run and each re-arm.
 Nil hooks drop what they would have received — the SDK does not write to stderr
 on the caller's behalf (ADR 0030) — and the documentation says to wire
 `Report`. The clock is an injected `clock.Timed` (ADR 0090): a `ManualClock`
@@ -171,7 +190,7 @@ parameters satisfies, and the precedent for aliasing a suffixed engine type
 under a plain public name is `secret.Policy = PolicySpec`. The facade names
 them `Machine` and `Definition`.
 
-## Consequences
+## Consequences / Semantics
 
 - The framework rebuilds its Workflow on this engine and keeps what is its own
   — positions for the diagram, spans, the Studio, its wire mapping:
@@ -180,8 +199,9 @@ them `Machine` and `Definition`.
     `insertOnly` and `replaceOnly` writes, a Conflict or NotFound mapped to
     `false, nil`; `All` its decode of every entity;
   - its instances file behind a `Journal` (`Save`/`Delete` rewrite the file
-    once per call; its model.Step maps from StepValue, delay and deadline both
-    to "timer", start to "create");
+    once per call, under a mutex of its own, since writes of different
+    entities may now arrive at once; its model.Step maps from StepValue, delay
+    and deadline both to "timer", start to "create");
   - its store's `onWrite` and `onDelete` hooks call `Changed` and `Deleted`;
   - `Actor` is its current node, `Observe` its `begin`/`end` span with the
     instance and trigger attributes, `Report` its problem list and log,
@@ -221,6 +241,11 @@ None. `statemachine` is a new domain in this change set.
   amortised.
 - **One mutex, as before.** Simpler, and a slow hook of one entity blocks every
   other; per-entity locks cost a map entry per entity in flight.
+- **Journal writes under the bookkeeping mutex.** It orders every write for
+  free, and brings the one mutex back through the side door: a slow journal
+  would hold every entity's transition, and a journal or a `Report` that reads
+  the census would deadlock on it. A gate per key orders what needs ordering —
+  the writes of one entity — and nothing else.
 - **Evaluate guards on the writer's goroutine.** The writer is often a request
   handler; a guard is the caller's code and may panic or be slow. The loop is
   where caller code already runs, recovered.
@@ -253,7 +278,12 @@ None. `statemachine` is a new domain in this change set.
   deadline brought forward waking the loop; a burst of writes as one run.
 - `internal/service/statemachine/edge_external_test.go` — what is due at
   opening, a run stopped half-way, a store failing under the loop, a state
-  flipped during a flight, a notification given up on.
+  flipped during a flight, a notification given up on; a journal write that
+  holds only its own key and orders a delete after it
+  (`TestAJournalWriteHoldsOnlyItsOwnKey`), a journal and a `Report` that read
+  the machine, an observer's end that panics, an entity gone under the loop's
+  write, a deletion landing during a read (`TestADeletionDuringAReadIsNotUndone`),
+  and a hook error carrying `ENTITY_MISSING` treated as a failure.
 - `internal/service/statemachine/agenda_internal_test.go` — lazy deletion, the
   2N + 64 bound, the order of a run, the backoff.
 - `internal/service/statemachine/agenda_bench_test.go` + `BENCH.md` — the

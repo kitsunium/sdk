@@ -38,9 +38,9 @@ func (m *StateMachine[E, S]) Changed(ctx context.Context, key string) error {
 }
 
 // Deleted tells the machine the entity under key was deleted: its record
-// leaves the census, the journal and the agenda. A transition of the entity in
-// flight will not record it again. It returns the journal's failure, if any;
-// the record is dropped either way.
+// leaves the census, the journal and the agenda. A read or a transition of the
+// entity in progress will not record it again. It returns the journal's
+// failure, if any; the record is dropped either way.
 func (m *StateMachine[E, S]) Deleted(ctx context.Context, key string) error {
 	m.agenda.forget(key)
 	//: no lock: a hook deleting its own entity runs under it.
@@ -48,8 +48,11 @@ func (m *StateMachine[E, S]) Deleted(ctx context.Context, key string) error {
 }
 
 // refresh reads the entity under key and brings its record and its place on
-// the agenda in line. The caller holds the entity's lock.
+// the agenda in line. The caller holds the entity's lock; the read is a
+// flight, so a deletion that arrives between the read and the record wins.
 func (m *StateMachine[E, S]) refresh(ctx context.Context, key string) error {
+	f := m.book.read(key)
+	defer m.landRead(key, f)
 	entity, found, err := m.store.Get(ctx, key)
 	//: the store could not say.
 	if err != nil {
@@ -61,10 +64,19 @@ func (m *StateMachine[E, S]) refresh(ctx context.Context, key string) error {
 		//: the journal's failure, if any.
 		return m.Deleted(ctx, key)
 	}
-	changed := m.book.reconcile(ctx, key, *m.plan.state(&entity), m.cfg.clock.Now())
+	changed, err := m.book.reconcile(ctx, key, *m.plan.state(&entity), m.cfg.clock.Now(), f)
 	m.replan(key, changed)
-	//: in line.
-	return nil
+	//: in line; a journal failure is the caller's to report.
+	return err
+}
+
+// landRead ends a read's flight; an entity deleted during it leaves the
+// agenda, whatever the reader planned for it.
+func (m *StateMachine[E, S]) landRead(key string, f *flight) {
+	//: the deletion wins over the plan.
+	if _, deleted := m.book.land(key, f); deleted {
+		m.agenda.forget(key)
+	}
 }
 
 // replan puts key on the agenda for the loop to evaluate, or takes it off

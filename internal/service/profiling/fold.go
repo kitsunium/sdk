@@ -118,8 +118,15 @@ type FlameNodeValue struct {
 // function name — an unsymbolized one — is left out of the stacks it is in.
 //
 // It refuses a sample type the profile does not measure with
-// [SampleTypeMissing].
+// [SampleTypeMissing], and a nil profile or a sample with fewer values than
+// the profile has sample types — which a profile Parse returned never has, a
+// hand-built one may — with [ProfileMalformed].
 func Fold(p *ProfileValue, cfg FoldConfig) (FoldedValue, error) {
+	//: nothing to fold.
+	if p == nil {
+		//: named like any other part that could not be read.
+		return FoldedValue{}, malformed("profile")
+	}
 	cfg = cfg.normal()
 	typ := cfg.SampleType
 	//: the caller did not say: the profile's own default.
@@ -136,6 +143,11 @@ func Fold(p *ProfileValue, cfg FoldConfig) (FoldedValue, error) {
 	//: every sample with a cost.
 	for i := range p.Samples {
 		s := &p.Samples[i]
+		//: a sample with no value for the type folded.
+		if idx >= len(s.Values) {
+			//: nothing partial is returned.
+			return FoldedValue{}, malformed("sample values")
+		}
 		//: a zero value adds nothing to anything.
 		if s.Values[idx] == 0 {
 			//: next sample.

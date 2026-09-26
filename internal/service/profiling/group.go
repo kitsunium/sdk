@@ -4,8 +4,17 @@ package profiling
 
 import (
 	"cmp"
+	"encoding/binary"
 	"slices"
 	"strings"
+)
+
+// Presence marks of a grouping label in a group key, and the room a key
+// starts with — enough for a few labels, a state and a frame without growing.
+const (
+	labelAbsent  byte = 0
+	labelPresent byte = 1
+	keyRoom      int  = 64
 )
 
 // GroupConfig says how GroupGoroutines groups: by which labels, and how many
@@ -75,25 +84,31 @@ func GroupGoroutines(gs []GoroutineValue, cfg GroupConfig) []GoroutineGroupValue
 	return groups
 }
 
-// groupKey is a goroutine's group identity: its grouping labels, its state and
-// its top frame, joined with a separator none of them contains.
+// groupKey is a goroutine's group identity: its grouping labels — each marked
+// present or absent — its state and its top frame, every string prefixed by
+// its length. No separator is needed, so no value — a label is the caller's
+// text, and may hold any byte — can make two different goroutines one group.
 func groupKey(g *GoroutineValue, keys []string, top string) string {
-	var b strings.Builder
-	//: each grouping label's value, present or not.
+	key := make([]byte, 0, keyRoom)
+	//: each grouping label, present or not.
 	for _, k := range keys {
 		v, has := g.Labels[k]
+		mark := labelAbsent
 		//: an absent label and an empty one are different groups.
 		if has {
-			b.WriteString("=")
+			mark = labelPresent
 		}
-		b.WriteString(v)
-		b.WriteByte(0)
+		key = appendPart(append(key, mark), v)
 	}
-	b.WriteString(g.State)
-	b.WriteByte(0)
-	b.WriteString(top)
+	key = appendPart(appendPart(key, g.State), top)
 	//: the identity.
-	return b.String()
+	return string(key)
+}
+
+// appendPart appends s to key, prefixed by its length.
+func appendPart(key []byte, s string) []byte {
+	//: the length first, so the part ends where it says.
+	return append(binary.AppendUvarint(key, uint64(len(s))), s...)
 }
 
 // pick returns the grouping labels a goroutine carries.

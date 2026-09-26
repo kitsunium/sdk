@@ -57,6 +57,45 @@ func TestGoroutinesGroupByLabelsStateAndTopFrame(t *testing.T) {
 	}
 }
 
+// TestNoValueMergesTwoGroups pins the group key: labels, states and frames
+// that hold the bytes a separator would have been — a NUL, an "=" — still
+// keep different goroutines in different groups.
+func TestNoValueMergesTwoGroups(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		labels []string
+		gs     []profiling.GoroutineValue
+	}
+	cases := []tc{
+		{"a label holding what separated the next one", []string{"node", "loop"}, []profiling.GoroutineValue{
+			goroutine(map[string]string{"node": "a\x00=b"}, "S", "app.T"),
+			goroutine(map[string]string{"node": "a", "loop": "b\x00"}, "S", "app.T"),
+		}},
+		{"a state holding what separated the frame", nil, []profiling.GoroutineValue{
+			goroutine(nil, "x\x00y", "z"),
+			goroutine(nil, "x", "y\x00z"),
+		}},
+		{"an absent label and an empty one", []string{"node"}, []profiling.GoroutineValue{
+			goroutine(map[string]string{"node": ""}, "S", "app.T"),
+			goroutine(nil, "S", "app.T"),
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		groups := profiling.GroupGoroutines(c.gs, profiling.GroupConfig{Labels: c.labels})
+		if len(groups) != 2 || groups[0].Count != 1 || groups[1].Count != 1 {
+			t.Fatalf("groups = %+v; want two of one", groups)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestCanonicalNameMeetsEverySpelling pins one name per function, whoever
 // spelled it.
 func TestCanonicalNameMeetsEverySpelling(t *testing.T) {

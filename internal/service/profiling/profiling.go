@@ -40,3 +40,12 @@ const MaxCPUWindow time.Duration = 5 * time.Minute
 // few megabytes; a gzip stream inflating past this is not a profile anyone
 // should hold in memory.
 const MaxProfileBytes int = 64 << 20
+
+// MaxFrames bounds the frames Parse builds: each location's, once, and every
+// sample's stack, which copies them. The bytes a profile weighs do not bound
+// them: a sample names each location by its id, and a location stands for as
+// many frames as it has inlined lines, so a few megabytes naming one deep
+// location again and again would expand into gigabytes of frames. Four
+// million frames — some 230 MB of them — hold a profile of tens of thousands
+// of distinct stacks, as deep as the runtime records them.
+const MaxFrames int = 1 << 22

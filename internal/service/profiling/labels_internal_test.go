@@ -1,10 +1,13 @@
-// Package profiling — white-box tests of the counted goroutine profile and of
-// the label matching that relies on it.
+// Package profiling — white-box tests of the counted goroutine profile, of the
+// label matching that relies on it and its fallback, and of the frame budget.
 package profiling
 
 import (
+	"errors"
 	"slices"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // counted is a debug=1 goroutine profile as linux/arm64 writes it: tabwriter
@@ -57,5 +60,78 @@ func TestLabelsAreMatchedOneGoroutinePerCount(t *testing.T) {
 	gs[0].Labels["node"] = "changed"
 	if gs[1].Labels["node"] != "waiter" {
 		t.Error("two goroutines share one labels map")
+	}
+}
+
+// TestGoroutinesStandWithoutTheLabelledProfile pins the fallback: when the
+// labelled profile cannot be written, the dump's goroutines are returned
+// without labels rather than dropped.
+func TestGoroutinesStandWithoutTheLabelledProfile(t *testing.T) {
+	t.Parallel()
+	dump := "goroutine 1 [running]:\nmain.main()\n\t/src/main.go:30 +0x13f\n"
+	gs, err := goroutinesFrom(func(debug int) ([]byte, error) {
+		if debug == debugCounts {
+			return nil, errors.New("the labelled profile could not be written")
+		}
+		return []byte(dump), nil
+	})
+	if err != nil || len(gs) != 1 || gs[0].ID != 1 || gs[0].Labels != nil {
+		t.Fatalf("goroutinesFrom() = %+v, %v; want the one goroutine, unlabelled", gs, err)
+	}
+	if _, err := goroutinesFrom(func(int) ([]byte, error) { return nil, errors.New("no dump") }); err == nil {
+		t.Error("a dump that cannot be written must fail the call")
+	}
+}
+
+// deep is a decoder whose one location has lines inlined lines, named by one
+// sample refs times.
+func deep(lines, refs int) *decoder {
+	loc := rawLocation{lines: make([]rawLine, lines)}
+	for i := range loc.lines {
+		loc.lines[i] = rawLine{function: 1, line: int64(i + 1)}
+	}
+	return &decoder{
+		strings:   []string{"", "samples", "count", "app.f", "/src/app.go"},
+		types:     []rawType{{typ: 1, unit: 2}},
+		functions: map[uint64]rawFunction{1: {name: 3, file: 4}},
+		locations: map[uint64]rawLocation{1: loc},
+		samples:   []rawSample{{locations: slices.Repeat([]uint64{1}, refs), values: []int64{1}}},
+	}
+}
+
+// TestTheFramesAreBoundedBeforeTheyAreBuilt pins MaxFrames: a location's
+// frames and every stack's copy of them count, and the budget is checked
+// before the frames exist — a location three deep named four times is 3 + 12.
+func TestTheFramesAreBoundedBeforeTheyAreBuilt(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name   string
+		d      *decoder
+		budget int
+		fits   bool
+	}
+	cases := []tc{
+		{"exactly the budget", deep(3, 4), 15, true},
+		{"one frame over, in a stack", deep(3, 4), 14, false},
+		{"a location deeper than the budget", deep(20, 1), 10, false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		p, err := c.d.resolve(c.budget)
+		if c.fits {
+			if err != nil || len(p.Samples[0].Stack) != 12 {
+				t.Fatalf("resolve() = %v; want a stack of 12", err)
+			}
+			return
+		}
+		if p != nil || !errs.HasCode(err, CodeProfileTooLarge) {
+			t.Fatalf("resolve() = %v, %v; want PROFILE_TOO_LARGE", p, err)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

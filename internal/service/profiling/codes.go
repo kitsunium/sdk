@@ -25,7 +25,7 @@ const CodeCaptureFailed errs.Code = 0x00_03_59_04 // 0.3.89.4
 const CodeProfileMalformed errs.Code = 0x00_03_59_05 // 0.3.89.5
 
 // CodeProfileTooLarge identifies a profile over MaxProfileBytes, compressed or
-// decompressed.
+// decompressed, or whose stacks resolve to more than MaxFrames frames.
 const CodeProfileTooLarge errs.Code = 0x00_03_59_06 // 0.3.89.6
 
 // CodeSampleTypeMissing identifies a fold asked for a sample type the profile

@@ -220,14 +220,15 @@ func (d *decoder) readFunction(w *wire, kind uint64) error {
 	return err
 }
 
-// resolve turns the raw tables into a ProfileValue, checking every index.
-func (d *decoder) resolve() (*ProfileValue, error) {
+// resolve turns the raw tables into a ProfileValue, checking every index and
+// building at most frames frames, the locations' and the stacks' together.
+func (d *decoder) resolve(frames int) (*ProfileValue, error) {
 	//: profile.proto requires the empty string first.
 	if len(d.strings) == 0 || d.strings[0] != "" {
 		//: every "absent" string index would resolve to something else.
 		return nil, malformed("string table")
 	}
-	r := resolver{d: d, frames: make(map[uint64][]FrameValue, len(d.locations))}
+	r := resolver{d: d, frames: make(map[uint64][]FrameValue, len(d.locations)), budget: frames, limit: frames}
 	p := &ProfileValue{Time: timeOf(d.timeNanos), Duration: time.Duration(d.durationNanos), Period: d.period}
 	//: the header first: its strings are few and every sample needs its types.
 	if err := r.header(p); err != nil {

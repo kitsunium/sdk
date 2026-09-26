@@ -22,8 +22,8 @@ second: ask where the cost is, not exactly how much.
 | `0.3.89.2` | `PROFILER_BUSY` | the process's one CPU profiler is running (409) |
 | `0.3.89.3` | `CAPTURE_CANCELED` | the context ended before the window; no profile (503) |
 | `0.3.89.4` | `CAPTURE_FAILED` | runtime/pprof could not write a profile |
-| `0.3.89.5` | `PROFILE_MALFORMED` | not a well-formed pprof profile; the part is named, the input never quoted |
-| `0.3.89.6` | `PROFILE_TOO_LARGE` | over `MaxProfileBytes`, compressed or inflated |
+| `0.3.89.5` | `PROFILE_MALFORMED` | not a well-formed pprof profile; the part is named, the input never quoted — or a nil or short-valued profile handed to `Fold` |
+| `0.3.89.6` | `PROFILE_TOO_LARGE` | over `MaxProfileBytes`, compressed or inflated, or stacks past `MaxFrames` |
 | `0.3.89.7` | `SAMPLE_TYPE_MISSING` | the profile does not measure the sample type asked |
 
 Public facade: `pkg/v1/profiling`. See `CLAUDE.md`.

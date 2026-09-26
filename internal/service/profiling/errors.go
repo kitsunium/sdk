@@ -57,10 +57,11 @@ var (
 		"service/profiling: the profile did not decode; the reading field names the part")
 
 	// ProfileTooLarge refuses a profile over MaxProfileBytes, before reading
-	// it or once it inflates past the bound.
+	// it or once it inflates past the bound, and one whose stacks resolve to
+	// more than MaxFrames frames.
 	ProfileTooLarge = errs.Define(CodeProfileTooLarge, "PROFILE_TOO_LARGE",
 		"The profile is too large to read",
-		"service/profiling: the profile, compressed or inflated, exceeds MaxProfileBytes")
+		"service/profiling: the profile, compressed or inflated, exceeds MaxProfileBytes, or its stacks exceed MaxFrames; the bytes or bound field says which")
 
 	// SampleTypeMissing refuses a fold asked for a sample type the profile
 	// does not measure — "cpu" of a heap profile.

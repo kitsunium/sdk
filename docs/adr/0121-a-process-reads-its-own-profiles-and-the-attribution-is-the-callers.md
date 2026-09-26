@@ -71,13 +71,19 @@ reader of about a hundred lines of code (varints, length-delimited fields, the
 skip of a field it does not read) and the eleven Profile fields it needs, six
 hundred lines in all; repeated
 scalars packed or not, as runtime/pprof writes both. It is STRICT: every
-string, function and location index is checked, a sample must carry one value
-per sample type, and anything else is `ProfileMalformed` naming the part — never
-quoting the input. It is BOUNDED: `MaxProfileBytes` (64 MiB), before reading
-and once inflated (`ProfileTooLarge`). Each location's frames are resolved once
-and shared by every sample through it; an inlined call is a frame of its own,
-innermost first, and an unsymbolized location is a frame with an address and
-no name.
+string, function and location index is checked, a varint whose tenth byte
+carries more than the 64th bit is refused rather than truncated, a sample must
+carry one value per sample type, and anything else is `ProfileMalformed`
+naming the part — never quoting the input. It is BOUNDED, in what it reads and
+in what it builds: `MaxProfileBytes` (64 MiB), before reading and once
+inflated, and `MaxFrames` (4 194 304, some 230 MB) frames resolved — each
+location's once, and every copy a sample's stack makes of them, counted BEFORE
+they are built — both `ProfileTooLarge`. The bytes alone would not bound the
+frames: a sample names a location by its id, so a few megabytes naming one
+deeply inlined location again and again would expand into gigabytes. Each
+location's frames are resolved once and shared by every sample through it; an
+inlined call is a frame of its own, innermost first, and an unsymbolized
+location is a frame with an address and no name.
 
 It was checked out of tree against `github.com/google/pprof/profile` on real
 CPU, heap, allocs and goroutine profiles from go1.27.1: every sample type,
@@ -96,6 +102,8 @@ go by flat then cumulative then name, and the flame graph climbs from the
 outermost frame, bounded in depth and pruned below a share of the total. The
 defaults are the framework's own (25 functions, 8 per owner, 0.5 %, 64 deep),
 taken when a field is not positive — or, for the share, outside (0, 1) or NaN.
+A profile `Parse` did not build is refused, not indexed: a nil one, or a
+sample with fewer values than there are sample types, is `ProfileMalformed`.
 
 ### D5 — a dump reader that never fails, and a grouping
 
@@ -109,9 +117,11 @@ creator. A header it does not understand skips its block; a line it does not
 know is ignored. `Goroutines` takes the process's own dump and, when the
 headers carry no labels (`GODEBUG=tracebacklabels=0`), matches them from the
 counted profile by the innermost frames — reading its tab-aligned columns by
-their non-empty fields. `GroupGoroutines` counts goroutines by
+their non-empty fields; when that profile cannot be written, the goroutines
+stand without labels. `GroupGoroutines` counts goroutines by
 the labels the caller names, the state, and the top frame — the innermost one
-that is not the runtime's machinery.
+that is not the runtime's machinery — keyed by each part prefixed with its
+length, so no label value, whatever bytes it holds, merges two groups.
 
 ### D6 — one spelling per function
 
@@ -129,7 +139,7 @@ confidence and how much only approximately. The suite asks where the bytes are
 — sixteen megabytes held by a named function must read as at least four —
 never how many exactly.
 
-## Consequences
+## Consequences / Semantics
 
 - The framework keeps its node attribution (its function-to-node table from
   the graph, the module-relative source paths), its routes and its model, and
@@ -171,10 +181,12 @@ None. `profiling` is a new package in this change set.
 - `internal/service/profiling/parse_external_test.go` — a hand-built profile
   exercising both repeated encodings, inlined frames, an unsymbolized
   location, labels, comments and skipped fields; gzip and raw alike; each
-  malformation refused by code; both bounds; `FuzzParse`.
+  malformation refused by code, a varint past 64 bits among them; a 64-bit
+  varint read; both byte bounds; `FuzzParse`.
 - `internal/service/profiling/fold_external_test.go` — exact sums, recursion,
   rankings and ties, the flame's root, order, pruning and depth, the sample type
-  default, a missing one, no attribution.
+  default, a missing one, no attribution; a nil profile and a sample short of
+  values refused.
 - `internal/service/profiling/capture_external_test.go` — a labelled burner
   charged by its label with its source located; the one profiler, the window
   bounds, a cancellation that frees the profiler; the heap found by its stack.
@@ -183,10 +195,13 @@ None. `profiling` is a new package in this change set.
   elided frames, an unparsable header); the live process with labels printed in
   the headers and matched from the profile.
 - `internal/service/profiling/group_external_test.go` — the grouping key, its
-  order and bounds, and `CanonicalName`.
+  order and bounds, values holding NULs and "=" kept apart, and
+  `CanonicalName`.
 - `internal/service/profiling/labels_internal_test.go` — a counted profile as
   linux/arm64 writes it, empty alignment columns included, and the matching of
-  its labels one goroutine per count, each with its own map.
+  its labels one goroutine per count, each with its own map; the goroutines
+  kept when the labelled profile fails; the frame budget, exactly at it, one
+  over, and a location deeper than it (`TestTheFramesAreBoundedBeforeTheyAreBuilt`).
 
 ## References
 

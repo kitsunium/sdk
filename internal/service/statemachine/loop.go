@@ -147,6 +147,12 @@ func (m *StateMachine[E, S]) Run(ctx context.Context) error {
 		return LoopRunning
 	}
 	defer m.running.Store(false)
+	//: nothing moves an entity by itself: there is no run to make.
+	if len(m.plan.auto) == 0 {
+		<-ctx.Done()
+		//: a clean stop, like a loop that had something to do.
+		return nil
+	}
 	wake := WakeStart
 	//: a run, then a wait, until the context ends.
 	for {
@@ -297,6 +303,7 @@ func stopTimer(timer clock.Timer) {
 }
 
 // step is one pass: take what is due or written, and look at each entity once.
+// Every failure is reported here, once the entity's lock is released.
 func (m *StateMachine[E, S]) step(ctx context.Context) stepResult {
 	now := m.cfg.clock.Now()
 	keys := m.agenda.take(now)
@@ -310,15 +317,17 @@ func (m *StateMachine[E, S]) step(ctx context.Context) stepResult {
 			//: the rest is left untouched.
 			break
 		}
-		fired, err := m.guarded(ctx, key, now)
+		looked := m.guarded(ctx, key, now)
+		m.cfg.reportErr(ctx, looked.failed)
+		m.cfg.reportErr(ctx, looked.late)
 		//: tally the outcome.
 		switch {
-		//: reported already; counted and joined for the run.
-		case err != nil:
+		//: counted and joined for the run.
+		case looked.failed != nil:
 			out.failed++
-			failures = append(failures, err)
+			failures = append(failures, looked.failed)
 		//: one transition stored.
-		case fired:
+		case looked.fired:
 			out.fired++
 		}
 	}
@@ -328,11 +337,21 @@ func (m *StateMachine[E, S]) step(ctx context.Context) stepResult {
 	return out
 }
 
+// pass is what looking at one entity did: whether a transition was stored,
+// the failure that holds the entity back, and a failure that is not the
+// entity's — a journal write — which is only reported.
+type pass struct {
+	failed error
+	late   error
+	fired  bool
+}
+
 // guarded is process with a panic of the caller's own code — a store method,
-// a journal, an observer — recovered as that entity's failure: the loop goes
-// on, reports it, and tries the entity again after its backoff. The entity's
-// lock and flight are released by process's own deferred calls on the way out.
-func (m *StateMachine[E, S]) guarded(ctx context.Context, key string, now time.Time) (fired bool, err error) {
+// a journal, an observer's start — recovered as that entity's failure: the
+// loop goes on, reports it, and tries the entity again after its backoff. The
+// entity's lock and flights are released by process's own deferred calls on
+// the way out. An observer's end has its panic recovered apart, by finish.
+func (m *StateMachine[E, S]) guarded(ctx context.Context, key string, now time.Time) (looked pass) {
 	defer func() {
 		value := recover()
 		//: the ordinary path.
@@ -340,10 +359,9 @@ func (m *StateMachine[E, S]) guarded(ctx context.Context, key string, now time.T
 			//: the outcome stands as process returned it.
 			return
 		}
-		fired = false
 		//: the value travels as a field, never as the wrap origin.
-		err = m.failure(ctx, key, now, errs.Wrap(LoopPanicked, errs.WrapParams{}, errs.String("key", key),
-			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack()))))
+		looked = pass{failed: m.failure(key, now, errs.Wrap(LoopPanicked, errs.WrapParams{}, errs.String("key", key),
+			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack()))))}
 	}()
 	//: the entity's pass, unguarded.
 	return m.process(ctx, key, now)
@@ -351,91 +369,123 @@ func (m *StateMachine[E, S]) guarded(ctx context.Context, key string, now time.T
 
 // process looks at one entity: it reads it, asks its automatic transitions
 // what is due, and fires the first declared one due — or schedules the
-// earliest. It reports whether a transition was stored, and the failure the
-// loop must report.
-func (m *StateMachine[E, S]) process(ctx context.Context, key string, now time.Time) (bool, error) {
+// earliest.
+func (m *StateMachine[E, S]) process(ctx context.Context, key string, now time.Time) pass {
 	release, err := m.locks.acquire(ctx, key)
 	//: stopping while a caller's transition held the entity.
 	if err != nil {
 		m.agenda.requeue([]string{key})
 		//: not a failure: the next pass looks again.
-		return false, nil
+		return pass{}
 	}
 	defer release()
+	looked, due, ok := m.look(ctx, key, now)
+	//: nothing to fire: the look is the whole pass.
+	if !ok {
+		//: read, recorded, scheduled.
+		return looked
+	}
+	fired := m.fire(ctx, due, release, now)
+	fired.late = errors.Join(looked.late, fired.late)
+	//: the first declared transition due, fired.
+	return fired
+}
+
+// look reads key under a read's flight — so a deletion that arrives before
+// the record is made wins — records what it read, and returns the transition
+// due, when there is one. An entity deleted meanwhile fires nothing and
+// leaves the agenda. The caller holds the entity's lock.
+func (m *StateMachine[E, S]) look(ctx context.Context, key string, now time.Time) (looked pass, due pending[E, S], ok bool) {
+	f := m.book.read(key)
+	defer func() {
+		//: deleted while it was read: nothing fires, nothing stays planned.
+		if _, deleted := m.book.land(key, f); deleted {
+			m.agenda.forget(key)
+			looked, ok = pass{late: looked.late}, false
+		}
+	}()
+	//: the read, the record and the verdict.
+	return m.inspect(ctx, key, now, f)
+}
+
+// inspect is the body of look: it reads the entity, reconciles its record,
+// and returns the first declared transition due — or schedules the earliest.
+func (m *StateMachine[E, S]) inspect(ctx context.Context, key string, now time.Time, f *flight) (pass, pending[E, S], bool) {
+	var none pending[E, S]
 	entity, found, err := m.store.Get(ctx, key)
-	//: the store could not say, or holds nothing any more.
-	if err != nil || !found {
-		//: a failed read is retried; a vanished entity is forgotten.
-		return false, m.unreadable(ctx, key, now, err)
+	//: the store could not say: retried after the backoff.
+	if err != nil {
+		//: counted as a failure of this entity.
+		return pass{failed: m.failure(key, now, storeFailure(err, "get"))}, none, false
+	}
+	//: gone without a notification: forgotten, not failed.
+	if !found {
+		//: the journal's verdict on forgetting it, if any.
+		return pass{late: m.Deleted(ctx, key)}, none, false
 	}
 	state := *m.plan.state(&entity)
-	changed := m.book.reconcile(ctx, key, state, m.cfg.clock.Now())
+	changed, late := m.book.reconcile(ctx, key, state, m.cfg.clock.Now(), f)
 	//: a state entered behind the machine's back starts afresh.
 	if changed {
 		m.agenda.restart(key)
 	}
 	entered, _ := m.book.entered(key)
 	v, err := m.plan.evaluate(entity, state, entered, now)
-	//: a guard or an instant function panicked.
+	//: a guard or an instant function panicked: retried after its backoff.
 	if err != nil {
-		//: retried after its backoff, like any failed transition.
-		return false, m.failure(ctx, key, now, err)
+		//: like any failed transition.
+		return pass{failed: m.failure(key, now, err), late: late}, none, false
 	}
 	//: nothing due now, or held back by an earlier failure.
 	if v.fire == nil || m.agenda.heldBack(key, now) {
 		m.reschedule(key, v)
-		//: nothing fired.
-		return false, nil
+		//: nothing to fire.
+		return pass{late: late}, none, false
 	}
-	//: the first declared transition due fires.
-	return m.fire(ctx, pending[E, S]{entity: entity, key: key, arrow: *v.fire}, release, now)
+	//: the first declared transition due.
+	return pass{late: late}, pending[E, S]{entity: entity, key: key, arrow: *v.fire}, true
 }
 
 // fire runs one transition the loop decided on, bracketed by Config.Observe.
-// The entity's lock is held and its release handed over.
-func (m *StateMachine[E, S]) fire(ctx context.Context, p pending[E, S], release func(), now time.Time) (bool, error) {
-	key, x := p.key, p.arrow
-	tctx, done := m.cfg.bracket(ctx, &FiringValue[S]{Key: key, Event: x.event, From: x.from, To: x.to, Trigger: x.trigger})
-	_, err := m.transition(tctx, p, release)
-	done(err)
+// The entity's lock is held and its release handed over; the transition
+// reports its own late failures once it has released it. The observer hears
+// the outcome only once the agenda holds it, so a panic of the observer's own
+// is reported and changes nothing: a stored transition is never retried.
+func (m *StateMachine[E, S]) fire(ctx context.Context, p pending[E, S], release func(), now time.Time) pass {
+	x := p.arrow
+	tctx, done := m.cfg.bracket(ctx, &FiringValue[S]{Key: p.key, Event: x.event, From: x.from, To: x.to, Trigger: x.trigger})
+	landed, err := m.transition(tctx, p, release)
+	fired := m.outcome(ctx, p.key, now, landed.gone, err)
+	fired.late = errors.Join(fired.late, m.cfg.finish(done, p.key, err))
+	//: what the agenda recorded, and what is only reported.
+	return fired
+}
+
+// outcome records on the agenda what a transition the loop fired came to.
+// gone says the store refused the write because the entity was deleted.
+func (m *StateMachine[E, S]) outcome(ctx context.Context, key string, now time.Time, gone bool, err error) pass {
 	//: the outcome decides what the agenda remembers.
 	switch {
 	//: stored: whatever failed before is behind it.
 	case err == nil:
 		m.agenda.succeeded(key)
 		//: one transition fired.
-		return true, nil
-	//: deleted while it ran: nothing is due any more, and nothing failed.
-	case errs.HasCode(err, CodeEntityMissing):
-		m.agenda.forget(key)
-		//: not a failure.
-		return false, nil
+		return pass{fired: true}
+	//: deleted while it ran, without a word to the machine: forgotten
+	//: everywhere, as a read that finds nothing — and nothing failed.
+	case gone:
+		//: the journal's verdict on forgetting it, if any.
+		return pass{late: m.Deleted(ctx, key)}
 	}
 	//: a hook or the store refused it: retried after the backoff.
-	return false, m.failure(tctx, key, now, err)
+	return pass{failed: m.failure(key, now, err)}
 }
 
-// unreadable handles an entity the loop could not read: a store that failed
-// is retried after the backoff; an entity that is gone is forgotten.
-func (m *StateMachine[E, S]) unreadable(ctx context.Context, key string, now time.Time, err error) error {
-	//: the store failed: retry later.
-	if err != nil {
-		//: counted as a failure of this entity.
-		return m.failure(ctx, key, now, storeFailure(err, "get"))
-	}
-	//: gone without a notification: forget it now.
-	if ferr := m.Deleted(ctx, key); ferr != nil {
-		m.cfg.reportErr(ctx, ferr)
-	}
-	//: a vanished entity is not a failure of the loop.
-	return nil
-}
-
-// failure counts a failure of key, schedules its retry and reports it.
-func (m *StateMachine[E, S]) failure(ctx context.Context, key string, now time.Time, err error) error {
+// failure counts a failure of key and schedules its retry; the step reports
+// it once the entity's lock is released.
+func (m *StateMachine[E, S]) failure(key string, now time.Time, err error) error {
 	m.agenda.failed(key, now, m.cfg.backoff)
-	m.cfg.reportErr(ctx, err)
-	//: joined into the run's error too.
+	//: joined into the run's error, and reported.
 	return err
 }
 

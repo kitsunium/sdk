@@ -4,10 +4,13 @@ package statemachine
 
 import (
 	"context"
+	"fmt"
+	"runtime/debug"
 	"time"
 
 	corestm "github.com/kitsunium/sdk/internal/core/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/resilience"
 )
 
@@ -64,13 +67,18 @@ type Config[E any, S comparable] struct {
 	// ones no caller can wrap: it is called before the transition with the
 	// loop's context, returns the context the transition's hooks and store
 	// calls run under — a tracer puts its span there — and a function the
-	// engine calls with the outcome once the OnTransition hooks have run. A
-	// caller wraps its own Start and Fire itself. Nil observes nothing.
+	// engine calls with the outcome once the OnTransition hooks have run and
+	// the loop has recorded it: a panic there is reported as LoopPanicked and
+	// changes nothing, the transition stands. A caller wraps its own Start and
+	// Fire itself. It is called while the loop holds the entity, so it must
+	// not fire that entity. Nil observes nothing.
 	Observe func(ctx context.Context, firing FiringValue[S]) (context.Context, func(err error))
 	// Report receives every error no caller's return value carries: an
 	// OnTransition hook's failure, a Journal write that failed, and each
-	// transition the loop could not fire. Nil drops them — the SDK does not
-	// write to stderr on the caller's behalf (ADR 0030) — so wire it.
+	// transition the loop could not fire. It is called with no lock of the
+	// machine held, so it may read the machine — its census, a record — or
+	// fire it. Nil drops them — the SDK does not write to stderr on the
+	// caller's behalf (ADR 0030) — so wire it.
 	Report func(ctx context.Context, err error)
 	// OnLoop is told what Run does: a run starting, a run ending with what
 	// it fired and when the loop wakes next, and the loop re-arming earlier
@@ -154,6 +162,26 @@ func (s *settings[E, S]) bracket(ctx context.Context, firing *FiringValue[S]) (c
 	}
 	//: the transition runs under whatever the observer returned.
 	return tctx, done
+}
+
+// finish hands the observer's end the outcome of the transition it
+// bracketed, with a panic of its own recovered and returned: the transition
+// is stored or refused already, and the panic only reported.
+func (s *settings[E, S]) finish(done func(error), key string, err error) (failed error) {
+	defer func() {
+		value := recover()
+		//: the ordinary path.
+		if value == nil {
+			//: nothing to report.
+			return
+		}
+		//: the value travels as a field, never as the wrap origin.
+		failed = errs.Wrap(LoopPanicked, errs.WrapParams{}, errs.String("key", key), errs.String("call", "observe-end"),
+			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
+	}()
+	done(err)
+	//: the observer heard it.
+	return nil
 }
 
 // reportErr hands err to Config.Report, when there is one.

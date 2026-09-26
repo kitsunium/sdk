@@ -20,9 +20,9 @@ replaces re-read and decoded every entity of the store on every wake.
 | Architecture       | arm64 |
 | Go toolchain       | go1.27.1 darwin/arm64 |
 | Git branch         | `feat/framework-wave-3b` |
-| Git commit         | `679aad1` (pre-commit) |
-| Generated (UTC)    | 2026-09-26 |
-| Bench wall-clock   | `-benchtime=1s -count=3`, 25 s total |
+| Git commit         | `c2aea80` + the review fixes (pre-commit) |
+| Generated (UTC)    | 2026-09-26 02:55 UTC |
+| Bench wall-clock   | `-benchtime=1s -count=3`, 24 s total |
 
 ## What is measured
 
@@ -41,41 +41,44 @@ replaces re-read and decoded every entity of the store on every wake.
 ## Results
 
 ```
-BenchmarkNextDue/entities=1000-10         	  359516	      3366 ns/op	    2544 B/op	      27 allocs/op
-BenchmarkNextDue/entities=1000-10         	  396308	      3281 ns/op	    2546 B/op	      27 allocs/op
-BenchmarkNextDue/entities=1000-10         	  411684	      3314 ns/op	    2546 B/op	      27 allocs/op
-BenchmarkNextDue/entities=10000-10        	  373569	      3542 ns/op	    2315 B/op	      27 allocs/op
-BenchmarkNextDue/entities=10000-10        	  401763	      3638 ns/op	    2332 B/op	      27 allocs/op
-BenchmarkNextDue/entities=10000-10        	  388644	      3477 ns/op	    2324 B/op	      27 allocs/op
-BenchmarkNextDue/entities=100000-10       	  341588	      3796 ns/op	    1427 B/op	      27 allocs/op
-BenchmarkNextDue/entities=100000-10       	  336648	      3852 ns/op	    1427 B/op	      27 allocs/op
-BenchmarkNextDue/entities=100000-10       	  307464	      4645 ns/op	    1429 B/op	      27 allocs/op
-BenchmarkSweepBaseline/entities=1000-10   	    2217	    508931 ns/op	  107420 B/op	    2014 allocs/op
-BenchmarkSweepBaseline/entities=1000-10   	    2486	    530697 ns/op	  107409 B/op	    2014 allocs/op
-BenchmarkSweepBaseline/entities=1000-10   	    2574	    474785 ns/op	  107447 B/op	    2014 allocs/op
-BenchmarkSweepBaseline/entities=10000-10  	     222	   5346917 ns/op	 1389021 B/op	   20023 allocs/op
-BenchmarkSweepBaseline/entities=10000-10  	     231	   5176008 ns/op	 1388937 B/op	   20023 allocs/op
-BenchmarkSweepBaseline/entities=10000-10  	     222	   5301756 ns/op	 1389005 B/op	   20023 allocs/op
-BenchmarkSweepBaseline/entities=100000-10 	      18	  66491407 ns/op	16129253 B/op	  200036 allocs/op
-BenchmarkSweepBaseline/entities=100000-10 	      16	  68055526 ns/op	16129872 B/op	  200035 allocs/op
-BenchmarkSweepBaseline/entities=100000-10 	      16	  68656242 ns/op	16128725 B/op	  200035 allocs/op
+BenchmarkNextDue/entities=1000-10         	  335331	      3645 ns/op	    2542 B/op	      29 allocs/op
+BenchmarkNextDue/entities=1000-10         	  339094	      3746 ns/op	    2543 B/op	      29 allocs/op
+BenchmarkNextDue/entities=1000-10         	  353571	      3725 ns/op	    2543 B/op	      29 allocs/op
+BenchmarkNextDue/entities=10000-10        	  336592	      4061 ns/op	    2288 B/op	      29 allocs/op
+BenchmarkNextDue/entities=10000-10        	  354188	      3841 ns/op	    2301 B/op	      29 allocs/op
+BenchmarkNextDue/entities=10000-10        	  331010	      3821 ns/op	    2283 B/op	      29 allocs/op
+BenchmarkNextDue/entities=100000-10       	  289802	      4103 ns/op	    1423 B/op	      30 allocs/op
+BenchmarkNextDue/entities=100000-10       	  303241	      4088 ns/op	    1429 B/op	      29 allocs/op
+BenchmarkNextDue/entities=100000-10       	  314904	      4028 ns/op	    1428 B/op	      29 allocs/op
+BenchmarkSweepBaseline/entities=1000-10   	    2512	    478301 ns/op	  107439 B/op	    2014 allocs/op
+BenchmarkSweepBaseline/entities=1000-10   	    2512	    477834 ns/op	  107436 B/op	    2014 allocs/op
+BenchmarkSweepBaseline/entities=1000-10   	    2524	    477742 ns/op	  107451 B/op	    2014 allocs/op
+BenchmarkSweepBaseline/entities=10000-10  	     229	   5305130 ns/op	 1388870 B/op	   20023 allocs/op
+BenchmarkSweepBaseline/entities=10000-10  	     193	   6797628 ns/op	 1389051 B/op	   20023 allocs/op
+BenchmarkSweepBaseline/entities=10000-10  	     217	   5450844 ns/op	 1388812 B/op	   20023 allocs/op
+BenchmarkSweepBaseline/entities=100000-10 	      16	  70110594 ns/op	16129541 B/op	  200036 allocs/op
+BenchmarkSweepBaseline/entities=100000-10 	      16	  68678331 ns/op	16129363 B/op	  200036 allocs/op
+BenchmarkSweepBaseline/entities=100000-10 	      16	  67868763 ns/op	16129038 B/op	  200036 allocs/op
 ```
 
 ## Reading
 
 | Entities | Agenda, one due transition fired | Sweep, search only | Ratio |
 |---:|---:|---:|---:|
-| 1 000   | 3.3 µs | 0.50 ms | ×150 |
-| 10 000  | 3.6 µs | 5.3 ms  | ×1 470 |
-| 100 000 | 3.8 µs | 67 ms   | ×17 600 |
+| 1 000   | 3.7 µs | 0.48 ms | ×130 |
+| 10 000  | 3.9 µs | 5.3 ms  | ×1 360 |
+| 100 000 | 4.1 µs | 68 ms   | ×16 600 |
 
-- **The agenda is flat.** A hundredfold more entities costs about 15 % more
+- **The agenda is flat.** A hundredfold more entities costs about 10 % more
   per transition — the heap's log N, on top of a transition's fixed cost — and
-  the allocations do not move: 27 per pass, all of them the transition's own
-  (the JSON of the in-memory store, the record's step, the hooks' context).
+  the allocations do not move: 29 per pass, all of them the transition's own
+  (the JSON of the in-memory store, the record's step, the hooks' context)
+  and the flights of the two reads, which let a delete that lands during a
+  read win over it. The journal's per-key gates allocate nothing: a key's gate
+  is one of 256 mutexes, picked by its hash.
 - **The sweep is linear**, in time and in memory: it decodes every entity to
   find one — two allocations and about 160 bytes per entity per wake — so at
-  100 000 entities every wake costs 67 ms and 16 MB of garbage, whether or not
+  100 000 entities every wake costs 68 ms and 16 MB of garbage, whether or not
   anything is due.
 - **A write costs the same as a due transition.** A write marks one entity
   dirty and the next pass re-evaluates that entity alone; the sweep re-read

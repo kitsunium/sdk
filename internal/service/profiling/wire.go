@@ -14,12 +14,15 @@ const (
 	wireFixed32 uint64 = 5
 )
 
-// Sizes the reader skips over for the fixed-width wire types, and the most
-// bytes one varint may take.
+// Sizes the reader skips over for the fixed-width wire types, the most bytes
+// one varint may take, and the largest last byte of a ten-byte varint: the
+// nine before it carry 63 bits, so the tenth carries the 64th alone and may
+// not ask for another byte.
 const (
-	fixed64Size int = 8
-	fixed32Size int = 4
-	maxVarint   int = 10
+	fixed64Size  int  = 8
+	fixed32Size  int  = 4
+	maxVarint    int  = 10
+	maxTenthByte byte = 1
 )
 
 // varintPayload and varintMore split a varint byte: seven bits of value, and
@@ -45,12 +48,19 @@ func (w *wire) more() bool {
 	return len(w.buf) > 0
 }
 
-// varint reads one base-128 varint.
+// varint reads one base-128 varint. A tenth byte carrying more than the 64th
+// bit — a value past 64 bits, or an eleventh byte announced — is malformed,
+// never truncated into a value the decoder would trust.
 func (w *wire) varint() (uint64, error) {
 	var value uint64
 	//: at most ten bytes carry the 64 bits.
 	for i := range min(len(w.buf), maxVarint) {
 		b := w.buf[i]
+		//: the tenth byte has room for one bit and no continuation.
+		if i == maxVarint-1 && b > maxTenthByte {
+			//: an overflow is not a value.
+			return 0, malformed("varint")
+		}
 		value |= uint64(b&varintPayload) << (varintShift * uint(i))
 		//: the last byte of the varint.
 		if b&varintMore == 0 {
