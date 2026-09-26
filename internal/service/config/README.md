@@ -1,6 +1,7 @@
 # config (service)
 
-Concrete env + file `Source`s, the merge+decode+validate `Load[T]`, the compiled
+Concrete env + file `Source`s (a file on disk, or inside an `fs.FS` — an
+embedded configuration), the merge+decode+validate `Load[T]`, the compiled
 **schema** (`NewSchemaValue` + `LoadSchema`: required keys, typed defaults, a
 closed key vocabulary — ADR 0061), the traced loads that say which layer
 supplied each key and mark the `secret.Value` ones (`LoadWithOrigins` /

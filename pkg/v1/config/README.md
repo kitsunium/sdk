@@ -19,6 +19,28 @@ err := config.Load(&c,
 
 File parsing dispatches through the codec registry — blank\-import the format's codec \(e.g. pkg/v1/codec\) so it is registered. Failures surface typed sentinels \(SourceFailed / DecodeFailed / ValidationFailed / WatchFailed\).
 
+### A configuration carried in the binary
+
+[FSSource](<#FSSource>) is [FileSource](<#FileSource>) over an io/fs.FS, for a program whose committed configuration travels inside it:
+
+```
+//go:embed config
+var files embed.FS
+
+err := config.Load(&c,
+    config.FSSource(files, "yaml", "config/config.yaml"),
+    config.EnvSource("APP"), // the environment still wins
+)
+```
+
+It dispatches through the same codecs, refuses with the same SourceFailed, and describes itself the same way — a traced load reports its keys under the layer "file" with the path as given. A file the filesystem does not hold is refused, as FileSource refuses one it cannot open, and never read as an empty layer: absent from an embedded tree usually means an embed pattern that matched nothing, and read as empty it would start the program on its defaults without a word. A layer that is optional by design — one document per environment, where some environments have none — is the caller's decision, one fs.Stat away:
+
+```
+if _, err := fs.Stat(files, "config/"+env+".yaml"); err == nil {
+    sources = append(sources, config.FSSource(files, "yaml", "config/"+env+".yaml"))
+}
+```
+
 ### The schema: required keys, defaults, and a closed vocabulary
 
 [NewSchema](<#NewSchema>) compiles a [SchemaSpec](<#SchemaSpec>) into a [Schema](<#Schema>): which keys the application cannot start without, the typed [Default](<#Default>) each key takes when nobody supplies it, and the constraints the decoded result must satisfy — the \`validate\` struct tags of the type, composed with any cross\-field rule the caller adds. [LoadSchema](<#LoadSchema>) is [Load](<#Load>) with one.
@@ -95,6 +117,7 @@ An origin never carries a value. A key whose field holds a secret.Value \(pkg/v1
 - [type SchemaSpec](<#SchemaSpec>)
 - [type Source](<#Source>)
   - [func EnvSource\(prefix string\) Source](<#EnvSource>)
+  - [func FSSource\(fsys fs.FS, format, path string\) Source](<#FSSource>)
   - [func FileSource\(format, path string\) Source](<#FileSource>)
 - [type Validator](<#Validator>)
 - [type Watcher](<#Watcher>)
@@ -146,7 +169,7 @@ var (
 ```
 
 <a name="Load"></a>
-## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L206>)
+## func [Load](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L234>)
 
 ```go
 func Load[T any](target *T, sources ...Source) error
@@ -157,7 +180,7 @@ Load merges sources into target \(later overrides earlier\), decodes, and valida
 It declares no schema: nothing is required, nothing is defaulted, and a key the target cannot address is dropped exactly as encoding/json drops it. Use [LoadSchema](<#LoadSchema>) to have those caught.
 
 <a name="LoadSchema"></a>
-## func [LoadSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L233>)
+## func [LoadSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L261>)
 
 ```go
 func LoadSchema[T any](target *T, schema *Schema[T], sources ...Source) error
@@ -168,7 +191,7 @@ LoadSchema is [Load](<#Load>) with a compiled [Schema](<#Schema>): the schema's 
 The layer order is default \< file \< env \< any later source. A missing required key and an unaddressable key are reported together, each naming all of its keys, so one restart tells the whole truth. A nil schema is refused by name rather than silently loading nothing.
 
 <a name="Default"></a>
-## type [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L158>)
+## type [Default](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L186>)
 
 Default is the public alias for one declared key and the typed value it takes when NO source supplied it. A defaulted key is never also required.
 
@@ -177,16 +200,16 @@ type Default = coreconfig.DeclaredValue
 ```
 
 <a name="Describer"></a>
-## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L168>)
+## type [Describer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L196>)
 
-Describer is the public alias for the optional sibling of [Source](<#Source>) through which a source names its layer and, per key, the detail behind it. EnvSource, FileSource and Schema.Source implement it.
+Describer is the public alias for the optional sibling of [Source](<#Source>) through which a source names its layer and, per key, the detail behind it. EnvSource, FileSource, FSSource and Schema.Source implement it.
 
 ```go
 type Describer = coreconfig.Describer
 ```
 
 <a name="Origin"></a>
-## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L163>)
+## type [Origin](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L191>)
 
 Origin is the public alias for one key's provenance in a traced load: the layer that supplied its final value, the detail an operator acts on, and whether the key holds a secret. It never carries the value.
 
@@ -195,7 +218,7 @@ type Origin = coreconfig.OriginValue
 ```
 
 <a name="LoadSchemaWithOrigins"></a>
-### func [LoadSchemaWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L248>)
+### func [LoadSchemaWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L276>)
 
 ```go
 func LoadSchemaWithOrigins[T any](target *T, schema *Schema[T], sources ...Source) (origins []Origin, err error)
@@ -204,7 +227,7 @@ func LoadSchemaWithOrigins[T any](target *T, schema *Schema[T], sources ...Sourc
 LoadSchemaWithOrigins is [LoadSchema](<#LoadSchema>) with the origins [LoadWithOrigins](<#LoadWithOrigins>) returns; a key the schema defaulted is reported as [LayerDefault](<#LayerDefault>).
 
 <a name="LoadWithOrigins"></a>
-### func [LoadWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L241>)
+### func [LoadWithOrigins](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L269>)
 
 ```go
 func LoadWithOrigins[T any](target *T, sources ...Source) (origins []Origin, err error)
@@ -213,7 +236,7 @@ func LoadWithOrigins[T any](target *T, sources ...Source) (origins []Origin, err
 LoadWithOrigins is [Load](<#Load>), and it also returns one [Origin](<#Origin>) per leaf key of T, sorted by key: which layer supplied the key's final value and the detail behind it — never the value itself. On a failure no origin is returned.
 
 <a name="Schema"></a>
-## type [Schema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L173>)
+## type [Schema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L201>)
 
 Schema is the public alias for a compiled configuration shape: the default layer it contributes, the keys it requires, the vocabulary it accepts, and the constraints it enforces. Build one with [NewSchema](<#NewSchema>).
 
@@ -222,7 +245,7 @@ type Schema[T any] = svcconfig.SchemaValue[T]
 ```
 
 <a name="NewSchema"></a>
-### func [NewSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L218>)
+### func [NewSchema](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L246>)
 
 ```go
 func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error)
@@ -231,7 +254,7 @@ func NewSchema[T any](spec SchemaSpec[T]) (schema *Schema[T], err error)
 NewSchema compiles spec into a [Schema](<#Schema>), refusing at construction every declaration that could not work: a malformed key, a key naming no field of T, a duplicate, a key declared both required and with a default, a default the decode cannot carry, and — the one that matters — a default that violates the constraint the schema itself declares for that key. A tag the validation engine refuses surfaces THAT engine's error, whose fields already name the field, the rule and the clause.
 
 <a name="SchemaSpec"></a>
-## type [SchemaSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L178>)
+## type [SchemaSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L206>)
 
 SchemaSpec is the public alias for a schema declaration. Its zero value is a legitimate schema: nothing required, nothing defaulted, no extra rule — but the \`validate\` tags of T still apply and an unknown key is still refused.
 
@@ -240,7 +263,7 @@ type SchemaSpec[T any] = svcconfig.SchemaSpec[T]
 ```
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L148>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L176>)
 
 Source is the public alias for a configuration layer producer.
 
@@ -249,7 +272,7 @@ type Source = coreconfig.Source
 ```
 
 <a name="EnvSource"></a>
-### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L270>)
+### func [EnvSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L298>)
 
 ```go
 func EnvSource(prefix string) Source
@@ -263,8 +286,17 @@ A value is coerced to a typed Go value only when the WHOLE value is one complete
 
 An EMPTY prefix reads the whole process environment, so pairing it with a schema that refuses unknown keys refuses PATH, HOME and everything else the shell exported. That is a fact about the source, not about the schema: give the source a prefix, or set [SchemaSpec](<#SchemaSpec>).AllowUnknownKeys.
 
+<a name="FSSource"></a>
+### func [FSSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L316>)
+
+```go
+func FSSource(fsys fs.FS, format, path string) Source
+```
+
+FSSource returns a Source reading path inside fsys and parsing it as format — [FileSource](<#FileSource>) over an io/fs.FS, such as an embed.FS. path is an io/fs name: slash\-separated and unrooted. It fails with SourceFailed exactly where FileSource does, a file fsys does not hold included, and a nil fsys is refused when the source loads. A traced load reports it as [LayerFile](<#LayerDefault>) with path as the detail.
+
 <a name="FileSource"></a>
-### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L277>)
+### func [FileSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L305>)
 
 ```go
 func FileSource(format, path string) Source
@@ -273,7 +305,7 @@ func FileSource(format, path string) Source
 FileSource returns a Source reading path and parsing it as format \(the codec must be registered — blank\-import its package, e.g. pkg/v1/codec\).
 
 <a name="Validator"></a>
-## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L151>)
+## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L179>)
 
 Validator is the public alias for a decoded config's self\-check.
 
@@ -282,7 +314,7 @@ type Validator = coreconfig.Validator
 ```
 
 <a name="Watcher"></a>
-## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L154>)
+## type [Watcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L182>)
 
 Watcher is the public alias for a change observer.
 
@@ -291,7 +323,7 @@ type Watcher = coreconfig.Watcher
 ```
 
 <a name="PollWatcher"></a>
-### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L283>)
+### func [PollWatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L322>)
 
 ```go
 func PollWatcher(path string, interval time.Duration) Watcher

@@ -25,6 +25,7 @@ go_test(
     srcs = ["config_external_test.go"],
     deps = [
         ":config",
+        "//pkg/v1/codec",
         "//pkg/v1/errs",
         "//pkg/v1/secret",
     ],

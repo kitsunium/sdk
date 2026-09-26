@@ -2,10 +2,13 @@ package config_test
 
 import (
 	"testing"
+	"testing/fstest"
 
 	"github.com/kitsunium/sdk/pkg/v1/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
+
+	_ "github.com/kitsunium/sdk/pkg/v1/codec" // register the formats the file sources read
 )
 
 type conf struct {
@@ -183,5 +186,48 @@ func TestOriginsThroughTheFacade(t *testing.T) {
 	}
 	if config.LayerDefault != "default" || config.LayerSource != "source" {
 		t.Error("the layer names drifted from the documented strings")
+	}
+}
+
+// TestFSSourceThroughTheFacade pins the embedded-configuration path through
+// public names: a document read from an fs.FS layers under the environment,
+// the traced load reports it as a file with the path as given, and a file the
+// filesystem does not hold is SourceFailed rather than an empty layer.
+func TestFSSourceThroughTheFacade(t *testing.T) {
+	// No t.Parallel: t.Setenv mutates a process-wide variable.
+	t.Setenv("FACADEFS_PORT", "9090")
+	files := fstest.MapFS{
+		"config/config.yaml": {Data: []byte("name: kitsune\nport: 8080\n")},
+	}
+	var c conf
+	origins, err := config.LoadWithOrigins(&c,
+		config.FSSource(files, "yaml", "config/config.yaml"),
+		config.EnvSource("FACADEFS"),
+	)
+	if err != nil {
+		t.Fatalf("LoadWithOrigins: %v", err)
+	}
+	if c.Name != "kitsune" || c.Port != 9090 {
+		t.Fatalf("decoded %+v, want the file's name and the environment's port", c)
+	}
+	want := []config.Origin{
+		{Key: "name", Layer: config.LayerFile, Detail: "config/config.yaml"},
+		{Key: "port", Layer: config.LayerEnv, Detail: "FACADEFS_PORT"},
+	}
+	if len(origins) != len(want) {
+		t.Fatalf("origins = %+v, want %+v", origins, want)
+	}
+	for index := range want {
+		if origins[index] != want[index] {
+			t.Errorf("origins[%d] = %+v, want %+v", index, origins[index], want[index])
+		}
+	}
+	code, ok := errs.CodeOf(config.SourceFailed)
+	if !ok {
+		t.Fatal("SourceFailed carries no code")
+	}
+	var absent conf
+	if err := config.Load(&absent, config.FSSource(files, "yaml", "config/production.yaml")); !errs.HasCode(err, code) {
+		t.Errorf("an absent embedded file = %v, want SourceFailed", err)
 	}
 }

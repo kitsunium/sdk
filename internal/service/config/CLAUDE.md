@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Concrete configuration sources (env, file), the generic merge+decode+validate
+Concrete configuration sources (env, file on disk or in an `fs.FS`), the generic merge+decode+validate
 `Load[T]`, the compiled **schema** (`NewSchemaValue` + `LoadSchema` — ADR 0061),
 the traced loads (`LoadWithOrigins` + `LoadSchemaWithOrigins` — ADR 0097), and a
 cross-OS poll `Watcher` implementing `core/config`. File parsing dispatches
@@ -14,7 +14,8 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 | File | Surface |
 |---|---|
 | `env_source.go` | `EnvSource(prefix)` — `PREFIX_KEY` env vars, whole-document-JSON-coerced values; `Describe` names the variable, and `lookup` hands the loader a variable's RAW text for a secret field |
-| `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse; `Describe` names the path |
+| `file_source.go` | `FileSource(format, path)` — codec-dispatched file parse; `Describe` names the path; `parseDocument` — the codec lookup + decode both file sources share |
+| `fs_source.go` | `FSSource(fsys, format, path)` — `FileSource` over an `io/fs.FS` (an embedded configuration): the same parse, the same `CONFIG_SOURCE_FAILED` — a file the FS does not hold included, never an empty layer — and the same `Describe` (`"file"`, the path as given); a nil `fsys` is refused at `Load` |
 | `merge.go` | `deepMerge` — recursive layer merge (later wins; an array REPLACES, it is never merged) + `cloneNested` / `cloneArray` — a deep copy sharing no table and no array, a nil array kept nil |
 | `load.go` | `Load[T]` / `LoadSchema[T]` — merge + key pass + JSON round-trip decode + constraints + Validate; the merge keeps its layers, and `restoreRawSecrets` undoes the environment's coercion for a `secret.Value` field |
 | `origins.go` | `LoadWithOrigins[T]` / `LoadSchemaWithOrigins[T]` — the same pipeline, plus one `core/config.OriginValue` per leaf key, attributed to the last layer that supplied it (ADR 0097) |
@@ -49,6 +50,11 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 - **Decode via JSON round-trip**: merged map → `json.Marshal` → `json.Unmarshal` into the
   typed target (reuses struct tags; no mapstructure dep).
 - **Cross-OS watch is poll-based** (`os.Stat` mtime+size) — no inotify/kqueue.
+- **A missing file is a refusal on both file sources** — `FileSource` and
+  `FSSource` alike, never an empty layer. Absent from an embedded tree usually
+  means an embed pattern that matched nothing; read as empty, it would start the
+  program on its defaults in silence. An optional layer is the caller's
+  `fs.Stat` (ADR 0097 §Amendment).
 - No `errs.Define` here — service emits the `core/config` sentinels via `wrapAs`.
 - **The key pass runs BEFORE the decode**, on the merged map — the only place an
   absent key and a key set to its zero are still distinguishable. Every missing
