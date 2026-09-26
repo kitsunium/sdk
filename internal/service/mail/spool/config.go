@@ -47,8 +47,11 @@ type Config struct {
 	Clock clock.Timed
 	// Observe is told what happens to every mail — queued, sent, retrying,
 	// dead-lettered, dropped as a duplicate — one call at a time, on the
-	// caller of Send or the spool's own consumer. It must be short. Nil tells
-	// nobody: the spool writes nothing anywhere itself.
+	// caller of Send or the spool's own consumer. A mail's Queued event comes
+	// before every event of its delivery, even when the consumer delivers it
+	// before Send returns. It must be short, and must not call Send, which
+	// would wait for the call it is made from. Nil tells nobody: the spool
+	// writes nothing anywhere itself.
 	Observe func(EventValue)
 	// Annotate returns what Send's context knows that a delivery should know
 	// too — a trace to continue, the caller's identity — kept with the mail

@@ -97,7 +97,11 @@ size either way.
   `EventValue` for each outcome: queued, sent, retrying (with when the next
   attempt is due), dead-lettered, duplicate. The event carries the mail
   itself, because a spool may deliver a mail an earlier process queued, and an
-  observer building a mailbox has seen no `Send` for it.
+  observer building a mailbox has seen no `Send` for it. The calls are
+  serialised, and a mail's `queued` event always comes before the events of
+  its delivery, even when the consumer, woken by the publication, delivers the
+  mail before `Send` returns. A delivery event waits for its mail's `queued`
+  event, so an observer never sees a delivered mail go back to waiting.
 - **Nothing written by the spool.** It logs nothing itself.
 - **A panicking transport.** A panic inside the transport is recovered into
   `TRANSPORT_PANICKED`: the attempt fails like any other, and every other mail

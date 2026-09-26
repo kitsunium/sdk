@@ -93,11 +93,17 @@ type Spool struct {
 	from coremail.AddressValue
 	// backoff is the retry curve.
 	backoff svcres.BackoffValue
+	// announcing maps the identifier of a mail a Send published and has not
+	// yet told the observer about to the channel that Send closes once it
+	// has: a delivery of that mail waits for it before it reports anything.
+	announcing map[string]chan struct{}
 	// maxAttempts, sendTimeout and poll are the resolved limits.
 	maxAttempts int
 	sendTimeout time.Duration
 	poll        time.Duration
-	// mu guards closed.
+	// observing serialises the observer's calls.
+	observing sync.Mutex
+	// mu guards closed and announcing.
 	mu     sync.RWMutex
 	closed bool
 }
@@ -139,7 +145,8 @@ func resolve(cfg *Config) *Spool {
 	s := &Spool{
 		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
 		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
-		maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout, poll: cfg.PollInterval,
+		announcing: map[string]chan struct{}{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
+		poll: cfg.PollInterval,
 	}
 	//: the wall clock is the only non-arbitrary default.
 	if s.clock == nil {
@@ -203,6 +210,9 @@ func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string,
 		//: MessageUnencodable; nothing queued.
 		return "", kerrs.Wrap(MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
 	}
+	//: the consumer may deliver the mail before Publish returns here: its
+	//: delivery waits until the observer has heard it was queued.
+	defer s.announce(record.ID)()
 	//: durable before Send returns, with a Dir.
 	if _, publishErr := s.broker.Publish(ctx, payload); publishErr != nil {
 		//: MessageTooLarge, QueueBackendFailed, or the caller's context.
@@ -211,6 +221,45 @@ func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string,
 	s.emit(&EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta})
 	//: the spool's identifier.
 	return record.ID, nil
+}
+
+// announce registers id as a mail Send is publishing and has not yet told the
+// observer about, and returns the function that ends the registration — once
+// the observer was told, or once the publication failed. A spool nobody
+// observes registers nothing: there is no order to keep.
+func (s *Spool) announce(id string) (done func()) {
+	//: no observer, no order to keep.
+	if s.observe == nil {
+		//: nothing to end.
+		return func() {}
+	}
+	told := make(chan struct{})
+	s.mu.Lock()
+	s.announcing[id] = told
+	s.mu.Unlock()
+	//: the registration's end, which releases a delivery waiting for it.
+	return func() {
+		s.mu.Lock()
+		//: a later Send under the same identifier owns the entry now.
+		if s.announcing[id] == told {
+			delete(s.announcing, id)
+		}
+		s.mu.Unlock()
+		close(told)
+	}
+}
+
+// awaitAnnouncement waits until the observer has heard that the mail id was
+// queued, when the Send that queued it is still running in this process. A
+// mail an earlier process queued has nothing to wait for.
+func (s *Spool) awaitAnnouncement(id string) {
+	s.mu.RLock()
+	told := s.announcing[id]
+	s.mu.RUnlock()
+	//: a Send between its publication and its Queued event.
+	if told != nil {
+		<-told
+	}
 }
 
 // stamp fills in what a retry must not change and validates the result.
@@ -338,11 +387,21 @@ func (s *Spool) Close() error {
 	return closer.Close()
 }
 
-// emit tells the observer, when there is one.
+// emit tells the observer, when there is one, one call at a time.
 func (s *Spool) emit(event *EventValue) {
 	//: nobody asked.
 	if s.observe == nil {
 		return
 	}
+	s.observing.Lock()
+	defer s.observing.Unlock()
 	s.observe(*event)
+}
+
+// report tells the observer about a delivery, after the Queued event of the
+// same mail: a mail is never sent, retried or dropped before it was queued,
+// as far as the observer can tell.
+func (s *Spool) report(event *EventValue) {
+	s.awaitAnnouncement(event.ID)
+	s.emit(event)
 }

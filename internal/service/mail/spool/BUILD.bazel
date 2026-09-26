@@ -41,12 +41,13 @@ alias(
 go_test(
     name = "spool_test",
     srcs = [
+        "announce_internal_test.go",
         "disk_external_test.go",
         "harness_external_test.go",
         "spool_external_test.go",
     ],
+    embed = [":spool"],
     deps = [
-        ":spool",
         "//internal/core/mail",
         "//internal/core/proc",
         "//internal/core/queue",

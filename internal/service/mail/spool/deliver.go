@@ -35,7 +35,7 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	//: delivered already: this is the queue's redelivery, never a new mail.
 	if s.delivered.has(record.ID) {
 		event.Kind, event.At = EventDuplicate, s.clock.Now()
-		s.emit(&event)
+		s.report(&event)
 		//: acknowledged, not sent.
 		return nil
 	}
@@ -45,7 +45,7 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	if sendErr == nil {
 		s.delivered.add(record.ID)
 		event.Kind = EventSent
-		s.emit(&event)
+		s.report(&event)
 		//: acknowledged.
 		return nil
 	}
@@ -53,7 +53,7 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	//: the last attempt: the nack dead-letters the mail with this failure.
 	if attempt >= s.maxAttempts {
 		event.Kind = EventDeadLettered
-		s.emit(&event)
+		s.report(&event)
 		//: nacked, and the queue's delivery count says it is the last.
 		return sendErr
 	}
@@ -61,13 +61,13 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	event.Kind, event.Next = EventRetrying, event.At.Add(delay)
 	//: parked for the backoff: the lease lapses when the next attempt is due.
 	if s.park(ctx, delivery, delay) {
-		s.emit(&event)
+		s.report(&event)
 		//: nothing to acknowledge; see the doc comment.
 		return nil
 	}
 	//: a queue that cannot extend a lease: its own retry delay instead.
 	event.Next = event.At.Add(s.backoff.BaseDelay)
-	s.emit(&event)
+	s.report(&event)
 	//: nacked.
 	return sendErr
 }

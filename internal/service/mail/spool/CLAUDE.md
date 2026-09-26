@@ -54,6 +54,14 @@ Code range `0.3.81.*`.
   failure — rather than the spool owning a goroutine it would have to stop.
 - **Nothing is written anywhere by the spool.** `Observe` gets every event;
   logging is the caller's.
+- **The observer's calls are serialised, and a mail's `queued` comes first.**
+  The consumer can deliver a mail before `Send` has returned, since `Publish`
+  wakes it. `Send` therefore registers the mail's identifier in `announcing`
+  before publishing and releases it after its `queued` event, and every
+  delivery event goes through `report`, which waits for that release. A
+  `queued` arriving after `sent` would leave an observer's mailbox showing a
+  delivered mail as waiting. It happened on the linux/386 lane before this
+  existed.
 
 ## Do NOT
 
@@ -62,6 +70,8 @@ Code range `0.3.81.*`.
 - **Mint the Message-ID in the composer**, or per attempt.
 - **Put a secret in `Annotate`'s map**: it is written into the spool as is.
 - **Log from here.**
+- **Emit a delivery event with `emit`**: use `report`, which keeps the mail's
+  `queued` first. And never hold `observing` while waiting for anything.
 
 ## Verification
 
