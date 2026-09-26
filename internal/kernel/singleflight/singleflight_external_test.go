@@ -55,10 +55,13 @@ func TestConcurrentCallersOnOneKeyShareOneResult(t *testing.T) {
 	const callers int = 32
 
 	var wg sync.WaitGroup
+	var started atomic.Int64
 	shared := make([]bool, callers)
 	values := make([]int, callers)
+	//: every caller counts itself in just before it calls Do.
 	for i := range callers {
 		wg.Go(func() {
+			started.Add(1)
 			val, wasShared, err := group.Do(t.Context(), "k", func(context.Context) (int, error) {
 				runs.Add(1)
 				<-release
@@ -71,6 +74,12 @@ func TestConcurrentCallersOnOneKeyShareOneResult(t *testing.T) {
 		})
 	}
 	waitFor(t, func() bool { return group.InFlight() == 1 }, "the call to be in flight")
+	// Releasing as soon as the first call is in flight let a slow scheduler —
+	// Windows, on CI — run every other caller after it ended, each leading its
+	// own call. Every caller has now started, and the call in flight cannot
+	// end before release, so the ones reaching Do in the settle below join it.
+	waitFor(t, func() bool { return started.Load() == int64(callers) }, "every caller to start")
+	time.Sleep(50 * time.Millisecond)
 	close(release)
 	wg.Wait()
 
