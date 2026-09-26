@@ -1,8 +1,8 @@
 // Package spool is outbound mail made durable: Send validates a mail and
 // queues it, and the spool's consumer hands it to a mail transport, retrying a
-// failure with a backoff and dead-lettering the mail after its last attempt —
-// sending a delivered mail twice never, and a retried one always under the
-// same Message-ID. ADR 0111.
+// failure with a backoff and dead-lettering the mail after its last attempt. A
+// redelivery of a mail it delivered is dropped, and every attempt, the one
+// resend a crash can cause included, carries the same Message-ID. ADR 0111.
 //
 // # Where it sits
 //

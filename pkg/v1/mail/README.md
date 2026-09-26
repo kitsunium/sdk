@@ -100,7 +100,7 @@ go outbox.Run(ctx) // or under lifecycle.NewSupervisor
 id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body})
 ```
 
-A mail the spool delivered is never sent again: a redelivery — its lease lapsed while a slow relay was still accepting it — is recognised by its identifier and dropped. The one duplicate no outbox can prevent is a process that dies between the relay's acceptance and the acknowledgement; the next process sends the mail again under the SAME Message\-ID, which is how a receiver recognises it. Every attempt carries its [SpoolAttempt](<#SpoolAttempt>) in its context — the identifier, the count, and what [SpoolConfig](<#SpoolConfig>).Annotate kept from the Send's context — so a transport can continue the Send's trace, and every mail's fate reaches [SpoolConfig](<#SpoolConfig>).Observe. The spool writes nothing anywhere itself.
+A redelivery of a mail the spool delivered — its lease lapsed while a slow relay was still accepting it — is recognised by its identifier and dropped. The one duplicate no outbox can prevent is a process that dies between the relay's acceptance and the acknowledgement; the next process sends the mail again under the SAME Message\-ID, which is how a receiver recognises it. Every attempt carries its [SpoolAttempt](<#SpoolAttempt>) in its context — the identifier, the count, and what [SpoolConfig](<#SpoolConfig>).Annotate kept from the Send's context — so a transport can continue the Send's trace, and every mail's fate reaches [SpoolConfig](<#SpoolConfig>).Observe. The spool writes nothing anywhere itself.
 
 ### Testing
 

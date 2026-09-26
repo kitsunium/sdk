@@ -45,7 +45,7 @@ to its own generated `README.md`.
 | [`tlsid`](./pkg/v1/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
 | [`view`](./pkg/v1/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
 | [`i18n`](./pkg/v1/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
-| [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure, and never sent twice once delivered — every retry under the same Message-ID. |
+| [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |
 
 ### Data and security
 

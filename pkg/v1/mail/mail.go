@@ -145,9 +145,9 @@
 //	go outbox.Run(ctx) // or under lifecycle.NewSupervisor
 //	id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body})
 //
-// A mail the spool delivered is never sent again: a redelivery — its lease
-// lapsed while a slow relay was still accepting it — is recognised by its
-// identifier and dropped. The one duplicate no outbox can prevent is a process
+// A redelivery of a mail the spool delivered — its lease lapsed while a slow
+// relay was still accepting it — is recognised by its identifier and dropped.
+// The one duplicate no outbox can prevent is a process
 // that dies between the relay's acceptance and the acknowledgement; the next
 // process sends the mail again under the SAME Message-ID, which is how a
 // receiver recognises it. Every attempt carries its [SpoolAttempt] in its

@@ -5,8 +5,9 @@
 Outbound mail made durable (ADR 0111): `Send` validates a mail, stamps what a
 retry must not change, and queues it; `Run` hands each mail to a
 `core/mail.Transport`, retries a failure on a growing backoff, dead-letters a
-mail after its last attempt with that failure, and never sends a mail it
-delivered twice. The queue is `internal/service/queue` — `NewFile` with a
+mail after its last attempt with that failure, and drops a redelivery of a
+mail it delivered — the one resend left is a crash between the relay's
+acceptance and the acknowledgement, under the same Message-ID. The queue is `internal/service/queue` — `NewFile` with a
 `Dir`, `NewMemory` without. Public facade: `pkg/v1/mail` (`NewSpool`).
 
 Code range `0.3.81.*`.

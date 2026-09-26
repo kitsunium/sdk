@@ -1,5 +1,5 @@
 // Package spool_test — a mail queued, delivered, retried on its backoff,
-// dead-lettered, never sent twice, and carried across a restart.
+// dead-lettered, a redelivery dropped, and carried across a restart.
 package spool_test
 
 import (

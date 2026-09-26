@@ -1,4 +1,4 @@
-# ADR 0111 — a mail outbox retries on a backoff, dead-letters with its last failure, and never sends a delivered mail twice
+# ADR 0111 — a mail spool retries on a backoff, dead-letters with its last failure, and resends a delivered mail only after a crash
 
 - **Status**: Accepted
 - **Date**: 2026-09-26
