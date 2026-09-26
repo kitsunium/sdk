@@ -12,6 +12,9 @@ go_library(
         "run.go",
         "start.go",
         "stop.go",
+        "supervise.go",
+        "supervise_config.go",
+        "supervise_event.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/lifecycle",
     visibility = [
@@ -25,6 +28,7 @@ go_library(
         "//internal/kernel/errs",
         "//internal/service/proc/sdnotify",
         "//internal/service/proc/signal",
+        "//internal/service/resilience",
     ],
 )
 
@@ -47,6 +51,7 @@ go_test(
         "run_unix_external_test.go",
         "start_external_test.go",
         "stop_external_test.go",
+        "supervise_external_test.go",
     ],
     # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
     # files at runtime. Bazel's sandbox strips the source-tree relationship, so
@@ -59,6 +64,7 @@ go_test(
         "//internal/core/proc",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/resilience",
     ],
 )
 

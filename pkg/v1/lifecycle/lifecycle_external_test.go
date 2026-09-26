@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/lifecycle"
 )
@@ -167,4 +168,84 @@ func TestDefaultStopTimeoutIsPublishedAndPositive(t *testing.T) {
 	if lifecycle.PhaseStart.String() != "start" || lifecycle.PhaseStop.String() != "stop" {
 		t.Fatalf("the Phase constants did not survive the alias")
 	}
+}
+
+// TestTheSupervisorThroughTheFacade pins the supervisor through public names:
+// a function that fails once is restarted after DefaultRestartBase on a
+// manual clock, the observer is told, and the Lifecycle's Stop joins the
+// running function.
+func TestTheSupervisorThroughTheFacade(t *testing.T) {
+	t.Parallel()
+	clk := clock.NewManualClock(time.Date(2031, time.March, 7, 4, 5, 0, 0, time.UTC))
+	runs := make(chan int, 4)
+	var n int
+	run := func(ctx context.Context) error {
+		n++
+		runs <- n
+		if n == 1 {
+			return errDial
+		}
+		<-ctx.Done()
+		return ctx.Err()
+	}
+	events := make(chan lifecycle.SupervisionEvent, 16)
+	sup, err := lifecycle.NewSupervisor("dialer", run, lifecycle.SupervisorConfig{
+		Clock:   clk,
+		Observe: func(e lifecycle.SupervisionEvent) { events <- e },
+	})
+	if err != nil {
+		t.Fatalf("NewSupervisor() = %v", err)
+	}
+	app := lifecycle.New(lifecycle.Config{Clock: clk})
+	if err := app.Add(sup.Component()); err != nil {
+		t.Fatalf("Add() = %v", err)
+	}
+	if err := app.Start(context.Background()); err != nil {
+		t.Fatalf("Start() = %v", err)
+	}
+	<-runs
+	clk.BlockUntil(1)
+	clk.Advance(lifecycle.DefaultRestartBase)
+	if second := <-runs; second != 2 {
+		t.Fatalf("run %d, want 2", second)
+	}
+	if err := app.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop() = %v", err)
+	}
+	close(events)
+	var restarting, stopped int
+	for e := range events {
+		switch e.Phase {
+		case lifecycle.SupervisionRunEnded:
+			//: the first run's own error, verbatim; the last one's clean way out.
+			if (e.Run == 1 && !errors.Is(e.Err, errDial)) || (e.Run == 2 && e.Err != nil) {
+				t.Errorf("run %d ended with %v", e.Run, e.Err)
+			}
+		case lifecycle.SupervisionRestarting:
+			restarting++
+			if e.Delay != lifecycle.DefaultRestartBase || e.Failures != 1 {
+				t.Errorf("restart %+v", e)
+			}
+		case lifecycle.SupervisionStopped:
+			stopped++
+		default:
+			//: a run started carries nothing this test asserts.
+		}
+	}
+	if restarting != 1 || stopped != 1 {
+		t.Fatalf("%d restarts and %d stops observed", restarting, stopped)
+	}
+	if _, err := lifecycle.NewSupervisor("", run, lifecycle.SupervisorConfig{}); !errs.HasCode(err, mustCode(t, lifecycle.SupervisorMisconfigured)) {
+		t.Fatalf("a nameless supervisor = %v", err)
+	}
+}
+
+// mustCode reads a sentinel's code.
+func mustCode(t *testing.T, sentinel error) errs.Code {
+	t.Helper()
+	code, ok := errs.CodeOf(sentinel)
+	if !ok {
+		t.Fatalf("%v carries no code", sentinel)
+	}
+	return code
 }

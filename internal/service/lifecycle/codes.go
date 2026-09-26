@@ -27,3 +27,16 @@ const CodeUnwindFailed errs.Code = 0x00_03_31_04 // 0.3.49.4
 // CodeReadinessFailed identifies an opt-in sd_notify readiness or stopping
 // datagram that could not be delivered.
 const CodeReadinessFailed errs.Code = 0x00_03_31_05 // 0.3.49.5
+
+// CodeRunPanicked identifies a supervised run that panicked; the supervisor
+// recovered it, counted it as a failure, and restarts the run after its
+// backoff.
+const CodeRunPanicked errs.Code = 0x00_03_31_06 // 0.3.49.6
+
+// CodeSupervisorMisconfigured identifies a supervisor refused at
+// construction: no name, or no function to run.
+const CodeSupervisorMisconfigured errs.Code = 0x00_03_31_07 // 0.3.49.7
+
+// CodeSupervisorRunning identifies a Start refused because the supervisor is
+// already supervising.
+const CodeSupervisorRunning errs.Code = 0x00_03_31_08 // 0.3.49.8

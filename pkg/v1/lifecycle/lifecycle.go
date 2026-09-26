@@ -77,6 +77,32 @@
 // them because it was imported fights the caller's own main. Both delegate to
 // the SDK packages that already implement them.
 //
+// # A loop that must keep running: the Supervisor
+//
+// Many components own a loop that runs between their Start and their Stop — a
+// consumer, a sweeper, a watcher — and that loop is where a component dies
+// unnoticed: it returns an error nobody reads, or panics and takes the process
+// with it. [NewSupervisor] runs such a function on a goroutine of its own
+// until it is stopped, and restarts it after every early end — an error, a
+// nil return before its context ended, a panic, which it recovers into
+// [RunPanicked] — after a backoff: one second, doubling, to a minute by
+// default ([SupervisorConfig].Backoff is the resilience curve, published by
+// pkg/v1/resilience). A run that lasted [DefaultHealthyRun] was working, so
+// its end waits the first backoff again. Every run started and ended, every
+// restart scheduled, and the end of the supervision reach
+// [SupervisorConfig].Observe; the supervisor writes nothing anywhere itself.
+//
+//	sweeper, err := lifecycle.NewSupervisor("session-sweeper", sweep, lifecycle.SupervisorConfig{})
+//	err = app.Add(sweeper.Component()) // Start begins it, Stop cancels and joins it
+//
+// Stop cancels the function's context and waits for it to return — the
+// Lifecycle budgets that wait like any other Stop — and a function that
+// ignores its context is abandoned at the budget, never killed. Start's
+// context gives every run its values; its cancellation does not end the
+// supervision, because a Lifecycle hands a component the context of its
+// STARTUP. Every wait is on [SupervisorConfig].Clock, so a test drives each
+// restart with a ManualClock instead of sleeping.
+//
 // # Errors
 //
 // A failed [Lifecycle.Start] returns an errors.Join carrying [StartFailed]
@@ -108,6 +134,24 @@ const (
 	// DefaultStopTimeout is the per-component budget a non-positive
 	// Config.StopTimeout clamps to.
 	DefaultStopTimeout time.Duration = svclc.DefaultStopTimeout
+	// DefaultRestartBase is the supervisor's first restart backoff when
+	// SupervisorConfig.Backoff is zero; it doubles from there.
+	DefaultRestartBase time.Duration = svclc.DefaultRestartBase
+	// DefaultRestartMax is the supervisor's longest restart backoff when
+	// SupervisorConfig.Backoff is zero.
+	DefaultRestartMax time.Duration = svclc.DefaultRestartMax
+	// DefaultHealthyRun is how long a supervised run must last, when
+	// SupervisorConfig.HealthyAfter is not positive, for its end to count as
+	// a first failure again.
+	DefaultHealthyRun time.Duration = svclc.DefaultHealthyRun
+	// SupervisionRunStarted reports a run of the supervised function beginning.
+	SupervisionRunStarted SupervisionPhase = svclc.SupervisionRunStarted
+	// SupervisionRunEnded reports a run returning, or panicking.
+	SupervisionRunEnded SupervisionPhase = svclc.SupervisionRunEnded
+	// SupervisionRestarting reports a restart scheduled after Delay.
+	SupervisionRestarting SupervisionPhase = svclc.SupervisionRestarting
+	// SupervisionStopped reports the end of the supervision.
+	SupervisionStopped SupervisionPhase = svclc.SupervisionStopped
 )
 
 // Start is the public alias for the ctx-aware bring-up half of a component.
@@ -139,6 +183,21 @@ type Config = svclc.Config
 // RunConfig is the public alias for Run's opt-in supervision wiring.
 type RunConfig = svclc.RunConfig
 
+// Supervisor is the public alias for a function run until stopped and
+// restarted after every early end: Start, Stop, Component.
+type Supervisor = svclc.Supervisor
+
+// SupervisorConfig is the public alias for a supervisor's optional tuning:
+// Clock, Observe, Backoff, HealthyAfter.
+type SupervisorConfig = svclc.SupervisorConfig
+
+// SupervisionEvent is the public alias for one thing a supervisor did, as
+// its observer is told.
+type SupervisionEvent = svclc.SupervisionEventValue
+
+// SupervisionPhase is the public alias for what a SupervisionEvent reports.
+type SupervisionPhase = svclc.SupervisionPhase
+
 var (
 	// InvalidComponent is returned by Add for a component that could never
 	// run — an empty Name, a nil Start, a nil Stop. The "missing" field names
@@ -168,6 +227,15 @@ var (
 	// ReadinessFailed is returned when an opt-in sd_notify datagram could not
 	// be delivered.
 	ReadinessFailed = svclc.ReadinessFailed
+	// RunPanicked is the failure of a supervised run that panicked. It was
+	// recovered and the run restarted; the panic value and the stack travel
+	// as fields, never in the Public text.
+	RunPanicked = svclc.RunPanicked
+	// SupervisorMisconfigured refuses a supervisor without a name or a
+	// function.
+	SupervisorMisconfigured = svclc.SupervisorMisconfigured
+	// SupervisorRunning refuses a second Start while a supervision runs.
+	SupervisorRunning = svclc.SupervisorRunning
 )
 
 // New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the
@@ -184,4 +252,13 @@ func New(cfg Config) Lifecycle {
 func Run(ctx context.Context, lc Lifecycle, cfg RunConfig) error {
 	//: delegate to the service helper.
 	return svclc.Run(ctx, lc, cfg)
+}
+
+// NewSupervisor builds a supervisor named name over run, tuned by cfg — whose
+// zero value is a working supervisor. run must return when its context ends;
+// returning earlier, or panicking, restarts it after the backoff. It starts
+// nothing: Start does, or the Lifecycle it is a Component of.
+func NewSupervisor(name string, run func(ctx context.Context) error, cfg SupervisorConfig) (*Supervisor, error) {
+	//: delegate to the service constructor.
+	return svclc.NewSupervisor(name, run, cfg)
 }

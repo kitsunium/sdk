@@ -29,6 +29,7 @@ go_test(
     ],
     deps = [
         ":lifecycle",
+        "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],
 )

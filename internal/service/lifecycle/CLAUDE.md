@@ -5,10 +5,13 @@
 The concrete `core/lifecycle.Lifecycle`: ordered bring-up, reverse teardown,
 the **partial-start unwind**, the **per-component shutdown budget**, and `Run`
 — the opt-in bridge to the signal and `sd_notify` machinery `internal/service/
-proc` already ships. **ADR 0050.**
+proc` already ships. **ADR 0050.** And the **supervisor** (ADR 0112): a
+function run until stopped, restarted after every early end on the published
+backoff curve, observed run by run, joined on stop — and a `Component`, so a
+`Lifecycle` starts it and budgets its stop.
 
-Code range: `0.3.49.*` (run outcomes). Registration refusals come from
-`core/lifecycle` (`0.2.19.*`).
+Code range: `0.3.49.*` (run outcomes and the supervisor's three). Registration
+refusals come from `core/lifecycle` (`0.2.19.*`).
 
 ## Contents
 
@@ -19,7 +22,10 @@ Code range: `0.3.49.*` (run outcomes). Registration refusals come from
 | `start.go` | `Start`, `callStart`, `abort`, `joinStartFailure` — the bring-up sequence and the unwind trigger |
 | `stop.go` | `Stop`, `stopEach` (**the single unwind path**), `callStop`, `stopped`, `abandoned` |
 | `run.go` | `RunConfig`, `Run`, `waitForStop`, `announce` — opt-in signals + sd_notify |
-| `codes.go` / `errors.go` | `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed` |
+| `supervise.go` | `Supervisor`, `NewSupervisor`, `Start` / `Stop` / `Component`, the supervision loop (`supervise`, `once` — panic recovery — `wait`, `emit`, `wayOut`) |
+| `supervise_config.go` | `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`), `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun`, the refusal and the clamps |
+| `supervise_event.go` | `SupervisionPhase` (four), `SupervisionEventValue` |
+| `codes.go` / `errors.go` | `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed`; `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` |
 
 ## How the partial-start cleanup is guaranteed
 
@@ -57,6 +63,27 @@ the component owns (ADR 0047 §D9 — cleanup that cannot tell what it owns from
 what it handed away destroys live work and reports nothing). `Stop` returns in
 at most `n × StopTimeout`; that bound is the price of not letting one component
 spend everyone else's budget, and it is stated rather than discovered.
+
+## The supervisor
+
+- **Every early end restarts**: an error, a nil return before the context
+  ended (a loop that stopped looping), a panic (`RUN_PANICKED`, value and stack
+  as fields). A run that ends because the supervision is stopping and returns
+  its context's error is the way out: reported with a nil error and
+  `Stopping`, never restarted.
+- **The backoff is `resilience.BackoffValue`**, the one curve the SDK computes;
+  its zero clamps to 1s → 1m, because a zero curve is a hot loop. A run that
+  lasted `HealthyAfter` resets the consecutive-failure count.
+- **`Start`'s context gives values, `Stop` gives the end.** Runs derive from
+  `context.WithoutCancel(start ctx)`: under a `Lifecycle` that context is a
+  STARTUP deadline, and a supervision bound to it would end when startup did.
+- **`Stop` cancels and joins; its own context bounds the join** and an overrun
+  is `STOP_TIMEOUT` — the goroutine is abandoned, never killed, and a later
+  `Stop` waits again. A `Start` while the supervision still runs is
+  `SUPERVISOR_RUNNING`.
+- **The wall-clock audit covers it**: every wait is `SupervisorConfig.Clock`,
+  and `supervise_external_test.go` drives each restart with `BlockUntil` +
+  `Advance`, asserting "not one nanosecond early".
 
 ## Conventions
 
