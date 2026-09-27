@@ -107,7 +107,12 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
   failure, `SUBJECT_KEY_UNREADABLE` for a key held that does not unwrap (a
   fault — never an erasure — which `Seal` never overwrites), and
   `STORE_UNAVAILABLE` when the store or the root store failed. A first `Seal`
-  inserts; a lost insert race re-reads, three turns at most.
+  inserts; a lost insert race re-reads, three turns at most. After its insert
+  it reads the root's newest version once (`settle`) and, when the root
+  rotated since the wrap, re-wraps its own key there with a compare-and-swap:
+  a rotation that scanned before the insert could not see the key and may
+  prune the version it was wrapped under, and every rotation stores its version
+  before it scans, so that one read sees every such rotation.
 - **The cache and the erasure**: an `openedKey` hands out COPIES under its
   mutex and is wiped under the same mutex, so no call seals under bytes an
   eviction zeroed. `Destroy` deletes from the store FIRST, then advances the
@@ -117,11 +122,16 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
   match is dropped and the store read once (another process replaced it).
   `CacheTTL` is required with a cache and refused without one: it bounds how
   long a key destroyed by ANOTHER process keeps opening — and sealing — here.
-- **Rewrap**: reads the root once (`rootView`), moves each key not under the
-  newest version with a compare-and-swap `Replace` (a key destroyed meanwhile
-  is skipped, never written back), counts what did not unwrap and returns
-  `SUBJECT_KEY_UNREADABLE` after finishing the pass. `OldestRoot` reads headers
-  only, skips an entry that is no keyring box, and fails closed.
+- **Rewrap**: reads the root once (`rootView`) and OPENS every key
+  (`unwrapIn`: grammar, version held, authenticated, one key long); moves each
+  key not under the newest version with a compare-and-swap `Replace` (a key
+  destroyed meanwhile is skipped, never written back); counts a key under a
+  version NEWER than the pass read as current; counts everything that does not
+  open as unreadable and returns `SUBJECT_KEY_UNREADABLE` after finishing the
+  pass. `OldestRoot` opens every key too and counts only those that open — a
+  key lost with a pruned version, altered, or no keyring box pins nothing, or
+  the root would never prune again — checks the context at every key, and
+  fails closed.
 
 ## Surface
 

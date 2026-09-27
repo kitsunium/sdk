@@ -225,8 +225,13 @@ func TestSubjectKeysRewrapCountsAnAlteredKey(t *testing.T) {
 	if replaced, err := f.store.Replace(t.Context(), "user:1", entry.Wrapped, altered); !replaced || err != nil {
 		t.Fatalf("Replace = (%v, %v)", replaced, err)
 	}
-	putRandomVersion(t, f.roots, rootName)
+	//: under the newest version already: a header alone would call it current.
 	report, err := keys.Rewrap(t.Context())
+	if report != (svcsecret.RewrapValue{Root: 1, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+		t.Fatalf("Rewrap before a rotation = (%+v, %v), want the altered key counted unreadable, not current", report, err)
+	}
+	putRandomVersion(t, f.roots, rootName)
+	report, err = keys.Rewrap(t.Context())
 	if report != (svcsecret.RewrapValue{Root: 2, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap = (%+v, %v), want the altered key counted unreadable", report, err)
 	}
@@ -237,14 +242,23 @@ func TestSubjectKeysRewrapCountsAnAlteredKey(t *testing.T) {
 // numbered. Both prune to Keep, exactly as a rotator without InUse would.
 func TestRotatorInUseAnswersOutsideTheVersionsKeepThePolicy(t *testing.T) {
 	t.Parallel()
-	for _, answer := range []int{0, 1000} {
+	type tc struct {
+		name   string
+		answer int
+	}
+	tests := []tc{
+		{"no key at all", 0},
+		{"a version the store never numbered", 1000},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
 		f := newSubjectFixture(t)
 		rotator, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
 			Store:  f.roots,
 			Name:   rootName,
 			Policy: svcsecret.PolicySpec{Every: rotationEvery, Keep: 2, Generate: svcsecret.Random(32)},
 			Clock:  f.clk,
-			InUse:  func(context.Context) (int, error) { return answer, nil },
+			InUse:  func(context.Context) (int, error) { return c.answer, nil },
 		})
 		if err != nil {
 			t.Fatalf("NewRotator: %v", err)
@@ -255,7 +269,176 @@ func TestRotatorInUseAnswersOutsideTheVersionsKeepThePolicy(t *testing.T) {
 			}
 		}
 		if got := f.rootVersions(t); !slices.Equal(got, []int{4, 3}) {
-			t.Fatalf("InUse answering %d: root keeps %v, want [4 3]", answer, got)
+			t.Fatalf("%s: root keeps %v, want [4 3]", c.name, got)
 		}
 	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestSubjectKeysAKeyMadeAcrossTwoRotationsStillOpens pins the creation race:
+// a Seal wraps a new subject's key under version 1, and before its insert
+// lands two rotations run — the first keeps version 1 as the one it replaced,
+// the second scans a store where the key is not filed yet and prunes version
+// 1. The key must still end up under a version the root keeps: the Seal reads
+// the newest version after its insert and moves its own key there.
+func TestSubjectKeysAKeyMadeAcrossTwoRotationsStillOpens(t *testing.T) {
+	t.Parallel()
+	f := newSubjectFixture(t)
+	var rotator *svcsecret.Rotator
+	inserts := 0
+	stalling := scriptedKeyStore{
+		SubjectKeyStore: f.store,
+		insert: func(ctx context.Context, subject string, wrapped []byte) (bool, error) {
+			inserts++
+			//: the first insert stalls across two whole rotations.
+			if inserts == 1 {
+				for range 2 {
+					if _, err := rotator.Rotate(ctx); err != nil {
+						return false, err
+					}
+				}
+			}
+			return f.store.Insert(ctx, subject, wrapped)
+		},
+	}
+	keys := engineOver(t, f.root, stalling)
+	built, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
+		Store:  f.roots,
+		Name:   rootName,
+		Policy: svcsecret.PolicySpec{Every: rotationEvery, Keep: 2, Generate: svcsecret.Random(32)},
+		Clock:  f.clk,
+		InUse:  keys.OldestRoot,
+	})
+	if err != nil {
+		t.Fatalf("NewRotator: %v", err)
+	}
+	rotator = built
+	box := seal(t, keys, "user:1", "made while the root rotated twice")
+	if got := f.rootVersions(t); !slices.Equal(got, []int{3, 2}) {
+		t.Fatalf("root keeps %v, want [3 2]: the second rotation retired version 1", got)
+	}
+	if got := wrappedVersions(t, f.store); !slices.Equal(got, []int{3}) {
+		t.Fatalf("the new key is wrapped under %v, want [3], a version the root keeps", got)
+	}
+	mustOpen(t, f.process(t, 0), box, "made while the root rotated twice")
+}
+
+// TestOldestRootCountsOnlyKeysThatOpen pins that a key nothing can open pins
+// no version: one wrapped under a version already pruned, one altered, one
+// that is no keyring box. Counting them would keep every later version for
+// ever — the root would never prune again, and a backed-up wrapped key would
+// keep opening long after its subject's erasure.
+func TestOldestRootCountsOnlyKeysThatOpen(t *testing.T) {
+	t.Parallel()
+	f := newSubjectFixture(t)
+	keys := f.process(t, 0)
+	seal(t, keys, "user:1", "lost with version 1")
+	putRandomVersion(t, f.roots, rootName)
+	if err := f.roots.Prune(t.Context(), rootName, 1); err != nil {
+		t.Fatalf("Prune: %v", err)
+	}
+	box := seal(t, keys, "user:2", "alive under version 2")
+	alive := filed(t, f.store)[1]
+	altered := slices.Clone(alive.Wrapped)
+	altered[len(altered)-1] ^= 0x01
+	for subject, wrapped := range map[string][]byte{"user:3": altered, "user:4": []byte("no keyring box")} {
+		if inserted, err := f.store.Insert(t.Context(), subject, wrapped); !inserted || err != nil {
+			t.Fatalf("Insert(%s) = (%v, %v)", subject, inserted, err)
+		}
+	}
+	if oldest, err := keys.OldestRoot(t.Context()); oldest != 2 || err != nil {
+		t.Fatalf("OldestRoot = (%d, %v), want (2, nil): the lost keys pin nothing", oldest, err)
+	}
+	rotator, err := svcsecret.NewRotator(svcsecret.RotatorConfig{
+		Store:  f.roots,
+		Name:   rootName,
+		Policy: svcsecret.PolicySpec{Every: rotationEvery, Keep: 2, Generate: svcsecret.Random(32)},
+		Clock:  f.clk,
+		InUse:  keys.OldestRoot,
+		OnRotate: func(coresecret.VersionValue) {
+			//: the live key moves on; the lost ones are reported, as they must be.
+			report, rewrapErr := keys.Rewrap(context.Background())
+			if report.Rewrapped != 1 || !errs.HasCode(rewrapErr, svcsecret.CodeSubjectKeyUnreadable) {
+				t.Errorf("Rewrap = (%+v, %v), want the live key moved and the lost ones reported", report, rewrapErr)
+			}
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewRotator: %v", err)
+	}
+	for range 3 {
+		if _, rotateErr := rotator.Rotate(t.Context()); rotateErr != nil {
+			t.Fatalf("Rotate: %v", rotateErr)
+		}
+	}
+	if got := f.rootVersions(t); !slices.Equal(got, []int{5, 4}) {
+		t.Fatalf("root keeps %v, want [5 4]: versions piled up behind keys nothing can open", got)
+	}
+	mustOpen(t, f.process(t, 0), box, "alive under version 2")
+}
+
+// TestOldestRootStopsAtTheNextKeyWhenCancelled pins that a cancelled scan
+// ends at the next key rather than after the whole store — a rotation given a
+// deadline must not read a million keys past it.
+func TestOldestRootStopsAtTheNextKeyWhenCancelled(t *testing.T) {
+	t.Parallel()
+	f := newSubjectFixture(t)
+	for _, subject := range []string{"user:1", "user:2", "user:3"} {
+		seal(t, f.process(t, 0), subject, "value")
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	yielded := 0
+	counting := scriptedKeyStore{
+		SubjectKeyStore: f.store,
+		all: func(c context.Context) iter.Seq2[coresecret.SubjectKeyValue, error] {
+			return func(yield func(coresecret.SubjectKeyValue, error) bool) {
+				for entry, err := range f.store.All(c) {
+					yielded++
+					if !yield(entry, err) {
+						return
+					}
+					//: the caller gives up after the first key.
+					cancel()
+				}
+			}
+		},
+	}
+	_, err := engineOver(t, f.root, counting).OldestRoot(ctx)
+	if !errors.Is(err, context.Canceled) || yielded != 2 {
+		t.Fatalf("OldestRoot = %v after %d keys, want context.Canceled at the second of three", err, yielded)
+	}
+}
+
+// TestSubjectKeysRewrapLeavesANewerKeyToTheNextPass pins what a pass does with
+// a key filed under a version NEWER than the one it read — a rotation and a
+// first Seal landed after the pass began: current, not unreadable, and left
+// alone; it is the next pass's to open.
+func TestSubjectKeysRewrapLeavesANewerKeyToTheNextPass(t *testing.T) {
+	t.Parallel()
+	f := newSubjectFixture(t)
+	seal(t, f.process(t, 0), "user:1", "under version 1")
+	var box []byte
+	late := scriptedKeyStore{
+		SubjectKeyStore: f.store,
+		all: func(ctx context.Context) iter.Seq2[coresecret.SubjectKeyValue, error] {
+			//: after the pass read the root: a rotation, and a new subject under it.
+			putRandomVersion(t, f.roots, rootName)
+			box = seal(t, f.process(t, 0), "user:2", "under version 2")
+			return f.store.All(ctx)
+		},
+	}
+	report, err := engineOver(t, f.root, late).Rewrap(t.Context())
+	if err != nil || report != (svcsecret.RewrapValue{Root: 1, Current: 2}) {
+		t.Fatalf("Rewrap = (%+v, %v), want both keys current and no unreadable", report, err)
+	}
+	if got := wrappedVersions(t, f.store); !slices.Equal(got, []int{1, 2}) {
+		t.Fatalf("keys wrapped under %v, want [1 2]: the pass moved nothing down", got)
+	}
+	mustOpen(t, f.process(t, 0), box, "under version 2")
 }

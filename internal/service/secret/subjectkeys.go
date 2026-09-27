@@ -352,9 +352,61 @@ func (s *SubjectKeys) create(ctx context.Context, subject string) (opened *opene
 		//: nothing made.
 		return nil, false, nil
 	}
+	settled, settleErr := s.settle(ctx, subject, dek, wrapped)
+	//: the key is filed, but whether its root version survives is unknown.
+	if settleErr != nil {
+		//: the root's or the store's verdict; the next call reads the key.
+		return nil, false, settleErr
+	}
+	//: destroyed, or re-wrapped by another writer, between the insert and now.
+	if !settled {
+		//: read it again on the next turn.
+		return nil, false, nil
+	}
 	opened, err = deriveOpened(subject, dek)
 	//: the key filed, and opened.
 	return opened, err == nil, err
+}
+
+// settle moves a key just filed to the root's newest version when the root
+// rotated while the key was being made, and reports whether the key filed is
+// still this one.
+//
+// A rotation's InUse scan sees every key FILED when it runs. A key made
+// between the wrap and the insert is not filed yet, so a rotation that scanned
+// in that window, after another that retired nothing, may prune the version
+// the key was wrapped under — and the insert would file a key nothing opens.
+// Every rotation stores its new version before it scans, so reading the newest
+// version once, after the insert, sees every rotation that could have missed
+// the key; one that stores its version later scans later, and sees the key.
+// The data key is still in hand, so a stale wrap is replaced, never lost.
+func (s *SubjectKeys) settle(ctx context.Context, subject string, dek, wrapped []byte) (settled bool, err error) {
+	version, _, _ := parseHeader(wrapped)
+	newest, getErr := s.root.store.Get(ctx, s.root.name)
+	//: the root could not be read: the key stays filed as it is.
+	if getErr != nil {
+		//: the root store's verdict.
+		return false, getErr
+	}
+	//: no rotation since the wrap: the version is the newest, and kept.
+	if newest.Version == version {
+		//: filed as made.
+		return true, nil
+	}
+	rewrapped, wrapErr := s.root.sealAs(ctx, wrapLabel, dek, wrapAAD(subject))
+	//: the newest version is not usable, or the root store failed.
+	if wrapErr != nil {
+		//: the root's verdict.
+		return false, wrapErr
+	}
+	replaced, replaceErr := s.store.Replace(ctx, subject, wrapped, rewrapped)
+	//: the store failed.
+	if replaceErr != nil {
+		//: StoreUnavailable.
+		return false, storeFailure(replaceErr, "replace", subject)
+	}
+	//: false when the key was destroyed or re-wrapped meanwhile.
+	return replaced, nil
 }
 
 // unwrap opens a wrapped key under the root keyring.

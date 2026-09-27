@@ -187,13 +187,18 @@ SP 800-88r2. What it reaches, and how fast, is part of the contract:
 
 ### 6. A rotation re-wraps one key per subject, and never prunes a version a key needs
 
-`Rewrap` reads the root once — every usable version's sealing key derived once
-— and moves each key not under the newest version: unwrap, wrap, and
-`Replace` with a compare-and-swap, so a key destroyed or re-wrapped meanwhile is
-skipped and never written back. No box is touched. It finishes the pass even
-when some keys do not unwrap, counts them, and then returns
-`SUBJECT_KEY_UNREADABLE`; it is idempotent, so it runs after every rotation and
-at start-up, to finish a pass that was interrupted.
+`Rewrap` reads the root once — every usable version's wrap key derived once —
+and OPENS every key: one not under the newest version is wrapped again and
+filed with a compare-and-swap `Replace`, so a key destroyed or re-wrapped
+meanwhile is skipped and never written back. No box is touched. A key already
+under the newest version is opened too, and so is proven current rather than
+assumed from its header: the report's `Unreadable` counts every key that does
+not open as one data key — a version gone, another purpose, altered, not one
+key long — and the pass finishes before returning `SUBJECT_KEY_UNREADABLE`. A
+key filed under a version NEWER than the one the pass read — a rotation and a
+first `Seal` landed after the pass began — is current, and the next pass's to
+open. It is idempotent, so it runs after every rotation and at start-up, to
+finish a pass that was interrupted.
 
 The `Rotator` prunes right after it stores a new version (ADR 0096 §6). With
 keys still wrapped under the version a prune would take, that prune is an
@@ -206,8 +211,31 @@ signature — is asked after the new version is stored and before the prune,
 which then keeps `max(Keep, newest − oldest + 1)`. `Keep` becomes a floor: the
 root keeps rotating, and the old version lingers until the keys move on. An
 `InUse` error prunes NOTHING and is returned, because "unknown" read as "none"
-destroys what depends on a version. `OldestRoot` reads headers only and skips
-an entry that is no keyring box, since keeping a version for it saves nothing.
+destroys what depends on a version.
+
+`OldestRoot` reads the root once and opens every key under the version its
+header names, and counts only the keys that open. A key that does not — its
+version already pruned, altered, not a keyring box — is lost whatever is kept,
+and counting it would pin its version and every later one for ever: the root
+would never prune again, and a backed-up wrapped key would keep opening long
+after its subject's erasure, which is §5's bound broken by a single bad
+record. Such keys are `Rewrap`'s to report. A cancelled scan stops at the next
+key, so a rotation given a deadline does not read a million keys past it.
+
+The scan sees every key FILED when it runs, and one kind of key is not: a key
+a first `Seal` has wrapped and not yet inserted. A rotation that scans in that
+window, after another that retired nothing, prunes the version the key was
+wrapped under, and the insert would then file a key nothing opens. `Seal`
+closes the window without any lock: after its insert it reads the root's
+newest version once, and when the root rotated since the wrap, it wraps the
+data key — still in hand — under the newest version and files it with a
+compare-and-swap. That single read is enough because every rotation stores its
+new version BEFORE it scans: a rotation that could have missed the key has
+stored its version before the insert, so the read sees it, and the version it
+reads is one every such rotation keeps; a rotation that stores its version
+after the read scans after the insert, and sees the key. `Rewrap` needs no
+such step: the key it rewrites stays filed throughout, under a version no newer
+than the one it writes, so every scan sees it.
 
 ### 7. A bounded cache, whose TTL is a promise about erasure
 
@@ -265,13 +293,14 @@ once through an unexported view instead of widening the keyring's surface.
   `InUse: keys.OldestRoot` and a `Rewrap` after each rotation.
 - Measured on an Apple M1 Pro, medians of five runs over in-memory stores
   (`internal/service/secret/BENCH.md`): a 64-byte value seals under a cached
-  subject key in about 1.1 µs against 0.8 µs for the bare AES-256-GCM seal
-  underneath, and opens in 0.7 µs; a key not cached costs one read of each
-  store and three HKDF derivations, about 7 µs, once per `CacheTTL`. A rotation
-  costs the engine about 2.5 µs per subject, and the caller's store one durable
-  write per subject on top — on a document store on disk, about 11 ms here,
-  so a million subjects re-wrap in hours, in the background, while `InUse`
-  keeps the old version. `OldestRoot` costs 0.3 µs per subject.
+  subject key in about 0.9 µs against 0.75 µs for the bare AES-256-GCM seal
+  underneath, and opens in 0.6 µs; a key not cached costs one read of each
+  store and three HKDF derivations, about 4 µs, once per `CacheTTL`. A
+  rotation costs the engine about 2 µs per subject, and the caller's store one
+  durable write per subject on top — on a document store on disk, about 11 ms
+  here, so a million subjects re-wrap in hours, in the background, while
+  `InUse` keeps the old version. `OldestRoot` and a pass with nothing to move
+  open every key, about 0.8 µs each.
 - The root keeps more than `Keep` versions while a re-wrap lags, and says
   nothing: the store's `Versions` shows it.
 - A box is 40 bytes plus its subject longer than the value it seals.
@@ -303,6 +332,11 @@ break, which ADR 0040 accepts while the module is v0.
 - **Refraining from rotating** while a key lags, as kit's record proposed.
   Every caller would rebuild the rotator's loop to hold a rotation back; the
   prune is where the loss happens, so the guard is there.
+- **A lock shared by the rotator and every first `Seal`**, to close the
+  creation window of §6. It would hold a cross-process lock across a whole
+  `InUse` scan — every new subject waiting minutes on a large store — to cover
+  a window one read of the root closes, because a rotation stores its version
+  before it scans.
 - **Wrapping with the root's `Seal` key**, separated from the caller's own
   boxes by the associated data alone. It holds only while no caller ever seals
   under that root with associated data that begins with the wrap's domain
@@ -351,11 +385,20 @@ break, which ADR 0040 accepts while the module is v0.
   after the re-wrap, an `InUse` error pruning nothing; an erasure landing in
   the middle of a re-wrap not undone; a restored backup of the key store
   opening while its version is kept and never after; store and root outages
-  staying `STORE_UNAVAILABLE`; every way a key leaves the cache wiping it.
+  staying `STORE_UNAVAILABLE`; every way a key leaves the cache wiping it; a
+  first `Seal` whose insert stalls across two rotations — the second pruning
+  the version it wrapped under — still filing a key that opens; `OldestRoot`
+  pinning nothing for a key lost with a pruned version, an altered key or a
+  record that is no keyring box, the root then pruning back to `Keep` through
+  three rotations; a cancelled scan stopping at the second of three keys; a
+  re-wrap counting an altered key under the newest version, and a key that is
+  not one key long, as unreadable, and a key newer than the pass as current.
   Mutations checked against the suite — the binding ignored, the length prefix
   dropped, `Destroy` not reaching the cache, no re-read of a replaced key,
   `InUse` ignored, `Replace` without its compare, the wrap under the `Seal`
-  key — each fail it.
+  key, no settling after a first insert, no length check, a current key taken
+  from its header, `OldestRoot` counting by header, no cancellation check per
+  key, a newer key read as unreadable — each fail it.
 - `pkg/v1/secret`: the wiring the package doc shows, through public names only.
 
 ## References

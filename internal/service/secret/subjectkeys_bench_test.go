@@ -121,8 +121,30 @@ func BenchmarkSubjectKeysRewrap(b *testing.B) {
 	}
 }
 
+// BenchmarkSubjectKeysRewrapNothingToMove is the pass a start-up runs when no
+// rotation happened since the last one: every key is opened, to prove it is
+// current, and nothing is written.
+func BenchmarkSubjectKeysRewrapNothingToMove(b *testing.B) {
+	const subjects int = 10_000
+	_, keys := benchEngine(b, 0)
+	ctx := b.Context()
+	//: ten thousand subjects, every key under the one root version.
+	for index := range subjects {
+		if _, err := keys.Seal(ctx, fmt.Sprintf("user:%d", index), benchPlaintext); err != nil {
+			b.Fatalf("Seal: %v", err)
+		}
+	}
+	b.ReportAllocs()
+	for b.Loop() {
+		if report, err := keys.Rewrap(ctx); err != nil || report.Current != subjects {
+			b.Fatalf("Rewrap = (%+v, %v)", report, err)
+		}
+	}
+	b.ReportMetric(float64(b.Elapsed().Nanoseconds())/float64(b.N*subjects), "ns/key")
+}
+
 // BenchmarkSubjectKeysOldestRoot is what the rotator's InUse question costs:
-// a header read per key, no cryptography.
+// one unwrap per key, so that a key nothing can open pins no version.
 func BenchmarkSubjectKeysOldestRoot(b *testing.B) {
 	const subjects int = 10_000
 	_, keys := benchEngine(b, 0)

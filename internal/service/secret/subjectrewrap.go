@@ -5,6 +5,7 @@ package secret
 import (
 	"context"
 
+	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	coresecret "github.com/kitsunium/sdk/internal/core/secret"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -15,7 +16,9 @@ import (
 type RewrapValue struct {
 	// Root is the root version the pass wrapped under: the newest it read.
 	Root int
-	// Current counts the keys already wrapped under Root.
+	// Current counts the keys already wrapped under Root, each opened to
+	// prove it, and the keys a later rotation already wrapped under a newer
+	// version, which the next pass checks.
 	Current int
 	// Rewrapped counts the keys the pass moved to Root.
 	Rewrapped int
@@ -23,10 +26,11 @@ type RewrapValue struct {
 	// while the pass ran. They are left as they are: a re-wrap never brings
 	// back a destroyed key.
 	Skipped int
-	// Unreadable counts the keys that did not unwrap — wrapped under a
-	// version no longer kept, under another root secret, or altered — and the
-	// entries whose subject is outside the grammar. They are left as they
-	// are, and the pass returns [SubjectKeyUnreadable].
+	// Unreadable counts the keys that did not unwrap as one data key —
+	// wrapped under a version no longer kept, under another root secret or
+	// for another purpose, altered, or not one key long — and the entries
+	// whose subject is outside the grammar. They are left as they are, and
+	// the pass returns [SubjectKeyUnreadable].
 	Unreadable int
 }
 
@@ -53,9 +57,11 @@ const (
 //
 // Run it after every rotation of the root (the rotator's OnRotate), and at
 // start-up to finish a pass that was interrupted: a key already under the
-// newest version costs a header read. It reads the root once, so a rotation
-// during the pass leaves keys under the version it read, which the next pass
-// moves.
+// newest version costs one unwrap, which is also what makes Unreadable exact —
+// every key the pass counts has been opened. It reads the root once, so a
+// rotation during the pass leaves keys under the version it read, which the
+// next pass moves, and a key filed meanwhile under a NEWER version is counted
+// current and left for that pass.
 //
 // It returns the report with a nil error when every key is under the newest
 // version, the report with [SubjectKeyUnreadable] when some did not unwrap —
@@ -102,26 +108,25 @@ func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error
 
 // rewrapOne moves one key to the view's newest version.
 func (s *SubjectKeys) rewrapOne(ctx context.Context, view *rootView, entry coresecret.SubjectKeyValue) (outcome rewrapOutcome, err error) {
-	//: an entry this engine could never have filed.
-	if coresecret.ValidateSubject(entry.Subject) != nil {
-		//: counted; nothing is written under a subject nobody can name.
-		return outcomeUnreadable, nil
-	}
 	version, _, parsed := parseHeader(entry.Wrapped)
-	//: already where the pass is moving everything.
-	if parsed && version == view.newest {
-		//: a header read, and nothing else.
+	//: filed by a rotation newer than the one this pass read: not ours to move.
+	if parsed && version > view.newest && coresecret.ValidateSubject(entry.Subject) == nil {
+		//: current; the next pass opens it.
 		return outcomeCurrent, nil
 	}
-	aad := wrapAAD(entry.Subject)
-	dek, openErr := view.open(entry.Wrapped, aad)
-	//: under a version no longer kept, another root, or altered.
-	if openErr != nil {
+	dek, opened := unwrapIn(view, entry)
+	//: a subject nobody can name, a version gone, altered, or not one key.
+	if !opened {
 		//: counted; the key is left as it is.
 		return outcomeUnreadable, nil
 	}
 	defer clear(dek)
-	next, sealErr := view.seal(dek, aad)
+	//: already where the pass is moving everything, and proven so.
+	if version == view.newest {
+		//: nothing to write.
+		return outcomeCurrent, nil
+	}
+	next, sealErr := view.seal(dek, wrapAAD(entry.Subject))
 	//: sealing fails only on an unregistered scheme, which the imports rule out.
 	if sealErr != nil {
 		//: the crypto verdict, unchanged.
@@ -168,10 +173,27 @@ func (r *RewrapValue) count(outcome rewrapOutcome) {
 //
 //	rotator, err := NewRotator(RotatorConfig{..., InUse: keys.OldestRoot})
 //
-// It reads every key's header and opens none. An entry that is not a
-// keyring box is skipped: it opens under no version, so keeping one for it
-// saves nothing. Any failure is returned, and the rotator then prunes nothing.
+// It reads the root once and OPENS every key under the version it names —
+// about a microsecond each — and counts only the keys that open as one data
+// key. A key that does not — its version already pruned, altered, not a
+// keyring box — is lost whatever is kept, and counting it would stop every
+// later prune for nothing: the root's versions would pile up, and a backed-up
+// wrapped key would keep opening under them long after its subject's
+// erasure. Such keys are Rewrap's to report. A cancelled scan stops at the
+// next key, and any failure is returned: the rotator then prunes nothing.
 func (s *SubjectKeys) OldestRoot(ctx context.Context) (version int, err error) {
+	//: a scan asked to stop before it starts reads nothing.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		//: the context's own error.
+		return 0, ctxErr
+	}
+	view, viewErr := s.root.view(ctx, wrapLabel)
+	//: no root, or a root that cannot seal: unknown is never "none".
+	if viewErr != nil {
+		//: the root's verdict.
+		return 0, viewErr
+	}
+	defer view.close()
 	oldest := 0
 	//: every filed key, once.
 	for entry, allErr := range s.store.All(ctx) {
@@ -180,21 +202,59 @@ func (s *SubjectKeys) OldestRoot(ctx context.Context) (version int, err error) {
 			//: StoreUnavailable.
 			return 0, storeFailure(allErr, "all", "")
 		}
-		wrapped, _, parsed := parseHeader(entry.Wrapped)
-		//: not a keyring box: no version could open it.
-		if !parsed {
+		//: a cancelled scan answers nothing a rotation may rely on.
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			//: the context's own error.
+			return 0, ctxErr
+		}
+		wrappedUnder, opens := openedUnder(view, entry)
+		//: nothing keeps a key that does not open: it pins no version.
+		if !opens {
 			continue
 		}
-		//: the lowest version seen so far.
-		if oldest == 0 || wrapped < oldest {
-			oldest = wrapped
+		//: the lowest version a live key needs, so far.
+		if oldest == 0 || wrappedUnder < oldest {
+			oldest = wrappedUnder
 		}
-	}
-	//: a cancelled scan answers nothing a rotation may rely on.
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		//: the context's own error.
-		return 0, ctxErr
 	}
 	//: the oldest version in use, or 0.
 	return oldest, nil
+}
+
+// openedUnder reports the root version entry's key is wrapped under, and
+// whether it opens there as one data key. The key is cleared at once: the
+// question is where it lives, not what it is.
+func openedUnder(view *rootView, entry coresecret.SubjectKeyValue) (version int, opens bool) {
+	version, _, _ = parseHeader(entry.Wrapped)
+	dek, opened := unwrapIn(view, entry)
+	clear(dek)
+	//: the version, when the key is alive under it.
+	return version, opened
+}
+
+// unwrapIn opens entry's wrapped key under the view and returns the data key,
+// which the caller clears. It reports false for everything the load path
+// would refuse as unreadable: a subject outside the grammar, a version the
+// view does not hold, a wrapper altered or sealed for another purpose, and a
+// plaintext that is not one key long.
+func unwrapIn(view *rootView, entry coresecret.SubjectKeyValue) (dek []byte, opened bool) {
+	//: an entry this engine could never have filed.
+	if coresecret.ValidateSubject(entry.Subject) != nil {
+		//: not a key.
+		return nil, false
+	}
+	dek, openErr := view.open(entry.Wrapped, wrapAAD(entry.Subject))
+	//: a version gone or unusable, another root, another purpose, or altered.
+	if openErr != nil {
+		//: not a key.
+		return nil, false
+	}
+	//: authenticated, but not what this engine wraps.
+	if len(dek) != corecrypto.KeyLen {
+		clear(dek)
+		//: not a key.
+		return nil, false
+	}
+	//: the data key.
+	return dek, true
 }
