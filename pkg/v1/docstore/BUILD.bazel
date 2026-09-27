@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/kernel/errs",
         "//internal/service/docstore",
+        "//pkg/v1/sql",
     ],
 )
 

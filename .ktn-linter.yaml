@@ -884,6 +884,13 @@ rules:
       # or builds a store over files it never read (ADR 0110).
       - "**/internal/service/docstore/docstore.go"
       - "internal/service/docstore/docstore.go"
+      # service/docstore.SQLStore is built by OpenSQL, the same engine family's
+      # constructor under the same verb as Store's Open. A NewSQLStore beside it
+      # would be a second way in that skips the configuration's refusals — a
+      # transactor that cannot join, a table name that is not safe to
+      # interpolate — which OpenSQL decides before the store exists (ADR 0139).
+      - "**/internal/service/docstore/sql_store.go"
+      - "internal/service/docstore/sql_store.go"
       # service/proc/childwait.Claim is MINTED by Spawn, under the ledger's
       # spawning gate, and by nothing else (ADR 0093): the gate is what keeps a
       # sweep from taking the child for an orphan between the fork and the
@@ -1120,6 +1127,12 @@ rules:
       # one engine differently from every port it sits beside (ADR 0110).
       - "**/internal/service/docstore/docstore.go"
       - "internal/service/docstore/docstore.go"
+      # service/docstore.SQLStore is the same role over a database: the store,
+      # named as its sibling engine is, prefixed by what it keeps its documents
+      # in. "SQLStoreService" would name the second engine differently from the
+      # first, and from every storage port beside them (ADR 0139).
+      - "**/internal/service/docstore/sql_store.go"
+      - "internal/service/docstore/sql_store.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the

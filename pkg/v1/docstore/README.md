@@ -54,15 +54,42 @@ A Store is safe for concurrent use, and a reader never waits for a disk: writers
 
 It is one process's store: a second process opening the same files is not detected. It keeps every document in memory. It has no transaction across documents. It is a store for the documents a service owns, not a database.
 
+### The same store over SQL
+
+[OpenSQL](<#OpenSQL>) keeps the same documents — the same keys, indexes, write modes, hooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or SQLite database the caller opened and hands over as a \[sql.Transactor\]. Nothing is held in memory: the database is the source of truth, and every call is a round trip that takes a context \(ADR 0139\).
+
+```
+tm, err := sql.NewTransactor(sql.Config{DB: pool, Dialect: sql.DialectPostgres, Pool: sql.PoolConfig{MaxOpen: 10}})
+create, err := docstore.SQLMigration(sql.DialectPostgres, "members__accounts", 20260927120000) // run by your Migrator
+accounts, err := docstore.OpenSQL(
+    docstore.SQLConfig[Account]{Key: func(a Account) string { return a.ID },
+        Transactor: tm, Dialect: sql.DialectPostgres, Table: "members__accounts"},
+    docstore.Unique("email", func(a Account) string { return a.Email }),
+)
+err = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {
+    return accounts.Insert(ctx, Account{ID: "acc_1", Email: "ada@example.com"}) // joins this transaction
+})
+```
+
+A call runs on the transaction its context carries for that transactor, and on the pool otherwise. A write runs in a savepoint of the caller's transaction — or a transaction of its own — so it is atomic on its own, and a refused one leaves the caller's transaction usable. Its hooks run once the transaction that holds it has committed, and never for one rolled back.
+
+The document is kept as the bytes the store encoded, never as the engine's JSON type, which reorders members and respells numbers, so it reads back byte for byte. Keys are compared as bytes — binary key columns, no collation — so "a", "A" and "a " are three keys, as they are in Go. A key longer than [MaxSQLKeyLen](<#MaxSQLKeyLen>) bytes is refused with KeyTooLong. Index keys may reach the table hashed: [SQLConfig](<#SQLConfig>).IndexKey transforms every one at a write and at every Lookup and Find, and an index is an equality lookup, which a keyed hash keeps. Index rows are kept, not rebuilt at every open: after a declaration changes, [SQLStore](<#SQLStore>).Reindex files the stored documents again.
+
+A failure of the database is StatementFailed, which a caller answers with a 503: the driver's error is joined beside it for errors.Is and errors.As, and withheld from its text, because a driver quotes the row a constraint refused and that row holds a key.
+
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
 - [type Config](<#Config>)
 - [type Entry](<#Entry>)
 - [type IndexSpec](<#IndexSpec>)
   - [func Index\[T any\]\(name string, keys func\(T\) \[\]string\) IndexSpec\[T\]](<#Index>)
   - [func Unique\[T any\]\(name string, key func\(T\) string\) IndexSpec\[T\]](<#Unique>)
+- [type SQLConfig](<#SQLConfig>)
+- [type SQLStore](<#SQLStore>)
+  - [func OpenSQL\[T any\]\(cfg SQLConfig\[T\], indexes ...IndexSpec\[T\]\) \(\*SQLStore\[T\], error\)](<#OpenSQL>)
 - [type Stats](<#Stats>)
 - [type Store](<#Store>)
   - [func Open\[T any\]\(cfg Config\[T\], indexes ...IndexSpec\[T\]\) \(\*Store\[T\], error\)](<#Open>)
@@ -105,6 +132,10 @@ const (
     CodeStoreMisconfigured errs.Code = svcdocstore.CodeStoreMisconfigured
     // CodeWriteUnconfirmed: the write stands, its durability is in doubt.
     CodeWriteUnconfirmed errs.Code = svcdocstore.CodeWriteUnconfirmed
+    // CodeStatementFailed: the SQL store's database did not complete a call.
+    CodeStatementFailed errs.Code = svcdocstore.CodeStatementFailed
+    // CodeKeyTooLong: a key is longer than the SQL store's key columns hold.
+    CodeKeyTooLong errs.Code = svcdocstore.CodeKeyTooLong
 )
 ```
 
@@ -112,6 +143,24 @@ const (
 
 ```go
 const DefaultFoldAt int = svcdocstore.DefaultFoldAt
+```
+
+<a name="MaxSQLIndexNameLen"></a>MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.
+
+```go
+const MaxSQLIndexNameLen int = svcdocstore.MaxSQLIndexNameLen
+```
+
+<a name="MaxSQLKeyLen"></a>MaxSQLKeyLen is the longest store key, and the longest index key as it reaches the table, a SQL store accepts, in bytes.
+
+```go
+const MaxSQLKeyLen int = svcdocstore.MaxSQLKeyLen
+```
+
+<a name="MaxSQLTableLen"></a>MaxSQLTableLen is the longest table name [OpenSQL](<#OpenSQL>) and [SQLMigration](<#SQLMigration>) accept, in bytes: PostgreSQL's limit of 63, less what the store appends to derive its index table's name.
+
+```go
+const MaxSQLTableLen int = svcdocstore.MaxSQLTableLen
 ```
 
 ## Variables
@@ -151,11 +200,25 @@ var (
     // WriteUnconfirmed reports a write that stands but may not survive a
     // power loss.
     WriteUnconfirmed = svcdocstore.WriteUnconfirmed
+    // StatementFailed reports a call the SQL store's database did not
+    // complete; the driver's error is joined beside it, its text withheld.
+    StatementFailed = svcdocstore.StatementFailed
+    // KeyTooLong refuses a key longer than the SQL store's key columns hold.
+    KeyTooLong = svcdocstore.KeyTooLong
 )
 ```
 
+<a name="SQLMigration"></a>
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L278>)
+
+```go
+func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
+```
+
+SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again.
+
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L170>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L232>)
 
 Config is the public alias for a store's configuration: Key \(required\), FS and Path \(both, or neither for a memory store\), and FoldAt.
 
@@ -164,7 +227,7 @@ type Config[T any] = svcdocstore.Config[T]
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L177>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L239>)
 
 Entry is the public alias for one stored document as JSON, with its key.
 
@@ -173,7 +236,7 @@ type Entry = svcdocstore.EntryValue
 ```
 
 <a name="IndexSpec"></a>
-## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L174>)
+## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L236>)
 
 IndexSpec is the public alias for one secondary index's declaration, built by [Unique](<#Unique>) or [Index](<#Index>) and given to [Open](<#Open>).
 
@@ -182,7 +245,7 @@ type IndexSpec[T any] = svcdocstore.IndexSpec[T]
 ```
 
 <a name="Index"></a>
-### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L201>)
+### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L292>)
 
 ```go
 func Index[T any](name string, keys func(T) []string) IndexSpec[T]
@@ -191,7 +254,7 @@ func Index[T any](name string, keys func(T) []string) IndexSpec[T]
 Index declares an index where a document may have several keys and a key several documents. Empty keys are not indexed.
 
 <a name="Unique"></a>
-### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L194>)
+### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L285>)
 
 ```go
 func Unique[T any](name string, key func(T) string) IndexSpec[T]
@@ -199,8 +262,35 @@ func Unique[T any](name string, key func(T) string) IndexSpec[T]
 
 Unique declares a unique index over the one key key returns. An empty key is not indexed, so any number of documents may have none.
 
+<a name="SQLConfig"></a>
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L254>)
+
+SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table \(required\), and IndexKey.
+
+```go
+type SQLConfig[T any] = svcdocstore.SQLConfig[T]
+```
+
+<a name="SQLStore"></a>
+## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L250>)
+
+SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write; OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
+
+```go
+type SQLStore[T any] = svcdocstore.SQLStore[T]
+```
+
+<a name="OpenSQL"></a>
+### func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L268>)
+
+```go
+func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error)
+```
+
+OpenSQL builds a store over SQL from cfg with the secondary indexes given, declared as for [Open](<#Open>). It sends no statement: its tables are [SQLMigration](<#SQLMigration>)'s, run by the caller's Migrator before the store is used.
+
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L181>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L243>)
 
 Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, and the last automatic fold's failure.
 
@@ -209,7 +299,7 @@ type Stats = svcdocstore.StatsValue
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L166>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L228>)
 
 Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
@@ -218,7 +308,7 @@ type Store[T any] = svcdocstore.Store[T]
 ```
 
 <a name="Open"></a>
-### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L187>)
+### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/docstore/docstore.go#L260>)
 
 ```go
 func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)

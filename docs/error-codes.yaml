@@ -2302,6 +2302,14 @@ codes:
     const: CodeWriteUnconfirmed
     hex: "0x00_03_50_0F"
     package: internal/service/docstore
+  - code: "0.3.80.16"
+    const: CodeStatementFailed
+    hex: "0x00_03_50_10"
+    package: internal/service/docstore
+  - code: "0.3.80.17"
+    const: CodeKeyTooLong
+    hex: "0x00_03_50_11"
+    package: internal/service/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"

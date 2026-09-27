@@ -101,6 +101,15 @@ func (c *Config[T]) validate(indexes []IndexSpec[T]) error {
 		//: StoreMisconfigured, naming the setting.
 		return pathErr
 	}
+	//: the declarations every engine refuses alike.
+	return validateIndexes(indexes)
+}
+
+// validateIndexes refuses index declarations no engine could serve: an index
+// with no name, two of one name, or one with no key function. Both Open and
+// OpenSQL call it, so a declaration refused by one engine is refused by the
+// other.
+func validateIndexes[T any](indexes []IndexSpec[T]) error {
 	//: every index has a distinct name and a function.
 	seen := make(map[string]bool, len(indexes))
 	//: in declaration order, so the first mistake is the one reported.
@@ -124,7 +133,7 @@ func (c *Config[T]) validate(indexes []IndexSpec[T]) error {
 				kerrs.String("setting", "Indexes"), kerrs.String("problem", "no key function"), kerrs.String("index", spec.Name))
 		}
 	}
-	//: a store that can be opened.
+	//: declarations an engine can serve.
 	return nil
 }
 

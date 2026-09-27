@@ -61,3 +61,13 @@ const CodeStoreMisconfigured errs.Code = 0x00_03_50_0E // 0.3.80.14
 // not confirm durable: the directory flush after the rename failed. The write
 // took effect — every reader of the files sees it, and so does the store.
 const CodeWriteUnconfirmed errs.Code = 0x00_03_50_0F // 0.3.80.15
+
+// CodeStatementFailed identifies a call the SQL store's database did not
+// complete: it could not be reached, or it refused a statement for a reason
+// that is not one of the store's own refusals. The driver's error travels
+// beside it, withheld from its text.
+const CodeStatementFailed errs.Code = 0x00_03_50_10 // 0.3.80.16
+
+// CodeKeyTooLong identifies a write whose store key, or one of whose index
+// keys, is longer than the SQL store's key columns hold.
+const CodeKeyTooLong errs.Code = 0x00_03_50_11 // 0.3.80.17

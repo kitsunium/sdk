@@ -5,7 +5,9 @@
 Public facade over `internal/service/docstore` (ADR 0110): typed, keyed JSON
 documents with unique and multi-valued secondary indexes, in memory or
 persisted through a `vfs.FullFS` — every write durable before it returns, and
-a write's cost independent of how many documents the store holds.
+a write's cost independent of how many documents the store holds — and the same
+contract over SQL, in two tables of a PostgreSQL, MySQL or SQLite database,
+every call on the transaction its context carries (ADR 0139).
 
 ## Surface
 
@@ -19,11 +21,18 @@ a write's cost independent of how many documents the store holds.
 | `Entry` | type alias | `= svcdocstore.EntryValue` — `Key`, `JSON` (the caller's copy) |
 | `Stats` | type alias | `= svcdocstore.StatsValue` — `Documents`, `Pending`, `Folds`, `FoldError` |
 | `DefaultFoldAt` | const | 1024 |
-| `Code*` | const | `0.3.80.1`–`0.3.80.15` |
-| `DocumentNotFound` … `WriteUnconfirmed` | var | the fifteen sentinels |
+| `OpenSQL[T](cfg, indexes...)` | func | a `*SQLStore[T]` over `cfg.Transactor`; sends no statement |
+| `SQLStore[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `OnWrite`, `OnDelete`; `Reindex` — every call takes a context |
+| `SQLConfig[T]` | type alias | `Key`, `Transactor`, `Dialect`, `Table` (required), `IndexKey` |
+| `SQLMigration(dialect, table, version)` | func | the two tables as one idempotent `sql.Migration` |
+| `MaxSQLTableLen` / `MaxSQLKeyLen` / `MaxSQLIndexNameLen` | const | 58 / 1024 / 64 bytes |
+| `Code*` | const | `0.3.80.1`–`0.3.80.17` |
+| `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong` | var | the seventeen sentinels |
 
 All types are aliases onto the service: there is no port, and the values are
-the engine's (ADR 0074).
+the engines' (ADR 0074, ADR 0139 §D2). The SQL signatures name `pkg/v1/sql`'s
+aliases (`sql.Dialect`, `sql.Migration`), so a consumer's documentation never
+shows an internal package.
 
 ## Why-this-shape
 
@@ -34,6 +43,10 @@ the engine's (ADR 0074).
   directory hands it over, and a test hands `vfs.NewMem()`.
 - **The codes are exported beside the sentinels** because a caller maps them —
   a framework turning `DocumentNotFound` into a 404 reads `CodeDocumentNotFound`.
+  Both engines answer the same codes, so one mapping serves both.
+- **The SQL engine is `OpenSQL` in this package, not a package of its own**,
+  because its refusals ARE this package's: a second package would be a second
+  code range for the same meanings.
 
 ## README is generated
 

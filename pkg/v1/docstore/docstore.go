@@ -79,16 +79,69 @@
 // It is one process's store: a second process opening the same files is not
 // detected. It keeps every document in memory. It has no transaction across
 // documents. It is a store for the documents a service owns, not a database.
+//
+// # The same store over SQL
+//
+// [OpenSQL] keeps the same documents — the same keys, indexes, write modes,
+// hooks and refusals, the same codes — in two tables of a PostgreSQL, MySQL or
+// SQLite database the caller opened and hands over as a [sql.Transactor].
+// Nothing is held in memory: the database is the source of truth, and every
+// call is a round trip that takes a context (ADR 0139).
+//
+//	tm, err := sql.NewTransactor(sql.Config{DB: pool, Dialect: sql.DialectPostgres, Pool: sql.PoolConfig{MaxOpen: 10}})
+//	create, err := docstore.SQLMigration(sql.DialectPostgres, "members__accounts", 20260927120000) // run by your Migrator
+//	accounts, err := docstore.OpenSQL(
+//	    docstore.SQLConfig[Account]{Key: func(a Account) string { return a.ID },
+//	        Transactor: tm, Dialect: sql.DialectPostgres, Table: "members__accounts"},
+//	    docstore.Unique("email", func(a Account) string { return a.Email }),
+//	)
+//	err = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {
+//	    return accounts.Insert(ctx, Account{ID: "acc_1", Email: "ada@example.com"}) // joins this transaction
+//	})
+//
+// A call runs on the transaction its context carries for that transactor, and
+// on the pool otherwise. A write runs in a savepoint of the caller's
+// transaction — or a transaction of its own — so it is atomic on its own, and
+// a refused one leaves the caller's transaction usable. Its hooks run once the
+// transaction that holds it has committed, and never for one rolled back.
+//
+// The document is kept as the bytes the store encoded, never as the engine's
+// JSON type, which reorders members and respells numbers, so it reads back
+// byte for byte. Keys are compared as bytes — binary key columns, no
+// collation — so "a", "A" and "a " are three keys, as they are in Go. A key
+// longer than [MaxSQLKeyLen] bytes is refused with KeyTooLong. Index keys may
+// reach the table hashed: [SQLConfig].IndexKey transforms every one at a write
+// and at every Lookup and Find, and an index is an equality lookup, which a
+// keyed hash keeps. Index rows are kept, not rebuilt at every open: after a
+// declaration changes, [SQLStore].Reindex files the stored documents again.
+//
+// A failure of the database is StatementFailed, which a caller answers with a
+// 503: the driver's error is joined beside it for errors.Is and errors.As,
+// and withheld from its text, because a driver quotes the row a constraint
+// refused and that row holds a key.
 package docstore
 
 import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcdocstore "github.com/kitsunium/sdk/internal/service/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // DefaultFoldAt is the least number of overlay entries that folds the overlay
 // into the snapshot when [Config].FoldAt is zero.
 const DefaultFoldAt int = svcdocstore.DefaultFoldAt
+
+// MaxSQLTableLen is the longest table name [OpenSQL] and [SQLMigration]
+// accept, in bytes: PostgreSQL's limit of 63, less what the store appends to
+// derive its index table's name.
+const MaxSQLTableLen int = svcdocstore.MaxSQLTableLen
+
+// MaxSQLKeyLen is the longest store key, and the longest index key as it
+// reaches the table, a SQL store accepts, in bytes.
+const MaxSQLKeyLen int = svcdocstore.MaxSQLKeyLen
+
+// MaxSQLIndexNameLen is the longest index name a SQL store accepts, in bytes.
+const MaxSQLIndexNameLen int = svcdocstore.MaxSQLIndexNameLen
 
 // The codes of the store's refusals (0.3.80.*), for errs.HasCode.
 const (
@@ -123,6 +176,10 @@ const (
 	CodeStoreMisconfigured errs.Code = svcdocstore.CodeStoreMisconfigured
 	// CodeWriteUnconfirmed: the write stands, its durability is in doubt.
 	CodeWriteUnconfirmed errs.Code = svcdocstore.CodeWriteUnconfirmed
+	// CodeStatementFailed: the SQL store's database did not complete a call.
+	CodeStatementFailed errs.Code = svcdocstore.CodeStatementFailed
+	// CodeKeyTooLong: a key is longer than the SQL store's key columns hold.
+	CodeKeyTooLong errs.Code = svcdocstore.CodeKeyTooLong
 )
 
 // The store's sentinels, for errors.Is.
@@ -158,6 +215,11 @@ var (
 	// WriteUnconfirmed reports a write that stands but may not survive a
 	// power loss.
 	WriteUnconfirmed = svcdocstore.WriteUnconfirmed
+	// StatementFailed reports a call the SQL store's database did not
+	// complete; the driver's error is joined beside it, its text withheld.
+	StatementFailed = svcdocstore.StatementFailed
+	// KeyTooLong refuses a key longer than the SQL store's key columns hold.
+	KeyTooLong = svcdocstore.KeyTooLong
 )
 
 // Store is the public alias for the document store: Get, List, Filter,
@@ -180,6 +242,17 @@ type Entry = svcdocstore.EntryValue
 // pending overlay entries, folds, and the last automatic fold's failure.
 type Stats = svcdocstore.StatsValue
 
+// SQLStore is the public alias for the document store over SQL: Get, List,
+// Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update
+// and Delete write; OnWrite and OnDelete announce once the write's
+// transaction commits; Reindex files the stored documents again. Every call
+// takes a context.
+type SQLStore[T any] = svcdocstore.SQLStore[T]
+
+// SQLConfig is the public alias for a SQL store's configuration: Key,
+// Transactor, Dialect and Table (required), and IndexKey.
+type SQLConfig[T any] = svcdocstore.SQLConfig[T]
+
 // Open builds a store from cfg with the secondary indexes given: in memory
 // without a filesystem, otherwise loaded from it — the snapshot, the overlay
 // replayed on top, the indexes rebuilt. It creates the directories the store
@@ -187,6 +260,24 @@ type Stats = svcdocstore.StatsValue
 func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
 	//: delegate verbatim to the service constructor.
 	return svcdocstore.Open(cfg, indexes...)
+}
+
+// OpenSQL builds a store over SQL from cfg with the secondary indexes given,
+// declared as for [Open]. It sends no statement: its tables are
+// [SQLMigration]'s, run by the caller's Migrator before the store is used.
+func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error) {
+	//: delegate verbatim to the service constructor.
+	return svcdocstore.OpenSQL(cfg, indexes...)
+}
+
+// SQLMigration returns the migration that creates the two tables a SQL store
+// named table keeps on dialect, numbered version for the caller's own version
+// table. Its Down drops both, and every document in them. Every statement does
+// nothing when its table exists, so a run MySQL's implicit commit stopped
+// halfway completes when it runs again.
+func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error) {
+	//: delegate verbatim to the service constructor.
+	return svcdocstore.SQLMigration(dialect, table, version)
 }
 
 // Unique declares a unique index over the one key key returns. An empty key is
