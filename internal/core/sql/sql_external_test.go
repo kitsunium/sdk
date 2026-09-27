@@ -48,6 +48,28 @@ func TestTransactorIsFrozenAtOneMethod(t *testing.T) {
 	}
 }
 
+// TestTheTransactorsSiblingsAreFrozenAtOneMethodEach pins the two capabilities
+// ADR 0139 added BESIDE the frozen Transactor rather than in it. pkg/v1 aliases
+// both, so each is published at one method: a second capability is a third
+// sibling, never a widened one.
+func TestTheTransactorsSiblingsAreFrozenAtOneMethodEach(t *testing.T) {
+	t.Parallel()
+	for name, sibling := range map[string]reflect.Type{
+		"Join":  reflect.TypeFor[coresql.Joiner](),
+		"Defer": reflect.TypeFor[coresql.Deferrer](),
+	} {
+		if sibling.NumMethod() != 1 {
+			t.Fatalf("%s has %d methods, want 1", sibling.Name(), sibling.NumMethod())
+		}
+		if _, found := sibling.MethodByName(name); !found {
+			t.Fatalf("%s does not declare %s", sibling.Name(), name)
+		}
+		if reflect.TypeFor[coresql.Transactor]().Implements(sibling) {
+			t.Fatalf("Transactor satisfies %s by itself: the capability was folded into the frozen port", sibling.Name())
+		}
+	}
+}
+
 // TestParseDialectRefusesRecognisedEnginesByName covers the distinction that
 // makes a refusal actionable: an engine we KNOW and decline reports why, and
 // is a different error from one we have never heard of.

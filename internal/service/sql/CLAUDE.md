@@ -4,8 +4,9 @@
 
 Implements the **ADR 0055** relational-database ports declared in
 `internal/core/sql`: the transaction manager (root transactions **and** nested
-savepoints), the connection-pool policy, the bounded health check, and the
-migration runner with its advisory lock and version table.
+savepoints) with its `Joiner` and `Deferrer` siblings (ADR 0139), the
+connection-pool policy, the bounded health check, and the migration runner
+with its advisory lock and version table.
 
 It ships **no driver** and imports none. `database/sql` is the stdlib's driver
 interface; a *driver* is a vendor connector and lives under `third-party/`
@@ -20,9 +21,10 @@ Code range: `0.3.54.*` (ADR 0055).
 | `sql.go` | package doc + `failed()` — the verdict/driver-error join |
 | `config.go` | `Config`, `PoolConfig`, `Default{MaxLifetime,MaxIdle,CheckTimeout}` |
 | `resolved.go` | `resolved` — the validated, clamped form of a `Config` |
-| `tx.go` | `NewTransactor`, `transactor`, root/nested settle paths, `cleanup()`, `txEnded()` |
-| `txstate.go` | `txState` — savepoint counter + poison flag, under one `sync.RWMutex` |
-| `txscope.go` | `txScope` — the per-context transaction chain and its walk |
+| `tx.go` | `NewTransactor`, `transactor`, root/nested settle paths, `cleanup()`, `txEnded()`; the held functions run after the root's commit and are dropped with a failed savepoint |
+| `join.go` | `Join` (core/sql.Joiner) and `Defer` (core/sql.Deferrer) — ADR 0139 |
+| `txstate.go` | `txState` — savepoint counter + poison flag + the functions held until the commit, each tagged with its scope's id, under one `sync.RWMutex` |
+| `txscope.go` | `txScope` — the per-context transaction chain and its walk; each link carries the executor its scope lent and its id (0 for the root, the savepoint counter otherwise) |
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
 | `statements.go` | `Statements(...string) coresql.Step` |
@@ -99,6 +101,12 @@ Code range: `0.3.54.*` (ADR 0055).
   SQLite gets `MigrationLockUnsupported`. Running unlocked is not offered as a
   fallback: a runner that silently drops mutual exclusion is at its most
   dangerous in exactly the situation it exists for.
+- **`Join` never falls back to the pool for a context that names one of this
+  manager's transactions**, even a finished one: its retired executor refuses
+  with `TX_CLOSED`. **`Defer` tags a held function with the id of the scope
+  that held it**; a failed savepoint drops ids at or above its own — scopes
+  are a stack and ids only grow — and the root runs what is left after its
+  COMMIT, before `Transact` returns (ADR 0139).
 - **The version table name is validated against `identifierPattern`, never
   bound.** An identifier cannot be a parameter, so it is interpolated — that
   regexp is the whole defence.

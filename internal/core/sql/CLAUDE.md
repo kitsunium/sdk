@@ -4,8 +4,11 @@
 
 Declares the **relational-database ports** above `database/sql`: `Executor`
 (the read/write surface a statement runs against), `Transactor` (who owns a
-transaction), `Checker` (a bounded liveness probe) and `Migrator` (an ordered,
-versioned, mutually-exclusive schema runner) — plus the domain values
+transaction) with its two ADR 0039 siblings `Joiner` (where a statement issued
+under a context runs) and `Deferrer` (a function held until the context's
+transaction commits — ADR 0139), `Checker` (a bounded liveness probe) and
+`Migrator` (an ordered, versioned, mutually-exclusive schema runner) — plus
+the domain values
 `TxOptionsValue`, `MigrationValue`, `Dialect`, the `TxFunc` / `Step` func ports
 and the typed sentinels. Admitted by **ADR 0055**. Every concrete
 implementation lives in `internal/service/sql`.
@@ -17,7 +20,7 @@ Code range: `0.2.24.*` (ADR 0055).
 | File | Surface |
 |---|---|
 | `sql.go` | package doc + `TxFunc func(ctx, Executor) error` |
-| `sql_interface.go` | the four ports — `Executor`, `Preparer` (ADR 0039 sibling), `Transactor`, `Checker`, `Migrator` |
+| `sql_interface.go` | the four ports and their siblings — `Executor`, `Preparer` (ADR 0039 sibling), `Transactor`, `Joiner` and `Deferrer` (its ADR 0039 siblings, ADR 0139), `Checker`, `Migrator` |
 | `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + `ParseDialect` |
 | `sql_txoptions.go` | `TxOptionsValue` — `Isolation` / `ReadOnly` + `IsZero` / `StdOptions` |
 | `sql_migration.go` | `Step func(ctx, Executor) error`, `MigrationValue` + `Validate`, `Irreversible` |
@@ -41,6 +44,15 @@ Code range: `0.2.24.*` (ADR 0055).
   that receives an `Executor` therefore *cannot* end the transaction it was
   handed — the mistake does not compile. `Preparer` is the first ADR 0039
   sibling; a fourth capability gets a fifth interface, never a fourth method.
+- **`Transactor` grows by siblings too.** `Joiner.Join(ctx)` answers the
+  executor of the innermost scope of the transaction ctx carries for THAT
+  transactor — a retired one when the scope has returned, never the pool,
+  so a leaked context refuses instead of running outside its transaction —
+  or the pool when ctx carries none. `Deferrer.Defer(ctx, fn)` holds fn until
+  that transaction commits; the rollback of the savepoint it was held in drops
+  it, and a released savepoint hands it to the scope around it. Both are one
+  method each and frozen, and a transactor that is not the SDK's may offer
+  neither: a consumer asserts for them (ADR 0139).
 - **`TxFunc` and `Step` are FUNC ports**, the shape `internal/core/CLAUDE.md`
   already admits for `resilience.Operation`, `scheduler.Job` and
   `lifecycle.Start`. ADR 0039 is satisfied structurally: a func type cannot
@@ -75,10 +87,10 @@ Code range: `0.2.24.*` (ADR 0055).
 
 ## Do NOT
 
-- **Add a method to `Executor`, `Transactor`, `Checker` or `Migrator`.**
-  `pkg/v1/sql` aliases all four, so the shape is published (ADR 0039). A new
-  capability gets a sibling interface discovered by type assertion, as
-  `Preparer` is.
+- **Add a method to `Executor`, `Transactor`, `Joiner`, `Deferrer`,
+  `Checker` or `Migrator`.** `pkg/v1/sql` aliases all six, so the shape is
+  published (ADR 0039). A new capability gets a sibling interface discovered
+  by type assertion, as `Preparer`, `Joiner` and `Deferrer` are.
 - **Grow an ORM here.** No entity mapping, no query builder, no lazy loading,
   no identity map, no change tracking, no repository generation, no schema
   reflection. ADR 0055 §D1 is a decision, not an omission.

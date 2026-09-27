@@ -79,7 +79,9 @@ func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn c
 		//: back, then let the panic continue with its original stack — see
 		//: the package doc: a panic is not a database outcome, and
 		//: converting it here would hide a bug at the site that produced it.
+		//: What was held for a commit that will never happen is dropped.
 		scoped.retire()
+		state.drain(false)
 		//: the panic is the news and it is already travelling, so there is no
 		//: return value left to report a rollback failure on. It is recorded
 		//: on the STATE instead: a unit of work that leaked its executor past
@@ -90,11 +92,18 @@ func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn c
 			state.poison(failed(RollbackFailed, rbErr))
 		}
 	}()
-	err = fn(withScope(ctx, t, state), scoped)
+	err = fn(withScope(ctx, &txScope{owner: t, state: state, exec: scoped, id: rootScope}), scoped)
 	settled = true
 	scoped.retire()
 	//: commit, or roll back and report — in exactly one place.
-	return t.settle(state, err)
+	err = t.settle(state, err)
+	//: what was held for the commit runs once it stood, in the order it was
+	//: held, and is dropped with a transaction that did not (ADR 0139).
+	for _, held := range state.drain(err == nil) {
+		held.fn()
+	}
+	//: nil only for a commit.
+	return err
 }
 
 // settle ends a root transaction: commit on success, roll back otherwise.
@@ -189,7 +198,7 @@ func (t *transactor) nested(
 		//: the original cause travels beside the verdict.
 		return failed(TxPoisoned, poison)
 	}
-	name := scope.state.nextSavepoint()
+	id, name := scope.state.nextSavepoint()
 	create, undo, release := savepointSQL(scope.state.dialect, name)
 	//: the savepoint itself runs on the transaction, not through a scoped
 	//: executor: it is the SDK's own bookkeeping, not the unit of work.
@@ -199,7 +208,7 @@ func (t *transactor) nested(
 			kerrs.String("statement", "SAVEPOINT"), kerrs.String("savepoint", name))
 	}
 	//: run the unit of work, then release or roll back to the savepoint.
-	return t.runNested(ctx, scope, fn, savepointStmts{name: name, undo: undo, release: release})
+	return t.runNested(ctx, scope, fn, savepointStmts{name: name, undo: undo, release: release, id: id})
 }
 
 // runNested runs the unit of work under an already-created savepoint.
@@ -216,8 +225,10 @@ func (t *transactor) runNested(
 		}
 		//: a PANIC unwound past the scope. Retire the handle and undo the
 		//: savepoint so the outer transaction is not left carrying half of
-		//: an abandoned unit of work; the panic then continues.
+		//: an abandoned unit of work; the panic then continues. What the
+		//: scope held for the commit goes with its work.
 		scoped.retire()
+		scope.state.dropFrom(sp.id)
 		//: best-effort, and on a DETACHED context: a panic often coexists
 		//: with a cancellation, and the undo must outlive it. A failure here
 		//: POISONS, so the outer scope refuses to commit half of an abandoned
@@ -229,7 +240,7 @@ func (t *transactor) runNested(
 				kerrs.String("statement", "ROLLBACK TO"), kerrs.String("savepoint", sp.name)))
 		}
 	}()
-	err := fn(withScope(ctx, t, scope.state), scoped)
+	err := fn(withScope(ctx, &txScope{owner: t, state: scope.state, exec: scoped, id: sp.id}), scoped)
 	settled = true
 	scoped.retire()
 	//: release on success, roll back to the savepoint on failure.
@@ -241,8 +252,10 @@ func (t *transactor) runNested(
 func (t *transactor) settleNested(
 	ctx context.Context, scope *txScope, sp savepointStmts, cause error,
 ) error {
-	//: the failure path — undo just this scope's work.
+	//: the failure path — undo just this scope's work, and drop what it held
+	//: for a commit its work will no longer be part of.
 	if cause != nil {
+		scope.state.dropFrom(sp.id)
 		//: the caller's error travels verbatim beside whatever the undo says.
 		return errors.Join(cause, t.undoSavepoint(ctx, scope, sp))
 	}

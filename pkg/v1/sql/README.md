@@ -63,6 +63,17 @@ Three consequences worth knowing before you rely on it:
 - A failed nested scope does NOT condemn the outer transaction. ROLLBACK TO SAVEPOINT is precisely the statement that clears PostgreSQL's aborted state, so catching the inner error leaves you a usable transaction. If that statement itself fails, the transaction is poisoned: every later operation is refused and the commit never happens.
 - A nested call must pass the ZERO [TxOptions](<#TxOptions>). A savepoint cannot change isolation or read\-only mode, and being handed a weaker transaction than you asked for under a nil error is worse than being told no.
 
+### Joining the caller's transaction, and waiting for its commit
+
+The transactor [NewTransactor](<#NewTransactor>) returns has two more capabilities, each an interface of its own beside [Transactor](<#Transactor>), found by type assertion \(ADR 0139\):
+
+```
+ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
+held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+```
+
+[Joiner](<#Joiner>) answers the executor of the transaction ctx carries — so a repository called inside its caller's transaction reads what that transaction wrote — or the pool when it carries none. A context that outlived its transaction still names it, and its executor refuses rather than fall back to the pool. [Deferrer](<#Deferrer>) holds a function until that transaction commits: a rollback drops it, and so does the rollback of the savepoint it was held in. It is how a message, a mail or a store's write hook waits for the work it announces to be committed. The SDK's document store over SQL is built on both.
+
 ### Migrations
 
 [NewMigrator](<#NewMigrator>) applies an ordered, versioned set under the database's own advisory lock, so two instances starting together cannot apply the same migration twice. The lock dies with the connection that holds it, which is why it is the engine's and not a row in a table: a runner killed mid\-run leaves nothing held.
@@ -104,9 +115,11 @@ The sentinels above are the matchable values; their Code\(\) is the ADR 0005 dot
 - [type Checker](<#Checker>)
   - [func NewChecker\(cfg Config\) \(probe Checker, err error\)](<#NewChecker>)
 - [type Config](<#Config>)
+- [type Deferrer](<#Deferrer>)
 - [type Dialect](<#Dialect>)
   - [func ParseDialect\(name string\) \(dialect Dialect, err error\)](<#ParseDialect>)
 - [type Executor](<#Executor>)
+- [type Joiner](<#Joiner>)
 - [type MigrateConfig](<#MigrateConfig>)
 - [type Migration](<#Migration>)
 - [type Migrator](<#Migrator>)
@@ -191,7 +204,7 @@ var (
 ```
 
 <a name="Irreversible"></a>
-## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L263>)
+## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L291>)
 
 ```go
 func Irreversible(ctx context.Context, ex Executor) error
@@ -200,7 +213,7 @@ func Irreversible(ctx context.Context, ex Executor) error
 Irreversible is the [Step](<#Step>) a migration assigns to Down to declare, out loud, that it cannot be reversed.
 
 <a name="Transact"></a>
-## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L304>)
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L332>)
 
 ```go
 func Transact(ctx context.Context, tm Transactor, fn TxFunc) error
@@ -211,7 +224,7 @@ Transact runs fn inside a transaction with the driver's default isolation.
 It is the ergonomic form of [Transactor](<#Transactor>).Transact for the common case. The port itself keeps the options parameter so it never needs a second method \(ADR 0039\); this helper keeps the call site short.
 
 <a name="Checker"></a>
-## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L165>)
+## type [Checker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L193>)
 
 Checker is the public alias for the bounded liveness probe.
 
@@ -220,7 +233,7 @@ type Checker = coresql.Checker
 ```
 
 <a name="NewChecker"></a>
-### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L276>)
+### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L304>)
 
 ```go
 func NewChecker(cfg Config) (probe Checker, err error)
@@ -229,7 +242,7 @@ func NewChecker(cfg Config) (probe Checker, err error)
 NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L182>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L210>)
 
 Config is the public alias for the parameters every port is built from.
 
@@ -237,8 +250,17 @@ Config is the public alias for the parameters every port is built from.
 type Config = svcsql.Config
 ```
 
+<a name="Deferrer"></a>
+## type [Deferrer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L186>)
+
+Deferrer is the public alias for the ADR 0039 sibling of [Transactor](<#Transactor>) that holds a function until the transaction a context carries has committed, and drops it with a rollback. Discover it by type assertion.
+
+```go
+type Deferrer = coresql.Deferrer
+```
+
 <a name="Dialect"></a>
-## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L179>)
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L207>)
 
 Dialect is the public alias for the closed set of SQL engines this SDK can spell.
 
@@ -265,7 +287,7 @@ const DialectSQLite Dialect = coresql.DialectSQLite
 ```
 
 <a name="ParseDialect"></a>
-### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L256>)
+### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L284>)
 
 ```go
 func ParseDialect(name string) (dialect Dialect, err error)
@@ -274,7 +296,7 @@ func ParseDialect(name string) (dialect Dialect, err error)
 ParseDialect resolves a dialect name and never guesses. A recognised but unsupported engine returns [DialectRefused](<#UnknownDialect>) carrying why; an unrecognised one returns [UnknownDialect](<#UnknownDialect>).
 
 <a name="Executor"></a>
-## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L148>)
+## type [Executor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L166>)
 
 Executor is the public alias for the read/write surface a statement runs against. \*sql.DB, \*sql.Tx and \*sql.Conn all satisfy it with no adapter, and it deliberately carries no Commit, Rollback or Begin.
 
@@ -282,8 +304,17 @@ Executor is the public alias for the read/write surface a statement runs against
 type Executor = coresql.Executor
 ```
 
+<a name="Joiner"></a>
+## type [Joiner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L181>)
+
+Joiner is the public alias for the ADR 0039 sibling of [Transactor](<#Transactor>) that says where a statement issued under a context runs: in the transaction the context carries, or on the pool. Discover it by type assertion.
+
+```go
+type Joiner = coresql.Joiner
+```
+
 <a name="MigrateConfig"></a>
-## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L188>)
+## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L216>)
 
 MigrateConfig is the public alias for the migration runner's parameters.
 
@@ -292,7 +323,7 @@ type MigrateConfig = svcsql.MigrateConfig
 ```
 
 <a name="Migration"></a>
-## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L172>)
+## type [Migration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L200>)
 
 Migration is the public alias for one versioned schema change and its reversal.
 
@@ -301,7 +332,7 @@ type Migration = coresql.MigrationValue
 ```
 
 <a name="Migrator"></a>
-## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L168>)
+## type [Migrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L196>)
 
 Migrator is the public alias for the schema\-migration runner.
 
@@ -310,7 +341,7 @@ type Migrator = coresql.Migrator
 ```
 
 <a name="NewMigrator"></a>
-### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L283>)
+### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L311>)
 
 ```go
 func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
@@ -319,7 +350,7 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 NewMigrator returns the migration runner. It refuses a dialect with no session\-scoped advisory lock, by name and at construction.
 
 <a name="PoolConfig"></a>
-## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L185>)
+## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L213>)
 
 PoolConfig is the public alias for the connection\-pool policy.
 
@@ -328,7 +359,7 @@ type PoolConfig = svcsql.PoolConfig
 ```
 
 <a name="Preparer"></a>
-## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L152>)
+## type [Preparer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L170>)
 
 Preparer is the public alias for the ADR 0039 sibling of [Executor](<#Executor>): an executor that can also prepare a statement. Discover it by type assertion.
 
@@ -337,7 +368,7 @@ type Preparer = coresql.Preparer
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L175>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L203>)
 
 Step is the public alias for one direction of a migration.
 
@@ -346,7 +377,7 @@ type Step = coresql.Step
 ```
 
 <a name="Statements"></a>
-### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L294>)
+### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L322>)
 
 ```go
 func Statements(stmts ...string) Step
@@ -357,7 +388,7 @@ Statements returns a [Step](<#Step>) that runs the given statements in order on 
 It is the smallest useful helper and deliberately not a file loader: it invents no directory layout, no naming convention and no parser. Where the text comes from — a literal, an embed.FS, a generator — stays yours.
 
 <a name="Transactor"></a>
-## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L158>)
+## type [Transactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L176>)
 
 Transactor is the public alias for the transaction manager.
 
@@ -366,7 +397,7 @@ type Transactor = coresql.Transactor
 ```
 
 <a name="NewTransactor"></a>
-### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L270>)
+### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L298>)
 
 ```go
 func NewTransactor(cfg Config) (manager Transactor, err error)
@@ -375,7 +406,7 @@ func NewTransactor(cfg Config) (manager Transactor, err error)
 NewTransactor returns the transaction manager for cfg.DB, applying cfg.Pool to it.
 
 <a name="TxFunc"></a>
-## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L155>)
+## type [TxFunc](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L173>)
 
 TxFunc is the public alias for a unit of work run inside a transaction.
 
@@ -384,7 +415,7 @@ type TxFunc = coresql.TxFunc
 ```
 
 <a name="TxOptions"></a>
-## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L162>)
+## type [TxOptions](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L190>)
 
 TxOptions is the public alias for one transaction's isolation and read\-only\-ness. The zero value defers to the driver.
 

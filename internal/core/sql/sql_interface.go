@@ -73,6 +73,54 @@ type Transactor interface {
 	Transact(ctx context.Context, opts TxOptionsValue, fn TxFunc) error
 }
 
+// Joiner is an ADR 0039 sibling of [Transactor]: a transactor that says where
+// a statement issued under a context runs. Discover it by type assertion; the
+// SDK's own transactor implements it.
+//
+// It is what lets a callee JOIN the transaction its caller opened instead of
+// opening a second one. A second transaction takes a second connection, does
+// not see the caller's uncommitted writes, and under a pool of one waits
+// forever for the connection its own caller holds (ADR 0139).
+type Joiner interface {
+	// Join returns the executor a statement issued under ctx runs on.
+	//
+	// When ctx carries a transaction THIS transactor opened, that is the
+	// executor of the innermost scope ctx names, and inTx is true. It is
+	// valid only while that scope runs and refuses afterwards: a context
+	// that outlived its transaction must not fall back to the pool, where
+	// its statements would run outside the transaction they were written
+	// for.
+	//
+	// When ctx carries none — no transaction, or only another transactor's —
+	// it is the pool, outside any transaction, and inTx is false.
+	Join(ctx context.Context) (ex Executor, inTx bool)
+}
+
+// Deferrer is an ADR 0039 sibling of [Transactor]: a transactor that holds a
+// function until the transaction a context carries has committed. Discover it
+// by type assertion; the SDK's own transactor implements it.
+//
+// It is how an effect that must not happen for work that is rolled back — a
+// store's write hooks, a message, a mail — waits for the commit (ADR 0139).
+type Deferrer interface {
+	// Defer holds fn until the transaction ctx carries for this transactor
+	// commits, and reports true.
+	//
+	// The held functions run once, in the order they were held, on the
+	// goroutine that commits, after the commit and before the outermost
+	// Transact returns. A rollback drops them, and so does the rollback of
+	// the savepoint they were held in; a savepoint that is released hands
+	// them to the scope around it. A panic in one reaches the caller of the
+	// outermost Transact after the commit stood, and the functions held after
+	// it do not run.
+	//
+	// Defer reports false and holds nothing when ctx carries no open
+	// transaction of this transactor. There is no commit to wait for, so fn
+	// is the caller's again, usually to run at once. A nil fn holds nothing
+	// and gets the same answer.
+	Defer(ctx context.Context, fn func()) (held bool)
+}
+
 // Checker reports whether the database is reachable. Implementations MUST be
 // safe for concurrent use.
 type Checker interface {

@@ -72,6 +72,24 @@
 //     isolation or read-only mode, and being handed a weaker transaction than
 //     you asked for under a nil error is worse than being told no.
 //
+// # Joining the caller's transaction, and waiting for its commit
+//
+// The transactor [NewTransactor] returns has two more capabilities, each an
+// interface of its own beside [Transactor], found by type assertion (ADR 0139):
+//
+//	ex, inTx := tm.(sql.Joiner).Join(ctx)       // where a statement under ctx runs
+//	held := tm.(sql.Deferrer).Defer(ctx, notify) // notify runs once ctx's transaction commits
+//
+// [Joiner] answers the executor of the transaction ctx carries — so a
+// repository called inside its caller's transaction reads what that
+// transaction wrote — or the pool when it carries none. A context that
+// outlived its transaction still names it, and its executor refuses rather
+// than fall back to the pool. [Deferrer] holds a function until that
+// transaction commits: a rollback drops it, and so does the rollback of the
+// savepoint it was held in. It is how a message, a mail or a store's write
+// hook waits for the work it announces to be committed. The SDK's document
+// store over SQL is built on both.
+//
 // # Migrations
 //
 // [NewMigrator] applies an ordered, versioned set under the database's own
@@ -156,6 +174,16 @@ type TxFunc = coresql.TxFunc
 
 // Transactor is the public alias for the transaction manager.
 type Transactor = coresql.Transactor
+
+// Joiner is the public alias for the ADR 0039 sibling of [Transactor] that
+// says where a statement issued under a context runs: in the transaction the
+// context carries, or on the pool. Discover it by type assertion.
+type Joiner = coresql.Joiner
+
+// Deferrer is the public alias for the ADR 0039 sibling of [Transactor] that
+// holds a function until the transaction a context carries has committed, and
+// drops it with a rollback. Discover it by type assertion.
+type Deferrer = coresql.Deferrer
 
 // TxOptions is the public alias for one transaction's isolation and
 // read-only-ness. The zero value defers to the driver.
