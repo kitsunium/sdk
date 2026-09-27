@@ -109,9 +109,12 @@ func (d Dialect) Valid() bool {
 // drops.
 //
 // SQLite does not: it has no advisory-lock function, only the file lock that
-// serialises writers. That distinction decides whether [Migrator] can promise
-// mutual exclusion across processes, so it is a property of the dialect and
-// not a runtime discovery (ADR 0055 §D7).
+// serialises writers. That distinction decides HOW [Migrator] promises mutual
+// exclusion across processes, so it is a property of the dialect and not a
+// runtime discovery (ADR 0055 §D7). On SQLite the runner holds the database
+// file's write lock for the whole run instead, which the operating system
+// releases when its holder dies, as a server releases an advisory lock
+// (ADR 0140).
 func (d Dialect) SupportsAdvisoryLock() bool {
 	//: Postgres has pg_advisory_lock, MySQL has GET_LOCK; both die with the
 	//: session, which is the entire reason they were chosen.

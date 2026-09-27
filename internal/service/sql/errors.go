@@ -139,14 +139,19 @@ var (
 		"service/sql: renumber the migration above the highest applied version; the fields carry both",
 		errs.WithExitCode(exitConfig))
 
-	// MigrationLockUnsupported refuses a Migrator at CONSTRUCTION when the
-	// dialect has no session-scoped advisory lock. Refusing here rather than
-	// running unlocked is the whole point: a runner that silently drops
-	// mutual exclusion is at its most dangerous exactly when two instances
-	// start together, which is the case it exists for.
+	// MigrationLockUnsupported is the refusal of a Migrator over a dialect
+	// that offers no lock dying with its holder — never a run without one: a
+	// runner that silently drops mutual exclusion is at its most dangerous
+	// exactly when two instances start together, which is the case it exists
+	// for.
+	//
+	// No dialect the SDK speaks answers it since ADR 0140: PostgreSQL and
+	// MySQL serialise on the session's advisory lock, SQLite on the database
+	// file's write lock. It stays defined because it is published, and a
+	// caller matching it would otherwise stop compiling.
 	MigrationLockUnsupported = errs.Define(CodeMigrationLockUnsupported, "MIGRATION_LOCK_UNSUPPORTED",
 		"That dialect has no advisory lock, so migrations cannot be serialised",
-		"service/sql: only postgres and mysql expose a session-scoped advisory lock; wire your own exclusion",
+		"service/sql: the dialect offers neither a session-scoped advisory lock nor a database-file lock; wire your own exclusion",
 		errs.WithExitCode(exitConfig))
 
 	// MigrationLockTimeout is returned when another holder kept the migration

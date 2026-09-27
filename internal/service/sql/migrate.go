@@ -29,28 +29,26 @@ type migrator struct {
 	plan migratePlan
 	// tx opens one transaction per migration. It is the SAME manager type a
 	// consumer uses, so a migration step and application code see identical
-	// transaction semantics.
-	tx coresql.Transactor
+	// transaction semantics. Its Join is also where the version table is read
+	// and written: on the pool under an advisory lock, and inside the run's
+	// own transaction under SQLite's file lock.
+	tx *transactor
 }
 
 // NewMigrator returns the migration runner for cfg.DB.
 //
-// It REFUSES a dialect with no session-scoped advisory lock, at construction
-// and by name. Running unlocked is not offered as a fallback: a runner that
-// silently drops mutual exclusion is at its most dangerous in exactly the
-// situation it exists for — two instances of a deployment starting together.
+// Every run is mutually exclusive across processes, and the lock is one its
+// holder's death releases: the session's advisory lock on PostgreSQL and
+// MySQL (ADR 0055 §D7), the database file's write lock on SQLite (ADR 0140).
+// Running unlocked is never offered as a fallback: a runner that silently
+// drops mutual exclusion is at its most dangerous in exactly the situation it
+// exists for — two instances of a deployment starting together.
 func NewMigrator(cfg Config, mig MigrateConfig) (runner coresql.Migrator, err error) {
 	res, err := cfg.resolve()
 	//: a refused Config leaves the caller's DB exactly as it was.
 	if err != nil {
 		//: propagate CONFIG_INVALID / POOL_MISCONFIGURED unchanged.
 		return nil, err
-	}
-	//: no advisory lock means no promise this runner is willing to make.
-	if !res.dialect.SupportsAdvisoryLock() {
-		//: name the dialect; it is the caller's own configuration.
-		return nil, kerrs.Wrap(MigrationLockUnsupported, kerrs.WrapParams{},
-			kerrs.String("dialect", res.dialect.String()))
 	}
 	plan, err := mig.resolve()
 	//: an unrunnable migration set is refused before any connection is used.
@@ -92,22 +90,16 @@ func (m *migrator) Plan(ctx context.Context) (pending []coresql.MigrationValue, 
 	return m.pending(applied, highest)
 }
 
-// Up applies every pending migration in ascending version order, each in its
-// own transaction, under the migration lock.
-func (m *migrator) Up(ctx context.Context) (err error) {
-	lock, err := m.acquire(ctx)
+// Up applies every pending migration in ascending version order, each atomic
+// on its own, under the migration lock.
+func (m *migrator) Up(ctx context.Context) error {
 	//: nothing is applied without the lock — that is the whole guarantee.
-	if err != nil {
-		//: propagate MIGRATION_LOCK_TIMEOUT / MIGRATION_FAILED unchanged.
-		return err
-	}
-	//: the lock is released even if a migration panics; the connection close
-	//: inside release is what makes the guarantee survive a crash too. Its
-	//: failure is JOINED rather than discarded, for the reason RollbackFailed
-	//: gives: a teardown that also breaks is a second defect, and reporting
-	//: only one of the two hides the other. A stuck unlock costs the NEXT
-	//: runner a full LockTimeout, which is worth a caller's attention.
-	defer func() { err = errors.Join(err, lock.release(ctx)) }()
+	return m.serialised(ctx, m.upAll)
+}
+
+// upAll is Up's work, run under the lock: the plan, then every pending
+// migration in ascending order, stopping at the first failure.
+func (m *migrator) upAll(ctx context.Context) error {
 	//: the plan is recomputed UNDER the lock: the one computed before it
 	//: could have been made stale by the holder that just finished.
 	pending, err := m.Plan(ctx)
@@ -116,7 +108,7 @@ func (m *migrator) Up(ctx context.Context) (err error) {
 		//: propagate the planning verdict unchanged.
 		return err
 	}
-	//: ascending order, one transaction each, stopping at the first failure.
+	//: ascending order, one migration at a time, stopping at the first failure.
 	for _, migration := range pending {
 		//: a half-applied set is not retried past its own failure.
 		if err := m.applyOne(ctx, migration); err != nil {
@@ -129,16 +121,17 @@ func (m *migrator) Up(ctx context.Context) (err error) {
 }
 
 // Down reverses every applied migration above target, in descending order.
-func (m *migrator) Down(ctx context.Context, target uint64) (err error) {
-	lock, err := m.acquire(ctx)
+func (m *migrator) Down(ctx context.Context, target uint64) error {
 	//: nothing is reversed without the lock either.
-	if err != nil {
-		//: propagate MIGRATION_LOCK_TIMEOUT / MIGRATION_FAILED unchanged.
-		return err
-	}
-	//: released on every path, including a panicking Down step; the release
-	//: verdict is joined for the same reason Up joins it.
-	defer func() { err = errors.Join(err, lock.release(ctx)) }()
+	return m.serialised(ctx, func(locked context.Context) error {
+		//: the reversal, under the lock.
+		return m.downTo(locked, target)
+	})
+}
+
+// downTo is Down's work, run under the lock: the history read, then every
+// reversal down to target.
+func (m *migrator) downTo(ctx context.Context, target uint64) error {
 	//: the bookkeeping table must exist before it can be read.
 	if err := m.ensureTable(ctx); err != nil {
 		//: propagate MIGRATION_FAILED unchanged.
@@ -150,8 +143,34 @@ func (m *migrator) Down(ctx context.Context, target uint64) (err error) {
 		//: propagate MIGRATION_FAILED unchanged.
 		return err
 	}
-	//: descending order, one transaction each.
+	//: descending order, one migration at a time.
 	return m.reverseAll(ctx, applied, target)
+}
+
+// serialised runs work under the migration lock the dialect has: the
+// session's advisory lock where the engine offers one, the database file's
+// write lock on SQLite (ADR 0140).
+func (m *migrator) serialised(ctx context.Context, work func(context.Context) error) (err error) {
+	//: SQLite has no advisory lock: the run holds the file's write lock.
+	if !m.cfg.dialect.SupportsAdvisoryLock() {
+		//: one transaction, holding the lock from its first write to its commit.
+		return m.underFileLock(ctx, work)
+	}
+	lock, err := m.acquire(ctx)
+	//: nothing runs without the lock.
+	if err != nil {
+		//: propagate MIGRATION_LOCK_TIMEOUT / MIGRATION_FAILED unchanged.
+		return err
+	}
+	//: the lock is released even if a migration panics; the connection close
+	//: inside release is what makes the guarantee survive a crash too. Its
+	//: failure is JOINED rather than discarded, for the reason RollbackFailed
+	//: gives: a teardown that also breaks is a second defect, and reporting
+	//: only one of the two hides the other. A stuck unlock costs the NEXT
+	//: runner a full LockTimeout, which is worth a caller's attention.
+	defer func() { err = errors.Join(err, lock.release(ctx)) }()
+	//: the work runs on the pool, one transaction per migration.
+	return work(ctx)
 }
 
 // reverseAll walks the applied set downwards to target.
@@ -215,7 +234,9 @@ func (m *migrator) assertNoUnknown(applied map[uint64]bool, target uint64) error
 	return nil
 }
 
-// applyOne runs one migration's Up and records it, in ONE transaction.
+// applyOne runs one migration's Up and records it, in ONE transaction — or,
+// on SQLite, in one savepoint of the run's transaction, which ctx carries, so
+// the same Transact nests instead of opening a second.
 func (m *migrator) applyOne(ctx context.Context, migration coresql.MigrationValue) error {
 	err := m.tx.Transact(ctx, coresql.TxOptionsValue{}, func(txCtx context.Context, ex coresql.Executor) error {
 		//: the step runs on the SAME executor as the bookkeeping row, which
@@ -237,7 +258,8 @@ func (m *migrator) applyOne(ctx context.Context, migration coresql.MigrationValu
 	return nil
 }
 
-// revertOne runs one migration's Down and forgets it, in ONE transaction.
+// revertOne runs one migration's Down and forgets it, in ONE transaction — or
+// in one savepoint of the run's transaction on SQLite, as applyOne does.
 func (m *migrator) revertOne(ctx context.Context, migration coresql.MigrationValue) error {
 	err := m.tx.Transact(ctx, coresql.TxOptionsValue{}, func(txCtx context.Context, ex coresql.Executor) error {
 		//: an Irreversible step fails here, with the caller's own declaration.

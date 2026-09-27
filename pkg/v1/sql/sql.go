@@ -92,11 +92,16 @@
 //
 // # Migrations
 //
-// [NewMigrator] applies an ordered, versioned set under the database's own
-// advisory lock, so two instances starting together cannot apply the same
-// migration twice. The lock dies with the connection that holds it, which is
-// why it is the engine's and not a row in a table: a runner killed mid-run
-// leaves nothing held.
+// [NewMigrator] applies an ordered, versioned set under a lock that excludes
+// every other runner and dies with its holder, so two instances starting
+// together cannot apply the same migration twice and a runner killed mid-run
+// leaves nothing held. On PostgreSQL and MySQL it is the session's advisory
+// lock, which the server drops with the connection. On SQLite it is the
+// database file's write lock (ADR 0140): the run is ONE transaction that takes
+// it with its first statement, each migration a savepoint of it, and the
+// operating system drops a dead process's file locks. A SQLite run needs a
+// single connection, and a migration there cannot run what SQLite refuses
+// inside a transaction — VACUUM, or PRAGMA journal_mode.
 //
 // Migrations are VALUES you build. The SDK ships no directory, no file format
 // and no naming convention, because the moment it reads a directory it has
@@ -157,7 +162,7 @@ const DialectPostgres Dialect = coresql.DialectPostgres
 const DialectMySQL Dialect = coresql.DialectMySQL
 
 // DialectSQLite is SQLite 3.6.8+. It has no advisory lock, so [NewMigrator]
-// refuses it — the rest of the domain works.
+// serialises a run on the database file's write lock instead (ADR 0140).
 const DialectSQLite Dialect = coresql.DialectSQLite
 
 // Executor is the public alias for the read/write surface a statement runs
@@ -262,8 +267,9 @@ var (
 	// MigrationOutOfOrder refuses a pending migration older than one already
 	// applied.
 	MigrationOutOfOrder = svcsql.MigrationOutOfOrder
-	// MigrationLockUnsupported refuses a Migrator on a dialect with no
-	// advisory lock.
+	// MigrationLockUnsupported refuses a Migrator on a dialect with no lock
+	// that dies with its holder. No dialect this SDK speaks answers it since
+	// SQLite's runner serialises on its file's write lock (ADR 0140).
 	MigrationLockUnsupported = svcsql.MigrationLockUnsupported
 	// MigrationLockTimeout reports another process holding the migration lock
 	// for the whole budget. Nothing was applied.

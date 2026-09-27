@@ -62,6 +62,12 @@
 // carries the id of the scope that held it, a failed savepoint drops what was
 // held at or above its own id, and the root runs what is left after its COMMIT.
 //
+// # SQLite's migrations
+//
+// SQLite has no advisory lock, and its runner holds the database file's write
+// lock instead (ADR 0140): the run is ONE transaction that takes the lock with
+// a write that writes nothing, and each migration is a savepoint of it.
+//
 // # A partially applied migration, and what MySQL does to the guarantee
 //
 // Each migration runs in ITS OWN transaction, and the version-table row is

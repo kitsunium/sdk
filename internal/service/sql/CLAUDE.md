@@ -6,7 +6,8 @@ Implements the **ADR 0055** relational-database ports declared in
 `internal/core/sql`: the transaction manager (root transactions **and** nested
 savepoints) with its `Joiner` and `Deferrer` siblings (ADR 0139), the
 connection-pool policy, the bounded health check, and the migration runner
-with its advisory lock and version table.
+with its version table and its lock — the session's advisory lock, or SQLite's
+database-file write lock (ADR 0140).
 
 It ships **no driver** and imports none. `database/sql` is the stdlib's driver
 interface; a *driver* is a vendor connector and lives under `third-party/`
@@ -28,12 +29,13 @@ Code range: `0.3.54.*` (ADR 0055).
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
 | `statements.go` | `Statements(...string) coresql.Step` |
-| `dialect_sql.go` | **the only place dialect-specific SQL is rendered** — savepoints, placeholders, advisory lock |
+| `dialect_sql.go` | **the only place dialect-specific SQL is rendered** — savepoints, placeholders, advisory lock, SQLite's `fileLockSQL` |
 | `health.go` | `NewChecker`, `checker` — bounded ping on the injected clock |
-| `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down` |
+| `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down`, `serialised` — the work under whichever lock the dialect has |
 | `migrate_config.go` | `MigrateConfig`, `Default{VersionTable,LockTimeout,LockRetryInterval}` |
 | `migrate_plan.go` | `migratePlan` — the validated, sorted, clamped migration set |
 | `migrate_lock.go` | `advisoryLock` — acquisition, retry loop, release |
+| `migrate_filelock.go` | SQLite's run: ONE transaction holding the file's write lock, `lockBusy`, the retry on the injected clock — ADR 0140 |
 | `migrate_table.go` | version-table DDL, reads, `record` / `forget`, `scanVersions` |
 | `codes.go` | `Code*` constants — range 0.3.54.* |
 | `savepoint_stmts.go` | `savepointStmts` — one savepoint's three rendered statements |
@@ -97,10 +99,22 @@ Code range: `0.3.54.*` (ADR 0055).
   session, which the OS does for a process that no longer exists — so there is
   no lease, no heartbeat, no expiry to tune and no stealing. See ADR 0055 §D7
   for why this is not `pkg/v1/lock`.
-- **A dialect with no advisory lock is refused at construction, by name.**
-  SQLite gets `MigrationLockUnsupported`. Running unlocked is not offered as a
-  fallback: a runner that silently drops mutual exclusion is at its most
-  dangerous in exactly the situation it exists for.
+- **SQLite's lock is the database file's write lock** (ADR 0140). A run is
+  ONE transaction of the runner's own transactor: `CREATE TABLE IF NOT EXISTS`
+  on the version table, then `DELETE FROM <table> WHERE 1 = 0` — a write that
+  writes nothing, and takes the write lock because SQLite starts a write
+  transaction when a write statement starts. Each migration's `Transact` then
+  NESTS — a savepoint with its version row — and the run COMMITS what applied
+  even when a later migration failed. The version table is read through
+  `Join`, inside the run's transaction, because the pool's other connections
+  are the writers the lock holds off. Busy is SQLite's own words ("database
+  is locked", `SQLITE_BUSY`), retried on the injected clock — from the lock
+  statements, and from a BEGIN that never began, which is where a
+  `_txlock=immediate` connection, or one converting a fresh file to WAL,
+  answers the same lock; anything else fails at once, so a misreading stops
+  the run and never runs it unlocked.
+  Running unlocked is never offered: `MigrationLockUnsupported` stays defined
+  for a dialect with neither lock, and none of the three answers it.
 - **`Join` never falls back to the pool for a context that names one of this
   manager's transactions**, even a finished one: its retired executor refuses
   with `TX_CLOSED`. **`Defer` tags a held function with the id of the scope
@@ -127,7 +141,7 @@ written by that **same** transaction on that **same** `Executor`.
 | Engine | Transactional DDL | A failed migration leaves |
 |---|---|---|
 | PostgreSQL | **yes** | nothing — schema change and version row roll back together; the database sits at *n−1* and re-running is safe |
-| SQLite | **yes** | same |
+| SQLite | **yes** | same — and the run is ONE transaction under the file's write lock, each migration a savepoint: a failed migration rolls back to its own, and the run commits the ones before it (ADR 0140) |
 | MySQL / MariaDB | **NO** — DDL implicitly commits | the schema change **already committed**, the version row rolled back: a state no version number describes |
 
 The MySQL row is the reason this table exists. No client-side code can make
@@ -208,7 +222,12 @@ never because a finding was inconvenient:
 - **Make the savepoint counter per-scope, or reset it.** Reuse shadows.
 - **Replace the advisory lock with a lock table or `pkg/v1/lock`** without
   reading ADR 0055 §D7 — a lock that survives its holder's death is the
-  failure mode this design exists to avoid.
+  failure mode this design exists to avoid. The same holds for SQLite's file
+  lock (ADR 0140).
+- **Read a busy SQLite lock as anything but SQLite's own words.** A driver
+  error that does not match is a failure, which stops the run; widening the
+  match could read a real failure as a lock held elsewhere and wait out the
+  budget on a broken database.
 
 ## Verification
 

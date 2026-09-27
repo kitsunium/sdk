@@ -54,7 +54,8 @@ const CodeMigrationFailed errs.Code = 0x00_03_36_0B // 0.3.54.11
 const CodeMigrationOutOfOrder errs.Code = 0x00_03_36_0C // 0.3.54.12
 
 // CodeMigrationLockUnsupported identifies a Migrator refused at construction
-// because the dialect has no session-scoped advisory lock.
+// because the dialect offers no lock that dies with its holder. No dialect the
+// SDK speaks answers it since ADR 0140.
 const CodeMigrationLockUnsupported errs.Code = 0x00_03_36_0D // 0.3.54.13
 
 // CodeMigrationLockTimeout identifies a migration run abandoned because

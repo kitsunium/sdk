@@ -87,20 +87,6 @@ func buildMigrator(
 	return runner, db, err
 }
 
-// TestMigratorRefusesADialectWithNoAdvisoryLock is the refusal that matters
-// most, because the alternative is a runner that drops mutual exclusion
-// silently in exactly the case it exists for.
-func TestMigratorRefusesADialectWithNoAdvisoryLock(t *testing.T) {
-	t.Parallel()
-	db := closeOnCleanup(t, newFakeDB().open())
-	_, err := svcsql.NewMigrator(svcsql.Config{
-		DB: db, Dialect: coresql.DialectSQLite, Pool: svcsql.PoolConfig{MaxOpen: 2},
-	}, svcsql.MigrateConfig{})
-	if !errs.HasCode(err, svcsql.CodeMigrationLockUnsupported) {
-		t.Fatalf("NewMigrator(sqlite) = %v, want MIGRATION_LOCK_UNSUPPORTED", err)
-	}
-}
-
 // TestPlanIsADryRunThatAppliesNothingAndTakesNoLock pins both halves of the
 // dry run, including the one thing it DOES write — its own bookkeeping table,
 // because reading a table that does not exist is not portable.

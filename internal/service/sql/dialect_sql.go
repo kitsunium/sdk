@@ -100,6 +100,21 @@ func unlockSQL(dialect coresql.Dialect, key string) (query string, arg any) {
 	return "SELECT RELEASE_LOCK(" + placeholder(dialect, 1) + ")", key
 }
 
+// fileLockSQL renders the statement that makes a SQLite transaction take the
+// database file's write lock at once, where BEGIN — which database/sql sends
+// as SQLite's deferred form — takes none.
+//
+// It is a DELETE that matches no row. SQLite starts the write transaction a
+// write statement needs when the statement STARTS, before its WHERE clause is
+// weighed, so the lock is taken and nothing is changed. It names the version
+// table because that is the one table the runner knows exists at this point:
+// it creates it first, in the same transaction (ADR 0140).
+func fileLockSQL(table string) string {
+	//: a write that writes nothing; the table name was validated at
+	//: construction, which is the whole defence of an interpolated identifier.
+	return "DELETE FROM " + table + " WHERE 1 = 0"
+}
+
 // lockKey folds a lock name into the 64-bit integer PostgreSQL's advisory
 // locks are keyed by.
 //
