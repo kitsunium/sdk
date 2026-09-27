@@ -7,6 +7,7 @@ import (
 	"context"
 	"database/sql/driver"
 	"errors"
+	"runtime"
 	"slices"
 	"sync"
 	"testing"
@@ -172,6 +173,54 @@ func TestSQLiteGivesUpWhenTheFileStaysLocked(t *testing.T) {
 	}
 	if len(applied) != 0 || f.sent(sqliteRecordRow) || f.sent("COMMIT") {
 		t.Fatalf("statements = %v, want nothing applied and nothing committed", f.statements())
+	}
+}
+
+// TestABusyAttemptWhoseRollbackFailsIsNotRetried pins the one busy answer
+// that is not waited out: undoing the attempt failed, so what the connection
+// still holds is unknown. The run stops with the rollback's verdict instead of
+// registering a wait — which the loop below would catch.
+func TestABusyAttemptWhoseRollbackFailsIsNotRetried(t *testing.T) {
+	t.Parallel()
+	f := newFakeDB().on(fileLock, func(int) ([]string, [][]driver.Value, error) { return nil, nil, errBusy })
+	f.rollbackErr = errScripted
+	manual := clock.NewManualClock(time.Unix(0, 0))
+	runner := newSQLiteMigrator(t, f, manual)
+	verdict := make(chan error, 1)
+	var running sync.WaitGroup
+	running.Go(func() { verdict <- runner.Up(t.Context()) })
+	t.Cleanup(running.Wait)
+	for {
+		select {
+		case err := <-verdict:
+			if !errs.HasCode(err, svcsql.CodeRollbackFailed) {
+				t.Fatalf("Up = %v, want ROLLBACK_FAILED beside the busy answer", err)
+			}
+			return
+		default:
+			if manual.Pending() > 0 {
+				manual.Advance(lockRetry)
+				t.Fatal("the run waited to retry after its rollback failed")
+			}
+			runtime.Gosched()
+		}
+	}
+}
+
+// TestABeginRefusedForAnotherReasonNamesTheLockPhase pins where a BEGIN that
+// is refused, and not busy, is reported: in the lock phase, since no migration
+// started — never as a commit that lost the run.
+func TestABeginRefusedForAnotherReasonNamesTheLockPhase(t *testing.T) {
+	t.Parallel()
+	f := newFakeDB()
+	f.beginErr = errScripted
+	runner := newSQLiteMigrator(t, f, clock.NewManualClock(time.Unix(0, 0)))
+	err := runner.Up(t.Context())
+	if !errs.HasCode(err, svcsql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {
+		t.Fatalf("Up = %v, want MIGRATION_FAILED in the lock phase", err)
+	}
+	if !errs.HasCode(err, svcsql.CodeBeginFailed) {
+		t.Fatal("the transactor's own verdict did not travel beside the run's")
 	}
 }
 

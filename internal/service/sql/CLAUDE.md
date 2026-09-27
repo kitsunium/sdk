@@ -112,7 +112,8 @@ Code range: `0.3.54.*` (ADR 0055).
   statements, and from a BEGIN that never began, which is where a
   `_txlock=immediate` connection, or one converting a fresh file to WAL,
   answers the same lock; anything else fails at once, so a misreading stops
-  the run and never runs it unlocked.
+  the run and never runs it unlocked. A busy attempt whose ROLLBACK fails is
+  not retried either: what its connection holds is unknown.
   Running unlocked is never offered: `MigrationLockUnsupported` stays defined
   for a dialect with neither lock, and none of the three answers it.
 - **`Join` never falls back to the pool for a context that names one of this

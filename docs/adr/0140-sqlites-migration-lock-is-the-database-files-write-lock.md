@@ -85,6 +85,12 @@ A misreading can only go one way. A driver that rewrote SQLite's words would
 make a held lock a failure, which stops the run; nothing reads a failure as a
 lock taken, so nothing runs unlocked.
 
+Two answers are not waited out. A busy attempt whose ROLLBACK then fails stops
+the run with `ROLLBACK_FAILED` beside the busy answer, because what that
+connection still holds is unknown. And a BEGIN refused for any reason other
+than a busy lock is reported in the `lock` phase — no migration started —
+never as a COMMIT that lost the run.
+
 A connection with a busy timeout first waits that long inside the driver
 before it answers busy, so an attempt can outlast the runner's budget by the
 connection's timeout. The budget is the runner's; the wait is the
@@ -144,9 +150,10 @@ the refusal to keep migrations off SQLite gets them run.
   savepoint and version row per migration, one COMMIT) on a pool of ONE
   connection; a busy answer rolled back and retried on the manual clock; a
   lock held for the whole budget; a refusal that is not busy stopping at once;
-  a busy BEGIN read as the same lock; a failing migration committing the ones
-  before it; a failing COMMIT naming its phase; `Down` under the same lock;
-  `Plan` taking none.
+  a busy BEGIN read as the same lock; a busy attempt whose rollback fails,
+  not retried; a BEGIN refused otherwise, in the lock phase; a failing
+  migration committing the ones before it; a failing COMMIT naming its phase;
+  `Down` under the same lock; `Plan` taking none.
 - `third-party/db/sql/migrate_integration_test.go`, under `-tags integration`:
   the lock proved on SQLite (D2), a failing migration on the real engine, and
   two runners applying a migration once on SQLite — deferred and

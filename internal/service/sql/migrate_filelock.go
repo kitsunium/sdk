@@ -93,18 +93,44 @@ func (m *migrator) fileLockedRun(ctx context.Context, work func(context.Context)
 	if !began && err != nil && lockBusy(err) {
 		busy = true
 	}
-	//: a busy attempt is retried, and its rollback verdict with it.
+	//: a busy attempt is retried — unless undoing it failed: what the
+	//: connection still holds is then unknown, and the run stops and says so.
 	if busy {
-		//: nothing ran.
+		//: the rollback's own verdict, beside the busy answer that caused it.
+		if kerrs.HasCode(err, CodeRollbackFailed) {
+			//: not retried.
+			return false, err
+		}
+		//: nothing ran, nothing is left: try again.
 		return true, nil
 	}
-	//: a run whose COMMIT failed lost every migration it applied.
-	if err != nil && outcome == nil && !kerrs.HasCode(err, CodeMigrationFailed) {
-		//: say which phase took the run with it.
-		err = failed(MigrationFailed, err, kerrs.String("phase", commitPhase))
+	//: the verdict names the phase that ended the run.
+	return false, errors.Join(outcome, runPhase(err, began, outcome))
+}
+
+// runPhase labels a run's transaction error with the phase it came from, when
+// the error does not already say: the lock's, for a transaction that never
+// began — BEGIN refused for another reason than a busy lock — and the
+// commit's, for one whose work finished, since a COMMIT that fails loses every
+// migration the run applied.
+func runPhase(err error, began bool, outcome error) error {
+	//: nothing failed, or the failure already names its phase.
+	if err == nil || kerrs.HasCode(err, CodeMigrationFailed) {
+		//: as it is.
+		return err
 	}
-	//: the work's verdict, and the transaction's beside it.
-	return false, errors.Join(outcome, err)
+	//: BEGIN itself was refused: no migration started.
+	if !began {
+		//: the lock phase, which BEGIN is part of on SQLite.
+		return failed(MigrationFailed, err, kerrs.String("phase", lockPhase))
+	}
+	//: the work reported its own failure; the transaction's travels beside it.
+	if outcome != nil {
+		//: as it is.
+		return err
+	}
+	//: the COMMIT took the run with it.
+	return failed(MigrationFailed, err, kerrs.String("phase", commitPhase))
 }
 
 // takeFileLock makes the run's transaction the database's one writer.
