@@ -63,9 +63,42 @@ plain, _ := keyring.Open(ctx, box, nil)  // still opens after a rotation
 
 The newest version seals and signs; every kept version still opens and verifies, because each box and each signature carries the number of the version that made it. A version stops opening when it is pruned — and a rotation keeps [Policy](<#Policy>).Keep versions, at least two, so the one it replaces keeps working.
 
+### One key per subject, and an erasure that reaches every copy
+
+[SubjectKeys](<#SubjectKeys>) keeps one data key per SUBJECT — a person, a tenant, a record: whoever the caller files keys under — wrapped by a root [Keyring](<#Keyring>) that rotates, and seals and opens under it \(ADR 0142\):
+
+```
+keys, _ := secret.NewSubjectKeys(secret.SubjectKeysConfig{
+    Root:  root,                    // a Keyring over the root secret, "data-key"
+    Store: store,                   // your SubjectKeyStore, or NewMemorySubjectKeyStore()
+    CacheSize: 10_000, CacheTTL: time.Minute,
+})
+box, _ := keys.Seal(ctx, ref, []byte(email), "reports", id, "/email")
+plain, _ := keys.Open(ctx, box, "reports", id, "/email")
+_, _ = keys.Destroy(ctx, ref)       // every box sealed for ref stops opening
+_, err := keys.Open(ctx, box, "reports", id, "/email") // KeyDestroyed
+```
+
+A subject is a REFERENCE, never an identity: it is kept in clear in the store and in every box \([ValidateSubject](<#ValidateSubject>): lowercase, 1 to [MaxSubjectLen](<#MaxSubjectLen>) bytes\). Derive it — an HMAC of the identity, in hexadecimal. The parts after the plaintext bind the box to where it lies, so a box copied into another record or field does not open; they are length\-prefixed, so \("ab", "c"\) and \("a", "bc"\) differ.
+
+Destroying a subject's key is a cryptographic erase \(NIST SP 800\-88r2\): the boxes it sealed stop opening wherever they were copied — former versions, a dead letter, a backup of the data — because nothing holds the key. Open then answers [KeyDestroyed](<#InvalidSubject>), which a caller reads as "erased", and never [SubjectKeyUnreadable](<#InvalidSubject>), which is a fault: a key held that does not unwrap. The erasure reaches this process's cache at once, another process's within its CacheTTL, and a copy of the wrapped key a backup of the KEY store kept only while the root version that wrapped it is kept.
+
+A rotation of the root costs one small write per subject and never touches a box. Wire the rotator so it re\-wraps after each rotation and never prunes a version a key still needs:
+
+```
+rotator, _ := secret.NewRotator(secret.RotatorConfig{
+    Store: secrets, Name: "data-key",
+    Policy:   secret.Policy{Every: 30 * 24 * time.Hour, Keep: 3, Generate: secret.Random(32)},
+    InUse:    keys.OldestRoot,      // Keep becomes a floor while a key lags
+    OnRotate: func(secret.Versioned) { _, _ = keys.Rewrap(ctx) },
+})
+```
+
 ### What this package does not do
 
 It ships no Vault, KMS or cloud secret\-manager client: those are [Store](<#Store>) implementations a connector provides, and the port is frozen so one can be written today. It does not reload TLS certificates. It does not lock memory or promise that a revealed secret is erased: Go's collector moves and copies memory, and a string cannot be cleared.
+
+Package secret — subject keys: one data key per subject under a rotating root, and the erasure that destroys it \(ADR 0142\).
 
 ## Index
 
@@ -73,13 +106,16 @@ It ships no Vault, KMS or cloud secret\-manager client: those are [Store](<#Stor
 - [Variables](<#variables>)
 - [func KeyFile\(path string\) \(key crypto.Key, err error\)](<#KeyFile>)
 - [func Random\(n int\) func\(\) \(Value, error\)](<#Random>)
+- [func SubjectOf\(box \[\]byte\) \(subject string, err error\)](<#SubjectOf>)
 - [func ValidateName\(name string\) error](<#ValidateName>)
+- [func ValidateSubject\(subject string\) error](<#ValidateSubject>)
 - [type EnvConfig](<#EnvConfig>)
 - [type FileConfig](<#FileConfig>)
 - [type Keyring](<#Keyring>)
   - [func NewKeyring\(store Store, name string\) \(keyring \*Keyring, err error\)](<#NewKeyring>)
 - [type MemoryConfig](<#MemoryConfig>)
 - [type Policy](<#Policy>)
+- [type RewrapReport](<#RewrapReport>)
 - [type Rotator](<#Rotator>)
   - [func NewRotator\(cfg RotatorConfig\) \(rotator \*Rotator, err error\)](<#NewRotator>)
 - [type RotatorConfig](<#RotatorConfig>)
@@ -87,10 +123,16 @@ It ships no Vault, KMS or cloud secret\-manager client: those are [Store](<#Stor
   - [func NewEnv\(cfg EnvConfig\) \(store Store, err error\)](<#NewEnv>)
   - [func NewFile\(cfg FileConfig\) \(store Store, err error\)](<#NewFile>)
   - [func NewMemory\(cfg MemoryConfig\) Store](<#NewMemory>)
+- [type SubjectKeyStore](<#SubjectKeyStore>)
+  - [func NewMemorySubjectKeyStore\(\) SubjectKeyStore](<#NewMemorySubjectKeyStore>)
+- [type SubjectKeys](<#SubjectKeys>)
+  - [func NewSubjectKeys\(cfg SubjectKeysConfig\) \(keys \*SubjectKeys, err error\)](<#NewSubjectKeys>)
+- [type SubjectKeysConfig](<#SubjectKeysConfig>)
 - [type Value](<#Value>)
   - [func FromString\(text string\) Value](<#FromString>)
   - [func New\(raw \[\]byte\) Value](<#New>)
 - [type Versioned](<#Versioned>)
+- [type WrappedKey](<#WrappedKey>)
 
 
 ## Constants
@@ -99,6 +141,12 @@ It ships no Vault, KMS or cloud secret\-manager client: those are [Store](<#Stor
 
 ```go
 const MaxNameLen int = coresecret.MaxNameLen
+```
+
+<a name="MaxSubjectLen"></a>MaxSubjectLen is the longest subject reference, in bytes.
+
+```go
+const MaxSubjectLen int = coresecret.MaxSubjectLen
 ```
 
 <a name="Redacted"></a>Redacted is the placeholder every rendering of a [Value](<#Value>) writes.
@@ -154,8 +202,24 @@ var (
 )
 ```
 
+<a name="InvalidSubject"></a>
+
+```go
+var (
+    // InvalidSubject is returned for a subject outside the grammar; the
+    // rejected string is never repeated.
+    InvalidSubject = coresecret.InvalidSubject
+    // KeyDestroyed is returned by SubjectKeys.Open for a box whose data key is
+    // not held: the value was erased.
+    KeyDestroyed = svcsecret.KeyDestroyed
+    // SubjectKeyUnreadable is returned when a subject's data key is held and
+    // does not unwrap under the root: a fault, never an erasure.
+    SubjectKeyUnreadable = svcsecret.SubjectKeyUnreadable
+)
+```
+
 <a name="KeyFile"></a>
-## func [KeyFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L246>)
+## func [KeyFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L289>)
 
 ```go
 func KeyFile(path string) (key crypto.Key, err error)
@@ -166,7 +230,7 @@ KeyFile returns the crypto.Key held in the file at path — exactly crypto.KeyLe
 It refuses content that is not exactly one key with [KeyFileInvalid](<#NotFound>), an existing file other accounts can read with [InvalidConfig](<#NotFound>), and — where the file store refuses, every platform outside the Unix family, because a mode is not an access list there — proc.UnsupportedPlatform. No error carries the key or a refused file's content.
 
 <a name="Random"></a>
-## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L253>)
+## func [Random](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L296>)
 
 ```go
 func Random(n int) func() (Value, error)
@@ -174,8 +238,17 @@ func Random(n int) func() (Value, error)
 
 Random returns a generator of n bytes from crypto/rand; a keyring's versions need n = 32. Below 16 bytes the generator refuses every call.
 
+<a name="SubjectOf"></a>
+## func [SubjectOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L74>)
+
+```go
+func SubjectOf(box []byte) (subject string, err error)
+```
+
+SubjectOf returns the subject a box sealed by [SubjectKeys](<#SubjectKeys>).Seal names, without opening it, or [SealInvalid](<#NotFound>) for anything that is not such a box.
+
 <a name="ValidateName"></a>
-## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L197>)
+## func [ValidateName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L240>)
 
 ```go
 func ValidateName(name string) error
@@ -183,8 +256,17 @@ func ValidateName(name string) error
 
 ValidateName reports whether name is a secret name, returning [InvalidName](<#NotFound>) when it is not. Every store calls it; a caller may too, to refuse a name at the edge of its own input.
 
+<a name="ValidateSubject"></a>
+## func [ValidateSubject](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L50>)
+
+```go
+func ValidateSubject(subject string) error
+```
+
+ValidateSubject reports whether subject is a subject reference, returning [InvalidSubject](<#InvalidSubject>) when it is not: 1 to [MaxSubjectLen](<#MaxSubjectLen>) bytes of a\-z, 0\-9, '\-', '\_', '.' and ':', starting with a letter or a digit. A subject is kept in clear, so it is a reference derived from an identity, never the identity.
+
 <a name="EnvConfig"></a>
-## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L122>)
+## type [EnvConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L165>)
 
 EnvConfig parameterises [NewEnv](<#NewEnv>).
 
@@ -193,7 +275,7 @@ type EnvConfig = svcsecret.EnvConfig
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L125>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L168>)
 
 FileConfig parameterises [NewFile](<#NewFile>).
 
@@ -202,7 +284,7 @@ type FileConfig = svcsecret.FileConfig
 ```
 
 <a name="Keyring"></a>
-## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L129>)
+## type [Keyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L172>)
 
 Keyring sees the versions of one secret as keys: the newest seals and signs, every kept version opens and verifies.
 
@@ -211,7 +293,7 @@ type Keyring = svcsecret.Keyring
 ```
 
 <a name="NewKeyring"></a>
-### func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L225>)
+### func [NewKeyring](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L268>)
 
 ```go
 func NewKeyring(store Store, name string) (keyring *Keyring, err error)
@@ -220,7 +302,7 @@ func NewKeyring(store Store, name string) (keyring *Keyring, err error)
 NewKeyring returns the keyring over the versions of name in store.
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L119>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L162>)
 
 MemoryConfig parameterises [NewMemory](<#NewMemory>).
 
@@ -229,7 +311,7 @@ type MemoryConfig = svcsecret.MemoryConfig
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L133>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L176>)
 
 Policy says how often a secret rotates, how many versions a rotation keeps, and how a new one is made.
 
@@ -237,8 +319,17 @@ Policy says how often a secret rotates, how many versions a rotation keeps, and 
 type Policy = svcsecret.PolicySpec
 ```
 
+<a name="RewrapReport"></a>
+## type [RewrapReport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L32>)
+
+RewrapReport says what one [SubjectKeys](<#SubjectKeys>).Rewrap pass did, key by key.
+
+```go
+type RewrapReport = svcsecret.RewrapValue
+```
+
 <a name="Rotator"></a>
-## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L139>)
+## type [Rotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L182>)
 
 Rotator mints new versions of one secret according to a [Policy](<#Policy>).
 
@@ -247,7 +338,7 @@ type Rotator = svcsecret.Rotator
 ```
 
 <a name="NewRotator"></a>
-### func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L231>)
+### func [NewRotator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L274>)
 
 ```go
 func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
@@ -256,7 +347,7 @@ func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error)
 NewRotator returns a rotator for cfg.Name in cfg.Store. It starts nothing.
 
 <a name="RotatorConfig"></a>
-## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L136>)
+## type [RotatorConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L179>)
 
 RotatorConfig parameterises [NewRotator](<#NewRotator>).
 
@@ -265,7 +356,7 @@ type RotatorConfig = svcsecret.RotatorConfig
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L112>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L155>)
 
 Store keeps named secrets as numbered versions. It is frozen at five methods; a new capability arrives as a sibling interface.
 
@@ -274,7 +365,7 @@ type Store = coresecret.Store
 ```
 
 <a name="NewEnv"></a>
-### func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L210>)
+### func [NewEnv](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L253>)
 
 ```go
 func NewEnv(cfg EnvConfig) (store Store, err error)
@@ -283,7 +374,7 @@ func NewEnv(cfg EnvConfig) (store Store, err error)
 NewEnv returns a read\-only Store over the process environment, honouring the NAME\_FILE convention. It refuses a prefix no shell could export.
 
 <a name="NewFile"></a>
-### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L219>)
+### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L262>)
 
 ```go
 func NewFile(cfg FileConfig) (store Store, err error)
@@ -292,7 +383,7 @@ func NewFile(cfg FileConfig) (store Store, err error)
 NewFile returns a Store that keeps its versions in a directory it owns, sealed at rest when cfg.Key is set. It refuses a directory other accounts can read, and returns proc.UnsupportedPlatform where atomic publication or the file lock is unavailable. The store also implements io.Closer.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L203>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L246>)
 
 ```go
 func NewMemory(cfg MemoryConfig) Store
@@ -300,8 +391,53 @@ func NewMemory(cfg MemoryConfig) Store
 
 NewMemory returns a Store that keeps its versions in this process's memory.
 
+<a name="SubjectKeyStore"></a>
+## type [SubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L25>)
+
+SubjectKeyStore keeps one wrapped data key per subject. The caller implements it over its own storage — Insert and Replace atomic across every process — or uses [NewMemorySubjectKeyStore](<#NewMemorySubjectKeyStore>). It is frozen at five methods; a new capability arrives as a sibling interface.
+
+```go
+type SubjectKeyStore = coresecret.SubjectKeyStore
+```
+
+<a name="NewMemorySubjectKeyStore"></a>
+### func [NewMemorySubjectKeyStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L67>)
+
+```go
+func NewMemorySubjectKeyStore() SubjectKeyStore
+```
+
+NewMemorySubjectKeyStore returns a [SubjectKeyStore](<#SubjectKeyStore>) that keeps the wrapped keys in this process's memory — for tests and development, where the data they protect dies with the process too.
+
+<a name="SubjectKeys"></a>
+## type [SubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L16>)
+
+SubjectKeys keeps one data key per subject, wrapped by a root [Keyring](<#Keyring>): Seal and Open under a subject's key, Destroy to erase everything it sealed, Rewrap after the root rotates.
+
+```go
+type SubjectKeys = svcsecret.SubjectKeys
+```
+
+<a name="NewSubjectKeys"></a>
+### func [NewSubjectKeys](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L59>)
+
+```go
+func NewSubjectKeys(cfg SubjectKeysConfig) (keys *SubjectKeys, err error)
+```
+
+NewSubjectKeys returns the engine that keeps one data key per subject under cfg.Root, filed in cfg.Store. It refuses a nil root or store, a negative cache, and a cache without a TTL — the TTL bounds how long a key another process destroyed keeps opening here — with [InvalidConfig](<#NotFound>).
+
+<a name="SubjectKeysConfig"></a>
+## type [SubjectKeysConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L19>)
+
+SubjectKeysConfig parameterises [NewSubjectKeys](<#NewSubjectKeys>).
+
+```go
+type SubjectKeysConfig = svcsecret.SubjectKeysConfig
+```
+
 <a name="Value"></a>
-## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L108>)
+## type [Value](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L151>)
 
 Value is an immutable secret that renders as [Redacted](<#Redacted>) in every rendering; only Reveal and RevealString hand its bytes back.
 
@@ -310,7 +446,7 @@ type Value = coresecret.Value
 ```
 
 <a name="FromString"></a>
-### func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L189>)
+### func [FromString](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L232>)
 
 ```go
 func FromString(text string) Value
@@ -319,7 +455,7 @@ func FromString(text string) Value
 FromString returns a Value holding text.
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L183>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L226>)
 
 ```go
 func New(raw []byte) Value
@@ -328,12 +464,21 @@ func New(raw []byte) Value
 New returns a Value holding a copy of raw.
 
 <a name="Versioned"></a>
-## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L116>)
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/secret.go#L159>)
 
 Versioned is one version of one secret: name, number, value, and when the store recorded it.
 
 ```go
 type Versioned = coresecret.VersionValue
+```
+
+<a name="WrappedKey"></a>
+## type [WrappedKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/secret/subjectkeys.go#L29>)
+
+WrappedKey is one subject's wrapped data key, as a [SubjectKeyStore](<#SubjectKeyStore>) keeps it.
+
+```go
+type WrappedKey = coresecret.SubjectKeyValue
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

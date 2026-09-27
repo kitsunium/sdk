@@ -82,6 +82,49 @@
 // rotation keeps [Policy].Keep versions, at least two, so the one it replaces
 // keeps working.
 //
+// # One key per subject, and an erasure that reaches every copy
+//
+// [SubjectKeys] keeps one data key per SUBJECT — a person, a tenant, a record:
+// whoever the caller files keys under — wrapped by a root [Keyring] that
+// rotates, and seals and opens under it (ADR 0142):
+//
+//	keys, _ := secret.NewSubjectKeys(secret.SubjectKeysConfig{
+//	    Root:  root,                    // a Keyring over the root secret, "data-key"
+//	    Store: store,                   // your SubjectKeyStore, or NewMemorySubjectKeyStore()
+//	    CacheSize: 10_000, CacheTTL: time.Minute,
+//	})
+//	box, _ := keys.Seal(ctx, ref, []byte(email), "reports", id, "/email")
+//	plain, _ := keys.Open(ctx, box, "reports", id, "/email")
+//	_, _ = keys.Destroy(ctx, ref)       // every box sealed for ref stops opening
+//	_, err := keys.Open(ctx, box, "reports", id, "/email") // KeyDestroyed
+//
+// A subject is a REFERENCE, never an identity: it is kept in clear in the store
+// and in every box ([ValidateSubject]: lowercase, 1 to [MaxSubjectLen] bytes).
+// Derive it — an HMAC of the identity, in hexadecimal. The parts after the
+// plaintext bind the box to where it lies, so a box copied into another record
+// or field does not open; they are length-prefixed, so ("ab", "c") and ("a",
+// "bc") differ.
+//
+// Destroying a subject's key is a cryptographic erase (NIST SP 800-88r2): the
+// boxes it sealed stop opening wherever they were copied — former versions, a
+// dead letter, a backup of the data — because nothing holds the key. Open then
+// answers [KeyDestroyed], which a caller reads as "erased", and never
+// [SubjectKeyUnreadable], which is a fault: a key held that does not unwrap.
+// The erasure reaches this process's cache at once, another process's within
+// its CacheTTL, and a copy of the wrapped key a backup of the KEY store kept
+// only while the root version that wrapped it is kept.
+//
+// A rotation of the root costs one small write per subject and never touches a
+// box. Wire the rotator so it re-wraps after each rotation and never prunes a
+// version a key still needs:
+//
+//	rotator, _ := secret.NewRotator(secret.RotatorConfig{
+//	    Store: secrets, Name: "data-key",
+//	    Policy:   secret.Policy{Every: 30 * 24 * time.Hour, Keep: 3, Generate: secret.Random(32)},
+//	    InUse:    keys.OldestRoot,      // Keep becomes a floor while a key lags
+//	    OnRotate: func(secret.Versioned) { _, _ = keys.Rewrap(ctx) },
+//	})
+//
 // # What this package does not do
 //
 // It ships no Vault, KMS or cloud secret-manager client: those are [Store]
