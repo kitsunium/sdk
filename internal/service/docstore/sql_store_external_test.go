@@ -415,6 +415,13 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 	engine := newSQLEngine(coresql.DialectSQLite, accountsTable)
 	tm := newSQLTransactor(t, engine, coresql.DialectSQLite)
 	valid := docstore.SQLConfig[account]{Key: accountKey, Transactor: tm, Dialect: coresql.DialectSQLite, Table: accountsTable}
+	//: the parallel subtests run once this function has returned, so what
+	//: they sent is read in a cleanup, which runs after all of them.
+	t.Cleanup(func() {
+		if roles := engine.roles(); len(roles) != 0 {
+			t.Errorf("a refused configuration reached the database: %v", roles)
+		}
+	})
 	for name, tc := range map[string]struct {
 		mutate  func(*docstore.SQLConfig[account])
 		indexes []docstore.IndexSpec[account]
@@ -453,9 +460,6 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 				t.Fatalf("the refusal names setting %q, want %q", setting, tc.setting)
 			}
 		})
-	}
-	if roles := engine.roles(); len(roles) != 0 {
-		t.Fatalf("a refused configuration reached the database: %v", roles)
 	}
 	must(t, openErr(docstore.OpenSQL(docstore.SQLConfig[account]{
 		Key: accountKey, Transactor: tm, Dialect: coresql.DialectSQLite, Table: strings.Repeat("t", docstore.MaxSQLTableLen),
