@@ -20,5 +20,20 @@ with `Equal` in constant time, and does not compile with `==`.
 `Store` is frozen at five methods (ADR 0039). Versions number from 1 and are
 never reused. A name is 1–63 characters of `a-z`, `0-9` and `-`.
 
-Concrete stores, the keyring and the rotator: `internal/service/secret`. Public
-facade: `pkg/v1/secret`. See `CLAUDE.md`.
+`SubjectKeyStore` (ADR 0142) keeps one wrapped data key per subject for the
+subject-key engine, and is frozen at five methods too. The caller implements it
+over its own storage; `Insert` must be insert-if-absent and `Replace`
+compare-and-swap across every process, and absence is an answer, not an error:
+
+```go
+var keys coresecret.SubjectKeyStore // yours, or service/secret.NewMemorySubjectKeyStore()
+
+inserted, err := keys.Insert(ctx, "9f86d081884c7d65", wrapped) // false: a key is filed already
+replaced, err := keys.Replace(ctx, "9f86d081884c7d65", old, next) // false: destroyed or changed meanwhile
+```
+
+A subject is a reference, never an identity: 1–128 bytes of lowercase `a-z`,
+`0-9`, `-`, `_`, `.`, `:` (`ValidateSubject`) — an HMAC of the identity, in hex.
+
+Concrete stores, the keyring, the rotator and the subject keys:
+`internal/service/secret`. Public facade: `pkg/v1/secret`. See `CLAUDE.md`.

@@ -91,4 +91,13 @@ var (
 		"A prune must keep at least one version",
 		"core/secret: Prune was asked to keep fewer than one version, which would delete the secret rather than prune it",
 		errs.WithExitCode(exitConfig))
+
+	// InvalidSubject is returned by ValidateSubject, and by every call that
+	// takes a subject, for a subject outside the grammar (ADR 0142). The
+	// rejected string is never repeated: the one most likely to be refused is
+	// the identity a caller forgot to derive a reference from.
+	InvalidSubject = errs.Define(CodeInvalidSubject, "INVALID_SUBJECT",
+		"That is not a valid subject reference",
+		"core/secret: a subject must be 1-128 bytes of a-z, 0-9, '-', '_', '.' and ':', starting with a letter or a digit",
+		errs.WithExitCode(exitConfig))
 )

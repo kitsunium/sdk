@@ -1114,6 +1114,10 @@ codes:
     const: CodeInvalidKeep
     hex: "0x00_02_25_07"
     package: internal/core/secret
+  - code: "0.2.37.8"
+    const: CodeInvalidSubject
+    hex: "0x00_02_25_08"
+    package: internal/core/secret
   - code: "0.2.56.1"
     const: CodeTriggerUnknown
     hex: "0x00_02_38_01"
