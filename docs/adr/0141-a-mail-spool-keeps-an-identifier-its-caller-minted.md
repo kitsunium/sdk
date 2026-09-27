@@ -4,7 +4,7 @@
 - **Date**: 2026-09-27
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0111](0111-a-mail-spool-retries-on-a-backoff-and-resends-only-after-a-crash.md) — D2, where a mail's identifier comes from and the rule it keeps; D4, what a repeated identifier meets; D5, how the observer's order is kept
-- **Related**: [ADR 0064](0064-sdk-mail-domain.md) (the mail domain and its dot-atom grammar), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code), kitsunium/sdk#254, kitsunium/platform ADR 0004 (the need)
+- **Related**: [ADR 0064](0064-sdk-mail-domain.md) (the mail domain and its dot-atom grammar), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code), [kitsunium/sdk#254](https://github.com/kitsunium/sdk/issues/254) (the tracking issue), kitsunium/platform ADR 0004 (the need)
 
 ## Context
 
@@ -122,7 +122,7 @@ of the OTHER Send's mail, whose `sent` could reach the observer before its
 `queued`. The registrations are now counted, and a delivery of an identifier
 waits until none is left.
 
-## Consequences
+## Consequences / Semantics
 
 - kit can do what its ADR 0004 plans: mint the outbox ID at `Mailer.Send`
   (`kit.NewID("mail")`, a TypeID), return it, hold the mail with the
@@ -189,8 +189,8 @@ was. The default ULID and every generator in `service/id` pass. The new code,
 
 - `internal/service/mail/spool/identifier.go`, `internal/service/mail/spool/spool.go`,
   `internal/core/mail/address.go`
-- RFC 5322 §2.1.1 (line length), §3.2.3 (atext, dot-atom-text), §3.6.4
-  (msg-id, id-left, uniqueness)
+- [RFC 5322](https://www.rfc-editor.org/rfc/rfc5322) §2.1.1 (line length),
+  §3.2.3 (atext, dot-atom-text), §3.6.4 (msg-id, id-left, uniqueness)
 - kitsunium/platform `docs/adr/0004-the-store-is-the-port-databases-are-adapters.md`
   ("Held effects", and the third SDK change it lists)
-- kitsunium/sdk#254
+- [kitsunium/sdk#254](https://github.com/kitsunium/sdk/issues/254), the tracking issue
