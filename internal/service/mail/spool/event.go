@@ -14,7 +14,7 @@ type EventKind uint8
 
 // What can happen to a spooled mail. The zero value is none of them.
 const (
-	// EventQueued: Send put the mail in the spool.
+	// EventQueued: Send or SendWithID put the mail in the spool.
 	EventQueued EventKind = iota + 1
 	// EventSent: the transport accepted the mail.
 	EventSent
@@ -23,9 +23,12 @@ const (
 	// EventDeadLettered: the last attempt failed; the mail is kept, with
 	// that failure, and never delivered again.
 	EventDeadLettered
-	// EventDuplicate: the queue handed back a mail this spool had already
-	// delivered — its lease lapsed while the relay was accepting it — and it
-	// was dropped instead of sent twice.
+	// EventDuplicate: the queue handed back a mail under an identifier this
+	// spool had already delivered — its lease lapsed while the relay was
+	// accepting it, or a SendWithID repeated the identifier — and it was
+	// dropped instead of sent twice. A repeat's own EventQueued comes first,
+	// so an observer keyed by identifier reads this one as "delivered
+	// already".
 	EventDuplicate
 )
 

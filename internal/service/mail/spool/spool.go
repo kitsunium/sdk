@@ -23,6 +23,20 @@
 // spool's identifier at the sender's domain — and returns once the mail is in
 // the spool: durable, with a Dir, before Send returns.
 //
+// # An identifier the caller minted
+//
+// Send mints the mail's identifier with Config.NewID. SendWithID queues the
+// mail under one its caller minted instead, for a caller that must know the
+// identifier before the spool has the mail — a framework that holds a mail
+// until a transaction commits returns the identifier at the call and queues
+// the mail after the commit. Every identifier, whoever minted it, is
+// non-empty, at most MaxIDBytes and an RFC 5322 dot-atom, because it becomes
+// the left half of the mail's Message-ID: a caller's that is not is
+// InvalidMailID, a generator's SpoolMisconfigured. A repeated identifier is
+// not refused. The spool cannot see the identifiers in its queue without
+// reading every record; it drops a mail under an identifier it delivered, as
+// it drops every redelivery.
+//
 // # How a mail is delivered
 //
 // Run consumes the spool, one mail at a time, on the goroutine that calls it.
@@ -85,8 +99,8 @@ type announcement struct {
 	pending int
 }
 
-// Spool is a durable outbox for mail. Build one with [New]; Send queues, Run
-// delivers. It is safe for concurrent use.
+// Spool is a durable outbox for mail. Build one with [New]; Send and
+// SendWithID queue, Run delivers. It is safe for concurrent use.
 type Spool struct {
 	// transport delivers each mail.
 	transport coremail.Transport
@@ -200,47 +214,129 @@ func maxMessageBytes(configured int) int {
 	return configured
 }
 
-// Send validates msg, stamps what a retry must not change, and queues it. It
-// returns the spool's identifier for the mail once the mail is in the spool —
-// on disk, with a Dir. A mail without a sender gets Config.From; without a
-// Date, the spool's clock; without a Message-ID, one made of its identifier
-// at the sender's domain, which every attempt keeps.
+// Send validates msg, stamps what a retry must not change, and queues it
+// under an identifier Config.NewID mints. It returns that identifier once the
+// mail is in the spool — on disk, with a Dir. A mail without a sender gets
+// Config.From; without a Date, the spool's clock; without a Message-ID, one
+// made of its identifier at the sender's domain, which every attempt keeps.
 //
 // A refusal is the mail domain's own typed verdict (HeaderInjection,
 // InvalidAddress, NoRecipients, EmptyBody…), the queue's (MessageTooLarge),
-// SpoolMisconfigured for an empty identifier from Config.NewID, or
-// SpoolClosed; nothing is queued. A Send racing Close either lands before the
-// queue closes or is SpoolClosed.
+// SpoolMisconfigured for an identifier from Config.NewID that breaks the rule
+// SendWithID states, or SpoolClosed; nothing is queued. A Send racing Close
+// either lands before the queue closes or is SpoolClosed.
 func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string, err error) {
 	//: a closed spool takes nothing, and mints nothing for it.
 	if s.isClosed() {
 		//: SpoolClosed.
 		return "", kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
 	}
-	record, stampErr := s.stamp(ctx, msg)
-	//: the identifier could not be minted, or the mail is refused.
+	id, mintErr := s.mint()
+	//: no identifier, no mail.
+	if mintErr != nil {
+		//: the generator's own verdict, or SpoolMisconfigured.
+		return "", mintErr
+	}
+	//: queued under it, or refused with nothing queued.
+	if queueErr := s.queue(ctx, id, msg); queueErr != nil {
+		//: as queue refused it.
+		return "", queueErr
+	}
+	//: the spool's identifier.
+	return id, nil
+}
+
+// SendWithID is Send under an identifier its caller minted, for a caller that
+// must know the identifier before the spool has the mail: a framework that
+// holds a mail until its transaction commits returns the identifier at the
+// call and queues the mail after the commit. SendWithID stamps what Send
+// stamps, the Message-ID it makes is id at the sender's domain, and the
+// events, the attempts and the dead letter carry id.
+//
+// The identifier must be non-empty, at most MaxIDBytes, and an RFC 5322
+// dot-atom — the grammar of a Message-ID's left half: printable ASCII, no
+// special, no empty label — even when the mail brings its own Message-ID,
+// because the rule belongs to the identifier and not to one mail. Anything
+// else is InvalidMailID, which names the rule it broke and never the
+// identifier; nothing is queued. Identifiers are compared byte for byte.
+//
+// The identifier is the caller's promise that the mail is new, as one from
+// Config.NewID is. The spool does not look for it among the mails it holds;
+// a repeated identifier meets the ledger every redelivery meets. A mail under
+// an identifier this process delivered — among the last DeliveredMemory — is
+// dropped at delivery with EventDuplicate, after its own EventQueued, instead
+// of being sent. So SendWithID repeated after a failure that hid a landed
+// publication sends the mail once, while the process remembers it. An
+// identifier whose mail was dead-lettered was never delivered, and carries a
+// new attempt. After a restart the ledger is empty, and a repeat is sent
+// again — under the same Message-ID, when that was made of id.
+//
+// Every other refusal is Send's, and a SendWithID racing Close lands or is
+// SpoolClosed.
+func (s *Spool) SendWithID(ctx context.Context, id string, msg coremail.MessageValue) error {
+	//: a closed spool takes nothing.
+	if s.isClosed() {
+		//: SpoolClosed.
+		return kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
+	}
+	//: the rule every identifier keeps, whoever minted it.
+	if problem, ok := checkID(id); !ok {
+		//: InvalidMailID, naming the rule and the length — never the
+		//: identifier, which may carry the very bytes it was refused for.
+		return kerrs.Wrap(InvalidMailID, kerrs.WrapParams{},
+			kerrs.String("problem", problem), kerrs.Int("bytes", len(id)))
+	}
+	//: queued under it, or refused with nothing queued.
+	return s.queue(ctx, id, msg)
+}
+
+// mint asks Config.NewID for an identifier and holds it to the rule
+// SendWithID holds a caller's to: one the generator got wrong is the
+// configuration's defect, not the mail's.
+func (s *Spool) mint() (string, error) {
+	id, idErr := s.newID()
+	//: the generator failed.
+	if idErr != nil {
+		//: its own typed verdict.
+		return "", idErr
+	}
+	//: an identifier no mail can keep — an empty one, which every later
+	//: empty one would repeat, among them.
+	if problem, ok := checkID(id); !ok {
+		//: SpoolMisconfigured, naming the setting.
+		return "", misconfigured("NewID", "returned an identifier that is "+problem)
+	}
+	//: minted.
+	return id, nil
+}
+
+// queue stamps msg under id, writes it into the spool and tells the observer
+// it was queued. When it returns an error, nothing was queued.
+func (s *Spool) queue(ctx context.Context, id string, msg coremail.MessageValue) error {
+	record, stampErr := s.stamp(ctx, id, msg)
+	//: the mail is refused.
 	if stampErr != nil {
-		//: nothing queued.
-		return "", stampErr
+		//: the mail domain's own verdict.
+		return stampErr
 	}
 	payload, encodeErr := json.Marshal(record)
 	//: a Date encoding/json refuses.
 	if encodeErr != nil {
-		//: MessageUnencodable; nothing queued.
-		return "", kerrs.Wrap(MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
+		//: MessageUnencodable.
+		return kerrs.Wrap(MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
 	}
 	//: the consumer may deliver the mail before Publish returns here: its
 	//: delivery waits until the observer has heard it was queued.
 	defer s.announce(record.ID)()
-	//: durable before Send returns, with a Dir.
+	//: durable before the caller hears of it, with a Dir.
 	if publishErr := s.publish(ctx, payload); publishErr != nil {
 		//: SpoolClosed, MessageTooLarge, QueueBackendFailed, or the caller's
 		//: context.
-		return "", publishErr
+		return publishErr
 	}
 	s.emit(&EventValue{Kind: EventQueued, At: record.QueuedAt, QueuedAt: record.QueuedAt, ID: record.ID, Message: record.Message, Meta: record.Meta})
-	//: the spool's identifier.
-	return record.ID, nil
+	//: in the spool.
+	return nil
 }
 
 // isClosed reports whether Close ran.
@@ -323,8 +419,9 @@ func (s *Spool) awaitAnnouncement(id string) {
 	}
 }
 
-// stamp fills in what a retry must not change and validates the result.
-func (s *Spool) stamp(ctx context.Context, msg coremail.MessageValue) (spooledValue, error) {
+// stamp fills in what a retry must not change under id and validates the
+// result.
+func (s *Spool) stamp(ctx context.Context, id string, msg coremail.MessageValue) (spooledValue, error) {
 	//: the default sender, when the mail names none.
 	if msg.From.IsZero() {
 		msg.From = s.from
@@ -333,18 +430,6 @@ func (s *Spool) stamp(ctx context.Context, msg coremail.MessageValue) (spooledVa
 	//: the Date every attempt carries.
 	if msg.Date.IsZero() {
 		msg.Date = now
-	}
-	id, idErr := s.newID()
-	//: no identifier, no mail.
-	if idErr != nil {
-		//: the generator's own typed verdict.
-		return spooledValue{}, idErr
-	}
-	//: an empty identifier is one every later empty one would repeat, and the
-	//: spool drops a mail whose identifier it delivered already.
-	if id == "" {
-		//: SpoolMisconfigured, naming the setting.
-		return spooledValue{}, misconfigured("NewID", "returned an empty identifier")
 	}
 	//: the Message-ID every attempt carries, so a receiver can tell a retry
 	//: from a new mail.

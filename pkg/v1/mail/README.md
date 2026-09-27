@@ -102,6 +102,21 @@ id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body}
 
 A redelivery of a mail the spool delivered — its lease lapsed while a slow relay was still accepting it — is recognised by its identifier and dropped. The one duplicate no outbox can prevent is a process that dies between the relay's acceptance and the acknowledgement; the next process sends the mail again under the SAME Message\-ID, which is how a receiver recognises it. Every attempt carries its [SpoolAttempt](<#SpoolAttempt>) in its context — the identifier, the count, and what [SpoolConfig](<#SpoolConfig>).Annotate kept from the Send's context — so a transport can continue the Send's trace, and every mail's fate reaches [SpoolConfig](<#SpoolConfig>).Observe. The spool writes nothing anywhere itself.
 
+### An identifier minted before the mail is spooled
+
+[Spool](<#Spool>).Send mints the mail's identifier. A caller that must know it before the spool has the mail — a framework that holds a mail until a transaction commits, and returns the identifier at the call — mints it itself and queues the mail later with [Spool](<#Spool>).SendWithID, which stamps what Send stamps and makes the Message\-ID of that identifier:
+
+```
+mailIDs, err := id.NewTypeID("mail") // github.com/kitsunium/sdk/pkg/v1/id
+outboxID, err := mailIDs.New()       // at the call, inside the transaction
+// … once the transaction has committed:
+err = outbox.SendWithID(ctx, outboxID, msg)
+```
+
+The identifier becomes the left half of the mail's Message\-ID, so it must be an RFC 5322 dot\-atom — printable ASCII, no space, no special, no empty label — of at most [SpoolMaxIDBytes](<#DefaultCaptureKeep>) bytes, even for a mail that brings its own Message\-ID. Anything else is [InvalidMailID](<#HeaderInjection>), which never quotes the identifier, and nothing is queued. A [SpoolConfig](<#SpoolConfig>).NewID that mints such an identifier is [SpoolMisconfigured](<#HeaderInjection>) at Send.
+
+A repeated identifier is not refused. A mail under one the spool delivered is dropped at delivery as a [SpoolDuplicate](<#SpoolQueued>), after its own [SpoolQueued](<#SpoolQueued>), so a SendWithID retried after an ambiguous failure sends the mail once while the process remembers it. A mail dead\-lettered under an identifier was never delivered, and can be queued again under it. After a restart the spool remembers nothing, and a repeat is sent again — under the same Message\-ID, when that was made of the identifier.
+
 ### Testing
 
 [NewMemory](<#NewMemory>) returns a transport that COMPOSES every message and records the bytes instead of dialling. It is a double rather than a stub: it runs the same composer and the same guards, so a message production would refuse is refused in the test that exists to catch it.
@@ -172,6 +187,9 @@ const (
     // SpoolDeliveredMemory is how many delivered mails a spool remembers to
     // drop a redelivery.
     SpoolDeliveredMemory int = svcspool.DeliveredMemory
+    // SpoolMaxIDBytes bounds a spooled mail's identifier, whoever minted it:
+    // Spool.SendWithID refuses a longer one with InvalidMailID.
+    SpoolMaxIDBytes int = svcspool.MaxIDBytes
 )
 ```
 
@@ -241,9 +259,10 @@ var (
     // the clause and never the URL, which carries the password.
     InvalidURL = svcmail.InvalidURL
 
-    // SpoolMisconfigured refuses a spool that could never deliver.
+    // SpoolMisconfigured refuses a spool that could never deliver, and a Send
+    // whose SpoolConfig.NewID minted an identifier no mail can keep.
     SpoolMisconfigured = svcspool.SpoolMisconfigured
-    // SpoolClosed refuses a Send after Close.
+    // SpoolClosed refuses a Send or a SendWithID after Close.
     SpoolClosed = svcspool.SpoolClosed
     // SpooledMailUndecodable reports a spooled record that is not a mail.
     SpooledMailUndecodable = svcspool.MessageUndecodable
@@ -251,11 +270,15 @@ var (
     SpooledMailUnencodable = svcspool.MessageUnencodable
     // TransportPanicked is the failure of an attempt whose transport panicked.
     TransportPanicked = svcspool.TransportPanicked
+    // InvalidMailID refuses an identifier Spool.SendWithID was given that is
+    // empty, longer than SpoolMaxIDBytes or not an RFC 5322 dot-atom. It names
+    // the rule broken and never the identifier.
+    InvalidMailID = svcspool.InvalidMailID
 )
 ```
 
 <a name="Compose"></a>
-## func [Compose](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L458>)
+## func [Compose](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L494>)
 
 ```go
 func Compose(msg Message) (raw []byte, err error)
@@ -264,7 +287,7 @@ func Compose(msg Message) (raw []byte, err error)
 Compose renders msg to the RFC 5322 wire form using the system clock and crypto/rand. It is the one\-line form of [NewComposer](<#NewComposer>).
 
 <a name="Validate"></a>
-## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L469>)
+## func [Validate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L505>)
 
 ```go
 func Validate(msg Message) error
@@ -275,7 +298,7 @@ Validate reports whether msg can be composed and sent, returning the first typed
 It is exported so a caller can reject a message at the edge — where a form was submitted — rather than at the transport, and get the same verdict either way.
 
 <a name="Address"></a>
-## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L243>)
+## type [Address](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L274>)
 
 Address is the public alias for one RFC 5322 mailbox.
 
@@ -284,7 +307,7 @@ type Address = coremail.AddressValue
 ```
 
 <a name="Attachment"></a>
-## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L247>)
+## type [Attachment](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L278>)
 
 Attachment is the public alias for one file or inline part. A non\-empty ContentID makes it inline.
 
@@ -293,7 +316,7 @@ type Attachment = coremail.AttachmentValue
 ```
 
 <a name="BatchSender"></a>
-## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L269>)
+## type [BatchSender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L300>)
 
 BatchSender is the public alias for the sibling that sends several messages over one session.
 
@@ -302,7 +325,7 @@ type BatchSender = coremail.BatchSender
 ```
 
 <a name="Composer"></a>
-## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L291>)
+## type [Composer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L322>)
 
 Composer is the public alias for the type that turns a [Message](<#Message>) into the RFC 5322 wire form without sending anything.
 
@@ -311,7 +334,7 @@ type Composer = svcmail.Composer
 ```
 
 <a name="NewComposer"></a>
-### func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L451>)
+### func [NewComposer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L487>)
 
 ```go
 func NewComposer(cfg ComposerConfig) *Composer
@@ -322,7 +345,7 @@ NewComposer returns a composer that renders a [Message](<#Message>) to the RFC 5
 A [ComposerConfig](<#ComposerConfig>) with a fixed clock and a fixed randomness source makes composition byte\-deterministic.
 
 <a name="ComposerConfig"></a>
-## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L287>)
+## type [ComposerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L318>)
 
 ComposerConfig is the public alias for the composer's optional clock and randomness source. Both clamp rather than refuse.
 
@@ -331,7 +354,7 @@ type ComposerConfig = svcmail.ComposerConfig
 ```
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L260>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L291>)
 
 Delivery is the public alias for one record of what a transport put on the wire: the envelope, and the composed bytes.
 
@@ -340,7 +363,7 @@ type Delivery = coremail.DeliveryValue
 ```
 
 <a name="Envelope"></a>
-## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L256>)
+## type [Envelope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L287>)
 
 Envelope is the public alias for the SMTP envelope: one MAIL FROM and every RCPT TO, Bcc included.
 
@@ -349,7 +372,7 @@ type Envelope = coremail.EnvelopeValue
 ```
 
 <a name="FullTransport"></a>
-## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L277>)
+## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L308>)
 
 FullTransport is the public alias for the union [NewMemory](<#NewMemory>) returns. A parameter should still ask for the narrowest thing it uses.
 
@@ -358,7 +381,7 @@ type FullTransport = coremail.FullTransport
 ```
 
 <a name="NewCapture"></a>
-### func [NewCapture](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L408>)
+### func [NewCapture](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L444>)
 
 ```go
 func NewCapture(keep int) FullTransport
@@ -367,7 +390,7 @@ func NewCapture(keep int) FullTransport
 NewCapture returns NewMemory's double keeping only the last keep deliveries — DefaultCaptureKeep when keep is not positive: the transport a development server and a test deliver through.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L440>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L476>)
 
 ```go
 func NewMemory() FullTransport
@@ -378,7 +401,7 @@ NewMemory returns a transport that composes every message and records the result
 It takes no arguments on purpose: every knob it could offer is one a test has to set before it can assert anything, and the value of a double is that it costs one line.
 
 <a name="HeaderField"></a>
-## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L252>)
+## type [HeaderField](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L283>)
 
 HeaderField is the public alias for one additional header. It is a slice element rather than a map entry so a composed message is deterministic and so a field may legitimately repeat.
 
@@ -387,7 +410,7 @@ type HeaderField = coremail.HeaderFieldValue
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L240>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L271>)
 
 Message is the public alias for one mail, as a value.
 
@@ -396,7 +419,7 @@ type Message = coremail.MessageValue
 ```
 
 <a name="Outbox"></a>
-## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L273>)
+## type [Outbox](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L304>)
 
 Outbox is the public alias for the sibling that exposes what was sent. Only the in\-memory transport implements it.
 
@@ -405,7 +428,7 @@ type Outbox = coremail.Outbox
 ```
 
 <a name="SMTPConfig"></a>
-## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L280>)
+## type [SMTPConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L311>)
 
 SMTPConfig is the public alias for the SMTP transport's configuration.
 
@@ -414,7 +437,7 @@ type SMTPConfig = svcmail.SMTPConfig
 ```
 
 <a name="ParseURL"></a>
-### func [ParseURL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L417>)
+### func [ParseURL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L453>)
 
 ```go
 func ParseURL(raw string) (cfg SMTPConfig, err error)
@@ -423,16 +446,16 @@ func ParseURL(raw string) (cfg SMTPConfig, err error)
 ParseURL reads smtp://user:password@host:port?tls=starttls|implicit|none, or smtps://…, into an [SMTPConfig](<#SMTPConfig>) that [NewSMTP](<#NewSMTP>) accepts; see the package documentation for the grammar and its defaults. On a refusal it returns the zero SMTPConfig and an error that never quotes the URL.
 
 <a name="Spool"></a>
-## type [Spool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L295>)
+## type [Spool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L326>)
 
-Spool is the public alias for the durable outbox: Send, Run, DeadLetters, Close.
+Spool is the public alias for the durable outbox: Send, SendWithID, Run, DeadLetters, Close.
 
 ```go
 type Spool = svcspool.Spool
 ```
 
 <a name="NewSpool"></a>
-### func [NewSpool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L393>)
+### func [NewSpool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L429>)
 
 ```go
 func NewSpool(cfg SpoolConfig) (*Spool, error)
@@ -441,7 +464,7 @@ func NewSpool(cfg SpoolConfig) (*Spool, error)
 NewSpool builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or in memory without one. It starts nothing: Run delivers.
 
 <a name="SpoolAttempt"></a>
-## type [SpoolAttempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L310>)
+## type [SpoolAttempt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L341>)
 
 SpoolAttempt is the public alias for what one delivery attempt knows about itself, carried in the context the spool hands its transport.
 
@@ -450,7 +473,7 @@ type SpoolAttempt = svcspool.AttemptValue
 ```
 
 <a name="SpoolAttemptFrom"></a>
-### func [SpoolAttemptFrom](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L400>)
+### func [SpoolAttemptFrom](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L436>)
 
 ```go
 func SpoolAttemptFrom(ctx context.Context) (attempt SpoolAttempt, ok bool)
@@ -459,7 +482,7 @@ func SpoolAttemptFrom(ctx context.Context) (attempt SpoolAttempt, ok bool)
 SpoolAttemptFrom returns the attempt a delivery context carries — only a context a Spool handed its transport carries one.
 
 <a name="SpoolConfig"></a>
-## type [SpoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L300>)
+## type [SpoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L331>)
 
 SpoolConfig is the public alias for a spool's configuration: Transport and MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout, MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
 
@@ -468,7 +491,7 @@ type SpoolConfig = svcspool.Config
 ```
 
 <a name="SpoolDeadLetter"></a>
-## type [SpoolDeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L313>)
+## type [SpoolDeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L344>)
 
 SpoolDeadLetter is the public alias for a mail the spool gave up on.
 
@@ -477,7 +500,7 @@ type SpoolDeadLetter = svcspool.DeadLetterValue
 ```
 
 <a name="SpoolEvent"></a>
-## type [SpoolEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L303>)
+## type [SpoolEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L334>)
 
 SpoolEvent is the public alias for one thing that happened to one mail.
 
@@ -486,7 +509,7 @@ type SpoolEvent = svcspool.EventValue
 ```
 
 <a name="SpoolEventKind"></a>
-## type [SpoolEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L306>)
+## type [SpoolEventKind](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L337>)
 
 SpoolEventKind is the public alias for what a SpoolEvent reports.
 
@@ -512,7 +535,7 @@ const (
 ```
 
 <a name="TLSMode"></a>
-## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L283>)
+## type [TLSMode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L314>)
 
 TLSMode is the public alias for the encryption mode. Its zero value is refused.
 
@@ -547,7 +570,7 @@ const TLSUnset TLSMode = svcmail.TLSUnset
 ```
 
 <a name="Transport"></a>
-## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L265>)
+## type [Transport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L296>)
 
 Transport is the public alias for the frozen port. A new capability arrives as a sibling interface reached by type assertion, never as a second method \(ADR 0039\).
 
@@ -556,7 +579,7 @@ type Transport = coremail.Transport
 ```
 
 <a name="NewSMTP"></a>
-### func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L428>)
+### func [NewSMTP](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/mail/mail.go#L464>)
 
 ```go
 func NewSMTP(cfg SMTPConfig) (transport Transport, err error)

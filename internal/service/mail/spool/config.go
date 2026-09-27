@@ -58,10 +58,12 @@ type Config struct {
 	// and handed back to every attempt through AttemptFrom. Nil keeps nothing.
 	// It must not return a secret: it is written into the spool as it is.
 	Annotate func(ctx context.Context) map[string]string
-	// NewID mints the spool's identifier for a mail. Nil mints a ULID. Every
-	// identifier must be new: the spool drops a mail whose identifier it
-	// delivered already, as a redelivery. An empty one is refused at Send
-	// (SpoolMisconfigured).
+	// NewID mints the spool's identifier for a mail Send queues; SendWithID
+	// takes its caller's instead. Nil mints a ULID. Every identifier must be
+	// new: the spool drops a mail whose identifier it delivered already, as a
+	// redelivery. One that is empty, longer than MaxIDBytes or not an RFC 5322
+	// dot-atom is refused at Send (SpoolMisconfigured), since it would become
+	// the left half of the mail's Message-ID.
 	NewID func() (string, error)
 	// Dir is the spool's directory: a durable queue that outlives the
 	// process, shared by every process that names it. Empty keeps the spool
