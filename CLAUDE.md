@@ -146,6 +146,8 @@ third-party/       opt-in vendor integrations (root module only)
                    entitlement (the ssh Identity + enrolment ONLY; the
                      mechanism is pkg/v1/entitlement — ADR 0079),
                    db/writer/{clickhouse,mysql,redis},
+                   db/sql (the SQL mechanisms on real engines — integration
+                     tests only, no production code — ADR 0139/0140),
                    transform (zstd + s2 — ADR 0066),
                    x-crypto/{argon2id,xchacha}
 ```
