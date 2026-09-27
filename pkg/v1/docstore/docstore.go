@@ -102,8 +102,9 @@
 // A call runs on the transaction its context carries for that transactor, and
 // on the pool otherwise. A write runs in a savepoint of the caller's
 // transaction — or a transaction of its own — so it is atomic on its own, and
-// a refused one leaves the caller's transaction usable. Its hooks run once the
-// transaction that holds it has committed, and never for one rolled back.
+// a refused or failed one leaves the caller's transaction usable. Its hooks run
+// once the transaction that holds it has committed, and never for one rolled
+// back.
 //
 // The document is kept as the bytes the store encoded, never as the engine's
 // JSON type, which reorders members and respells numbers, so it reads back

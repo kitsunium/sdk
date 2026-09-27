@@ -309,6 +309,36 @@ func TestSQLFindAndFilter(t *testing.T) {
 	})
 }
 
+// TestSQLManyUniqueKeysAreCheckedInBatches pins a unique index that answers
+// many keys for one document: its keys are checked a bounded batch at a time,
+// under the engines' ceiling on bound parameters, and a key taken in a later
+// batch is still refused, naming the index.
+func TestSQLManyUniqueKeysAreCheckedInBatches(t *testing.T) {
+	t.Parallel()
+	//: 449 keys of the document's own, and a last one it may share.
+	aliases := func(a account) []string {
+		keys := make([]string, 0, 450)
+		for i := range 449 {
+			keys = append(keys, fmt.Sprintf("alias-%s-%03d", a.ID, i))
+		}
+		return append(keys, "shared-"+a.Name)
+	}
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		ctx := t.Context()
+		fx := openSQL(t, dialect, docstore.IndexSpec[account]{Name: "aliases", Unique: true, Keys: aliases})
+		must(t, fx.store.Put(ctx, account{ID: "acc_1", Name: "ada"}))
+		if checks := countOf(fx.engine.roles(), "uniqueTaken"); checks != 2 {
+			t.Fatalf("450 unique keys took %d checks, want 2 bounded batches", checks)
+		}
+		must(t, fx.store.Put(ctx, account{ID: "acc_3", Name: "grace"}))
+		err := fx.store.Put(ctx, account{ID: "acc_2", Name: "ada"})
+		requireCode(t, err, docstore.CodeUniqueKeyTaken, "a key taken in the last batch")
+		if index := fieldValue(errs.FieldsOf(err), "index"); index != "aliases" {
+			t.Fatalf("the refusal names index %q, want aliases", index)
+		}
+	})
+}
+
 // TestSQLIndexKeysMayBeStoredHashed pins IndexKey: the table holds what it
 // returns and never the key, and Lookup, Find, a rewrite and a deletion all go
 // through it.

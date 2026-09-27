@@ -16,6 +16,11 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// uniqueKeysPerStatement bounds how many unique keys one unique check asks
+// about. At two arguments a key, plus the document's key, it stays under
+// SQLite's 999 bound parameters for the same reason indexRowsPerStatement does.
+const uniqueKeysPerStatement int = 400
+
 // indexRowsPerStatement bounds how many index rows one INSERT carries. At four
 // arguments a row it stays under 999 bound parameters — SQLite's ceiling
 // before 3.32 — so a document with many keys is filed in a few statements
@@ -171,25 +176,27 @@ func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode) error {
 
 // run runs a write's statements where they belong.
 //
-// A write of more than one statement runs in a transaction: a savepoint of
-// the caller's when ctx carries one — so its failure undoes it alone, and the
-// caller's transaction stays usable — else one of the store's own. A write of
-// one statement runs on the executor ctx names; one statement is atomic on its
-// own.
+// Inside the caller's transaction, every write is a savepoint of it, however
+// many statements it sends: its failure — a refusal, a collision, a statement
+// the database cancelled when a per-call deadline passed — undoes it alone,
+// and on PostgreSQL clears the aborted state a failed statement leaves, so the
+// caller's transaction stays usable. Outside one, a write of several
+// statements runs in a transaction of the store's own, and a write of one
+// statement runs on the pool, where one statement is atomic by itself.
 func (s *SQLStore[T]) run(ctx context.Context, several bool, work coresql.TxFunc) error {
 	ex, inTx := s.tx.join.Join(ctx)
-	//: one statement needs no transaction to be atomic.
-	if !several {
-		//: in the caller's transaction, or on the pool.
-		return work(ctx, ex)
-	}
-	opts := s.own
 	//: a savepoint takes no options: it has its transaction's.
 	if inTx {
-		opts = coresql.TxOptionsValue{}
+		//: a savepoint of the caller's transaction.
+		return s.tm.Transact(ctx, coresql.TxOptionsValue{}, work)
 	}
-	//: a savepoint of the caller's transaction, or the store's own.
-	return s.tm.Transact(ctx, opts, work)
+	//: one statement needs no transaction to be atomic.
+	if !several {
+		//: on the pool.
+		return work(ctx, ex)
+	}
+	//: a transaction of the store's own.
+	return s.tm.Transact(ctx, s.own, work)
 }
 
 // settle turns a failed write's error into what the caller is told: a
@@ -464,25 +471,29 @@ func (s *SQLStore[T]) fileIndexes(ctx context.Context, ex coresql.Executor, p *s
 
 // checkUnique refuses p when a unique index files one of its keys under
 // another document, naming the first such index in declaration order. shared
-// reads the latest committed rows, which a check after a collision needs.
+// reads the latest committed rows, which a check after a collision needs. The
+// keys are asked about a bounded number at a time, so a document whose unique
+// index answers many keys is checked, not refused by the engine's ceiling on
+// bound parameters.
 func (s *SQLStore[T]) checkUnique(ctx context.Context, ex coresql.Executor, p *sqlPrepared, shared bool) error {
 	unique := slices.DeleteFunc(slices.Clone(p.rows), func(r indexRow) bool { return !r.unique })
-	//: only a unique index refuses anything.
-	if len(unique) == 0 {
-		//: nothing to check.
-		return nil
-	}
-	args := make([]any, 0, 1+2*len(unique))
-	args = append(args, []byte(p.key))
-	//: each unique key's index and value.
-	for _, row := range unique {
-		args = append(args, []byte(row.name), row.key)
-	}
-	taken, err := s.queryNames(ctx, ex, s.stmts.uniqueTaken(len(unique), shared), args)
-	//: the check did not complete.
-	if err != nil {
-		//: StatementFailed.
-		return err
+	var taken []string
+	//: one argument list, refilled for each batch.
+	args := make([]any, 0, 1+2*min(len(unique), uniqueKeysPerStatement))
+	//: every unique key, a bounded batch at a time.
+	for batch := range slices.Chunk(unique, uniqueKeysPerStatement) {
+		args = append(args[:0], []byte(p.key))
+		//: each unique key's index and value.
+		for _, row := range batch {
+			args = append(args, []byte(row.name), row.key)
+		}
+		names, err := s.queryNames(ctx, ex, s.stmts.uniqueTaken(len(batch), shared), args)
+		//: the check did not complete.
+		if err != nil {
+			//: StatementFailed.
+			return err
+		}
+		taken = append(taken, names...)
 	}
 	//: in declaration order, so the refusal names the first index that fails.
 	for _, spec := range s.indexes {

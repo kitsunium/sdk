@@ -441,28 +441,65 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 // execute runs one of the store's statements over work, the tables the
 // statement reads and writes; latest is what a locking read sees on MySQL.
 func (e *sqlEngine) execute(role, query string, args []driver.Value, work, latest *tables) (answer, error) {
+	// A read answers rows; anything else is a write.
+	if ans, isRead := e.read(role, query, args, work, latest); isRead {
+		return ans, nil
+	}
+	return e.write(role, query, args, work)
+}
+
+// read answers the store's reads, and reports false for any other statement.
+func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *tables) (answer, bool) {
 	str := func(i int) string { return string(args[i].([]byte)) }
 	switch role {
+	// One document, or whether one is stored.
 	case "getDoc", "exists":
-		return e.readOne(role, query, str(0), work, latest), nil
+		return e.readOne(role, query, str(0), work, latest), true
+	// Every document, in key order.
 	case "listDocs":
-		return rowsOf([]string{"doc"}, docRows(work, "", 0, false)), nil
+		return rowsOf([]string{"doc"}, docRows(work, "", 0, false)), true
+	// Every document with its key, all of them or the first n.
 	case "entries":
-		return rowsOf([]string{"doc_key", "doc"}, docRows(work, "", 0, true)), nil
+		return rowsOf([]string{"doc_key", "doc"}, docRows(work, "", 0, true)), true
 	case "entriesLimit":
-		return rowsOf([]string{"doc_key", "doc"}, docRows(work, "", int(args[0].(int64)), true)), nil
+		return rowsOf([]string{"doc_key", "doc"}, docRows(work, "", int(args[0].(int64)), true)), true
+	// Reindex's next page.
 	case "pageAfter":
-		return rowsOf([]string{"doc_key", "doc"}, docRows(work, str(0), int(args[1].(int64)), true)), nil
+		return rowsOf([]string{"doc_key", "doc"}, docRows(work, str(0), int(args[1].(int64)), true)), true
+	// How many documents.
 	case "count":
-		return rowsOf([]string{"n"}, [][]driver.Value{{int64(len(work.docs))}}), nil
+		return rowsOf([]string{"n"}, [][]driver.Value{{int64(len(work.docs))}}), true
+	// Which unique indexes file one of the keys elsewhere.
+	case "uniqueTaken":
+		return e.uniqueTaken(query, args, work, latest), true
+	// The documents one index key files; NULL — the empty key — equals none.
+	case "lookup", "find":
+		if args[1] == nil {
+			return rowsOf([]string{"doc"}, nil), true
+		}
+		return e.lookup(work, str(0), str(1)), true
+	// Reindex's check of the unique indexes.
+	case "sharedKeys":
+		return e.sharedKeys(work, args), true
+	}
+	return none, false
+}
+
+// write runs the store's writes.
+func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables) (answer, error) {
+	str := func(i int) string { return string(args[i].([]byte)) }
+	switch role {
+	// The three write modes' statements.
 	case "upsert":
 		return e.upsert(work, str(0), args[1].([]byte)), nil
 	case "insert":
 		return e.insert(work, str(0), args[1].([]byte))
 	case "replace", "writeLocked":
 		return e.replace(role, work, str(1), args[0].([]byte)), nil
+	// Update's locking read, a write on SQLite.
 	case "lockDoc":
 		return e.lock(work, str(0)), nil
+	// A document, and its index rows.
 	case "deleteDoc":
 		if _, found := work.docs[str(0)]; !found {
 			return none, nil
@@ -471,20 +508,9 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work, lates
 		return affecting(1), nil
 	case "deleteIndex":
 		return affecting(dropRows(work, func(k ixKey) bool { return k.doc == str(0) })), nil
+	// Reindex's clearing of every row, and its constraining of the unique ones.
 	case "clearIndex":
 		return affecting(dropRows(work, func(ixKey) bool { return true })), nil
-	case "insertIndexRows":
-		return e.insertRows(work, args)
-	case "uniqueTaken":
-		return e.uniqueTaken(query, args, work, latest), nil
-	case "lookup", "find":
-		if args[1] == nil {
-			//: NULL equals nothing: the empty key finds nobody.
-			return rowsOf([]string{"doc"}, nil), nil
-		}
-		return e.lookup(work, str(0), str(1)), nil
-	case "sharedKeys":
-		return e.sharedKeys(work, args), nil
 	case "markUnique":
 		names := stringArgs(args)
 		for k := range work.ix {
@@ -493,6 +519,9 @@ func (e *sqlEngine) execute(role, query string, args []driver.Value, work, lates
 			}
 		}
 		return none, nil
+	// A document's index rows.
+	case "insertIndexRows":
+		return e.insertRows(work, args)
 	}
 	return none, errors.New("the fake engine does not speak: " + query)
 }

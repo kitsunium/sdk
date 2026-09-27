@@ -245,9 +245,10 @@ func TestSQLAFailedStatementWithholdsTheDriversText(t *testing.T) {
 }
 
 // TestSQLRoundTripsPerCall pins what each call sends, which is what it costs:
-// one statement for a read, one for a write to a store without indexes, and a
-// transaction of the store's own — READ COMMITTED on MySQL — or a savepoint of
-// the caller's for a write that files index rows.
+// one statement for a read, one for a write to a store without indexes outside
+// a transaction, a transaction of the store's own — READ COMMITTED on MySQL —
+// for a write that files index rows, and a savepoint of the caller's for any
+// write inside one.
 func TestSQLRoundTripsPerCall(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
@@ -303,6 +304,37 @@ func TestSQLRoundTripsPerCall(t *testing.T) {
 		}
 		if got := fx.engine.roles(); !slices.Equal(got, want) {
 			t.Fatalf("a write inside the caller's transaction sent %v, want %v", got, want)
+		}
+		bare.engine.resetLog()
+		must(t, bare.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
+			return bare.store.Put(ctx, account{ID: "acc_1"})
+		}))
+		want = []string{"BEGIN", "SAVEPOINT ktn_sp_1", "upsert", "RELEASE SAVEPOINT ktn_sp_1", "COMMIT"}
+		if got := bare.engine.roles(); !slices.Equal(got, want) {
+			t.Fatalf("a one-statement write inside the caller's transaction sent %v, want %v", got, want)
+		}
+	})
+}
+
+// TestSQLAFailedWriteLeavesTheCallersTransactionUsable pins what the savepoint
+// buys even a write of one statement: a statement the database fails — here,
+// on PostgreSQL, one that leaves the transaction aborted — is undone alone, and
+// the caller who catches it goes on and commits the rest.
+func TestSQLAFailedWriteLeavesTheCallersTransactionUsable(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		fx := openSQL(t, dialect, []docstore.IndexSpec[account]{}...)
+		fx.engine.failNext("upsert", errors.New("the statement was cancelled"))
+		err := fx.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
+			requireCode(t, fx.store.Put(ctx, account{ID: "failed"}), docstore.CodeStatementFailed, "a failed statement, caught")
+			return fx.store.Put(ctx, account{ID: "kept"})
+		})
+		must(t, err)
+		if _, getErr := fx.store.Get(t.Context(), "kept"); getErr != nil {
+			t.Fatalf("the write after the caught failure was not committed: %v", getErr)
+		}
+		if _, getErr := fx.store.Get(t.Context(), "failed"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+			t.Fatalf("the failed write is there: %v", getErr)
 		}
 	})
 }

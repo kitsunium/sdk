@@ -108,12 +108,16 @@ engines' (ADR 0074, ADR 0139 §D2).
   index's rows carry `uniq = 1` and the others NULL, so one
   `UNIQUE (index_name, index_key, uniq)` guards every unique index across
   transactions and processes.
-- **Every call runs where its context says** — `core/sql.Joiner`. A write of
-  several statements runs in `Transact`: a savepoint of the caller's
-  transaction, so a refused write undoes itself alone, or a transaction of the
+- **Every call runs where its context says** — `core/sql.Joiner`. Inside the
+  caller's transaction every write is a savepoint of it, so a refused or failed
+  write undoes itself alone and a PostgreSQL transaction is not left aborted.
+  Outside one, a write of several statements runs in a transaction of the
   store's own, READ COMMITTED on MySQL because REPEATABLE READ's gap locks
-  deadlock two writers of neighbouring new keys. Its hooks go through
-  `core/sql.Deferrer`, after the commit and never for a rollback.
+  deadlock two writers of neighbouring new keys, and a write of one statement
+  runs on the pool. Its hooks go through `core/sql.Deferrer`, after the commit
+  and never for a rollback. Unique keys are checked 400 at a time and index
+  rows written 200 at a time, under the oldest SQLite's bound-parameter
+  ceiling.
 - **A refusal is the database's answer, never a parsed error.** `Insert` over a
   taken key affects no row (`ON CONFLICT DO NOTHING`), a unique key held
   elsewhere is read before the rows are written, and a statement the engine's
@@ -144,8 +148,9 @@ engines' (ADR 0074, ADR 0139 §D2).
   validated table name.
 - **Parse a driver's error** to recognise a collision: ask the database after
   the rollback. The SQL engine imports no driver (ADR 0055 §D2).
-- **Run a joined write outside a savepoint** when it sends more than one
-  statement: a caller catching its refusal would commit half of it.
+- **Run a write outside a savepoint of the caller's transaction** when the
+  context carries one: a caller catching its failure would commit half of it,
+  or find a PostgreSQL transaction aborted.
 
 ## Verification
 

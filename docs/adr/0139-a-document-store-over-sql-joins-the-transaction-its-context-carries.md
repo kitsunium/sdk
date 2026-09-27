@@ -140,12 +140,15 @@ because the statement that already ran does nothing the second time.
 
 - A read runs on `Join(ctx)`'s executor: in the caller's transaction, which
   sees what it wrote, or on the pool.
-- A write of several statements — any write to a store with indexes, and every
-  `Update` — runs in `Transact`: a savepoint of the caller's transaction when
-  `ctx` carries one, so a write that fails undoes itself alone and leaves the
-  caller's transaction usable; a transaction of the store's own otherwise. A
-  write of one statement runs on `Join(ctx)`'s executor, since one statement
-  is atomic by itself.
+- Inside the caller's transaction, EVERY write runs in `Transact`, which nests:
+  a savepoint of that transaction, however many statements the write sends. A
+  write that fails — refused, collided, or cancelled by a per-call deadline —
+  undoes itself alone, and on PostgreSQL the savepoint's rollback also clears
+  the aborted state a failed statement leaves, so the caller's transaction
+  stays usable. Outside one, a write of several statements — any write to a
+  store with indexes, and every `Update` — runs in a transaction of the
+  store's own, and a write of one statement runs on the pool, where one
+  statement is atomic by itself.
 - A write's hook runs through `Defer(ctx, …)`: after the caller's commit, or
   at once when the write ran in a transaction of its own, which has committed.
 - `Update` locks the document from its read to its write: `SELECT … FOR
@@ -167,10 +170,11 @@ What a call costs, pinned by `TestSQLRoundTripsPerCall`:
 | `Put` of a new document, with indexes | BEGIN, upsert, unique check, index rows, COMMIT |
 | `Put` over a stored document | the same, and a deletion of its previous rows |
 | `Update` | BEGIN, locking read, write, unique check, deletion, index rows, COMMIT |
-| any write inside the caller's transaction | SAVEPOINT and RELEASE in place of BEGIN and COMMIT |
+| any write inside the caller's transaction, with or without indexes | its statements between a SAVEPOINT and a RELEASE |
 
-The unique check is skipped for a document with no unique key, and the index
-rows travel in one statement per 200 rows. Timed on the real engines
+The unique check is skipped for a document with no unique key; a document's
+unique keys are checked 400 at a time and its index rows travel 200 to a
+statement, under the 999 bound parameters of an SQLite older than 3.32. Timed on the real engines
 (`third-party/db/sql/BENCH.md`), a call costs its round trips: on PostgreSQL
 across Docker's network a `Get` is one (0.31 ms), an indexed `Put` about six
 (1.81 ms), an `Update` about seven and a half; on SQLite, where there is no
@@ -243,11 +247,6 @@ one transaction, and must not run beside writers of the same store.
   question D6 asks after a raced collision is answered from the snapshot and
   may find nothing: the caller gets `STATEMENT_FAILED` rather than the
   refusal, and serialization failures surface the same way.
-- **PostgreSQL, a write of one statement inside the caller's transaction**
-  runs without a savepoint (D5). Its refusals fail no statement — a taken key
-  inserts no row, a missing one updates none — so a caller can catch them and
-  go on. A statement that FAILS, which only a failure of the database does,
-  aborts the caller's transaction as any failed statement does there.
 - **SQLite** serialises writers. A connection opened without a busy timeout
   answers a held lock with the driver's busy error at once; a transaction the
   caller began DEFERRED and read in before the store's first write can be
@@ -352,8 +351,9 @@ a change of behaviour.
   over the fake engine (`sqlfake_external_test.go`): the write modes, keys
   empty and too long, reads in byte order, `Update`, the indexes, `IndexKey`,
   hooks after the commit, the caller's transaction joined, rolled back,
-  refused writes caught, a nested failure, raced collisions answered as
-  refusals, `STATEMENT_FAILED` withholding a driver's text that quotes a key,
+  refused writes caught, a failed one-statement write caught on PostgreSQL's
+  aborted state, a nested failure, raced collisions answered as refusals,
+  450 unique keys checked in two batches, `STATEMENT_FAILED` withholding a driver's text that quotes a key,
   the statements per call, the configuration refusals, `Reindex`, thirty-two
   writers, and the statements' text per dialect.
 - `third-party/db/sql`, under `-tags integration`: the same contract on
