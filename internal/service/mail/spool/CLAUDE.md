@@ -69,13 +69,19 @@ Code range `0.3.81.*`.
   delivery event goes through `report`, which waits for that release. A
   `queued` arriving after `sent` would leave an observer's mailbox showing a
   delivered mail as waiting. It happened on the linux/386 lane before this
-  existed.
+  existed. The registrations of one identifier are COUNTED, not replaced:
+  when two Sends of one identifier are in flight, the first to tell the
+  observer must not release a delivery of the other's mail
+  (`TestTwoSendsOfOneIDEachKeepTheirQueuedEventFirst` fails with the
+  replace-the-entry version).
 
 ## Do NOT
 
 - **Nack a failure that has attempts left.** It would wait the queue's fixed
   `RetryDelay`, not the backoff.
 - **Mint the Message-ID in the composer**, or per attempt.
+- **Replace an `announcing` entry** for a second Send of one identifier:
+  count it.
 - **Put a secret in `Annotate`'s map**: it is written into the spool as is.
 - **Log from here.**
 - **Emit a delivery event with `emit`**: use `report`, which keeps the mail's

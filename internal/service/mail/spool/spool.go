@@ -74,6 +74,17 @@ type spooledValue struct {
 	Message coremail.MessageValue `json:"message"`
 }
 
+// announcement is the Sends of one identifier that published their mail and
+// have not yet told the observer. Nothing stops an identifier from repeating,
+// so there may be several at once, and a delivery of that identifier waits
+// for the last of them.
+type announcement struct {
+	// told is closed once pending falls to zero.
+	told chan struct{}
+	// pending counts them; the spool's mu guards it.
+	pending int
+}
+
 // Spool is a durable outbox for mail. Build one with [New]; Send queues, Run
 // delivers. It is safe for concurrent use.
 type Spool struct {
@@ -94,9 +105,10 @@ type Spool struct {
 	// backoff is the retry curve.
 	backoff svcres.BackoffValue
 	// announcing maps the identifier of a mail a Send published and has not
-	// yet told the observer about to the channel that Send closes once it
-	// has: a delivery of that mail waits for it before it reports anything.
-	announcing map[string]chan struct{}
+	// yet told the observer about to the Sends of that identifier still in
+	// that window: a delivery of that identifier waits until none is before
+	// it reports anything.
+	announcing map[string]*announcement
 	// maxAttempts, sendTimeout and poll are the resolved limits.
 	maxAttempts int
 	sendTimeout time.Duration
@@ -149,7 +161,7 @@ func resolve(cfg *Config) *Spool {
 	s := &Spool{
 		transport: cfg.Transport, clock: cfg.Clock, observe: cfg.Observe, annotate: cfg.Annotate,
 		newID: cfg.NewID, delivered: newLedger(DeliveredMemory), from: cfg.From, backoff: cfg.Backoff,
-		announcing: map[string]chan struct{}{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
+		announcing: map[string]*announcement{}, maxAttempts: cfg.MaxAttempts, sendTimeout: cfg.SendTimeout,
 		poll: cfg.PollInterval,
 	}
 	//: the wall clock is the only non-arbitrary default.
@@ -255,42 +267,59 @@ func (s *Spool) publish(ctx context.Context, payload []byte) error {
 	return publishErr
 }
 
-// announce registers id as a mail Send is publishing and has not yet told the
-// observer about, and returns the function that ends the registration — once
-// the observer was told, or once the publication failed. A spool nobody
-// observes registers nothing: there is no order to keep.
+// announce registers a Send of id that is publishing its mail and has not yet
+// told the observer, and returns the function that ends the registration —
+// once the observer was told, or once the publication failed. The Sends of
+// one identifier are counted, not replaced: an identifier can repeat, and the
+// Send that tells the observer first must not release a delivery another has
+// not told it about yet. A spool nobody observes registers nothing: there is
+// no order to keep.
 func (s *Spool) announce(id string) (done func()) {
 	//: no observer, no order to keep.
 	if s.observe == nil {
 		//: nothing to end.
 		return func() {}
 	}
-	told := make(chan struct{})
 	s.mu.Lock()
-	s.announcing[id] = told
+	entry := s.announcing[id]
+	//: the first Send of this identifier in the window.
+	if entry == nil {
+		entry = &announcement{told: make(chan struct{})}
+		s.announcing[id] = entry
+	}
+	entry.pending++
+	told := entry.told
 	s.mu.Unlock()
-	//: the registration's end, which releases a delivery waiting for it.
+	//: the registration's end, which releases a delivery waiting for the last.
 	return func() {
 		s.mu.Lock()
-		//: a later Send under the same identifier owns the entry now.
-		if s.announcing[id] == told {
+		entry.pending--
+		last := entry.pending == 0
+		//: no Send of this identifier is left in the window.
+		if last {
 			delete(s.announcing, id)
 		}
 		s.mu.Unlock()
-		close(told)
+		//: exactly one registration sees the count fall to zero, under mu,
+		//: so told is closed once; a waiter reads the entry under mu and waits
+		//: outside it.
+		if last {
+			close(told)
+		}
 	}
 }
 
 // awaitAnnouncement waits until the observer has heard that the mail id was
-// queued, when the Send that queued it is still running in this process. A
-// mail an earlier process queued has nothing to wait for.
+// queued, when a Send that queued it is still running in this process: until
+// no Send of id is left between its publication and its Queued event. A mail
+// an earlier process queued has nothing to wait for.
 func (s *Spool) awaitAnnouncement(id string) {
 	s.mu.RLock()
-	told := s.announcing[id]
+	entry := s.announcing[id]
 	s.mu.RUnlock()
-	//: a Send between its publication and its Queued event.
-	if told != nil {
-		<-told
+	//: Sends between their publication and their Queued event.
+	if entry != nil {
+		<-entry.told
 	}
 }
 
