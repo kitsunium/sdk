@@ -24,7 +24,7 @@ func keyringFixture(t *testing.T) (coresecret.Store, *svcsecret.Keyring) {
 }
 
 // putRandomVersion stores a new 32-byte random version of name.
-func putRandomVersion(t *testing.T, store coresecret.Store, name string) coresecret.VersionValue {
+func putRandomVersion(t testing.TB, store coresecret.Store, name string) coresecret.VersionValue {
 	t.Helper()
 	value, err := svcsecret.Random(32)()
 	if err != nil {

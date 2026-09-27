@@ -2194,6 +2194,14 @@ codes:
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
     package: internal/service/secret
+  - code: "0.3.68.9"
+    const: CodeKeyDestroyed
+    hex: "0x00_03_44_09"
+    package: internal/service/secret
+  - code: "0.3.68.10"
+    const: CodeSubjectKeyUnreadable
+    hex: "0x00_03_44_0A"
+    package: internal/service/secret
   - code: "0.3.72.1"
     const: CodeDocumentTooLarge
     hex: "0x00_03_48_01"

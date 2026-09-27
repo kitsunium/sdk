@@ -39,3 +39,13 @@ const CodeGenerateFailed errs.Code = 0x00_03_44_07 // 0.3.68.7
 // CodeKeyFileInvalid identifies a key file that exists and does not hold one
 // key: not a regular file, or not exactly one crypto.Key long.
 const CodeKeyFileInvalid errs.Code = 0x00_03_44_08 // 0.3.68.8
+
+// CodeKeyDestroyed identifies a box whose subject data key is not held:
+// destroyed by an erasure, or never made (ADR 0142).
+const CodeKeyDestroyed errs.Code = 0x00_03_44_09 // 0.3.68.9
+
+// CodeSubjectKeyUnreadable identifies a subject data key that is held and does
+// not unwrap under the root keyring: the version that wrapped it is no longer
+// kept, the root secret was replaced, or the stored bytes were altered (ADR
+// 0142).
+const CodeSubjectKeyUnreadable errs.Code = 0x00_03_44_0A // 0.3.68.10

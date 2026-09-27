@@ -103,6 +103,17 @@ type RotatorConfig struct {
 	// it may call back into the rotator. Ensure creating the first version is
 	// not a rotation and does not call it.
 	OnRotate func(rotated coresecret.VersionValue)
+	// InUse, when set, reports the OLDEST version something still needs — for
+	// the root of a SubjectKeys, the oldest version a data key is still
+	// wrapped under: [SubjectKeys.OldestRoot] — or 0 when nothing does. A
+	// rotation then prunes no version at or above it, whatever Policy.Keep
+	// says: Keep becomes a floor, and the store holds more versions until the
+	// dependants move on (SubjectKeys.Rewrap). It is asked after the new
+	// version is stored and before the prune. Its error is returned as it is
+	// and nothing is pruned — the rotation happened, and the next one prunes
+	// again — because a version pruned while still needed destroys whatever
+	// depends on it, and no later call can bring it back.
+	InUse func(ctx context.Context) (oldest int, err error)
 }
 
 // Rotator mints new versions of one secret according to a [PolicySpec].
@@ -126,6 +137,8 @@ type Rotator struct {
 	locker corelock.Locker
 	// onRotate is nil unless a caller wants to be told.
 	onRotate func(rotated coresecret.VersionValue)
+	// inUse is nil unless something depends on versions a prune could take.
+	inUse func(ctx context.Context) (oldest int, err error)
 	// mu serialises this rotator's own decisions, so two goroutines of one
 	// process cannot both rotate one due secret.
 	mu sync.Mutex
@@ -155,6 +168,7 @@ func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error) {
 		clk:      clk,
 		locker:   cfg.Locker,
 		onRotate: cfg.OnRotate,
+		inUse:    cfg.InUse,
 	}, nil
 }
 
@@ -372,8 +386,38 @@ func (r *Rotator) rotateLocked(ctx context.Context) (created coresecret.VersionV
 		//: the store's verdict — ReadOnly for a store that only reads.
 		return coresecret.VersionValue{}, putErr
 	}
-	//: the rotation happened; retire what the policy no longer keeps.
-	return created, r.store.Prune(ctx, r.name, r.policy.Keep)
+	keep, keepErr := r.keepFor(ctx, created.Version)
+	//: nobody could say which versions are still needed: prune nothing.
+	if keepErr != nil {
+		//: the rotation happened; the next one prunes.
+		return created, keepErr
+	}
+	//: the rotation happened; retire what is no longer kept.
+	return created, r.store.Prune(ctx, r.name, keep)
+}
+
+// keepFor is how many versions the prune after a rotation to newest keeps:
+// the policy's Keep, or more when InUse reports an older version still
+// needed, so that version and every newer one survive.
+func (r *Rotator) keepFor(ctx context.Context, newest int) (keep int, err error) {
+	//: nothing depends on old versions but what Keep already covers.
+	if r.inUse == nil {
+		//: the policy's number.
+		return r.policy.Keep, nil
+	}
+	oldest, inUseErr := r.inUse(ctx)
+	//: unknown is not "none": a guess here destroys what depends on a version.
+	if inUseErr != nil {
+		//: the caller's own verdict.
+		return 0, inUseErr
+	}
+	//: nothing in use, or an answer outside the versions this store numbered.
+	if oldest < 1 || oldest > newest {
+		//: the policy's number.
+		return r.policy.Keep, nil
+	}
+	//: every version from the oldest in use to the newest, or Keep if more.
+	return max(r.policy.Keep, newest-oldest+1), nil
 }
 
 // generate runs the policy's generator and refuses an empty result.

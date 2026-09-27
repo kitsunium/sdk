@@ -46,11 +46,18 @@ const (
 // sealing key and signing key two independent keys. Using one 32-byte value
 // both as an AES key and as an HMAC key is the cross-primitive reuse key
 // separation exists to prevent, and the derivation costs a microsecond.
+//
+// wrapLabel is the third purpose (ADR 0142): the AEAD key a version wraps
+// subject data keys under. A box Seal makes is sealed under another key, so
+// no value a caller seals directly under a root can ever unwrap as a data
+// key, whatever associated data it was given.
 const (
 	// sealLabel derives the AEAD key.
 	sealLabel string = "kitsunium/secret keyring seal v1"
 	// signLabel derives the MAC key.
 	signLabel string = "kitsunium/secret keyring sign v1"
+	// wrapLabel derives the AEAD key subject data keys are wrapped under.
+	wrapLabel string = "kitsunium/secret keyring wrap v1"
 )
 
 // bindingPrefix opens the bytes every box's associated data and every
@@ -75,7 +82,8 @@ const bindingPrefix string = "kitsunium/secret keyring v1\x00"
 // name is refused with [KeyMaterialInvalid] rather than stretched, because
 // stretching would hide that it was never random. Each version is split by
 // HKDF-SHA256 into an AES-256-GCM key and an HMAC-SHA256 key, so sealing and
-// signing never share a key.
+// signing never share a key — and, for the subject keys a keyring is the root
+// of (ADR 0142), into a third key that wraps them, which Seal never uses.
 //
 // A box is [0x01][version, 4 bytes big-endian][crypto box]; a signature is
 // [0x01][version][32-byte tag]. The version is not secret — it names a key,
@@ -114,27 +122,42 @@ func NewKeyring(store coresecret.Store, name string) (keyring *Keyring, err erro
 // core/secret.NotFound while the secret has no version, and
 // [KeyMaterialInvalid] when the newest version is not a 32-byte key.
 func (k *Keyring) Seal(ctx context.Context, plaintext, aad []byte) (box []byte, err error) {
+	//: the sealing purpose.
+	return k.sealAs(ctx, sealLabel, plaintext, aad)
+}
+
+// sealAs is Seal under the AEAD key derived for label: sealLabel for Seal,
+// wrapLabel for a subject data key. The box layout is the same; the key is not.
+func (k *Keyring) sealAs(ctx context.Context, label string, plaintext, aad []byte) (box []byte, err error) {
 	current, getErr := k.store.Get(ctx, k.name)
 	//: no current version, or no store to ask.
 	if getErr != nil {
 		//: the store's own verdict.
 		return nil, getErr
 	}
-	key, keyErr := k.subkey(current, sealLabel)
+	key, keyErr := k.subkey(current, label)
 	//: the newest version is not usable as a key.
 	if keyErr != nil {
 		//: KeyMaterialInvalid.
 		return nil, keyErr
 	}
 	defer key.Zeroize()
-	sealed, sealErr := corecrypto.Seal(sealAlgorithm, key, plaintext, k.binding(current.Version, aad))
+	//: the box, naming the version that sealed it.
+	return k.sealUnder(key, current.Version, plaintext, aad)
+}
+
+// sealUnder seals plaintext with key — the AEAD key of version — into a box
+// whose header names version. Seal and a root view share it, so a box has one
+// layout whichever of them made it.
+func (k *Keyring) sealUnder(key corecrypto.Key, version int, plaintext, aad []byte) (box []byte, err error) {
+	sealed, sealErr := corecrypto.Seal(sealAlgorithm, key, plaintext, k.binding(version, aad))
 	//: sealing fails only on an unregistered scheme, which the imports rule out.
 	if sealErr != nil {
 		//: the crypto verdict, unchanged: it names no key and no plaintext.
 		return nil, sealErr
 	}
 	//: the header names the key; the box proves the rest.
-	return append(header(current.Version), sealed...), nil
+	return append(header(version), sealed...), nil
 }
 
 // Open decrypts a box Seal made, under the version its header names, verifying
@@ -143,13 +166,20 @@ func (k *Keyring) Seal(ctx context.Context, plaintext, aad []byte) (box []byte, 
 // store that could not be READ is reported as such, because "retry" and
 // "reject the box" are different responses.
 func (k *Keyring) Open(ctx context.Context, box, aad []byte) (plaintext []byte, err error) {
+	//: the sealing purpose.
+	return k.openAs(ctx, sealLabel, box, aad)
+}
+
+// openAs is Open under the AEAD key derived for label, the counterpart of
+// sealAs: a box sealed for one purpose does not open for another.
+func (k *Keyring) openAs(ctx context.Context, label string, box, aad []byte) (plaintext []byte, err error) {
 	version, sealed, parsed := parseHeader(box)
 	//: too short, or a format this build does not make.
 	if !parsed {
 		//: SealInvalid.
 		return nil, SealInvalid
 	}
-	key, keyErr := k.keyFor(ctx, version, sealLabel)
+	key, keyErr := k.keyFor(ctx, version, label)
 	//: the store could not answer, or the box names no key it holds.
 	if keyErr != nil {
 		//: StoreUnavailable passes through; anything else is SealInvalid.
