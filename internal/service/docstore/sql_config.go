@@ -3,17 +3,20 @@
 package docstore
 
 import (
+	"context"
 	"regexp"
 	"strconv"
 	"strings"
 
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // MaxSQLTableLen is the longest table name a SQL store accepts, in bytes:
-// PostgreSQL's identifier limit of 63, less the five bytes of the longest name
-// the store derives from it — its index table, the name followed by "___ix".
+// PostgreSQL's identifier limit of 63, less the five bytes of the longest names
+// the store derives from it — its index table, the name followed by "___ix",
+// and its versions table, followed by "___vs".
 // A caller whose names can be longer shortens them, with a digest, before
 // they reach the store.
 const MaxSQLTableLen int = 58
@@ -36,6 +39,10 @@ const derivedSeparator string = "___"
 // indexTableTag names the table of index rows beside the documents' table.
 const indexTableTag string = "ix"
 
+// versionsTableTag names the table of versions beside the documents' table
+// (ADR 0143).
+const versionsTableTag string = "vs"
+
 // reservedTablePrefix starts every name SQLite keeps for itself: creating a
 // table under it is an error there, so it is refused on every engine and a
 // store moves between them unchanged.
@@ -56,6 +63,15 @@ type SQLConfig[T any] struct {
 	// Key returns the key a document is stored under, as for [Open]: a pure
 	// function of the document, compared byte for byte.
 	Key func(T) string
+	// Clock stamps each version with the instant of the write that made it.
+	// Nil is the system clock.
+	Clock clock.Clock
+	// Held reports whether the document stored under key is held — a legal
+	// hold — so that no write prunes its versions, as for [Open]. It is
+	// called by a write that would prune, inside that write's transaction
+	// and with its context, so a read it makes through the same transactor
+	// joins it. Nil holds nothing. It is refused without Versions.
+	Held func(ctx context.Context, key string) bool
 	// Transactor is the transaction manager of the database the store lives
 	// in — the one the caller's own transactions are opened with, so a call
 	// made under one of them joins it. It must also be a core/sql Joiner and
@@ -77,6 +93,16 @@ type SQLConfig[T any] struct {
 	// Dialect is the engine's: the SQL the store speaks to it. It must be the
 	// Transactor's own.
 	Dialect coresql.Dialect
+	// Versions is how many former versions each document keeps beside its
+	// current one, as for [Open]: a write that changes a document makes a
+	// new version and prunes the oldest beyond Versions, in its own
+	// transaction. They live in a third table, <Table>___vs, which
+	// [SQLVersionsMigration] creates. Zero keeps no versions and sends
+	// exactly the statements the store sent before versions existed; a
+	// negative value is refused. The store cannot see a versions table it was
+	// told nothing about: turned off, it leaves the table as it is, so drop it
+	// with the migration's Down (ADR 0143).
+	Versions int
 }
 
 // txParts are the two capabilities a SQL store needs of its transactor, found
@@ -112,6 +138,11 @@ func (c *SQLConfig[T]) validate(indexes []IndexSpec[T]) (txParts, error) {
 	if tableErr := validateTable(c.Table); tableErr != nil {
 		//: StoreMisconfigured, naming the problem.
 		return txParts{}, tableErr
+	}
+	//: how many versions, and a hold only where versions are kept.
+	if versionsErr := validateVersions(c.Versions, c.Held != nil); versionsErr != nil {
+		//: StoreMisconfigured, naming the setting.
+		return txParts{}, versionsErr
 	}
 	//: the declarations every engine refuses alike, then what a column holds.
 	if ixErr := validateSQLIndexes(indexes); ixErr != nil {
@@ -202,4 +233,10 @@ func validateTable(table string) error {
 func indexTable(table string) string {
 	//: the documents' table, the separator no table name holds, the tag.
 	return table + derivedSeparator + indexTableTag
+}
+
+// versionsTable derives the name of the table a store keeps its versions in.
+func versionsTable(table string) string {
+	//: the documents' table, the separator no table name holds, the tag.
+	return table + derivedSeparator + versionsTableTag
 }

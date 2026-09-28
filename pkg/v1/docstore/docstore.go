@@ -120,6 +120,40 @@
 // 503: the driver's error is joined beside it for errors.Is and errors.As,
 // and withheld from its text, because a driver quotes the row a constraint
 // refused and that row holds a key.
+//
+// # Versions
+//
+// A store opened with [Config].Versions — or [SQLConfig].Versions — keeps the
+// last versions of each document, as a content system keeps a page's
+// revisions (ADR 0143):
+//
+//	pages, err := docstore.Open(docstore.Config[Page]{Key: Page.Key, FS: data, Path: "cms/pages.json", Versions: 20})
+//	err = pages.PutStamped(page, docstore.Stamp{Meta: map[string]string{"by": userID, "command": "pages.Edit"}})
+//	revisions, err := pages.Versions(page.ID) // newest first: the page as it is, then the 20 before it
+//	third, err := pages.Version(page.ID, revisions[3].Number)
+//
+// A creation is version 1, and every write that changes the document makes
+// the next one, stamped with the instant of [Config].Clock and the metadata
+// the Stamped writes carry — who, which command; the plain writes carry none.
+// A number is never given twice while the document exists. A write storing
+// the JSON already stored makes no version, and neither does one stamped
+// InPlace: the document changes and its current version keeps its number. The
+// former versions beyond Versions are pruned by the write that makes a newer
+// one, in the same durable write as the document — the same overlay entry, the
+// same transaction — so no crash ever leaves the versions ahead of or behind
+// their document. [Config].Held keeps a document's versions from pruning, for
+// a legal hold, until a write finds it released. RewriteVersions rewrites a
+// document's former versions under the writers' lock, for an erasure: it may
+// clear or drop them, never renumber or add one. A deletion takes every
+// version with it. Versions are never indexed: Lookup and Find read the
+// current version.
+//
+// The file store keeps them in memory, in each write's overlay entry and, at
+// rest, in the file Path + ".versions"; a store opened without versions over
+// files that keep them is refused, rather than left to drop them. The SQL
+// store keeps them in a third table, which [SQLVersionsMigration] creates.
+// [Version].JSON is compact JSON; a version predating a change of the type
+// may no longer decode into it, which is why it is JSON and not a T.
 package docstore
 
 import (
@@ -181,6 +215,12 @@ const (
 	CodeStatementFailed errs.Code = svcdocstore.CodeStatementFailed
 	// CodeKeyTooLong: a key is longer than the SQL store's key columns hold.
 	CodeKeyTooLong errs.Code = svcdocstore.CodeKeyTooLong
+	// CodeVersionsNotKept: a call on versions to a store that keeps none.
+	CodeVersionsNotKept errs.Code = svcdocstore.CodeVersionsNotKept
+	// CodeVersionNotFound: the document keeps no version of that number.
+	CodeVersionNotFound errs.Code = svcdocstore.CodeVersionNotFound
+	// CodeVersionsRewriteRefused: a rewrite returned what a rewrite may not.
+	CodeVersionsRewriteRefused errs.Code = svcdocstore.CodeVersionsRewriteRefused
 )
 
 // The store's sentinels, for errors.Is.
@@ -221,16 +261,35 @@ var (
 	StatementFailed = svcdocstore.StatementFailed
 	// KeyTooLong refuses a key longer than the SQL store's key columns hold.
 	KeyTooLong = svcdocstore.KeyTooLong
+	// VersionsNotKept refuses a call on versions to a store that keeps none.
+	VersionsNotKept = svcdocstore.VersionsNotKept
+	// VersionNotFound is a miss on a version: never made, or pruned.
+	VersionNotFound = svcdocstore.VersionNotFound
+	// VersionsRewriteRefused refuses what a rewrite's function returned.
+	VersionsRewriteRefused = svcdocstore.VersionsRewriteRefused
 )
 
 // Store is the public alias for the document store: Get, List, Filter,
 // Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and
-// Delete write; OnWrite and OnDelete announce; Fold and Close bring it to rest.
+// Delete write, and their Stamped forms say what the version they make
+// records; Versions and Version read a document's versions, RewriteVersions
+// rewrites its former ones; OnWrite and OnDelete announce; Fold and Close
+// bring it to rest.
 type Store[T any] = svcdocstore.Store[T]
 
 // Config is the public alias for a store's configuration: Key (required), FS
-// and Path (both, or neither for a memory store), and FoldAt.
+// and Path (both, or neither for a memory store), FoldAt, and Versions with
+// its Clock and Held.
 type Config[T any] = svcdocstore.Config[T]
+
+// Version is the public alias for one version of a document: its Number from
+// 1, the instant At the write that made it ran, the Meta that write carried,
+// and the document as JSON.
+type Version = svcdocstore.VersionValue
+
+// Stamp is the public alias for what a Stamped write says about the version
+// it makes: the Meta the version records, or InPlace — no version.
+type Stamp = svcdocstore.StampValue
 
 // IndexSpec is the public alias for one secondary index's declaration, built
 // by [Unique] or [Index] and given to [Open].
@@ -245,13 +304,15 @@ type Stats = svcdocstore.StatsValue
 
 // SQLStore is the public alias for the document store over SQL: Get, List,
 // Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update
-// and Delete write; OnWrite and OnDelete announce once the write's
-// transaction commits; Reindex files the stored documents again. Every call
-// takes a context.
+// and Delete write, and their Stamped forms say what the version they make
+// records; Versions, Version and RewriteVersions as for [Store]; OnWrite and
+// OnDelete announce once the write's transaction commits; Reindex files the
+// stored documents again. Every call takes a context.
 type SQLStore[T any] = svcdocstore.SQLStore[T]
 
 // SQLConfig is the public alias for a SQL store's configuration: Key,
-// Transactor, Dialect and Table (required), and IndexKey.
+// Transactor, Dialect and Table (required), IndexKey, and Versions with its
+// Clock and Held.
 type SQLConfig[T any] = svcdocstore.SQLConfig[T]
 
 // Open builds a store from cfg with the secondary indexes given: in memory
@@ -279,6 +340,16 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error) {
 	//: delegate verbatim to the service constructor.
 	return svcdocstore.SQLMigration(dialect, table, version)
+}
+
+// SQLVersionsMigration returns the migration that creates the table a SQL
+// store named table keeps its versions in on dialect, numbered version for the
+// caller's own version table, beside [SQLMigration]'s. A store opened with
+// [SQLConfig].Versions needs it. Its Down drops the table, and every version
+// in it: run it to turn versions off for good.
+func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error) {
+	//: delegate verbatim to the service constructor.
+	return svcdocstore.SQLVersionsMigration(dialect, table, version)
 }
 
 // Unique declares a unique index over the one key key returns. An empty key is

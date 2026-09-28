@@ -37,8 +37,13 @@ const (
 )
 
 // entryRecord is one overlay entry: the whole latest state of one key since
-// the snapshot — its document, or its deletion.
+// the snapshot — its document and its versions, or its deletion.
 type entryRecord struct {
+	// Versions are the key's versions, when the store keeps them and the
+	// document has any recorded; absent otherwise, and for a deletion. They
+	// travel in the document's own entry, so no crash can leave one without
+	// the other.
+	Versions *versionsRecord `json:"versions,omitempty"`
 	// Document is the key's document; absent for a deletion.
 	Document json.RawMessage `json:"doc,omitempty"`
 	// Key is the store key, which the entry's name only hashes.
@@ -84,15 +89,16 @@ func (s *Store[T]) markPending(key string) {
 	}
 }
 
-// persist publishes key's overlay entry — its document, or its deletion —
-// before the write is applied. A memory store persists nothing.
-func (s *Store[T]) persist(key string, raw json.RawMessage, deleted bool) error {
+// persist publishes key's overlay entry — its document and its versions, or
+// its deletion — before the write is applied. A memory store persists
+// nothing.
+func (s *Store[T]) persist(key string, raw json.RawMessage, deleted bool, versions *versionsRecord) error {
 	//: nothing to persist to.
 	if s.fs == nil {
 		//: a memory write is done once it is applied.
 		return nil
 	}
-	record, encodeErr := json.Marshal(entryRecord{Document: raw, Key: key, Deleted: deleted})
+	record, encodeErr := json.Marshal(entryRecord{Versions: versions, Document: raw, Key: key, Deleted: deleted})
 	//: unreachable while the document is json.Marshal's own output.
 	if encodeErr != nil {
 		//: PersistFailed, naming the step.
@@ -202,14 +208,25 @@ func (s *Store[T]) Close() error {
 	return foldErr
 }
 
-// fold rewrites the snapshot from the documents and removes the entries it
-// folded. The caller holds the writers' lock, so no entry changes meanwhile:
-// an entry removed here holds exactly what the snapshot now holds for its key.
+// fold rewrites the versions file, when the store keeps versions, then the
+// snapshot, from what the store holds, and removes the entries they now
+// contain. The caller holds the writers' lock, so no entry changes meanwhile:
+// an entry removed here holds exactly what the two files now hold for its
+// key. A crash between the two publications leaves every entry in place, and
+// a key with no entry holds the same in the old files as in the new, since
+// nothing wrote it since the last fold — so the next open loads the same
+// documents with the same versions, whichever file got written.
 func (s *Store[T]) fold() error {
 	//: a memory store has no files.
 	if s.fs == nil {
 		//: nothing to fold.
 		return nil
+	}
+	//: the versions first; a store that keeps none writes no such file.
+	if versionsErr := s.foldVersions(); versionsErr != nil {
+		s.recordFold(versionsErr, nil)
+		//: PersistFailed or WriteUnconfirmed: the entries stay.
+		return versionsErr
 	}
 	snapshot, encodeErr := encodeSnapshot(s.docs)
 	//: unreachable while every document is json.Marshal's own output.
@@ -283,4 +300,25 @@ func (s *Store[T]) recordFold(foldErr error, removed []string) {
 func encodeSnapshot(docs map[string]json.RawMessage) ([]byte, error) {
 	//: encoding/json sorts the keys of a map.
 	return json.MarshalIndent(docs, "", "  ")
+}
+
+// foldVersions publishes the versions file: one JSON object from key to the
+// versions of the documents that have any recorded, sorted and indented as
+// the snapshot is — "{}" when none has, so the file says the store keeps
+// versions. A store that keeps none writes nothing.
+func (s *Store[T]) foldVersions() error {
+	//: no versions, no file.
+	if s.keep == 0 {
+		//: nothing to write.
+		return nil
+	}
+	versions, encodeErr := json.MarshalIndent(s.versions, "", "  ")
+	//: unreachable while every document is JSON the store checked.
+	if encodeErr != nil {
+		//: PersistFailed, naming the step.
+		return kerrs.Wrap(PersistFailed, kerrs.WrapParams{},
+			kerrs.String("store", s.path), kerrs.String("step", "versions"), kerrs.String("cause", encodeCause(encodeErr)))
+	}
+	//: published whole, before the snapshot.
+	return s.publish(s.versionsPath, versions, "versions")
 }

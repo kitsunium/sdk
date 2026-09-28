@@ -1,4 +1,4 @@
-<!-- generated from third-party/db/sql/docstore_bench_test.go — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./third-party/db/sql/` to refresh (Docker for PostgreSQL and MySQL) -->
+<!-- generated from third-party/db/sql/docstore_bench_test.go — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./third-party/db/sql/` to refresh (Docker for PostgreSQL and MySQL); the pattern matches BenchmarkSQLStoreVersions too -->
 # Benchmarks — the document store over SQL, on real engines
 
 These numbers answer the question ADR 0139's cost table leaves open:
@@ -97,3 +97,45 @@ The allocations — 37 for a `Get`, 130 to 160 for a write — are mostly
 database/sql's and the driver's, and the rows do not separate the SDK's own
 share of a call from theirs. Against a round trip of a few hundred
 microseconds, it is not the number that decides anything.
+
+## Versions (ADR 0143)
+
+`BenchmarkSQLStoreVersions` times a store keeping ten former versions of each
+of its 100 documents, every document already holding ten, so each write makes a
+version and prunes one. It ran on the same machine as the rows above, one day
+later, from branch `feat/docstore-versions`, load average 4.1 / 6.2 / 15.3,
+`-benchtime=2s`, beside a fresh run of `BenchmarkSQLStore` for the plain rows.
+
+```
+BenchmarkSQLStore/sqlite/Put-10                     16617      144598 ns/op      6025 B/op      139 allocs/op
+BenchmarkSQLStore/sqlite/Update-10                  16226      147915 ns/op      6956 B/op      160 allocs/op
+BenchmarkSQLStore/postgres/Put-10                    1256     1892685 ns/op      7171 B/op      130 allocs/op
+BenchmarkSQLStore/postgres/Update-10                 1324     1880103 ns/op      8227 B/op      150 allocs/op
+BenchmarkSQLStore/mysql/Put-10                        747     2997308 ns/op      5788 B/op      120 allocs/op
+BenchmarkSQLStore/mysql/Update-10                     698     3456420 ns/op      6964 B/op      149 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Put-10             10000      215485 ns/op     10973 B/op      269 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Update-10          10000      208533 ns/op     11175 B/op      270 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Versions-10        77890       30671 ns/op      6007 B/op      132 allocs/op
+BenchmarkSQLStoreVersions/postgres/Put-10             631     3793299 ns/op     13280 B/op      249 allocs/op
+BenchmarkSQLStoreVersions/postgres/Update-10          636     3748774 ns/op     13496 B/op      251 allocs/op
+BenchmarkSQLStoreVersions/postgres/Versions-10       6626      339262 ns/op      6294 B/op      131 allocs/op
+BenchmarkSQLStoreVersions/mysql/Put-10                429     5690597 ns/op     11304 B/op      252 allocs/op
+BenchmarkSQLStoreVersions/mysql/Update-10             464     5086745 ns/op     11301 B/op      247 allocs/op
+BenchmarkSQLStoreVersions/mysql/Versions-10          4382      586551 ns/op      4995 B/op      119 allocs/op
+```
+
+### A versioned write costs its five statements more, and nothing else
+
+`TestSQLVersionsRoundTrips` counts what a write adds when it makes a version:
+the current version's number, read locked; its row given the document it held;
+the new version's row; the question of what to prune; and the pruning — five
+statements, four when there is nothing to prune. On PostgreSQL an indexed
+`Put` goes from 1.89 ms to 3.79 ms, which is those five at 0.29 ms a round
+trip, plus the claim replacing the upsert and one write under its lock; an
+`Update`, from 1.88 ms to 3.75 ms. MySQL reads the same at about 0.6 ms a round
+trip. On SQLite the statements share one commit, so a versioned write costs
+1.4 times a plain one (215 µs against 145), not twice.
+
+Reading every version of a document is one statement whatever it holds: a
+LEFT JOIN of the documents' table and the versions', 0.34 ms on PostgreSQL —
+about a `Get` — and 31 µs on SQLite for eleven versions.

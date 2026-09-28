@@ -13,6 +13,10 @@ import (
 // its key, its document's key, and whether its index is unique.
 const indexRowArgs int = 4
 
+// versionRowArgs is how many arguments one version row binds: its document's
+// key, its number, its instant, its metadata and its document.
+const versionRowArgs int = 5
+
 // sqlStatements are the statements one SQL store sends, rendered for its
 // dialect and tables. The fixed ones are rendered at OpenSQL; the two whose
 // length depends on a document — its index rows, and its unique keys — are
@@ -46,8 +50,32 @@ type sqlStatements struct {
 	// lookup reads the document one index key files; find reads every one,
 	// in key order.
 	lookup, find string
-	// docTable and ixTable are the two tables' quoted names.
-	docTable, ixTable string
+	// claim creates a document, or locks the one stored and leaves it as it
+	// is, for a Put on a store that keeps versions: it answers the revision it
+	// wrote and the document the row holds — PostgreSQL, SQLite — or its
+	// count of affected rows — MySQL.
+	claim string
+	// versionHead reads the number of a document's current version, locking
+	// it where the engine locks rows; no row is a document stored before its
+	// store kept versions.
+	versionHead string
+	// retireHead gives the current version the document it holds, as it
+	// becomes a former one.
+	retireHead string
+	// pruneCut reads the newest former version a write prunes — the one past
+	// the number a store keeps — which goes with every older one.
+	pruneCut string
+	// pruneVersions removes a document's former versions up to a number.
+	pruneVersions string
+	// dropVersions removes every version of a document; dropFormers every
+	// former one.
+	dropVersions, dropFormers string
+	// readVersions reads every version of a document with the document
+	// itself, newest first; lockFormers reads its former ones, locked, for a
+	// rewrite.
+	readVersions, lockFormers string
+	// docTable, ixTable and vsTable are the three tables' quoted names.
+	docTable, ixTable, vsTable string
 	// shareLock ends a read that must see the latest committed rows inside a
 	// transaction that has its own snapshot; empty where a plain read does.
 	shareLock string
@@ -58,8 +86,9 @@ type sqlStatements struct {
 // renderStatements renders every fixed statement of the store keeping its
 // documents in table, on dialect. The table name was validated at OpenSQL.
 func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
-	docs, ix := quoteIdent(dialect, table), quoteIdent(dialect, indexTable(table))
-	p1, p2 := placeholder(dialect, 1), placeholder(dialect, 2)
+	docs, ix, vs := quoteIdent(dialect, table), quoteIdent(dialect, indexTable(table)), quoteIdent(dialect, versionsTable(table))
+	p1, p2, p3 := placeholder(dialect, 1), placeholder(dialect, 2), placeholder(dialect, 3)
+	lock := forUpdateClause(dialect)
 	join := "SELECT d.doc FROM " + ix + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
 		" WHERE i.index_name = " + p1 + " AND i.index_key = " + p2
 	s := sqlStatements{
@@ -75,10 +104,23 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 		pageAfter:    "SELECT doc_key, doc FROM " + docs + " WHERE doc_key > " + p1 + " ORDER BY doc_key LIMIT " + p2,
 		lookup:       join,
 		find:         join + " ORDER BY i.doc_key",
-		docTable:     docs,
-		ixTable:      ix,
-		shareLock:    shareLockClause(dialect),
-		dialect:      dialect,
+		versionHead:  "SELECT num FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NULL" + lock,
+		retireHead:   "UPDATE " + vs + " SET doc = " + p1 + " WHERE doc_key = " + p2 + " AND num = " + p3,
+		pruneCut: "SELECT num FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL" +
+			" ORDER BY num DESC LIMIT 1 OFFSET " + p2 + lock,
+		pruneVersions: "DELETE FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL AND num <= " + p2,
+		dropVersions:  "DELETE FROM " + vs + " WHERE doc_key = " + p1,
+		dropFormers:   "DELETE FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL",
+		readVersions: "SELECT v.num, v.made_at, v.meta, COALESCE(v.doc, d.doc) FROM " + docs + " d LEFT JOIN " + vs +
+			" v ON v.doc_key = d.doc_key WHERE d.doc_key = " + p1 + " ORDER BY v.num DESC",
+		lockFormers: "SELECT num, made_at, meta, doc FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL" +
+			" ORDER BY num DESC" + lock,
+		claim:     claimStatement(dialect, docs),
+		docTable:  docs,
+		ixTable:   ix,
+		vsTable:   vs,
+		shareLock: shareLockClause(dialect),
+		dialect:   dialect,
 	}
 	s.exists = "SELECT 1 FROM " + docs + " WHERE doc_key = " + p1 + s.shareLock
 	s.upsert, s.insert = writeModes(dialect, docs)
@@ -141,6 +183,84 @@ func updateStatements(dialect coresql.Dialect, docs, replace string) (lockDoc, w
 	}
 	//: the row lock both engines take on a locking read.
 	return "SELECT doc FROM " + docs + " WHERE doc_key = " + placeholder(dialect, 1) + " FOR UPDATE", replace
+}
+
+// claimStatement renders the first statement of a Put on a store that keeps
+// versions: it must know the document it replaces before replacing it, and
+// must not let another writer create the key between its read and its write.
+// So it creates the document when the key is free, and otherwise leaves the
+// stored one as it is while moving its revision — which locks the row, on
+// every engine, in the same statement.
+//
+// PostgreSQL and SQLite answer the revision and the row's document: a
+// revision of 1 is a creation, and the document is then the one just written;
+// any other is the stored document, now locked. MySQL has no RETURNING: its
+// count of affected rows says which — 1 for a creation, 2 for a row changed,
+// since the revision always changes — and the document is read after, under
+// the lock this statement took.
+func claimStatement(dialect coresql.Dialect, docs string) string {
+	p1, p2 := placeholder(dialect, 1), placeholder(dialect, 2)
+	values := "INSERT INTO " + docs + " (doc_key, rev, doc) VALUES (" + p1 + ", 1, " + p2 + ")"
+	//: MySQL and MariaDB.
+	if dialect == coresql.DialectMySQL {
+		//: the revision moves, the document stays.
+		return values + " ON DUPLICATE KEY UPDATE rev = rev + 1"
+	}
+	existing := "rev"
+	//: PostgreSQL names the existing row by its table.
+	if dialect == coresql.DialectPostgres {
+		existing = docs + ".rev"
+	}
+	//: the revision written, and the document the row holds.
+	return values + " ON CONFLICT (doc_key) DO UPDATE SET rev = " + existing + " + 1 RETURNING rev, doc"
+}
+
+// claimReturnsRow reports whether the claim answers a row holding the
+// revision and the document, rather than a count of affected rows.
+func (s *sqlStatements) claimReturnsRow() bool {
+	//: every engine but MySQL has RETURNING.
+	return s.dialect != coresql.DialectMySQL
+}
+
+// insertVersions renders the insertion of n version rows, each binding
+// versionRowArgs arguments, in one statement.
+func (s *sqlStatements) insertVersions(n int) string {
+	var b strings.Builder
+	b.WriteString("INSERT INTO " + s.vsTable + " (doc_key, num, made_at, meta, doc) VALUES ")
+	//: one tuple per row, placeholders numbered across the whole statement.
+	for row := range n {
+		//: rows are comma-separated.
+		if row > 0 {
+			b.WriteString(", ")
+		}
+		b.WriteString("(")
+		//: the row's five columns.
+		for col := 1; col <= versionRowArgs; col++ {
+			//: columns are comma-separated.
+			if col > 1 {
+				b.WriteString(", ")
+			}
+			b.WriteString(placeholder(s.dialect, row*versionRowArgs+col))
+		}
+		b.WriteString(")")
+	}
+	//: n rows in one round trip.
+	return b.String()
+}
+
+// forUpdateClause ends a read of version rows made inside a write: it locks
+// them where the engine locks rows, and — what matters on MySQL inside a
+// caller's REPEATABLE READ transaction — reads the latest committed rows
+// rather than the transaction's snapshot. SQLite has no such clause and needs
+// none: its writer holds the database's only write lock.
+func forUpdateClause(dialect coresql.Dialect) string {
+	//: PostgreSQL, MySQL and MariaDB.
+	if dialect != coresql.DialectSQLite {
+		//: the row lock, which reads the latest committed rows.
+		return " FOR UPDATE"
+	}
+	//: SQLite: nothing to add.
+	return ""
 }
 
 // upsertArgs binds the upsert's arguments: the key and the document, and on
@@ -341,6 +461,44 @@ func createTableStatements(dialect coresql.Dialect, table string) []string {
 				" UNIQUE (index_name, index_key, uniq))",
 		}
 	}
+}
+
+// createVersionsTableStatements renders the DDL that creates the table a
+// store keeps its versions in, beside its two others (ADR 0143): one row per
+// version, keyed by the document's key and the version's number. A former
+// version's row holds the document it was; the current version's holds NULL,
+// because its document is the documents' table's. made_at is the instant in
+// nanoseconds since 1970 UTC, NULL when unknown; meta is the stamp's metadata
+// as a JSON object, NULL when there is none. The key is binary, as in the two
+// other tables, and the table has no index but its primary key: versions are
+// read by document, never looked up by what they hold.
+func createVersionsTableStatements(dialect coresql.Dialect, table string) []string {
+	vs := quoteIdent(dialect, versionsTable(table))
+	//: the types and the table options are each engine's.
+	switch dialect {
+	//: MySQL and MariaDB: InnoDB, for transactions.
+	case coresql.DialectMySQL:
+		//: a VARBINARY key sized like the documents'.
+		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key VARBINARY(" + strconv.Itoa(MaxSQLKeyLen) + ") NOT NULL," +
+			" num BIGINT NOT NULL, made_at BIGINT NULL, meta LONGBLOB NULL, doc LONGBLOB NULL, PRIMARY KEY (doc_key, num)) ENGINE=InnoDB"}
+	//: PostgreSQL: bytea.
+	case coresql.DialectPostgres:
+		//: the same columns, PostgreSQL's types.
+		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key bytea NOT NULL, num bigint NOT NULL, made_at bigint," +
+			" meta bytea, doc bytea, PRIMARY KEY (doc_key, num))"}
+	//: SQLite: BLOB.
+	default:
+		//: the same columns, SQLite's types.
+		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key BLOB NOT NULL, num INTEGER NOT NULL, made_at INTEGER," +
+			" meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))"}
+	}
+}
+
+// dropVersionsTableStatements renders the reversal of
+// createVersionsTableStatements, doing nothing when the table is gone.
+func dropVersionsTableStatements(dialect coresql.Dialect, table string) []string {
+	//: every engine spells it alike.
+	return []string{"DROP TABLE IF EXISTS " + quoteIdent(dialect, versionsTable(table))}
 }
 
 // dropTableStatements renders the reversal of createTableStatements: the index

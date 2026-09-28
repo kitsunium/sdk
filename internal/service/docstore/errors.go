@@ -106,11 +106,11 @@ var (
 		"service/docstore: the publication's rename succeeded and the directory flush failed; the write stands in memory and on disk, and may not survive a power loss",
 		errs.WithHTTPStatus(http.StatusInternalServerError), errs.WithExitCode(exitIOErr))
 
-	// LoadFailed refuses to open a store whose files cannot be read, or are
-	// not a store's files.
+	// LoadFailed refuses to open a store whose files cannot be read, are not
+	// a store's files, or keep versions the store was not opened to keep.
 	LoadFailed = errs.Define(CodeLoadFailed, "LOAD_FAILED",
 		"The store's files could not be loaded",
-		"service/docstore: Open could not read or parse the snapshot or an overlay entry; the fields name the file and the problem",
+		"service/docstore: Open could not read or parse the snapshot, the versions file or an overlay entry, or found versions it does not keep; the fields name the file and the problem",
 		errs.WithHTTPStatus(http.StatusInternalServerError), errs.WithExitCode(exitDataErr))
 
 	// IndexBroken refuses to open a store whose documents break a unique
@@ -130,8 +130,9 @@ var (
 
 	// StoreMisconfigured refuses a configuration no store could honour: no
 	// key function, an index without a name, a function or a unique one, a
-	// filesystem without a path; for the SQL store, a transactor that cannot
-	// join or defer, an unknown dialect, a table name that is not one.
+	// filesystem without a path, a negative Versions, a Held without
+	// Versions; for the SQL store, a transactor that cannot join or defer, an
+	// unknown dialect, a table name that is not one.
 	StoreMisconfigured = errs.Define(CodeStoreMisconfigured, "STORE_MISCONFIGURED",
 		"The document store cannot be opened as configured",
 		"service/docstore: Open or OpenSQL refused its Config; the fields name the setting and the problem",
@@ -158,5 +159,30 @@ var (
 	KeyTooLong = errs.Define(CodeKeyTooLong, "KEY_TOO_LONG",
 		"A key is longer than the store can keep",
 		"service/docstore: a store key or an index key exceeds MaxSQLKeyLen bytes; the fields name the store, the index and the limit, never the key",
+		errs.WithHTTPStatus(http.StatusBadRequest))
+
+	// VersionsNotKept refuses a call on a document's versions — Versions,
+	// Version, RewriteVersions — to a store whose configuration keeps none.
+	// Answering the current document as its only version would tell the
+	// caller a history exists and is empty, which is not what happened.
+	VersionsNotKept = errs.Define(CodeVersionsNotKept, "VERSIONS_NOT_KEPT",
+		"This store keeps no versions",
+		"service/docstore: the store was opened with Versions zero, so it records no version and reads none; the fields name the store",
+		errs.WithHTTPStatus(http.StatusBadRequest))
+
+	// VersionNotFound is a miss on a version: the document holds no version of
+	// that number — it was never made, or a write pruned it.
+	VersionNotFound = errs.Define(CodeVersionNotFound, "VERSION_NOT_FOUND",
+		"The document keeps no version of this number",
+		"service/docstore: the document exists and keeps no version of the number asked for, never made or pruned; the fields name the store and the number, never the key",
+		errs.WithHTTPStatus(http.StatusNotFound))
+
+	// VersionsRewriteRefused refuses what a rewrite's function returned: a
+	// rewrite may drop a former version and change what one holds and what
+	// its writer said, never add one, reorder them or change when one was
+	// made. Nothing changed.
+	VersionsRewriteRefused = errs.Define(CodeVersionsRewriteRefused, "VERSIONS_REWRITE_REFUSED",
+		"A rewrite of versions may only drop or rewrite the versions it was given",
+		"service/docstore: the rewrite function returned a version it was not given, out of order, with another instant, or that is not JSON; the fields name the store and the problem",
 		errs.WithHTTPStatus(http.StatusBadRequest))
 )

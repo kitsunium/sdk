@@ -67,15 +67,43 @@ type docRow struct {
 // ixKey is the index table's primary key.
 type ixKey struct{ name, key, doc string }
 
-// tables is one version of the two tables.
+// vsKey is the versions table's primary key.
+type vsKey struct {
+	doc string
+	num int64
+}
+
+// vsRow is one row of the versions table: NULL is nil in every column.
+type vsRow struct {
+	at   driver.Value // nil or int64
+	meta []byte
+	doc  []byte
+}
+
+// tables is one version of the three tables.
 type tables struct {
 	docs map[string]docRow
 	ix   map[ixKey]bool // the value is uniq: true for a unique index's row
+	vs   map[vsKey]vsRow
 }
 
 // clone copies t, so a transaction or a savepoint can be undone.
 func (t *tables) clone() *tables {
-	return &tables{docs: maps.Clone(t.docs), ix: maps.Clone(t.ix)}
+	return &tables{docs: maps.Clone(t.docs), ix: maps.Clone(t.ix), vs: maps.Clone(t.vs)}
+}
+
+// versionsOf returns the numbers of key's version rows, newest first, the
+// former ones only when formers.
+func (t *tables) versionsOf(key string, formers bool) []int64 {
+	var nums []int64
+	for k, row := range t.vs {
+		if k.doc == key && (!formers || row.doc != nil) {
+			nums = append(nums, k.num)
+		}
+	}
+	slices.Sort(nums)
+	slices.Reverse(nums)
+	return nums
 }
 
 // uniqueHolder returns the document another unique row files under (name, key).
@@ -116,7 +144,7 @@ type sqlEngine struct {
 // table on dialect.
 func newSQLEngine(dialect coresql.Dialect, table string) *sqlEngine {
 	return &sqlEngine{
-		committed: &tables{docs: map[string]docRow{}, ix: map[ixKey]bool{}},
+		committed: &tables{docs: map[string]docRow{}, ix: map[ixKey]bool{}, vs: map[vsKey]vsRow{}},
 		failures:  map[string][]error{},
 		before:    map[string]func(){},
 		stmts:     docstore.RenderSQLForTest(dialect, table),
@@ -374,7 +402,7 @@ func (c *fakeSQLConn) run(ctx context.Context, query string, args []driver.Value
 func writes(role string) bool {
 	switch role {
 	case "getDoc", "listDocs", "entries", "entriesLimit", "count", "exists", "lookup", "find",
-		"pageAfter", "uniqueTaken", "sharedKeys":
+		"pageAfter", "uniqueTaken", "sharedKeys", "readVersions", "versionHead", "pruneCut", "lockFormers":
 		return false
 	default:
 		return true
@@ -434,6 +462,8 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 		return "sharedKeys"
 	case nargs > 0 && query == e.stmts.MarkUnique(nargs):
 		return "markUnique"
+	case nargs%5 == 0 && nargs > 0 && query == e.stmts.InsertVersions(nargs/5):
+		return "insertVersions"
 	}
 	return query
 }
@@ -481,8 +511,64 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 	// Reindex's check of the unique indexes.
 	case "sharedKeys":
 		return e.sharedKeys(work, args), true
+	// A document's versions, and what a write reads of them.
+	case "readVersions":
+		return e.readVersions(work, str(0)), true
+	case "versionHead":
+		for k, row := range work.vs {
+			if k.doc == str(0) && row.doc == nil {
+				return rowsOf([]string{"num"}, [][]driver.Value{{k.num}}), true
+			}
+		}
+		return rowsOf([]string{"num"}, nil), true
+	case "pruneCut":
+		formers := work.versionsOf(str(0), true)
+		if offset := int(args[1].(int64)); offset < len(formers) {
+			return rowsOf([]string{"num"}, [][]driver.Value{{formers[offset]}}), true
+		}
+		return rowsOf([]string{"num"}, nil), true
+	case "lockFormers":
+		var rows [][]driver.Value
+		for _, num := range work.versionsOf(str(0), true) {
+			row := work.vs[vsKey{doc: str(0), num: num}]
+			rows = append(rows, []driver.Value{num, row.at, nullable(row.meta), bytes.Clone(row.doc)})
+		}
+		return rowsOf([]string{"num", "made_at", "meta", "doc"}, rows), true
 	}
 	return none, false
+}
+
+// readVersions answers every version of a document with the document itself,
+// newest first, as the LEFT JOIN does: one row without a number for a
+// document no version row names, none for no document.
+func (e *sqlEngine) readVersions(work *tables, key string) answer {
+	cols := []string{"num", "made_at", "meta", "doc"}
+	current, found := work.docs[key]
+	if !found {
+		return rowsOf(cols, nil)
+	}
+	nums := work.versionsOf(key, false)
+	if len(nums) == 0 {
+		return rowsOf(cols, [][]driver.Value{{nil, nil, nil, bytes.Clone(current.doc)}})
+	}
+	rows := make([][]driver.Value, 0, len(nums))
+	for _, num := range nums {
+		row := work.vs[vsKey{doc: key, num: num}]
+		doc := row.doc
+		if doc == nil {
+			doc = current.doc
+		}
+		rows = append(rows, []driver.Value{num, row.at, nullable(row.meta), bytes.Clone(doc)})
+	}
+	return rowsOf(cols, rows)
+}
+
+// nullable is b as a column value: nil, which is NULL, when b is nil.
+func nullable(b []byte) driver.Value {
+	if b == nil {
+		return nil
+	}
+	return bytes.Clone(b)
 }
 
 // write runs the store's writes.
@@ -522,8 +608,88 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables)
 	// A document's index rows.
 	case "insertIndexRows":
 		return e.insertRows(work, args)
+	// A Put's claim on a store that keeps versions.
+	case "claim":
+		return e.claim(work, str(0), args[1].([]byte)), nil
+	// A document's versions.
+	case "retireHead":
+		k := vsKey{doc: str(1), num: args[2].(int64)}
+		row, found := work.vs[k]
+		if !found {
+			return none, nil
+		}
+		row.doc = bytes.Clone(args[0].([]byte))
+		work.vs[k] = row
+		return affecting(1), nil
+	case "insertVersions":
+		return e.insertVersions(work, args)
+	case "pruneVersions":
+		cut := args[1].(int64)
+		return affecting(dropVersions(work, str(0), func(num int64, row vsRow) bool { return row.doc != nil && num <= cut })), nil
+	case "dropVersions":
+		return affecting(dropVersions(work, str(0), func(int64, vsRow) bool { return true })), nil
+	case "dropFormers":
+		return affecting(dropVersions(work, str(0), func(_ int64, row vsRow) bool { return row.doc != nil })), nil
 	}
 	return none, errors.New("the fake engine does not speak: " + query)
+}
+
+// claim is a Put's first statement on a store that keeps versions: it creates
+// the document, or moves the stored one's revision and leaves it as it is,
+// answering the way the dialect does.
+func (e *sqlEngine) claim(work *tables, key string, doc []byte) answer {
+	row, found := work.docs[key]
+	if found {
+		row.rev++
+	} else {
+		row = docRow{doc: bytes.Clone(doc), rev: 1}
+	}
+	work.docs[key] = row
+	if e.dialect != coresql.DialectMySQL {
+		return rowsOf([]string{"rev", "doc"}, [][]driver.Value{{row.rev, bytes.Clone(row.doc)}})
+	}
+	if found {
+		return affecting(2)
+	}
+	return affecting(1)
+}
+
+// insertVersions inserts version rows, refusing one whose key and number are
+// taken, as the primary key does; a statement that fails leaves nothing of
+// itself behind.
+func (e *sqlEngine) insertVersions(work *tables, args []driver.Value) (answer, error) {
+	var added []vsKey
+	for i := 0; i < len(args); i += 5 {
+		k := vsKey{doc: string(args[i].([]byte)), num: args[i+1].(int64)}
+		if _, taken := work.vs[k]; taken {
+			for _, undo := range added {
+				delete(work.vs, undo)
+			}
+			return none, errDuplicate{key: k.doc}
+		}
+		row := vsRow{at: args[i+2]}
+		if meta, ok := args[i+3].([]byte); ok {
+			row.meta = bytes.Clone(meta)
+		}
+		if doc, ok := args[i+4].([]byte); ok {
+			row.doc = bytes.Clone(doc)
+		}
+		work.vs[k] = row
+		added = append(added, k)
+	}
+	return affecting(int64(len(added))), nil
+}
+
+// dropVersions deletes the version rows of key gone accepts and counts them.
+func dropVersions(work *tables, key string, gone func(num int64, row vsRow) bool) int64 {
+	n := int64(0)
+	for k, row := range work.vs {
+		if k.doc == key && gone(k.num, row) {
+			delete(work.vs, k)
+			n++
+		}
+	}
+	return n
 }
 
 // readOne answers getDoc — the document — or exists — a 1 — for key, reading

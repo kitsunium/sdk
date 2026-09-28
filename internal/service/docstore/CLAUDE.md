@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-28T23:30:00Z -->
 # internal/service/docstore/
 
 ## Purpose
@@ -13,13 +13,19 @@ indexes, in two engines that keep one contract:
   caller owns, every call taking a context and running on the transaction it
   carries, nothing held in memory. **ADR 0139.**
 
+Both keep, when their configuration's `Versions` says so, the last versions of
+each document in the same durable write as the document — the file engine's
+overlay entry, the SQL engine's transaction — pruned in that write, kept from
+pruning by `Held`, rewritten by `RewriteVersions`. **ADR 0143.**
+
 Public facade: `pkg/v1/docstore`.
 
 Code range `0.3.80.*`, shared: both engines answer the same refusals under the
-same codes, and the SQL engine adds `STATEMENT_FAILED` and `KEY_TOO_LONG`. No
-core counterpart: the two engines differ on the one thing a port would have to
-fix — a context, and a database that can fail — so the values are the
-engines' (ADR 0074, ADR 0139 §D2).
+same codes, and the SQL engine adds `STATEMENT_FAILED` and `KEY_TOO_LONG`;
+versions add `VERSIONS_NOT_KEPT`, `VERSION_NOT_FOUND` and
+`VERSIONS_REWRITE_REFUSED` to both. No core counterpart: the two engines
+differ on the one thing a port would have to fix — a context, and a database
+that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
 
 ## Contents
 
@@ -27,20 +33,22 @@ engines' (ADR 0074, ADR 0139 §D2).
 |---|---|
 | `docstore.go` | package doc, `Store[T]`, `EntryValue`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
-| `config.go` | `Config[T]` (`Key`, `FS`, `Path`, `FoldAt`), `IndexSpec[T]`, `Unique`, `Index`, `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` (shared) |
-| `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`; `encodeCause` |
+| `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `IndexSpec[T]`, `Unique`, `Index`, `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` and `validateVersions` (shared) |
+| `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`, which computes the versions a write leaves before it persists anything; `encodeCause` |
+| `version.go` | `VersionValue`, `StampValue` (shared); the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON` |
 | `index.go` | the index maps (`entries`, `owned`), `fileableKeys` (shared: the empty key is no key, a repeated one is filed once), `uniqueTaken`, `file` / `unfile`, `rebuild` on open: every document decoded, checked against its own `Key` (`LOAD_FAILED` otherwise, naming the file via `origin`) and filed; a broken unique index or a panicking key function refuses the open |
-| `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `removeFolded` / `recordFold`, `encodeSnapshot` |
-| `load.go` | `load`: the directories, `readSnapshot`, `readOverlay` / `replay`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
+| `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write, the document and its versions), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `foldVersions` (the versions file, then the snapshot) / `removeFolded` / `recordFold`, `encodeSnapshot` |
+| `load.go` | `load`: the directories, `readSnapshot`, `replayOverSnapshot` → `readVersions` (refused by a store that keeps none), `readOverlay` / `replay` / `checkEntryVersions`, `versionsWithoutDocument`, `checkRecord`, `compacted`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable (file engine) or committed (SQL engine), outside every lock |
-| `sql_config.go` | `SQLConfig[T]` (`Key`, `Transactor`, `IndexKey`, `Table`, `Dialect`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule, `indexTable`, the refusals |
-| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`), the four rendered per call (a write's index rows and unique-key check, `Reindex`'s shared-key check and unique marking), the DDL |
+| `sql_config.go` | `SQLConfig[T]` (`Key`, `Clock`, `Held`, `Transactor`, `IndexKey`, `Table`, `Dialect`, `Versions`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule, `indexTable`, `versionsTable`, the refusals |
+| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `forUpdateClause`, the pruning), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables |
 | `sql_store.go` | `OpenSQL`, `SQLStore[T]`; the reads — `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `OnWrite` / `OnDelete`; `failed` (STATEMENT_FAILED + the withheld cause) |
-| `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
+| `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `UpdateStamped`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `several`, `claimRow` / `lockedReplace` (a store that keeps versions reads what it replaces first), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
+| `sql_version.go` | the SQL engine's `PutStamped` / `InsertStamped` / `ReplaceStamped`, `Versions` (one LEFT JOIN), `Version`, `RewriteVersions`; `keepVersions` (the version rows a write leaves, in its transaction), `readHead`, `prune`, `insertVersionRows` (150 a statement), `versionOf` |
 | `sql_reindex.go` | `Reindex`: every index row rebuilt from the documents, a page at a time, `INDEX_BROKEN` for a unique key two documents share |
-| `sql_migration.go` | `SQLMigration`: the two tables as one idempotent `core/sql` migration the caller numbers |
+| `sql_migration.go` | `SQLMigration`: the two tables as one idempotent `core/sql` migration the caller numbers; `SQLVersionsMigration`: the versions table, beside it |
 | `sql_withheld.go` | `withheld`: the driver's error for `errors.Is`/`errors.As`, its text out of every rendering |
-| `codes.go` / `errors.go` | `0.3.80.1`–`0.3.80.17` |
+| `codes.go` / `errors.go` | `0.3.80.1`–`0.3.80.20` |
 | `BENCH.md` | what a write costs as the file store grows, against the whole-file rewrite it replaces |
 
 ## Why-this-shape
@@ -105,8 +113,8 @@ engines' (ADR 0074, ADR 0139 §D2).
   key column is binary and every key is bound as `[]byte`, so `a`, `A` and `a␠`
   are three keys in Go's order; the document is the bytes encoded, never the
   engine's JSON type. `rev` moves on every write, which makes MySQL's
-  affected-row count exact and is the numbering kitsunium/platform's ADR 0007
-  versions will need (ADR 0139 §D10). A unique
+  affected-row count exact. Versions are numbered apart from it, in their own
+  table: a write that makes no version moves `rev` too (ADR 0143). A unique
   index's rows carry `uniq = 1` and the others NULL, so one
   `UNIQUE (index_name, index_key, uniq)` guards every unique index across
   transactions and processes.
@@ -135,9 +143,43 @@ engines' (ADR 0074, ADR 0139 §D2).
   stores index keys transformed — a keyed hash — at every write, `Lookup` and
   `Find`.
 
+### Versions (ADR 0143)
+
+- **The current version is the document.** A document's versions are its
+  current one — the document itself, with the number, instant and metadata of
+  the write that made it — and up to `Versions` former ones, newest first. A
+  creation is version 1, every write that changes the document the next; a
+  write storing the JSON already stored, or stamped `InPlace`, makes none and
+  the document keeps its current version's header. A document stored before
+  its store kept versions is version 1 at an unknown instant.
+- **Versions travel in the document's own write.** File engine: the overlay
+  entry holds the key's document AND its versions, pruned, so one atomic
+  publication carries both; the fold writes the versions file, then the
+  snapshot, and removes the entries only after both — a key without an entry
+  is the same in the old files as in the new, so a crash anywhere loads the
+  same documents with the same versions. SQL engine: the version rows are
+  statements of the write's own transaction or savepoint.
+- **A Put reads what it replaces.** On a store that keeps versions, the SQL
+  engine's Put starts with a claim — an upsert that leaves the stored document
+  as it is and moves its revision — which creates the key or locks the row in
+  one statement, so no writer lands between the read and the write.
+- **The version rows are read locked inside a write** (`FOR UPDATE` on
+  PostgreSQL and MySQL), because a plain read inside a caller's REPEATABLE READ
+  transaction on MySQL answers from its snapshot.
+- **`Held` is asked only when something would be pruned**, under the writers'
+  lock or inside the write's transaction, with its context.
+- **A store without versions writes byte for byte what it wrote before.** The
+  file engine refuses (`LOAD_FAILED`) files that keep versions rather than
+  drop them at its next fold; the SQL engine cannot see a versions table it was
+  not told about, so turning versions off there is the migration's Down.
+
 ## Do NOT
 
 - **Persist the file engine's indexes.** Rebuild them. See above.
+- **Write a document without its versions, or its versions without it** — not
+  in two entries, not in two transactions. The whole promise is one write.
+- **Change a `versionsRecord` once stored.** A write stores a new one; readers
+  hold the old one outside the lock.
 - **Remove an overlay entry outside a fold**, or fold without the writers'
   lock: the idempotent replay rests on "every entry removed is inside the
   snapshot just written".
@@ -166,7 +208,11 @@ cd internal/service && GOWORK=off go test -race ./docstore
 The SQL engine's default-lane suite (`sql_*_external_test.go`) runs every case
 on the three dialects' statements over `sqlfake_external_test.go`, a fake
 engine that understands exactly those statements, with serialised
-transactions, savepoints, the two constraints, PostgreSQL's aborted state, and
-failures and concurrent commits injected at a named statement. The same
-contract runs on SQLite, PostgreSQL 17 and MySQL 8.4 through real drivers in
-`third-party/db/sql`, under `-tags integration` — see its CLAUDE.md.
+transactions, savepoints, the constraints, PostgreSQL's aborted state, the
+versions table, and failures and concurrent commits injected at a named
+statement. The versions have their own files: `version_external_test.go` and
+`version_persist_external_test.go` (memory and file engines, the interrupted
+fold, the versions file) and `sql_version_external_test.go` (every dialect).
+The same contract runs on SQLite, PostgreSQL 17 and MySQL 8.4 through real
+drivers in `third-party/db/sql`, under `-tags integration` — see its
+CLAUDE.md.

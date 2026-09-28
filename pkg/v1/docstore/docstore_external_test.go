@@ -1,11 +1,15 @@
 package docstore_test
 
 import (
+	"encoding/json"
 	"slices"
 	"testing"
+	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/sql"
 	"github.com/kitsunium/sdk/pkg/v1/vfs"
 )
 
@@ -100,5 +104,69 @@ func TestFacadeInMemory(t *testing.T) {
 	}
 	if _, err := docstore.Open(docstore.Config[member]{Key: func(m member) string { return m.ID }, Path: "members.json"}); !errs.HasCode(err, docstore.CodeStoreMisconfigured) {
 		t.Fatalf("a path without a filesystem = %v, want StoreMisconfigured", err)
+	}
+}
+
+// TestFacadeVersions pins a document's versions through public names: kept in
+// the write that stores the document, stamped, pruned, read back after a
+// reopen, rewritten, and refused under their own codes.
+func TestFacadeVersions(t *testing.T) {
+	t.Parallel()
+	fsys, clk := vfs.NewMem(), clock.NewManualClock(time.Date(2026, 9, 28, 12, 0, 0, 0, time.UTC))
+	cfg := docstore.Config[member]{Key: func(m member) string { return m.ID }, FS: fsys, Path: "members.json", Versions: 1, Clock: clk}
+	store, err := docstore.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() = %v", err)
+	}
+	for _, email := range []string{"a@example.com", "b@example.com", "c@example.com"} {
+		clk.Advance(time.Minute)
+		if err := store.PutStamped(member{ID: "m1", Email: email}, docstore.Stamp{Meta: map[string]string{"by": email}}); err != nil {
+			t.Fatalf("PutStamped() = %v", err)
+		}
+	}
+	if err := store.Close(); err != nil {
+		t.Fatalf("Close() = %v", err)
+	}
+	reopened, err := docstore.Open(cfg)
+	if err != nil {
+		t.Fatalf("Open() again = %v", err)
+	}
+	defer func() {
+		if err := reopened.Close(); err != nil {
+			t.Errorf("Close() = %v", err)
+		}
+	}()
+	versions, err := reopened.Versions("m1")
+	if err != nil || len(versions) != 2 || versions[0].Number != 3 || versions[1].Number != 2 || versions[1].Meta["by"] != "b@example.com" {
+		t.Fatalf("Versions() after a reopen = %+v, %v", versions, err)
+	}
+	if _, err := reopened.Version("m1", 1); !errs.HasCode(err, docstore.CodeVersionNotFound) {
+		t.Fatalf("a pruned version = %v, want VersionNotFound", err)
+	}
+	err = reopened.RewriteVersions("m1", func(former []docstore.Version) ([]docstore.Version, error) {
+		former[0].JSON = json.RawMessage(`{"id":"m1"}`)
+		return former, nil
+	})
+	if err != nil {
+		t.Fatalf("RewriteVersions() = %v", err)
+	}
+	err = reopened.RewriteVersions("m1", func(former []docstore.Version) ([]docstore.Version, error) {
+		former[0].Number = 9
+		return former, nil
+	})
+	if !errs.HasCode(err, docstore.CodeVersionsRewriteRefused) {
+		t.Fatalf("a rewrite that renumbers = %v, want VersionsRewriteRefused", err)
+	}
+	plain := open(t, vfs.NewMem())
+	defer func() {
+		if err := plain.Close(); err != nil {
+			t.Errorf("Close() = %v", err)
+		}
+	}()
+	if _, err := plain.Versions("m1"); !errs.HasCode(err, docstore.CodeVersionsNotKept) {
+		t.Fatalf("Versions on a store that keeps none = %v, want VersionsNotKept", err)
+	}
+	if _, err := docstore.SQLVersionsMigration(sql.DialectSQLite, "members__accounts", 2); err != nil {
+		t.Fatalf("SQLVersionsMigration() = %v", err)
 	}
 }

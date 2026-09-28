@@ -103,3 +103,26 @@ document, to check the key the document is stored under (ADR 0110 §D6). A rerun
 on this machine allocated exactly as before (1 511 and 140 692 allocations per
 open). Its timings are not quoted here because the machine was loaded (load
 average 55) and they would measure the load.
+
+### A version costs what it weighs (ADR 0143)
+
+`BenchmarkPutVersioned` rewrites a document in a store keeping `versions`
+former versions of each of its 100 documents, every document already holding
+that many, over the in-memory filesystem. It ran from branch
+`feat/docstore-versions` on 2026-09-28, load average 4.0 / 6.4 / 15.6, beside a
+fresh `BenchmarkPut` (2 717 ns at 100 documents):
+
+```
+BenchmarkPutVersioned/versions=0-10         446612        2665 ns/op      1850 B/op       29 allocs/op
+BenchmarkPutVersioned/versions=1-10         318596        3872 ns/op      2812 B/op       36 allocs/op
+BenchmarkPutVersioned/versions=10-10        153122        8140 ns/op      6977 B/op       45 allocs/op
+BenchmarkPutVersioned/versions=100-10        28969       41885 ns/op     43919 B/op      135 allocs/op
+```
+
+A store that keeps no versions writes what it wrote before: 2 665 ns. A write
+that keeps them publishes the document AND its versions in its one entry,
+because that is what makes the pair survive a crash together, so its cost
+grows with what the versions weigh — about 0.38 µs a kept version of this
+hundred-byte document — and not with the store's size. On a disk the two flushes
+still dominate: 42 µs of encoding at a hundred versions is 0.4 % of the
+11 ms a durable write costs here.

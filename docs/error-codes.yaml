@@ -2310,6 +2310,18 @@ codes:
     const: CodeKeyTooLong
     hex: "0x00_03_50_11"
     package: internal/service/docstore
+  - code: "0.3.80.18"
+    const: CodeVersionsNotKept
+    hex: "0x00_03_50_12"
+    package: internal/service/docstore
+  - code: "0.3.80.19"
+    const: CodeVersionNotFound
+    hex: "0x00_03_50_13"
+    package: internal/service/docstore
+  - code: "0.3.80.20"
+    const: CodeVersionsRewriteRefused
+    hex: "0x00_03_50_14"
+    package: internal/service/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"

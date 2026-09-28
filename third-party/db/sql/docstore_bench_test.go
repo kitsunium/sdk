@@ -114,3 +114,54 @@ func benchKey(i int) string { return fmt.Sprintf("m%06d", i) }
 func benchMember(i int) member {
 	return member{ID: benchKey(i), Email: fmt.Sprintf("user%06d@example.com", i), Name: "An ordinary name", Teams: []string{"red"}}
 }
+
+// BenchmarkSQLStoreVersions measures, on each engine, what keeping versions
+// adds to a call (ADR 0143): a Put and an Update on a store keeping ten former
+// versions of each of its 100 documents — every document already holding ten,
+// so each write makes one and prunes one — and a read of every version of a
+// document.
+func BenchmarkSQLStoreVersions(b *testing.B) {
+	for name, open := range benchEngines {
+		b.Run(name, func(b *testing.B) {
+			const docs int = 100
+			fx := openVersioned(b, open(b), 10)
+			ctx := b.Context()
+			for round := range 11 {
+				for i := range docs {
+					doc := benchMember(i)
+					doc.Name = fmt.Sprintf("round %d", round)
+					if err := fx.store.Put(ctx, doc); err != nil {
+						b.Fatal(err)
+					}
+				}
+			}
+			b.Run("Put", func(b *testing.B) {
+				for i := 0; b.Loop(); i++ {
+					doc := benchMember(i % docs)
+					doc.Name = fmt.Sprintf("put %d", i)
+					if err := fx.store.Put(ctx, doc); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("Update", func(b *testing.B) {
+				for i := 0; b.Loop(); i++ {
+					_, err := fx.store.Update(ctx, benchKey(i%docs), func(m *member) error {
+						m.Name = fmt.Sprintf("update %d", i)
+						return nil
+					})
+					if err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+			b.Run("Versions", func(b *testing.B) {
+				for i := 0; b.Loop(); i++ {
+					if _, err := fx.store.Versions(ctx, benchKey(i%docs)); err != nil {
+						b.Fatal(err)
+					}
+				}
+			})
+		})
+	}
+}

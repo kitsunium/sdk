@@ -76,6 +76,7 @@ import (
 	"sync"
 
 	corevfs "github.com/kitsunium/sdk/internal/core/vfs"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -92,12 +93,23 @@ type Store[T any] struct {
 	// docs holds each document's JSON under its key — the snapshot's own
 	// shape, so a fold encodes it as it is.
 	docs map[string]json.RawMessage
+	// versions holds each document's versions under its key, when the store
+	// keeps them, and is nil otherwise. A document stored before the store
+	// kept versions, and not versioned since, has none here. A record is
+	// never changed once stored: a write stores a new one.
+	versions map[string]*versionsRecord
 	// pending names the overlay entries the snapshot does not contain yet.
 	pending map[string]struct{}
+	// clock stamps each version.
+	clock clock.Clock
+	// held reports a document whose versions no write may prune; nil holds
+	// nothing.
+	held func(key string) bool
 	// foldErr is the last automatic fold's failure, until a fold succeeds.
 	foldErr error
-	// path is the snapshot's name; overlay the overlay directory's.
-	path, overlay string
+	// path is the snapshot's name, overlay the overlay directory's, and
+	// versionsPath the versions file's.
+	path, overlay, versionsPath string
 	// indexes are the secondary indexes, in declaration order.
 	indexes []*index[T]
 	// onWrite and onDelete are the hooks called after a write or a deletion.
@@ -105,11 +117,14 @@ type Store[T any] struct {
 	// writing serialises writers, folds and Close; they hold it across the
 	// filesystem work.
 	writing sync.Mutex
-	// mu guards docs, pending, the index maps, closed, folds and foldErr:
-	// changed under writing AND mu, read under either.
+	// mu guards docs, versions, pending, the index maps, closed, folds and
+	// foldErr: changed under writing AND mu, read under either.
 	mu sync.RWMutex
 	// foldAt is the configured fold threshold.
 	foldAt int
+	// keep is how many former versions each document keeps; zero keeps no
+	// versions at all.
+	keep int
 	// folds counts the folds since Open.
 	folds int
 	// closed refuses every call once Close ran.
