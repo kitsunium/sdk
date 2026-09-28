@@ -27,7 +27,10 @@ and are built. Step 4, record revisions — `kit.Revisions(n)`, `Revisions`,
 - and, beside `docstore`, "a structural diff of two JSON documents as RFC 6902
   operations, in `codec`" — kit's `Diff(ctx, key, from, to)` returns
   `[]kit.Edit{Op, Path, From, To}`, "in RFC 6902's words (`add`, `remove`,
-  `replace`, at a JSON pointer), with both values".
+  `replace`, at a JSON pointer), with both values";
+- and "a list of common passwords for `password`", for kit's
+  `kit.NotCommon()`: "ASVS 5.0 asks for at least the top 3 000". kit does not
+  build `NotCommon` until the SDK has the list.
 
 kit's own record rejects the alternative it would build without the SDK — a
 sibling store of revisions — because it costs two durable writes per change
@@ -285,6 +288,41 @@ list of them is a JSON Patch document.
 kit's `Diff` is `jsonpatch.Diff` of two versions' JSON, with `Old` and `Value`
 as its `From` and `To`, and a `secret` member's values dropped on kit's side.
 
+### D10 — the common passwords: `password.IsCommon`
+
+`password.IsCommon(password []byte) bool` reports whether a password is one of
+the ten thousand most common ones, compared case-insensitively. NIST SP
+800-63B-4 requires a verifier to check a new password against such a blocklist;
+OWASP ASVS 5.0 (6.2.4) asks for at least the top 3 000.
+
+- **The list** is SecLists' `Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt`,
+  embedded byte for byte as it stood at commit
+  `2e3e92569043d24297ca6c35070078e5cf41651e`, SHA-256
+  `c63d5e4ccc31344d662583cc39ca4bd5bd20517ff1d24501f0c4e0c22d9b722a`, which the
+  suite checks. It is the 10 000 most frequent passwords of the ten million
+  credentials Mark Burnett released into the public domain in 2015.
+- **The licence allows embedding it.** SecLists is MIT, Copyright (c) 2018
+  Daniel Miessler; its text travels beside the list as `LICENSE.SecLists`, in
+  the module the list ships in, and the package documentation names the
+  source, the commit, the digest and the licence. The SDK is MIT too. It is data
+  in a package, not `vendor/` code.
+- **Case-insensitive, nothing else normalised.** `PASSWORD` is refused with
+  `password`: an attacker tries case variants first, and refusing them costs a
+  person nothing. Nothing is trimmed or substituted — NIST says a verifier
+  SHALL NOT alter a password, and a look-alike table is a policy of its own.
+- **The empty password is a length rule's.** The file holds it, as one empty
+  line; `IsCommon` answers false for it. The list is 9 999 passwords, 9 916 once
+  case variants are one.
+- **Where.** `internal/service/crypto/commonpw`, data beside the schemes, which
+  registers nothing and mints no code — a lookup cannot fail — behind
+  `pkg/v1/password`, the one surface for human passwords. It is sorted once,
+  at the first question, and searched by bisection: 76 KB in the binary, no map
+  of ten thousand keys.
+- **What it does not do.** A policy of fifteen characters, NIST's minimum for a
+  password used alone, has two entries left to refuse here; the list matters
+  beside a shorter minimum. Checking against breached passwords through a
+  service stays kit's deferred connector.
+
 ## Consequences / Semantics
 
 - kit's revisions map onto the store: `Revision{Number, At, By, Command,
@@ -301,11 +339,13 @@ as its `From` and `To`, and a `secret` member's values dropped on kit's side.
 - `pkg/v1/codec/jsonpatch` is a new public package: `Diff`, `Edit`, `Op` and
   its three values, `NotJSON` and its code, in the range `0.3.90.*` the
   service package owns.
+- `pkg/v1/password` publishes `IsCommon`, and links the 76 KB list; kit's
+  `NotCommon()` becomes buildable, on by default as its record plans.
 
 ## Breaking changes
 
-None. The methods, the types, the migration, the codes and `codec/jsonpatch`
-are additions.
+None. The methods, the types, the migration, the codes, `codec/jsonpatch` and
+`password.IsCommon` are additions.
 `Config` and `SQLConfig` gain `Versions`, `Clock` and `Held`: a keyed literal
 compiles unchanged, and an unkeyed one — which `go vet` already reports across
 packages — would not, under the v0 licence of ADR 0040. A store that keeps no
@@ -348,6 +388,15 @@ versions behaves, and writes, as before.
   pointer; kit's record asks for add, remove and replace.
 - **Positional array diffs only.** Correct, and a single insertion at the start
   of a list of blocks would read as a rewrite of every block after it.
+- **A bigger list** — SecLists' 100 000 or its NCSC 100 000. Ten times the
+  binary for entries that are rarer still, and the NCSC list's terms are not
+  SecLists' own; the top 10 000 is past ASVS's figure with room.
+- **A list merged from several sources**, or rebuilt from a breach corpus. Its
+  provenance could not be checked with one digest, and every source would need
+  its licence read.
+- **A case-sensitive check**, or one that also substitutes look-alike
+  characters. The first lets `PASSWORD` through; the second is a policy a
+  framework may add on top.
 
 ## Deferred
 
@@ -402,12 +451,24 @@ versions behaves, and writes, as before.
   applied in order by the suite's own RFC 6902 applier and every `old` checked
   against what the path held; the alignment bound. `pkg/v1/codec/jsonpatch`:
   the same through public names.
+- `internal/service/crypto/commonpw`: the embedded list's SHA-256 against the
+  recorded digest, ten thousand lines, 9 916 distinct passwords; every entry
+  found, as written and upper-cased, and the empty line not; case variants,
+  near misses and a Unicode password; sixteen goroutines asking at once.
+  `pkg/v1/password`: `TestIsCommon`.
 
 ## References
 
 - `internal/service/docstore/version.go`, `sql_version.go`, `sql_dialect.go`,
   `load.go`, `persist.go`; `internal/service/codec/jsonpatch/`
 - RFC 6902 (JSON Patch), RFC 6901 (JSON Pointer), RFC 8259 (JSON)
+- SecLists: https://github.com/danielmiessler/SecLists (MIT), the file at
+  https://github.com/danielmiessler/SecLists/blob/2e3e92569043d24297ca6c35070078e5cf41651e/Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt;
+  Mark Burnett's ten million passwords, public domain:
+  https://archive.org/details/10MillionPasswords
+- NIST SP 800-63B-4, the blocklist: https://pages.nist.gov/800-63-4/sp800-63b.html;
+  OWASP ASVS 5.0, 6.2.4:
+  https://github.com/OWASP/ASVS/blob/v5.0.0/5.0/en/0x15-V6-Authentication.md
 - kitsunium/platform `docs/adr/0007-data-remembers-its-versions.md` (§3 and
   "Implementation, in order", step 3), `0006-data-is-classified-field-by-field.md`
   (erasure, holds)

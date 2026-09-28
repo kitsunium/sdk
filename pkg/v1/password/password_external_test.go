@@ -150,3 +150,21 @@ func TestAlgorithmIsDomainDefinedType_V104(t *testing.T) {
 		})
 	}
 }
+
+// TestIsCommon pins the blocklist through the facade: a common password and
+// its case variant refused, a passphrase and the empty password not — the
+// latter is a length rule's.
+func TestIsCommon(t *testing.T) {
+	t.Parallel()
+	for pw, want := range map[string]bool{
+		"password":                          true,
+		"Qwerty":                            true,
+		"123456":                            true,
+		"correct horse battery staple 1729": false,
+		"":                                  false,
+	} {
+		if got := password.IsCommon([]byte(pw)); got != want {
+			t.Errorf("IsCommon(%q) = %v, want %v", pw, got, want)
+		}
+	}
+}

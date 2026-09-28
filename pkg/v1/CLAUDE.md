@@ -52,7 +52,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `hash/` | Digests: `New` / `Sum` / `SumHex` over `SHA256`, `SHA512`, `SHA3256`, `CRC32C` and `FNV1a64`, plus the streaming `NewDigestWriter` / `NewVerifyingReader` | `pkg/v1/hash/README.md` |
 | `kdf/` | Key derivation (ADR 0014): `Subkey(HKDFSHA256, …)` and `NewKeyTree`, a key hierarchy under one master `Key` | `pkg/v1/kdf/README.md` |
 | `mac/` | Message authentication (ADR 0014): `Tag` / `Verify` with `HMACSHA256` over a `Key` | `pkg/v1/mac/README.md` |
-| `password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id` | `pkg/v1/password/README.md` |
+| `password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id`; `IsCommon`, one of the ten thousand most common passwords, case-insensitively (ADR 0143) | `pkg/v1/password/README.md` |
 | `sign/` | Signatures: `GenerateKey` / `Sign` / `Verify` over `Ed25519` and `ECDSAP256` | `pkg/v1/sign/README.md` |
 | `client/` | The outbound half of the network domain (ADR 0029): `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` (`AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies`) is enforced in the transport; a refusal is `RequestDenied` | `pkg/v1/client/README.md` |
 | `tlsid/` | TLS and mutual-TLS identities shared by `server` and `client` (ADR 0029): `New` for material in memory, `Load` for material on disk; `MaterialInvalid` | `pkg/v1/tlsid/README.md` |
