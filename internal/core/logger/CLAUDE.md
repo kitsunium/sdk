@@ -1,11 +1,11 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/core/logger/
 
 ## Purpose
 
-Interface layer of the SDK's structured logger. Defines the four ports between the caller-facing `Logger`, the formatting `Handler`, the format-side `Encoder` and the transport-side `Sink`, plus the immutable value types they carry. No runtime behaviour lives here — concrete implementations sit under `internal/service/logger/{encoder,sink,middleware}/`. The human-readable surface doc is `README.md`; this file captures the engineering rules.
+Interface layer of the SDK's structured logger. Defines the four ports between the caller-facing `Logger`, the formatting `Handler`, the format-side `Encoder` and the transport-side `Sink`, plus the immutable value types they carry. No runtime behaviour lives here — concrete implementations sit under `internal/service/logger/{encoder,sink,middleware}/`. This directory carries no `README.md`: the human-readable surface doc is the public facade's generated `pkg/v1/logger/README.md`, and this file captures the engineering rules.
 
-Code range: `0.2.16.*` reserved (ADR 0006). No codes emitted today — service-layer wiring owns the slot.
+Code range: `0.2.1.*` reserved (ADR 0005 §Registry); `codeRangeOwners` carries no entry for it. No codes emitted today — service-layer wiring owns the slot.
 
 ## Contents
 
@@ -17,10 +17,10 @@ Code range: `0.2.16.*` reserved (ADR 0006). No codes emitted today — service-l
 | `sink.go` | `Sink` (transport-side port) — `Write(ctx, RecordEvent, []byte) (int, error)`, `Flush(ctx) error`, `Close() error` |
 | `record.go` | `RecordEvent` — `Time`, `Level`, `Message`, `PC uintptr`, `Attrs []AttrValue`, `TraceContext TraceContextValue` — and `AttrValue{Key string; Value Value}` |
 | `trace_context.go` | `TraceContextValue{TraceID [16]byte; SpanID [8]byte}` + `IsValid()` + `AppendTraceIDHex` / `AppendSpanIDHex`; the `TraceContextSource func(ctx) TraceContextValue` port; `TraceIDKey`/`SpanIDKey` (`"trace_id"`/`"span_id"`) and the four length constants (ADR 0062) |
-| `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`) and accessors |
+| `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `IntValue` / `Uint64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`, and `NewValue`, an alias of `AnyValue`) and accessors |
 | `kind.go` | `Kind int8` + `KindAny`/`KindBool`/`KindDuration`/`KindFloat64`/`KindInt64`/`KindString`/`KindTime`/`KindUint64`/`KindGroup` + `String()` |
 
-Sub-package: [`level/`](./level/) — severity constants (`Debug`/`Info`/`Warn`/`Error`).
+Sub-package: `level/` — severity constants (`Debug`/`Info`/`Warn`/`Error`); see `level/CLAUDE.md`.
 
 ## Conventions
 
@@ -57,7 +57,3 @@ cd internal/core && GOWORK=off go test -race -cover ./logger/...
 ```
 
 Contract is exercised end-to-end by `internal/service/logger` and `pkg/v1/logger` test suites.
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V13, V15) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

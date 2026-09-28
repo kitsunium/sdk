@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/mail/
 
 ## Purpose
@@ -24,7 +25,7 @@ maintainer's half.
 | `FullTransport` | alias | the union `NewMemory` returns |
 | `SMTPConfig`, `TLSMode`, `ComposerConfig`, `Composer` | aliases | service-layer types |
 | `TLSUnset`/`TLSStartTLS`/`TLSImplicit`/`TLSDisabled` | constants | the zero is refused |
-| 16 sentinels | vars | 9 from core, 7 from service — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
+| 19 sentinels | vars | 9 from core, 10 from service — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
 | `NewSMTP`, `NewMemory`, `NewComposer`, `Compose`, `Validate`, `ParseURL` | funcs | `ParseURL` reads `smtp://…?tls=…` / `smtps://…` into a config `NewSMTP` accepts, and never quotes the URL in a refusal |
 | `NewCapture(keep)` / `DefaultCaptureKeep` | func / const | `NewMemory`'s double keeping the last `keep` deliveries (200 when not positive) — the development server's transport |
 | `NewSpool`, `SpoolAttemptFrom` | funcs | the durable outbox and the attempt a delivery context carries (ADR 0111) |
@@ -36,8 +37,8 @@ maintainer's half.
 
 Error CODE constants are deliberately not re-exported. `errors.Is(err,
 mail.HeaderInjection)` is the consumer-facing way to match one refusal —
-`errs.Is` compares `(Code, Reason)` rather than pointers — and `errs.CodeOf`
-covers the rest. This mirrors `pkg/v1/vfs`.
+the SDK error's `Is` method compares `(Code, Reason)` rather than pointers —
+and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/vfs`.
 
 ## Why this shape
 

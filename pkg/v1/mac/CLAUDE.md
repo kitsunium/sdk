@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/mac/
 
 ## Purpose
@@ -14,8 +15,9 @@ activating HMAC-SHA256 with **zero non-stdlib deps**.
 
 | Identifier | Role |
 |---|---|
-| `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id) |
+| `Algorithm` | defined type over `corecrypto.Algorithm` (stable scheme id) — distinct from the other crypto-family `Algorithm` types, so a hash or signature constant does not compile into a MAC call |
 | `Key` | alias of `corecrypto.Key` (redacting 256-bit key) |
+| `KeyLen` | `corecrypto.KeyLen` — the 32-byte length `NewKey` enforces |
 | `HMACSHA256` | HMAC (RFC 2104) over SHA-256 |
 | `NewKey(raw) (Key, error)` | 32-byte key; wrong length → `InvalidKey` |
 | `Tag(a, key, message) ([]byte, error)` | tag; unknown algo → `UnknownMACAlgorithm` |
@@ -37,8 +39,10 @@ inverse of the `pkg/v1/hash` rule.
 
 ## Conventions
 
-- **Aliases, not new types** — `Algorithm`/`Key = corecrypto.*`; the const is the
-  frozen wire string (`"hmac-sha256"`).
+- **`Key` is an alias, `Algorithm` a defined type** — `Key = corecrypto.Key`;
+  `Algorithm` is converted to `corecrypto.Algorithm` at the call into core, so
+  the MAC registry stays its own keyspace. The const is the frozen wire string
+  (`"hmac-sha256"`).
 - **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
   package doc comment in `mac.go`; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.** New scheme consts can be added; existing ones

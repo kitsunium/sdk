@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-11T00:00:00Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/logger/
 
 ## Purpose
@@ -14,7 +14,7 @@ The shape at a glance:
 ```
 Logger ── Handler (genericHandler / TextHandler)
                   │
-                  ├── Encoder (encoder/text)
+                  ├── Encoder (encoder: text, json)
                   └── Sink chain (middleware/* → sink/*)
 ```
 
@@ -66,6 +66,7 @@ Logger ── Handler (genericHandler / TextHandler)
 | `builder.go`      | `Builder` interface + `chainBuilder` impl (recycled via `recordPool`) |
 | `handler.go`      | `genericHandler` (Encoder × Sink composition) + `NewHandler` |
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
+| `source.go`       | `WithCaller` + `sourceHandler` — an opt-in Handler decorator appending a `source` attribute (`SourceFieldKey`, `file:line:function`) resolved from the captured `RecordEvent.PC`; a foreign `Logger` (not a `*loggerImpl`) comes back unchanged |
 | `pool.go`         | `recordPool` — `recycler.Pool[*chainBuilder]` with pre-sized attrs |
 | `codes.go`        | `Code*` constants — ADR 0005 range **0.3.1.\*** |
 | `errors.go`       | Sentinels — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` |
@@ -186,10 +187,6 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtim
 
 ## Subtree
 
-- `encoder/` — `core/logger.Encoder` adapters (text today; ndjson/json later)
-- `middleware/` — chainable `Sink` decorators (multi, async, route, failover, sample, recover)
-- `sink/` — terminal `Sink` implementations (console, file, syslog)
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V27) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
+- `encoder/` — `core/logger.Encoder` adapters (text and JSON)
+- `middleware/` — chainable `Sink` decorators (multi, async, route, failover, sample, recover, encwrite, tee)
+- `sink/` — terminal `Sink` implementations (console, file, syslog, memory)

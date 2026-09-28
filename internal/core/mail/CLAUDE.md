@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/core/mail/
 
 ## Purpose
@@ -34,7 +35,7 @@ halves of one send. The names stay long, the layer's convention, the same one
 | `header_field_value.go` | `HeaderFieldValue` |
 | `value.go` | `DeliveryValue` and `EnvelopeValue` |
 | `transport_interface.go` | `Transport`, `BatchSender`, `Outbox`, `FullTransport` |
-| `header.go` | the field-name constants, the reserved set, and the INJECTION GATE |
+| `header.go` | the thirteen field-name constants (`HeaderFrom` … `HeaderContentID`), the reserved set and `IsReservedHeader`, and the INJECTION GATE — `ValidateHeaderName`, `ValidateHeaderValue`, and `ValidateHeader`, which runs both and refuses a reserved name |
 | `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, and `IsDotAtom` — the dot-atom grammar, exported because a Message-ID's id-left is written in it too |
 | `attachment.go` | `ValidateAttachment` and its three sub-guards |
 | `validate.go` | `Validate` — the one whole-message guard both transports run |

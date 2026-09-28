@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/core/metrics/
 
 ## Purpose
@@ -69,7 +70,7 @@ convention, not part of the public vocabulary.
 | Observable (asynchronous) instruments | yes | `AsyncMeter` + the two func callbacks |
 | `Metric.description` | yes | `Describer` port; `Description` on the three metric envelopes (ADR 0067) |
 | `Metric.unit` | **deferred** | a unit changes the metric NAME on some wires (Prometheus suffixes it) and is a second decision |
-| Exemplars | **deferred** | no tracing domain, so no span id to carry |
+| Exemplars | **deferred** | `core/trace` supplies the span context one points at (ADR 0051); ADR 0051 §Deferred lists what landing them takes — an `ExemplarValue` holding the raw id arrays, a sibling port whose instrument fetch takes a context, a sampled-span filter, and the field in both encoders |
 | Exponential histograms | **deferred** | a second point type, not a field |
 | Summary (legacy) | **never** | the OTel spec itself says "not recommended for new applications" |
 

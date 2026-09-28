@@ -1,11 +1,12 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/logger/middleware/
 
 ## Purpose
 
 Chainable `core/logger.Sink` decorators. Each sub-package is itself a
 `Sink` so middlewares compose by wrapping one another — the bottom of the
-chain is always a terminal sink from `service/logger/sink/*`.
+chain is always a terminal sink: one of `service/logger/sink/*`, or a writer
+sink from `internal/service/writer/*` or `third-party/*/writer/*`.
 
 ## Contents
 
@@ -17,6 +18,8 @@ chain is always a terminal sink from `service/logger/sink/*`.
 | `failover/`| Sequential retry across an ordered chain                              | 0.3.19.\* |
 | `sample/`  | 1-of-N rate-limiter on top of a downstream sink                       | 0.3.20.\* |
 | `recover/` | Catches downstream panics, materialises them as typed errors          | 0.3.21.\* |
+| `encwrite/`| Seals each record's bytes under a per-sink subkey (AES-256-GCM, HKDF-SHA256) and length-prefixes the box | 0.3.28.\* |
+| `tee/`     | Fan-out to every primary; spills a record to a dead-letter sink only when all primaries reject it | 0.3.29.\* |
 
 ## Composition order
 
@@ -77,15 +80,19 @@ Three findings a caller should know before wiring a chain:
 
 ## Conventions
 
-- **One package per concern**, each with its own `codes.go` + `errors.go`
-  + sentinels named after their drop / fail mode.
-- **OnError / OnDrop hooks.** Middlewares that can silently lose records
-  expose a `Config` callback so operators wire metrics or fallback logs.
-  `async` exposes both; others surface via aggregated errors.
+- **One package per concern**, each owning one code range and sentinels
+  named after their drop / fail mode — in `codes.go` + `errors.go`, or in one
+  shared file (`multi/failed.go`, `route/match.go`, `tee/failed.go`).
+- **OnError / OnDrop / OnPanic hooks.** Middlewares that can silently lose
+  records expose a `Config` callback so operators wire metrics or fallback
+  logs. `async` exposes `OnDrop` and `OnError`, `recover` exposes `OnPanic`;
+  the others surface failures through their returned (aggregated) errors.
 - **Concurrency.** Every middleware is safe for concurrent producers by
-  contract (`async` via ring + mutex, `multi` / `failover` / `route` via
-  stateless fan-out, `sample` via `atomic.Uint64`).
-- **Origin wins on wrap.** Aggregated errors flow through `errs.Wrap` so
+  contract (`async` via ring + mutex, `encwrite` via a mutex, `multi` /
+  `failover` / `route` / `tee` via stateless fan-out, `sample` via
+  `atomic.Uint64`; `recover` holds no state).
+- **Origin wins on wrap.** `Write`'s aggregated errors flow through
+  `errs.Wrap` (`Flush` / `Close` return the bare `errors.Join`), so
   consumer-side `errors.Is` matches every downstream cause via `Unwrap`.
 
 ## Do NOT
@@ -93,7 +100,8 @@ Three findings a caller should know before wiring a chain:
 - Add I/O to a middleware — they wrap, never originate, except for `async`
   whose drainer goroutine *is* the I/O boundary by design.
 - Leak the concrete decorator type at the public API; constructors return
-  the `Sink` interface.
+  the `Sink` interface — all but `encwrite.NewEncWriter` (`*EncWriter`) and
+  `tee.NewTeeSink` (`*TeeSink`).
 
 ## Verification
 

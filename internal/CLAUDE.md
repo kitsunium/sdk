@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T00:19:36Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/
 
 ## Purpose
@@ -84,7 +84,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 | `github.com/kitsunium/sdk/internal/core`    | `cd internal/core && GOWORK=off go build ./...`   |
 | `github.com/kitsunium/sdk/internal/service` | `cd internal/service && GOWORK=off go build ./...`|
 
-`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root lets `go build ./...` from the SDK root work without `replace`. Third-party deps live only in `internal/service/go.mod` (cbor, msgpack, toml, yaml).
+`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root lets `go build ./...` from the SDK root work without `replace`. Third-party deps live only in `internal/service/go.mod`: the codec libraries (bson through `go.mongodb.org/mongo-driver`, cbor, msgpack, toml, yaml) and `golang.org/x/mod` (`semver` for `entitlement` and `selfupdate`, `module` for `proc/self`).
 
 ## Conventions
 
@@ -98,7 +98,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
   group: unrelated declarations sharing a file is `KTN-STRUCT-COHESION`, and
   it still fires.
 - **Doc comments follow Effective Go.** Lead with the identifier name and name the parameters and return values inline (`Foo returns the X computed from y and z.`). No Javadoc-style `Params:` / `Returns:` sections — they were removed project-wide in PR #26. Every control block still takes a `//:` intent comment; every `case` label has its own intent comment.
-- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 988** test files define one, while **446** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
+- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 1 135** test files define one, while **523** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
   group and may share a file — `failed.go`, `match.go`, `unknown.go` — or stay
   split as `codes.go` / `errors.go` where the package is large enough for the
