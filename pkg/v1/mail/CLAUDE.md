@@ -7,7 +7,8 @@ The public facade for the mail domain (ADR 0064): type aliases over
 `NewSMTP`, `NewMemory`, `NewCapture`, `NewComposer` — plus `Compose` and
 `Validate` for a caller that wants the bytes or the verdict without a
 transport. And the durable outbox (ADR 0111): `NewSpool` over
-`internal/service/mail/spool`.
+`internal/service/mail/spool`, whose `Spool.SendWithID` queues a mail under an
+identifier its caller minted (ADR 0141).
 
 Consumer-facing prose lives in the package doc comment in `mail.go` and is
 rendered into `README.md` by `gomarkdoc` (rule 10 / ADR 0008). This file is the
@@ -23,14 +24,15 @@ maintainer's half.
 | `FullTransport` | alias | the union `NewMemory` returns |
 | `SMTPConfig`, `TLSMode`, `ComposerConfig`, `Composer` | aliases | service-layer types |
 | `TLSUnset`/`TLSStartTLS`/`TLSImplicit`/`TLSDisabled` | constants | the zero is refused |
-| 16 sentinels | vars | 9 from core, 7 from service — `InvalidURL` is `ParseURL`'s — plus the spool's five below |
+| 16 sentinels | vars | 9 from core, 7 from service — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
 | `NewSMTP`, `NewMemory`, `NewComposer`, `Compose`, `Validate`, `ParseURL` | funcs | `ParseURL` reads `smtp://…?tls=…` / `smtps://…` into a config `NewSMTP` accepts, and never quotes the URL in a refusal |
 | `NewCapture(keep)` / `DefaultCaptureKeep` | func / const | `NewMemory`'s double keeping the last `keep` deliveries (200 when not positive) — the development server's transport |
 | `NewSpool`, `SpoolAttemptFrom` | funcs | the durable outbox and the attempt a delivery context carries (ADR 0111) |
-| `Spool`, `SpoolConfig`, `SpoolEvent`, `SpoolEventKind`, `SpoolAttempt`, `SpoolDeadLetter` | aliases | onto `service/mail/spool` — `Spool`, `Config`, `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue` |
+| `Spool`, `SpoolConfig`, `SpoolEvent`, `SpoolEventKind`, `SpoolAttempt`, `SpoolDeadLetter` | aliases | onto `service/mail/spool` — `Spool`, `Config`, `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue`; `Spool.SendWithID` reaches consumers through the alias, so the facade adds no function for it (ADR 0141) |
 | `SpoolQueued` … `SpoolDuplicate` | constants | the five event kinds |
 | `DefaultSpoolSendTimeout`, `DefaultSpoolRetryBase`, `DefaultSpoolRetryMax`, `DefaultSpoolMaxMessageBytes`, `SpoolDeliveredMemory` | constants | the spool's clamps |
-| `SpoolMisconfigured`, `SpoolClosed`, `SpooledMailUndecodable`, `SpooledMailUnencodable`, `TransportPanicked` | vars | the spool's sentinels (`0.3.81.*`) |
+| `SpoolMaxIDBytes` | constant | the bound on a spooled mail's identifier, whoever minted it (ADR 0141) |
+| `SpoolMisconfigured`, `SpoolClosed`, `SpooledMailUndecodable`, `SpooledMailUnencodable`, `TransportPanicked`, `InvalidMailID` | vars | the spool's sentinels (`0.3.81.*`); `InvalidMailID` is `SendWithID`'s refusal of an identifier no mail can keep |
 
 Error CODE constants are deliberately not re-exported. `errors.Is(err,
 mail.HeaderInjection)` is the consumer-facing way to match one refusal —

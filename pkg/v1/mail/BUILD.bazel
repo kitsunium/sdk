@@ -27,6 +27,7 @@ go_test(
     deps = [
         ":mail",
         "//pkg/v1/errs",
+        "//pkg/v1/id",
     ],
 )
 

@@ -110,24 +110,27 @@ func TestACurveWithoutABaseNeverRetriesAtOnce(t *testing.T) {
 	}
 }
 
-// TestSendRefusesAnEmptyIdentifier pins the guard on Config.NewID: the spool
-// drops a mail whose identifier it delivered already, so an empty identifier
-// would make every later empty one a redelivery. Send refuses it, and nothing
-// is queued.
-func TestSendRefusesAnEmptyIdentifier(t *testing.T) {
+// TestSendRefusesAnIdentifierNewIDGotWrong pins the guard on Config.NewID: it
+// is held to the rule SendWithID holds a caller to, since its identifier also
+// becomes the left half of the Message-ID — and an empty one, which the rule
+// refuses, would make every later empty one a redelivery the spool drops.
+// Send refuses each as the configuration's defect, and nothing is queued.
+func TestSendRefusesAnIdentifierNewIDGotWrong(t *testing.T) {
 	t.Parallel()
-	s, _, rec := newSpool(t, spool.Config{
-		Transport: svcmail.NewCapture(0),
-		From:      coremail.AddressValue{Addr: "members@example.com"},
-		NewID:     func() (string, error) { return "", nil },
-	})
-	if _, err := s.Send(context.Background(), message("Hi")); !errs.HasCode(err, spool.CodeSpoolMisconfigured) {
-		t.Fatalf("Send() with an empty identifier = %v, want SpoolMisconfigured", err)
-	}
-	select {
-	case event := <-rec.events:
-		t.Fatalf("a refused mail produced %v", event.Kind)
-	default:
+	for _, minted := range []string{"", "mail 7", strings.Repeat("a", spool.MaxIDBytes+1)} {
+		s, _, rec := newSpool(t, spool.Config{
+			Transport: svcmail.NewCapture(0),
+			From:      coremail.AddressValue{Addr: "members@example.com"},
+			NewID:     func() (string, error) { return minted, nil },
+		})
+		if _, err := s.Send(context.Background(), message("Hi")); !errs.HasCode(err, spool.CodeSpoolMisconfigured) {
+			t.Fatalf("Send() with NewID minting %q = %v, want SpoolMisconfigured", minted, err)
+		}
+		select {
+		case event := <-rec.events:
+			t.Fatalf("a refused mail produced %v", event.Kind)
+		default:
+		}
 	}
 }
 
@@ -331,7 +334,8 @@ func TestNewRefuses(t *testing.T) {
 	}
 }
 
-// TestAClosedSpoolRefusesMail pins Close: every later Send is SpoolClosed.
+// TestAClosedSpoolRefusesMail pins Close: every later Send and SendWithID is
+// SpoolClosed.
 func TestAClosedSpoolRefusesMail(t *testing.T) {
 	t.Parallel()
 	s, err := spool.New(spool.Config{Transport: svcmail.NewCapture(0), MaxAttempts: 3})
@@ -345,6 +349,9 @@ func TestAClosedSpoolRefusesMail(t *testing.T) {
 	msg.From = coremail.AddressValue{Addr: "members@example.com"}
 	if _, err := s.Send(context.Background(), msg); !errs.HasCode(err, spool.CodeSpoolClosed) {
 		t.Fatalf("Send() after Close = %v, want SpoolClosed", err)
+	}
+	if err := s.SendWithID(context.Background(), "mail_late", msg); !errs.HasCode(err, spool.CodeSpoolClosed) {
+		t.Fatalf("SendWithID() after Close = %v, want SpoolClosed", err)
 	}
 }
 

@@ -7,8 +7,9 @@ ADR 0039 capability siblings `BatchSender` and `Outbox`, their union
 `FullTransport`, the message as a VALUE (`MessageValue`, `AddressValue`,
 `AttachmentValue`, `HeaderFieldValue`), the SMTP `EnvelopeValue` derived from it, and the guards every
 implementation runs — `Validate`, `ValidateHeaderName`, `ValidateHeaderValue`,
-`ValidateAddress`, `ValidateAttachment`. The 28th core sibling, admitted by
-**ADR 0064**.
+`ValidateAddress`, `ValidateAttachment` — plus `IsDotAtom`, the RFC 5322
+grammar an address's halves and a Message-ID's left half share. The 28th core
+sibling, admitted by **ADR 0064**.
 
 MIME composition and the SMTP session live in `internal/service/mail`. Nothing
 here writes a byte to a socket.
@@ -34,7 +35,7 @@ halves of one send. The names stay long, the layer's convention, the same one
 | `value.go` | `DeliveryValue` and `EnvelopeValue` |
 | `transport_interface.go` | `Transport`, `BatchSender`, `Outbox`, `FullTransport` |
 | `header.go` | the field-name constants, the reserved set, and the INJECTION GATE |
-| `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, the dot-atom grammar |
+| `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, and `IsDotAtom` — the dot-atom grammar, exported because a Message-ID's id-left is written in it too |
 | `attachment.go` | `ValidateAttachment` and its three sub-guards |
 | `validate.go` | `Validate` — the one whole-message guard both transports run |
 | `codes.go` | the nine `Code` constants, `0.2.31.1` … `0.2.31.9` |

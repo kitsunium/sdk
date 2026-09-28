@@ -5,11 +5,13 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // range: 0.3.81.0 - 0.3.81.255
 
-// CodeSpoolMisconfigured identifies a spool refused at construction: no
-// transport, no attempt budget, a default sender that is not an address.
+// CodeSpoolMisconfigured identifies a spool refused at construction — no
+// transport, no attempt budget, a default sender that is not an address — or
+// an identifier Config.NewID got wrong, refused at Send.
 const CodeSpoolMisconfigured errs.Code = 0x00_03_51_01 // 0.3.81.1
 
-// CodeSpoolClosed identifies a Send on a spool that has been closed.
+// CodeSpoolClosed identifies a Send or a SendWithID on a spool that has been
+// closed.
 const CodeSpoolClosed errs.Code = 0x00_03_51_02 // 0.3.81.2
 
 // CodeMessageUndecodable identifies a spooled record that does not decode —
@@ -24,3 +26,7 @@ const CodeMessageUnencodable errs.Code = 0x00_03_51_04 // 0.3.81.4
 // CodeTransportPanicked identifies a delivery attempt whose transport
 // panicked: recovered, it is that attempt's failure like any other.
 const CodeTransportPanicked errs.Code = 0x00_03_51_05 // 0.3.81.5
+
+// CodeInvalidMailID identifies an identifier SendWithID was given that no
+// mail can keep: empty, longer than MaxIDBytes, or not an RFC 5322 dot-atom.
+const CodeInvalidMailID errs.Code = 0x00_03_51_06 // 0.3.81.6

@@ -276,6 +276,36 @@ func TestAddressGrammar(t *testing.T) {
 	}
 }
 
+// TestIsDotAtom pins the grammar an address's halves and a Message-ID's left
+// half share: every identifier the SDK's generators mint is in it, and a
+// byte outside atext or an empty label is not — each of the latter would end
+// or split a header rather than name something.
+func TestIsDotAtom(t *testing.T) {
+	t.Parallel()
+	in := []string{
+		"01J8Z3K4M5N6P7Q8R9S0T1V2W3",           // ULID
+		"mail_01j8z3k4m5n6p7q8r9s0t1v2w3",      // TypeID
+		"0190c2a4-7b3e-7d2a-9f10-1a2b3c4d5e6f", // UUIDv7
+		"V1StGXR8_Z5jdHi6B-myT",                // NanoID
+		"first.last",
+		"!#$%&'*+-/=?^_`{|}~",
+	}
+	for _, s := range in {
+		if !mail.IsDotAtom(s) {
+			t.Errorf("IsDotAtom(%q) = false, want true", s)
+		}
+	}
+	out := []string{
+		"", ".", "a.", ".a", "a..b", "a b", "a\r\nb", "a\x00b", "a\tb", "a@b", "a<b", "a>b",
+		"a,b", `a"b`, "a:b", "a;b", "a(b", "a[b", `a\b`, "réunion", "a\xffb", "a\x7fb",
+	}
+	for _, s := range out {
+		if mail.IsDotAtom(s) {
+			t.Errorf("IsDotAtom(%q) = true, want false", s)
+		}
+	}
+}
+
 // TestNeedsQuotedDisplayName pins the grammar rule the composer depends on. An
 // unquoted "Doe, John" makes the comma a list separator, so a message to one
 // person parses as a message to two.

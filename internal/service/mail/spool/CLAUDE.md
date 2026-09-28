@@ -3,7 +3,8 @@
 ## Purpose
 
 Outbound mail made durable (ADR 0111): `Send` validates a mail, stamps what a
-retry must not change, and queues it; `Run` hands each mail to a
+retry must not change, and queues it; `SendWithID` does the same under an
+identifier its caller minted (ADR 0141); `Run` hands each mail to a
 `core/mail.Transport`, retries a failure on a growing backoff, dead-letters a
 mail after its last attempt with that failure, and drops a redelivery of a
 mail it delivered — the one resend left is a crash between the relay's
@@ -16,12 +17,13 @@ Code range `0.3.81.*`.
 
 | File | Surface |
 |---|---|
-| `spool.go` | package doc, `Spool`, `New`, `Send` (`stamp`, `domainOf`), `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
+| `spool.go` | package doc, `Spool`, `New`, `Send` (`mint`), `SendWithID`, both through `queue` (`stamp`, `domainOf`), the per-identifier `announcement` count, `Run` (the queue's `Consume`, one mail at a time), `DeadLetters`, `Close` |
+| `identifier.go` | `MaxIDBytes` and `checkID` — the rule every identifier keeps, whoever minted it |
 | `config.go` | `Config`, `DefaultSendTimeout`, `DefaultRetryBase` / `DefaultRetryMax`, `DefaultMaxMessageBytes`, `DeliveredMemory`; the refusals |
 | `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
 | `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
-| `codes.go` / `errors.go` | `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked` |
+| `codes.go` / `errors.go` | `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` |
 
 ## Why-this-shape
 
@@ -43,6 +45,26 @@ Code range `0.3.81.*`.
   receiver cannot tell a retry from a new mail. The spool knows there will be
   retries: `<id>@<the sender's domain>`, entropy from `service/id`, domain the
   caller's own.
+- **A caller may mint the identifier, and it is held to one rule.**
+  `SendWithID` exists for a caller that must return the identifier before the
+  spool has the mail — kit holds a mail in a transaction and queues it after
+  the commit (kit ADR 0004). It is a method and not an option of `Send`: a
+  variadic `Send` changes the method's type under every interface a consumer
+  declared over it, an identifier in the context is a parameter nobody sees,
+  and an empty string meaning "mint one" would give the zero a second
+  reading. Every identifier becomes the left half of a Message-ID, so every
+  one — the caller's, and `Config.NewID`'s since ADR 0141 — is non-empty, at
+  most `MaxIDBytes` and a dot-atom (`core/mail.IsDotAtom`, the grammar's one
+  home). A caller's that breaks it is `INVALID_MAIL_ID`, which names the rule
+  and never the identifier; a generator's is `SPOOL_MISCONFIGURED`.
+- **A repeated identifier is not refused; the ledger meets it.** The spool
+  cannot see the identifiers in its queue without reading every record, and
+  ADR 0111 deferred an idempotent `Send` for exactly that. A mail under an
+  identifier this process delivered — among the last `DeliveredMemory` — is
+  dropped with `duplicate` after its own `queued`; a dead-lettered mail was
+  never delivered, so its identifier carries a new attempt; after a restart a
+  repeat is sent again. Two Sends of a repeated identifier can be in flight at
+  once, which is why `announcing` counts them (below).
 - **The lease is twice `SendTimeout`, and the attempt is bounded on the
   spool's clock**, so a relay slower than the timeout is needed for a lease to
   lapse mid-attempt — and then the delivered-ID ledger drops the redelivery.
@@ -64,18 +86,29 @@ Code range `0.3.81.*`.
   released before the observer is told. A second `Close` is nil.
 - **The observer's calls are serialised, and a mail's `queued` comes first.**
   The consumer can deliver a mail before `Send` has returned, since `Publish`
-  wakes it. `Send` therefore registers the mail's identifier in `announcing`
-  before publishing and releases it after its `queued` event, and every
+  wakes it. `Send` and `SendWithID` therefore register the mail's identifier
+  in `announcing` before publishing and release it after its `queued` event, and every
   delivery event goes through `report`, which waits for that release. A
   `queued` arriving after `sent` would leave an observer's mailbox showing a
   delivered mail as waiting. It happened on the linux/386 lane before this
-  existed.
+  existed. The registrations of one identifier are COUNTED, not replaced:
+  when two Sends of one identifier are in flight, the first to tell the
+  observer must not release a delivery of the other's mail
+  (`TestTwoSendsOfOneIDEachKeepTheirQueuedEventFirst` fails with the
+  replace-the-entry version).
 
 ## Do NOT
 
 - **Nack a failure that has attempts left.** It would wait the queue's fixed
   `RetryDelay`, not the backoff.
 - **Mint the Message-ID in the composer**, or per attempt.
+- **Read an empty identifier as "mint one"**, or exempt an identifier from the
+  rule because its mail brings its own Message-ID: the rule is the
+  identifier's, not one mail's.
+- **Put the identifier in `INVALID_MAIL_ID`'s fields**: it may carry the very
+  bytes it was refused for.
+- **Replace an `announcing` entry** for a second Send of one identifier:
+  count it.
 - **Put a secret in `Annotate`'s map**: it is written into the spool as is.
 - **Log from here.**
 - **Emit a delivery event with `emit`**: use `report`, which keeps the mail's

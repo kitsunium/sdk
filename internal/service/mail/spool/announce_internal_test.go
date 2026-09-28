@@ -71,6 +71,72 @@ func TestADeliveryWaitsForItsMailsQueuedEvent(t *testing.T) {
 	}
 }
 
+// TestTwoSendsOfOneIDEachKeepTheirQueuedEventFirst pins the order when two
+// Sends of one identifier are in flight at once, which an identifier minted
+// outside the spool can make happen. The Send that tells the observer first
+// must not release a delivery of that identifier while the other has not: the
+// delivery may be of the other's mail, and its sent event would reach the
+// observer before that mail's queued. The registrations are counted; before
+// they were, the later one replaced the earlier and its end released every
+// delivery.
+//
+// Goroutine lifecycle: one goroutine runs the delivery; the case reads its
+// result once both registrations have ended.
+func TestTwoSendsOfOneIDEachKeepTheirQueuedEventFirst(t *testing.T) {
+	t.Parallel()
+	events := make(chan EventKind, 4)
+	transport := make(handedOver, 1)
+	s, err := New(Config{Transport: transport, MaxAttempts: 3, Observe: func(e EventValue) { events <- e.Kind }})
+	if err != nil {
+		t.Fatalf("New() = %v", err)
+	}
+	//: two Sends of mail_1 between their publication and their queued event.
+	slow := s.announce("mail_1")
+	fast := s.announce("mail_1")
+	//: the second tells the observer first.
+	s.emit(&EventValue{Kind: EventQueued, ID: "mail_1"})
+	fast()
+	if kind := <-events; kind != EventQueued {
+		t.Fatalf("the observer heard %v, want queued", kind)
+	}
+	payload, err := json.Marshal(spooledValue{ID: "mail_1", Message: coremail.MessageValue{Subject: "Twice"}})
+	if err != nil {
+		t.Fatalf("Marshal() = %v", err)
+	}
+	delivered := make(chan error, 1)
+	go func() {
+		delivered <- s.deliver(context.Background(), corequeue.DeliveryValue{
+			Message: corequeue.MessageValue{ID: "q_1", Payload: payload}, Deliveries: 1,
+		})
+	}()
+	if subject := <-transport; subject != "Twice" {
+		t.Fatalf("the transport was handed %q", subject)
+	}
+	//: a bound on the wait for a report that must not come, never a verdict
+	//: on how long anything takes: with the order kept, nothing arrives.
+	select {
+	case <-delivered:
+		t.Fatal("the delivery reported while a Send of its identifier had not told the observer")
+	case kind := <-events:
+		t.Fatalf("the observer heard %v before every Send of the identifier was queued", kind)
+	case <-time.After(50 * time.Millisecond):
+	}
+	s.emit(&EventValue{Kind: EventQueued, ID: "mail_1"})
+	slow()
+	if err := <-delivered; err != nil {
+		t.Fatalf("deliver() = %v", err)
+	}
+	if first, second := <-events, <-events; first != EventQueued || second != EventSent {
+		t.Fatalf("the observer heard %v then %v, want queued then sent", first, second)
+	}
+	s.mu.RLock()
+	left := len(s.announcing)
+	s.mu.RUnlock()
+	if left != 0 {
+		t.Fatalf("%d registrations left once every Send ended", left)
+	}
+}
+
 // TestNobodyObservingRegistersNothing pins the cost side: a spool without an
 // observer keeps no order, so Send registers nothing and a delivery waits for
 // nothing.

@@ -15,13 +15,13 @@ var (
 	// SpoolMisconfigured refuses a spool that could never deliver.
 	SpoolMisconfigured = errs.Define(CodeSpoolMisconfigured, "SPOOL_MISCONFIGURED",
 		"The mail spool cannot run as configured",
-		"service/mail/spool: New refused its Config, or Send got an empty identifier from Config.NewID; the fields name the setting and the problem",
+		"service/mail/spool: New refused its Config, or Send got an identifier from Config.NewID that is empty, longer than MaxIDBytes or not an RFC 5322 dot-atom; the fields name the setting and the problem",
 		errs.WithExitCode(exitConfig))
 
-	// SpoolClosed refuses a Send after Close.
+	// SpoolClosed refuses a Send or a SendWithID after Close.
 	SpoolClosed = errs.Define(CodeSpoolClosed, "SPOOL_CLOSED",
 		"The mail spool is closed",
-		"service/mail/spool: Send was called after Close",
+		"service/mail/spool: Send or SendWithID was called after Close",
 		errs.WithHTTPStatus(http.StatusServiceUnavailable))
 
 	// MessageUndecodable reports a spooled record that does not decode. It is
@@ -46,4 +46,13 @@ var (
 	TransportPanicked = errs.Define(CodeTransportPanicked, "TRANSPORT_PANICKED",
 		"The mail transport panicked and was recovered",
 		"service/mail/spool: the transport panicked during an attempt; the fields carry the mail, the panic value and the stack")
+
+	// InvalidMailID refuses an identifier SendWithID was given that no mail
+	// can keep, because it becomes the left half of the mail's Message-ID.
+	// Nothing was queued. The fields name the rule it broke and its length,
+	// never the identifier, which may carry the very bytes it was refused for.
+	InvalidMailID = errs.Define(CodeInvalidMailID, "INVALID_MAIL_ID",
+		"The mail identifier is malformed",
+		"service/mail/spool: SendWithID was given an identifier that is empty, longer than MaxIDBytes or not an RFC 5322 dot-atom; the fields name the problem and the length, never the identifier",
+		errs.WithHTTPStatus(http.StatusBadRequest))
 )

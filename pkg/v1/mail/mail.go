@@ -156,6 +156,34 @@
 // every mail's fate reaches [SpoolConfig].Observe. The spool writes nothing
 // anywhere itself.
 //
+// # An identifier minted before the mail is spooled
+//
+// [Spool].Send mints the mail's identifier. A caller that must know it before
+// the spool has the mail — a framework that holds a mail until a transaction
+// commits, and returns the identifier at the call — mints it itself and
+// queues the mail later with [Spool].SendWithID, which stamps what Send
+// stamps and makes the Message-ID of that identifier:
+//
+//	mailIDs, err := id.NewTypeID("mail") // github.com/kitsunium/sdk/pkg/v1/id
+//	outboxID, err := mailIDs.New()       // at the call, inside the transaction
+//	// … once the transaction has committed:
+//	err = outbox.SendWithID(ctx, outboxID, msg)
+//
+// The identifier becomes the left half of the mail's Message-ID, so it must be
+// an RFC 5322 dot-atom — printable ASCII, no space, no special, no empty label
+// — of at most [SpoolMaxIDBytes] bytes, even for a mail that brings its own
+// Message-ID. Anything else is [InvalidMailID], which never quotes the
+// identifier, and nothing is queued. A [SpoolConfig].NewID that mints such an
+// identifier is [SpoolMisconfigured] at Send.
+//
+// A repeated identifier is not refused. A mail under one the spool delivered
+// is dropped at delivery as a [SpoolDuplicate], after its own [SpoolQueued],
+// so a SendWithID retried after an ambiguous failure sends the mail once while
+// the process remembers it. A mail dead-lettered under an identifier was
+// never delivered, and can be queued again under it. After a restart the
+// spool remembers nothing, and a repeat is sent again — under the same
+// Message-ID, when that was made of the identifier.
+//
 // # Testing
 //
 // [NewMemory] returns a transport that COMPOSES every message and records the
@@ -220,6 +248,9 @@ const (
 	// SpoolDeliveredMemory is how many delivered mails a spool remembers to
 	// drop a redelivery.
 	SpoolDeliveredMemory int = svcspool.DeliveredMemory
+	// SpoolMaxIDBytes bounds a spooled mail's identifier, whoever minted it:
+	// Spool.SendWithID refuses a longer one with InvalidMailID.
+	SpoolMaxIDBytes int = svcspool.MaxIDBytes
 )
 
 // What can happen to a spooled mail.
@@ -290,8 +321,8 @@ type ComposerConfig = svcmail.ComposerConfig
 // the RFC 5322 wire form without sending anything.
 type Composer = svcmail.Composer
 
-// Spool is the public alias for the durable outbox: Send, Run, DeadLetters,
-// Close.
+// Spool is the public alias for the durable outbox: Send, SendWithID, Run,
+// DeadLetters, Close.
 type Spool = svcspool.Spool
 
 // SpoolConfig is the public alias for a spool's configuration: Transport and
@@ -376,9 +407,10 @@ var (
 	// The spool's own sentinels (0.3.81.*). As for every sentinel of this
 	// package, errors.Is matches one and errs.CodeOf reads its code.
 
-	// SpoolMisconfigured refuses a spool that could never deliver.
+	// SpoolMisconfigured refuses a spool that could never deliver, and a Send
+	// whose SpoolConfig.NewID minted an identifier no mail can keep.
 	SpoolMisconfigured = svcspool.SpoolMisconfigured
-	// SpoolClosed refuses a Send after Close.
+	// SpoolClosed refuses a Send or a SendWithID after Close.
 	SpoolClosed = svcspool.SpoolClosed
 	// SpooledMailUndecodable reports a spooled record that is not a mail.
 	SpooledMailUndecodable = svcspool.MessageUndecodable
@@ -386,6 +418,10 @@ var (
 	SpooledMailUnencodable = svcspool.MessageUnencodable
 	// TransportPanicked is the failure of an attempt whose transport panicked.
 	TransportPanicked = svcspool.TransportPanicked
+	// InvalidMailID refuses an identifier Spool.SendWithID was given that is
+	// empty, longer than SpoolMaxIDBytes or not an RFC 5322 dot-atom. It names
+	// the rule broken and never the identifier.
+	InvalidMailID = svcspool.InvalidMailID
 )
 
 // NewSpool builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or

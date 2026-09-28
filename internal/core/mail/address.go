@@ -116,7 +116,7 @@ func validateAddrSpec(field, addr string) error {
 	}
 	//: both halves must be dot-atoms: printable ASCII, no specials, no space,
 	//: and no empty label at either end or in the middle.
-	if !isDotAtom(local) || !isDotAtom(domain) {
+	if !IsDotAtom(local) || !IsDotAtom(domain) {
 		//: invalid, and the caller's own literal is the only thing they need.
 		return errs.Wrap(InvalidAddress, errs.WrapParams{}, errs.String("field", field))
 	}
@@ -124,10 +124,16 @@ func validateAddrSpec(field, addr string) error {
 	return nil
 }
 
-// isDotAtom reports whether s is an RFC 5322 §3.2.3 dot-atom: one or more
+// IsDotAtom reports whether s is an RFC 5322 §3.2.3 dot-atom-text: one or more
 // atoms of atext separated by single dots, with no leading, trailing or
-// doubled dot.
-func isDotAtom(s string) bool {
+// doubled dot. atext is printable ASCII that is neither a special nor a space,
+// so a CR, an LF, a NUL, a non-ASCII byte and an invalid UTF-8 sequence all
+// fall outside it.
+//
+// It is exported because the grammar is not the address's alone: the left
+// half of a Message-ID (RFC 5322 §3.6.4, id-left) is written in it too, and a
+// package that builds one from an identifier checks the identifier here.
+func IsDotAtom(s string) bool {
 	//: an empty half cannot be an atom; a leading, trailing or doubled dot is
 	//: an empty label, which no MTA accepts. One guard, one verdict.
 	if s == "" || strings.HasPrefix(s, ".") || strings.HasSuffix(s, ".") || strings.Contains(s, "..") {

@@ -2322,6 +2322,10 @@ codes:
     const: CodeTransportPanicked
     hex: "0x00_03_51_05"
     package: internal/service/mail/spool
+  - code: "0.3.81.6"
+    const: CodeInvalidMailID
+    hex: "0x00_03_51_06"
+    package: internal/service/mail/spool
   - code: "0.3.88.1"
     const: CodeTransitionRefused
     hex: "0x00_03_58_01"
