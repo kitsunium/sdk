@@ -35,6 +35,7 @@ the three must agree, and the test fails until they do.
 | `commonpw.go` | package doc (source, licence, comparison), the embedded `listText`, `sorted` (lower-cased, deduplicated, sorted once, at the first question), `IsCommon`, `Len` |
 | `xato-net-10-million-passwords-10000.txt` | the list, 10 000 lines, one of them empty |
 | `LICENSE.SecLists` | SecLists' MIT licence |
+| `.gitattributes` | both files `-text`: a Windows checkout with `core.autocrlf` would otherwise rewrite the list's line endings, and its digest with them — found by the `windows` lane |
 
 ## Why-this-shape
 

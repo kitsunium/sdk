@@ -42,7 +42,7 @@ func TestTheListLoads(t *testing.T) {
 func TestEveryEntryIsCommon(t *testing.T) {
 	t.Parallel()
 	for entry := range strings.Lines(commonpw.ListForTest()) {
-		entry = strings.TrimSuffix(entry, "\n")
+		entry = strings.TrimRight(entry, "\r\n")
 		if entry == "" {
 			if commonpw.IsCommon(nil) {
 				t.Fatal("the empty password is common: a length rule's job is taken")
