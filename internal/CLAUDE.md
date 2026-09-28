@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-21T21:27:56Z -->
+<!-- updated: 2026-09-28T00:19:36Z -->
 # internal/
 
 ## Purpose
@@ -27,7 +27,7 @@ core  ──┼──▶ service ──▶ (pkg/v1 re-exports / consumes)
 | `internal/kernel/**` | stdlib only |
 | `internal/core/**`   | stdlib + `internal/kernel/*` |
 | `internal/service/**`| stdlib + kernel + core + **sibling `internal/service/*`** (+ vetted third-party encoders for codec/*) |
-| `pkg/v1/**` (consumes) | stdlib + kernel + core + service |
+| `pkg/v1/**` (consumes) | stdlib + kernel + core + service + **sibling `pkg/v1/*`** |
 
 A service package may import another service package, and that is permitted
 rather than tolerated: the firewall asserts a DIRECTION, and a lateral import
@@ -50,6 +50,26 @@ git grep -l '"github.com/kitsunium/sdk/internal/service/' -- 'internal/service/*
   grep -oE '"github.com/kitsunium/sdk/internal/service/[a-z/]+"' "$f" | tr -d '"' | \
   sed 's|github.com/kitsunium/sdk/||' | grep -v "^$d$" | sed "s|^|$d -> |"; \
   done | sort -u
+```
+
+A `pkg/v1` package may import another `pkg/v1` package, and that too is
+permitted rather than tolerated. `check-layer-deps.sh`'s pkg query is
+`deps(//pkg/...) intersect //third-party/...` — it names the one tree the public
+module may not reach (ADR 0068 §Decision) and says nothing about siblings, and
+every `pkg/v1` library is `//visibility:public`, so Bazel admits the edge too.
+The facades are built on it: `client.New` and `server.TLS` take a
+`tlsid.Identity`, `secret.KeyFile` returns a `crypto.Key`, `slogbridge` adapts a
+`logger.Logger`, `proc` builds its refusal with `errs.New`, and `authz`, `codec`
+and `token` type their codes as `errs.Code`.
+
+The row said "stdlib + kernel + core + service" — the gap the service row had —
+and an automated review read the omission as a layer rule. Ask the tree here
+too, with `go list` rather than a grep (package doc comments quote `pkg/v1`
+import paths, and a grep reports them as edges):
+
+```sh
+go list -f '{{$p := .ImportPath}}{{range .Imports}}{{$p}} -> {{.}}{{"\n"}}{{end}}' ./pkg/v1/... \
+  | grep ' -> github.com/kitsunium/sdk/pkg/v1/' | sed 's|github.com/kitsunium/sdk/||g' | sort -u
 ```
 
 Any import going "upward" fails `make lint` and CI: `scripts/check-layer-deps.sh` asserts the direction on the build graph (ADR 0068). Visibility does not — Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, so an upward import builds. `.golangci.yml` ships a code-quality second-opinion ruleset only.

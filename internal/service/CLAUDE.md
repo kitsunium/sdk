@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-21T21:27:56Z -->
+<!-- updated: 2026-09-28T00:19:36Z -->
 # internal/service/
 
 ## Purpose
@@ -59,7 +59,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 
 ## Do NOT
 
-- Re-export a service type as the public-facing API. The public facade is `pkg/v1/*` — consumers should never see `svccodec.jsonCodec` or `svclogger.builder` types directly.
+- Let a service type reach a consumer by any road but `pkg/v1`. The public facade is `pkg/v1/*`: a service type a consumer holds is published there as an alias, and every public signature names it by that alias (`pkg/v1/CLAUDE.md` §Public surface contract, "Aliases, not new types"); an implementation this layer returns behind an interface stays behind it — the codec registry hands `svccodec.jsonCodec` back as a `codec.Codec`, and `Build` hands the recycled `chainBuilder` back as a `Builder` (`IFACE-PLUGIN`). Aliasing a service type is not the defect. Which types `pkg/v1` aliases onto this layer is the ownership question of ADR 0074 (`docs/adr/0074-what-a-public-alias-may-point-at.md`): one engine's handle, its `Option` closures, its construction parameters and a value only it produces belong here and are aliased here — "the common case and … not a defect" — and what ADR 0074 still refuses is a type a core port speaks that is declared in a service package. This line used to read "Re-export a service type as the public-facing API", written when `pkg/CLAUDE.md` had every public type alias core or kernel; once ADR 0029 §D1 and ADR 0074 made service aliases the rule, it read as a ban on them, and an automated review read it that way.
 - Call `fmt.Errorf` / `errors.New` in production. All errors flow through `errs.Define` (the sentinels, in whichever file holds that package's code group — `errors.go`, `failed.go`, `match.go`) + `errs.Wrap` (call sites in `codec.go` / handler code).
 - Reach into `core/*` structs to mutate them. Domain values (`AttrValue`, `RecordEvent`) are immutable after construction.
 - Swallow a third-party encode/decode error silently. Wrap it via `errs.Wrap` so `errors.Is(err, originalCause)` keeps working and the dotted-quad code surfaces.
