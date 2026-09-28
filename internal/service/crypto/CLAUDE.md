@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/
 
 ## Purpose
@@ -28,7 +29,7 @@ and `jwk` is a wire format rather than an algorithm.
 | `x25519/` | `Agreement` — DH-style shared secret | `x25519` | `pkg/v1/agree` | core `0.2.4.*` |
 | `keyenvelope/` | composition — password-wrapped DEK at rest (AEAD + PBKDF2) | *not registered* | `pkg/v1/crypto` | core `0.2.4.19` |
 | `keytree/` | composition — path-addressed hierarchical derivation (HKDF) | *not registered* | `pkg/v1/kdf` | core `0.2.4.*` |
-| `jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | *internal only today* | **`0.3.42.*`** |
+| `jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/token` (`JWK`, `JWKSet`) | **`0.3.42.*`** |
 
 `jwk` is the only package in this subtree that owns a `PP` slot: every scheme
 routes through a core port and therefore emits the shared `core/crypto`
@@ -43,7 +44,8 @@ unsupported `kty`, off-curve point, ambiguous `kid`) that no port models.
   code.
 - **Schemes mint no error codes.** They return the shared `core/crypto`
   sentinels (`SigningFailed`, `DecryptionFailed`, …) or wrap a `crypto/rand`
-  fault as `KeyGenerationFailed`. `jwk` is the documented exception.
+  fault as `KeyGenerationFailed`, `EntropyFailed` or `PasswordHashFailed`.
+  `jwk` is the documented exception.
 - **Secrets stay redacting.** `core/crypto.Key` answers `<redacted>` under
   `%v` / `%s` / `%#v`, and anything here that holds or re-wraps key material
   keeps that property — including `jwk.KeyValue`, whose whole export surface is

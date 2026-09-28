@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/json/
 
 ## Purpose
@@ -26,24 +26,24 @@ JSON codec wrapping stdlib `encoding/json`. Reference implementation for the reg
 ## Conventions
 
 - Stateless singleton.
-- `Append` delegates to `Marshal` so the wrap/error contract has a single source; on failure the original `dst` is returned untouched and the wrapped error surfaces with `CodeJSONMarshalFailed`.
+- `Append` shares `Marshal`'s `json.RawMessage` fast-path; any other value is encoded into a pooled buffer (`json.NewEncoder`, its trailing newline dropped) and copied once onto `dst`. On failure the original `dst` is returned untouched and the wrapped error surfaces with `CodeJSONMarshalFailed`.
 - Streaming encoder/decoder wrap the stdlib types only to bridge the `core/codec.Encoder.Close` and `core/codec.Decoder.More` shape.
 
 ## Performance (lib-bound)
 
-`encoding/json`'s reflect walk and `typeFields` cache are internal to the
+`encoding/json`'s reflect walk and its per-type field cache are internal to the
 stdlib — unreachable from this layer. The realised wins are the
 `json.RawMessage` pass-through fast-path (Marshal + Append skip the reflect
 round-trip when the bytes already exist) and Append encoding into a pooled
-buffer (now `internal/core/codec/scratch`). `encoding/json/v2` (GOEXPERIMENT)
-would be the only further lever and is ADR-gated. Do not re-add a local pool.
+buffer (now `internal/core/codec/scratch`). `encoding/json/v2` is the only
+further lever: Go 1.27 ships it without an experiment flag and builds
+`encoding/json` itself on it (`jsonv2` is in the toolchain's baseline), and
+ADR 0102 pulled the lever for `strictjson` alone — this codec keeps the v1 API,
+so `codec.Unmarshal(codec.JSON, …)` keeps its meaning. Do not re-add a local
+pool.
 
 ## Verification
 
 ```
 bazel test --config=race //internal/service/codec/json:json_test
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V49, V51) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # encwrite
 
 Logger middleware that encrypts each record's bytes before delivery to a
@@ -21,7 +22,8 @@ path before closing the downstream sink.
 ## Framing
 
 `[4-byte big-endian uint32 = len(box)][sealed box]` where the sealed box is
-`nonce || ciphertext || tag` as produced by `crypto.Seal`.
+the self-framed `[Version][algorithm id][nonce][ciphertext || tag]` produced by
+`crypto.Seal`.
 
 ## Error codes
 
@@ -32,7 +34,7 @@ Slot 0x1c. See `codes.go`.
 | File | Tag | Lane that runs it |
 |---|---|---|
 | `encwrite_external_test.go`, `encwrite_internal_test.go` | — | `bazel test --config=race //...` (default) |
-| `codes_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) |
+| `codes_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) — and CI's `test-386` job, where `Test_frame_overflow` skips: `len` cannot exceed `MaxUint32` on a 32-bit `int` |
 | `encwrite_integration_test.go` | `//go:build integration` | **none** — opt-in, run by hand (below) |
 
 `Test_EncWriter_Integration_RealSocket` drives a sealed-frame round trip over a
@@ -41,9 +43,5 @@ excluded from the default build. Per rule 12 this is a *declared* exemption, not
 an oversight — run it before shipping a change to the framing or the seal path:
 
 ```sh
-GOWORK=off go test -tags integration ./internal/service/logger/middleware/encwrite/...
+cd internal/service && GOWORK=off go test -tags integration ./logger/middleware/encwrite/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V32) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

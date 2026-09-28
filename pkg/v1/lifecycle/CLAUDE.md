@@ -1,11 +1,13 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/lifecycle/
 
 ## Purpose
 
 Public facade for the SDK's ordered start/stop domain (ADR 0050). Aliases the
-`Start`/`Stop`/`Lifecycle` port and the three domain values, re-exports the two
-constructors, the `Phase` constants, `DefaultStopTimeout` and all nine
-sentinels. And the supervisor (ADR 0112): a function run until stopped,
+`Start`/`Stop`/`Lifecycle` port and the three domain values, re-exports `New`
+and `Run`, the `Phase` constants, `DefaultStopTimeout` and the nine start/stop
+sentinels. And the supervisor (ADR 0112), with three sentinels of its own: a
+function run until stopped,
 restarted after every early end on a backoff, observed run by run, joined on
 stop. Stdlib-only → dep-light; cross-OS portable.
 
@@ -30,7 +32,8 @@ stop. Stdlib-only → dep-light; cross-OS portable.
 
 ## Conventions
 
-- **Type aliases, not new types**; the two constructors are thin delegations.
+- **Type aliases, not new types**; `New`, `Run` and `NewSupervisor` are thin
+  delegations.
 - **The Add order IS the dependency order**, and shutdown is its exact reverse.
   No graph, no cycle detection, no parallel start, no autowiring — ADR 0050
   §D1/§D2 record those as decisions rather than omissions, so the next proposal

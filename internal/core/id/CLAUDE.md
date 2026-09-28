@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/id/
 
 ## Purpose
@@ -38,7 +39,10 @@ Code range: `0.2.7.*` (ADR 0024).
 - **Registration via package-level `var`, never `init()`**.
 - **`Scheme("")` is the reserved invalid zero value** (`Known()` is false).
 - Idempotent re-registration of the same generator is a no-op; a distinct
-  generator on a taken scheme **panics at boot**.
+  generator on a taken scheme **panics at boot**. So do a generator whose
+  `Scheme()` is empty and an unusable one — a nil, a typed nil or a
+  non-comparable value (`plugin.Unusable`, ADR 0071) — each with the
+  `DUPLICATE_REGISTRATION` bracket.
 
 ## Do NOT
 

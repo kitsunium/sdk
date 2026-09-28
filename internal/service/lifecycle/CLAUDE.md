@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/lifecycle/
 
 ## Purpose
@@ -114,7 +115,7 @@ spend everyone else's budget, and it is stated rather than discovered.
 
 Deterministic end to end: `clock.ManualClock` for every budget, channel
 rendezvous for every ordering. `harness_external_test.go` holds the recorder
-and the component factories; `blocking` returns an `entered`/`release` pair,
+and the component factories; `blocking` takes an `entered`/`release` pair,
 and receiving on `entered` proves the previous component's timer is retired and
 the current one's is armed, which is what makes `Advance(budget)` exact.
 

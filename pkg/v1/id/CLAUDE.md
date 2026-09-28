@@ -1,16 +1,19 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/id/
 
 ## Purpose
 
 Public facade for SDK identifier generation (ADR 0024). Aliases `core/id`'s
-`Scheme`/`Generator`, blank-activates the six registered `service/id` schemes on
-import, and exposes ergonomic helpers. Stdlib-only → **dep-light** (no new
+`Scheme`/`Generator`, activates the six registered `service/id` schemes on
+import (its import of `internal/service/id` runs their registrations), and
+exposes ergonomic helpers. Stdlib-only → **dep-light** (no new
 vendor entries in `pkg/go.sum`), cross-OS portable.
 
 ## Surface
 
 | Symbol | Notes |
 |---|---|
+| `Scheme` / `Generator` | type aliases onto `core/id` |
 | `New(scheme)` | dispatch by `Scheme`; `UnknownScheme` on a missing scheme |
 | `UUIDv4` / `UUIDv7` / `ULID` / `Snowflake` / `NanoID` / `KSUID` | named helpers (registered singletons) |
 | `NewSnowflake(node)` | explicit-node stateful generator (not global) |

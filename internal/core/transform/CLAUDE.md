@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-30T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/transform/
 
 ## Purpose
@@ -14,12 +14,13 @@ Compression is modelled as a **parallel registry, never a codec `Format`**:
 adding `gzip` as a `Format` would break the frozen `any→[]byte` codec contract
 and the append-only Format set (ADR 0014 §Why-not). The compression *verbs*
 (`MarshalCompressed` / `UnmarshalCompressed`) and the self-describing
-compressed-frame format land at `pkg/v1/codec` in a later commit; this package
-declares only the port + registry.
+compressed-frame format live at `pkg/v1/codec`; this package declares only the
+port + registry.
 
 No algorithm bodies and no vendor types live here. Concrete schemes live under
-`internal/service/transform/` (stdlib gzip/flate/zlib today), self-registering
-via a package-level `var` at import — no `init()`. `flate` (raw DEFLATE, RFC
+`internal/service/transform/` (stdlib gzip/flate/zlib) and, for the vendor
+schemes `zstd` and `s2`, under `third-party/transform/` (ADR 0066), each
+self-registering via a package-level `var` at import — no `init()`. `flate` (raw DEFLATE, RFC
 1951) and `zlib` (the RFC 1950 envelope HTTP misnames `deflate`) are distinct
 `Algorithm`s, not aliases — see that package's `CLAUDE.md`.
 
@@ -29,15 +30,17 @@ Code range: `0.2.5.*` (ADR 0014).
 
 | File | Surface |
 |---|---|
-| `transform.go` | `Algorithm` typed string (`String` / `Known`) + `Compressor` interface (`Algorithm` / `Compress` / `Decompress`) |
+| `transform.go` | `Algorithm` typed string (`String` / `Known`) + `Compressor` interface (`Algorithm` / `Compress` / `Decompress`) + `BoundedDecompressor`, the optional extension adding `DecompressBounded(dst, src, max)`, detected by type assertion |
 | `registry.go`  | `snapshot.Value`-backed Compressor registry: `Register` / `Lookup` / `Available` |
 | `codes.go`     | `Code*` constants — range 0.2.5.\* |
-| `errors.go`    | `UnknownCompressor` (0.2.5.1), `CompressionFailed` (0.2.5.2), `DecompressionFailed` (0.2.5.3), `CompressedFrameInvalid` (0.2.5.4) |
+| `errors.go`    | `UnknownCompressor` (0.2.5.1), `CompressionFailed` (0.2.5.2), `DecompressionFailed` (0.2.5.3), `CompressedFrameInvalid` (0.2.5.4), `DuplicateRegistration` (0.2.5.5), `DecompressedTooLarge` (0.2.5.6) |
 
 `CodeCompressedFrameInvalid` is allocated here so the whole `0.2.5.*` block is
 declared in one place per ADR 0014, but its **emitter** is the `pkg/v1/codec`
-frame layer (a later commit) — the decompression-bomb guard lives in the frame,
-not in this port.
+frame layer — the decompression-bomb guard lives in the frame, not in this port.
+`DecompressedTooLarge` is what a scheme's `DecompressBounded` returns past the
+caller's ceiling: it states only that the ceiling was exceeded, never that the
+stream was well formed, because the decode stops before the trailer.
 
 ## Conventions
 
@@ -47,10 +50,15 @@ not in this port.
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var GzipCompressor = transform.Register(gzipCompressor{})` in each scheme.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme
-  claiming a taken `Algorithm` **panics at boot** with the dotted-quad code.
+  claiming a taken `Algorithm` **panics at boot** with the dotted-quad code, and
+  so does an unusable one — a typed nil pointer or a non-comparable value
+  (`internal/kernel/plugin`, ADR 0071).
 - **`Algorithm("")` is the reserved invalid zero value** — `Known()` is false.
 - **append-to-dst convention** — `Compress` / `Decompress` follow the stdlib
-  shape (`dst` may be nil) so callers can reuse buffers on the hot path.
+  shape (`dst` may be nil) so callers can reuse buffers on the hot path. `src`
+  must not overlap `dst`'s spare capacity (`dst[len(dst):cap(dst)]`): every
+  scheme writes there while still reading `src`, and no scheme can check it
+  cheaply.
 
 ## Do NOT
 
@@ -60,7 +68,7 @@ not in this port.
   contract (ADR 0014 §Why-not).
 - Put a scheme implementation or a vendor import here — those live in
   `service/transform/`.
-- Grow a SIXTH core sibling without first widening the layer purpose via an ADR
+- Grow a new core sibling without first widening the layer purpose via an ADR
   (the gate `transform` cleared via ADR 0014, like `writer` via ADR 0012 and
   `crypto` via ADR 0013).
 
@@ -71,7 +79,3 @@ bazel test --config=race //internal/core/transform:transform_test
 # Fallback
 cd internal/core && GOWORK=off go test -race -cover ./transform/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V12) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

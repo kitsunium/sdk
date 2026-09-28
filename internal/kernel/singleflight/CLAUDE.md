@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/singleflight/
 
 ## Purpose
@@ -90,7 +91,7 @@ system and not a kernel primitive.
   arriving now would join. A forgotten or fully abandoned call keeps running
   uncounted, so after `Forget` plus a re-issuing `Do` it reads 1 while two
   calls for that key run. Read it as a gauge, never as "how much work is live".
-- Cross-OS: 100 % portable (`sync`, `context`, `runtime/debug`).
+- Cross-OS: 100 % portable (`sync`, `context`, `runtime/debug`, `strings`).
 
 ## Do NOT
 

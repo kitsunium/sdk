@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/cbor/
 
 ## Purpose
@@ -43,7 +43,3 @@ scratch; do not re-add a local pool. (Verified during codec-perf-micro-pprof.)
 ```
 bazel test --config=race //internal/service/codec/cbor:cbor_test
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V55) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

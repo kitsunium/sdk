@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/docstore/
 
 ## Purpose
@@ -33,7 +34,7 @@ engines' (ADR 0074, ADR 0139 §D2).
 | `load.go` | `load`: the directories, `readSnapshot`, `readOverlay` / `replay`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable (file engine) or committed (SQL engine), outside every lock |
 | `sql_config.go` | `SQLConfig[T]` (`Key`, `Transactor`, `IndexKey`, `Table`, `Dialect`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule, `indexTable`, the refusals |
-| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`), the two rendered per call, the DDL |
+| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`), the four rendered per call (a write's index rows and unique-key check, `Reindex`'s shared-key check and unique marking), the DDL |
 | `sql_store.go` | `OpenSQL`, `SQLStore[T]`; the reads — `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `OnWrite` / `OnDelete`; `failed` (STATEMENT_FAILED + the withheld cause) |
 | `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
 | `sql_reindex.go` | `Reindex`: every index row rebuilt from the documents, a page at a time, `INDEX_BROKEN` for a unique key two documents share |
@@ -104,7 +105,8 @@ engines' (ADR 0074, ADR 0139 §D2).
   key column is binary and every key is bound as `[]byte`, so `a`, `A` and `a␠`
   are three keys in Go's order; the document is the bytes encoded, never the
   engine's JSON type. `rev` moves on every write, which makes MySQL's
-  affected-row count exact and is ADR 0007's numbering to come. A unique
+  affected-row count exact and is the numbering kitsunium/platform's ADR 0007
+  versions will need (ADR 0139 §D10). A unique
   index's rows carry `uniq = 1` and the others NULL, so one
   `UNIQUE (index_name, index_key, uniq)` guards every unique index across
   transactions and processes.
@@ -119,11 +121,12 @@ engines' (ADR 0074, ADR 0139 §D2).
   rows written 200 at a time, under the oldest SQLite's bound-parameter
   ceiling.
 - **A refusal is the database's answer, never a parsed error.** `Insert` over a
-  taken key affects no row (`ON CONFLICT DO NOTHING`), a unique key held
-  elsewhere is read before the rows are written, and a statement the engine's
-  constraint refused after all — a collision raced in — rolls the write back,
-  after which the store asks what now holds the key (`LOCK IN SHARE MODE` on
-  MySQL, past a REPEATABLE READ snapshot).
+  taken key affects no row on PostgreSQL and SQLite (`ON CONFLICT DO NOTHING`),
+  a unique key held elsewhere is read before the rows are written, and a
+  statement the engine's constraint refused — MySQL's plain `INSERT` over a
+  taken key, or a collision raced in — rolls the write back, after which the
+  store asks what now holds the key (`LOCK IN SHARE MODE` on MySQL, past a
+  REPEATABLE READ snapshot).
 - **Update locks before it reads**: `FOR UPDATE` on PostgreSQL and MySQL; on
   SQLite the read IS a write — `UPDATE … RETURNING` — because SQLite's lock is
   taken by a transaction's first write.

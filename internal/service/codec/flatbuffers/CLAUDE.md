@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-21T21:27:56Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/flatbuffers/
 
 ## Purpose
@@ -21,6 +21,7 @@ No third-party dependency — pure stdlib.
 | Constructor      | `New() codec.Codec` |
 | Streaming        | **not** implemented (no natural framing for a passthrough codec) |
 | Appender         | yes (`Append(dst, v) ([]byte, error)`) |
+| `PromotionMagic` | `uint32` `0x80000001` — the root-offset header `pkg/v1/codec/promote.go` stamps on a promoted non-FlatBuffer value; a deliberately invalid offset, so a `flatc` reader fails on it, and `Marshal` returns a `[]byte` carrying it (within the size cap) without re-validating it |
 
 ## Adapter interfaces
 

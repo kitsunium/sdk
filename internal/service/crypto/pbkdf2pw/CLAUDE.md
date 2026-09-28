@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/pbkdf2pw/
 
 ## Purpose
@@ -5,9 +6,9 @@
 Registers the **"pbkdf2-sha256"** password-hashing scheme (ADR 0013).
 Blank-importing the package — typically via `pkg/v1/password` — self-registers
 the scheme so `crypto.HashPassword` / `crypto.VerifyPassword` resolve.
-**Stdlib-only** (`crypto/pbkdf2` + `crypto/sha256` + `crypto/rand` +
-`crypto/subtle`, all Go 1.26): zero non-stdlib deps, so it is the default that
-keeps `pkg/v1/password` consumers dep-light.
+**Stdlib-only** (`crypto/pbkdf2`, in the standard library since Go 1.24, +
+`crypto/sha256` + `crypto/rand` + `crypto/subtle`): zero non-stdlib deps, so it
+is the default that keeps `pkg/v1/password` consumers dep-light.
 
 PBKDF2-SHA256 at 600 000 iterations is the OWASP-recommended fallback where the
 memory-hard argon2id is unavailable. argon2id (the OWASP first choice) lives
@@ -48,7 +49,8 @@ $pbkdf2-sha256$i=600000$<b64-salt>$<b64-digest>
 
 - Log the password or the digest; compare only via `subtle.ConstantTimeCompare`.
 - Lower `currentIters` — it is a one-way ratchet (raising it makes old hashes
-  `NeedsRehash`-stale, which is correct).
+  `NeedsRehash`-stale, which is correct). `Test_pbkdf2PW_Hash` fails below the
+  OWASP floor of 600 000 and lets a raise pass.
 - Mint error codes here — they live in `core/crypto`.
 
 ## Verification
@@ -58,7 +60,3 @@ bazel test --config=race //internal/service/crypto/pbkdf2pw:pbkdf2pw_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./crypto/pbkdf2pw/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V71, V72) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

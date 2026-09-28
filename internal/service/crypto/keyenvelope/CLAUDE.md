@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/keyenvelope
 
 Password-wrapped DEK at rest — a pure composition over the registered
@@ -22,6 +23,12 @@ The KEK is computed with stdlib `crypto/pbkdf2` directly
 PasswordHasher registry, whose internal salt would break the deterministic
 KEK contract. This keeps the package dep-light (stdlib + core/crypto +
 kernel/errs); x/crypto never leaks.
+
+The count is the wire contract, since an envelope carries no cost field.
+`Test_iterations` holds it two ways: `iterations` must read 600000, and the
+exported `UnwrapKey` must open a golden envelope sealed at 600000 rounds, which
+a cheaper count cannot open. Cases that do not depend on the cost run
+`wrapKey` / `unwrapKey` at `testIterations` (2).
 
 ## AAD binding
 

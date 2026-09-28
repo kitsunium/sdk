@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/i18n/
 
 ## Purpose
@@ -31,7 +32,7 @@ never fails a request.
 | `NewMessage` / `NewPluralMessage` / `Plain` / `PluralForms` | funcs | message and entry constructors |
 | `NewStore` / `LoadFS` / `NewPrinter` / `NewNegotiator` | funcs | the four construction points, and where every refusal happens |
 | `Rules` / `SupportedTags` | funcs | the CLDR table, at runtime |
-| 12 `errs.Define` sentinels | vars | 8 from core, 4 from service |
+| 13 `errs.Define` sentinels | vars | 8 from core, 5 from service (`NegotiationEmpty` among them) |
 
 ## How a consumer wires it
 
@@ -84,8 +85,8 @@ said.
   the caller passes and read its value — the one thing this domain cannot
   detect.
 - **Build a `Printer` per request.** It resolves a chain and allocates; the
-  documented shape is one per language, indexed by `Tag`. `BENCH.md` prices
-  both.
+  documented shape is one per language, indexed by `Tag`.
+  `internal/service/i18n/BENCH.md` prices both.
 - **Read `Printer.Tag()` as "the language that answered".** It is the language
   REQUESTED. When a key came from the fallback the two differ, and the SDK does
   not report that per call — `Store.Missing` answers it exhaustively, at build

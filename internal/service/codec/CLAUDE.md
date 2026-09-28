@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-21T21:27:56Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/
 
 ## Purpose
@@ -26,7 +26,7 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 | `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | yes |
 | `yaml/`        | YAML — gopkg.in/yaml.v3                       | `0.3.4.*`  | yes | yes |
 
-The `PP` slots above are authoritative — verified against each `codes.go`. New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
+The `PP` slots above are authoritative — verified against each package's `Code*` constants (`codes.go`, or `failed.go` in `asn1`, `msgpack` and `yaml`). New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
 
 `jsonshape/` is not a codec either (ADR 0133): it encodes nothing, and describes
 how values of a Go type look under `encoding/json` — the members an object has,
@@ -58,8 +58,10 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 ├── decoder.go, encoder.go        # streaming helpers (only for StreamingCodec implementers)
 ├── codes.go                      # const CodeXxx errs.Code  (PP slot)
 ├── errors.go                     # var XxxSentinel = errs.Define(...)
+├── failed.go                     # codes + sentinels in one file, in place of the two above (asn1, msgpack, yaml)
 ├── codec_internal_test.go        # white-box (per-codec quirks)
 ├── codec_external_test.go        # black-box (interface contract)
+├── codec_integration_test.go     # //go:build !race AllocsPerRun budgets, run by the race-off alloc lane (all but bson, multipart)
 ├── encoder_internal_test.go      # only when streaming
 ├── decoder_internal_test.go      # only when streaming
 └── BUILD.bazel                   # gazelle-managed
@@ -67,11 +69,11 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 
 ## Conventions
 
-- **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic and the AST audit forbids `init()` in this tree.
-- **Stateless singletons**: `New()` returns the same `Codec` singleton, except when a codec exposes an opt-in mode (`csv.NewWithEscape(bool)` returns a fresh instance not added to the registry).
-- **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns `slices.Clone(table)` so callers cannot mutate the package-level slice.
-- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `form.maxFormPairs`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
-- **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go`. Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
+- **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic, and ktn-linter's `KTN-FUNC-NOINIT` reports any `init()` — active everywhere, with no exclusion in `.ktn-linter.yaml`.
+- **Stateless singletons**: `New()` returns the same `Codec` singleton; the two opt-in modes — `csv.NewWithEscape(bool)` and `multipart.NewWithLimits(LimitsConfig)` — each return a fresh instance not added to the registry.
+- **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns a slice the caller owns — `slices.Clone(table)`, or a fresh literal in `asn1`, `csv` and `json` — so callers cannot mutate a package-level slice.
+- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `form.maxFormPairs`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
+- **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go` (`failed.go` in `asn1`, `msgpack` and `yaml`). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 
 ## Do NOT
@@ -79,7 +81,7 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 - Add an `init()` function to register a codec — use the package-level `var Codec = codec.Register(...)` pattern.
 - Import a sibling codec package. Codecs are independent; cross-codec composition belongs in `pkg/v1/codec` or in the caller.
 - Use `fmt.Errorf` or bare `errors.New` to surface a third-party encode/decode failure. Wrap it through `errs.Wrap` so the dotted-quad code and reason survive.
-- Mutate the singleton's MIME / extension slices — callers receive `slices.Clone` copies for a reason.
+- Mutate the singleton's MIME / extension slices — callers receive their own copies for a reason.
 - Reach into a streaming Encoder/Decoder's `inner` field from outside the codec package.
 
 ## Subtree

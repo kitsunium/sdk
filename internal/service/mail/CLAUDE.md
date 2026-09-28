@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/mail/
 
 ## Purpose
@@ -14,14 +15,14 @@ Code range: `0.3.61.*`.
 
 | File | What lives there |
 |---|---|
-| `composer.go` | `Composer`, `Compose`, and the message header block |
+| `composer.go` | `Composer`, `NewComposer`, `Compose`, and the message header block |
 | `composer_config.go` | `ComposerConfig` — the clock and the randomness source, both clamping |
 | `composition.go` | the per-message build state, the boundary generator, and the structure table |
 | `compose.go` | the media-type helpers, the part builders, and `estimateSize` |
 | `entity.go` | the MIME entity tree and the writer that renders it — including the multipart delimiters, written here rather than by `mime/multipart` |
 | `line_wrapper.go` | the streaming 76-octet line breaker every base64 body goes through |
 | `headerwrite.go` | RFC 2047 encoding, RFC 5322 folding, and the injection gate re-run at the point of writing |
-| `smtp.go` | the SMTP transport: prepare, dial, negotiate, authenticate, send |
+| `smtp.go` | `NewSMTP` — the SMTP transport: prepare, dial, negotiate, authenticate, send |
 | `session.go` | one open SMTP conversation — the client and the policy that governs it |
 | `smtpconfig.go` | `SMTPConfig`, `TLSMode`, and the refusals at construction |
 | `smtpconfig_render.go` | `String` / `GoString` / `Format` / `MarshalJSON` on `SMTPConfig` — every rendering writes `<redacted>` for a set password, through a method-less mirror struct whose conversion stops compiling if the two field sets diverge |

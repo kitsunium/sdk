@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/crypto/
 
 ## Purpose
@@ -9,9 +10,10 @@ the redacting `Key` value type, and the process-wide registry mapping an
 exactly as codec resolves a `Format` to a `Codec` (ADR 0013).
 
 No algorithm bodies and no vendor types live here. Concrete schemes live under
-`internal/service/crypto/<algo>/` (stdlib AES-256-GCM today) and, later,
-`third-party/x-crypto/*` (XChaCha20-Poly1305), self-registering via a
-package-level `var` at import — no `init()`. `pkg/v1/crypto` blank-imports the
+`internal/service/crypto/<algo>/` (stdlib only — the AEAD there is
+AES-256-GCM) and `third-party/x-crypto/*` (`xchacha`, the XChaCha20-Poly1305
+AEAD, and `argon2id`), self-registering via a package-level `var` at import —
+no `init()`. `pkg/v1/crypto` blank-imports the
 stdlib scheme and re-exports `Seal` / `Open` against this package.
 
 Code range: `0.2.4.*` (ADR 0013).
@@ -41,7 +43,7 @@ Code range: `0.2.4.*` (ADR 0013).
 | `stream.go`    | `StreamSealer` interface (`Algorithm` / `Writer` / `Reader`) — the **chunked streaming-AEAD** port with the hold-back contract; truncation surfaces as `StreamTruncated` |
 | `stream_registry.go` | eighth `schemeRegistry`-backed registry mapping an `Algorithm` to a `StreamSealer`: `RegisterStreamSealer` / `LookupStreamSealer` / `AvailableStreamSealers` + `SealStream` / `OpenStream` dispatch (a lookup miss reuses the AEAD `UnknownAlgorithm` sentinel — streaming extends the AEAD domain) |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18), `DigestMismatch` (0.2.4.20) |
+| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18), `InvalidKeyEnvelope` (0.2.4.19), `DigestMismatch` (0.2.4.20) |
 
 Eight **independent** registries live here, all on one `Algorithm` keyspace: the
 **AEAD** (`registry.go`, keyed encryption), **Hasher** (`hash_registry.go`,
@@ -85,7 +87,9 @@ known from the alg-id, so the reader strips it without a length prefix. Each
   `var AEAD = crypto.Register(aesGCM{})` in each scheme package.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme
   claiming a taken `Algorithm` **or** wire id **panics at boot** with the
-  dotted-quad code.
+  dotted-quad code. So does an unusable scheme — a nil, a typed nil or a
+  non-comparable value (`plugin.Unusable`, ADR 0071) — in all eight
+  registries, before anything is published.
 - **`Algorithm("")` is the reserved invalid zero value** — `Known()` is false.
 - **The nonce never reaches a caller.** `Seal` generates it from `crypto/rand`
   and embeds it; `Open` strips it. No nonce parameter exists anywhere.
@@ -112,7 +116,3 @@ bazel test --config=race //internal/core/crypto:crypto_test
 # Fallback
 cd internal/core && GOWORK=off go test -race -cover ./crypto/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V23) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

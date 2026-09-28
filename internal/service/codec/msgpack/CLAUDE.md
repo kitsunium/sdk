@@ -1,9 +1,9 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/msgpack/
 
 ## Purpose
 
-MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encoder/Decoder are forwarded directly.
+MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encoder/Decoder are forwarded; the decoder is held to the same byte cap as `Unmarshal`.
 
 ## Surface
 
@@ -26,6 +26,7 @@ MessagePack codec wrapping `github.com/vmihailenco/msgpack/v5`. Streaming Encode
 ## Conventions
 
 - **Byte cap on `Unmarshal`**: `maxMsgPackBytes = 10 << 20` (10 MiB). vmihailenco/msgpack v5 exposes no per-decoder caps for array / map / nesting depth; a MessagePack value with a huge declared length pre-allocates that many slots before any consistency check, so size-limiting the input buffer is the primary defence against memory-exhaustion DoS (CWE-400 / CWE-1284).
+- **The streaming decoder inherits the cap**: `NewDecoder` reads through `io.LimitReader(r, maxMsgPackBytes+1)`, so the library never reads more than `maxMsgPackBytes + 1` bytes of one stream — the whole stream, not each value — and a value cut at the limit surfaces as `UNMARSHAL_FAILED` from `Decode`. Pinned by `Test_msgpackCodec_NewDecoder_StreamingDoS`.
 - Over-cap rejection carries diagnostic `Fields`: `len`, `cap` — surfaced via `errs.Int(...)`.
 - Stateless singleton.
 

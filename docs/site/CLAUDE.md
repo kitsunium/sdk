@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # docs/site/
 
 ## Purpose
@@ -14,12 +15,12 @@ drift from the code.
 
 | Step | Script | Emits |
 |---|---|---|
-| `prebuild` | `scripts/sync-versions.mjs` | `src/content/docs/<release>/<major>/**` (gitignored), `src/data/versions.json`, `src/data/build-info.json`, the `whats-new-*.json` banner |
+| `prebuild` | `scripts/sync-versions.mjs` | `src/content/docs/<release>/<major>/**` (gitignored), `src/data/versions.json`, `src/data/build-info.json`, the `src/data/features-<release>-<major>.json` banner data (curated in `src/data/features.mjs`; `scripts/gen-features.mjs` regenerates the local release's alone) |
 | | `scripts/gen-symbols.mjs` → `tools/genindex` | `public/_search/symbols-<major>.json` (⌘K search index) |
 | `build` | `astro build` + `pagefind` | `dist/` + `dist/_pagefind/` |
-| `test` | `node --test scripts/**/*.test.mjs` | versioning-logic unit tests |
+| `test` | `node --test scripts/lib/*.test.mjs` | tag-format and feature-catalog unit tests |
 
-Run `make docs` / `make serve` from the repo root (they call the above).
+Run `make docs` / `make serve` from the repo root (they call the above); `make docs-dev` runs `npm run dev`, the same sync then `astro dev`.
 
 ## Deployment + base path
 
@@ -40,8 +41,9 @@ every link under `/<repo>/` — any link outside it is a missing-base bug.
 
 ## Versioning (ADR 0007)
 
-The version dropdown is driven by `versions.json`, built from
-`git tag -l 'pkg/v*/v*'`. Each tagged release is snapshotted via
+The version dropdown is driven by `versions.json`, built from the releases
+`gh release list` returns, or — without `gh` — from `git tag -l 'pkg/v*/v*'`,
+a glob the bare `pkg/vX.Y.Z` tags of ADR 0017 do not match. Each tagged release is snapshotted via
 `git worktree`. `scripts/lib/tag-format.mjs` is the JS mirror of
 `scripts/release/lib/tag-format.sh` (same TAG_REGEX — edit together, ADR 0007
 §1). Tag-format + version-defaulting logic is unit-tested (`npm test`).

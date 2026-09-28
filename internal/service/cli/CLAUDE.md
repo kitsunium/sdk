@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/cli/
 
 ## Purpose
@@ -48,8 +49,10 @@ Code range: `0.3.62.*` (ADR 0065).
   page silently), and the `-h` path turns it into `HelpWriteFailed` (EX_IOERR)
   with that error beneath it — or in `cause` and `cause_code` fields when it
   is itself an `*errs.Error`, which origin-wins would otherwise let take over
-  the code and the exit status. The usage paths discard it on purpose: there the usage error
-  is the verdict. Pinned by `TestAHelpNobodyReceivedIsNotASuccess`,
+  the code and the exit status. On the usage paths the usage error stays the
+  verdict on purpose, and the stream's error rides on it as a
+  `help_write_error` field (`withHelpFailure`). Pinned by
+  `TestAHelpNobodyReceivedIsNotASuccess`,
   `TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict` and
   `TestAFailedHelpWriteKeepsTheUsageVerdict`.
 - **The only recovered panic is an `Action`'s.** A panicking Go program exits

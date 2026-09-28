@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/trace/
 
 ## Purpose
@@ -25,7 +26,8 @@ Code range: `0.2.20.*` (ADR 0051).
 | `identifier.go` | `TraceID` / `SpanID` / `TraceFlags` + `ParseTraceID` / `ParseSpanID` + `FlagSampled` + `Sanitized` |
 | `span_context.go` | `SpanContextValue` — TraceID, SpanID, Flags, State, Remote; `IsValid` / `IsSampled` / `WithState` |
 | `traceparent.go` | `ParseTraceParent` / `FormatTraceParent` + `TraceParentHeader` / `TraceStateHeader` / `TraceParentLen` / `VersionSupported` |
-| `trace_state.go` | `TraceStateValue` — ordered, immutable vendor list; `Get` / `Insert` / `Delete` / `Len` / `String` + the three grammar limits |
+| `state_value.go` | `StateValue` — the `tracestate` list, ordered and immutable; `ParseTraceState` + `Get` / `Insert` / `Delete` / `Len` / `String` + the three grammar limits (`MaxTraceStateMembers` / `MaxTraceStateKeyLen` / `MaxTraceStateValueLen`) |
+| `trace_state_entry.go` | `traceStateEntry` — one list member, unexported |
 | `carrier.go` | `Carrier` (2 methods, FROZEN) + `Inject` / `Extract` |
 | `context.go` | `ContextWithSpanContext` / `SpanContextFromContext` |
 | `span_kind.go` | `SpanKind` + the five values + `Resolved` |
@@ -37,7 +39,6 @@ Code range: `0.2.20.*` (ADR 0051).
 | `sampler.go` | `Sampler` and `SpanSink` — FUNC ports (ADR 0041) |
 | `sampling_params.go` | `SamplingParams` — what a Sampler sees |
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` |
-| `attrs.go` | the ALIASES of `core/metrics`' attribute / Resource / Scope model, and why |
 | `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) |
 | `codes.go` | `Code*` constants — range 0.2.20.* |
 | `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` |
@@ -63,8 +64,10 @@ and nothing looks wrong at the process that caused it.
 
 ## Why the attribute model is `core/metrics`' — Do NOT twin it
 
-`AttrValue`, `ResourceValue` and `ScopeValue` are **type aliases**, so
-`pkg/v1/trace.Attr` and `pkg/v1/metrics.Attr` are one type.
+This package declares **no** attribute, Resource or Scope type: every model
+value holds `core/metrics`' `AttrValue`, `ResourceValue` and `ScopeValue`
+directly, and `pkg/v1/trace` aliases those same types, so `pkg/v1/trace.Attr`
+and `pkg/v1/metrics.Attr` are one type.
 
 They are not metrics concepts. `AttrValue` is `common/v1.KeyValue`/`AnyValue`,
 `ResourceValue` is `resource/v1.Resource`, `ScopeValue` is
@@ -123,7 +126,7 @@ Three §4.3 consequences, each tested:
 - **two** traceparent headers merge to `"v1,v2"`, fail the grammar, and restart —
   which is correct, because neither claim may be believed.
 
-`TraceStateValue` is an ordered slice and not a map, because §3.5 makes the order
+`StateValue` is an ordered slice and not a map, because §3.5 makes the order
 meaning: leftmost is the system that touched the trace most recently. The
 grammar's own numbers are the limits (32 members, 256-char keys and values,
 241/14 for `tenant@system`) — there is no SDK-invented ceiling.
@@ -164,6 +167,6 @@ enforced in `Insert` instead. Documented in place and in
 | `TestParseTraceParentIsForwardCompatible` | §3.2.4, including the undashed-tail case |
 | `TestFormatTraceParentMasksUndefinedFlagBits` | mask on output, keep on input |
 | `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
-| `TestAttributesAreTheSameTypeAsMetrics` | the alias, as a value fact |
+| `TestAttributesAreTheSameTypeAsMetrics` | one attribute type across every model value, as a compile and value fact |
 | `TestScopeDefaultNamesTheTracePackage` | the one thing that is NOT shared |
 | `TestHTTPHeaderIsACarrierWithNoAdapter` | the ADR 0039 freeze on `Carrier` |

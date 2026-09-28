@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/middleware/multi/
 
 ## Purpose
@@ -27,7 +27,9 @@ independent failure modes per branch.
 - `Write` tracks the latest successful branch's byte count as `n`. Errors
   from any branch are collected; if any failed, `Write` returns
   `(n, errs.Wrap(errors.Join(...), FanoutWriteFailed))`.
-- `Flush` / `Close` mirror the same aggregation policy.
+- `Flush` / `Close` reach every distinct branch — a sink repeated in the
+  slate is flushed and closed once — and return the bare `errors.Join` of
+  the failures, not wrapped in `FanoutWriteFailed`.
 
 ## Error catalogue — range 0.3.16.\*
 
@@ -63,10 +65,12 @@ pprof line and the before/after.
   `Close` keep theirs — they run once per sink lifetime.
 
   This one is **guarded**, not merely written down: `TestFanoutWidthAddsNoAllocation`
-  (`pkg/v1/logger/fanout_integration_test.go`) compares the allocations of an
-  emit at widths 2/3/4/8 against the width-1 baseline and fails on any
-  difference. It was checked against the defect it exists for — restoring the
-  pre-sized slate makes widths 3, 4 and 8 fail while width 2 still passes.
+  (`pkg/v1/logger/fanout_integration_test.go`) compares the total allocations
+  of 2 000 emits at widths 2/3/4/8 against the width-1 total and fails on any
+  difference — a total, since `testing.AllocsPerRun` rounds an amortised
+  allocation down to 0. It was checked against the defect it exists for —
+  restoring the pre-sized slate makes widths 3, 4 and 8 fail while width 2
+  still passes.
 
 ## Verification
 

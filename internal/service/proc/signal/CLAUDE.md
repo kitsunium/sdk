@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/proc/signal
 
 Service implementation of the typed **signal toolbox** for the process-supervision
@@ -10,7 +11,7 @@ stdlib + `internal/core/proc` + `internal/kernel/errs` (never `pkg/*`).
 |---|---|---|
 | `Target` | `signal.go` | recipient of a relayed signal — positive pid, or `< -1` for `-pgid` |
 | `Notify` | `signal.go` | subscribe to a set of signals on a leak-free typed channel |
-| `Relay` | `relay_unix.go` / `relay_other.go` | forward received signals to a pid / process group via kill(2) |
+| `Relay` | `relay_unix.go` / `relay_windows.go` / `relay_other.go` | forward received signals to a pid / process group — kill(2) on Unix, the kernel32 primitives on Windows |
 
 `Parse` / `String` are NOT re-implemented here — they belong to `core/proc.Signal`
 and are re-exported only by the public facade.
@@ -27,10 +28,13 @@ closed.
 The returned `stop`:
 - closes `done` → the goroutine returns → its defer runs `signal.Stop` and closes
   the output channel;
-- is **idempotent** (guarded by a `stopped` bool) — a second call is a no-op;
-- is **leak-free** — after it returns no goroutine and no `os/signal`
-  registration survive (the external test asserts `runtime.NumGoroutine` settles
-  back to a warmed baseline).
+- is **idempotent** (guarded by a `sync.Once`, so concurrent calls cannot
+  double-close `done`) — a second call is a no-op;
+- is **leak-free** — the goroutine's deferred `signal.Stop` and the close of the
+  output channel run on that goroutine just after `stop` returns (see the
+  caveat under Performance), so a reader sees the teardown as the channel
+  closing; the external test asserts that close rather than a
+  `runtime.NumGoroutine` count.
 
 The output channel is buffered (`max(len(sigs), 1)` slots) so a burst is not
 dropped while the reader is busy, honouring the os/signal "never blocks the
@@ -44,7 +48,10 @@ sender" contract.
 - `target < -1` → the process group whose id is `-target` (the kill(2)
   negative-pid convention, see kill(2)).
 
-A clean drain of the source returns `nil`; the first delivery failure stops the
+The reserved targets `0` (the caller's own process group) and `-1` (every
+process the caller may signal) are refused with `RelayFailed` before anything
+is delivered, so a zero-value `Target` never fans out. A clean drain of the
+source returns `nil`; the first delivery failure stops the
 relay and returns `coreproc.RelayFailed` (code `RELAY_FAILED`, exit 71) wrapping
 the kill(2) cause, with `target` and `signal` fields attached. A value whose
 carrier is not a `syscall.Signal` is skipped rather than aborting the relay.
@@ -52,10 +59,14 @@ carrier is not a `syscall.Signal` is skipped rather than aborting the relay.
 ## Platform split
 
 `os/signal` is portable, so `Notify` is cross-platform and lives in `signal.go`.
-Only the kill(2) path is split:
+Only the delivery path is split:
 - `relay_unix.go` (`//go:build unix`) — real kill(2) delivery;
-- `relay_other.go` (`//go:build !unix`) — returns `coreproc.UnsupportedPlatform`,
-  so every GOOS compiles and merely degrades.
+- `relay_windows.go` (`//go:build windows`) — kernel32 bound through
+  `syscall.NewLazyDLL`: a group target gets `GenerateConsoleCtrlEvent`
+  (`CTRL_C` for SIGINT, `CTRL_BREAK` otherwise), a pid gets `OpenProcess` +
+  `TerminateProcess`; the reserved targets are refused as on Unix;
+- `relay_other.go` (`//go:build !unix && !windows`) — returns
+  `coreproc.UnsupportedPlatform`, so every GOOS compiles and merely degrades.
 
 ## Performance — see `BENCH.md`
 
@@ -83,13 +94,19 @@ fields verbatim (never `errs.Define`). Match with
 
 ## Tests
 
-`signal_external_test.go` (`//go:build unix`) covers the #62 acceptance criteria:
-- `Notify` delivers a self-sent `SIGUSR1`, then `stop` closes the channel and the
-  goroutine count settles (no leak); `stop` is idempotent;
-- `Relay` to a **negative** target delivers SIGTERM to a child forked into its
-  OWN process group (`Setpgid`) — isolated so the group kill never reaches the
-  test runner's group — and the child is observed to die from exactly SIGTERM;
-- a failed delivery surfaces `CodeRelayFailed`.
+The #62 acceptance criteria are covered by two `//go:build unix` files:
+- `signal_external_test.go`: `Notify` delivers a self-sent `SIGUSR1`,
+  `SIGWINCH` or burst of `SIGUSR2`, then `stop` closes the channel (the proof
+  the goroutine returned) and a second `stop` is a no-op;
+  `TestNotifyStopConcurrent` calls `stop` from many goroutines at once, which
+  `-race` fails if the `sync.Once` guard regresses;
+- `relay_unix_external_test.go`: `Relay` to a **negative** target delivers
+  SIGTERM to a child forked into its OWN process group (`Setpgid`) — isolated so
+  the group kill never reaches the test runner's group — and the child is
+  observed to die from exactly SIGTERM; the reserved targets `0` and `-1`, and a
+  pid that cannot exist, surface `CodeRelayFailed`.
 
-`relay_other_test.go` (`//go:build !unix`) asserts the stub returns
+`relay_windows_test.go` (`//go:build windows`) pins the reserved-target
+refusal, a pid terminated, and a clean drain; `relay_other_test.go`
+(`//go:build !unix && !windows`) asserts the stub returns
 `CodeUnsupportedPlatform`.

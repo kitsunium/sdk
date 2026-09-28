@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/sign/
 
 ## Purpose
@@ -15,7 +16,7 @@ Importing the package blank-imports `internal/service/crypto/ed25519sig` AND
 
 | Identifier | Role |
 |---|---|
-| `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id) |
+| `Algorithm` | defined type over `corecrypto.Algorithm` (stable scheme id) — distinct from the other crypto-family `Algorithm` types, so a hash or MAC constant does not compile into a signature call |
 | `Ed25519` | the EdDSA-over-Curve25519 scheme const (RFC 8032) — the modern default |
 | `ECDSAP256` | ECDSA over NIST P-256 with SHA-256 + ASN.1/DER signatures (JWT `ES256`, X.509, COSE interop) |
 | `GenerateKey(a) (pub, priv []byte, error)` | fresh keypair; `priv` is secret |
@@ -40,8 +41,10 @@ never WHY a check failed.
 
 ## Conventions
 
-- **Aliases, not new types** — `Algorithm = corecrypto.Algorithm`; the const is
-  the frozen wire string (`"ed25519"`).
+- **`Algorithm` is a defined type, not an alias** — converted to
+  `corecrypto.Algorithm` at the call into core, so the signature registry stays
+  its own keyspace. The consts are the frozen wire strings (`"ed25519"`,
+  `"ecdsa-p256"`).
 - **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
   package doc comment in `sign.go`; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.** New scheme consts can be added; existing ones
@@ -61,7 +64,3 @@ bazel test --config=race //pkg/v1/sign:sign_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./sign/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V81, V108) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/tlv/
 
 ## Purpose
@@ -16,7 +17,8 @@ arbitrary Go values; decoder reconstructs them as Go-native types
 | `Extensions()`   | `.tlv` |
 | Constructor      | `New() codec.Codec` |
 | Streaming        | yes (`NewEncoder`, `NewDecoder` — one record per Encode/Decode) |
-| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc. Against a genuinely pre-sized `dst` it is **0 allocs/op** (`BENCH.md` §2); the "1 alloc/op" quoted in `pkg/v1/codec/BENCH.md` is that harness's recycled buffer occasionally growing, and it is still the best of the 22 formats measured there (`form` was registered after that run and is not in those numbers) |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — drops Marshal's fresh-slice alloc. Against a genuinely pre-sized `dst` it is **0 allocs/op** (`BENCH.md` §2); the "1 alloc/op" quoted in `pkg/v1/codec/BENCH.md` is that harness's recycled buffer occasionally growing — the fewest any measured codec shows there, tied with `cbor` and `flatbuffers` |
+| `Tag`            | `uint8` — the 1-byte discriminator that opens every record; the tag values themselves are unexported |
 
 ## Error codes (range `0.3.22.*`)
 
@@ -39,6 +41,12 @@ arbitrary Go values; decoder reconstructs them as Go-native types
   not `tagInt64`. Decoding always upgrades to the widest Go type
   (`int64` / `uint64` / `float64`) and re-narrows via `reflect.Convert`
   when assigning back to a typed pointer.
+- **The round trip converges; it is not the identity.** Decoded untyped, a
+  struct record becomes `map[string]any`, which re-encodes as a map record,
+  and a nil slice or map is the same bytes as an empty one — so
+  `Unmarshal(Marshal(v))` need not equal `v`; what holds is that the pair
+  reaches a fixed point after one round. `FuzzTLVUnmarshalAny` asserts that
+  convergence.
 - **Hardening caps**: input buffer ≤ 10 MiB (`maxTLVBytes`), nesting
   depth ≤ 32 (`maxTLVDepth`), struct field-name ≤ 255 bytes
   (`maxFieldNameBytes`), pre-allocation hint clamped to 4096
@@ -93,7 +101,7 @@ The encode scratch is a **local** `sync.Pool` of `*[]byte` (`scratchPool`,
 `encoder.go`), capped at `maxRetainedScratchBytes = 256 << 10`. It is
 deliberately NOT part of the shared `internal/core/codec/scratch`
 mutualisation: that package pools `*bytes.Buffer` / `*bytes.Reader` (the shape
-the ten library-mediated codecs share), whereas TLV's varint encoder grows a
+the eleven library-mediated codecs share), whereas TLV's varint encoder grows a
 raw `[]byte` and would gain nothing from a `bytes.Buffer` wrapper. The shared
 `256 << 10` retain threshold is matched intentionally — it is the project-wide
 oversize-discard ceiling, not copied pool boilerplate.
@@ -102,4 +110,13 @@ oversize-discard ceiling, not copied pool boilerplate.
 
 ```
 bazel test --config=race //internal/service/codec/tlv:tlv_test
+# fuzz one target at a time (fuzz_external_test.go): FuzzTLVUnmarshalAny,
+# FuzzTLVUnmarshalTyped, FuzzTLVDecodeStream
+cd internal/service && GOWORK=off go test -run='^$' -fuzz='^FuzzTLVUnmarshalAny$' -fuzztime=30s ./codec/tlv/
 ```
+
+The three fuzz targets assert convergence and a size bound on the untyped
+decode, idempotence on a typed target, and — for the streaming decoder —
+progress on every record and agreement with the buffered path. Their seeds, and
+the corpus entry under `testdata/fuzz/`, run with the ordinary suite; the
+`go_test` ships `testdata/**` as data.
