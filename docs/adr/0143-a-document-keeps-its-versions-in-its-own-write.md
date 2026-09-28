@@ -423,6 +423,14 @@ configuration type of its own, or `pkg/v2`.
   it too; it is the one thing that would need a number kept across a deletion.
 - **Paged versions** for a held document whose history has grown: `Versions`
   reads them all.
+- **Undoing a write exactly on the file engine.** A framework that rolls a
+  write back by writing the former document again — kit's transactions on its
+  data directory and in memory, which write each entity's previous value back
+  — makes one more version holding the former document, and the version the
+  undone write made stays in the history. Restoring a key's document and
+  versions together, as they were, is not offered here; the SQL engine's
+  rollback needs none, since the versions are rows of the transaction it
+  undoes.
 - **Detecting a stale SQL versions table** (D7), which needs a statement at
   `OpenSQL` or a column in the documents' table.
 - **Side values** in the same write (ADR 0139 §D10): an ordered index for kit's
