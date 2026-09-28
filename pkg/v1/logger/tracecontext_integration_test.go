@@ -76,7 +76,7 @@ func traceMallocsOver(runs int, f func()) uint64 {
 	//: often enough to fail an exact count. Such noise only ever ADDS, so the
 	//: smallest of a few windows is still the exact cost of f: a regression
 	//: shows in every window, and in their minimum.
-	best := uint64(math.MaxUint64)
+	var best uint64 = math.MaxUint64
 	//: each window measures the same runs; the smallest is kept.
 	for range traceWindows {
 		var before, after runtime.MemStats

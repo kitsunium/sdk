@@ -1114,6 +1114,10 @@ codes:
     const: CodeInvalidKeep
     hex: "0x00_02_25_07"
     package: internal/core/secret
+  - code: "0.2.37.8"
+    const: CodeInvalidSubject
+    hex: "0x00_02_25_08"
+    package: internal/core/secret
   - code: "0.2.56.1"
     const: CodeTriggerUnknown
     hex: "0x00_02_38_01"
@@ -2189,6 +2193,14 @@ codes:
   - code: "0.3.68.8"
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
+    package: internal/service/secret
+  - code: "0.3.68.9"
+    const: CodeKeyDestroyed
+    hex: "0x00_03_44_09"
+    package: internal/service/secret
+  - code: "0.3.68.10"
+    const: CodeSubjectKeyUnreadable
+    hex: "0x00_03_44_0A"
     package: internal/service/secret
   - code: "0.3.72.1"
     const: CodeDocumentTooLarge

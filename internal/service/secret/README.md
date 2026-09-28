@@ -23,6 +23,20 @@ box, _ := keyring.Seal(ctx, cookie, nil) // opens after a rotation, until pruned
 - `Keyring` — the newest version seals and signs, every kept one opens and
   verifies; boxes carry their version.
 - `Rotator` — `Ensure`, `Due`, `RotateIfDue`, `Rotate`, `Run`; keeps at least
-  two versions; starts no goroutine.
+  two versions; starts no goroutine. With `InUse`, never prunes a version
+  something still needs.
+- `SubjectKeys` (ADR 0142) — one data key per subject, wrapped by a `Keyring`
+  root: `Seal` / `Open` bound to the parts naming where a value lies,
+  `Destroy` to erase every copy it sealed, `Rewrap` after the root rotates,
+  `OldestRoot` for the rotator's `InUse`.
+- `NewMemorySubjectKeyStore` — the reference `core/secret.SubjectKeyStore`.
+
+```go
+keys, _ := svcsecret.NewSubjectKeys(svcsecret.SubjectKeysConfig{
+    Root: root, Store: svcsecret.NewMemorySubjectKeyStore(), CacheSize: 1024, CacheTTL: time.Minute,
+})
+box, _ := keys.Seal(ctx, "9f86d081884c7d65", []byte(email), "reports", id, "/email")
+_, _ = keys.Destroy(ctx, "9f86d081884c7d65") // Open(box) now answers KeyDestroyed
+```
 
 Public facade: `pkg/v1/secret`. See `CLAUDE.md`.

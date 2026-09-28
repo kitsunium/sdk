@@ -1,19 +1,27 @@
 // Package secret — declares the sentinel *errs.Error outcomes of the concrete
-// stores, the keyring and the rotator. Each var's name equals its errs.Define
-// Reason in SCREAMING_SNAKE form.
+// stores, the keyring, the rotator and the subject keys. Each var's name
+// equals its errs.Define Reason in SCREAMING_SNAKE form.
 //
-// No Public, Private or field here carries a secret or a sealed box. A
-// secret's name, a version number, an environment variable's NAME and an
-// operation may travel as log-only fields; a file path does not, because the
-// directory a store owns is a deployment detail an error has no reason to
-// repeat.
+// No Public, Private or field here carries a secret, a data key or a sealed
+// box. A secret's name, a version number, an environment variable's NAME, a
+// valid subject reference and an operation may travel as log-only fields; a
+// file path does not, because the directory a store owns is a deployment
+// detail an error has no reason to repeat.
 package secret
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	coresecret "github.com/kitsunium/sdk/internal/core/secret"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // exitConfig matches sysexits EX_CONFIG (78): the fix is in the wiring or the
 // deployment, and the same call is refused identically until it is made.
 const exitConfig int = 78
+
+// exitTempFail matches sysexits EX_TEMPFAIL (75), the exit status of core
+// StoreUnavailable: a subject-key store that failed may answer the next
+// attempt, and a verdict built around a plain store error carries it too.
+const exitTempFail int = 75
 
 var (
 	// InvalidConfig is returned by every constructor in this package for a
@@ -86,7 +94,56 @@ var (
 		"The key file does not hold a key",
 		"service/secret: the key file is not a regular file or is not exactly 32 raw bytes; the content is never repeated",
 		errs.WithExitCode(exitConfig))
+
+	// KeyDestroyed is returned by SubjectKeys.Open for a box whose data key
+	// is not held — the answer an erasure exists to produce, so a caller
+	// reading records treats it as "this value was erased" rather than as a
+	// fault. It cannot tell a key destroyed from one never made, nor from a
+	// box whose key identifier was edited: telling them apart would mean
+	// keeping a trace of every erased subject, which is what an erasure
+	// removes.
+	KeyDestroyed = errs.Define(CodeKeyDestroyed, "KEY_DESTROYED",
+		"That value was erased",
+		"service/secret: the box names a subject key that is not held — destroyed by an erasure, or never made — and nothing can open it again")
+
+	// SubjectKeyUnreadable is returned when a subject's data key is held and
+	// does not unwrap under the root keyring. It is NOT an erasure and must
+	// never be read as one: the likeliest causes are a root secret replaced by
+	// another value under the same version number, and a root version pruned
+	// while a key was still wrapped under it — which RotatorConfig.InUse
+	// exists to prevent. The engine never replaces such a key; Destroy
+	// removes it.
+	SubjectKeyUnreadable = errs.Define(CodeSubjectKeyUnreadable, "SUBJECT_KEY_UNREADABLE",
+		"A data key could not be unwrapped",
+		"service/secret: a subject key is held and does not open under the root keyring — its version pruned, the root replaced, or the record altered; the field names the subject",
+		errs.WithExitCode(exitConfig))
 )
+
+// storeFailure is the verdict for an error a SubjectKeyStore method returned:
+// the retryable core StoreUnavailable, naming the operation and — when the
+// call was about one — the subject.
+//
+// It wraps the store's error rather than the sentinel, as the state-machine
+// engine does with its own caller's store: a store error that is itself an SDK
+// error keeps its code — origin wins — and gains StoreUnavailable in its trail,
+// and a plain error stays reachable through errors.Is. A caller's store is the
+// caller's code, so its message is the caller's to keep free of secrets; the
+// engine adds only a valid subject, which is a reference and never a value.
+func storeFailure(cause error, operation, subject string) error {
+	fields := []errs.FieldValue{errs.String("operation", operation)}
+	//: a call about the whole store names no subject.
+	if subject != "" {
+		fields = append(fields, errs.String("subject", subject))
+	}
+	//: origin wins when the store's error is already an SDK error.
+	return errs.Wrap(cause, errs.WrapParams{
+		Code:     coresecret.CodeStoreUnavailable,
+		Reason:   "STORE_UNAVAILABLE",
+		Public:   coresecret.StoreUnavailable.Public(),
+		Private:  coresecret.StoreUnavailable.Private(),
+		ExitCode: exitTempFail,
+	}, fields...)
+}
 
 // wrapAs returns the given sentinel as the error origin — its code, reason and
 // public message win — with the cause's message and any extra fields attached

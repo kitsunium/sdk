@@ -33,3 +33,8 @@ const CodeEmptyValue errs.Code = 0x00_02_25_06 // 0.2.37.6
 // CodeInvalidKeep identifies a Prune asked to keep fewer than one version.
 // Keeping none would delete the secret, which is not what pruning means.
 const CodeInvalidKeep errs.Code = 0x00_02_25_07 // 0.2.37.7
+
+// CodeInvalidSubject identifies a subject outside the subject grammar: empty,
+// longer than MaxSubjectLen, or carrying a character outside the closed
+// alphabet (ADR 0142).
+const CodeInvalidSubject errs.Code = 0x00_02_25_08 // 0.2.37.8
