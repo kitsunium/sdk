@@ -1,10 +1,11 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/proc/sdlisten
 
 Socket activation (`sd_listen_fds(3)`) for the OS process-supervision domain
 (ADR 0016) — the service half that recovers inherited listening sockets, plus the
 activator half (`Prepare`) that hands sockets to a spawned child. Companion to
 `sdnotify`. **Stdlib-only** (`net`, `os`, `strconv`, `strings`, `syscall`, plus
-`slices`/`maps`) + `internal/kernel/errs`.
+`slices`/`maps`) + `internal/core/proc` + `internal/kernel/errs`.
 
 ## File map
 

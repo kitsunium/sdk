@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/streamaead/
 
 ## Purpose
@@ -37,8 +38,15 @@ independently from the stdlib).
 - **Hold-back:** the reader never surfaces a chunk's plaintext before its GCM tag
   verifies (GCM verifies the whole chunk before returning), and never before the
   chunk's `Open` succeeds.
-- **Truncation** (EOF before a final-flag chunk) → `StreamTruncated`.
-- **Counter overflow** (> 2^88 chunks, unreachable) is a hard error, never a wrap.
+- **Truncation** never ends in a clean EOF, which follows only a verified
+  final-flag chunk. Where the cut falls picks the sentinel: a header short of
+  its 18 bytes, a last piece shorter than a GCM tag, or a read fault is
+  `StreamTruncated`; a longer last piece — a whole non-final chunk included — is
+  opened as the final chunk and fails its tag, `DecryptionFailed`.
+  `TestStream_truncated` accepts either.
+- **Counter overflow** is unreachable rather than checked: the counter is a
+  `uint64` in the low 8 bytes of the 11-byte counter field (`chunkNonce`), so it
+  never reaches the flag byte, and it wraps only after 2^64 chunks of 64 KiB.
 - **Lead-byte rejection:** the whole-buffer `Open` rejects a `0x02` stream (its
   version check fails); this reader rejects a `0x01` box / unknown version as
   `DecryptionFailed`.
@@ -78,7 +86,3 @@ make bench   # regenerates BENCH.md
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./crypto/streamaead/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V67, V68) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

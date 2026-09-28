@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/core/sql/
 
 ## Purpose
@@ -97,7 +98,7 @@ Code range: `0.2.24.*` (ADR 0055).
 - **Import a driver, or `net`, or anything that opens a connection.** This
   package declares shapes; `internal/service/sql` runs statements.
 - **Invent a migration file format, directory layout or naming convention.**
-  A `MigrationValue` is a value the consumer constructs. ADR 0055 §D8.
+  A `MigrationValue` is a value the consumer constructs. ADR 0055 §D12.
 - **Put a `Rows`/`Row`/`Result` of our own here.** See above — that is the
   first step of the ORM.
 

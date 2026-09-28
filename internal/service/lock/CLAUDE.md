@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/lock/
 
 ## Purpose
@@ -79,6 +80,7 @@ process pass the gate and then block on a `flock` its own process holds.
 |---|---|
 | `config.go` | `MemoryConfig` + its ADR 0031 **refusal** (a non-positive TTL) |
 | `memory.go` | `memoryLocker`: the holding map, the fence ledger, takeover, wake-on-release and wake-on-deadline |
+| `holding.go` | `holding`: one live acquisition of one name — its token, fence and deadline, and the channel its end closes once to wake every waiter |
 | `memory_lease.go` | `memoryLease`: the only lease that implements `Deadliner` |
 | `file_config.go` | `FileConfig` + the ADR 0031 **clamp** (`Poll`) + the directory permission rule |
 | `file.go` | `fileLocker`: gate → `flock` → fence, and the reverse on release |
@@ -92,16 +94,19 @@ process pass the gate and then block on a `flock` its own process holds.
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
 | `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
+| `dacl_tokens_windows.go` | `tokenSet`: the three nested accounts a DACL is evaluated for — a deny reaches every account holding the SID it names, which a map keyed by the ACE's SID gets wrong (ADR 0084 §D3b; the third account, ADR 0086) |
 | `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
+| `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner` |
+| `codes.go` / `errors.go` | the `0.3.51.*` codes and their five sentinels — see §Sentinels |
 
 ## Platform matrix (ADR 0018)
 
 | GOOS | `NewMemory` | `NewFileLocker` |
 |---|---|---|
-| linux, darwin, freebsd, openbsd, netbsd, dragonfly | native | native (`flock(2)`) |
+| linux, darwin, freebsd, openbsd, netbsd, dragonfly — and android, ios, which satisfy the `linux` / `darwin` tags | native | native (`flock(2)`) |
 | windows | native | native (`LockFileEx` — ADR 0081) |
-| js, plan9, aix, solaris, ios | native | **refused at construction** with `proc.UnsupportedPlatform` |
+| js, wasip1, plan9, aix, solaris, illumos | native | **refused at construction** with `proc.UnsupportedPlatform` |
 
 ## `LockFileEx` is a different primitive, and the differences are measured
 

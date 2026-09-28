@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/secret/
 
 ## Purpose
@@ -169,8 +170,11 @@ sealed file (the file stores join wherever a probe `NewFile` does not answer
 not run in parallel. The subject keys are covered by `subjectkeys_`,
 `subjectrewrap_`, `subjectfaults_` and `subjectmemory_external_test.go` (two
 engines over one store stand for two processes; a scripted store injects
-failures and an erasure in the middle of a re-wrap) and by
-`subjectcache_internal_test.go` (every way a key leaves the cache wipes it).
+failures and an erasure in the middle of a re-wrap), by
+`subjectcache_internal_test.go` (every way a key leaves the cache wipes it) and
+by `subjectkeys_internal_test.go` (a value wrapped under the root that is not
+one key long is unreadable: never used as a key, never moved, pinning no
+version).
 `subjectkeys_bench_test.go` feeds `BENCH.md`.
 
 ## Do NOT

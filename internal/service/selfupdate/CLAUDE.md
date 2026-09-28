@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/selfupdate/
 
 ## Purpose
@@ -25,7 +26,10 @@ module.
 | `codes.go`, `errors.go` | this package's own range `0.3.66.*` and its sentinels |
 | `wrap.go` | `refuse` and `classify` — the only two ways an error is built here |
 | `diagnose.go` | the half of an error `Error()` never renders, for the reader entitled to it |
-| `interfaces.go`, `osfilesystem.go`, `stdiocopier.go` | the port implementations |
+| `release_info.go` | `releaseInfo` / `releaseAsset` — the release host's JSON shape |
+| `update_info.go` | `UpdateValue`, an alias of the core value |
+| `interfaces.go` | the ports `Getter`, `FileSystem`, `Copier`, aliased from core |
+| `osfilesystem.go`, `stdiocopier.go` (+ `osfilesystem_compliance.go`, `stdiocopier_compliance.go`) | the port implementations, and the compile-time assertions that they still satisfy the ports |
 
 ## Why-this-shape
 
@@ -106,7 +110,7 @@ between them is whether this package DECIDED the failure or was TOLD about one.
 - `classify(sentinel, cause, fields...)` — a failure from outside, under the
   sentinel that says what it means here. The sentinel's Code, Reason, Public,
   Private and exit status are READ from it rather than restated at the call
-  site, because twelve sites in five files reach `DownloadFailed` — eight of
+  site, because thirteen sites in five files reach `DownloadFailed` — ten of
   them through `classify` — and four hand-copied strings drift. `TestClassifyCarriesTheSentinelVerbatim` is what
   makes that impossible rather than unlikely.
 

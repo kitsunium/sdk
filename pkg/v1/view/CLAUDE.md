@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/view/
 
 ## Purpose
@@ -43,7 +44,7 @@ Importing this package is what wires the `html` engine: the facade imports
 
 ## Do NOT
 
-- **Weaken the "what `Trusted` does not prevent" paragraph in the package doc
+- **Weaken the "Read this before calling TrustHTML" section of the package doc
   comment.** `view.TrustHTML(r.FormValue("bio"))` compiles and is stored XSS,
   and the SDK cannot see it: `TrustedHTML` is a type alias, so a fragment
   marked through `TrustHTML` is indistinguishable from a raw

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/metrics/
 
 ## Purpose
@@ -33,7 +34,7 @@ the excess into a single aggregated overflow series.
 | `sum.go` | `memSum` — the storage behind BOTH counter kinds (atomic.Int64 + monotonic/observed flags + delta bookkeeping) |
 | `gauge.go` | `memGauge` (atomic float64 bits, CAS) |
 | `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot) |
-| `exporter_text.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter` |
+| `exporter_text.go` / `metric_header.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter`; `metricHeader`, what one `# metric` line says about a name |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the proto3-JSON scalar types (`otlpInt64`/`otlpUint64`/`otlpDouble`) + the two refusals + `otlpJSONExporter` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter` |
 | `otlp_request.go` | the OTLP payload TREE — a Go mirror of the four `.proto` files, in schema field-number order, restricted to the fields this SDK produces |
 | `exporter_otlphttp.go` | the EMITTER, and the only `net/http` in this package: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + endpoint refusal + response classification + the default client's own connection pool (`newOTLPTransport`) |

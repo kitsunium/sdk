@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/group/
 
 ## Purpose
@@ -98,7 +99,8 @@ Go has no way to abandon a goroutine.
 - `Collect` is a function, not a method, because Go's methods take no type
   parameters of their own: a `Group[T]` would force `Group[struct{}]` on every
   caller who only wants to wait.
-- Cross-OS: 100 % portable (`context`, `sync`, `math`, `runtime/debug`).
+- Cross-OS: 100 % portable (`context`, `sync`, `math`, `runtime/debug`,
+  `strings`).
 
 ## Do NOT
 

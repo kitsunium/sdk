@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/server/
 
 ## Purpose
@@ -32,8 +32,9 @@ in the dimension that motivated the domain, whatever else it gained.
 | `ReadHeaderTimeout` | HTTP groups only: the header phase's own bound; unset keeps `ReadTimeout` there, as before |
 | `MaxHeaderBytes` | HTTP groups only: the header size cap, answered 431; unset keeps net/http's 1 MiB default |
 | `MaxConns` | the group's concurrent-connection ceiling, shared across its listeners; zero is no ceiling |
-| `Shards` | listeners per address through `SO_REUSEPORT`; zero is one per core; a platform that cannot shard reports it in `State` |
+| `Shards` | listeners per address through `SO_REUSEPORT`; zero is one per core; an explicit count the platform or socket family cannot shard collapses to one and says so in `State` |
 | `ReadBufferSize`, `MaxPacketSize`, `BatchSize` | the per-connection scratch buffer; the datagram size cap and batch |
+| `Option`, `GroupOption` | what `New` takes, and what `Server.Group` / `Server.PacketGroup` take |
 | `WithDrainTimeout` | server option |
 | `DrainSignal` | the shutdown signal a handler holding a connection open watches |
 | `ListenFailed` … `ConnLimitReached` | sentinels |
@@ -89,7 +90,7 @@ in the dimension that motivated the domain, whatever else it gained.
 bazel test --config=race //pkg/v1/server:server_test
 # Fallback:
 cd pkg && GOWORK=off go test -race -cover ./v1/server/...
-# expected: ~59% for the facade itself, ~83% for sse/.
+# expected: ~53% for the facade itself, ~83% for sse/.
 #
 # The facade's figure is not a gap. Nine forwarders here (HandshakeTimeout,
 # ReadHeaderTimeout, MaxHeaderBytes, MaxPacketSize, BatchSize, ChainPacket,

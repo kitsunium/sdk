@@ -1,12 +1,13 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/hkdfsha256/
 
 ## Purpose
 
 Registers the **"hkdf-sha256"** key-derivation scheme (ADR 0013). Blank-importing
 the package — typically via `pkg/v1/kdf` — self-registers the scheme so
-`crypto.Subkey` resolves. **Stdlib-only** (`crypto/hkdf` + `crypto/sha256`, both
-Go 1.26): it pulls zero non-stdlib deps, so it is the default KDF that keeps
-`pkg/v1/kdf` consumers dep-light.
+`crypto.Subkey` resolves. **Stdlib-only** (`crypto/hkdf`, in the standard
+library since Go 1.24, + `crypto/sha256`): it pulls zero non-stdlib deps, so it
+is the default KDF that keeps `pkg/v1/kdf` consumers dep-light.
 
 HKDF (RFC 5869) is for **key separation** — expanding one strong secret into
 independent, purpose-bound subkeys — **NOT** password stretching. It is fast by
@@ -33,8 +34,9 @@ sentinel `DerivationFailed`; it mints no codes of its own.
 
 ## Do NOT
 
-- Feed a human password here; HKDF does not stretch — use the (future) argon2id
-  password port for that.
+- Feed a human password here; HKDF does not stretch — use the password port
+  for that (`pkg/v1/password`: `pbkdf2pw`, or the opt-in argon2id in
+  `third-party/x-crypto/argon2id`).
 - Mint error codes here — derivation + dispatch errors live in `core/crypto`.
 
 ## Verification

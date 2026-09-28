@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/vfs/
 
 ## Purpose
@@ -18,7 +19,7 @@ either replaces it completely or changes nothing at all.
 | `WritableFS` | alias → `corevfs.WritableFS` | four write verbs on the embedded `FS`; frozen |
 | `AtomicWriter` | alias → `corevfs.AtomicWriter` | ADR 0039 sibling, reached by type assertion |
 | `FullFS` | alias → `corevfs.FullFS` | the union both constructors return |
-| `NewOS(root)` | func | confined to one tree; refuses at construction |
+| `NewOS(root)` | func | confined to one tree; refuses at construction; the filesystem also answers `io.Closer` by type assertion, releasing its directory descriptor |
 | `NewMem()` | func | a filesystem in a map; takes no arguments, on purpose |
 | `InvalidPath`, `InvalidPermission`, `PathEscaped`, `ReadFailed`, `WriteFailed`, `PublishFailed`, `NotRegularFile`, `DirectoryNotEmpty` | sentinels | re-exported from `internal/core/vfs` |
 | `RootUnavailable`, `DirectorySyncFailed` | sentinels | re-exported from `internal/service/vfs` |

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/batcher/
 
 ## Purpose
@@ -86,4 +87,7 @@ Tests: `batcher_external_test.go` (public contract: coalescing Flush, eager
 MaxItems / MaxWeight flush, wrapped deliver error, Close + final flush +
 Closed-after-Close + idempotent second Close, background ticker),
 `batcher_internal_test.go` (`weigh` count-only fallback, concurrent
-producers + flusher race, deliver-closure-controls-order proof).
+producers + flusher race, serial `Sink` invocation (V6), every `Add` accepted
+while `Close` runs is delivered, deliver-closure-controls-order proof),
+`batcher_bench_test.go` (cap-flush `Add`, uncontended and contended, and the
+empty `Flush` fast path — the numbers are in `BENCH.md`).

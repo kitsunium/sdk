@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/authz/
 
 ## Purpose
@@ -18,7 +19,7 @@ Code range: `0.2.26.*` (ADR 0057).
 | `authz.go` | `Policy func(ctx, RequestValue) (Decision, error)` · `Condition func(RequestValue) (bool, error)` |
 | `decision.go` | `Decision` + `Abstain` / `Allow` / `Deny` + `Granted` / `Valid` / `String` |
 | `request_value.go` | `RequestValue` + `NewRequestValue` + `Subject` / `Action` / `Resource` / `Attr` / `AttrCount` |
-| `attr_value.go` | `AttrKind` + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + the `(value, ok)` accessors and `Contains` |
+| `attr_value.go` | `AttrKind` (`KindInvalid` / `KindString` / `KindInt64` / `KindBool` / `KindStrings`) + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + `Key` / `Kind`, the `(value, ok)` accessors and `Contains` |
 | `codes.go` | `Code*` constants — range 0.2.26.* |
 | `errors.go` | `PermissionDenied` / `AttributeMissing` / `AttributeKindMismatch` / `PolicyMisconfigured` (`errs.Define`) |
 

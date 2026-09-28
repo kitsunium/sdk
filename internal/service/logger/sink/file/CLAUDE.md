@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-13T17:40:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/sink/file/
 
 ## Purpose
@@ -7,8 +7,12 @@ Terminal `Sink` that appends formatted bytes onto an on-disk file. Opens
 with `O_APPEND | O_CREATE | O_WRONLY` (+ `O_NOFOLLOW` on every Unix) so
 concurrent producers — and other processes appending to the same file —
 emit atomic records as long as the payload stays under `PIPE_BUF` on
-POSIX. Rotation is intentionally out of scope (compose with a future
-`sink/rotate` or lumberjack-style wrapper).
+POSIX. Rotation is out of scope here. The `file` writer
+(`internal/service/writer/file`) wraps this sink and never rotates; the
+`rotfile` writer (`internal/service/writer/rotfile`, ADR 0014, opt-in per
+ADR 0015) is a separate sink that owns its descriptor — a rotation closes,
+renames and reopens the path, which an append-only sink cannot — and carries
+its own copy of this hardening, re-run on every reopen.
 
 ## Contents
 
@@ -127,7 +131,7 @@ rows planted and fails on zero.
 
 - Place the log file under an attacker-writable directory; the hardening
   is TOCTOU-safe only when the directory tree is not world-writable.
-- Expect rotation — sink composition or out-of-band tooling owns that.
+- Expect rotation — the `rotfile` writer or out-of-band tooling owns that.
 
 ## Verification
 

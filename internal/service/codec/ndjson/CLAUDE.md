@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-14T16:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/ndjson/
 
 ## Purpose
@@ -22,11 +22,11 @@ Newline-delimited JSON: one JSON value per line, `\n`-separated. `Marshal` emits
 |---|---|---|
 | `0.3.11.1`   | `MarshalFailed`   | `encoding/json.Marshal` failed on a single record |
 | `0.3.11.2`   | `UnmarshalFailed` | `encoding/json.Unmarshal` failed on a single record OR a line exceeded `scannerMaxCapacity` |
-| `0.3.11.3`   | `ValueInvalid`    | argument is not a slice (Marshal/Append) or target is not a pointer to a slice (Unmarshal) |
+| `0.3.11.3`   | `ValueInvalid`    | argument is not a slice or an array (Marshal/Append) or target is not a pointer to a slice (Unmarshal) |
 
 ## Conventions
 
-- **Slice-only**: NDJSON models a stream of records, so a non-slice argument is a programming error caught by the `asSlice` / `asSlicePointer` reflect helpers.
+- **Slices and arrays only**: NDJSON models a stream of records, so `Marshal` / `Append` take a slice or an array (or a non-nil pointer to one) and `Unmarshal` a non-nil pointer to a slice; anything else is a programming error caught by the `asSlice` / `asSlicePointer` reflect helpers.
 - **Line-length cap**: max single-line length 10 MiB (`scannerMaxCapacity`) enforced by the hand-rolled splitter — bigger records likely indicate a consumer bug or corrupt stream.
 - **Append rollback**: on per-record failure `Append` returns `dst[:origLen]` so callers never see a torn buffer (Appender contract).
 - Empty / whitespace-only lines are skipped silently to match the de-facto NDJSON dialect.
@@ -39,7 +39,3 @@ Newline-delimited JSON: one JSON value per line, `\n`-separated. `Marshal` emits
 ```
 bazel test --config=race //internal/service/codec/ndjson:ndjson_test
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V53) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

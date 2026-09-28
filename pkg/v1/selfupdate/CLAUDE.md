@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/selfupdate/
 
 ## Purpose
@@ -15,7 +16,10 @@ service and `core/selfupdate` stay internal.
 | `Source` | type alias | `= svcupd.SourceValue` — one engine's parameters (ADR 0074) |
 | `Service` | type alias | `= svcupd.Service` — the engine handle (ADR 0074) |
 | `New` / `NewWithDeps` | func | delegate verbatim |
-| `Code*` | const | the eighteen codes, for `errs.HasCode` |
+| `StdinIsTerminal()` | func | whether a human could answer a prompt on stdin — the `interactive` argument `Source.AuthoriseUnattendedUpgrade` takes |
+| `CandidateListSentinel` | const | the tag value meaning "list the candidates", which a CLI flag taking an optional value must spell exactly |
+| `Code*` | const | all 25 codes, for `errs.HasCode` — the contract's eighteen (`0.2.34.*`) and the implementation's seven (`0.3.66.*`) |
+| `NoVendorKey` … `ElevationFailed` | var | the 25 sentinels, one per code, for `errors.Is`; each keeps its `*errs.Error` |
 
 The codes are re-exported deliberately, following `pkg/v1/authz`: a consumer of
 THIS domain must distinguish a transient failure from a supply-chain refusal, and

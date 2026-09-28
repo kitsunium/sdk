@@ -1,10 +1,12 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/resilience/
 
 ## Purpose
 
 Declares the **reliability port**: the ctx-aware `Operation` and the composable
-`Runner` interface every policy (retry, circuit-breaker, rate-limit, bulkhead,
-timeout, fallback, hedging) satisfies, plus the typed outcome sentinels. A core
+`Runner` interface every policy (retry, circuit-breaker, rate-limit, keyed
+rate-limit, bulkhead, timeout, fallback, hedging) satisfies, plus the typed
+outcome sentinels. A core
 sibling admitted by **ADR 0026** (Phase-B wave). Policies are concrete and live in
 `internal/service/resilience`; this package owns only the contract + sentinels,
 so policies compose by nesting: `Retry(Breaker(Timeout(op)))`.
@@ -28,7 +30,7 @@ Code range: `0.2.8.*` (ADR 0026).
 - **The port says nothing about idempotence, and deliberately so.** Only the
   hedging policy runs an `Operation` concurrently with itself; every other one
   runs it at most once at a time, so hoisting an idempotence requirement into
-  the port would tax six policies for one. The requirement lives where it
+  the port would tax seven policies for one. The requirement lives where it
   applies, as `service/resilience.HedgeConfig.Idempotent` — a mandatory,
   greppable, in-code assertion rather than a doc comment (see that package's
   `CLAUDE.md` §Hedging).

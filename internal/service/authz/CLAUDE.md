@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/authz/
 
 ## Purpose
@@ -84,6 +85,10 @@ emits a core sentinel from `0.2.26.*`).
 - **There is no `Always` condition.** An unconditional rule is a grant with no
   reason; the caller who wants one writes the predicate at the call site, where
   it appears in the diff and in review.
+- **A caller's slice is cloned before a closure captures it**: `DenyOverrides`,
+  `NewABAC` and `checkedMembers` (behind `AllOf` / `AnyOf`) keep a
+  `slices.Clone`, so an append the caller makes afterwards cannot rewrite a live
+  policy or condition (3 occurrences).
 
 ## Do NOT
 

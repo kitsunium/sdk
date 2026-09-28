@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -8,10 +9,11 @@ process that already exists.
 
 ## Layering & deps
 
-- Imports: stdlib (`os`, `os/user`, `syscall`, `context`, `sync`, `time`,
-  `strconv`, `errors`) + `internal/core/proc` + `internal/kernel/errs` +
-  `internal/service/proc/childwait` (Unix files only). No `golang.org/x/sys`,
-  no `pkg/*`.
+- Imports: stdlib (`os`, `os/exec`, `os/user`, `syscall`, `context`, `sync`,
+  `time`, `strconv`, `strings`, `errors`, `io`, `io/fs`, `path/filepath`, and
+  `unsafe` in `joblimits_windows.go`) + `internal/core/proc` +
+  `internal/kernel/errs` + `internal/service/proc/childwait` (Unix files only).
+  No `golang.org/x/sys`, no `pkg/*`.
 - Returns `coreproc.Process` (the port interface); the concrete `handle` type is
   unexported.
 - Every error is a central `coreproc` sentinel — wrapped via the local
@@ -28,15 +30,20 @@ process that already exists.
 | `lookpath.go` | `unix \|\| windows` | `resolveSpec`: a bare `Spec.Path` searched in the CHILD's PATH (Spec.Env's, else the parent's), os/exec's rules — first executable wins, a relative match is `exec.ErrDot`, none is `exec.ErrNotFound`, both wrapped in `SpawnFailed`; argv[0] keeps the name as written |
 | `lookpath_unix.go` / `lookpath_windows.go` | per OS | the candidate spellings (PATHEXT on Windows), what "executable" means (an execute bit / the extension), and how variable names compare (case-insensitive on Windows) |
 | `handle_unix.go` | `unix` | the `handle` value: `PID`/`Wait`/`Signal`/`SignalGroup`/`Stop`, once-only reap through `collectExit` (claim first, own wait, `Reclaim` on ECHILD — it takes a `waiter`, the process's own wait and nothing else; `releaser` adds the handle release an aborted spawn needs), exit translation (`exitValue`), stdio-copier join |
-| `stdio_unix.go` | `unix` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) |
+| `stdio.go` | `unix \|\| windows` | `buildStdio`: wires `Spec.Stdio` (inherit/null/capture) to `ProcAttr.Files`; capture pipes + copier goroutines joined by `Wait` (100% delivery, no leak) |
+| `trampoline_unix.go` | `unix` | the re-exec trampoline (`installTrampoline`, `childHandshakeFD`) — see below |
+| `handshake_unix.go` | `unix` | the parent side of the trampoline's status pipe and `handshakeError` (status byte → sentinel) |
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
 | `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
 | `cgroup_placement_linux.go` | `linux` | `validateCgroupPath` (pre-spawn: missing/not-a-cgroup ⇒ `CgroupUnavailable`) + `applyCgroupPlacement` (trampoline writes pid → `cgroup.procs`) |
 | `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
+| `limittable_as.go` / `limittable_openbsd.go` | `unix && !openbsd` / `openbsd` | `addPlatformLimits`: `RLIMIT_AS` where the stdlib exports it; nothing on OpenBSD, whose kernel has none, so `ResourceAS` is `UnknownResource` there |
+| `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go` | `unix` except / only on `386 \|\| arm \|\| mips \|\| mipsle` | `maxRSSKB`: `Rusage.Maxrss` as `int64`, widened from the `int32` those four 32-bit targets declare |
+| `rlimit_value_default.go` / `rlimit_value_signed.go` | `unix && !freebsd && !dragonfly` / `freebsd \|\| dragonfly` | `makeRlimit`: the `syscall.Rlimit` field type (see Cross-platform below) |
 | `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
-| `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
+| `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,CgroupUnavailable,StdioCapture,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
 
 ## Spawn semantics
 
@@ -196,10 +203,16 @@ both descriptor and exec costs, neither of them this package's own code.
 
 ## Tests
 
-`exec_external_test.go` (black-box) covers the ADR acceptance criteria:
-group-kill leaves no survivor, `Stop` escalates `SIGTERM`→`SIGKILL` for a child
-that ignores `SIGTERM`, `Wait` reports the exact normal/signalled status, plus
-the typed-error contracts (`InvalidSpec`, `UnknownUser/Group`,
-`UnknownResource`, `RlimitFailed`, context cancellation). Spawn tests are gated
-on a `/bin/sh` probe and skip cleanly where the host cannot run them; the
-typed-error tests hold on every platform.
+`exec_unix_external_test.go` (black-box, `unix`) spawns real children through
+`/bin/sh`: the refusals checked before any OS work (a cancelled context,
+`InvalidSpec`, `UnknownResource`, a cgroup path that is no control group —
+`CgroupUnavailable` on Linux, `UnsupportedPlatform` elsewhere), limits read
+back from inside the child, trampoline failures arriving typed (`RlimitFailed`
+/ `SpawnFailed`), `ExtraFiles` keeping fd 3 through the trampoline, a nil
+`Spec.Env` leaking nothing, and the three stdio modes. The handle is pinned
+white-box in `handle_unix_internal_test.go`: `Stop` escalates
+`SIGTERM`→`SIGKILL` for a child that ignores `SIGTERM`, `SignalGroup` reaches a
+grandchild, `Wait` is memoised, and a signalled exit reports code −1;
+`creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
+`exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
+not found) and `exec_other_test.go` the `UnsupportedPlatform` stub.

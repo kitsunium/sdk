@@ -1,11 +1,13 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/resilience/
 
 ## Purpose
 
 Concrete reliability policies implementing `core/resilience.Runner`: retry,
 circuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging. Each
-constructor returns a Runner; policies compose by nesting. Stdlib + kernel `clock` only — **no vendor
-deps**, cross-OS portable. Wraps outcomes in the `core/resilience` sentinels.
+constructor returns a Runner; policies compose by nesting. Stdlib + kernel
+`clock` and `errs` + the `core/resilience` port only — **no vendor deps**,
+cross-OS portable. Wraps outcomes in the `core/resilience` sentinels.
 ADR 0026.
 
 ## Contents
@@ -21,7 +23,7 @@ ADR 0026.
 | `timeout.go` | timeout | `context.WithTimeout`, `TimeoutExceeded`; non-positive `d` refused (ADR 0031) |
 | `fallback.go` / `fallback_config.go` | fallback | secondary `Operation` on primary failure; `FallbackFailed` carries BOTH errors; nil `Fallback` refused (ADR 0031) |
 | `hedge.go` / `hedge_config.go` / `hedge_race.go` / `hedge_outcome.go` | hedging | duplicate copies raced after `Delay`, first success wins; a copy's panic re-raised on the caller's goroutine with its original value; `Idempotent`/`Delay`/`MaxInFlight` refused, `MaxHedges`→1 (ADR 0031) |
-| `wrap.go` | — | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause as a field |
+| `wrap.go` | — | `wrapAs(sentinel, cause)` (sentinel origin-wins + cause as a field) over `wrapAsFields(sentinel, fields...)`, the one builder every outcome goes through, `FallbackFailed`'s two halves included |
 | `retryable.go` | — | `isRetryable(pred, err)` — nil-predicate default shared by retry + breaker |
 | `misconfigured.go` | — | `newMisconfigured(policy, knob)` — refuses every call with `PolicyMisconfigured` (ADR 0031) |
 
@@ -46,7 +48,7 @@ ADR 0026.
   the `RetryExhausted` relabel; the breaker folds it into neither the failure
   count nor the success path, so it cannot trip an Open nor close a HalfOpen.
 - **Reject mode** for bulkhead/ratelimit in v1 (no queuing/waiting — deferred).
-- Cross-OS: 100 % portable (context/time/sync/atomic).
+- Cross-OS: 100 % portable (context/time/sync, no syscall).
 
 ## Backoff — one curve, published
 
@@ -91,7 +93,7 @@ pushes active ones out, and a key pushed out comes back with a full bucket.
 ## Fallback — which error survives a double failure
 
 A fallback that also fails poses the only question the policy really has: which
-error does the caller get? **Both.** `Run` returns the package's own
+error does the caller get? **Both.** `Run` returns the `core/resilience`
 `FallbackFailed` sentinel with the two messages attached as the `primary` and
 `fallback` fields.
 

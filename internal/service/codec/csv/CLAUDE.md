@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/csv/
 
 ## Purpose
@@ -21,7 +21,7 @@ CSV codec wrapping stdlib `encoding/csv`. Models the wire format as a `[][]strin
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.8.1`    | `MarshalFailed`   | `encoding/csv.Writer.WriteAll` returned an error |
-| `0.3.8.2`    | `UnmarshalFailed` | `encoding/csv.Reader.ReadAll` returned an error |
+| `0.3.8.2`    | `UnmarshalFailed` | `encoding/csv.Reader.Read` returned an error (`readAllPreSized` reads record by record) |
 | `0.3.8.3`    | `ValueInvalid`    | argument is not `[][]string` / target is not `*[][]string` |
 
 ## Conventions

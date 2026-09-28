@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/i18n/
 
 ## Purpose
@@ -47,8 +48,10 @@ application's, because it needs to know what the product says.
 - **`Catalog` is FROZEN at two methods.** `pkg/v1/i18n` aliases it and Go
   interfaces are structural, so a third method breaks every downstream
   two-method double at compile time with no deprecation window (ADR 0039).
-  `TestCatalogIsFrozenAtTwoMethods` is a package-level double in
-  `internal/service/i18n` and is the executable guard.
+  The executable guard is a package-level assertion in
+  `internal/service/i18n`'s `store_external_test.go` —
+  `var _ corei18n.Catalog = twoMethodDouble{}` — which stops that file
+  compiling if a third method is added.
 - **`Lookup` is EXACT.** No fallback, no parent truncation, no plural
   selection. All three are policy, and a Catalog that decided them would decide
   them invisibly for every caller. The walk lives in exactly one place —

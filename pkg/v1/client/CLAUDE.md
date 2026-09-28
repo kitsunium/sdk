@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-03T00:00:00Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/client/
 
 ## Purpose
@@ -12,8 +12,8 @@ constructors. No logic lives here.
 
 | Symbol | Role |
 |---|---|
-| `Client`, `New` | the guarded client; a nil policy is refused |
-| `Config` | typed configuration (`json` tags, `Duration` accepts `"5s"`) |
+| `Client`, `New` | the guarded client; `New(cfg, id, policy, hook)` takes a `tlsid.Identity`; a nil policy is refused |
+| `Config`, `Duration` | typed configuration (`json` tags; a `Duration` accepts `"5s"`) |
 | `Response` | fully-read response: `Status`, `Header`, `Body` |
 | `Policy`, `PolicyFunc`, `RequestInfo` | the authorisation port |
 | `AllowMethods`, `AllowPaths`, `DenyPaths`, `Policies` | ready-made policies |
@@ -23,10 +23,11 @@ constructors. No logic lives here.
 ## Why-this-shape
 
 - **The guarantee lives in the transport, so `Client.HTTP()` is safe to hand
-  out.** That is the whole reason the check is not in `Do`. `TestPolicyIsEnforcedInTheTransport`
-  forges a `DELETE` through the raw `*http.Client` and asserts it is refused
-  *and* that the upstream was never contacted. It is mutation-checked: moving
-  the check out of the `RoundTripper` fails it.
+  out.** That is the whole reason the check is not in `Do`. `TestClient_HTTP`
+  (`internal/service/net/client/client_external_test.go`) forges a `DELETE`
+  through the raw `*http.Client` and asserts it is refused *and* that the
+  upstream was never contacted. It is mutation-checked: moving the check out of
+  the `RoundTripper` fails it.
 - **Every default is closed** — nil policy, empty conjunction, empty path
   allowlist, empty method set all refuse. An allowlist that lost its contents
   must close, never become a passthrough.

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/entitlement/
 
 ## Purpose
@@ -129,8 +130,9 @@ What this package owes is a deadline that can be acted on **without polling**:
 | `Grant.NotAfter` | to DISPLAY what the verification recorded, which is the zero instant when it recorded none |
 
 Reading the field to schedule on is the mistake the method exists to prevent:
-`serve.go` seeds a grant from a bare timestamp at start-up, so `NotAfter` is
-genuinely zero there and the deadline the SDK applies is
+a grant a consumer seeds from a bare timestamp at start-up (the case the
+`NotAfter` field's doc comment names; no such caller lives in this repository)
+has a genuinely zero `NotAfter`, and the deadline the SDK applies is
 `VerifiedAt + RosterLifetime`. `Expired` used to be the only place that
 fallback existed.
 
@@ -150,5 +152,6 @@ from the repository root. Do **not** hand-edit it.
 ## Verification
 
 ```sh
+bazel test --config=race //pkg/v1/entitlement:entitlement_test
 bazel test --config=race //internal/service/entitlement:entitlement_test
 ```

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/proc/cgroup/
 
 ## Purpose
@@ -5,8 +6,9 @@
 Creates and manages **cgroup v2** control groups to confine a process tree's
 memory / CPU / pids / IO, for the OS process-supervision domain (ADR 0016). It
 implements the `core/proc.Group` port against the unified cgroup v2 hierarchy at
-`/sys/fs/cgroup`. **Stdlib-only** (`os`, `path/filepath`, `strconv`, `errors`,
-`syscall`) plus `internal/kernel/errs` — no `golang.org/x/sys`.
+`/sys/fs/cgroup`. **Stdlib-only** (`os`, `path/filepath`, `strconv`, `strings`,
+`errors`, `syscall`, and `sync` / `unsafe` in the Windows and FreeBSD backends)
+plus `internal/core/proc` and `internal/kernel/errs` — no `golang.org/x/sys`.
 
 ## Contents
 
@@ -65,9 +67,10 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
   returns `UnsupportedPlatform` (darwin, OpenBSD, NetBSD, DragonFly). Every GOOS
   compiles.
 - Unprivileged hosts without cgroup delegation degrade gracefully to
-  `CgroupUnavailable` — never a panic. The acceptance test gates the live
-  confinement path behind `Available()` and `t.Skip`s with a reason otherwise,
-  still asserting the typed-error contract.
+  `CgroupUnavailable` — never a panic. The acceptance test
+  (`TestGroupConfinement`) gates the live confinement path behind
+  `Available()` and, where it is false, asserts the typed refusal (no handle,
+  `CgroupUnavailable`) instead of skipping.
 
 ## Performance — see `BENCH.md`
 
@@ -94,7 +97,7 @@ floor; the difference is cgroupfs.
 
 ## Do NOT
 
-- Call `errs.Define` — all 22 codes live in `core/proc`. Restate the sentinel
+- Call `errs.Define` — all 23 codes live in `core/proc`. Restate the sentinel
   fields in `errs.Wrap` instead.
 - Support cgroup v1 — only the unified v2 hierarchy is in scope (ADR 0016).
 - Assume the top-level mount is writable; always probe (and prefer `WithRoot` to

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/ed25519sig/
 
 ## Purpose
@@ -10,8 +11,8 @@ default signature scheme that keeps `pkg/v1/sign` consumers dep-light.
 
 Ed25519 is the modern default: fixed-size keys (32-byte public, 64-byte
 private), 64-byte signatures, fast constant-time verification, and no parameter
-choices to misconfigure. ECDSA lands later under its own scheme package
-(`third-party/x-crypto/*` or a sibling), exactly as XChaCha20 followed aesgcm.
+choices to misconfigure. ECDSA P-256, the interoperable choice (JWT `ES256`,
+X.509), is the sibling scheme `ecdsasig`.
 
 ## Contents
 

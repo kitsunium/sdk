@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/aesgcm/
 
 ## Purpose
@@ -41,8 +42,8 @@ sentinels (`InvalidKey`, `DecryptionFailed`) and wraps a `crypto/rand` fault as
   It never distinguishes them.
 - **Nonce uniqueness** — one fresh random 96-bit nonce per `Seal`. With random
   nonces, AES-GCM's birthday bound caps safe message count per key around 2^32;
-  high-volume callers should prefer the (future) XChaCha20-Poly1305 scheme with
-  its 192-bit nonce.
+  high-volume callers should prefer the opt-in XChaCha20-Poly1305 scheme
+  (`xchacha20poly1305`, `third-party/x-crypto/xchacha`) with its 192-bit nonce.
 
 ## Do NOT
 

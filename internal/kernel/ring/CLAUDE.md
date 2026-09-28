@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/ring/
 
 ## Purpose
@@ -46,7 +46,7 @@ Match with `errs.HasCode(err, ring.CodeRingFull)` or `errors.Is(err, ring.Full)`
 ## Do NOT
 
 - Share a single `Queue[T]` across multiple producers or multiple consumers without external serialisation. The SPSC contract is a hard precondition, not a hint.
-- Spin in a tight loop on `TryRead` returning `Empty` without backoff — the consumer should wait on a wake signal from the producer (the async middleware uses a condvar).
+- Spin in a tight loop on `TryRead` returning `Empty` without backoff — the consumer should wait on a wake signal from the producer or yield between attempts (the async middleware's drainer checks its stop channel, then yields with `runtime.Gosched`).
 - Construct sentinels at the call site (`errs.Define(...)`) — reuse `ring.Full / Empty / CapZero` so identity-based comparisons stay zero-alloc.
 - Add `Blocking` / `Bounded` variants here without an ADR — admitting a second concurrency contract to the kernel is a layer-policy decision, not a drive-by.
 
@@ -59,4 +59,4 @@ cd internal/kernel && GOWORK=off go test -race -cover ./ring
 # coverage target: 90%
 ```
 
-Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`).
+Tests: `ring_external_test.go` (public contract: TryWrite/TryRead happy paths, full / empty sentinels, capacity reporting, Len snapshot, FIFO order, single-producer/single-consumer race coverage), `ring_internal_test.go` (cursor arithmetic, slot-clear-on-read, wrap-around at `cap+1`), `ring_bench_test.go` (the numbers in `BENCH.md`).

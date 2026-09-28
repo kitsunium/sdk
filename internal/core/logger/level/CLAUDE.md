@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/core/logger/level/
 
 ## Purpose
@@ -8,12 +8,12 @@ config layer need around them: the `Level int8` type with four constants
 (`Debug=-4`, `Info=0`, `Warn=4`, `Error=8`) and `String()`, the `Leveler`
 interface (`Level() Level`), the atomic `Var` holder (`NewVar`/`Set`/`Level`),
 and the canonical string parser `ParseLevel`. Signatures mirror `log/slog` for
-ergonomic familiarity. Code range `0.2.17.*` (ADR 0006); one sentinel emitted
+ergonomic familiarity. Code range `0.2.17.*` (ADR 0005); one sentinel emitted
 today — `LevelUnknown` (`0.2.17.1`) from `ParseLevel`.
 
 ## History — why it lives here, not in `kernel/`
 
-Moved out of `internal/kernel/` on 2026-04-19. The kernel rule is two-pronged: **stdlib-only AND generic**. `level` satisfies the first half (no external imports) but **fails the second half** — `Debug` / `Info` / `Warn` / `Error` are logger-domain vocabulary. The audit `.claude/contexts/sdk-layer-placement-audit.md` documents the move; the rule `kernel = stdlib-only AND generic` is enforced by review (not a linter today).
+Moved out of `internal/kernel/` on 2026-04-19. The kernel rule is two-pronged: **stdlib-only AND generic**. `level` satisfies the first half (no external imports) but **fails the second half** — `Debug` / `Info` / `Warn` / `Error` are logger-domain vocabulary. The audit `.claude/contexts/sdk-layer-placement-audit.md` documents the move. Of the rule `kernel = stdlib-only AND generic`, the stdlib-only half is asserted on the build graph by `scripts/check-layer-deps.sh` (ADR 0068); the generic half is enforced by review.
 
 Inlining `Level` into `internal/core/logger` was rejected because:
 - it would force a namespace collision (`logger.Level` next to `logger.Logger`),
@@ -23,19 +23,19 @@ Inlining `Level` into `internal/core/logger` was rejected because:
 ## Contents
 
 - `level.go` — `Level int8`, the four constants, `String()`.
-- `leveler.go` — `Leveler` interface (`Level() Level`); lets a gate hold either a live `Var` or a constant `Level`.
+- `leveler.go` — `Leveler` interface (`Level() Level`); lets a gate hold a live `Var` or any type that returns a fixed `Level` — `Level` itself has no `Level()` method, so it does not satisfy the interface.
 - `var.go` — `Var`, an atomic `Level` holder (`NewVar`/`Set`/`Level`) for runtime-adjustable thresholds.
 - `parse.go` — `ParseLevel(name) (Level, error)`, the canonical case-insensitive string→`Level` parser.
 - `unknown.go` — `CodeLevelUnknown` (`0.2.17.1`) + the `LevelUnknown` sentinel `ParseLevel` returns on an unknown name.
 - `level_compliance.go` — interface-assertion (`KTN-IFACE-ASSERT-PLACEMENT`).
 
-Tests: `level_external_test.go` (`String()` windows + `Debug < Info < Warn < Error` ordering), `parse_external_test.go` (parse + round-trip), `var_*_test.go` (concurrent `Var`), `leveler_*_test.go`.
+Tests: `level_external_test.go` (`String()` windows + `Debug < Info < Warn < Error` ordering), `parse_external_test.go` (parse + round-trip), `var_external_test.go` (concurrent `Var`, and `TestLeveler_Interface`).
 
 ## Conventions
 
 - **`Level` is `int8`** — arbitrary values are legal. Threshold windows: `[..,Info) → "DEBUG"`, `[Info, Warn) → "INFO"`, `[Warn, Error) → "WARN"`, `[Error, ..] → "ERROR"`. A value of `3` maps to `"INFO"`; `16` maps to `"ERROR"`.
 - **Constants are spaced `-4 / 0 / 4 / 8`** so downstream levels (`Trace = Debug - 4`, `Critical = Error + 4`) can interpolate without renumbering — same scheme as `log/slog`.
-- **Stdlib-only**; specifically, no `log/slog` import. `level` is the one package this SDK refuses to couple to slog's API.
+- **Stdlib-only**; specifically, no `log/slog` import. The rule binds all of kernel, core and service; `pkg/v1/logger/slogbridge` is the one package permitted to import slog (ADR 0032).
 - **`ParseLevel` is the one canonical parser.** It lives here (not in the calling layer) so every consumer — `logger.FromConfig`, `Var`, CLI flags — shares one string↔`Level` mapping and one `LevelUnknown` error. Serialisation (e.g. `MarshalJSON`) still stays out: that is a `pkg/v1/logger` concern.
 
 ## Do NOT
@@ -55,7 +55,3 @@ bazel test --config=race //internal/core/logger/level:level_test
 cd internal/core && GOWORK=off go test -race -cover ./logger/level/...
 # expected: 100% line coverage.
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V14) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

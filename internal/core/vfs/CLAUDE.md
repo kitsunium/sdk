@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/vfs/
 
 ## Purpose
@@ -79,10 +80,11 @@ Bits outside `fs.ModePerm` are refused **by name**, so that `0o4755` instead of
 - **No `Public` string here names a path.** A `Public` is read by third parties,
   and a path is the one piece of caller data a filesystem error is guaranteed to
   hold. It travels as a log-only field, reachable through `errs.FieldsOf`.
-- **`AtomicWriter` is a sibling, not a fifth method.** ADR 0039: `pkg/v1/vfs`
+- **`AtomicWriter` is a sibling, not a fifth write verb.** ADR 0039: `pkg/v1/vfs`
   aliases these interfaces, Go interfaces are structural, and widening
   `WritableFS` would break every downstream implementation at compile time with
-  no deprecation window. `TestWritableFSStaysFrozenAtFiveMethods` and
+  no deprecation window. `TestWritableFSStaysFrozenAtFiveMethods` (the four
+  write verbs plus the `Open` the embedded `fs.FS` brings) and
   `TestAtomicWriterIsASiblingAndNotAMember` are the guards.
 - **The two guards are shared, not reimplemented.** Both filesystems call them,
   which is what makes the memory one a faithful double rather than a different
@@ -90,7 +92,7 @@ Bits outside `fs.ModePerm` are refused **by name**, so that `0o4755` instead of
 
 ## Do NOT
 
-- **Do NOT add a fifth method to `WritableFS`.** New capability → new sibling
+- **Do NOT add a fifth write verb to `WritableFS`.** New capability → new sibling
   interface, reached by type assertion. See ADR 0039.
 - **Do NOT add `Walk`, `Glob`, `Sub` or any read verb.** They exist in `io/fs`
   and reach this port through the embedded `FS`.

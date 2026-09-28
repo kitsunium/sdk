@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/xml/
 
 ## Purpose
@@ -25,7 +25,7 @@ XML codec wrapping stdlib `encoding/xml`. Streaming Encoder/Decoder are forwarde
 
 ## Conventions
 
-- **Billion-Laughs bounded** by stdlib: `encoding/xml` does not expand external entities and rejects DOCTYPE declarations, so the classic XXE / entity-expansion DoS vector is inert. Asserted by `TestUnmarshal_BillionLaughsBounded` in `codec_external_test.go`. No additional hardening is layered on top.
+- **Billion-Laughs bounded** by stdlib: `encoding/xml` does not expand external entities and defines none of the entities a DOCTYPE declares — the declaration is skipped, and a reference to one of its entities is a syntax error (`invalid character entity`) — so the classic XXE / entity-expansion DoS vector is inert. Asserted by `TestUnmarshal_BillionLaughsBounded` in `codec_external_test.go`. No additional hardening is layered on top.
 - Stateless singleton.
 
 ## Performance (lib-bound)

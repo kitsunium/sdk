@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/cache/
 
 ## Purpose
@@ -161,7 +162,7 @@ without inventing the caller's requirement.
 
 ## Keys reach the log
 
-Error **fields** carry the key (log-only; ADR 0005 §4 keeps `Fields` out of
+Error **fields** carry the key (log-only; ADR 0002 §Semantics keeps `Fields` out of
 `Error()` and off the wire). A caller who puts a secret in a cache key has put
 that secret in their logs. Stated here because it is the kind of thing nobody
 discovers until an incident.

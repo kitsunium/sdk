@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-25T16:51:34Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/
 
 ## Purpose
@@ -45,6 +45,32 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `codec/json/`, `codec/yaml/`, `codec/toml/` | One format registered alone (ADR 0134): a blank import registers that codec and links its library, nothing else — where `codec/` links every format, the MongoDB driver included. Each exports `Format`, an untyped constant | `pkg/v1/codec/{json,yaml,toml}/README.md` |
 | `server/static/` | A file tree served over HTTP (ADR 0130): `New(fsys, Config)` → an `http.Handler` that cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types, and answers a refused NAME 404 and a failing tree 500. stdlib-only | `pkg/v1/server/static/README.md` |
 | `view/` | Server-side rendering (ADR 0058): `New(Config{FS: …})` → a `Renderer` you `Render(ctx, name, data)`, returning the complete document or nothing — it never takes an `io.Writer`, because a mid-execution failure would already have flushed the status line and half the page. The engine is the stdlib `html/template`, USED and not reimplemented: it is the only Go engine that escapes according to CONTEXT, and a hand-written escaper would be the security regression this domain exists to prevent. `text/template` has no representation at all and an AST audit fails the build on the import. **`TrustHTML` is the one bypass and the only spelling the SDK offers**; the other six html/template trust types are REFUSED in render data with the path named. **What it does NOT prevent is stated out loud: `TrustedHTML` is a type alias, so a `Trusted` the caller built wrongly is an XSS the SDK cannot see** — the domain prevents an accidental bypass and gives the deliberate one one greppable word. **Parse once**: reparsing per request costs 34× on a realistic tree. Stdlib-only, cross-OS | `pkg/v1/view/README.md` |
+| `logger/writer/` | Blank-import activation of the dependency-free logger writers `"console"`, `"file"` and `"rotfile"` (ADR 0012), so `logger.NewMulti` resolves those names; no exported symbols | `pkg/v1/logger/writer/README.md` |
+| `crypto/` | Authenticated encryption (ADR 0013): `NewKey` (exactly 32 bytes, redacting), `Seal` / `Open` with the nonce generated and hidden in the box, AES-256-GCM by default and `SealAs` for another `Algorithm` (`XChaCha20Poly1305` activates through its own blank import), `SealStream` / `OpenStream`, `WrapKey` / `UnwrapKey` passphrase envelopes (ADR 0014) | `pkg/v1/crypto/README.md` |
+| `agree/` | Key agreement (ADR 0014): `GenerateKey(X25519)` and `SharedKey(a, priv, peerPub, info)` → a `Key` of `KeyLen` bytes | `pkg/v1/agree/README.md` |
+| `hash/` | Digests: `New` / `Sum` / `SumHex` over `SHA256`, `SHA512`, `SHA3256`, `CRC32C` and `FNV1a64`, plus the streaming `NewDigestWriter` / `NewVerifyingReader` | `pkg/v1/hash/README.md` |
+| `kdf/` | Key derivation (ADR 0014): `Subkey(HKDFSHA256, …)` and `NewKeyTree`, a key hierarchy under one master `Key` | `pkg/v1/kdf/README.md` |
+| `mac/` | Message authentication (ADR 0014): `Tag` / `Verify` with `HMACSHA256` over a `Key` | `pkg/v1/mac/README.md` |
+| `password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id` | `pkg/v1/password/README.md` |
+| `sign/` | Signatures: `GenerateKey` / `Sign` / `Verify` over `Ed25519` and `ECDSAP256` | `pkg/v1/sign/README.md` |
+| `client/` | The outbound half of the network domain (ADR 0029): `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` (`AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies`) is enforced in the transport; a refusal is `RequestDenied` | `pkg/v1/client/README.md` |
+| `tlsid/` | TLS and mutual-TLS identities shared by `server` and `client` (ADR 0029): `New` for material in memory, `Load` for material on disk; `MaterialInvalid` | `pkg/v1/tlsid/README.md` |
+| `server/` | The inbound engine (ADR 0029): `New` → a `Server` of stream `Group`s and `PacketGroup`s configured by `GroupOption`s (`Listen`, `TLS`, the timeouts, `MaxConns`, `Shards`, …), `Chain` / `ChainPacket` middlewares, and a drain announced through `DrainSignal` rather than imposed (ADR 0043) under `WithDrainTimeout` | `pkg/v1/server/README.md` |
+| `server/sse/` | Server-Sent Events (ADR 0029, ADR 0043): `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` | `pkg/v1/server/sse/README.md` |
+| `server/websocket/` | WebSocket, RFC 6455 in the stdlib (ADR 0047): `Upgrade` → a `Conn`, the origin checked by default (`AllowOrigins` / `AllowAnyOrigin` widen it), frame and message ceilings, ping; `DrainSignal` | `pkg/v1/server/websocket/README.md` |
+| `proc/` | Capability preflight for the process domain (ADR 0016, ADR 0018): `Supported` / `MissingCapabilities` / `MustSupport` over `Capability`, and the `UnsupportedPlatform` a primitive returns where its OS has no secure mechanism | `pkg/v1/proc/README.md` |
+| `process/` | Spawn a child under explicit credentials in its own process group and session (ADR 0016): `Start` / `MustStart(ctx, Spec)` → a `Process` to wait on, signal and stop with a SIGTERM→SIGKILL escalation; and the running program itself — `Build` / `ParseBuild`, `Self` (ADR 0100) | `pkg/v1/process/README.md` |
+| `cgroup/` | Control groups (ADR 0016): `Create` / `MustCreate` → a `Group` (`WithRoot`), `Available` | `pkg/v1/cgroup/README.md` |
+| `memlimit/` | `Apply` derives the runtime soft memory limit from the control-group allowance governing this process and installs it, returning a `Limit` that names the allowance read, the limit applied and the `Source` that decided it (ADR 0075) | `pkg/v1/memlimit/README.md` |
+| `reaper/` | PID 1 / subreaper zombie collection (ADR 0016, ADR 0093): `New` → a `Reaper` (`WithOnReap`), `IsPID1`, `SetChildSubreaper` | `pkg/v1/reaper/README.md` |
+| `rlimit/` | Resource limits (ADR 0016): `Apply(pid, limits)` and `PrepareSysProcAttr` over `Resource` → `Limit`, `LimitInfinity` | `pkg/v1/rlimit/README.md` |
+| `sdlisten/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/sdlisten/README.md` |
+| `sdnotify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/sdnotify/README.md` |
+| `signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/signal/README.md` |
+| `git/` | What a branch changed and what a working tree is at (ADR 0076, ADR 0087, ADR 0100): `Resolve(ctx, Config)` → a `Resolution` that can say it does not know, `Head` → a `HeadState`, `GitDir`, `ShowFile` | `pkg/v1/git/README.md` |
+| `selfupdate/` | Replace the running binary with a newer signed release (ADR 0077): `New(version, Source)` → a `Service` that verifies the signature, THEN the digest, THEN writes to disk; no vendor key, no install (`NoVendorKey`) | `pkg/v1/selfupdate/README.md` |
+| `entitlement/` | A vendor-signed roster → a `Grant` (ADR 0079): `New` / `NewWithAnchors` / `NewWithGetter` → a `Service` over an `Identity` the caller brings (the ssh one is `third-party/entitlement`), anchors that are a list (ADR 0091), `BoundProver` (ADR 0092), `RequiresUpdate` / `UpdateRefusal` | `pkg/v1/entitlement/README.md` |
+| `gate/` | May this invocation run? (ADR 0080): `Decide(policy, path, verify)` → a `Decision` (`OutcomeAllow` / `OutcomeRefuse` / `OutcomeUpgrade`) from a `Policy`; it verifies nothing and exits nothing | `pkg/v1/gate/README.md` |
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -62,10 +88,12 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 ## Version freeze policy
 
 - `pkg/v1` signatures freeze on first `v1.0.0` tag. Breaking signature changes after the freeze go to `pkg/v2` (coexists with v1 until deprecation).
-- **Pre-1.0.0 precedent for breaking changes.** Two waves of breaking changes have already landed under `pkg/v1`:
+- **Pre-1.0.0 precedent for breaking changes.** Breaking changes land under `pkg/v1` while the module is v0 — ADR 0040 makes that a licence the commit must state, and it expires at v1. Among them:
   1. ADR 0002 errors-package MR — 4 breaking signature changes + 1 behaviour change (e.g. `NewText(Config{Writer: nil})` now returns `WriterRequired` instead of silently defaulting to stderr).
   2. PR #25 (`refactor!: drive ktn-linter phases 1-7 to zero issues`) — `baseenc.Encoding` migrated from untyped `string` constants to a typed `int` + `iota` block with `EncodingUnknown` as the zero-value sentinel. Caller code that compared `Encoding` to a string literal stopped compiling; the typed form makes typos catchable at the call site.
-- Both waves shipped before `v1.0.0`. **After v1.0.0 the policy hardens: no breaking changes in `pkg/v1`** — any further migrations go to `pkg/v2`. The pre-1.0 precedent does not authorise post-1.0 breakage.
+  3. PR #27 deleted the byte-level `codec/baseenc/` package itself (and `EncodingUnknown` with it) in favour of `codec.Marshal` dispatch — see Contents above.
+  4. ADR 0044 re-shaped the published `metrics` types onto the OpenTelemetry data model, citing ADR 0040.
+- All of them shipped before `v1.0.0`. **After v1.0.0 the policy hardens: no breaking changes in `pkg/v1`** — any further migrations go to `pkg/v2`. The pre-1.0 precedent does not authorise post-1.0 breakage.
 - Security fixes in `internal/*` propagate via minor bumps on the affected module without touching `pkg/v1` — the facade re-exports, it does not duplicate.
 
 ## Conventions
@@ -129,6 +157,32 @@ GOWORK=off go test -race -cover ./v1/...
 - `codec/jsonshape/` — see `pkg/v1/codec/jsonshape/CLAUDE.md`
 - `codec/json/`, `codec/yaml/`, `codec/toml/` — see their `CLAUDE.md`
 - `server/static/` — see `pkg/v1/server/static/CLAUDE.md`
+- `logger/writer/` — see `pkg/v1/logger/writer/CLAUDE.md`
+- `crypto/` — see `pkg/v1/crypto/CLAUDE.md`
+- `agree/` — see `pkg/v1/agree/CLAUDE.md`
+- `hash/` — see `pkg/v1/hash/CLAUDE.md`
+- `kdf/` — see `pkg/v1/kdf/CLAUDE.md`
+- `mac/` — see `pkg/v1/mac/CLAUDE.md`
+- `password/` — see `pkg/v1/password/CLAUDE.md`
+- `sign/` — see `pkg/v1/sign/CLAUDE.md`
+- `client/` — see `pkg/v1/client/CLAUDE.md`
+- `tlsid/` — see `pkg/v1/tlsid/CLAUDE.md`
+- `server/` — see `pkg/v1/server/CLAUDE.md`
+- `server/sse/` — see `pkg/v1/server/sse/CLAUDE.md`
+- `server/websocket/` — see `pkg/v1/server/websocket/CLAUDE.md`
+- `proc/` — see `pkg/v1/proc/CLAUDE.md`
+- `process/` — see `pkg/v1/process/CLAUDE.md`
+- `cgroup/` — see `pkg/v1/cgroup/CLAUDE.md`
+- `memlimit/` — see `pkg/v1/memlimit/CLAUDE.md`
+- `reaper/` — see `pkg/v1/reaper/CLAUDE.md`
+- `rlimit/` — see `pkg/v1/rlimit/CLAUDE.md`
+- `sdlisten/` — see `pkg/v1/sdlisten/CLAUDE.md`
+- `sdnotify/` — see `pkg/v1/sdnotify/CLAUDE.md`
+- `signal/` — see `pkg/v1/signal/CLAUDE.md`
+- `git/` — see `pkg/v1/git/CLAUDE.md`
+- `selfupdate/` — see `pkg/v1/selfupdate/CLAUDE.md`
+- `entitlement/` — see `pkg/v1/entitlement/CLAUDE.md`
+- `gate/` — see `pkg/v1/gate/CLAUDE.md`
 
 ## Before v1 — the shapes this layer publishes
 

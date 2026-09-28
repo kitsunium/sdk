@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/topic/
 
 ## Purpose
@@ -121,7 +122,7 @@ has already been abandoned.
   departure into a race whose panic lands in the publisher;
   `TestConcurrentPublishAndUnsubscribeNeverPanics` fails on it under `-race`.
 - Give `DeliveryConfig` a usable zero value, or default it inside `Subscribe`.
-  `TestSubscribeWithoutADeliveryPolicyRefuses` and
+  `TestSubscribeWithoutADeliveryConfigRefuses` and
   `TestTheZeroDeliveryConfigIsTheUnsetMode` are the two guards.
 - Deliver while holding the membership lock. See §"Leaving during a fan-out";
   `TestUnsubscribeReleasesAPublisherBlockedOnThatSubscriber` deadlocks on it.

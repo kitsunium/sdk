@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/metrics/
 
 ## Purpose
@@ -76,7 +77,7 @@ visible aggregated overflow series.
   `Int64("v", 1)` are two series. The four constructors are the only way to
   build one; a struct literal leaves `AttrKindInvalid`, which is refused.
 - **stdout is opt-in**: `NewTextExporter(name, os.Stdout)` binds it explicitly;
-  neither registered exporter ever does (ADR 0030).
+  none of the three registered exporters ever does (ADR 0030).
 - **`Snapshot` groups by instrument name**, each name holding one metric
   envelope whose `Points` are sorted by attribute set — the shape a per-series
   exporter consumes without regrouping, and the shape an OTLP encoder walks
@@ -92,8 +93,9 @@ visible aggregated overflow series.
   test for it without importing anything internal.
 - **The Prometheus exporter is a deliberately LOSSY connector**, and the
   sentinels that say so are re-exported for the same reason the overflow key is.
-  It refuses a delta snapshot (`UnsupportedTemporality`) and a name the format
-  cannot spell (`InvalidMetricName`/`InvalidLabelName`/`ReservedLabelName`) —
+  It refuses any snapshot that is not cumulative (`UnsupportedTemporality`: a
+  delta one, or a hand-built one whose temporality was left unresolved) and a
+  name the format cannot spell (`InvalidMetricName`/`InvalidLabelName`/`ReservedLabelName`) —
   including an OTel-conventional DOTTED attribute key — rather than
   transliterating, which would merge distinct instruments silently. Full list of
   losses: `internal/service/metrics/CLAUDE.md` §What the Prometheus connector

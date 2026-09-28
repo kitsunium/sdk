@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/snapshot/
 
 ## Purpose
@@ -44,7 +45,3 @@ bazel test --config=race //internal/kernel/snapshot:snapshot_test
 # zero-alloc gate runs HORS race (race instrumentation perturbs allocs):
 bazel test --config=pure //internal/kernel/snapshot:snapshot_test
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V10) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

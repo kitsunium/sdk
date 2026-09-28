@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-25T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/multipart/
 
 ## Purpose
@@ -10,8 +10,8 @@ dependencies**.
 Unlike every other codec in this tree, the format is a **container**, not a
 value serialisation: it frames a list of named sections, each with its own
 headers. Its native Go shape is therefore `FormValue` (a delimiter plus
-`[]PartValue`), and it is the first codec here to implement
-`core/codec.StreamingCodec` because the format exists to *not* be loaded whole.
+`[]PartValue`), and it implements `core/codec.StreamingCodec` because the
+format exists to *not* be loaded whole.
 
 ## Surface
 
@@ -34,7 +34,7 @@ application/json` carrying `encoding/json`'s output. `Unmarshal` reverses it —
 a `*FormValue` target gets the whole container, any other non-nil pointer gets
 the `_json` part decoded into it. `baseenc` is the in-tree precedent for a
 JSON-mediated pipeline; doing it *inside* the codec is what lets
-`codec.Marshal(codec.Multipart, anyValue)` hold without adding a sixth entry to
+`codec.Marshal(codec.Multipart, anyValue)` hold without adding a seventh entry to
 `pkg/v1/codec/promote.go`'s constrained-codec table.
 
 ## The boundary problem

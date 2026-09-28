@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # internal/service/sql/
 
 ## Purpose
@@ -132,12 +133,15 @@ Code range: `0.3.54.*` (ADR 0055).
 - **No `Public` describes infrastructure.** A failed dial names the host, the
   port and often the user; a failed statement names the statement. Every
   `Public` is a fixed literal naming the *class* of failure, pinned by
-  `TestNoPublicMessageDescribesInfrastructure`.
+  `pkg/v1/sql`'s `TestNoPublicMessageReachesTheConsumerWithInfrastructure`,
+  which scans these seventeen beside `core/sql`'s five (`core/sql`'s own
+  `TestNoPublicMessageDescribesInfrastructure` scans only those five).
 
 ## A partially applied migration — what is guaranteed on which engine
 
-Each migration runs in **its own transaction**, and its version-table row is
-written by that **same** transaction on that **same** `Executor`.
+Each migration runs in **its own transaction** — on SQLite, its own savepoint
+of the run's one transaction — and its version-table row is written by that
+**same** transaction or savepoint on that **same** `Executor`.
 
 | Engine | Transactional DDL | A failed migration leaves |
 |---|---|---|
@@ -214,8 +218,10 @@ never because a finding was inconvenient:
   `driver.Driver` is the supported way to exercise this package.
 - **Add a `Commit` or `Rollback` to `scopedExecutor`.** The absence is the
   design.
-- **Render SQL anywhere but `dialect_sql.go`.** Adding a fourth engine must not
-  be possible by forgetting a file.
+- **Render dialect-specific SQL anywhere but `dialect_sql.go`.** The
+  version-table statements `migrate_table.go` builds read the same on all
+  three engines and take their placeholders from `dialect_sql.go`. Adding a
+  fourth engine must not be possible by forgetting a file.
 - **Use `time.Now`, `time.After` or `time.Sleep`.** Take the injected clock.
 - **Read a driver error into a `Public`.** Join it; never rephrase it.
 - **Interpolate anything a caller supplied into SQL** other than the

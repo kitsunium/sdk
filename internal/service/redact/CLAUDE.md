@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/redact/
 
 ## Purpose
@@ -9,7 +10,7 @@ facade: `pkg/v1/redact`.
 
 Stdlib (`encoding/json` for the wire form of a value, `encoding/json/jsontext`
 to stream a document, `reflect`, `regexp`) plus `internal/core/logger` for the
-attribute shape. Code range `0.3.73.*`.
+attribute shape and `internal/kernel/errs`. Code range `0.3.73.*`.
 
 ## Contents
 

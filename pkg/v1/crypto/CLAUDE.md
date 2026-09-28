@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/crypto/
 
 ## Purpose
@@ -14,9 +15,15 @@ rendered to `README.md` by gomarkdoc — edit the doc comment, not the README.
 ## Contents
 
 ```
-crypto.go  — Key / Algorithm aliases, KeyLen + AESGCM consts, NewKey,
-             Seal / SealAs / Open + SealStream / OpenStream; blank-imports the
-             aesgcm + streamaead activators
+crypto.go  — Key alias + Algorithm defined type, KeyLen + AESGCM +
+             XChaCha20Poly1305 consts, NewKey, Seal / SealAs / Open +
+             SealStream / OpenStream + WrapKey / UnwrapKey; blank-imports the
+             aesgcm + streamaead activators, delegates the envelope to
+             internal/service/crypto/keyenvelope
+crypto_external_test.go — facade tests (round trips, non-oracle Open, stream
+             vs box versions, redaction, the V104 defined-type check)
+crypto_bench_test.go    — the benchmarks BENCH.md is generated from
+BENCH.md   — generated cost report; carries the crypto family's choice table
 README.md  — generated from the package doc comment (make docs-readme)
 ```
 
@@ -34,14 +41,20 @@ The streaming scheme (`internal/service/crypto/streamaead`) is **stdlib-only**
 
 ## Conventions
 
-- **Aliases, not new types.** `Key` / `Algorithm` are `= internal/core/crypto`
-  aliases — identity-equal to the internal model, zero runtime cost.
-- **Thin wrappers.** `NewKey` / `Seal` / `SealAs` / `Open` nil-validate-free
-  delegate to the core dispatcher; no crypto logic lives here.
+- **`Key` is an alias, `Algorithm` a defined type.** `Key = corecrypto.Key` is
+  identity-equal to the internal model. `Algorithm` is a type of its own over
+  `corecrypto.Algorithm`, converted at the call into core, so a hash, MAC or
+  signature constant does not compile into `SealAs` (V104).
+- **Thin wrappers.** `NewKey` / `Seal` / `SealAs` / `Open` / `SealStream` /
+  `OpenStream` delegate to the core dispatcher, `WrapKey` / `UnwrapKey` to the
+  `keyenvelope` service (ADR 0014 §D3: PBKDF2-SHA256 KEK, AES-256-GCM box,
+  `$kenv$` string); no crypto logic lives here.
 - **Default scheme via blank import.** `crypto.go` blank-imports
   `internal/service/crypto/aesgcm`; that is the only thing wiring the default
-  algorithm, and it is stdlib-only. Future schemes (XChaCha20-Poly1305) activate
-  via their own blank import — never auto-pulled here, to preserve dep-light.
+  algorithm, and it is stdlib-only. `XChaCha20Poly1305` is only a name here:
+  the scheme registers when the consumer blank-imports
+  `third-party/x-crypto/xchacha` (which alone pulls `golang.org/x/crypto`) —
+  never auto-pulled here, to preserve dep-light.
 - **The nonce is never in the API.** `Seal` generates and embeds it; `Open`
   strips it. There is no nonce parameter.
 - **`Open` is non-oracle.** Every failure returns the same `DecryptionFailed`.
@@ -68,7 +81,3 @@ bazel test --config=race //pkg/v1/crypto:crypto_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./crypto/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V82) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

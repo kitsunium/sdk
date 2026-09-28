@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/middleware/route/
 
 ## Purpose
@@ -30,7 +30,8 @@ Use case: send `Error+` records to a remote alerting drain while keeping
 - `Write` forwards to the first matching `Sink`. Misses fall through to
   the fallback, then to `NoMatch`.
 - `Flush` / `Close` walk every entry + the fallback and aggregate per-sink
-  errors via `errors.Join`.
+  errors via `errors.Join`; a sink shared by two entries, or by an entry and
+  the fallback, is flushed and closed once.
 
 ## Error catalogue — range 0.3.18.\*
 
