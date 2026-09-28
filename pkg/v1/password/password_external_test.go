@@ -156,15 +156,24 @@ func TestAlgorithmIsDomainDefinedType_V104(t *testing.T) {
 // latter is a length rule's.
 func TestIsCommon(t *testing.T) {
 	t.Parallel()
-	for pw, want := range map[string]bool{
-		"password":                          true,
-		"Qwerty":                            true,
-		"123456":                            true,
-		"correct horse battery staple 1729": false,
-		"":                                  false,
-	} {
-		if got := password.IsCommon([]byte(pw)); got != want {
-			t.Errorf("IsCommon(%q) = %v, want %v", pw, got, want)
+	type tc struct {
+		password string
+		common   bool
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := password.IsCommon([]byte(c.password)); got != c.common {
+			t.Errorf("IsCommon(%q) = %v, want %v", c.password, got, c.common)
 		}
+	}
+	//: every case, the same way.
+	for _, c := range []tc{
+		{password: "password", common: true},
+		{password: "Qwerty", common: true},
+		{password: "123456", common: true},
+		{password: "correct horse battery staple 1729", common: false},
+		{password: "", common: false},
+	} {
+		runCase(t, c)
 	}
 }

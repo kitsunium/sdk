@@ -29,11 +29,12 @@ alias(
 
 go_test(
     name = "jsonpatch_test",
-    srcs = ["jsonpatch_external_test.go"],
-    deps = [
-        ":jsonpatch",
-        "//internal/kernel/errs",
+    srcs = [
+        "jsonpatch_external_test.go",
+        "tree_internal_test.go",
     ],
+    embed = [":jsonpatch"],
+    deps = ["//internal/kernel/errs"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

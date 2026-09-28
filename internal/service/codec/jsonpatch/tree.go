@@ -15,6 +15,19 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// The FNV-1a 64-bit parameters the digests are built with, and the width of
+// the integers they take in.
+const (
+	// fnvOffset is FNV-1a's offset basis.
+	fnvOffset uint64 = 14695981039346656037
+	// fnvPrime is FNV-1a's prime.
+	fnvPrime uint64 = 1099511628211
+	// uint64Bytes is how many bytes an integer adds to a digest.
+	uint64Bytes int = 8
+	// byteBits is how far the next byte of an integer is shifted.
+	byteBits uint = 8
+)
+
 // node is one JSON value.
 type node struct {
 	// fields holds an object's members by name.
@@ -25,6 +38,11 @@ type node struct {
 	names []string
 	// items are an array's elements.
 	items []*node
+	// sum is a digest of the value that two equal values share: equal
+	// compares it first, so two values that differ are told apart in one
+	// comparison however large they are, and aligning two arrays costs one
+	// comparison a pair of elements rather than a walk of both.
+	sum uint64
 	// kind is the value's kind, as jsontext names it: 'n', 'f', 't', '"',
 	// '0', '{' or '['.
 	kind jsontext.Kind
@@ -74,8 +92,114 @@ func readValue(dec *jsontext.Decoder) (*node, error) {
 	//: null, true or false: the kind is the value.
 	default:
 	}
+	//: the digest, from the children's, once the value is whole.
+	if err == nil {
+		value.sum = digest(value)
+	}
 	//: nil, or the decoder's refusal inside a container.
 	return value, err
+}
+
+// digest returns the digest of n, whose children already have theirs: the
+// kind, then what equal compares — a string's text, a number's sign, digits
+// and power of ten (every zero alike), an array's elements in order, an
+// object's members as a sum, so that their order changes nothing.
+func digest(n *node) uint64 {
+	h := fnvByte(fnvOffset, byte(n.kind))
+	switch n.kind {
+	//: the unescaped text.
+	case '"':
+		//: the string.
+		return fnvString(h, n.text)
+	//: the number, reduced as sameNumber reduces it.
+	case '0':
+		//: sign, digits, power of ten.
+		return numberDigest(h, n.text)
+	//: the elements' digests, in order.
+	case '[':
+		//: each element.
+		for _, item := range n.items {
+			h = fnvUint(h, item.sum)
+		}
+		//: the array.
+		return h
+	//: the members' digests, summed, so their order does not count.
+	case '{':
+		var members uint64
+		//: each member: its name, with its value.
+		for name, value := range n.fields {
+			members += mix(fnvString(fnvOffset, name) ^ mix(value.sum))
+		}
+		//: the object.
+		return fnvUint(fnvUint(h, uint64(len(n.fields))), members)
+	//: null, true, false: the kind is the value.
+	default:
+		//: the literal.
+		return h
+	}
+}
+
+// numberDigest adds a number's sign, digits and power of ten to h, every zero
+// alike, so that two numbers sameNumber calls one share it.
+func numberDigest(h uint64, text string) uint64 {
+	negative, digits, exponent, ok := canonical(text)
+	switch {
+	//: not a number jsontext accepted — unreachable — as written.
+	case !ok:
+		//: the text.
+		return fnvString(h, text)
+	//: zero, whatever its sign or its exponent.
+	case digits == "":
+		//: one digest for every zero.
+		return fnvByte(h, '0')
+	//: the digits and the power of ten.
+	case negative:
+		h = fnvByte(h, '-')
+	//: positive.
+	default:
+	}
+	//: the three parts.
+	return fnvString(fnvString(h, digits), "e"+exponent.String())
+}
+
+// fnvByte adds one byte to an FNV-1a digest.
+func fnvByte(h uint64, b byte) uint64 {
+	//: xor, then multiply.
+	return (h ^ uint64(b)) * fnvPrime
+}
+
+// fnvString adds s's bytes to an FNV-1a digest, after its length, so that
+// two strings side by side never read as one.
+func fnvString(h uint64, s string) uint64 {
+	h = fnvUint(h, uint64(len(s)))
+	//: each byte.
+	for i := range len(s) {
+		h = fnvByte(h, s[i])
+	}
+	//: the digest.
+	return h
+}
+
+// fnvUint adds v's eight bytes to an FNV-1a digest.
+func fnvUint(h, v uint64) uint64 {
+	//: low byte first.
+	for range uint64Bytes {
+		h = fnvByte(h, byte(v))
+		v >>= byteBits
+	}
+	//: the digest.
+	return h
+}
+
+// mix scrambles v — splitmix64's finalizer — so that summing the members of
+// an object does not let two members cancel out.
+func mix(v uint64) uint64 {
+	v ^= v >> 30
+	v *= 0xbf58476d1ce4e5b9
+	v ^= v >> 27
+	v *= 0x94d049bb133111eb
+	//: the last shift.
+	return v ^ (v >> 31)
 }
 
 // readObject reads an object's members into obj, up to and including the
@@ -137,8 +261,9 @@ func readMember(dec *jsontext.Decoder) (name string, value *node, err error) {
 // equal, arrays equal element by element, objects with the same members,
 // whatever their order.
 func equal(a, b *node) bool {
-	//: the kind first.
-	if a.kind != b.kind {
+	//: the digests, then the kind: two values that differ nearly always
+	//: differ here, and two that are equal always agree.
+	if a.sum != b.sum || a.kind != b.kind {
 		//: different values.
 		return false
 	}
@@ -191,8 +316,14 @@ func sameNumber(a, b string) bool {
 		//: the same number.
 		return true
 	}
-	negA, digitsA, expA := canonical(a)
-	negB, digitsB, expB := canonical(b)
+	negA, digitsA, expA, okA := canonical(a)
+	negB, digitsB, expB, okB := canonical(b)
+	//: an exponent big.Int cannot read — unreachable for a number jsontext
+	//: accepted — is compared as written, and was not written alike.
+	if !okA || !okB {
+		//: different numbers.
+		return false
+	}
 	//: zero, whatever its sign or exponent.
 	if digitsA == "" || digitsB == "" {
 		//: both zero, or not.
@@ -204,8 +335,9 @@ func sameNumber(a, b string) bool {
 
 // canonical reduces a JSON number to a sign, its significant digits without
 // leading or trailing zeros — empty for zero — and the power of ten they are
-// multiplied by. The text is a number jsontext accepted.
-func canonical(number string) (negative bool, digits string, exponent *big.Int) {
+// multiplied by; ok is false for an exponent that is not an integer, which a
+// number jsontext accepted never has.
+func canonical(number string) (negative bool, digits string, exponent *big.Int, ok bool) {
 	negative = strings.HasPrefix(number, "-")
 	mantissa, power, _ := strings.Cut(strings.TrimPrefix(number, "-"), "e")
 	//: an upper-case exponent marker.
@@ -217,14 +349,18 @@ func canonical(number string) (negative bool, digits string, exponent *big.Int) 
 	//: the exponent as written, whatever its length: jsontext bounds nothing
 	//: there, and a big.Int reads it in linear time.
 	if power != "" {
-		exponent.SetString(strings.TrimPrefix(power, "+"), 10)
+		//: SetString leaves its receiver undefined when it fails.
+		if _, parsed := exponent.SetString(strings.TrimPrefix(power, "+"), 10); !parsed {
+			//: no number to reduce.
+			return false, "", nil, false
+		}
 	}
 	digits = strings.TrimLeft(integer+fraction, "0")
 	exponent.Sub(exponent, big.NewInt(int64(len(fraction))))
 	trimmed := strings.TrimRight(digits, "0")
 	exponent.Add(exponent, big.NewInt(int64(len(digits)-len(trimmed))))
 	//: the three parts.
-	return negative, trimmed, exponent
+	return negative, trimmed, exponent, true
 }
 
 // encode writes n compact: members in the document's order, a number as

@@ -7,8 +7,10 @@ package docstore_test
 import (
 	"encoding/json"
 	"errors"
+	"fmt"
 	"maps"
 	"slices"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -369,4 +371,56 @@ func TestVersionsConfigurationRefusals(t *testing.T) {
 	if setting := fieldValue(errs.FieldsOf(err), "setting"); setting != "Held" {
 		t.Fatalf("the refusal names %q, want Held", setting)
 	}
+}
+
+// TestVersionsUnderContention pins the versions under the race detector:
+// writers stamping, updating, rewriting and deleting shared documents while
+// readers read their versions, on both engines. Whatever the interleaving,
+// every document ends with its current version first, numbers strictly
+// decreasing, and no more former versions than the store keeps.
+func TestVersionsUnderContention(t *testing.T) {
+	t.Parallel()
+	eachBackend(t, func(t *testing.T, fsys corevfs.FullFS) {
+		cfg := versionedConfig(fsys, 3, nil)
+		cfg.FoldAt = 8
+		store := openVersioned(t, cfg)
+		var wg sync.WaitGroup
+		for worker := range 8 {
+			wg.Go(func() {
+				for i := range 40 {
+					key := fmt.Sprintf("acc_%d", i%4)
+					stamp := docstore.StampValue{Meta: map[string]string{"by": strconv.Itoa(worker)}}
+					tolerate(t, store.PutStamped(account{ID: key, Name: fmt.Sprintf("w%d-%d", worker, i)}, stamp))
+					_, err := store.UpdateStamped(key, stamp, func(a *account) error { a.Teams = []string{strconv.Itoa(i)}; return nil })
+					tolerate(t, err, docstore.CodeDocumentNotFound)
+					_, err = store.Versions(key)
+					tolerate(t, err, docstore.CodeDocumentNotFound)
+					err = store.RewriteVersions(key, func(f []docstore.VersionValue) ([]docstore.VersionValue, error) { return f[:len(f)/2], nil })
+					tolerate(t, err, docstore.CodeDocumentNotFound)
+					if i%9 == 0 {
+						tolerate(t, store.Delete(key), docstore.CodeDocumentNotFound)
+					}
+				}
+			})
+		}
+		wg.Wait()
+		all, err := store.List()
+		must(t, err)
+		for _, a := range all {
+			versions := versionsOf(t, store, a.ID)
+			if len(versions) > 4 {
+				t.Fatalf("%s keeps %d versions, more than the current one and three former ones", a.ID, len(versions))
+			}
+			for i := 1; i < len(versions); i++ {
+				if versions[i].Number >= versions[i-1].Number {
+					t.Fatalf("%s's versions are numbered %v, not strictly decreasing", a.ID, numbers(versions))
+				}
+			}
+			var current account
+			must(t, json.Unmarshal(versions[0].JSON, &current))
+			if current.Name != a.Name || !slices.Equal(current.Teams, a.Teams) {
+				t.Fatalf("%s's current version holds %+v, the document %+v", a.ID, current, a)
+			}
+		}
+	})
 }

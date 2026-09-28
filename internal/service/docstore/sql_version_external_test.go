@@ -370,87 +370,98 @@ func TestSQLAFailedVersionStatementUndoesTheWrite(t *testing.T) {
 func TestSQLVersionsRoundTrips(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
-		begin := "BEGIN"
-		if dialect == coresql.DialectMySQL {
-			begin = "BEGIN READ COMMITTED"
-		}
-		claimed := []string{"claim"}
-		if dialect == coresql.DialectMySQL {
-			claimed = []string{"claim", "lockDoc"}
-		}
-		ctx, fx := t.Context(), openSQLVersioned(t, dialect, keeping(1, nil))
-		send := func(call func() error) []string {
+		fx := openSQLVersioned(t, dialect, keeping(1, nil))
+		runCase := func(t *testing.T, c roundTripCase) {
 			t.Helper()
 			fx.engine.resetLog()
-			must(t, call())
-			return fx.engine.roles()
-		}
-		wants := []struct {
-			name string
-			call func() error
-			want []string
-		}{
-			{
-				"Put of a new document", func() error { return fx.store.Put(ctx, account{ID: "acc_1", Email: "a@x.dev"}) },
-				[]string{begin, "claim", "uniqueTaken", "insertIndexRows", "insertVersions", "COMMIT"},
-			},
-			{
-				"Put over it", func() error { return fx.store.Put(ctx, account{ID: "acc_1", Email: "b@x.dev"}) },
-				slices.Concat([]string{begin}, claimed, []string{
-					"writeLocked", "uniqueTaken", "deleteIndex", "insertIndexRows",
-					"versionHead", "retireHead", "insertVersions", "pruneCut", "COMMIT",
-				}),
-			},
-			{
-				"Put over it again, pruning", func() error { return fx.store.Put(ctx, account{ID: "acc_1", Email: "c@x.dev"}) },
-				slices.Concat([]string{begin}, claimed, []string{
-					"writeLocked", "uniqueTaken", "deleteIndex", "insertIndexRows",
-					"versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions", "COMMIT",
-				}),
-			},
-			{
-				"Put of the same document", func() error { return fx.store.Put(ctx, account{ID: "acc_1", Email: "c@x.dev"}) },
-				slices.Concat([]string{begin}, claimed, []string{
-					"writeLocked", "uniqueTaken", "deleteIndex", "insertIndexRows",
-					"pruneCut", "COMMIT",
-				}),
-			},
-			{
-				"Insert", func() error { return fx.store.Insert(ctx, account{ID: "acc_2"}) },
-				[]string{begin, "insert", "insertVersions", "COMMIT"},
-			},
-			{
-				"Replace", func() error { return fx.store.Replace(ctx, account{ID: "acc_2", Name: "b"}) },
-				[]string{begin, "lockDoc", "writeLocked", "deleteIndex", "versionHead", "retireHead", "insertVersions", "pruneCut", "COMMIT"},
-			},
-			{"Update", func() error {
-				_, err := fx.store.Update(ctx, "acc_2", func(a *account) error { a.Name = "c"; return nil })
-				return err
-			}, []string{
-				begin, "lockDoc", "writeLocked", "deleteIndex", "versionHead", "retireHead", "insertVersions", "pruneCut",
-				"pruneVersions", "COMMIT",
-			}},
-			{
-				"Delete", func() error { return fx.store.Delete(ctx, "acc_2") },
-				[]string{begin, "deleteDoc", "deleteIndex", "dropVersions", "COMMIT"},
-			},
-			{"Versions", func() error { _, err := fx.store.Versions(ctx, "acc_1"); return err }, []string{"readVersions"}},
-			{"a Put inside the caller's transaction", func() error {
-				return fx.tm.Transact(ctx, coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
-					return fx.store.Put(ctx, account{ID: "acc_1", Email: "d@x.dev"})
-				})
-			}, slices.Concat([]string{"BEGIN", "SAVEPOINT ktn_sp_1"}, claimed, []string{
-				"writeLocked", "uniqueTaken", "deleteIndex",
-				"insertIndexRows", "versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions",
-				"RELEASE SAVEPOINT ktn_sp_1", "COMMIT",
-			})},
-		}
-		for _, w := range wants {
-			if got := send(w.call); !slices.Equal(got, w.want) {
-				t.Fatalf("%s sent\n%v\nwant\n%v", w.name, got, w.want)
+			must(t, c.call(t.Context()))
+			if got := fx.engine.roles(); !slices.Equal(got, c.want) {
+				t.Fatalf("%s sent\n%v\nwant\n%v", c.name, got, c.want)
 			}
 		}
+		//: in order: each case writes over what the one before left.
+		for _, c := range versionsRoundTripCases(fx, dialect) {
+			runCase(t, c)
+		}
 	})
+}
+
+// roundTripCase is one call and the statements it must send.
+type roundTripCase struct {
+	call func(ctx context.Context) error
+	name string
+	want []string
+}
+
+// versionsRoundTripCases are TestSQLVersionsRoundTrips' calls on dialect, in
+// the order they run over fx's store keeping one former version.
+func versionsRoundTripCases(fx *sqlFixture, dialect coresql.Dialect) []roundTripCase {
+	begin, claimed := "BEGIN", []string{"claim"}
+	//: MySQL opens its own transactions READ COMMITTED, and reads what its
+	//: claim locked in a statement of its own.
+	if dialect == coresql.DialectMySQL {
+		begin, claimed = "BEGIN READ COMMITTED", []string{"claim", "lockDoc"}
+	}
+	replaced := func(tail ...string) []string {
+		return slices.Concat([]string{begin}, claimed, []string{"writeLocked", "uniqueTaken", "deleteIndex", "insertIndexRows"}, tail)
+	}
+	store := fx.store
+	return []roundTripCase{
+		{
+			name: "Put of a new document", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "a@x.dev"}) },
+			want: []string{begin, "claim", "uniqueTaken", "insertIndexRows", "dropVersions", "insertVersions", "COMMIT"},
+		},
+		{
+			name: "Put over it", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "b@x.dev"}) },
+			want: replaced("versionHead", "retireHead", "insertVersions", "pruneCut", "COMMIT"),
+		},
+		{
+			name: "Put over it again, pruning", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "c@x.dev"}) },
+			want: replaced("versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions", "COMMIT"),
+		},
+		{
+			name: "Put of the same document", call: func(ctx context.Context) error { return store.Put(ctx, account{ID: "acc_1", Email: "c@x.dev"}) },
+			want: replaced("pruneCut", "COMMIT"),
+		},
+		{
+			name: "Insert", call: func(ctx context.Context) error { return store.Insert(ctx, account{ID: "acc_2"}) },
+			want: []string{begin, "insert", "dropVersions", "insertVersions", "COMMIT"},
+		},
+		{
+			name: "Replace", call: func(ctx context.Context) error { return store.Replace(ctx, account{ID: "acc_2", Name: "b"}) },
+			want: []string{begin, "lockDoc", "writeLocked", "deleteIndex", "versionHead", "retireHead", "insertVersions", "pruneCut", "COMMIT"},
+		},
+		{
+			name: "Update", call: func(ctx context.Context) error {
+				_, err := store.Update(ctx, "acc_2", func(a *account) error { a.Name = "c"; return nil })
+				return err
+			},
+			want: []string{
+				begin, "lockDoc", "writeLocked", "deleteIndex", "versionHead", "retireHead", "insertVersions", "pruneCut",
+				"pruneVersions", "COMMIT",
+			},
+		},
+		{
+			name: "Delete", call: func(ctx context.Context) error { return store.Delete(ctx, "acc_2") },
+			want: []string{begin, "deleteDoc", "deleteIndex", "dropVersions", "COMMIT"},
+		},
+		{
+			name: "Versions", call: func(ctx context.Context) error { _, err := store.Versions(ctx, "acc_1"); return err },
+			want: []string{"readVersions"},
+		},
+		{
+			name: "a Put inside the caller's transaction", call: func(ctx context.Context) error {
+				return fx.tm.Transact(ctx, coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
+					return store.Put(ctx, account{ID: "acc_1", Email: "d@x.dev"})
+				})
+			},
+			want: slices.Concat([]string{"BEGIN", "SAVEPOINT ktn_sp_1"}, claimed, []string{
+				"writeLocked", "uniqueTaken", "deleteIndex", "insertIndexRows",
+				"versionHead", "retireHead", "insertVersions", "pruneCut", "pruneVersions",
+				"RELEASE SAVEPOINT ktn_sp_1", "COMMIT",
+			}),
+		},
+	}
 }
 
 // TestSQLConcurrentVersionedWriters pins the claim and the locks on every
@@ -502,4 +513,53 @@ func TestSQLVersionsConfigurationRefusals(t *testing.T) {
 	if roles := engine.roles(); len(roles) != 0 {
 		t.Fatalf("a refused configuration sent %v", roles)
 	}
+}
+
+// TestSQLACreationStartsANewHistory pins the rows a creation clears: a
+// document deleted while its store kept no versions leaves its rows in the
+// versions table, and one created under its key once versions are kept again
+// starts at version 1 without them — in both write modes that create.
+func TestSQLACreationStartsANewHistory(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		ctx, fx := t.Context(), openSQLVersioned(t, dialect, keeping(5, nil))
+		for _, name := range []string{"a", "b", "c"} {
+			must(t, fx.store.Put(ctx, account{ID: "acc_1", Name: name}))
+			must(t, fx.store.Put(ctx, account{ID: "acc_2", Name: name}))
+		}
+		plain := reopenSQL(t, fx.tm, dialect)
+		must(t, plain.Delete(ctx, "acc_1"))
+		must(t, plain.Delete(ctx, "acc_2"))
+		if left := fx.engine.snapshot().versionsOf("acc_1", false); len(left) != 3 {
+			t.Fatalf("a store without versions touched the versions table: %v left", left)
+		}
+		must(t, fx.store.Insert(ctx, account{ID: "acc_1", Name: "new"}))
+		must(t, fx.store.Put(ctx, account{ID: "acc_2", Name: "new"}))
+		for _, key := range []string{"acc_1", "acc_2"} {
+			if got := numbers(sqlVersionsOf(t, fx.store, key)); !slices.Equal(got, []uint64{1}) {
+				t.Fatalf("%s created again has versions %v, want 1 alone", key, got)
+			}
+		}
+	})
+}
+
+// TestSQLAnInstantOutsideTheNanosecondRangeIsKept pins the instant to the
+// nanosecond over every instant a time.Time holds, on every dialect: the
+// seconds and the nanoseconds travel in two columns, where one count of
+// nanoseconds since 1970 would wrap before 1678 and after 2262.
+func TestSQLAnInstantOutsideTheNanosecondRangeIsKept(t *testing.T) {
+	t.Parallel()
+	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
+		ancient := time.Date(1066, 10, 14, 9, 0, 0, 123456789, time.UTC)
+		far := time.Date(2600, 1, 1, 0, 0, 0, 987654321, time.UTC)
+		clk := clock.NewManualClock(ancient)
+		ctx, store := t.Context(), openSQLVersioned(t, dialect, keeping(3, clk)).store
+		must(t, store.Put(ctx, account{ID: "acc_1", Name: "then"}))
+		clk.Set(far)
+		must(t, store.Put(ctx, account{ID: "acc_1", Name: "later"}))
+		all := sqlVersionsOf(t, store, "acc_1")
+		if len(all) != 2 || !all[0].At.Equal(far) || !all[1].At.Equal(ancient) {
+			t.Fatalf("the versions were made at %v and %v, want %v and %v", all[0].At, all[1].At, far, ancient)
+		}
+	})
 }

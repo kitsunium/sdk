@@ -75,7 +75,8 @@ type vsKey struct {
 
 // vsRow is one row of the versions table: NULL is nil in every column.
 type vsRow struct {
-	at   driver.Value // nil or int64
+	at   driver.Value // nil or int64: seconds
+	ns   driver.Value // nil or int64: nanoseconds
 	meta []byte
 	doc  []byte
 }
@@ -462,7 +463,7 @@ func (e *sqlEngine) recognise(query string, nargs int) string {
 		return "sharedKeys"
 	case nargs > 0 && query == e.stmts.MarkUnique(nargs):
 		return "markUnique"
-	case nargs%5 == 0 && nargs > 0 && query == e.stmts.InsertVersions(nargs/5):
+	case nargs%6 == 0 && nargs > 0 && query == e.stmts.InsertVersions(nargs/6):
 		return "insertVersions"
 	}
 	return query
@@ -511,9 +512,10 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 	// Reindex's check of the unique indexes.
 	case "sharedKeys":
 		return e.sharedKeys(work, args), true
-	// A document's versions, and what a write reads of them.
+	// Every version of a document, with the document itself.
 	case "readVersions":
 		return e.readVersions(work, str(0)), true
+	// The number of a document's current version, whose row holds no document.
 	case "versionHead":
 		for k, row := range work.vs {
 			if k.doc == str(0) && row.doc == nil {
@@ -521,19 +523,21 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 			}
 		}
 		return rowsOf([]string{"num"}, nil), true
+	// The newest former version a write prunes: the one past what it keeps.
 	case "pruneCut":
 		formers := work.versionsOf(str(0), true)
 		if offset := int(args[1].(int64)); offset < len(formers) {
 			return rowsOf([]string{"num"}, [][]driver.Value{{formers[offset]}}), true
 		}
 		return rowsOf([]string{"num"}, nil), true
+	// A document's former versions, newest first, for a rewrite.
 	case "lockFormers":
 		var rows [][]driver.Value
 		for _, num := range work.versionsOf(str(0), true) {
 			row := work.vs[vsKey{doc: str(0), num: num}]
-			rows = append(rows, []driver.Value{num, row.at, nullable(row.meta), bytes.Clone(row.doc)})
+			rows = append(rows, []driver.Value{num, row.at, row.ns, nullable(row.meta), bytes.Clone(row.doc)})
 		}
-		return rowsOf([]string{"num", "made_at", "meta", "doc"}, rows), true
+		return rowsOf([]string{"num", "made_at", "made_ns", "meta", "doc"}, rows), true
 	}
 	return none, false
 }
@@ -542,14 +546,14 @@ func (e *sqlEngine) read(role, query string, args []driver.Value, work, latest *
 // newest first, as the LEFT JOIN does: one row without a number for a
 // document no version row names, none for no document.
 func (e *sqlEngine) readVersions(work *tables, key string) answer {
-	cols := []string{"num", "made_at", "meta", "doc"}
+	cols := []string{"num", "made_at", "made_ns", "meta", "doc"}
 	current, found := work.docs[key]
 	if !found {
 		return rowsOf(cols, nil)
 	}
 	nums := work.versionsOf(key, false)
 	if len(nums) == 0 {
-		return rowsOf(cols, [][]driver.Value{{nil, nil, nil, bytes.Clone(current.doc)}})
+		return rowsOf(cols, [][]driver.Value{{nil, nil, nil, nil, bytes.Clone(current.doc)}})
 	}
 	rows := make([][]driver.Value, 0, len(nums))
 	for _, num := range nums {
@@ -558,7 +562,7 @@ func (e *sqlEngine) readVersions(work *tables, key string) answer {
 		if doc == nil {
 			doc = current.doc
 		}
-		rows = append(rows, []driver.Value{num, row.at, nullable(row.meta), bytes.Clone(doc)})
+		rows = append(rows, []driver.Value{num, row.at, row.ns, nullable(row.meta), bytes.Clone(doc)})
 	}
 	return rowsOf(cols, rows)
 }
@@ -611,7 +615,7 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables)
 	// A Put's claim on a store that keeps versions.
 	case "claim":
 		return e.claim(work, str(0), args[1].([]byte)), nil
-	// A document's versions.
+	// The current version becoming a former one, with the document it held.
 	case "retireHead":
 		k := vsKey{doc: str(1), num: args[2].(int64)}
 		row, found := work.vs[k]
@@ -621,13 +625,17 @@ func (e *sqlEngine) write(role, query string, args []driver.Value, work *tables)
 		row.doc = bytes.Clone(args[0].([]byte))
 		work.vs[k] = row
 		return affecting(1), nil
+	// Version rows, refused twice under one number.
 	case "insertVersions":
 		return e.insertVersions(work, args)
+	// The former versions a write prunes.
 	case "pruneVersions":
 		cut := args[1].(int64)
 		return affecting(dropVersions(work, str(0), func(num int64, row vsRow) bool { return row.doc != nil && num <= cut })), nil
+	// Every version of a document, as a deletion or a creation takes them.
 	case "dropVersions":
 		return affecting(dropVersions(work, str(0), func(int64, vsRow) bool { return true })), nil
+	// Every former version, before a rewrite writes back those it keeps.
 	case "dropFormers":
 		return affecting(dropVersions(work, str(0), func(_ int64, row vsRow) bool { return row.doc != nil })), nil
 	}
@@ -659,7 +667,7 @@ func (e *sqlEngine) claim(work *tables, key string, doc []byte) answer {
 // itself behind.
 func (e *sqlEngine) insertVersions(work *tables, args []driver.Value) (answer, error) {
 	var added []vsKey
-	for i := 0; i < len(args); i += 5 {
+	for i := 0; i < len(args); i += 6 {
 		k := vsKey{doc: string(args[i].([]byte)), num: args[i+1].(int64)}
 		if _, taken := work.vs[k]; taken {
 			for _, undo := range added {
@@ -667,11 +675,11 @@ func (e *sqlEngine) insertVersions(work *tables, args []driver.Value) (answer, e
 			}
 			return none, errDuplicate{key: k.doc}
 		}
-		row := vsRow{at: args[i+2]}
-		if meta, ok := args[i+3].([]byte); ok {
+		row := vsRow{at: args[i+2], ns: args[i+3]}
+		if meta, ok := args[i+4].([]byte); ok {
 			row.meta = bytes.Clone(meta)
 		}
-		if doc, ok := args[i+4].([]byte); ok {
+		if doc, ok := args[i+5].([]byte); ok {
 			row.doc = bytes.Clone(doc)
 		}
 		work.vs[k] = row

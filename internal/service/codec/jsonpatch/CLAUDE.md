@@ -18,7 +18,7 @@ Stdlib only; not a codec — it registers no Format. It reads documents with
 | File | Role |
 |---|---|
 | `jsonpatch.go` | package doc, `Op` (`Add`, `Remove`, `Replace`), `EditValue`, `Diff`; the `differ` — objects member by member in name order, arrays aligned (`align` → `lcsLengths`, bounded by `maxAlignCells`) then paired in runs (`changeRun`), anything else replaced; `escapeToken` |
-| `tree.go` | the `node` a document is read into (`parse` → `readValue` / `readObject` / `readArray` / `readMember`), `equal` (RFC 6902 §4.6), `sameNumber` / `canonical` (exact decimal equality, linear in the text), `encode` (compact, members in the document's order, a number as written), `notJSON` |
+| `tree.go` | the `node` a document is read into (`parse` → `readValue` / `readObject` / `readArray` / `readMember`), its `digest` (FNV-1a over what `equal` compares, members summed so their order does not count), `equal` (the digests first, then RFC 6902 §4.6), `sameNumber` / `canonical` (exact decimal equality, linear in the text), `encode` (compact, members in the document's order, a number as written), `notJSON` |
 | `codes.go` / `errors.go` | `0.3.90.1` `NOT_JSON` |
 
 ## Why-this-shape
@@ -31,6 +31,13 @@ Stdlib only; not a codec — it registers no Format. It reads documents with
   sign, its significant digits and a power of ten — the exponent a `big.Int`,
   because jsontext bounds nothing there — so `1e400` is compared, not
   overflowed, and `1e999999999999999999999` costs its length, not ten to that.
+- **Every value carries a digest of what `equal` compares**, built once as
+  the document is read: two values that differ are told apart in one
+  comparison, however large they are, so aligning two arrays of large
+  elements costs one comparison a pair of cells, not a walk of both. Equal
+  values always share it — members summed rather than chained, every zero
+  alike, a number by its sign, digits and power of ten — and a shared digest
+  is only a reason to compare in full, never a verdict.
 - **Arrays are aligned, then paired.** The equal elements at both ends are
   trimmed; the longest common subsequence of the middles says which elements
   both keep; between two kept ones, the removed and the added are paired in

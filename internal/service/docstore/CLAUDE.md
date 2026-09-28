@@ -159,6 +159,14 @@ that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
   is the same in the old files as in the new, so a crash anywhere loads the
   same documents with the same versions. SQL engine: the version rows are
   statements of the write's own transaction or savepoint.
+- **A creation starts a new history.** On the SQL engine it deletes whatever
+  version rows its key holds before it writes version 1: rows a document of
+  the same key left while the store kept no versions are not its history.
+- **An instant is kept to the nanosecond.** The file engine writes it as
+  RFC 3339 text (years 0 to 9999; a write stamped outside them fails
+  `PERSIST_FAILED`); the SQL engine keeps seconds and nanoseconds in two
+  columns, `made_at` and `made_ns`, which hold any instant a `time.Time`
+  does.
 - **A Put reads what it replaces.** On a store that keeps versions, the SQL
   engine's Put starts with a claim — an upsert that leaves the stored document
   as it is and moves its revision — which creates the key or locks the row in

@@ -194,13 +194,13 @@ func TestSQLTheVersionsStatements(t *testing.T) {
 		{dialect: coresql.DialectPostgres, role: "pruneVersions", text: `DELETE FROM "members__accounts___vs" WHERE doc_key = $1 AND doc IS NOT NULL AND num <= $2`},
 		{dialect: coresql.DialectPostgres, role: "dropVersions", text: `DELETE FROM "members__accounts___vs" WHERE doc_key = $1`},
 		{dialect: coresql.DialectPostgres, role: "dropFormers", text: `DELETE FROM "members__accounts___vs" WHERE doc_key = $1 AND doc IS NOT NULL`},
-		{dialect: coresql.DialectPostgres, role: "readVersions", text: `SELECT v.num, v.made_at, v.meta, COALESCE(v.doc, d.doc) FROM "members__accounts" d` +
+		{dialect: coresql.DialectPostgres, role: "readVersions", text: `SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, d.doc) FROM "members__accounts" d` +
 			` LEFT JOIN "members__accounts___vs" v ON v.doc_key = d.doc_key WHERE d.doc_key = $1 ORDER BY v.num DESC`},
-		{dialect: coresql.DialectMySQL, role: "readVersions", text: "SELECT v.num, v.made_at, v.meta, COALESCE(v.doc, d.doc) FROM `members__accounts` d" +
+		{dialect: coresql.DialectMySQL, role: "readVersions", text: "SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, d.doc) FROM `members__accounts` d" +
 			" LEFT JOIN `members__accounts___vs` v ON v.doc_key = d.doc_key WHERE d.doc_key = ? ORDER BY v.num DESC"},
-		{dialect: coresql.DialectMySQL, role: "lockFormers", text: "SELECT num, made_at, meta, doc FROM `members__accounts___vs` WHERE doc_key = ?" +
+		{dialect: coresql.DialectMySQL, role: "lockFormers", text: "SELECT num, made_at, made_ns, meta, doc FROM `members__accounts___vs` WHERE doc_key = ?" +
 			" AND doc IS NOT NULL ORDER BY num DESC FOR UPDATE"},
-		{dialect: coresql.DialectSQLite, role: "lockFormers", text: `SELECT num, made_at, meta, doc FROM "members__accounts___vs" WHERE doc_key = ?` +
+		{dialect: coresql.DialectSQLite, role: "lockFormers", text: `SELECT num, made_at, made_ns, meta, doc FROM "members__accounts___vs" WHERE doc_key = ?` +
 			` AND doc IS NOT NULL ORDER BY num DESC`},
 	} {
 		rendered := docstore.RenderSQLForTest(want.dialect, accountsTable)
@@ -209,8 +209,8 @@ func TestSQLTheVersionsStatements(t *testing.T) {
 		}
 	}
 	postgres := docstore.RenderSQLForTest(coresql.DialectPostgres, accountsTable)
-	if got, want := postgres.InsertVersions(2), `INSERT INTO "members__accounts___vs" (doc_key, num, made_at, meta, doc)`+
-		` VALUES ($1, $2, $3, $4, $5), ($6, $7, $8, $9, $10)`; got != want {
+	if got, want := postgres.InsertVersions(2), `INSERT INTO "members__accounts___vs" (doc_key, num, made_at, made_ns, meta, doc)`+
+		` VALUES ($1, $2, $3, $4, $5, $6), ($7, $8, $9, $10, $11, $12)`; got != want {
 		t.Errorf("the version rows' insertion =\n%s\nwant\n%s", got, want)
 	}
 }
@@ -223,11 +223,11 @@ func TestSQLVersionsMigrationCreatesTheVersionsTable(t *testing.T) {
 	t.Parallel()
 	for dialect, want := range map[coresql.Dialect]string{
 		coresql.DialectPostgres: `CREATE TABLE IF NOT EXISTS "members__accounts___vs" (doc_key bytea NOT NULL, num bigint NOT NULL,` +
-			` made_at bigint, meta bytea, doc bytea, PRIMARY KEY (doc_key, num))`,
+			` made_at bigint, made_ns integer, meta bytea, doc bytea, PRIMARY KEY (doc_key, num))`,
 		coresql.DialectMySQL: "CREATE TABLE IF NOT EXISTS `members__accounts___vs` (doc_key VARBINARY(1024) NOT NULL, num BIGINT NOT NULL," +
-			" made_at BIGINT NULL, meta LONGBLOB NULL, doc LONGBLOB NULL, PRIMARY KEY (doc_key, num)) ENGINE=InnoDB",
+			" made_at BIGINT NULL, made_ns INT NULL, meta LONGBLOB NULL, doc LONGBLOB NULL, PRIMARY KEY (doc_key, num)) ENGINE=InnoDB",
 		coresql.DialectSQLite: `CREATE TABLE IF NOT EXISTS "members__accounts___vs" (doc_key BLOB NOT NULL, num INTEGER NOT NULL,` +
-			` made_at INTEGER, meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))`,
+			` made_at INTEGER, made_ns INTEGER, meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))`,
 	} {
 		migration, err := docstore.SQLVersionsMigration(dialect, accountsTable, 20260928120000)
 		must(t, err)

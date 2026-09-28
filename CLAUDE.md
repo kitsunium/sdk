@@ -113,7 +113,9 @@ pkg/
     │                 + jsonshape/ — a type's wire shape — ADR 0133;
     │                 + jsonpatch/ — two documents' difference — ADR 0143;
     │                 + json/, yaml/, toml/ — one format each — ADR 0134)
-    ├── crypto/    (+ agree, hash, kdf, mac, password, sign)
+    ├── crypto/    (AEAD and keys; its scheme facades are siblings, not children:
+    │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
+    │                 since ADR 0143)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
     ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
     │                 the supervisor — ADR 0112)

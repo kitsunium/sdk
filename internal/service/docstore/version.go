@@ -19,8 +19,10 @@ import (
 // version holds it.
 type VersionValue struct {
 	// At is when the write that made the version ran, in UTC, read from the
-	// store's clock. It is zero for the first version of a document the store
-	// held before it kept versions: when that one was written is not known.
+	// store's clock and kept to the nanosecond — by the file engine for the
+	// years 0 to 9999, which RFC 3339 writes, and by the SQL engine for any
+	// instant. It is zero for the first version of a document the store held
+	// before it kept versions: when that one was written is not known.
 	At time.Time
 	// Meta is what the write's caller said about it — who made it, which
 	// command — as its [StampValue] gave it; nil when it said nothing. The
@@ -358,7 +360,8 @@ func rewriteRecord(store string, record *versionsRecord, fn func([]VersionValue)
 // checkRewrite checks what a rewrite's function returned against the former
 // versions it was given, and returns them as the store keeps them: each one
 // of those it was given, in the same order, with its own number and instant,
-// and a document that is JSON, compacted. Both engines check through it.
+// and a document that is JSON, compacted and HTML-escaped as json.Marshal
+// writes one. Both engines check through it.
 func checkRewrite(store string, given []formerVersion, kept []VersionValue) ([]formerVersion, error) {
 	out := make([]formerVersion, 0, len(kept))
 	next := 0
@@ -377,13 +380,17 @@ func checkRewrite(store string, given []formerVersion, kept []VersionValue) ([]f
 			//: VersionsRewriteRefused, naming the problem.
 			return nil, rewriteRefused(store, "a version made at another instant")
 		}
-		var compact bytes.Buffer
+		var compact, escaped bytes.Buffer
 		//: a version holds a JSON document.
 		if len(v.JSON) == 0 || json.Compact(&compact, v.JSON) != nil {
 			//: VersionsRewriteRefused, naming the problem and never the JSON.
 			return nil, rewriteRefused(store, "a version that is not JSON")
 		}
-		out = append(out, formerVersion{At: original.At, Meta: maps.Clone(v.Meta), Document: compact.Bytes(), Number: original.Number})
+		//: escaped as json.Marshal escapes a document — <, >, & — so the
+		//: bytes read back are the same before a restart and after one, and
+		//: on either engine.
+		json.HTMLEscape(&escaped, compact.Bytes())
+		out = append(out, formerVersion{At: original.At, Meta: maps.Clone(v.Meta), Document: escaped.Bytes(), Number: original.Number})
 	}
 	//: the versions to keep.
 	return out, nil

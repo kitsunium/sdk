@@ -6,3 +6,9 @@ package commonpw
 func ListForTest() string {
 	return listText
 }
+
+// CompareFoldedForTest is compareFolded, for the suite to hold against
+// strings.Compare over strings.ToLower.
+func CompareFoldedForTest(entry string, password []byte) int {
+	return compareFolded(entry, password)
+}

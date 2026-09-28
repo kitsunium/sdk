@@ -32,7 +32,7 @@ the three must agree, and the test fails until they do.
 
 | File | Role |
 |---|---|
-| `commonpw.go` | package doc (source, licence, comparison), the embedded `listText`, `sorted` (lower-cased, deduplicated, sorted once, at the first question), `IsCommon`, `Len` |
+| `commonpw.go` | package doc (source, licence, comparison), the embedded `listText`, `sorted` (lower-cased, deduplicated, sorted once, at the first question), `IsCommon`, `compareFolded`, `Len` |
 | `xato-net-10-million-passwords-10000.txt` | the list, 10 000 lines, one of them empty |
 | `LICENSE.SecLists` | SecLists' MIT licence |
 | `.gitattributes` | both files `-text`: a Windows checkout with `core.autocrlf` would otherwise rewrite the list's line endings, and its digest with them — found by the `windows` lane |
@@ -46,9 +46,13 @@ the three must agree, and the test fails until they do.
 - **The empty password is a length rule's.** The file holds it — one empty line
   — and `IsCommon` answers false for it, so the list is 9 999 passwords, 9 916
   once case variants are one.
-- **Sorted once, searched after.** A binary search over substrings of the
-  embedded text: no map of ten thousand keys, and nothing built until somebody
-  asks.
+- **Sorted once, searched after.** A binary search over the entries: no map
+  of ten thousand keys, and nothing built until somebody asks.
+- **The password is never copied.** The search lower-cases it rune by rune as
+  it compares (`compareFolded`), into a buffer on the stack, exactly as
+  `strings.ToLower` would — `TestTheComparisonIsStringsToLower` holds the two
+  against each other — so no string of the password exists, not even
+  briefly; `TestIsCommonAllocatesNothing` pins zero allocations a question.
 - **Byte for byte, pinned.** The file is SecLists' own, so its provenance is
   checkable with one `sha256sum`; the lower-casing and sorting happen in
   memory.

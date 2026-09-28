@@ -323,3 +323,50 @@ func TestVersionsFilesThatAreNotAStores(t *testing.T) {
 		})
 	}
 }
+
+// TestARewrittenVersionReadsBackAlikeAfterAReopen pins the bytes a rewrite
+// stores: the JSON a function returns is compacted and escaped as json.Marshal
+// escapes a document, so what Versions answers before a restart is what it
+// answers after one, although the files re-escape what they hold.
+func TestARewrittenVersionReadsBackAlikeAfterAReopen(t *testing.T) {
+	t.Parallel()
+	fsys := memFS()
+	store, err := openWith(versionedConfig(fsys, 2, nil))
+	must(t, err)
+	must(t, store.Put(account{ID: "acc_1", Name: "a"}))
+	must(t, store.Put(account{ID: "acc_1", Name: "b"}))
+	must(t, store.RewriteVersions("acc_1", func(former []docstore.VersionValue) ([]docstore.VersionValue, error) {
+		former[0].JSON = json.RawMessage(`{ "id": "acc_1", "name": "<b>&</b>" }`)
+		return former, nil
+	}))
+	before := versionsOf(t, store, "acc_1")
+	if want := `{"id":"acc_1","name":"\u003cb\u003e\u0026\u003c/b\u003e"}`; string(before[1].JSON) != want {
+		t.Fatalf("the rewritten version is %s, want %s", before[1].JSON, want)
+	}
+	must(t, store.Close())
+	sameVersions(t, "after a reopen", reopenedVersions(t, fsys, 2), map[string][]docstore.VersionValue{"acc_1": before})
+}
+
+// TestAnInstantIsKeptToTheNanosecondInTheFiles pins the instant through the
+// files: years far from 1970 read back exactly after a reopen, and a clock
+// past the year 9999, which RFC 3339 cannot write, fails the write as
+// PERSIST_FAILED — nothing changed — rather than keep a wrong instant.
+func TestAnInstantIsKeptToTheNanosecondInTheFiles(t *testing.T) {
+	t.Parallel()
+	fsys := memFS()
+	ancient := time.Date(1066, 10, 14, 9, 0, 0, 123456789, time.UTC)
+	far := time.Date(2600, 1, 1, 0, 0, 0, 987654321, time.UTC)
+	clk := clock.NewManualClock(ancient)
+	store, err := openWith(versionedConfig(fsys, 3, clk))
+	must(t, err)
+	must(t, store.Put(account{ID: "acc_1", Name: "then"}))
+	clk.Set(far)
+	must(t, store.Put(account{ID: "acc_1", Name: "later"}))
+	clk.Set(time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC))
+	requireCode(t, store.Put(account{ID: "acc_1", Name: "too late"}), docstore.CodePersistFailed, "a write stamped past the year 9999")
+	must(t, store.Close())
+	all := reopenedVersions(t, fsys, 3)["acc_1"]
+	if len(all) != 2 || !all[0].At.Equal(far) || !all[1].At.Equal(ancient) {
+		t.Fatalf("after a reopen the versions were made at %+v, want %v and %v", all, far, ancient)
+	}
+}

@@ -26,12 +26,14 @@
 //
 // # How a password is compared
 //
-// Case-insensitively: a password and every entry are compared lower-cased by
-// strings.ToLower, so PASSWORD and Password are refused with password — a
-// guessing attacker tries case variants first, and refusing them costs a
-// person nothing. Nothing else is normalised: no trimming, no substitution of
-// look-alike characters. The list is sorted once, at the first question, and
-// each question is a binary search; the password is neither kept nor logged.
+// Case-insensitively: a password and every entry are compared lower-cased as
+// strings.ToLower lower-cases them, so PASSWORD and Password are refused with
+// password — a guessing attacker tries case variants first, and refusing them
+// costs a person nothing. Nothing else is normalised: no trimming, no
+// substitution of look-alike characters. The list is sorted once, at the first
+// question, and each question is a binary search that lower-cases the password
+// as it compares it: no copy of the password is made, as a string or
+// otherwise, and it is neither kept nor logged.
 //
 // One line of the file is empty: the empty password is among the ten thousand
 // most used. It is not an entry here — refusing it is a length rule's job, and
@@ -45,10 +47,13 @@
 package commonpw
 
 import (
+	"cmp"
 	_ "embed"
 	"slices"
 	"strings"
 	"sync"
+	"unicode"
+	"unicode/utf8"
 )
 
 var (
@@ -83,9 +88,41 @@ func IsCommon(password []byte) bool {
 		//: not on the list.
 		return false
 	}
-	_, found := slices.BinarySearch(sorted(), strings.ToLower(string(password)))
+	_, found := slices.BinarySearchFunc(sorted(), password, compareFolded)
 	//: on the list, or not.
 	return found
+}
+
+// compareFolded compares entry with password lower-cased, byte for byte, as
+// strings.Compare(entry, strings.ToLower(string(password))) would, without
+// building that string: each rune of password is lower-cased by
+// unicode.ToLower and encoded as strings.ToLower encodes it — an invalid byte
+// as U+FFFD — into a buffer on the stack.
+func compareFolded(entry string, password []byte) int {
+	var encoded [utf8.UTFMax]byte
+	at := 0
+	//: rune by rune.
+	for len(password) > 0 {
+		r, size := utf8.DecodeRune(password)
+		password = password[size:]
+		n := utf8.EncodeRune(encoded[:], unicode.ToLower(r))
+		//: each byte of the lower-cased rune against the entry's.
+		for _, b := range encoded[:n] {
+			//: the entry ended first: it sorts before.
+			if at == len(entry) {
+				//: shorter.
+				return -1
+			}
+			//: the first byte that differs decides.
+			if c := cmp.Compare(entry[at], b); c != 0 {
+				//: before or after.
+				return c
+			}
+			at++
+		}
+	}
+	//: the password ended: equal, or the entry is longer and sorts after.
+	return cmp.Compare(len(entry), at)
 }
 
 // Len returns how many distinct passwords the list holds once lower-cased:

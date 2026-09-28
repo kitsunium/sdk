@@ -18,7 +18,7 @@ import (
 )
 
 // versionRowsPerStatement bounds how many version rows one INSERT carries. At
-// five arguments a row it stays under the 999 bound parameters of an SQLite
+// six arguments a row it stays under the 999 bound parameters of an SQLite
 // older than 3.32, as indexRowsPerStatement does.
 const versionRowsPerStatement int = 150
 
@@ -96,14 +96,13 @@ func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []Vers
 	//: newest first; a document stored before versions were kept is one row
 	//: without a number.
 	for rows.Next() {
-		var num, at stdsql.NullInt64
-		var meta, doc []byte
+		var row scannedVersion
 		//: a row the driver cannot hand over fails the read.
-		if scanErr := rows.Scan(&num, &at, &meta, &doc); scanErr != nil {
+		if scanErr := rows.Scan(&row.num, &row.at, &row.ns, &row.meta, &row.doc); scanErr != nil {
 			//: StatementFailed.
 			return nil, s.failed("read the versions", scanErr)
 		}
-		v, decodeErr := s.versionOf(num, at, meta, doc)
+		v, decodeErr := s.versionOf(&row)
 		//: metadata that is not what a write stored.
 		if decodeErr != nil {
 			//: DocumentUndecodable.
@@ -219,14 +218,13 @@ func (s *SQLStore[T]) lockedFormers(ctx context.Context, ex coresql.Executor, ke
 	defer func() { err = s.finishRows(rows, "read the versions", err) }()
 	//: newest first.
 	for rows.Next() {
-		var num, at stdsql.NullInt64
-		var meta, doc []byte
+		var row scannedVersion
 		//: a row the driver cannot hand over fails the read.
-		if scanErr := rows.Scan(&num, &at, &meta, &doc); scanErr != nil {
+		if scanErr := rows.Scan(&row.num, &row.at, &row.ns, &row.meta, &row.doc); scanErr != nil {
 			//: StatementFailed.
 			return nil, s.failed("read the versions", scanErr)
 		}
-		v, decodeErr := s.versionOf(num, at, meta, doc)
+		v, decodeErr := s.versionOf(&row)
 		//: metadata that is not what a write stored.
 		if decodeErr != nil {
 			//: DocumentUndecodable.
@@ -239,7 +237,8 @@ func (s *SQLStore[T]) lockedFormers(ctx context.Context, ex coresql.Executor, ke
 }
 
 // keepVersions records what a write leaves of its document's versions, in
-// the write's own transaction: a creation is version 1; a write that changes
+// the write's own transaction: a creation is version 1, over no row of an
+// earlier document of its key; a write that changes
 // the document makes the next version, the current one becoming the newest
 // former one with the document it held; a write stamped InPlace, or storing
 // the JSON already stored, makes none. Either way the former versions beyond
@@ -254,6 +253,12 @@ func (s *SQLStore[T]) keepVersions(ctx context.Context, ex coresql.Executor, w *
 	now := s.clock.Now().UTC()
 	//: a creation is version 1, whatever the stamp says.
 	if !w.existed {
+		//: a document's versions begin with it: rows a document of the same
+		//: key left while the store kept no versions are not its history.
+		if _, execErr := ex.ExecContext(ctx, s.stmts.dropVersions, []byte(w.key)); execErr != nil {
+			//: StatementFailed; the write rolls back.
+			return s.failed("keep a version", execErr)
+		}
 		//: its current version.
 		return s.insertVersionRows(ctx, ex, w.key, []versionRow{{at: &now, meta: w.meta, num: 1}})
 	}
@@ -270,6 +275,8 @@ func (s *SQLStore[T]) keepVersions(ctx context.Context, ex coresql.Executor, w *
 		return err
 	}
 	rows := []versionRow{{at: &now, meta: w.meta, num: head + 1}}
+	//: the row that becomes the newest former version: the current one's, or
+	//: a first row for a document stored before the store kept versions.
 	switch {
 	//: the current version becomes a former one, with the document it held.
 	case found:
@@ -365,16 +372,18 @@ func (s *SQLStore[T]) insertVersionRows(ctx context.Context, ex coresql.Executor
 }
 
 // versionArgs binds a batch of version rows of the document stored under
-// key: its key, the number, the instant in nanoseconds since 1970 UTC, the
-// metadata as a JSON object and the document, NULL where there is none.
+// key: its key, the number, the instant as seconds since 1970 UTC and the
+// nanoseconds within that second, the metadata as a JSON object and the
+// document, NULL where there is none.
 func (s *SQLStore[T]) versionArgs(key string, batch []versionRow) ([]any, error) {
 	args := make([]any, 0, versionRowArgs*len(batch))
 	//: in the order insertVersions numbers them.
 	for _, row := range batch {
-		var at, meta, doc any
-		//: an instant nobody recorded is NULL.
+		var at, ns, meta, doc any
+		//: an instant nobody recorded is NULL; any other is exact, since two
+		//: integers hold every instant a time.Time does.
 		if row.at != nil {
-			at = row.at.UnixNano()
+			at, ns = row.at.Unix(), int64(row.at.Nanosecond())
 		}
 		//: no metadata is NULL.
 		if len(row.meta) > 0 {
@@ -391,29 +400,44 @@ func (s *SQLStore[T]) versionArgs(key string, batch []versionRow) ([]any, error)
 		if row.doc != nil {
 			doc = row.doc
 		}
-		args = append(args, []byte(key), int64(row.num), at, meta, doc)
+		args = append(args, []byte(key), int64(row.num), at, ns, meta, doc)
 	}
-	//: five arguments a row.
+	//: six arguments a row.
 	return args, nil
+}
+
+// scannedVersion is one row of a versions read, as the driver hands it over.
+type scannedVersion struct {
+	// meta is the metadata as stored, NULL read as nil.
+	meta []byte
+	// doc is the document the version holds.
+	doc []byte
+	// num is the number; not valid for a document stored before its store
+	// kept versions.
+	num stdsql.NullInt64
+	// at and ns are the instant's seconds and nanoseconds; not valid when
+	// unknown.
+	at, ns stdsql.NullInt64
 }
 
 // versionOf turns one row of a versions read into a version. A row without a
 // number is a document stored before its store kept versions: version 1,
 // made at an unknown instant.
-func (s *SQLStore[T]) versionOf(num, at stdsql.NullInt64, meta, doc []byte) (VersionValue, error) {
-	v := VersionValue{JSON: doc, Number: 1}
+func (s *SQLStore[T]) versionOf(row *scannedVersion) (VersionValue, error) {
+	v := VersionValue{JSON: row.doc, Number: 1}
 	//: a version the table records.
-	if num.Valid {
-		v.Number = uint64(num.Int64)
+	if row.num.Valid {
+		v.Number = uint64(row.num.Int64)
 	}
-	//: when it was made, when anybody recorded it.
-	if at.Valid {
-		v.At = time.Unix(0, at.Int64).UTC()
+	//: when it was made, when anybody recorded it: to the nanosecond, over
+	//: any instant a time.Time holds.
+	if row.at.Valid {
+		v.At = time.Unix(row.at.Int64, row.ns.Int64).UTC()
 	}
 	//: what its writer said.
-	if len(meta) > 0 {
+	if len(row.meta) > 0 {
 		//: a JSON object of strings, as a write stored it.
-		if err := json.Unmarshal(meta, &v.Meta); err != nil {
+		if err := json.Unmarshal(row.meta, &v.Meta); err != nil {
 			//: DocumentUndecodable, naming what failed and never the value.
 			return VersionValue{}, kerrs.Wrap(DocumentUndecodable, kerrs.WrapParams{},
 				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err)))

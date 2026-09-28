@@ -295,3 +295,24 @@ func TestADocumentStoredBeforeVersionsOnEveryEngine(t *testing.T) {
 		}
 	})
 }
+
+// TestAnInstantFarFrom1970OnEveryEngine pins the instant to the nanosecond on
+// each engine, in years one count of nanoseconds since 1970 cannot hold: the
+// table keeps seconds and nanoseconds apart.
+func TestAnInstantFarFrom1970OnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		ancient := time.Date(1066, 10, 14, 9, 0, 0, 123456789, time.UTC)
+		far := time.Date(2600, 1, 1, 0, 0, 0, 987654321, time.UTC)
+		clk := clock.NewManualClock(ancient)
+		ctx, store := t.Context(), openVersioned(t, e, 3, func(c *docstore.SQLConfig[member]) { c.Clock = clk }).store
+		must(t, store.Put(ctx, member{ID: "m1", Name: "then"}))
+		clk.Set(far)
+		must(t, store.Put(ctx, member{ID: "m1", Name: "later"}))
+		all, err := store.Versions(ctx, "m1")
+		must(t, err)
+		if len(all) != 2 || !all[0].At.Equal(far) || !all[1].At.Equal(ancient) {
+			t.Fatalf("the versions were made at %+v, want %v and %v", all, far, ancient)
+		}
+	})
+}

@@ -59,6 +59,12 @@ func TestDiff(t *testing.T) {
 		{"the same document", `{"a":1,"b":[1,2]}`, `{"a":1,"b":[1,2]}`, []edit{}},
 		{"members in another order, spaces", `{"a":1,"b":2}`, "{ \"b\" : 2,\n \"a\" : 1 }", []edit{}},
 		{"one number written three ways", `[1, 100, 0.5, -0]`, `[1.0, 1e2, 5E-1, 0]`, []edit{}},
+		{"every zero is zero", `[0, -0, 0.0, 0e5, -0.000E-7]`, `[0, 0, 0, 0, 0]`, []edit{}},
+		{
+			"members in another order, nested in an array", `[{"a":{"x":1,"y":[1,{"p":2,"q":3}]},"b":2}]`,
+			`[{"b":2,"a":{"y":[1,{"q":3,"p":2}],"x":1}}]`,
+			[]edit{},
+		},
 		{"one string escaped two ways", `"caf\u00e9"`, `"café"`, []edit{}},
 		{
 			"an exponent no float holds, compared exactly", `[1e999999999999999999999, 2e-999999999999999999999]`,

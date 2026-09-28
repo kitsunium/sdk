@@ -102,40 +102,50 @@ microseconds, it is not the number that decides anything.
 
 `BenchmarkSQLStoreVersions` times a store keeping ten former versions of each
 of its 100 documents, every document already holding ten, so each write makes a
-version and prunes one. It ran on the same machine as the rows above, one day
-later, from branch `feat/docstore-versions`, load average 4.1 / 6.2 / 15.3,
-`-benchtime=2s`, beside a fresh run of `BenchmarkSQLStore` for the plain rows.
+version and prunes one. It ran beside a fresh `BenchmarkSQLStore`, whose plain
+rows it is read against.
+
+| Dimension | Value |
+|---|---|
+| Machine and engines | as above |
+| Git branch | `feat/docstore-versions` |
+| Git commit | `cdcbe78f` (pre-commit: the tree these rows ship with) |
+| Generated (UTC) | 2026-09-28, load average 2.1 / 2.3 / 3.6 |
+| Command | `GOWORK=off go test -tags integration -run '^$' -bench 'BenchmarkSQLStoreVersions\|BenchmarkSQLStore$' -benchmem -benchtime=2s ./third-party/db/sql/` |
 
 ```
-BenchmarkSQLStore/sqlite/Put-10                     16617      144598 ns/op      6025 B/op      139 allocs/op
-BenchmarkSQLStore/sqlite/Update-10                  16226      147915 ns/op      6956 B/op      160 allocs/op
-BenchmarkSQLStore/postgres/Put-10                    1256     1892685 ns/op      7171 B/op      130 allocs/op
-BenchmarkSQLStore/postgres/Update-10                 1324     1880103 ns/op      8227 B/op      150 allocs/op
-BenchmarkSQLStore/mysql/Put-10                        747     2997308 ns/op      5788 B/op      120 allocs/op
-BenchmarkSQLStore/mysql/Update-10                     698     3456420 ns/op      6964 B/op      149 allocs/op
-BenchmarkSQLStoreVersions/sqlite/Put-10             10000      215485 ns/op     10973 B/op      269 allocs/op
-BenchmarkSQLStoreVersions/sqlite/Update-10          10000      208533 ns/op     11175 B/op      270 allocs/op
-BenchmarkSQLStoreVersions/sqlite/Versions-10        77890       30671 ns/op      6007 B/op      132 allocs/op
-BenchmarkSQLStoreVersions/postgres/Put-10             631     3793299 ns/op     13280 B/op      249 allocs/op
-BenchmarkSQLStoreVersions/postgres/Update-10          636     3748774 ns/op     13496 B/op      251 allocs/op
-BenchmarkSQLStoreVersions/postgres/Versions-10       6626      339262 ns/op      6294 B/op      131 allocs/op
-BenchmarkSQLStoreVersions/mysql/Put-10                429     5690597 ns/op     11304 B/op      252 allocs/op
-BenchmarkSQLStoreVersions/mysql/Update-10             464     5086745 ns/op     11301 B/op      247 allocs/op
-BenchmarkSQLStoreVersions/mysql/Versions-10          4382      586551 ns/op      4995 B/op      119 allocs/op
+BenchmarkSQLStore/sqlite/Get-10                     227197       10496 ns/op      1379 B/op       37 allocs/op
+BenchmarkSQLStore/sqlite/Put-10                      16806      143975 ns/op      6022 B/op      139 allocs/op
+BenchmarkSQLStore/sqlite/Update-10                   15723      152502 ns/op      6956 B/op      160 allocs/op
+BenchmarkSQLStore/postgres/Get-10                     8160      307611 ns/op      1688 B/op       35 allocs/op
+BenchmarkSQLStore/postgres/Put-10                     1309     1857246 ns/op      7186 B/op      130 allocs/op
+BenchmarkSQLStore/postgres/Update-10                  1072     2110047 ns/op      8243 B/op      150 allocs/op
+BenchmarkSQLStore/mysql/Get-10                        4443      537232 ns/op      1254 B/op       37 allocs/op
+BenchmarkSQLStore/mysql/Put-10                         873     2945267 ns/op      5797 B/op      120 allocs/op
+BenchmarkSQLStore/mysql/Update-10                      678     3462856 ns/op      6955 B/op      149 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Put-10              10000      207049 ns/op     11106 B/op      270 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Update-10           10000      203025 ns/op     11289 B/op      271 allocs/op
+BenchmarkSQLStoreVersions/sqlite/Versions-10         73472       32612 ns/op      6349 B/op      112 allocs/op
+BenchmarkSQLStoreVersions/postgres/Put-10              757     3656566 ns/op     13435 B/op      251 allocs/op
+BenchmarkSQLStoreVersions/postgres/Update-10           639     3787582 ns/op     13630 B/op      253 allocs/op
+BenchmarkSQLStoreVersions/postgres/Versions-10        6441      363998 ns/op      6661 B/op      111 allocs/op
+BenchmarkSQLStoreVersions/mysql/Put-10                 428     5599093 ns/op     11458 B/op      252 allocs/op
+BenchmarkSQLStoreVersions/mysql/Update-10              466     5209521 ns/op     11436 B/op      248 allocs/op
+BenchmarkSQLStoreVersions/mysql/Versions-10           4384      688977 ns/op      5349 B/op       98 allocs/op
 ```
 
-### A versioned write costs its five statements more, and nothing else
+### A versioned write costs its extra statements, and nothing else
 
-`TestSQLVersionsRoundTrips` counts what a write adds when it makes a version:
-the current version's number, read locked; its row given the document it held;
-the new version's row; the question of what to prune; and the pruning — five
-statements, four when there is nothing to prune. On PostgreSQL an indexed
-`Put` goes from 1.89 ms to 3.79 ms, which is those five at 0.29 ms a round
-trip, plus the claim replacing the upsert and one write under its lock; an
-`Update`, from 1.88 ms to 3.75 ms. MySQL reads the same at about 0.6 ms a round
-trip. On SQLite the statements share one commit, so a versioned write costs
-1.4 times a plain one (215 µs against 145), not twice.
+`TestSQLVersionsRoundTrips` counts what a write adds when it makes a version
+and prunes one: the current number, read locked; its row given the document it
+held; the new row; the question of what to prune; the pruning — five
+statements — and a `Put` one more, since its claim locks the row and the
+document is then written under that lock. On PostgreSQL an indexed `Put` goes
+from 1.86 ms to 3.66 ms, six round trips at 0.31 ms; an `Update` from 2.11 ms
+to 3.79 ms, five. MySQL reads the same at about 0.55 ms a round trip. On
+SQLite the statements share one commit, so a versioned write costs 1.4 times a
+plain one (207 µs against 144, 203 against 153 for an `Update`), not twice.
 
 Reading every version of a document is one statement whatever it holds: a
-LEFT JOIN of the documents' table and the versions', 0.34 ms on PostgreSQL —
-about a `Get` — and 31 µs on SQLite for eleven versions.
+LEFT JOIN of the documents' table and the versions', 0.36 ms on PostgreSQL —
+about a `Get` — and 33 µs on SQLite for eleven versions.

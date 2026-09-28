@@ -100,8 +100,9 @@ type SQLConfig[T any] struct {
 	// [SQLVersionsMigration] creates. Zero keeps no versions and sends
 	// exactly the statements the store sent before versions existed; a
 	// negative value is refused. The store cannot see a versions table it was
-	// told nothing about: turned off, it leaves the table as it is, so drop it
-	// with the migration's Down (ADR 0143).
+	// told nothing about: turned off, it leaves the table as it is, and a
+	// document deleted and written again meanwhile would find the rows of the
+	// one it replaced — so drop the table with the migration's Down (ADR 0143).
 	Versions int
 }
 

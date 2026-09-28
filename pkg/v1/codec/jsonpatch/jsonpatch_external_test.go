@@ -5,7 +5,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/codec/jsonpatch"
-	"github.com/kitsunium/sdk/pkg/v1/errs"
+	errs "github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // TestFacade pins the diff through public names: nested changes as RFC 6902

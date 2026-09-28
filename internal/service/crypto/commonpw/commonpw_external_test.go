@@ -5,6 +5,7 @@ package commonpw_test
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"math/rand/v2"
 	"strings"
 	"sync"
 	"testing"
@@ -95,4 +96,49 @@ func TestIsCommonUnderContention(t *testing.T) {
 		})
 	}
 	wg.Wait()
+}
+
+// TestTheComparisonIsStringsToLower pins the comparison IsCommon searches
+// with against what it stands for — strings.Compare of the entry and the
+// password lower-cased by strings.ToLower — on the list's own entries against
+// passwords in every case, Unicode, invalid UTF-8, and prefixes of one another.
+func TestTheComparisonIsStringsToLower(t *testing.T) {
+	t.Parallel()
+	passwords := []string{
+		"", "a", "A", "PASSWORD", "password", "passwor", "password1", "Pässwörd", "ǅemal", "İstanbul",
+		"\xffpass", "pass\xc3", "ΣΊΣΥΦΟΣ", "123456", "zzzzzzzz", "~~~",
+	}
+	rng := rand.New(rand.NewPCG(143, 10))
+	for range 200 {
+		b := make([]byte, 1+rng.IntN(8))
+		for i := range b {
+			b[i] = byte(rng.IntN(256))
+		}
+		passwords = append(passwords, string(b))
+	}
+	entries := []string{"", "a", "password", "passwor", "pässwörd", "123456", "\uFFFDpass"}
+	for entry := range strings.Lines(commonpw.ListForTest()) {
+		entries = append(entries, strings.ToLower(strings.TrimRight(entry, "\r\n")))
+		if len(entries) > 600 {
+			break
+		}
+	}
+	for _, entry := range entries {
+		for _, pw := range passwords {
+			want := strings.Compare(entry, strings.ToLower(pw))
+			if got := commonpw.CompareFoldedForTest(entry, []byte(pw)); got != want {
+				t.Fatalf("compareFolded(%q, %q) = %d, want %d", entry, pw, got, want)
+			}
+		}
+	}
+}
+
+// TestIsCommonAllocatesNothing pins that a question copies nothing — no
+// string of the password — once the list is built.
+func TestIsCommonAllocatesNothing(t *testing.T) {
+	commonpw.IsCommon([]byte("warm"))
+	pw := []byte("PassWord")
+	if n := testing.AllocsPerRun(100, func() { commonpw.IsCommon(pw) }); n != 0 {
+		t.Fatalf("IsCommon allocated %v times a question", n)
+	}
 }

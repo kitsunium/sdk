@@ -116,8 +116,9 @@ written, the next open loads the same documents with the same versions. Every
 document and every version is kept in memory, as every document already was.
 
 **SQL engine.** A third table, `<table>___vs` — `doc_key`, `num`, `made_at`
-(nanoseconds since 1970 UTC, NULL when unknown), `meta` (a JSON object, NULL
-when empty), `doc`, keyed `(doc_key, num)` — which `SQLVersionsMigration`
+and `made_ns` (seconds since 1970 UTC and the nanoseconds within that second,
+NULL when unknown), `meta` (a JSON object, NULL when empty), `doc`, keyed
+`(doc_key, num)` — which `SQLVersionsMigration`
 creates beside `SQLMigration`'s two, as ADR 0139 §D10 foresaw. The current
 version's row holds NULL, because its document is the documents' table's; a
 former version's holds the document it was. The version rows are statements of
@@ -131,21 +132,24 @@ begins with a CLAIM: an upsert that leaves the stored document as it is and
 moves its revision — `ON CONFLICT … DO UPDATE SET rev = rev + 1 RETURNING
 rev, doc` on PostgreSQL and SQLite, `ON DUPLICATE KEY UPDATE rev = rev + 1` and
 a locking read on MySQL — which creates the key or locks its row in one
-statement. `Replace` and `Update` read under the lock they already took. The
+statement. `Replace` reads the document with the locking read `Update`
+already made — `FOR UPDATE`, or SQLite's write that returns it. The
 version rows are read `FOR UPDATE` on PostgreSQL and MySQL: inside a caller's
 REPEATABLE READ transaction on MySQL a plain read answers from the snapshot,
 and would number a version already taken. SQLite serialises writers and needs
 no clause.
 
-What a write sends, pinned by `TestSQLVersionsRoundTrips`: a creation adds the
-current version's row; a write that makes a version adds five statements — the
+What a write sends, pinned by `TestSQLVersionsRoundTrips`: a creation deletes
+any row an earlier document of its key left (D7) and adds the current
+version's row; a write that makes a version adds five statements — the
 current number, read locked; its row given the document it held; the new row;
 the question of what to prune; the pruning — four when there is nothing to
-prune; a write that makes none asks what to prune. On PostgreSQL across Docker's
-network an indexed `Put` goes from 1.89 ms to 3.79 ms, which is those round
-trips; on SQLite, where they share one commit, from 145 µs to 215 µs
+prune; a write that makes none asks what to prune. A `Put` also writes the
+document under its claim's lock. On PostgreSQL across Docker's network an
+indexed `Put` goes from 1.86 ms to 3.66 ms, which is those six round trips; on
+SQLite, where they share one commit, from 144 µs to 207 µs
 (`third-party/db/sql/BENCH.md`). In the file engine a write costs what its
-versions weigh — 2.7 µs with none, 8.1 µs with ten former versions of a
+versions weigh — 2.7 µs with none, 8.2 µs with ten former versions of a
 hundred-byte document, 42 µs with a hundred — and nothing more on a disk, where
 the entry's two flushes are still the cost (`internal/service/docstore/BENCH.md`).
 
@@ -198,6 +202,13 @@ transaction the context carries. Versions are never indexed: `Lookup`, `Find`
 and `Filter` read the current version, and a unique key a former version holds
 is free.
 
+`At` is kept to the nanosecond. The file engine writes it as RFC 3339 text,
+which holds the years 0 to 9999: a write stamped outside them — a clock that is
+wrong — fails `PERSIST_FAILED` and changes nothing, rather than keep another
+instant. The SQL engine keeps seconds and nanoseconds in two columns, which
+hold any instant a `time.Time` does; one count of nanoseconds since 1970 would
+wrap before 1678 and after 2262.
+
 A store that keeps no versions answers `VERSIONS_NOT_KEPT` to `Versions`,
 `Version` and `RewriteVersions` — rather than the document as its one version,
 which would tell a caller a history exists and is empty.
@@ -217,10 +228,13 @@ which would tell a caller a history exists and is empty.
   operator removes the file to drop them, or opens with `Versions`.
 - **Off, on the SQL engine.** `OpenSQL` sends no statement and cannot see a
   versions table it was told nothing about. A store opened without versions
-  never touches it; the migration's Down drops it. Opened with versions again
-  over a table it left, a document deleted and written again in between would
-  inherit the rows of the one it replaced — the one gap the SQL engine cannot
-  close alone, stated here and in `SQLConfig.Versions`.
+  never touches it; the migration's Down drops it. Left in place, the table
+  keeps the rows of a document deleted meanwhile. A creation made once versions
+  are kept again deletes whatever rows its key holds before it writes version
+  1, so a document's history begins with it (`TestSQLACreationStartsANewHistory`);
+  what stays open is a document deleted AND written again while the store kept
+  none, which then inherits the rows of the one it replaced — the one gap the
+  SQL engine cannot close alone, stated here and in `SQLConfig.Versions`.
 
 A store that keeps no versions writes exactly what it wrote before: the same
 entries, no versions file, the same SQL statements — pinned by
@@ -296,10 +310,10 @@ the ten thousand most common ones, compared case-insensitively. NIST SP
 OWASP ASVS 5.0 (6.2.4) asks for at least the top 3 000.
 
 - **The list** is SecLists' `Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt`,
-  embedded byte for byte as it stood at commit
-  `2e3e92569043d24297ca6c35070078e5cf41651e`, SHA-256
+  embedded byte for byte as it stood at [a pinned SecLists
+  commit](https://github.com/danielmiessler/SecLists/blob/2e3e92569043d24297ca6c35070078e5cf41651e/Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt), SHA-256
   `c63d5e4ccc31344d662583cc39ca4bd5bd20517ff1d24501f0c4e0c22d9b722a`, which the
-  suite checks. It is the 10 000 most frequent passwords of the ten million
+  suite checks; `internal/service/crypto/commonpw` names the commit. It is the 10 000 most frequent passwords of the ten million
   credentials Mark Burnett released into the public domain in 2015.
 - **The licence allows embedding it.** SecLists is MIT, Copyright (c) 2018
   Daniel Miessler; its text travels beside the list as `LICENSE.SecLists`, in
@@ -344,12 +358,14 @@ OWASP ASVS 5.0 (6.2.4) asks for at least the top 3 000.
 
 ## Breaking changes
 
-None. The methods, the types, the migration, the codes, `codec/jsonpatch` and
-`password.IsCommon` are additions.
-`Config` and `SQLConfig` gain `Versions`, `Clock` and `Held`: a keyed literal
-compiles unchanged, and an unkeyed one — which `go vet` already reports across
-packages — would not, under the v0 licence of ADR 0040. A store that keeps no
-versions behaves, and writes, as before.
+One, for one spelling. The methods, the types, the migration, the codes,
+`codec/jsonpatch` and `password.IsCommon` are additions, and a store that keeps
+no versions behaves, and writes, as before. But `Config` and `SQLConfig` gain
+`Versions`, `Clock` and `Held`: a keyed literal compiles unchanged, and an
+unkeyed one — which `go vet` already reports across packages — no longer does.
+That break is taken under the v0 licence of ADR 0040, which holds only while
+`pkg` is v0: after v1.0.0, a field added to a published configuration needs a
+configuration type of its own, or `pkg/v2`.
 
 ## Alternatives considered
 
@@ -426,12 +442,16 @@ versions behaves, and writes, as before.
     before it, or with its entries left, loading the same documents and
     versions; a refused publication changing neither; the versions file and a
     reopen; a document stored before versions; files that keep versions a store
-    does not keep, refused and left as they were; eleven files no store wrote.
+    does not keep, refused and left as they were; eleven files no store wrote;
+    a rewritten version read back byte for byte after a reopen; and, in
+    `version_external_test.go`, writers, rewriters and readers of shared
+    documents at once under the race detector.
   - `sql_version_external_test.go`, on the three dialects over the fake engine:
     the same contract; the claim, the locked reads and the pruning between one
     BEGIN and COMMIT, or inside one savepoint of the caller's; every version
     statement's failure rolling the document back; sixteen writers leaving
-    consecutive numbers; a hold whose read joins the write's transaction.
+    consecutive numbers; a hold whose read joins the write's transaction; a
+    creation clearing the rows a deleted document of its key left.
   - `sql_statements_external_test.go`: the new statements and the versions
     table's DDL as text, per dialect.
 - `pkg/v1/docstore`: `TestFacadeVersions`, through public names.
@@ -462,8 +482,8 @@ versions behaves, and writes, as before.
 - `internal/service/docstore/version.go`, `sql_version.go`, `sql_dialect.go`,
   `load.go`, `persist.go`; `internal/service/codec/jsonpatch/`
 - RFC 6902 (JSON Patch), RFC 6901 (JSON Pointer), RFC 8259 (JSON)
-- SecLists: https://github.com/danielmiessler/SecLists (MIT), the file at
-  https://github.com/danielmiessler/SecLists/blob/2e3e92569043d24297ca6c35070078e5cf41651e/Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt;
+- SecLists: https://github.com/danielmiessler/SecLists (MIT), and [the file
+  at the pinned commit](https://github.com/danielmiessler/SecLists/blob/2e3e92569043d24297ca6c35070078e5cf41651e/Passwords/Common-Credentials/xato-net-10-million-passwords-10000.txt);
   Mark Burnett's ten million passwords, public domain:
   https://archive.org/details/10MillionPasswords
 - NIST SP 800-63B-4, the blocklist: https://pages.nist.gov/800-63-4/sp800-63b.html;

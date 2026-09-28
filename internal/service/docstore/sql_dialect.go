@@ -14,8 +14,9 @@ import (
 const indexRowArgs int = 4
 
 // versionRowArgs is how many arguments one version row binds: its document's
-// key, its number, its instant, its metadata and its document.
-const versionRowArgs int = 5
+// key, its number, its instant — seconds and nanoseconds — its metadata and its
+// document.
+const versionRowArgs int = 6
 
 // sqlStatements are the statements one SQL store sends, rendered for its
 // dialect and tables. The fixed ones are rendered at OpenSQL; the two whose
@@ -111,9 +112,9 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 		pruneVersions: "DELETE FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL AND num <= " + p2,
 		dropVersions:  "DELETE FROM " + vs + " WHERE doc_key = " + p1,
 		dropFormers:   "DELETE FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL",
-		readVersions: "SELECT v.num, v.made_at, v.meta, COALESCE(v.doc, d.doc) FROM " + docs + " d LEFT JOIN " + vs +
+		readVersions: "SELECT v.num, v.made_at, v.made_ns, v.meta, COALESCE(v.doc, d.doc) FROM " + docs + " d LEFT JOIN " + vs +
 			" v ON v.doc_key = d.doc_key WHERE d.doc_key = " + p1 + " ORDER BY v.num DESC",
-		lockFormers: "SELECT num, made_at, meta, doc FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL" +
+		lockFormers: "SELECT num, made_at, made_ns, meta, doc FROM " + vs + " WHERE doc_key = " + p1 + " AND doc IS NOT NULL" +
 			" ORDER BY num DESC" + lock,
 		claim:     claimStatement(dialect, docs),
 		docTable:  docs,
@@ -226,7 +227,7 @@ func (s *sqlStatements) claimReturnsRow() bool {
 // versionRowArgs arguments, in one statement.
 func (s *sqlStatements) insertVersions(n int) string {
 	var b strings.Builder
-	b.WriteString("INSERT INTO " + s.vsTable + " (doc_key, num, made_at, meta, doc) VALUES ")
+	b.WriteString("INSERT INTO " + s.vsTable + " (doc_key, num, made_at, made_ns, meta, doc) VALUES ")
 	//: one tuple per row, placeholders numbered across the whole statement.
 	for row := range n {
 		//: rows are comma-separated.
@@ -234,7 +235,7 @@ func (s *sqlStatements) insertVersions(n int) string {
 			b.WriteString(", ")
 		}
 		b.WriteString("(")
-		//: the row's five columns.
+		//: the row's six columns.
 		for col := 1; col <= versionRowArgs; col++ {
 			//: columns are comma-separated.
 			if col > 1 {
@@ -467,11 +468,13 @@ func createTableStatements(dialect coresql.Dialect, table string) []string {
 // store keeps its versions in, beside its two others (ADR 0143): one row per
 // version, keyed by the document's key and the version's number. A former
 // version's row holds the document it was; the current version's holds NULL,
-// because its document is the documents' table's. made_at is the instant in
-// nanoseconds since 1970 UTC, NULL when unknown; meta is the stamp's metadata
-// as a JSON object, NULL when there is none. The key is binary, as in the two
-// other tables, and the table has no index but its primary key: versions are
-// read by document, never looked up by what they hold.
+// because its document is the documents' table's. made_at and made_ns are the
+// instant — seconds since 1970 UTC and the nanoseconds within that second, two
+// integers that hold any instant a time.Time does, to the nanosecond — both
+// NULL when unknown; meta is the stamp's metadata as a JSON object, NULL when
+// there is none. The key is binary, as in the two other tables, and the table
+// has no index but its primary key: versions are read by document, never
+// looked up by what they hold.
 func createVersionsTableStatements(dialect coresql.Dialect, table string) []string {
 	vs := quoteIdent(dialect, versionsTable(table))
 	//: the types and the table options are each engine's.
@@ -480,17 +483,18 @@ func createVersionsTableStatements(dialect coresql.Dialect, table string) []stri
 	case coresql.DialectMySQL:
 		//: a VARBINARY key sized like the documents'.
 		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key VARBINARY(" + strconv.Itoa(MaxSQLKeyLen) + ") NOT NULL," +
-			" num BIGINT NOT NULL, made_at BIGINT NULL, meta LONGBLOB NULL, doc LONGBLOB NULL, PRIMARY KEY (doc_key, num)) ENGINE=InnoDB"}
+			" num BIGINT NOT NULL, made_at BIGINT NULL, made_ns INT NULL, meta LONGBLOB NULL, doc LONGBLOB NULL," +
+			" PRIMARY KEY (doc_key, num)) ENGINE=InnoDB"}
 	//: PostgreSQL: bytea.
 	case coresql.DialectPostgres:
 		//: the same columns, PostgreSQL's types.
 		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key bytea NOT NULL, num bigint NOT NULL, made_at bigint," +
-			" meta bytea, doc bytea, PRIMARY KEY (doc_key, num))"}
+			" made_ns integer, meta bytea, doc bytea, PRIMARY KEY (doc_key, num))"}
 	//: SQLite: BLOB.
 	default:
 		//: the same columns, SQLite's types.
 		return []string{"CREATE TABLE IF NOT EXISTS " + vs + " (doc_key BLOB NOT NULL, num INTEGER NOT NULL, made_at INTEGER," +
-			" meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))"}
+			" made_ns INTEGER, meta BLOB, doc BLOB, PRIMARY KEY (doc_key, num))"}
 	}
 }
 
