@@ -83,22 +83,23 @@ type sqlPrepared struct {
 }
 
 // Put stores v under its key, creating it or replacing whatever was there.
+// On a store that keeps versions, it makes one, stamped with nothing.
 func (s *SQLStore[T]) Put(ctx context.Context, v T) error {
 	//: anything under the key is fine.
-	return s.store(ctx, v, upsert)
+	return s.store(ctx, v, upsert, StampValue{})
 }
 
 // Insert stores v, which must be new: DocumentExists when its key is taken.
 func (s *SQLStore[T]) Insert(ctx context.Context, v T) error {
 	//: nothing may be under the key.
-	return s.store(ctx, v, insertOnly)
+	return s.store(ctx, v, insertOnly, StampValue{})
 }
 
 // Replace stores v over the document already under its key: DocumentNotFound
 // when there is none, so a document deleted meanwhile is never brought back.
 func (s *SQLStore[T]) Replace(ctx context.Context, v T) error {
 	//: a document must be under the key.
-	return s.store(ctx, v, replaceOnly)
+	return s.store(ctx, v, replaceOnly, StampValue{})
 }
 
 // Update applies fn to a copy of the document stored under key and stores the
@@ -113,10 +114,17 @@ func (s *SQLStore[T]) Replace(ctx context.Context, v T) error {
 // connection. It must not write the document it updates, which is locked by
 // the very write that is waiting for fn.
 func (s *SQLStore[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
+	//: a new version, stamped with nothing, where versions are kept.
+	return s.UpdateStamped(ctx, key, StampValue{}, fn)
+}
+
+// UpdateStamped is Update, with what the write says about the version it
+// makes.
+func (s *SQLStore[T]) UpdateStamped(ctx context.Context, key string, stamp StampValue, fn func(*T) error) (T, error) {
 	var zero, result T
 	err := s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
 		var err error
-		result, err = s.modify(txCtx, ex, key, fn)
+		result, err = s.modify(txCtx, ex, key, stamp, fn)
 		//: nil, a refusal, fn's own error, or a failure.
 		return err
 	})
@@ -131,9 +139,10 @@ func (s *SQLStore[T]) Update(ctx context.Context, key string, fn func(*T) error)
 }
 
 // Delete removes the document stored under key, or returns DocumentNotFound.
+// Its versions go with it, in the same transaction.
 func (s *SQLStore[T]) Delete(ctx context.Context, key string) error {
-	err := s.run(ctx, len(s.indexes) > 0, func(txCtx context.Context, ex coresql.Executor) error {
-		//: the document, then its index rows.
+	err := s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
+		//: the document, then its index rows and its versions.
 		return s.remove(txCtx, ex, key)
 	})
 	//: nothing removed.
@@ -147,19 +156,23 @@ func (s *SQLStore[T]) Delete(ctx context.Context, key string) error {
 }
 
 // store prepares v outside any transaction, writes it, and announces it.
-func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode) error {
+func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode, stamp StampValue) error {
 	p, err := s.prepare(v)
 	//: DocumentKeyEmpty, DocumentUnencodable or KeyTooLong: nothing opened.
 	if err != nil {
 		//: nothing changed.
 		return err
 	}
-	err = s.run(ctx, len(s.indexes) > 0, func(txCtx context.Context, ex coresql.Executor) error {
-		existed, writeErr := s.writeDocument(txCtx, ex, p, mode)
+	err = s.run(ctx, s.several(), func(txCtx context.Context, ex coresql.Executor) error {
+		existed, old, writeErr := s.writeDocument(txCtx, ex, p, mode)
 		//: the document's rows, replacing its previous ones, once its own row
 		//: is written; a refusal or a failure rolls the write back.
 		if writeErr == nil {
 			writeErr = s.fileIndexes(txCtx, ex, p, existed)
+		}
+		//: its versions, in the same transaction, once nothing refused it.
+		if writeErr == nil {
+			writeErr = s.keepVersions(txCtx, ex, &storedWrite{meta: stamp.Meta, old: old, raw: p.raw, key: p.key, existed: existed, inPlace: stamp.InPlace})
 		}
 		//: nil, DocumentExists, DocumentNotFound, a failure, or a collision.
 		return writeErr
@@ -279,29 +292,119 @@ func (s *SQLStore[T]) indexRows(v T) ([]indexRow, error) {
 	return rows, nil
 }
 
+// several reports whether every write of the store sends more than one
+// statement — its index rows, its versions — and so needs a transaction of
+// its own outside the caller's.
+func (s *SQLStore[T]) several() bool {
+	//: a write files index rows, or keeps versions.
+	return len(s.indexes) > 0 || s.keep > 0
+}
+
 // writeDocument writes a prepared document's row the way mode asks, and
-// reports whether a document was already stored under its key.
+// reports whether a document was already stored under its key — and, on a
+// store that keeps versions, the document it replaced.
 func (s *SQLStore[T]) writeDocument(
 	ctx context.Context, ex coresql.Executor, p *sqlPrepared, mode writeMode,
-) (existed bool, err error) {
+) (existed bool, old []byte, err error) {
 	key := []byte(p.key)
 	//: the three write modes.
 	switch mode {
 	//: create or replace: the engine says which it did.
 	case upsert:
+		//: a store that keeps versions reads what it replaces first.
+		if s.keep > 0 {
+			//: whether it replaced, and what.
+			return s.claimRow(ctx, ex, p)
+		}
+		existed, err = s.upsertRow(ctx, ex, key, p.raw)
 		//: whether it replaced.
-		return s.upsertRow(ctx, ex, key, p.raw)
+		return existed, nil, err
 	//: create only.
 	case insertOnly:
 		//: never an existing document.
-		return false, s.insertRow(ctx, ex, p)
+		return false, nil, s.insertRow(ctx, ex, p)
 	//: replace only.
 	default:
+		//: a store that keeps versions reads what it replaces first.
+		if s.keep > 0 {
+			old, err = s.lockedReplace(ctx, ex, p)
+			//: a replacement, and what it replaced.
+			return true, old, err
+		}
 		result, execErr := ex.ExecContext(ctx, s.stmts.replace, []byte(p.raw), key)
 		//: DocumentNotFound when no row moved, which is exact: the revision
 		//: always changes, so a stored document is always a row affected.
-		return true, s.affected(result, execErr, "replace a document")
+		return true, nil, s.affected(result, execErr, "replace a document")
 	}
+}
+
+// claimRow creates or replaces a document's row on a store that keeps
+// versions, and returns the document it replaced: the claim creates the row,
+// or locks the stored one without changing what it holds, and a stored
+// document is then written under that lock — so no other writer lands between
+// the read and the write, and none creates the key between them either.
+func (s *SQLStore[T]) claimRow(ctx context.Context, ex coresql.Executor, p *sqlPrepared) (existed bool, old []byte, err error) {
+	key := []byte(p.key)
+	//: PostgreSQL and SQLite answer the revision and the row's document.
+	if s.stmts.claimReturnsRow() {
+		var rev int64
+		//: one row: 1 for a creation, the stored document otherwise.
+		if scanErr := ex.QueryRowContext(ctx, s.stmts.claim, key, []byte(p.raw)).Scan(&rev, &old); scanErr != nil {
+			//: StatementFailed.
+			return false, nil, s.failed("write a document", scanErr)
+		}
+		//: created, with this write's document.
+		if rev == 1 {
+			//: nothing replaced.
+			return false, nil, nil
+		}
+	} else {
+		result, execErr := ex.ExecContext(ctx, s.stmts.claim, key, []byte(p.raw))
+		n, countErr := rowsAffected(result, execErr)
+		//: MySQL: 1 row affected for a creation, 2 for a row changed.
+		if countErr != nil {
+			//: StatementFailed.
+			return false, nil, s.failed("write a document", countErr)
+		}
+		//: created, with this write's document.
+		if n == 1 {
+			//: nothing replaced.
+			return false, nil, nil
+		}
+		//: the stored document, under the lock the claim took.
+		if scanErr := ex.QueryRowContext(ctx, s.stmts.lockDoc, key).Scan(&old); scanErr != nil {
+			//: StatementFailed.
+			return false, nil, s.failed("lock a document", scanErr)
+		}
+	}
+	//: the stored document replaced, under the claim's lock.
+	return true, old, s.writeLockedRow(ctx, ex, p)
+}
+
+// lockedReplace replaces a stored document on a store that keeps versions,
+// and returns the document it replaced: it is read and locked first, as
+// Update reads it, and DocumentNotFound when there is none.
+func (s *SQLStore[T]) lockedReplace(ctx context.Context, ex coresql.Executor, p *sqlPrepared) (old []byte, err error) {
+	err = ex.QueryRowContext(ctx, s.stmts.lockDoc, []byte(p.key)).Scan(&old)
+	//: nothing to replace, and nothing is brought back.
+	if errors.Is(err, stdsql.ErrNoRows) {
+		//: DocumentNotFound, naming no key.
+		return nil, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+	}
+	//: the locking read did not complete.
+	if err != nil {
+		//: StatementFailed.
+		return nil, s.failed("lock a document", err)
+	}
+	//: replaced, under the lock.
+	return old, s.writeLockedRow(ctx, ex, p)
+}
+
+// writeLockedRow writes a prepared document over the row its write locked.
+func (s *SQLStore[T]) writeLockedRow(ctx context.Context, ex coresql.Executor, p *sqlPrepared) error {
+	result, execErr := ex.ExecContext(ctx, s.stmts.writeLocked, []byte(p.raw), []byte(p.key))
+	//: the row is locked, so it is there to be written.
+	return s.affected(result, execErr, "update a document")
 }
 
 // upsertRow creates or replaces a document's row and reports whether it
@@ -366,7 +469,7 @@ func (s *SQLStore[T]) insertRow(ctx context.Context, ex coresql.Executor, p *sql
 }
 
 // modify runs Update's read-modify-write inside its transaction.
-func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key string, fn func(*T) error) (T, error) {
+func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key string, stamp StampValue, fn func(*T) error) (T, error) {
 	var zero T
 	var raw []byte
 	err := ex.QueryRowContext(ctx, s.stmts.lockDoc, []byte(key)).Scan(&raw)
@@ -402,14 +505,18 @@ func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key strin
 		//: DocumentKeyChanged.
 		return zero, kerrs.Wrap(DocumentKeyChanged, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
-	result, execErr := ex.ExecContext(ctx, s.stmts.writeLocked, []byte(p.raw), []byte(key))
 	//: the row is locked, so it is there to be written.
-	if affErr := s.affected(result, execErr, "update a document"); affErr != nil {
+	if affErr := s.writeLockedRow(ctx, ex, p); affErr != nil {
 		//: StatementFailed, or DocumentNotFound for a row that vanished.
 		return zero, affErr
 	}
 	//: the rows of what it is now.
-	return v, s.fileIndexes(ctx, ex, p, true)
+	if fileErr := s.fileIndexes(ctx, ex, p, true); fileErr != nil {
+		//: UniqueKeyTaken, a failure, or a collision.
+		return zero, fileErr
+	}
+	//: its versions, in the same transaction.
+	return v, s.keepVersions(ctx, ex, &storedWrite{meta: stamp.Meta, old: raw, raw: p.raw, key: key, existed: true, inPlace: stamp.InPlace})
 }
 
 // remove runs Delete's statements.
@@ -420,17 +527,23 @@ func (s *SQLStore[T]) remove(ctx context.Context, ex coresql.Executor, key strin
 		//: nothing removed.
 		return err
 	}
-	//: a store without indexes has no rows to take out.
-	if len(s.indexes) == 0 {
-		//: removed.
-		return nil
-	}
-	//: its rows go with it.
-	if _, err := ex.ExecContext(ctx, s.stmts.deleteIndex, []byte(key)); err != nil {
+	//: its rows go with it; a store without indexes has none.
+	if len(s.indexes) > 0 {
 		//: StatementFailed; the transaction undoes the document's deletion.
-		return s.failed("delete a document's index rows", err)
+		if _, err := ex.ExecContext(ctx, s.stmts.deleteIndex, []byte(key)); err != nil {
+			//: nothing removed.
+			return s.failed("delete a document's index rows", err)
+		}
 	}
-	//: removed, rows and all.
+	//: its versions go with it; a store that keeps none has none.
+	if s.keep > 0 {
+		//: StatementFailed; the transaction undoes the document's deletion.
+		if _, err := ex.ExecContext(ctx, s.stmts.dropVersions, []byte(key)); err != nil {
+			//: nothing removed.
+			return s.failed("delete a document's versions", err)
+		}
+	}
+	//: removed, rows, versions and all.
 	return nil
 }
 

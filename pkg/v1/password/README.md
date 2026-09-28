@@ -30,6 +30,18 @@ Importing this package activates PBKDF2\-SHA256 with zero non\-stdlib deps:
 
 argon2id \(memory\-hard, the OWASP first choice\) is an opt\-in scheme under third\-party/x\-crypto — blank\-import it when you can take the x/crypto dep, then hash with its Algorithm; Verify still works on either scheme's stored hashes.
 
+### Common passwords
+
+[IsCommon](<#IsCommon>) reports whether a password is one of the ten thousand most common ones, compared case\-insensitively — the blocklist NIST SP 800\-63B\-4 requires a verifier to check a new password against, past the top 3 000 OWASP ASVS 5.0 \(6.2.4\) asks for:
+
+```
+if password.IsCommon([]byte(pw)) {
+    return errTooCommon // before hashing anything
+}
+```
+
+The list is SecLists' xato\-net\-10\-million\-passwords\-10000.txt, MIT\-licensed, Copyright \(c\) 2018 Daniel Miessler — the passwords that occur most often in the ten million credentials Mark Burnett released into the public domain in 2015 — embedded byte for byte at a pinned commit \(ADR 0143 §D10; internal/service/crypto/commonpw names the commit, the digest and the licence\). The empty password is left to a length rule. Nearly every entry is shorter than fifteen characters, so the check matters most beside a shorter minimum.
+
 ### Stable algorithm strings
 
 The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0; the PHC id segment equals the Algorithm, so stored hashes stay verifiable across releases.
@@ -37,13 +49,14 @@ The [Algorithm](<#Algorithm>) constants are frozen post\-v1.0.0; the PHC id segm
 ## Index
 
 - [func Hash\(a Algorithm, password \[\]byte\) \(phc string, err error\)](<#Hash>)
+- [func IsCommon\(password \[\]byte\) bool](<#IsCommon>)
 - [func NeedsRehash\(phc string\) bool](<#NeedsRehash>)
 - [func Verify\(password \[\]byte, phc string\) \(ok bool, err error\)](<#Verify>)
 - [type Algorithm](<#Algorithm>)
 
 
 <a name="Hash"></a>
-## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L60>)
+## func [Hash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L81>)
 
 ```go
 func Hash(a Algorithm, password []byte) (phc string, err error)
@@ -51,8 +64,17 @@ func Hash(a Algorithm, password []byte) (phc string, err error)
 
 Hash returns a PHC\-string hash of password using the named scheme, with a fresh random salt and the scheme's current cost parameters. An unregistered algorithm returns UnknownPasswordAlgorithm. Store the returned string as\-is.
 
+<a name="IsCommon"></a>
+## func [IsCommon](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L97>)
+
+```go
+func IsCommon(password []byte) bool
+```
+
+IsCommon reports whether password is one of the ten thousand most common passwords, compared case\-insensitively — PASSWORD as password. The empty password is not: refusing it is a length rule's job.
+
 <a name="NeedsRehash"></a>
-## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L76>)
+## func [NeedsRehash](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L105>)
 
 ```go
 func NeedsRehash(phc string) bool
@@ -61,7 +83,7 @@ func NeedsRehash(phc string) bool
 NeedsRehash reports whether the stored PHC hash was produced with cost parameters weaker than its scheme's current policy — call it after a successful Verify to transparently upgrade the stored hash.
 
 <a name="Verify"></a>
-## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L68>)
+## func [Verify](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L89>)
 
 ```go
 func Verify(password []byte, phc string) (ok bool, err error)
@@ -70,7 +92,7 @@ func Verify(password []byte, phc string) (ok bool, err error)
 Verify reports whether password matches the stored PHC hash, comparing in constant time. The scheme is read from phc. A malformed phc or unregistered scheme returns an error; a genuine mismatch is \(false, nil\).
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L52>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/password/password.go#L73>)
 
 Algorithm is the stable identifier of a password\-hashing scheme; it is also the PHC id segment of hashes that scheme produces. It is a defined type distinct from the other crypto\-family Algorithm types \(hash, mac, kdf, …\), so the compiler rejects feeding a hash or KDF constant into a password call \(V104\) — the seven registries are separate keyspaces, and the type system now enforces that separation the way typed Format/Level discipline does elsewhere.
 

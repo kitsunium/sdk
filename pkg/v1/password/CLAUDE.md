@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-09-29T00:30:00Z -->
 # pkg/v1/password/
 
 ## Purpose
@@ -9,7 +9,9 @@ over `internal/core/crypto`'s PasswordHasher registry — zero runtime cost, no
 business logic (per `pkg/` convention).
 
 Importing the package blank-imports `internal/service/crypto/pbkdf2pw`,
-activating PBKDF2-SHA256 with **zero non-stdlib deps**.
+activating PBKDF2-SHA256 with **zero non-stdlib deps**, and links the 76 KB
+list of common passwords `IsCommon` reads (`internal/service/crypto/commonpw`,
+sorted at its first question).
 
 ## Surface
 
@@ -20,6 +22,7 @@ activating PBKDF2-SHA256 with **zero non-stdlib deps**.
 | `Hash(a, password) (string, error)` | PHC hash for NEW passwords; unknown algo → `UnknownPasswordAlgorithm` |
 | `Verify(password, phc) (bool, error)` | constant-time check; scheme read from `phc`; mismatch → `(false, nil)`; malformed → error |
 | `NeedsRehash(phc) bool` | true when `phc` is below its scheme's current cost policy |
+| `IsCommon(password) bool` | one of the ten thousand most common passwords, case-insensitively (SecLists' xato-net top 10 000, MIT, embedded byte for byte — ADR 0143 §D10); the empty password is a length rule's |
 
 ## This is the ONLY surface for human passwords
 

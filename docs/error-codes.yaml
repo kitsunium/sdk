@@ -2310,6 +2310,18 @@ codes:
     const: CodeKeyTooLong
     hex: "0x00_03_50_11"
     package: internal/service/docstore
+  - code: "0.3.80.18"
+    const: CodeVersionsNotKept
+    hex: "0x00_03_50_12"
+    package: internal/service/docstore
+  - code: "0.3.80.19"
+    const: CodeVersionNotFound
+    hex: "0x00_03_50_13"
+    package: internal/service/docstore
+  - code: "0.3.80.20"
+    const: CodeVersionsRewriteRefused
+    hex: "0x00_03_50_14"
+    package: internal/service/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"
@@ -2446,6 +2458,10 @@ codes:
     const: CodeSampleTypeMissing
     hex: "0x00_03_59_07"
     package: internal/service/profiling
+  - code: "0.3.90.1"
+    const: CodeNotJSON
+    hex: "0x00_03_5A_01"
+    package: internal/service/codec/jsonpatch
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

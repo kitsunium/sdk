@@ -9,6 +9,7 @@ import (
 	"errors"
 
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -45,6 +46,11 @@ type SQLStore[T any] struct {
 	// indexKey transforms an index key before it reaches the database; nil
 	// keeps it as it is.
 	indexKey func(index, key string) []byte
+	// clock stamps each version.
+	clock clock.Clock
+	// held reports a document whose versions no write may prune; nil holds
+	// nothing.
+	held func(ctx context.Context, key string) bool
 	// byName finds an index by its name. It and indexes never change after
 	// OpenSQL.
 	byName map[string]IndexSpec[T]
@@ -58,6 +64,9 @@ type SQLStore[T any] struct {
 	onWrite, onDelete hooks
 	// own are the options of a transaction the store opens itself.
 	own coresql.TxOptionsValue
+	// keep is how many former versions each document keeps; zero keeps no
+	// versions, and touches no versions table.
+	keep int
 }
 
 // OpenSQL builds a SQL store from cfg, with the secondary indexes given. It
@@ -80,11 +89,18 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 		tm:       cfg.Transactor,
 		tx:       parts,
 		indexKey: cfg.IndexKey,
+		clock:    cfg.Clock,
+		held:     cfg.Held,
 		byName:   make(map[string]IndexSpec[T], len(indexes)),
 		table:    cfg.Table,
 		stmts:    renderStatements(cfg.Dialect, cfg.Table),
 		indexes:  indexes,
 		own:      ownTxOptions(cfg.Dialect),
+		keep:     cfg.Versions,
+	}
+	//: the system clock unless the caller brought one.
+	if store.clock == nil {
+		store.clock = clock.System
 	}
 	//: the indexes, by name.
 	for _, spec := range indexes {

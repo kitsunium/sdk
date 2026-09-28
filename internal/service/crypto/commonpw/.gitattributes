@@ -1,0 +1,4 @@
+# The list is embedded byte for byte and its SHA-256 is checked against the
+# digest the package documents: no checkout may rewrite its line endings.
+xato-net-10-million-passwords-10000.txt -text
+LICENSE.SecLists -text
