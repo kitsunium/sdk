@@ -2458,6 +2458,10 @@ codes:
     const: CodeSampleTypeMissing
     hex: "0x00_03_59_07"
     package: internal/service/profiling
+  - code: "0.3.90.1"
+    const: CodeNotJSON
+    hex: "0x00_03_5A_01"
+    package: internal/service/codec/jsonpatch
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

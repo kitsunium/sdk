@@ -144,6 +144,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_51_00: "internal/service/mail/spool",
 	0x00_03_58_00: "internal/service/statemachine",
 	0x00_03_59_00: "internal/service/profiling",
+	0x00_03_5A_00: "internal/service/codec/jsonpatch",
 	0x01_01_00_00: "pkg/v1/logger",
 	0x01_01_01_00: "pkg/v1/logger/slogbridge",
 	0x01_02_00_00: "pkg/v1/codec",

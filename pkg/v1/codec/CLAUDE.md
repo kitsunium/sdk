@@ -150,4 +150,5 @@ Every codec lives under `internal/service/codec/*` and is reached via the univer
 
 - `strictjson/` — one JSON document read one way — see `strictjson/CLAUDE.md` (ADR 0102)
 - `jsonshape/` — a Go type's wire shape under encoding/json — see `jsonshape/CLAUDE.md` (ADR 0133)
+- `jsonpatch/` — two JSON documents' difference as RFC 6902 operations — see `jsonpatch/CLAUDE.md` (ADR 0143)
 - `json/`, `yaml/`, `toml/` — one format registered alone — see their `CLAUDE.md` (ADR 0134)

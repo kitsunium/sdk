@@ -23,7 +23,11 @@ and are built. Step 4, record revisions — `kit.Revisions(n)`, `Revisions`,
 - versions are never indexed: `Lookup` and `Find` read the current version;
 - a version records its number — from 1, never reused — and when it was made,
   and kit adds who made it and which command: its `Revision{Number, At, By,
-  Command, Value}`.
+  Command, Value}`;
+- and, beside `docstore`, "a structural diff of two JSON documents as RFC 6902
+  operations, in `codec`" — kit's `Diff(ctx, key, from, to)` returns
+  `[]kit.Edit{Op, Path, From, To}`, "in RFC 6902's words (`add`, `remove`,
+  `replace`, at a JSON pointer), with both values".
 
 kit's own record rejects the alternative it would build without the SDK — a
 sibling store of revisions — because it costs two durable writes per change
@@ -219,7 +223,7 @@ A store that keeps no versions writes exactly what it wrote before: the same
 entries, no versions file, the same SQL statements — pinned by
 `TestAStoreWithoutVersions` and `TestSQLRoundTripsPerCall`.
 
-### D8 — three codes, in the range the store owns
+### D8 — three codes, in the range the store owns, and one range for the diff
 
 - `0.3.80.18` `VERSIONS_NOT_KEPT` (400): a call on versions to a store that
   keeps none.
@@ -227,6 +231,8 @@ entries, no versions file, the same SQL statements — pinned by
   number.
 - `0.3.80.20` `VERSIONS_REWRITE_REFUSED` (400): a rewrite returned what a
   rewrite may not.
+- `0.3.90.1` `NOT_JSON` (400), in a range of its own, `0.3.90.*`, owned by
+  `internal/service/codec/jsonpatch` (D9) — the next free service slot.
 
 Two refusals already defined grow: `STORE_MISCONFIGURED` for a negative
 `Versions` and for a `Held` on a store that keeps no versions (ADR 0031: a hold
@@ -235,6 +241,49 @@ for versions files and entries no store wrote — numbered 0, out of order,
 without a document, of a document the store does not hold, beside a deletion
 — or that the store does not keep. No refusal quotes a key, a document or a
 version.
+
+### D9 — what changed between two versions: `codec/jsonpatch`
+
+`jsonpatch.Diff(from, to []byte) ([]Edit, error)`, in a package of its own
+under the codec tree, beside `strictjson` and `jsonshape` and for their reason:
+it is about JSON documents, and `pkg/v1/codec` would link every codec. An
+`Edit` is `{Op, Path, Value, Old}`: RFC 6902's `add`, `remove` or `replace`, at
+an RFC 6901 JSON Pointer, the value written and the value replaced or removed.
+Its JSON is an RFC 6902 operation with `Old` under `old`, a member RFC 6902
+does not define for these operations and a patch applier ignores (§4), so a
+list of them is a JSON Patch document.
+
+- **Values compare as RFC 6902 §4.6 compares them**: strings once unescaped,
+  arrays element by element, objects by member name whatever their order, and
+  numbers numerically — exactly, reduced to a sign, significant digits and a
+  power of ten held in a `big.Int`, so `1`, `1.0` and `1e0` are one number,
+  `1e400` is compared rather than overflowed, and an exponent a document chose
+  costs its length, never ten to its power. Two versions a store wrote at
+  different times may spell a value differently; a diff that reported it would
+  report nothing a reader cares about.
+- **Documents are read strictly** with `encoding/json/jsontext` — no duplicated
+  member name, valid UTF-8, nesting within jsontext's bound, no trailing data
+  — or refused `NOT_JSON` (`0.3.90.1`), naming the document and the offset and
+  never a byte of it, since jsontext's own message quotes the character.
+- **Objects**: members in byte order of their names — removed, compared in
+  turn, added — so the same two documents give the same operations, byte for
+  byte.
+- **Arrays** are ALIGNED before they are paired: the equal elements at both
+  ends are kept, the longest common subsequence of the differing middles says
+  which elements both keep, and between two kept elements the removed and the
+  added are paired in order and compared in turn, the rest removed or added.
+  An insertion in the middle is one `add`; a block edited in place is a nested
+  `replace`. The alignment table is bounded — 2^18 cells, 1 MiB — past which
+  the middles are paired by position: a longer patch, still a correct one.
+- **Indices are the applied ones**: each is the index in the array as the
+  operations before it left it, so the list applies in order, as RFC 6902
+  applies a patch. Anything else that differs is replaced whole; two roots of
+  different kinds are one `replace` at `""`.
+- It emits no `move`, `copy` or `test`, and applies nothing. A value is the JSON
+  of that part of the document, compact, a number as written.
+
+kit's `Diff` is `jsonpatch.Diff` of two versions' JSON, with `Old` and `Value`
+as its `From` and `To`, and a `secret` member's values dropped on kit's side.
 
 ## Consequences / Semantics
 
@@ -249,10 +298,14 @@ version.
   the file engine, as kit's record says.
 - `pkg/v1/docstore` publishes `Version`, `Stamp`, `SQLVersionsMigration`, the
   three codes and sentinels, and the new methods and fields through its aliases.
+- `pkg/v1/codec/jsonpatch` is a new public package: `Diff`, `Edit`, `Op` and
+  its three values, `NotJSON` and its code, in the range `0.3.90.*` the
+  service package owns.
 
 ## Breaking changes
 
-None. The methods, the types, the migration and the codes are additions.
+None. The methods, the types, the migration, the codes and `codec/jsonpatch`
+are additions.
 `Config` and `SQLConfig` gain `Versions`, `Clock` and `Held`: a keyed literal
 compiles unchanged, and an unkeyed one — which `go vet` already reports across
 packages — would not, under the v0 licence of ADR 0040. A store that keeps no
@@ -286,6 +339,15 @@ versions behaves, and writes, as before.
   the operator one explicit removal (D7).
 - **An age limit on versions** — kit defers it; a record's retention bounds its
   history.
+- **A JSON Patch library** for the diff. The ones in the Go ecosystem are
+  third-party dependencies for a hundred lines of comparison, and the one
+  property that matters here — values compared as RFC 6902 compares them,
+  numbers exactly — is the one they differ on.
+- **`move` and `copy` in the diff.** A moved block is a removal and an
+  insertion, which a reader of a history reads without following a second
+  pointer; kit's record asks for add, remove and replace.
+- **Positional array diffs only.** Correct, and a single insertion at the start
+  of a list of blocks would read as a rewrite of every block after it.
 
 ## Deferred
 
@@ -332,11 +394,20 @@ versions behaves, and writes, as before.
   hold read from the same database inside the write's transaction; the
   rewrite; a document stored before versions, read through the LEFT JOIN.
 - `BENCH.md` in both places: the costs quoted in D3.
+- `internal/service/codec/jsonpatch`: the operations for the cases a reader
+  checks by eye (nested objects, arrays edited at both ends and in the middle,
+  names escaped, values equal however written, exponents no float holds); the
+  JSON of an operation; thirteen documents that are not JSON, refused naming
+  the document and never its bytes; four thousand generated pairs, each patch
+  applied in order by the suite's own RFC 6902 applier and every `old` checked
+  against what the path held; the alignment bound. `pkg/v1/codec/jsonpatch`:
+  the same through public names.
 
 ## References
 
 - `internal/service/docstore/version.go`, `sql_version.go`, `sql_dialect.go`,
-  `load.go`, `persist.go`
+  `load.go`, `persist.go`; `internal/service/codec/jsonpatch/`
+- RFC 6902 (JSON Patch), RFC 6901 (JSON Pointer), RFC 8259 (JSON)
 - kitsunium/platform `docs/adr/0007-data-remembers-its-versions.md` (§3 and
   "Implementation, in order", step 3), `0006-data-is-classified-field-by-field.md`
   (erasure, holds)

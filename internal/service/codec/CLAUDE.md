@@ -34,6 +34,14 @@ resolved by the Go 1.27 engine's own rules, which may be missing or null, and th
 Go field behind each. It declares no codes and is reached through
 `pkg/v1/codec/jsonshape`.
 
+`jsonpatch/` is not a codec either (ADR 0143 §D9): it encodes nothing, and
+computes the structural difference between two JSON documents as RFC 6902
+operations — add, remove, replace at a JSON Pointer — with the value each
+writes and the value it replaces. Documents are read strictly with
+`encoding/json/jsontext` and compared as RFC 6902 §4.6 compares values, numbers
+exactly; arrays are aligned before they are paired. It owns `0.3.90.*` and is
+reached through `pkg/v1/codec/jsonpatch`.
+
 Three of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
 `pkg/v1/codec/yaml` and `pkg/v1/codec/toml` each blank-import their own package
 here and nothing else (ADR 0134), so a program reading YAML configuration links
@@ -94,6 +102,7 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 - `flatbuffers/` — see `flatbuffers/CLAUDE.md`
 - `form/`        — see `form/CLAUDE.md`
 - `json/`        — see `json/CLAUDE.md`
+- `jsonpatch/`   — see `jsonpatch/CLAUDE.md` (not a codec — ADR 0143)
 - `jsonshape/`   — see `jsonshape/CLAUDE.md` (not a codec — ADR 0133)
 - `msgpack/`     — see `msgpack/CLAUDE.md`
 - `multipart/`   — see `multipart/CLAUDE.md`

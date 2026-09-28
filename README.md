@@ -4,10 +4,10 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 54 at the top level, plus ten nested ones
+`pkg/v1` ships **65 packages**: 54 at the top level, plus eleven nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
-`server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/json`,
-`codec/yaml`, `codec/toml`). They are grouped below by the job they do, and each links
+`server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
+`codec/json`, `codec/yaml`, `codec/toml`). They are grouped below by the job they do, and each links
 to its own generated `README.md`.
 
 ### Observability
@@ -52,7 +52,7 @@ to its own generated `README.md`.
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `json`, `yaml` and `toml` register one format each, so a program reading YAML links `yaml.v3` and not the MongoDB driver. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml` and `toml` register one format each, so a program reading YAML links `yaml.v3` and not the MongoDB driver. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
