@@ -199,8 +199,9 @@ func (d *differ) changeRun(path string, i int, removed, added []*node) int {
 // keep in order — a longest common subsequence under equal — ascending. Past
 // maxAlignCells it keeps none, and the elements are paired by position.
 func align(a, b []*node) [][2]int {
-	//: nothing to align, or too much to align.
-	if len(a) == 0 || len(b) == 0 || len(a)*len(b) > maxAlignCells {
+	//: nothing to align, or too much to align — divided rather than
+	//: multiplied, since two long arrays' product overflows a 32-bit int.
+	if len(a) == 0 || len(b) == 0 || len(a) > maxAlignCells/len(b) {
 		//: none kept.
 		return nil
 	}

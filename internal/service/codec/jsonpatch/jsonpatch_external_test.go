@@ -244,10 +244,17 @@ func TestLongArraysArePairedByPosition(t *testing.T) {
 		from  []any
 		to    []any
 		edits int
+		// applied checks the patch with the suite's applier, which copies an
+		// array per operation: too slow for the longest case, whose pairing is
+		// the 700-element case's.
+		applied bool
 	}{
-		{"a prepended element, trimmed at the end", numbers(700), append([]any{json.Number("-1")}, numbers(700)...), 1},
-		{"middles of 300 elements, aligned", numbers(300), shiftedAndEdited(numbers(300)), 2},
-		{"middles of 700 elements, paired by position", numbers(700), shiftedAndEdited(numbers(700)), 701},
+		{"a prepended element, trimmed at the end", numbers(700), append([]any{json.Number("-1")}, numbers(700)...), 1, true},
+		{"middles of 300 elements, aligned", numbers(300), shiftedAndEdited(numbers(300)), 2, true},
+		{"middles of 700 elements, paired by position", numbers(700), shiftedAndEdited(numbers(700)), 701, true},
+		// 50 001 × 50 000 cells overflow a 32-bit int: the bound must hold on
+		// 386 too, where a product would wrap negative and pass it.
+		{"middles whose product overflows 32 bits, paired by position", numbers(50_000), shiftedAndEdited(numbers(50_000)), 50_001, false},
 	} {
 		from, to := mustJSON(t, c.from), mustJSON(t, c.to)
 		edits, err := jsonpatch.Diff(from, to)
@@ -256,6 +263,9 @@ func TestLongArraysArePairedByPosition(t *testing.T) {
 		}
 		if len(edits) != c.edits {
 			t.Fatalf("%s: %d operations, want %d", c.name, len(edits), c.edits)
+		}
+		if !c.applied {
+			continue
 		}
 		if got := applyAll(t, decoded(t, from), edits); !bytes.Equal(mustJSON(t, got), to) {
 			t.Fatalf("%s: the patch does not turn the first array into the second", c.name)
