@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:31:45Z -->
 # internal/service/trace/
 
 ## Purpose
@@ -23,7 +24,7 @@ Code range: `0.3.50.*` (ADR 0051).
 | `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
 | `idgen.go` | `NewTraceID` / `NewSpanID` + `readRandom` |
-| `recorder.go` | `Recorder` + `RecorderConfig` + `Sink` / `Collect` / `Len` / `Dropped` |
+| `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `trace.proto` / `common.proto` / `resource.proto`, in FIELD-NUMBER order |
 | `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter + `OTLPJSON` (registered, stderr) |
