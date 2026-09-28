@@ -48,7 +48,15 @@ func newIndex[T any](spec IndexSpec[T]) *index[T] {
 // keysOf returns v's keys in the index: the declared function's answer
 // without its empty or repeated keys.
 func (ix *index[T]) keysOf(v T) []string {
-	raw := ix.keys(v)
+	//: the rule both engines file by.
+	return fileableKeys(ix.keys(v))
+}
+
+// fileableKeys returns the keys an index files out of what its function
+// answered: in the order given, without the empty key — which is no key — and
+// with a repeated key once. The memory, file and SQL engines all file by it,
+// so a document has the same keys in every one of them.
+func fileableKeys(raw []string) []string {
 	out := make([]string, 0, len(raw))
 	//: in the order the function gave them.
 	for _, k := range raw {

@@ -49,11 +49,15 @@ func createTableSQL(table string) string {
 }
 
 // ensureTable creates the bookkeeping table if it is absent.
+//
+// It runs where ctx says. Under an advisory lock that is the pool — no
+// transaction is needed for an idempotent DDL statement, and wrapping one would
+// be meaningless on an engine with non-transactional DDL anyway. Under SQLite's
+// file lock it is the run's own transaction: the pool's other connections are
+// exactly the writers the lock is holding off, this one included.
 func (m *migrator) ensureTable(ctx context.Context) error {
-	//: the pool itself satisfies core/sql.Executor — no transaction is
-	//: needed for an idempotent DDL statement, and wrapping one would be
-	//: meaningless on an engine with non-transactional DDL anyway.
-	_, err := m.cfg.db.ExecContext(ctx, createTableSQL(m.plan.table))
+	ex, _ := m.tx.Join(ctx)
+	_, err := ex.ExecContext(ctx, createTableSQL(m.plan.table))
 	//: a table the runner cannot create makes every later step a guess.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
@@ -63,9 +67,11 @@ func (m *migrator) ensureTable(ctx context.Context) error {
 	return nil
 }
 
-// applied reads every recorded version and the highest of them.
+// applied reads every recorded version and the highest of them, where ctx
+// says, for the reason ensureTable gives.
 func (m *migrator) applied(ctx context.Context) (versions map[uint64]bool, highest uint64, err error) {
-	rows, err := m.cfg.db.QueryContext(ctx, "SELECT version FROM "+m.plan.table+" ORDER BY version")
+	ex, _ := m.tx.Join(ctx)
+	rows, err := ex.QueryContext(ctx, "SELECT version FROM "+m.plan.table+" ORDER BY version")
 	//: an unreadable history stops the run rather than producing a plan.
 	if err != nil {
 		//: the driver's error travels beside the verdict.

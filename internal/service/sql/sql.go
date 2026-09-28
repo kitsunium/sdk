@@ -52,6 +52,22 @@
 // is unknown at that point, and committing work the SDK believes it undid is
 // the one outcome worse than failing.
 //
+// # Joining a transaction, and holding what waits for its commit
+//
+// The manager is also a core/sql Joiner and a Deferrer (ADR 0139). Join answers
+// the executor of the innermost scope of the transaction a context carries for
+// THIS manager — a retired one, which refuses, when that scope has returned,
+// and never the pool in its place — or the pool when the context carries none.
+// Defer holds a function until that transaction commits; each held function
+// carries the id of the scope that held it, a failed savepoint drops what was
+// held at or above its own id, and the root runs what is left after its COMMIT.
+//
+// # SQLite's migrations
+//
+// SQLite has no advisory lock, and its runner holds the database file's write
+// lock instead (ADR 0140): the run is ONE transaction that takes the lock with
+// a write that writes nothing, and each migration is a savepoint of it.
+//
 // # A partially applied migration, and what MySQL does to the guarantee
 //
 // Each migration runs in ITS OWN transaction, and the version-table row is

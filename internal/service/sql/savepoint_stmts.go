@@ -10,4 +10,7 @@ type savepointStmts struct {
 	undo string
 	// release is the RELEASE SAVEPOINT statement.
 	release string
+	// id is the savepoint's number: the id of the scope it opens, which the
+	// functions held inside it carry.
+	id uint64
 }

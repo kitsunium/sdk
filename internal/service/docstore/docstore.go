@@ -55,6 +55,15 @@
 // and two would each believe their own memory. It keeps every document in
 // memory and sorts the keys for every List. It has no transaction across
 // documents. It is a store for the documents a service owns, not a database.
+//
+// # The same store over SQL
+//
+// OpenSQL builds the second engine, SQLStore, for when a store must outgrow
+// that: the same documents, keys, index declarations, write modes, hooks and
+// refusals, kept in two tables of a PostgreSQL, MySQL or SQLite database the
+// caller owns and hands over as a core/sql Transactor. Every call takes a
+// context and runs on the transaction it carries — a write in a savepoint of
+// it, its hooks after its commit — and nothing is held in memory. ADR 0139.
 package docstore
 
 import (
@@ -306,6 +315,15 @@ func (s *Store[T]) snapshotEntries(limit int) (entries []EntryValue, closed bool
 
 // decode decodes one stored document into a fresh value.
 func (s *Store[T]) decode(raw json.RawMessage) (T, error) {
+	//: the refusal names the snapshot.
+	return decodeAs[T](s.path, raw)
+}
+
+// decodeAs decodes one stored document into a fresh value, or refuses it
+// naming store — a snapshot's path, or a table — and never a byte of it. Every
+// engine decodes through it, so a type that changed under stored data is the
+// same refusal in each.
+func decodeAs[T any](store string, raw []byte) (T, error) {
 	var v T
 	//: the type changed under data an older program wrote.
 	if err := json.Unmarshal(raw, &v); err != nil {
@@ -313,7 +331,7 @@ func (s *Store[T]) decode(raw json.RawMessage) (T, error) {
 		//: DocumentUndecodable; what failed, never the document and never
 		//: the key.
 		return zero, kerrs.Wrap(DocumentUndecodable, kerrs.WrapParams{},
-			kerrs.String("store", s.path), kerrs.String("cause", jsonCause(err)))
+			kerrs.String("store", store), kerrs.String("cause", jsonCause(err)))
 	}
 	//: the caller's own copy.
 	return v, nil

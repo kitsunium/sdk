@@ -59,9 +59,11 @@ type fakeDB struct {
 	// responder can answer differently the second time.
 	calls map[string]int
 	// beginErr, commitErr, rollbackErr fail the transaction verbs.
-	beginErr    error
-	commitErr   error
-	rollbackErr error
+	beginErr error
+	// beginFailures fail the next BEGINs, one each, before beginErr applies.
+	beginFailures []error
+	commitErr     error
+	rollbackErr   error
 	// pingErr fails the liveness probe.
 	pingErr error
 	// pingBlock, when non-nil, blocks every ping until it is closed or the
@@ -241,6 +243,9 @@ func (c *fakeConn) Begin() (driver.Tx, error) {
 func (c *fakeConn) BeginTx(context.Context, driver.TxOptions) (driver.Tx, error) {
 	c.db.mu.Lock()
 	failure := c.db.beginErr
+	if len(c.db.beginFailures) > 0 {
+		failure, c.db.beginFailures = c.db.beginFailures[0], c.db.beginFailures[1:]
+	}
 	if !c.db.quiet {
 		c.db.log = append(c.db.log, "BEGIN")
 	}

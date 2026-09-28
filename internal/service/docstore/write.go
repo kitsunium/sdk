@@ -103,21 +103,35 @@ func (s *Store[T]) store(v T, mode writeMode) error {
 // index keys. It runs the caller's functions, so a write runs it before it
 // takes a lock whenever the document is already known.
 func (s *Store[T]) prepare(v T) (prepared, error) {
-	key := s.key(v)
-	//: a document the store could never find again.
-	if key == "" {
-		//: DocumentKeyEmpty.
-		return prepared{}, kerrs.Wrap(DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", s.path))
-	}
-	raw, err := json.Marshal(v)
-	//: a channel, a function, a cycle, a failing MarshalJSON.
+	key, raw, err := encodeAs(s.path, s.key, v)
+	//: DocumentKeyEmpty or DocumentUnencodable.
 	if err != nil {
-		//: DocumentUnencodable; what failed, never what it held.
-		return prepared{}, kerrs.Wrap(DocumentUnencodable, kerrs.WrapParams{},
-			kerrs.String("store", s.path), kerrs.String("cause", encodeCause(err)))
+		//: nothing to store.
+		return prepared{}, err
 	}
 	//: ready to be checked and stored.
 	return prepared{raw: raw, keys: s.indexKeys(v), key: key}, nil
+}
+
+// encodeAs computes v's key and JSON, or refuses v naming store and never a
+// byte of v. Every engine encodes through it, so a document one engine refuses
+// is refused by the other.
+func encodeAs[T any](store string, keyOf func(T) string, v T) (key string, raw json.RawMessage, err error) {
+	key = keyOf(v)
+	//: a document the store could never find again.
+	if key == "" {
+		//: DocumentKeyEmpty.
+		return "", nil, kerrs.Wrap(DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", store))
+	}
+	raw, err = json.Marshal(v)
+	//: a channel, a function, a cycle, a failing MarshalJSON.
+	if err != nil {
+		//: DocumentUnencodable; what failed, never what it held.
+		return "", nil, kerrs.Wrap(DocumentUnencodable, kerrs.WrapParams{},
+			kerrs.String("store", store), kerrs.String("cause", encodeCause(err)))
+	}
+	//: the key and the document as written.
+	return key, raw, nil
 }
 
 // commit checks a prepared write against the store and stores it. It reports

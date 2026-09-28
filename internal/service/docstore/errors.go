@@ -22,6 +22,10 @@ const exitDataErr int = 65
 // exitIOErr matches sysexits EX_IOERR (74): the filesystem failed.
 const exitIOErr int = 74
 
+// exitTempFail matches sysexits EX_TEMPFAIL (75): the database did not answer,
+// and the same call may well succeed once it does.
+const exitTempFail int = 75
+
 var (
 	// DocumentNotFound is a miss: no document under that key, or no document
 	// holding that key in a unique index.
@@ -126,9 +130,33 @@ var (
 
 	// StoreMisconfigured refuses a configuration no store could honour: no
 	// key function, an index without a name, a function or a unique one, a
-	// filesystem without a path.
+	// filesystem without a path; for the SQL store, a transactor that cannot
+	// join or defer, an unknown dialect, a table name that is not one.
 	StoreMisconfigured = errs.Define(CodeStoreMisconfigured, "STORE_MISCONFIGURED",
 		"The document store cannot be opened as configured",
-		"service/docstore: Open refused its Config; the fields name the setting and the problem",
+		"service/docstore: Open or OpenSQL refused its Config; the fields name the setting and the problem",
 		errs.WithExitCode(exitConfig))
+
+	// StatementFailed reports a call the SQL store's database did not
+	// complete: it could not be reached, its context ended, or it refused a
+	// statement for a reason that is none of the store's own refusals. What
+	// the call was writing did not take effect.
+	//
+	// The driver's error travels beside it under errors.Join, reachable by
+	// errors.Is and errors.As — a context's deadline included — and WITHHELD
+	// from its text: a driver quotes the row a constraint refused, and that
+	// row holds a key (ADR 0139).
+	StatementFailed = errs.Define(CodeStatementFailed, "STATEMENT_FAILED",
+		"The store's database did not complete the request",
+		"service/docstore: a SQL statement failed; the driver's error is joined beside this one, its text withheld, and the fields name the table and the step",
+		errs.WithHTTPStatus(http.StatusServiceUnavailable), errs.WithExitCode(exitTempFail))
+
+	// KeyTooLong refuses a write to the SQL store whose store key, or one of
+	// whose index keys, is longer than its key columns hold. It is refused
+	// before any statement, because MySQL outside strict mode would truncate
+	// the key rather than refuse it — and a truncated key is another key.
+	KeyTooLong = errs.Define(CodeKeyTooLong, "KEY_TOO_LONG",
+		"A key is longer than the store can keep",
+		"service/docstore: a store key or an index key exceeds MaxSQLKeyLen bytes; the fields name the store, the index and the limit, never the key",
+		errs.WithHTTPStatus(http.StatusBadRequest))
 )

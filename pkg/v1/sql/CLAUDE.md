@@ -14,7 +14,7 @@ re-exports, thin delegating constructors, and one ergonomic helper.
 
 | Kind | Names |
 |---|---|
-| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Checker`, `Migrator`, `Step` |
+| Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner` and `Deferrer` (the transactor's ADR 0039 siblings — ADR 0139), `Checker`, `Migrator`, `Step` |
 | Value aliases | `TxOptions` (= `coresql.TxOptionsValue`), `Migration` (= `coresql.MigrationValue`), `Dialect` |
 | Config aliases | `Config`, `PoolConfig`, `MigrateConfig` |
 | Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite` |
