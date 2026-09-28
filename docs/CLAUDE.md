@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T00:19:36Z -->
 # docs/
 
 ## Purpose
@@ -139,7 +139,7 @@ and had lost 23 entries, every ADR from 0061 on among them.
 - Sequential numbering (`0001`, `0002`, …). Never reuse a number.
 - Filename slug = short kebab-case summary of the decision.
 - Header fields: `Status`, `Date`, `Deciders`, optional `Supersedes`, `Superseded by`, `Amends`, `Related`.
-- Standard sections: Context, Decision, Consequences / Semantics, Breaking changes, Why not …, Deferred, References.
+- Standard sections, in this order: Context, Decision, Consequences / Semantics, Breaking changes, Alternatives considered and/or Why not …, Deferred, References. This is the same list as `docs/adr/CLAUDE.md` §Conventions — keep the two in step. Both forms are in use: ADRs 0093 to 0138 and 0142 have an `## Alternatives considered` section, some with `### Why not …` headings under it, and many older ones a `## Why not …` section. This line named "Why not …" alone after that file listed both, and an automated review read the omission as a rule and flagged the heading.
 - Immutable after merge. Supersede via a new ADR that references the old one (e.g. ADR 0005 supersedes ADR 0002 §Registry; ADR 0006 amends ADR 0005 §Registry).
 
 ## Registry coupling
