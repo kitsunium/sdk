@@ -366,6 +366,31 @@ type Bundle = svcent.BundleValue
 // refusal path that depends on what an origin answered.
 type Getter = svcent.Getter
 
+// BearerFetch performs the one request a [Service] makes with a credential:
+// the GitHub Actions ID-token mint on the CI path, which sends the runner's
+// bearer token. It is a function rather than a [Getter] method because the
+// roster fetch must never carry one.
+//
+// [Service].WithBearerFetch replaces the default, and only a test should need
+// to: the default refuses every redirect, so the runner's credential cannot be
+// forwarded to a destination nobody vouched for, and a replacement takes that
+// duty on. It aliases the service type (ADR 0074).
+type BearerFetch = svcent.BearerFetch
+
+// RoughtimeServer is one Roughtime server a [Service] may ask for a signed
+// statement of the current time, and the ed25519 key its answer must be signed
+// with: the key, not the address, is the whole trust decision.
+//
+// [Service].WithTimeServers takes the list. The check is off by default, and
+// ADVISORY: a server that does not answer, or whose answer does not verify, is
+// no signal and the verification carries on, while one that answers verifiably
+// and disagrees with the local clock by more than five minutes, widened by its
+// own stated uncertainty, refuses with [ErrClockRegressed]. No server ships with
+// the SDK: this client has been checked against its own test fixture and never
+// against a live server, so adding one is a decision for whoever can watch it
+// verify a real answer. It aliases the service type (ADR 0074).
+type RoughtimeServer = svcent.RoughtimeServerValue
+
 // UpdateRequiredError carries the two versions a version-floor refusal is
 // about. It exists as a TYPE rather than a message because a caller that cannot
 // read the required version out of the refusal re-runs the upgrade, gets the

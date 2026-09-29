@@ -36,6 +36,16 @@ type JWK = jwk.KeyValue
 // [NewJWKSet].
 type JWKSet = jwk.Set
 
+// KeyType is the public alias for a JWK's "kty" member, the key-type family
+// [JWK].Kty reports: [KeyTypeEC], [KeyTypeOKP] or [KeyTypeOct]. The zero JWK
+// reports the empty KeyType.
+type KeyType = jwk.Type
+
+// Curve is the public alias for a JWK's "crv" member, the curve [JWK].Crv
+// reports: [CurveP256], [CurveP384], [CurveP521] or [CurveEd25519]. A symmetric
+// key has no curve and reports the empty Curve.
+type Curve = jwk.Curve
+
 // NewHS256Issuer returns a JWT issuer signing with HMAC-SHA-256 under secret.
 //
 // HS256 is symmetric: everyone who can verify these tokens can also mint them.

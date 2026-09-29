@@ -4,10 +4,11 @@
 //
 // This file is the ONLY place in the SDK where logging and tracing meet, and
 // that placement is the design (ADR 0062). internal/service/logger and
-// internal/service/trace are siblings — one may not import the other — and
-// internal/core/logger is kept stdlib-only so a consumer who only wants a line
-// on stderr does not compile the trace model. pkg/v1 is the layer that is
-// allowed to know both domains, so the binding lives here and nowhere else.
+// internal/service/trace are siblings, and neither imports the other because
+// the two domains meet only here, at the top layer; internal/core/logger is
+// kept stdlib-only so a consumer who only wants a line on stderr does not
+// compile the trace model. pkg/v1 is the layer that knows both domains
+// already, so the binding lives here and nowhere else.
 package logger
 
 import (

@@ -26,6 +26,8 @@ package; the service and `core/entitlement` stay internal.
 | `Err*` | var | the fourteen sentinels, for `errors.Is` |
 | `Bundle` | type alias | the one-document roster form, for a caller that serves or caches one |
 | `Getter` | type alias | the roster HTTP surface, substitutable in a consumer's own suite |
+| `BearerFetch` | type alias | `= svcent.BearerFetch` — the one credentialed request (the Actions token mint), what `Service.WithBearerFetch` takes; the default refuses redirects |
+| `RoughtimeServer` | type alias | `= svcent.RoughtimeServerValue` — one Roughtime server and its pinned key, what `Service.WithTimeServers` takes; advisory, off by default, and no server ships |
 | `UpdateRequiredError` | type alias | the version-floor refusal, carrying both versions |
 | `NewWithGetter` | func | a verifier whose fetches go through your client |
 | `RequiresUpdate` / `UpdateRefusal` | func | the version floor, without a Service |
@@ -43,6 +45,15 @@ which made it unusable by the consumer it was written for.
 mismatched re-export fails rather than drifts, and the suite lives in an
 `_test` package with no access to the internal layers — a test that imported
 them would have passed against the incomplete facade.
+
+**A method reached through an alias needs its argument published too.**
+`Service` is an alias, so `WithTimeServers` and `WithBearerFetch` were public
+from the start, and their argument types were not (#259): nothing public could
+build a `RoughtimeServerValue`, so the first could only be handed nil, and a
+consumer could pass a func literal to the second but could not write its type
+down. `BearerFetch` and `RoughtimeServer` publish both.
+`TestAConsumerCanBuildWhatTheServiceSettersTake` builds them from this package
+alone, so removing either alias stops the suite compiling.
 
 ## Bring your own identity
 

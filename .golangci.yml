@@ -4,10 +4,13 @@ run:
   timeout: 5m
   go: "1.27"
 
-# The layer dependency firewall (kernel → core → service → pkg/v1) is now
-# enforced by Bazel visibility rules in the per-layer BUILD.bazel files.
-# golangci-lint keeps running the remaining code-quality checks below —
-# it stays useful as a second-opinion lint even though Bazel is the
+# The layer dependency firewall (kernel → core → service → pkg/v1, with
+# third-party/ above all) is asserted on the build graph by
+# scripts/check-layer-deps.sh, which `make lint` and CI run (ADR 0068).
+# Bazel visibility does not enforce it: Gazelle gives every library under
+# internal/ the visibility //:__subpackages__, which admits the whole
+# repository. golangci-lint keeps running the remaining code-quality checks
+# below — it stays useful as a second-opinion lint even though Bazel is the
 # primary build/test system.
 linters:
   default: none

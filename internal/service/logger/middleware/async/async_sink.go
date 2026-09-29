@@ -52,12 +52,13 @@ type asyncSink struct {
 	stop chan struct{}
 	// stopOnce guards close(stop) so concurrent Close calls never panic.
 	stopOnce sync.Once
-	// done is closed when the drainer loop returns on the white-box test
-	// path (drain() spawned by hand without a daemon). Production joins the
-	// loop through the worker.LoopDaemon instead and never closes this channel.
+	// done is closed by drain() when the drainer loop returns, on both paths:
+	// production runs drain() inside the worker.LoopDaemon, and the white-box
+	// tests spawn it by hand. Only the test path JOINS on it; production joins
+	// through the daemon's Stop, and nothing there receives from done.
 	done chan struct{}
-	// doneOnce guards close(done) on the test path; the daemon-owned
-	// production drainer never closes done (the daemon owns its own join).
+	// doneOnce guards close(done), so the drainer's exit signal fires exactly
+	// once whichever path ran drain().
 	doneOnce sync.Once
 	// daemon owns the production drainer goroutine — its idempotent Stop
 	// joins the loop, replacing the former hand-rolled <-done join with the

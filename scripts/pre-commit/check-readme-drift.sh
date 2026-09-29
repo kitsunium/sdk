@@ -32,20 +32,23 @@ fi
 # same set by construction, which is the only version of this that stays true.
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
+#
 # Two roots publish generated READMEs: pkg/v1 and the framework module above it
 # (ADR 0147). Each package is recorded as "<root> <dir>", so the check runs from
 # the root its go:generate line is relative to.
+#
+# A read loop, not `readarray`: readarray is bash 4, and the hook runs under
+# macOS's /bin/bash 3.2 as well (#260).
 roots=(pkg/v1 framework)
 packages=()
 for root in "${roots[@]}"; do
     [ -d "$root" ] || continue
-    readarray -t found < <(
-        cd "$root" && grep -rl 'go:generate gomarkdoc' . --include='*.go' \
+    while IFS= read -r dir; do
+        [ -n "$dir" ] && packages+=("$root $dir")
+    done < <(
+        cd "$root" && grep -rl --include='*.go' 'go:generate gomarkdoc' . \
           | xargs -n1 dirname | sort -u
     )
-    for dir in "${found[@]}"; do
-        [ -n "$dir" ] && packages+=("$root $dir")
-    done
 done
 
 # An empty list would make this gate pass vacuously, which is exactly the

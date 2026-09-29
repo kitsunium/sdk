@@ -155,7 +155,7 @@ Package logger — declares the TopologyConfig DTO consumed by FromConfig. A Top
 
 Package logger — bridges the trace domain to the logging domain, so a log line emitted inside a span carries that span's identity and an operator holding a trace\_id can find the logs that belong to it.
 
-This file is the ONLY place in the SDK where logging and tracing meet, and that placement is the design \(ADR 0062\). internal/service/logger and internal/service/trace are siblings — one may not import the other — and internal/core/logger is kept stdlib\-only so a consumer who only wants a line on stderr does not compile the trace model. pkg/v1 is the layer that is allowed to know both domains, so the binding lives here and nowhere else.
+This file is the ONLY place in the SDK where logging and tracing meet, and that placement is the design \(ADR 0062\). internal/service/logger and internal/service/trace are siblings, and neither imports the other because the two domains meet only here, at the top layer; internal/core/logger is kept stdlib\-only so a consumer who only wants a line on stderr does not compile the trace model. pkg/v1 is the layer that knows both domains already, so the binding lives here and nowhere else.
 
 Package logger — exposes the SDK version to the rest of the logger package. The ldflags pipeline injects the real value at build time; local development runs fall back to the "dev" sentinel.
 
@@ -1047,7 +1047,7 @@ type TopologyConfig struct {
 ```
 
 <a name="TraceContext"></a>
-## type [TraceContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L23>)
+## type [TraceContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L24>)
 
 TraceContext is the stable alias for the trace correlation a Record carries: the trace and span identifiers of the span the record was emitted inside. The zero value means "no trace here" and renders nothing.
 
@@ -1056,7 +1056,7 @@ type TraceContext = corelogger.TraceContextValue
 ```
 
 <a name="TraceContextFromContext"></a>
-### func [TraceContextFromContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L45>)
+### func [TraceContextFromContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L46>)
 
 ```go
 func TraceContextFromContext(ctx context.Context) TraceContext
@@ -1071,7 +1071,7 @@ An absent, unsampled\-and\-absent or malformed span context yields the zero valu
 It allocates nothing: the context walk returns a value type, and the two identifiers are fixed\-size arrays copied by assignment.
 
 <a name="TraceContextSource"></a>
-## type [TraceContextSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L28>)
+## type [TraceContextSource](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/logger/tracecontext.go#L29>)
 
 TraceContextSource is the stable alias for the port that reads a TraceContext off a context.Context. Every Logger built by this package is wired to TraceContextFromContext.
 

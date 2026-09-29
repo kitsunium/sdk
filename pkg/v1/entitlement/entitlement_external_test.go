@@ -677,3 +677,44 @@ func TestAConsumerCanScheduleOnAGrantsDeadlineWithoutPolling(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) { runCase(t, tt) })
 	}
 }
+
+// TestAConsumerCanBuildWhatTheServiceSettersTake pins #259 for the two setters
+// whose argument lived under internal/. WithTimeServers takes a slice of
+// svcent.RoughtimeServerValue, which nothing public could build, so a consumer
+// could only ever hand it nil. WithBearerFetch takes a svcent.BearerFetch: a
+// func literal fitted it, but a consumer could not declare a variable, a field
+// or a helper of its type. This file imports nothing under internal/, so the
+// composite literal and the conversion below are half the assertion: without
+// the aliases neither compiles.
+//
+// The other half is that both setters still chain on what a constructor
+// returned, which is the shape every call site writes.
+//
+// MUTATION (2026-09-29): entitlement.go was put back as it is on main.
+// Observed: `undefined: entitlement.RoughtimeServer`; the test package did not
+// build. With only the BearerFetch alias removed: `undefined:
+// entitlement.BearerFetch`. Restored; entitlement.go is byte-identical to the
+// pre-mutation file by SHA-256.
+func TestAConsumerCanBuildWhatTheServiceSettersTake(t *testing.T) {
+	t.Parallel()
+
+	serverKey, _, err := ed25519.GenerateKey(nil)
+	//: Without a key there is no server to pin.
+	if err != nil {
+		t.Fatalf("ed25519.GenerateKey: %v", err)
+	}
+	servers := []entitlement.RoughtimeServer{{
+		Name:      "example",
+		Address:   "roughtime.example.com:2002",
+		PublicKey: serverKey,
+	}}
+	fetch := entitlement.BearerFetch(func(string, string) (*http.Response, error) {
+		return nil, errors.New("no network in this test")
+	})
+
+	service := entitlement.New(stubIdentity{}, nil, nil)
+	//: Both setters hand back the receiver, so construction stays one expression.
+	if got := service.WithTimeServers(servers).WithBearerFetch(fetch); got != service {
+		t.Fatalf("the setters returned %p, want the receiver %p", got, service)
+	}
+}

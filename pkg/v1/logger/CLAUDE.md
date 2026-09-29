@@ -128,9 +128,12 @@ ADR 0039 never came into play.
   paths, both cases) in the race-off alloc lane; measured and profiled in
   `BENCH.md`.
 - **Where the bridge lives, and why here.** `internal/service/logger` and
-  `internal/service/trace` are siblings and may not import each other, and
-  `internal/core/logger` stays stdlib-only so a consumer who only wants stderr
-  does not compile the trace model. The port (`core/logger.TraceContextSource`)
+  `internal/service/trace` are siblings that import nothing from each other —
+  by ADR 0062's decision that the two domains meet only here, at the top layer,
+  not by a layer rule, since a service package may import a sibling
+  (`internal/CLAUDE.md` §Dependency direction) — and `internal/core/logger`
+  stays stdlib-only so a consumer who only wants stderr does not compile the
+  trace model. The port (`core/logger.TraceContextSource`)
   is declared in core, and this package — the top layer, already allowed to know
   both domains — is the single place that binds it to
   `internal/core/trace.SpanContextFromContext`. The edge stops at `core/trace`:
