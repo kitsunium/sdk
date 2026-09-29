@@ -8,7 +8,8 @@ subreaper zombie collector. On Unix it installs an `os/signal` SIGCHLD handler
 and drains every reapable child with a non-blocking `childwait.ReapAny()` loop
 until `ECHILD` — on illumos and Solaris also once a second, because a child's
 exit posts no SIGCHLD there (ADR 0144). Off Unix it degrades to a no-op so the package links and runs
-everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`) +
+everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`, and `time`
+for the illumos/Solaris ticker) +
 `internal/core/proc` + `internal/kernel/errs` +
 `internal/service/proc/childwait` — no `golang.org/x/sys`.
 

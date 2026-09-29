@@ -88,7 +88,9 @@ var (
 )
 
 // WithOnReap registers fn as a post-sweep observer receiving the number of
-// children reaped in each sweep (including zero). fn must not block.
+// children reaped in each sweep (including zero). fn must not block. On illumos
+// and Solaris the loop also sweeps once a second, so there an idle reaper calls
+// fn with zero once a second.
 func WithOnReap(fn func(int)) Option {
 	//: delegate to the service option constructor.
 	return svc.WithOnReap(fn)

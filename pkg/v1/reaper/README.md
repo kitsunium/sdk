@@ -67,7 +67,7 @@ var (
 ```
 
 <a name="IsPID1"></a>
-## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L114>)
+## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L116>)
 
 ```go
 func IsPID1() bool
@@ -76,7 +76,7 @@ func IsPID1() bool
 IsPID1 reports whether the current process is the init process \(pid 1\). It is false on platforms where the convention does not apply.
 
 <a name="SetChildSubreaper"></a>
-## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L107>)
+## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L109>)
 
 ```go
 func SetChildSubreaper() error
@@ -94,13 +94,13 @@ type Option = svc.Option
 ```
 
 <a name="WithOnReap"></a>
-### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L92>)
+### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L94>)
 
 ```go
 func WithOnReap(fn func(int)) Option
 ```
 
-WithOnReap registers fn as a post\-sweep observer receiving the number of children reaped in each sweep \(including zero\). fn must not block.
+WithOnReap registers fn as a post\-sweep observer receiving the number of children reaped in each sweep \(including zero\). fn must not block. On illumos and Solaris the loop also sweeps once a second, so there an idle reaper calls fn with zero once a second.
 
 <a name="Reaper"></a>
 ## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L69>)
@@ -112,7 +112,7 @@ type Reaper = coreproc.Reaper
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L99>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L101>)
 
 ```go
 func New(opts ...Option) Reaper
