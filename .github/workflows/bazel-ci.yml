@@ -387,6 +387,10 @@ jobs:
           - { goos: openbsd, goarch: amd64 }
           - { goos: netbsd, goarch: amd64 }
           - { goos: dragonfly, goarch: amd64 }
+          # illumos and Solaris are two GOOS values (the solaris build tag
+          # selects both, runtime.GOOS tells them apart) — ADR 0144.
+          - { goos: illumos, goarch: amd64 }
+          - { goos: solaris, goarch: amd64 }
     steps:
       - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
         with:

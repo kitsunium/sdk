@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/rlimit/
 
 ## Purpose
@@ -43,7 +43,7 @@ codes and never calls `errs.Define`.
 ## Platform notes
 
 - **Native on every Unix target** (linux, darwin, freebsd, netbsd, openbsd,
-  dragonfly). `setrlimit(2)` on the calling process is the shared mechanic, and
+  dragonfly, illumos, solaris — the last two run in `e2e-cross` since ADR 0144). `setrlimit(2)` on the calling process is the shared mechanic, and
   a lowered ceiling reads back through `getrlimit(2)` — asserted on Linux by
   `Test_applyLimits` (`rlimit_linux_internal_test.go`). `TestApply`
   (`rlimit_external_test.go`, every GOOS) pins the refusals and the empty set.

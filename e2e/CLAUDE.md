@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # e2e/
 
 ## Purpose
@@ -8,7 +8,7 @@ The SDK conformance binary: a runtime test harness that calls the **public
 *works* on a platform, not merely that it *compiles* (the build bar is the
 cross-platform matrix; this is the runtime bar — see ADR 0018). Run on real
 kernels by `.github/workflows/e2e-cross.yml` (GitHub's Linux, macOS and Windows
-runners, the three BSDs in VMs) and, on demand, on the lab's VMs by
+runners, the three BSDs, OmniOS and Oracle Solaris in VMs) and, on demand, on the lab's VMs by
 `.github/workflows/e2e-vm.yml`.
 
 ## Shape

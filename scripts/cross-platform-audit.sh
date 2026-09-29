@@ -22,13 +22,15 @@ set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$ROOT" || exit 1
 
-# GOOS/GOARCH targets. linux+darwin are primary; the BSDs + windows are the
-# portability frontier the SDK must not silently drop.
+# GOOS/GOARCH targets. linux+darwin are primary; the BSDs, windows, illumos and
+# solaris are the portability frontier the SDK must not silently drop. The list
+# is the cross-build job's in bazel-ci.yml.
 PLATFORMS=(
   linux/amd64 linux/arm64 linux/386 linux/arm
   darwin/arm64
   windows/amd64
   freebsd/amd64 openbsd/amd64 netbsd/amd64 dragonfly/amd64
+  illumos/amd64 solaris/amd64
 )
 
 # module dir -> import-path prefix is discovered via `go list`; each module is

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # pkg/v1/proc
 
 ## Purpose
@@ -46,6 +47,12 @@ Sibling `MustX` constructors live in the facades: `cgroup.MustCreate`,
   but not delegated). Use the per-facade probe for that (`cgroup.Available()`).
 - The capability × platform matrix lives in the package doc comment (`capability.go`)
   and is mirrored in the generated `README.md`.
+- **A GOOS joins a row only on the evidence of its own kernel.** `illumos` and
+  `solaris` are listed apart — `runtime.GOOS` names them apart although the
+  `solaris` build tag selects both — and joined the matrix only once
+  `e2e-cross.yml`'s `solarish` legs ran the proc suites there (ADR 0144). That
+  lane runs this package's suite too, so `TestSupported` checks each row on the
+  kernel it describes; the test's `isUnixGOOS` mirrors `unixTargets`.
 
 ## Intended use (consumer side)
 

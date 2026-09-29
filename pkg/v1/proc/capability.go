@@ -31,20 +31,26 @@
 //
 // # Capability × platform matrix
 //
-//	Capability           linux darwin windows freebsd openbsd netbsd dragonfly
-//	CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅
-//	CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅
-//	CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅
-//	CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌
-//	CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅
-//	CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅
-//	CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅
-//	CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅
+//	Capability           linux darwin windows freebsd openbsd netbsd dragonfly illumos solaris
+//	CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+//	CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+//	CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅        ✅⁴     ✅⁴
+//	CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌        ❌      ❌
+//	CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅        ✅      ✅
+//	CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+//	CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+//	CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
 //
 // ¹ Windows has no zombies; the reaper is a correct no-op there. ² Windows
 // cgroup is the Job Object backend. ³ the Unix setrlimit-on-self model has no
 // Windows analogue; Windows resource limits are applied through the cgroup
 // (Job Object) container or at spawn via the process Spec, not a standalone rlimit.
+// ⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD
+// and NetBSD: SetChildSubreaper returns [UnsupportedPlatform]. Their reaper
+// also sweeps once a second, because the Go runtime forks every child there
+// with FORK_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven
+// on OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's
+// cross-platform runtime lane.
 //
 // [Supported] consults runtime.GOOS only — it is the platform-level matrix, not
 // a runtime probe. A capability that is native on the GOOS may still be
@@ -105,9 +111,11 @@ var (
 	}
 
 	// unixTargets is the SDK's Unix GOOS set (the capabilities gated to Unix).
-	unixTargets = []string{"linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly"}
+	// illumos is listed apart from solaris because runtime.GOOS names it apart,
+	// even though the solaris build tag also selects it.
+	unixTargets = []string{"linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly", "illumos", "solaris"}
 	// unixAndWindows adds Windows to the Unix set (spawn / signal / reaper).
-	unixAndWindows = []string{"linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly", "windows"}
+	unixAndWindows = []string{"linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly", "illumos", "solaris", "windows"}
 
 	// capabilityGOOS lists the GOOS on which each capability has a native backend;
 	// a capability absent from this map is unsupported everywhere.

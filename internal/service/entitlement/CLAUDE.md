@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/entitlement/
 
 ## Purpose
@@ -321,3 +321,10 @@ it.
 ```sh
 bazel test --config=race //internal/service/entitlement:entitlement_test
 ```
+
+The suite also runs on real kernels in `e2e-cross.yml` (`./entitlement` is in
+`SERVICE_PKGS`), illumos and Solaris included since ADR 0144. The FIFO test
+creates its pipe through `makeFifo`: `syscall.Mkfifo` where the stdlib has it
+(`fifo_mkfifo_internal_test.go`), `syscall.Mknod` of an `S_IFIFO` node on
+illumos and Solaris, whose stdlib has no `Mkfifo`
+(`fifo_mknod_internal_test.go`).

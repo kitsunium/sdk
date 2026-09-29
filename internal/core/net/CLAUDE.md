@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/core/net/
 
 ## Purpose
@@ -157,7 +157,7 @@ name.
   takes 32 bytes per iteration, then 8, then 1 — **16.1×** the byte-at-a-time
   throughput, **6.17×** on the whole in-situ receive path — with no assembly, no
   build-tagged per-architecture file and no `unsafe`, which is the only reason
-  it can be one implementation across all eight GOOS the SDK targets (ADR 0018).
+  it can be one implementation across every GOOS the SDK targets (ADR 0018, ADR 0144).
   The compiler renders each word as a single memory-destination XOR; there is no
   vector instruction involved and none is wanted. Endianness safety is not a
   property of choosing little-endian — it is a property of using **one** order

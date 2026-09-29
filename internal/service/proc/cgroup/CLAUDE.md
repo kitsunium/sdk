@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/cgroup/
 
 ## Purpose
@@ -64,7 +64,8 @@ No `codes.go` / `errors.go` — every error is a `core/proc` sentinel
     discipline the reaper subreaper backends use. Cross-compile-verified; the
     rule-applying verbs are exercised on the e2e VM lane (real RACCT kernel).
 - Off Linux/Windows/FreeBSD the stub reports `Available() == false` and `Create`
-  returns `UnsupportedPlatform` (darwin, OpenBSD, NetBSD, DragonFly). Every GOOS
+  returns `UnsupportedPlatform` (darwin, OpenBSD, NetBSD, DragonFly, illumos,
+  Solaris). Every GOOS
   compiles.
 - Unprivileged hosts without cgroup delegation degrade gracefully to
   `CgroupUnavailable` — never a panic. The acceptance test

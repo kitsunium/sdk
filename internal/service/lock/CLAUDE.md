@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/lock/
 
 ## Purpose
@@ -439,4 +439,6 @@ The lane that executes the Windows half is the `windows` job of
 `.github/workflows/e2e-cross.yml` (`./lock` is in `SERVICE_PKGS`). The Linux
 Bazel gate compiles neither `flock_windows.go` nor its suite, so that lane is
 the only gate either has — and the same lane now proves the file locker's
-runtime behaviour on macOS and the three BSDs, where it had never run.
+runtime behaviour on macOS and the three BSDs, where it had never run — and,
+since ADR 0144, on illumos and Solaris, where what it proves is the refusal at
+construction.

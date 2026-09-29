@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/logger/sink/file/
 
 ## Purpose
@@ -75,11 +75,11 @@ by `unix` and every one of them compiles the constant; the remaining 8 are
 `js/wasm`, `plan9/{386,amd64,arm}`, `windows/{386,amd64,arm64}` and
 `wasip1/wasm` — the second and third rows above.
 
-Of the `unix` GOOS, five are **executed** on a real kernel by the
+Of the `unix` GOOS, seven are **executed** on a real kernel by the
 `e2e-cross` lane (`SERVICE_FILE_PKGS` carries `./logger/sink/file`):
-linux, darwin, freebsd, openbsd, netbsd. DragonFly, aix, solaris, illumos,
-android and ios get the flag by build tag and by cross-compile, never by
-execution — they are covered, not proven, and this sentence is the
+linux, darwin, freebsd, openbsd, netbsd, illumos and solaris (ADR 0144).
+DragonFly, aix, android and ios get the flag by build tag and by
+cross-compile, never by execution — they are covered, not proven, and this sentence is the
 difference.
 
 Closing the gap on Windows needs a different primitive, not a different
@@ -142,7 +142,8 @@ bazel test --config=race //internal/service/logger/sink/file:file_test
 The Bazel lane is Linux only, and Linux had `O_NOFOLLOW` before this package
 did. The off-Linux proof is `e2e-cross`, which runs
 `go test -count=1 -short ./logger/sink/file` on macos-15, freebsd 15.0,
-openbsd 7.9 and netbsd 10.1, and on windows through the whole-suite step,
+openbsd 7.9, netbsd 10.1, OmniOS r151054 and Oracle Solaris 11.4, and on
+windows through the whole-suite step,
 which gates there since ADR 0095. On Windows `TestNew_DefaultFilePermIs0600`
 asserts the one bit the mode reaches (`0666`, not read-only) and says why.
 A test that opens a sink closes it in `t.Cleanup` even on the paths that

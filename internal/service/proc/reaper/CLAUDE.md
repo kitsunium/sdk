@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/reaper/
 
 ## Purpose
@@ -6,8 +6,10 @@
 The OS implementation of the `core/proc.Reaper` port (ADR 0016): a PID1 /
 subreaper zombie collector. On Unix it installs an `os/signal` SIGCHLD handler
 and drains every reapable child with a non-blocking `childwait.ReapAny()` loop
-until `ECHILD`. Off Unix it degrades to a no-op so the package links and runs
-everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`) +
+until `ECHILD` — on illumos and Solaris also once a second, because a child's
+exit posts no SIGCHLD there (ADR 0144). Off Unix it degrades to a no-op so the package links and runs
+everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`, and `time`
+for the illumos/Solaris ticker) +
 `internal/core/proc` + `internal/kernel/errs` +
 `internal/service/proc/childwait` — no `golang.org/x/sys`.
 
@@ -37,7 +39,9 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
 | `subreaper_bsd.go` | `freebsd \|\| dragonfly` | `SetChildSubreaper` via `procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL)`, a raw `syscall.Syscall6` |
 | `subreaper_freebsd.go` / `subreaper_dragonfly.go` | `freebsd` / `dragonfly` | the `procctl(2)` ABI constants each kernel numbers differently (`sysProcctl`, `procReapAcquire`) |
-| `subreaper_other.go` | `unix && !linux && !freebsd && !dragonfly` | `SetChildSubreaper` → `UnsupportedPlatform` (no reparent-here facility on darwin, OpenBSD, NetBSD, Solaris) |
+| `subreaper_other.go` | `unix && !linux && !freebsd && !dragonfly` | `SetChildSubreaper` → `UnsupportedPlatform` (no reparent-here facility on darwin, OpenBSD, NetBSD, illumos, Solaris) |
+| `timersweep_unix.go` | `unix && !solaris` | `timerSweepEvery = 0`: the loop sweeps on SIGCHLD alone |
+| `timersweep_solaris.go` | `solaris` (illumos too) | `timerSweepEvery = time.Second`: the loop also sweeps on a ticker |
 | `reaper_other.go` | `!unix` | no-op `noopReaper`, `New`, `Start`/`Stop`/`ReapOnce`, `SetChildSubreaper` → `UnsupportedPlatform`, `IsPID1` → false |
 
 No `codes.go` / `errors.go`: the package mints no codes. It returns the central
@@ -61,6 +65,11 @@ disjoint, so exactly one definition of each exported symbol compiles per GOOS.
 - **Start** — idempotent; subscribes to SIGCHLD inside the loop goroutine (so
   `signal.Notify` and `defer signal.Stop` stay paired) and drains on every
   signal. An initial drain catches children that exited before subscription.
+  On illumos and Solaris it also drains on a one-second ticker, stopped with
+  the loop: the Go runtime forks every child there with
+  `forkx(FORK_NOSIGCHLD)`, so the exit of a child this process spawned posts
+  no SIGCHLD and would otherwise wait for its own `Wait`, another signal or
+  `Stop`. Orphans re-parented here still signal (ADR 0144).
 - **Stop** — closes `done` (guarded by a per-cycle `sync.Once`), the loop runs a
   final drain, detaches the handler, and closes `stopped`; Stop blocks on
   `stopped` so no goroutine and no zombie outlives it. Safe without a prior

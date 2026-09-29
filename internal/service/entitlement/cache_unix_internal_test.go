@@ -7,7 +7,6 @@ import (
 	"io/fs"
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 
@@ -77,9 +76,10 @@ func Test_DefaultCacheDir_unixDisablesItselfWithoutAHome(t *testing.T) {
 // for a hang that hangs reports a suite-wide timeout, which says far less than
 // a named failure on the one function at fault.
 //
-// Unix-only and build-tagged: syscall.Mkfifo does not exist on Windows, and
-// Windows named pipes are a different object reached a different way. There is
-// nothing to assert there rather than a skip to write.
+// Unix-only and build-tagged: a FIFO is a Unix object (makeFifo creates one,
+// through mkfifo(2) or, on illumos and Solaris, mknod(2)), and Windows named
+// pipes are a different object reached a different way. There is nothing to
+// assert there rather than a skip to write.
 func Test_readCappedFile_unixRefusesAFifoWithoutBlocking(t *testing.T) {
 	t.Parallel()
 
@@ -96,7 +96,7 @@ func Test_readCappedFile_unixRefusesAFifoWithoutBlocking(t *testing.T) {
 
 			path := filepath.Join(t.TempDir(), cachedBundleName)
 			//: A real FIFO with no writer: opening it read-only blocks.
-			if err := syscall.Mkfifo(path, 0o600); err != nil {
+			if err := makeFifo(path, 0o600); err != nil {
 				t.Fatalf("creating fifo: %v", err)
 			}
 

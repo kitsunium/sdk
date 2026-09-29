@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # pkg/v1/reaper/
 
 ## Purpose
@@ -45,8 +45,9 @@ Public types are **aliases** of the core/service types — never new types.
   way (`os/exec`, `syscall.ForkExec`) has no such hand-off.
 - Off Unix everything degrades: `New` is a no-op reaper, `SetChildSubreaper`
   returns `UnsupportedPlatform`. On a Unix with neither facility (e.g. Darwin,
-  OpenBSD, NetBSD) the loop works but `SetChildSubreaper` is
-  `UnsupportedPlatform`.
+  OpenBSD, NetBSD, illumos, Solaris) the loop works but `SetChildSubreaper` is
+  `UnsupportedPlatform`. On illumos and Solaris the loop also sweeps once a
+  second, because a child's exit posts no SIGCHLD there (ADR 0144).
 
 ## Do NOT
 
