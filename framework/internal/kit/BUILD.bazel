@@ -214,6 +214,8 @@ go_test(
         "endpoint_test.go",
         "expose_test.go",
         "fakedb_internal_test.go",
+        "fifo_mkfifo_internal_test.go",
+        "fifo_mknod_internal_test.go",
         "filestore_internal_test.go",
         "filestore_test.go",
         "healthcheck_internal_test.go",

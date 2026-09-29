@@ -6,6 +6,8 @@
 import "github.com/kitsunium/sdk/framework/connectors/sqlite"
 ```
 
+Package sqlite — the driver, linked on every GOOS modernc.org/sqlite has a port to.
+
 Package sqlite is kit's SQLite engine \(ADR 0004\): the one module a kit product imports to keep a database in a SQLite file, and the only code of the product that imports a SQLite driver — modernc.org/sqlite, "a CGo\-free port of the C SQLite3 library", so a kit product stays one static binary \(CGO\_ENABLED=0\). The product's main declares the database with it:
 
 ```
@@ -17,6 +19,8 @@ var App = kit.NewApp("vigie", intake.Service, audit.Service).With(
 ```
 
 Its URL, in the variable \<APP\>\_\<NAME\>\_URL, is the file's path — or a file: URI, with the driver's parameters —; without one, kit keeps the database in \<data\>/\<name\>.sqlite. The engine opens the file in WAL mode with a busy timeout, and its transactions take the write lock when they begin \(\_txlock=immediate\), so two writers queue rather than fail; a parameter the URL writes itself wins.
+
+On dragonfly, illumos and solaris, which modernc.org/sqlite does not port to, the module builds and Open refuses with proc.UnsupportedPlatform.
 
 kit cannot run migrations on SQLite yet: the SDK's migrator refuses a dialect with no advisory lock, and its SQLite migrator — the file's own lock — is an SDK change to come.
 
@@ -40,7 +44,7 @@ const (
 ```
 
 <a name="Engine"></a>
-## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/sqlite/sqlite.go#L69>)
+## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/sqlite/sqlite.go#L72>)
 
 ```go
 func Engine() kit.Engine

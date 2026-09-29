@@ -10,6 +10,7 @@ product stays one static binary (CI builds the module with `CGO_ENABLED=0`).
 | File | Holds |
 |---|---|
 | `sqlite.go` | `Engine()`: `Dialect` (the SDK's `sql.DialectSQLite`); `Describe` — the file, and no address, user or password —; `Open` — the file, made if need be; `current` is never asked, a file has no credentials to rotate —; `dsn` and `split`, which read a path or a `file:` URI and add the `defaults` the URL does not write: `_journal_mode=WAL`, `_busy_timeout=5000`, `_txlock=immediate` |
+| `driver.go` / `driver_none.go` | the blank import of modernc.org/sqlite, on every GOOS it has a port to; on dragonfly, illumos and solaris (its libc excludes them) `driverLinked` is false and `Open` refuses with `proc.UnsupportedPlatform`, so the module still builds there (the cross-build lane) |
 
 Rules:
 

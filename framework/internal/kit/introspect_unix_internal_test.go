@@ -5,7 +5,6 @@ package kit
 import (
 	"os"
 	"path/filepath"
-	"syscall"
 	"testing"
 	"time"
 )
@@ -20,7 +19,7 @@ func TestANamedPipeSwappedInIsRefusedAtOnce(t *testing.T) {
 	dir, root := sourceTree(t)
 	seen, err := root.Lstat("a.go")
 	must(t, err)
-	must(t, syscall.Mkfifo(filepath.Join(dir, "pipe"), 0o600))
+	must(t, makeFifo(filepath.Join(dir, "pipe"), 0o600))
 	must(t, root.Rename("pipe", "a.go"))
 	read := make(chan error, 1)
 	go func() {

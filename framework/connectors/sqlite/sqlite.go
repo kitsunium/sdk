@@ -19,6 +19,9 @@
 // begin (_txlock=immediate), so two writers queue rather than fail; a
 // parameter the URL writes itself wins.
 //
+// On dragonfly, illumos and solaris, which modernc.org/sqlite does not port
+// to, the module builds and Open refuses with proc.UnsupportedPlatform.
+//
 // kit cannot run migrations on SQLite yet: the SDK's migrator refuses a
 // dialect with no advisory lock, and its SQLite migrator — the file's own
 // lock — is an SDK change to come.
@@ -32,9 +35,9 @@ import (
 
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/proc"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
 	"github.com/kitsunium/sdk/pkg/v1/sql"
-	_ "modernc.org/sqlite" // the driver, registered as "sqlite"
 )
 
 const (
@@ -84,6 +87,10 @@ func (engine) Describe(u secret.Value) (kit.DatabaseURL, error) {
 // Open opens the file, creating it if need be, with the engine's defaults.
 // A file has no credentials to rotate: current is not asked.
 func (engine) Open(u secret.Value, _ func(context.Context) (secret.Value, error)) (*stdsql.DB, error) {
+	if !driverLinked {
+		// modernc.org/sqlite has no port to this GOOS (driver_none.go).
+		return nil, proc.UnsupportedPlatform
+	}
 	name, err := dsn(u.RevealString())
 	if err != nil {
 		return nil, err

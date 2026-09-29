@@ -9,15 +9,60 @@ package(default_visibility = ["//visibility:public"])
 
 go_library(
     name = "sqlite",
-    srcs = ["sqlite.go"],
+    srcs = [
+        "driver.go",
+        "driver_none.go",
+        "sqlite.go",
+    ],
     importpath = "github.com/kitsunium/sdk/framework/connectors/sqlite",
     deps = [
         "//framework/kit",
         "//pkg/v1/errs",
+        "//pkg/v1/proc",
         "//pkg/v1/secret",
         "//pkg/v1/sql",
-        "@org_modernc_sqlite//:sqlite",
-    ],
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:android": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:ios": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:js": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:linux": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:osx": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "@rules_go//go/platform:windows": [
+            "@org_modernc_sqlite//:sqlite",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
