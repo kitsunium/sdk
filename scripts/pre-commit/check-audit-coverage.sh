@@ -42,12 +42,16 @@ fi
 # `find -printf '%h\n'` with stderr discarded, and -printf is GNU-only — BSD
 # find (macOS) rejects it, printed nothing, and the loop below saw an empty
 # tree and passed. A find that fails now stops the script.
-if ! packages="$(find internal pkg third-party -name '*.go' ! -name '*_test.go' | sed 's|/[^/]*$||' | sort -u)"; then
-	echo "✗ find could not list internal/, pkg/ and third-party/ — refusing to pass on a tree it did not see." >&2
+# framework/ (ADR 0147) is walked when it exists: a fixture repository built
+# before it, or without it, still has its three historical roots checked.
+roots=(internal pkg third-party)
+[ -d framework ] && roots+=(framework)
+if ! packages="$(find "${roots[@]}" -name '*.go' ! -name '*_test.go' | sed 's|/[^/]*$||' | sort -u)"; then
+	echo "✗ find could not list internal/, pkg/, third-party/ and framework/ — refusing to pass on a tree it did not see." >&2
 	exit 1
 fi
 [ -n "$packages" ] || {
-	echo "✗ found no Go package under internal/, pkg/ or third-party/ — refusing to pass vacuously." >&2
+	echo "✗ found no Go package under internal/, pkg/, third-party/ or framework/ — refusing to pass vacuously." >&2
 	exit 1
 }
 

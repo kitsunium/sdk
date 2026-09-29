@@ -48,9 +48,19 @@ check "service depends on no pkg or third-party code" \
 	'kind("go_library", deps(//internal/service/...)) intersect (//pkg/... + //third-party/...)'
 check "pkg depends on no third-party code" \
 	'kind("go_library", deps(//pkg/...)) intersect //third-party/...'
+# The framework module sits above pkg/v1 (ADR 0147): nothing below reaches it,
+# it reaches no third-party code, and its only DIRECT edge into internal/ is the
+# meta package errs, which is how a sentinel is defined — every other mechanism
+# it uses comes through pkg/v1, as it would for any product.
+check "nothing below the framework depends on it" \
+	'kind("go_library", deps(//internal/... + //pkg/... + //third-party/...)) intersect //framework/...'
+check "the framework depends on no third-party code" \
+	'kind("go_library", deps(//framework/...)) intersect //third-party/...'
+check "the framework reaches internal/ through pkg/v1 only (kernel/errs aside)" \
+	'kind("go_library", deps(//framework/..., 1)) intersect (//internal/... except //internal/kernel/errs:errs)'
 
 if [ "$failed" -ne 0 ]; then
-	echo "The direction is kernel → core → service → pkg/v1, with third-party/ above all (ADR 0004, ADR 0068)." >&2
+	echo "The direction is kernel → core → service → pkg/v1 → framework, with third-party/ above all but the framework (ADR 0004, ADR 0068, ADR 0147)." >&2
 	exit 1
 fi
-echo "✓ layer direction holds: kernel → core → service → pkg/v1, third-party/ above all"
+echo "✓ layer direction holds: kernel → core → service → pkg/v1 → framework, third-party/ above all but the framework"

@@ -16,6 +16,7 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 package_group(
     name = "kernel_consumers",
     packages = [
+        "//framework/...",
         "//internal/core/...",
         "//internal/kernel/...",
         "//internal/service/...",

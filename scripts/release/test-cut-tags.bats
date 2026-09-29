@@ -94,6 +94,20 @@ replace (
 )
 EOF
 
+  # The chain is read from go.work (ADR 0147 §9): every module it uses but the
+  # root is released.
+  cat >go.work <<'EOF'
+go 1.26
+
+use (
+	.
+	./internal/core
+	./internal/kernel
+	./internal/service
+	./pkg
+)
+EOF
+
   : >pkg/v1/codec.go
   g add -A
   g commit -q --no-verify -m "init"
@@ -149,7 +163,7 @@ need_toolchain() {
   if ! command -v go >/dev/null 2>&1 || ! command -v jq >/dev/null 2>&1; then skip "go/jq absent"; fi
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/kernel/v0.1.0 internal/core/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0"* ]]
+  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0"* ]]
   # pkg pins its intra-repo deps to the release version …
   [[ "$output" == *"internal/service v0.1.0"* ]]
   # … and the local replace is gone.
@@ -202,7 +216,7 @@ need_toolchain() {
   commit_other 'docs: a second merge twelve seconds later'
   run bash -c "echo pkg | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"would tag chain: internal/kernel/v0.2.0 internal/core/v0.2.0 internal/service/v0.2.0 pkg/v0.2.0"* ]]
+  [[ "$output" == *"would tag chain: internal/core/v0.2.0 internal/kernel/v0.2.0 internal/service/v0.2.0 pkg/v0.2.0"* ]]
   # …and it says which merge sized it, since HEAD no longer shows it.
   [[ "$output" == *"label release:minor on #101"* ]]
   [[ "$output" == *"not HEAD"* ]]
@@ -804,4 +818,110 @@ commit_pkg_bench() {
   source "$LIB"
   run bash -c 'printf "pkg/v0.1.10\npkg/v0.1.2\npkg/v0.1.9\n" | { source "'"$LIB"'"; version_sort; } | tail -n1'
   [ "$output" = "pkg/v0.1.10" ]
+}
+
+# ── ADR 0147: the framework joins the chain, read from go.work ──────────────
+
+# add_framework — a framework module requiring pkg and replacing what pkg needs,
+# and one connector requiring the framework, both used by go.work: the shape of
+# the real tree, where the framework replaces internal/core without requiring it.
+add_framework() {
+  mkdir -p framework/model framework/connectors/postgres
+  cat >framework/go.mod <<'EOF'
+module github.com/kitsunium/sdk/framework
+
+go 1.26
+
+require (
+	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/pkg v0.0.0-00010101000000-000000000000
+)
+
+replace github.com/kitsunium/sdk/internal/core => ../internal/core
+
+replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
+
+replace github.com/kitsunium/sdk/internal/service => ../internal/service
+
+replace github.com/kitsunium/sdk/pkg => ../pkg
+EOF
+  cat >framework/connectors/postgres/go.mod <<'EOF'
+module github.com/kitsunium/sdk/framework/connectors/postgres
+
+go 1.26
+
+require github.com/kitsunium/sdk/framework v0.0.0-00010101000000-000000000000
+
+replace github.com/kitsunium/sdk/framework => ../..
+EOF
+  echo "package model" >framework/model/model.go
+  cat >go.work <<'EOF'
+go 1.26
+
+use (
+	.
+	./framework
+	./framework/connectors/postgres // one driver
+	./internal/core
+	./internal/kernel
+	./internal/service
+	./pkg
+)
+EOF
+  g add -A
+  g commit -q --no-verify -m "feat(framework): the module"
+}
+
+@test "chain_modules reads go.work, leaves the root out, and orders the chain" {
+  add_framework
+  run bash -c ". '$LIB'; chain_modules go.work"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'internal/core\ninternal/kernel\ninternal/service\npkg\nframework\nframework/connectors/postgres' ]
+}
+
+@test "chain_modules refuses a missing go.work rather than guessing a chain" {
+  g rm -q go.work
+  g commit -q --no-verify -m "chore: no workspace"
+  run bash -c ". '$LIB'; chain_modules go.work"
+  [ "$status" -ne 0 ]
+  [[ "$output" == *"refusing to guess the release chain"* ]]
+}
+
+@test "the framework tag shapes are valid chain tags, and a stray shape is not" {
+  run bash -c ". '$LIB'; is_valid_chain_tag framework/v0.12.0 && is_valid_chain_tag framework/connectors/postgres/v0.12.0 && is_valid_chain_tag internal/core/v0.12.0 && is_valid_chain_tag pkg/v0.12.0"
+  [ "$status" -eq 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag framework/connectors/Postgres/v0.12.0"
+  [ "$status" -ne 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag framework/v2.0.0"
+  [ "$status" -ne 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag tools/sdkguard/v0.1.0"
+  [ "$status" -ne 0 ]
+}
+
+@test "a framework release tags the whole chain once, pinned, with no replace left" {
+  need_toolchain
+  add_framework
+  run bash -c "printf 'pkg\nframework\n' | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0 framework/v0.1.0 framework/connectors/postgres/v0.1.0"* ]]
+  # One chain for two tokens: a second pass would cut the next patch on top.
+  [ "$(grep -c 'would tag chain' <<<"$output")" -eq 1 ]
+  # The framework pins pkg and the connector pins the framework …
+  [[ "$output" == *"github.com/kitsunium/sdk/pkg v0.1.0"* ]]
+  [[ "$output" == *"github.com/kitsunium/sdk/framework v0.1.0"* ]]
+  # … and every intra-repo replace is gone, the ones nothing requires included.
+  [[ "$output" != *"=> ../"* ]]
+}
+
+@test "the framework token alone is accepted and cuts the chain" {
+  add_framework
+  run bash -c "echo framework | $SCRIPT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refusing to auto-cut the FIRST release (pkg/v0.1.0)"* ]]
+}
+
+@test "an unknown token is still refused" {
+  run bash -c "echo tools | $SCRIPT"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"expected 'pkg' or 'framework'"* ]]
 }

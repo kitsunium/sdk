@@ -1,0 +1,61 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "core",
+    srcs = [
+        "architecture.go",
+        "code.go",
+        "connector.go",
+        "devtools.go",
+        "doc.go",
+        "edge_kind.go",
+        "errors.go",
+        "event_type.go",
+        "graph.go",
+        "history.go",
+        "id.go",
+        "id_grammar.go",
+        "mermaid.go",
+        "model.go",
+        "module.go",
+        "node.go",
+        "node_info.go",
+        "node_kind.go",
+        "node_process.go",
+        "privacy.go",
+        "profile.go",
+        "runtime.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/model/internal/core",
+    visibility = ["//framework/model:__subpackages__"],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":core",
+    visibility = ["//framework/model:__subpackages__"],
+)
+
+go_test(
+    name = "core_test",
+    srcs = [
+        "connector_test.go",
+        "id_external_test.go",
+        "id_grammar_external_test.go",
+        "model_test.go",
+        "module_test.go",
+        "operations_test.go",
+        "watch_test.go",
+    ],
+    embed = [":core"],
+    deps = ["//pkg/v1/errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

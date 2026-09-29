@@ -101,6 +101,13 @@ jobs:
       - name: test
         run: bazel test --config=ci //...
 
+      # The framework's own suite reads its sources and asserts positions
+      # relative to its module root, which a Bazel sandbox does not lay out:
+      # //framework/internal/kit:kit_test is `manual` and this is its gate (rule 12,
+      # ADR 0147). Every framework module, `go test -race`, GOWORK=off.
+      - name: framework suites (go test -race)
+        run: make test-framework
+
       # Every target below carries at least one //go:build !race test
       # (testing.AllocsPerRun / testing.Benchmark report a spurious +1 under
       # -race), so the race suite above never compiles them. This race-off pass

@@ -2158,6 +2158,10 @@ codes:
     const: CodeElevationFailed
     hex: "0x00_03_42_07"
     package: internal/service/selfupdate
+  - code: "0.3.66.8"
+    const: CodeProbeFailed
+    hex: "0x00_03_42_08"
+    package: internal/service/selfupdate
   - code: "0.3.67.1"
     const: CodeCacheUnwritable
     hex: "0x00_03_43_01"
@@ -2462,6 +2466,302 @@ codes:
     const: CodeNotJSON
     hex: "0x00_03_5A_01"
     package: internal/service/codec/jsonpatch
+  - code: "0.3.91.1"
+    const: CodeMisconfigured
+    hex: "0x00_03_5B_01"
+    package: internal/service/ipc
+  - code: "0.3.91.2"
+    const: CodeDirectoryUnsafe
+    hex: "0x00_03_5B_02"
+    package: internal/service/ipc
+  - code: "0.3.91.3"
+    const: CodeInUse
+    hex: "0x00_03_5B_03"
+    package: internal/service/ipc
+  - code: "0.3.91.4"
+    const: CodeListenFailed
+    hex: "0x00_03_5B_04"
+    package: internal/service/ipc
+  - code: "0.3.91.5"
+    const: CodePeerRefused
+    hex: "0x00_03_5B_05"
+    package: internal/service/ipc
+  - code: "0.3.91.6"
+    const: CodeDialFailed
+    hex: "0x00_03_5B_06"
+    package: internal/service/ipc
+  - code: "0.3.91.7"
+    const: CodeEndpointForeign
+    hex: "0x00_03_5B_07"
+    package: internal/service/ipc
+  - code: "0.3.91.8"
+    const: CodeClosed
+    hex: "0x00_03_5B_08"
+    package: internal/service/ipc
+  - code: "0.4.1.1"
+    const: CodeInvalidID
+    hex: "0x00_04_01_01"
+    package: framework/model/internal/core
+  - code: "0.4.2.1"
+    const: CodeStoreDecode
+    hex: "0x00_04_02_01"
+    package: framework/internal/kit
+  - code: "0.4.2.2"
+    const: CodeStoreEncode
+    hex: "0x00_04_02_02"
+    package: framework/internal/kit
+  - code: "0.4.2.3"
+    const: CodeStorePersist
+    hex: "0x00_04_02_03"
+    package: framework/internal/kit
+  - code: "0.4.2.4"
+    const: CodeStoreLoad
+    hex: "0x00_04_02_04"
+    package: framework/internal/kit
+  - code: "0.4.2.5"
+    const: CodeStoreIndex
+    hex: "0x00_04_02_05"
+    package: framework/internal/kit
+  - code: "0.4.2.6"
+    const: CodeTopicEncode
+    hex: "0x00_04_02_06"
+    package: framework/internal/kit
+  - code: "0.4.2.7"
+    const: CodeTopicPublish
+    hex: "0x00_04_02_07"
+    package: framework/internal/kit
+  - code: "0.4.2.8"
+    const: CodeQueueOpen
+    hex: "0x00_04_02_08"
+    package: framework/internal/kit
+  - code: "0.4.2.9"
+    const: CodeUndecodable
+    hex: "0x00_04_02_09"
+    package: framework/internal/kit
+  - code: "0.4.2.10"
+    const: CodeHandlerPanic
+    hex: "0x00_04_02_0A"
+    package: framework/internal/kit
+  - code: "0.4.2.11"
+    const: CodeNotMounted
+    hex: "0x00_04_02_0B"
+    package: framework/internal/kit
+  - code: "0.4.2.12"
+    const: CodeWorkflowLoad
+    hex: "0x00_04_02_0C"
+    package: framework/internal/kit
+  - code: "0.4.2.13"
+    const: CodeWorkflowHookPanic
+    hex: "0x00_04_02_0D"
+    package: framework/internal/kit
+  - code: "0.4.2.14"
+    const: CodeWorkflowHookChange
+    hex: "0x00_04_02_0E"
+    package: framework/internal/kit
+  - code: "0.4.2.15"
+    const: CodeWorkflowReentrant
+    hex: "0x00_04_02_0F"
+    package: framework/internal/kit
+  - code: "0.4.2.16"
+    const: CodeAppConfig
+    hex: "0x00_04_02_10"
+    package: framework/internal/kit
+  - code: "0.4.2.17"
+    const: CodeAppRunning
+    hex: "0x00_04_02_11"
+    package: framework/internal/kit
+  - code: "0.4.2.18"
+    const: CodeAppListen
+    hex: "0x00_04_02_12"
+    package: framework/internal/kit
+  - code: "0.4.2.19"
+    const: CodeMailConfig
+    hex: "0x00_04_02_13"
+    package: framework/internal/kit
+  - code: "0.4.2.20"
+    const: CodeMailEncode
+    hex: "0x00_04_02_14"
+    package: framework/internal/kit
+  - code: "0.4.2.21"
+    const: CodeMailQueue
+    hex: "0x00_04_02_15"
+    package: framework/internal/kit
+  - code: "0.4.2.22"
+    const: CodeMailUndecodable
+    hex: "0x00_04_02_16"
+    package: framework/internal/kit
+  - code: "0.4.2.23"
+    const: CodeMailPanic
+    hex: "0x00_04_02_17"
+    package: framework/internal/kit
+  - code: "0.4.2.24"
+    const: CodeLoopPanic
+    hex: "0x00_04_02_18"
+    package: framework/internal/kit
+  - code: "0.4.2.25"
+    const: CodeLoopNotMounted
+    hex: "0x00_04_02_19"
+    package: framework/internal/kit
+  - code: "0.4.2.26"
+    const: CodeLoopStart
+    hex: "0x00_04_02_1A"
+    package: framework/internal/kit
+  - code: "0.4.2.27"
+    const: CodeSecretStore
+    hex: "0x00_04_02_1B"
+    package: framework/internal/kit
+  - code: "0.4.2.28"
+    const: CodeSecretMissing
+    hex: "0x00_04_02_1C"
+    package: framework/internal/kit
+  - code: "0.4.2.29"
+    const: CodeSecretRead
+    hex: "0x00_04_02_1D"
+    package: framework/internal/kit
+  - code: "0.4.2.30"
+    const: CodeSecretRotate
+    hex: "0x00_04_02_1E"
+    package: framework/internal/kit
+  - code: "0.4.2.31"
+    const: CodeDatabaseOpen
+    hex: "0x00_04_02_1F"
+    package: framework/internal/kit
+  - code: "0.4.2.32"
+    const: CodeDatabaseMigrate
+    hex: "0x00_04_02_20"
+    package: framework/internal/kit
+  - code: "0.4.2.33"
+    const: CodeDatabaseUnavailable
+    hex: "0x00_04_02_21"
+    package: framework/internal/kit
+  - code: "0.4.2.34"
+    const: CodeDatabaseConfig
+    hex: "0x00_04_02_22"
+    package: framework/internal/kit
+  - code: "0.4.2.35"
+    const: CodePrivacyKey
+    hex: "0x00_04_02_23"
+    package: framework/internal/kit
+  - code: "0.4.2.36"
+    const: CodePrivacyErase
+    hex: "0x00_04_02_24"
+    package: framework/internal/kit
+  - code: "0.4.2.37"
+    const: CodePrivacyJournal
+    hex: "0x00_04_02_25"
+    package: framework/internal/kit
+  - code: "0.4.2.38"
+    const: CodePrivacyData
+    hex: "0x00_04_02_26"
+    package: framework/internal/kit
+  - code: "0.4.2.39"
+    const: CodeHistoryLoad
+    hex: "0x00_04_02_27"
+    package: framework/internal/kit
+  - code: "0.4.2.40"
+    const: CodeHistoryWrite
+    hex: "0x00_04_02_28"
+    package: framework/internal/kit
+  - code: "0.4.2.41"
+    const: CodeHistoryRead
+    hex: "0x00_04_02_29"
+    package: framework/internal/kit
+  - code: "0.4.2.42"
+    const: CodePasswordHash
+    hex: "0x00_04_02_2A"
+    package: framework/internal/kit
+  - code: "0.4.2.43"
+    const: CodeCommandReentrant
+    hex: "0x00_04_02_2B"
+    package: framework/internal/kit
+  - code: "0.4.2.44"
+    const: CodeCommandKey
+    hex: "0x00_04_02_2C"
+    package: framework/internal/kit
+  - code: "0.4.2.45"
+    const: CodeCommandQueue
+    hex: "0x00_04_02_2D"
+    package: framework/internal/kit
+  - code: "0.4.2.46"
+    const: CodeCommandEncode
+    hex: "0x00_04_02_2E"
+    package: framework/internal/kit
+  - code: "0.4.2.47"
+    const: CodeWatchQueue
+    hex: "0x00_04_02_2F"
+    package: framework/internal/kit
+  - code: "0.4.2.48"
+    const: CodeProfileRead
+    hex: "0x00_04_02_30"
+    package: framework/internal/kit
+  - code: "0.4.2.49"
+    const: CodeJobOverlapped
+    hex: "0x00_04_02_31"
+    package: framework/internal/kit
+  - code: "0.4.2.50"
+    const: CodeHistoryMoved
+    hex: "0x00_04_02_32"
+    package: framework/internal/kit
+  - code: "0.4.2.51"
+    const: CodeNotSource
+    hex: "0x00_04_02_33"
+    package: framework/internal/kit
+  - code: "0.4.2.52"
+    const: CodePasswordMoved
+    hex: "0x00_04_02_34"
+    package: framework/internal/kit
+  - code: "0.4.2.53"
+    const: CodeNothingToErase
+    hex: "0x00_04_02_35"
+    package: framework/internal/kit
+  - code: "0.4.2.54"
+    const: CodeKeyRekeyed
+    hex: "0x00_04_02_36"
+    package: framework/internal/kit
+  - code: "0.4.2.55"
+    const: CodeMigrateRefused
+    hex: "0x00_04_02_37"
+    package: framework/internal/kit
+  - code: "0.4.2.56"
+    const: CodeCatalogue
+    hex: "0x00_04_02_38"
+    package: framework/internal/kit
+  - code: "0.4.2.57"
+    const: CodeRetentionPanic
+    hex: "0x00_04_02_39"
+    package: framework/internal/kit
+  - code: "0.4.2.58"
+    const: CodeSingletonHeld
+    hex: "0x00_04_02_3A"
+    package: framework/internal/kit
+  - code: "0.4.2.59"
+    const: CodeCLIFailed
+    hex: "0x00_04_02_3B"
+    package: framework/internal/kit
+  - code: "0.4.2.60"
+    const: CodeScopeUnknown
+    hex: "0x00_04_02_3C"
+    package: framework/internal/kit
+  - code: "0.4.3.1"
+    const: CodeMisconfigured
+    hex: "0x00_04_03_01"
+    package: framework/telemetry
+  - code: "0.4.3.2"
+    const: CodeRunning
+    hex: "0x00_04_03_02"
+    package: framework/telemetry
+  - code: "0.4.16.1"
+    const: CodeURLMalformed
+    hex: "0x00_04_10_01"
+    package: framework/connectors/postgres
+  - code: "0.4.17.1"
+    const: CodeURLMalformed
+    hex: "0x00_04_11_01"
+    package: framework/connectors/mysql
+  - code: "0.4.18.1"
+    const: CodeURLMalformed
+    hex: "0x00_04_12_01"
+    package: framework/connectors/sqlite
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"

@@ -47,9 +47,15 @@ Replacing a binary in a directory the user cannot write needs a SECOND opt\-in. 
 
 Both variable names are derived from Source.Product — \`widget\` yields WIDGET\_AUTO\_UPGRADE and WIDGET\_ALLOW\_SUDO — by uppercasing and folding punctuation to underscore.
 
+A product whose updates are silent by design builds its Service WithAutomaticConsent — its own consent, given at build, which Service.AuthoriseUnattendedUpgrade reads and an operator still overrules with \<PREFIX\>\_AUTO\_UPGRADE=0. It grants no escalation, and WithoutElevation forbids escalation outright, whatever \<PREFIX\>\_ALLOW\_SUDO says \(ADR 0150\).
+
+### Keys that rotate, a signature that names its release, a probe that rolls back
+
+Service.WithVendorKeys links several keys, in order, and a release verifies against any of them: a rotation publishes under the new key while builds that carry both accept it, and neither side has to be updated first \(ADR 0150\). Service.WithSignatureDomain makes each signature cover a domain — so a key that also signs other documents cannot have one read as a release — and makes the signed manifest say which tag it is and until when it may be installed \("\# tag v1.4.0", "\# expires 2026\-12\-31T00:00:00Z"\): an older release replayed under a newer name, or a stale one, is refused. Service.WithProbe keeps the previous binary as \<binary\>.prev and runs the new one with the product's probe arguments; a probe that fails puts the previous one back \(CodeProbeFailed\).
+
 ### Two limits a caller must know before relying on this
 
-\*\*A compromised release host can serve an OLDER signed release.\*\* The manifest is signed, but it carries the version\-independent asset name and no signed release tag, so a host that answers a request for v2 with v1's manifest, signature and archive passes every check here and installs v1. Verification proves the bytes came from the vendor; it does not prove they are the version that was asked for. Closing it needs the tag INSIDE the signed document, which is a release\-format decision rather than a code one.
+\*\*Without a signature domain, a compromised release host can serve an OLDER signed release.\*\* The historical manifest is signed but carries no release tag, so a host that answers a request for v2 with v1's manifest, signature and archive passes every check and installs v1. WithSignatureDomain closes it by putting the tag and an expiry INSIDE the signed document; a product that has not adopted the format keeps the gap.
 
 \*\*Windows is not supported for the replacement step.\*\* Windows will not let a running executable be renamed over, so on a Windows build Upgrade refuses with the SDK's UNSUPPORTED\_PLATFORM — errors.Is\(err, proc.UnsupportedPlatform\) — before it downloads anything. CheckForUpdate works there: a product can still tell its user that a newer release exists. A build with no vendor key is told about the key first, on every platform.
 
@@ -57,7 +63,7 @@ Both are recorded in ADR 0077 §Deferred rather than left to be discovered, and 
 
 ### What this package does not do
 
-It does not roll back. The replacement is atomic \(temp file, chmod, rename\) so there is no window where the binary is half\-written, but once the rename lands the previous version is gone. A caller that needs to return to it keeps its own copy.
+It does not roll back on its own. The replacement is atomic \(temp file, chmod, rename\) so there is no window where the binary is half\-written, and without WithProbe the previous version is gone once the rename lands; with a probe it is kept as \<binary\>.prev and put back when the probe fails.
 
 ## Index
 
@@ -191,6 +197,12 @@ const CodeNoVendorKey errs.Code = coreupd.CodeNoVendorKey
 
 ```go
 const CodeNotPrerelease errs.Code = coreupd.CodeNotPrerelease
+```
+
+<a name="CodeProbeFailed"></a>CodeProbeFailed identifies a replacement whose new binary did not answer the probe the product declared with Service.WithProbe; the previous binary is put back from \<binary\>.prev when it was kept \(ADR 0150\).
+
+```go
+const CodeProbeFailed errs.Code = svcupd.CodeProbeFailed
 ```
 
 <a name="CodeReleaseMetadataUnreadable"></a>CodeReleaseMetadataUnreadable identifies a release\-API answer that arrived whole and did not decode. The bytes came, so no transport retry applies.
@@ -360,11 +372,15 @@ var (
     // authorise was refused by the system. Unlike ElevationNotAuthorised, no
     // environment variable repairs it.
     ElevationFailed = svcupd.ElevationFailed
+
+    // ProbeFailed is returned when the replaced binary did not answer its
+    // probe; rolled_back says whether <binary>.prev was put back.
+    ProbeFailed = svcupd.ProbeFailed
 )
 ```
 
 <a name="StdinIsTerminal"></a>
-## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L393>)
+## func [StdinIsTerminal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L421>)
 
 ```go
 func StdinIsTerminal() bool
@@ -375,7 +391,7 @@ StdinIsTerminal reports whether a human could answer a prompt on this process's 
 It is a free function rather than something AuthoriseUnattendedUpgrade works out for itself, and that is the point: the consent decision stays testable without a pty, because the CALLER supplies the answer. Pass the result as the interactive argument.
 
 <a name="Candidate"></a>
-## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L356>)
+## type [Candidate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L384>)
 
 Candidate is one release candidate. It aliases the core value type.
 
@@ -384,7 +400,7 @@ type Candidate = svcupd.CandidateValue
 ```
 
 <a name="Copier"></a>
-## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L349>)
+## type [Copier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L377>)
 
 Copier streams the verified archive to its destination. It aliases the core port.
 
@@ -393,7 +409,7 @@ type Copier = coreupd.Copier
 ```
 
 <a name="FileSystem"></a>
-## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L345>)
+## type [FileSystem](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L373>)
 
 FileSystem is the disk half of replacing a running binary. It aliases the core port.
 
@@ -402,7 +418,7 @@ type FileSystem = coreupd.FileSystem
 ```
 
 <a name="Getter"></a>
-## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L341>)
+## type [Getter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L369>)
 
 Getter performs the HTTP GETs a self\-update needs. It aliases the core port.
 
@@ -411,7 +427,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L365>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L393>)
 
 Service replaces the running binary with a newer signed release. It aliases the service type — the engine handle, per ADR 0074.
 
@@ -420,7 +436,7 @@ type Service = svcupd.Service
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L373>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L401>)
 
 ```go
 func New(version string, src Source) *Service
@@ -431,7 +447,7 @@ New returns a Service for the given running version and release source.
 The returned Service carries NO vendor key and therefore installs nothing: chain WithVendorKey with the build's linked\-in anchor. That is the safe direction — a Service that verified only when a key happened to be present would make the security property depend on a build flag.
 
 <a name="NewWithDeps"></a>
-### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L381>)
+### func [NewWithDeps](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L409>)
 
 ```go
 func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copier Copier) *Service
@@ -440,7 +456,7 @@ func NewWithDeps(version string, src Source, client Getter, fs FileSystem, copie
 NewWithDeps returns a Service with its three ports injected, for a caller that supplies its own HTTP policy or a test that supplies doubles. A nil fs or copier is legal on paths that never reach the disk.
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L361>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L389>)
 
 Source says where releases come from and what they are called. It aliases the service type: these are one engine's construction parameters, which ADR 0074 places with the engine rather than in the contract layer.
 
@@ -449,7 +465,7 @@ type Source = svcupd.SourceValue
 ```
 
 <a name="Update"></a>
-## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L353>)
+## type [Update](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/selfupdate/selfupdate.go#L381>)
 
 Update is the outcome of a version check or an install. It aliases the core value type.
 

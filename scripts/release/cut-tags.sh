@@ -40,11 +40,11 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # shellcheck source=lib/release-size.sh
 . "$here/lib/release-size.sh"
 
-# Internal modules in pkg's publish chain (ADR 0001 fixes this set). They are
-# tagged + cross-pinned at release so pkg resolves without `replace`; Go's
-# internal/ rule still blocks direct consumer import — these tags exist only
-# for module-graph resolution. Leaves first.
-INTERNAL_MODULES=(internal/kernel internal/core internal/service)
+# The release chain is every workspace module but the root, read from go.work
+# by chain_modules (lib/tag-format.sh — ADR 0147 §9): internal/* (tagged only
+# so pkg resolves without `replace`; Go's internal/ rule still blocks a direct
+# consumer import), pkg, the framework and its connectors. All are tagged at
+# one version and cross-pinned, so the published graph resolves from the proxy.
 
 DRY_RUN=0
 ALLOW_BOOTSTRAP=0
@@ -294,11 +294,26 @@ bump_for_pkg() {
   esac
 }
 
-# internal_deps_of <go.mod> — echo the intra-repo internal module paths this
-# go.mod requires, so we re-pin exactly those (never add a spurious require).
-internal_deps_of() {
+# SDK_PREFIX is every module of the chain: `…/internal/*`, `…/pkg`,
+# `…/framework`, `…/framework/connectors/*`. The root module is the bare
+# `github.com/kitsunium/sdk` — without the slash — and nothing requires it.
+SDK_PREFIX="github.com/kitsunium/sdk/"
+
+# sdk_deps_of <go.mod> — echo the intra-repo module paths this go.mod
+# requires, so we re-pin exactly those (never add a spurious require).
+sdk_deps_of() {
   go mod edit -json "$1" |
-    jq -r '.Require[]?.Path | select(startswith("github.com/kitsunium/sdk/internal/"))'
+    jq -r --arg p "$SDK_PREFIX" '.Require[]?.Path | select(startswith($p))'
+}
+
+# sdk_replaces_of <go.mod> — echo the intra-repo module paths this go.mod
+# replaces. A module may replace one it does not require directly — the
+# framework replaces internal/core so `GOWORK=off` resolves what pkg needs —
+# and such a replace must go too, or the published go.mod points at a
+# directory no consumer has.
+sdk_replaces_of() {
+  go mod edit -json "$1" |
+    jq -r --arg p "$SDK_PREFIX" '.Replace // [] | .[].Old.Path | select(startswith($p))'
 }
 
 # rewrite_publishable <go.mod> <sem> — drop every intra-repo `replace` and pin
@@ -309,8 +324,12 @@ rewrite_publishable() {
   local -a edits=()
   while IFS= read -r dep; do
     [ -z "$dep" ] && continue
-    edits+=(-dropreplace="$dep" -require="$dep@$sem")
-  done < <(internal_deps_of "$gomod")
+    edits+=(-require="$dep@$sem")
+  done < <(sdk_deps_of "$gomod")
+  while IFS= read -r dep; do
+    [ -z "$dep" ] && continue
+    edits+=(-dropreplace="$dep")
+  done < <(sdk_replaces_of "$gomod")
   if [ "${#edits[@]}" -gt 0 ]; then
     go mod edit "${edits[@]}" "$gomod"
   fi
@@ -325,8 +344,8 @@ assert_publishable() {
     echo "cut-tags: $gomod does not parse after rewrite" >&2
     return 1
   }
-  if go mod edit -json "$gomod" | jq -e \
-    '.Replace // [] | map(select(.Old.Path | startswith("github.com/kitsunium/sdk/internal/"))) | length > 0' >/dev/null; then
+  if go mod edit -json "$gomod" | jq -e --arg p "$SDK_PREFIX" \
+    '.Replace // [] | map(select(.Old.Path | startswith($p))) | length > 0' >/dev/null; then
     echo "cut-tags: $gomod still has an intra-repo replace after rewrite" >&2
     return 1
   fi
@@ -349,18 +368,17 @@ publish_chain() {
       ;;
   esac
 
-  local -a chain_dirs=("${INTERNAL_MODULES[@]}" "pkg")
+  local -a chain_dirs=()
+  local chain="" d t
+  chain="$(chain_modules go.work)" || return 1
+  mapfile -t chain_dirs <<<"$chain"
   local -a tags=()
-  local d t
   for d in "${chain_dirs[@]}"; do tags+=("$d/$sem"); done
 
-  # Validate every tag before touching the repo: pkg via the canonical regex,
-  # internal/* via the internal regex.
+  # Validate every tag before touching the repo, each against the shape of its
+  # family: pkg, internal/*, framework(/connectors/*) — lib/tag-format.sh.
   for t in "${tags[@]}"; do
-    case "$t" in
-      pkg/*) is_valid_tag "$t" ;;
-      *) is_valid_internal_tag "$t" ;;
-    esac || {
+    is_valid_chain_tag "$t" || {
       echo "cut-tags: refusing to push malformed chain tag '$t'" >&2
       return 1
     }
@@ -379,7 +397,7 @@ publish_chain() {
       echo "DRY-RUN: publishable module graph for $sem (replace dropped, intra-repo deps pinned):"
       for d in "${chain_dirs[@]}"; do
         echo "  --- $d/go.mod ---"
-        grep -nE 'replace|kitsunium/sdk/internal' "$d/go.mod" | sed 's/^/    /' || true
+        grep -nE 'replace|kitsunium/sdk/' "$d/go.mod" | sed 's/^/    /' || true
       done
       echo "DRY-RUN: would tag chain: ${tags[*]}"
     else
@@ -420,18 +438,27 @@ publish_chain() {
   return "$rc"
 }
 
+# The tokens are read in full first. `pkg` and `framework` both mean "the chain
+# changed" and the chain is released in lockstep (ADR 0147 §9), so any number
+# of valid tokens publishes it ONCE — a second pass would find the tag it just
+# pushed and cut the next patch on top of it.
+tokens=()
 while IFS= read -r token; do
   [ -z "$token" ] && continue
   case "$token" in
-    pkg) ;;
+    pkg | framework) ;;
     # Backward-compat: a legacy "vN" major token (pre bare-`pkg` migration)
     # now maps to the single public module.
     v[0-9]*) token="pkg" ;;
     *)
-      echo "cut-tags: unexpected bump token '$token' (expected 'pkg')" >&2
+      echo "cut-tags: unexpected bump token '$token' (expected 'pkg' or 'framework')" >&2
       exit 1
       ;;
   esac
+  tokens+=("$token")
+done
+
+if [ "${#tokens[@]}" -gt 0 ]; then
 
   last="$(latest_pkg_tag || true)"
   if [ -z "$last" ]; then
@@ -471,9 +498,14 @@ while IFS= read -r token; do
 
   publish_chain "$sem"
 
-  # Echo only the pkg tag: it is the consumer-facing release (the internal/*
-  # tags are resolution-only and get no GitHub Release).
+  # stdout is the list of consumer-facing tags the workflow turns into GitHub
+  # releases: pkg's first — the one its verification step counts —, then the
+  # framework's and its connectors'. The internal/* tags are resolution-only
+  # and get no GitHub Release.
   if [ "$DRY_RUN" -eq 0 ]; then
     echo "$next"
+    while IFS= read -r d; do
+      case "$d" in framework | framework/*) echo "$d/$sem" ;; esac
+    done < <(chain_modules go.work)
   fi
-done
+fi

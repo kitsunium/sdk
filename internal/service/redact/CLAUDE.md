@@ -20,7 +20,7 @@ attribute shape and `internal/kernel/errs`. Code range `0.3.73.*`.
 | `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
 | `json.go` | `DocumentValue`, `JSON`, `Value`, and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
-| `text.go` | `Text`, the URL-credential pattern, `clip` |
+| `text.go` | `Text`, the URL-credential pattern (`credentials`, compiled at the first text holding "://" and "@", not at every program start), `clip` |
 | `attrs.go` | `Attrs` — an iterator over `(dotted key, text)` pairs, `Unencodable`, and the per-kind rendering |
 | `codes.go` / `errors.go` | `0.3.73.*`: `DocumentInvalid`, `ValueUnencodable` |
 

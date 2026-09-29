@@ -49,15 +49,16 @@ func sdkRoot(tb testing.TB) (root string) {
 }
 
 // collectDefineCalls walks every non-test.go file under root/internal,
-// root/pkg, and root/third-party, returning each (file:line, call) pair whose
-// callee resolves to errs.Define. third-party is included so the opt-in
-// vendor-dependent emitters (e.g. the AWS writers, ADR 0012) are audited for
-// the same Public-is-literal / reason / code-uniqueness invariants as the rest
-// of the SDK. Used by the audits below.
+// root/pkg, root/third-party and root/framework, returning each (file:line,
+// call) pair whose callee resolves to errs.Define. third-party is included so
+// the opt-in vendor-dependent emitters (e.g. the AWS writers, ADR 0012) are
+// audited for the same Public-is-literal / reason / code-uniqueness invariants
+// as the rest of the SDK, and framework so the layer above pkg/v1 (ADR 0147)
+// is too. Used by the audits below.
 func collectDefineCalls(tb testing.TB, root string) (out []defineCall) {
 	tb.Helper()
 	fset := token.NewFileSet()
-	for _, sub := range []string{"internal", "pkg", "third-party"} {
+	for _, sub := range []string{"internal", "pkg", "third-party", "framework"} {
 		base := filepath.Join(root, sub)
 		filepath.Walk(base, func(path string, info os.FileInfo, _ error) error { //nolint:errcheck // audit is best-effort
 			if info == nil || info.IsDir() {

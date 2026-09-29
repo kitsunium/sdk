@@ -44,3 +44,11 @@ func (osFileSystem) Remove(name string) error {
 	//: Clean up temporary file on error.
 	return os.Remove(name)
 }
+
+// Link makes newpath a hard link to oldpath: how the previous binary is kept as
+// <binary>.prev without a moment where the binary's own name is absent
+// (probe.go). It is a sibling of the FileSystem port, found by type assertion,
+// so a FileSystem a caller wrote without it still satisfies the port.
+func (osFileSystem) Link(oldpath, newpath string) error {
+	return os.Link(oldpath, newpath)
+}

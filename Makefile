@@ -1,4 +1,4 @@
-.PHONY: help build test lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
+.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -54,7 +54,7 @@ help: ## Print this help (default goal).
 build:
 	bazel mod tidy
 	bazel run //:gazelle
-	gofumpt -l -w internal pkg third-party
+	gofumpt -l -w internal pkg third-party framework
 	bazel build //...
 
 # `test` is the race-on suite. Always runs //... so the AST audit in
@@ -62,6 +62,16 @@ build:
 # is part of every run — no separate audit target needed.
 test:
 	bazel test --config=race //...
+
+# `test-framework` runs the framework modules' suites under `go test -race`,
+# one module at a time and GOWORK=off, as a product builds them. It is the
+# gate of //framework/internal/kit:kit_test, `manual` under Bazel because the suite
+# reads its own sources and positions relative to the module root (rule 12,
+# ADR 0147).
+test-framework:
+	@set -e; for m in $$(bash scripts/ci/go-modules.sh | grep '^framework'); do \
+	  echo "→ $$m"; (cd $$m && GOWORK=off go test -race -count=1 ./...); \
+	done
 
 # `test-alloc` runs the race-off allocation gates. Every target here carries at
 # least one `//go:build !race` test file (testing.AllocsPerRun /
@@ -135,7 +145,7 @@ lint:
 # enforces and the set the pre-commit hook enforces cannot drift apart by
 # editing one.
 lint-check:
-	@drift=$$(gofumpt -l internal pkg third-party); if [ -n "$$drift" ]; then \
+	@drift=$$(gofumpt -l internal pkg third-party framework); if [ -n "$$drift" ]; then \
 		echo "gofumpt drift in the following files (run 'make build' to fix):"; \
 		echo "$$drift"; exit 1; \
 	fi
@@ -177,7 +187,7 @@ doclinks:
 # SDK is not a consumer of itself.
 guard:
 	cd tools/sdkguard && GOWORK=off go run . -level=invariant -version-check=off \
-	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/tools/...
+	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/framework/... $(CURDIR)/tools/...
 
 # The two gates below are shell-only: no Bazel, no Go, seconds to run. They are
 # invoked by name from bazel-ci.yml, which is what makes them gates rather than
@@ -376,7 +386,8 @@ docs-readme:
 	@command -v gomarkdoc >/dev/null 2>&1 \
 	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
 	cd pkg/v1 && go generate ./...
-	@echo "→ every pkg/v1 package declaring //go:generate gomarkdoc regenerated"
+	cd framework && go generate ./...
+	@echo "→ every pkg/v1 and framework package declaring //go:generate gomarkdoc regenerated"
 
 # `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
 # the dotted-quad error-code registry (ADR 0005/0006), extracted from every

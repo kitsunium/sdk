@@ -46,6 +46,7 @@ MAKEFILE="Makefile"
 # CI has to be a visible edit to this list.
 GATES=(
   ci-gates-check
+  test-framework
   release-scripts-check
   hooks-check
   pre-commit-check

@@ -459,3 +459,49 @@ STUB
   [ "$status" -eq 0 ]
   [ "$output" = "pkg" ]
 }
+
+# ── The framework module (ADR 0147) ─────────────────────────────────────────
+# framework/ is a public module of its own, released in lockstep with pkg. A
+# change to it emits the token `framework`; the chain is cut once either way.
+
+@test "a change under framework/ emits framework" {
+  mkdir -p framework/kit
+  echo "package kit" > framework/kit/kit.go
+  g add -A
+  g commit -q --no-verify -m "feat(framework): a declaration"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "framework" ]
+}
+
+@test "a change to a connector module emits framework" {
+  mkdir -p framework/connectors/postgres
+  printf 'module github.com/kitsunium/sdk/framework/connectors/postgres\n\ngo 1.27\n' > framework/connectors/postgres/go.mod
+  g add -A
+  g commit -q --no-verify -m "feat(framework): the postgres connector"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "framework" ]
+}
+
+@test "a framework CLAUDE.md alone releases nothing" {
+  mkdir -p framework
+  echo "# notes" > framework/CLAUDE.md
+  g add -A
+  g commit -q --no-verify -m "docs(framework): notes"
+  run "$SCRIPT" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"pkg"$'\n'* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+}
+
+@test "pkg and framework in one range emit both tokens, pkg first" {
+  mkdir -p framework/model
+  echo "package model" > framework/model/model.go
+  echo "// patch" >> pkg/v1/codec.go
+  g add -A
+  g commit -q --no-verify -m "feat: both modules"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkg\nframework' ]
+}

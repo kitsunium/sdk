@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "ipc",
+    srcs = [
+        "codes.go",
+        "dir_other.go",
+        "dir_unix.go",
+        "errors.go",
+        "ipc.go",
+        "peer_linux.go",
+        "peer_other.go",
+        "pipe_windows.go",
+        "socket.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/ipc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ipc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "ipc_test",
+    srcs = [
+        "admit_internal_test.go",
+        "ipc_external_test.go",
+        "pipe_windows_external_test.go",
+    ],
+    embed = [":ipc"],
+    deps = ["//internal/kernel/errs"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -42,6 +42,74 @@ is_valid_internal_tag() {
   [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
 }
 
+# Framework-module tags (ADR 0147): `framework/vX.Y.Z` for the framework itself
+# and `framework/connectors/<engine>/vX.Y.Z` for each database connector, a Go
+# module of its own. Cut in lockstep with the pkg tag, same X.Y.Z, for the same
+# reason the internal tags are: each requires the one below it EXACTLY.
+FRAMEWORK_TAG_REGEX='^framework(/connectors/[a-z][a-z0-9]*)?/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# Test a framework-module tag against the canonical shape. Exits 0 on match.
+is_valid_framework_tag() {
+  [[ "$1" =~ $FRAMEWORK_TAG_REGEX ]]
+}
+
+# is_valid_chain_tag <tag> — one of the three shapes a release chain carries.
+is_valid_chain_tag() {
+  case "$1" in
+    pkg/*) is_valid_tag "$1" ;;
+    internal/*) is_valid_internal_tag "$1" ;;
+    framework/*) is_valid_framework_tag "$1" ;;
+    *) return 1 ;;
+  esac
+}
+
+# chain_modules [go.work] — the modules a release tags, one directory per line,
+# read from the workspace's `use` directives with the root module (`.`) left
+# out: it is the umbrella that hosts third-party/ and nothing requires it
+# (ADR 0012). Deriving the chain from go.work is what makes a module added to
+# the workspace released without anyone editing this file — ADR 0137's census
+# argument, applied to tags (ADR 0147 §9).
+#
+# It REFUSES rather than guesses: a missing go.work, one it cannot read, or one
+# whose chain lacks `pkg` is an exit 1 with the reason on stderr, because a
+# chain read as empty would publish nothing and one read without pkg would
+# publish a framework requiring a pkg version that does not exist.
+#
+# Output order: internal/* first (by name — the tags are pushed atomically, so
+# no order among them matters), then pkg, then framework, then connectors —
+# the order each requires the one before, which is the order a reader of the
+# dry-run expects. Both `use ./x` and a parenthesised `use ( ... )` block are
+# read; a `//` comment and blank lines are skipped.
+chain_modules() {
+  local work="${1:-go.work}" dirs="" rc=0
+  if [ ! -r "$work" ]; then
+    echo "chain_modules: $work is missing or unreadable — refusing to guess the release chain" >&2
+    return 1
+  fi
+  dirs="$(awk '
+    { sub(/\/\/.*/, "") }
+    /^[[:space:]]*use[[:space:]]*\(/      { inblock = 1; next }
+    inblock && /^[[:space:]]*\)/          { inblock = 0; next }
+    inblock && NF                          { print $1; next }
+    /^[[:space:]]*use[[:space:]]+[^([:space:]]/ { print $2 }
+  ' "$work" | sed -e 's#^\./##' -e 's#/$##' | awk '$0 != "." && $0 != ""')" || rc=$?
+  if [ "$rc" -ne 0 ]; then
+    echo "chain_modules: could not parse $work (exit $rc)" >&2
+    return 1
+  fi
+  if ! grep -qx 'pkg' <<<"$dirs"; then
+    echo "chain_modules: $work does not use ./pkg — refusing a chain without the public module" >&2
+    return 1
+  fi
+  {
+    grep -E '^internal/' <<<"$dirs" | LC_ALL=C sort || true
+    echo pkg
+    grep -x 'framework' <<<"$dirs" || true
+    grep -E '^framework/' <<<"$dirs" | LC_ALL=C sort || true
+    grep -vE '^(internal/|pkg$|framework($|/))' <<<"$dirs" | LC_ALL=C sort || true
+  }
+}
+
 # Extract the bare semver X.Y.Z(-rc)? from a pkg tag. "pkg/v0.1.0" -> "0.1.0".
 version_from_tag() {
   awk -F/ '{sub(/^v/, "", $2); print $2}' <<<"$1"

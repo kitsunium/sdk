@@ -33,20 +33,28 @@ fi
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
 #
+# Two roots publish generated READMEs: pkg/v1 and the framework module above it
+# (ADR 0147). Each package is recorded as "<root> <dir>", so the check runs from
+# the root its go:generate line is relative to.
+#
 # A read loop, not `readarray`: readarray is bash 4, and the hook runs under
 # macOS's /bin/bash 3.2 as well (#260).
+roots=(pkg/v1 framework)
 packages=()
-while IFS= read -r pkg; do
-    packages+=("$pkg")
-done < <(
-    cd pkg/v1 && grep -rl --include='*.go' 'go:generate gomarkdoc' . \
-      | xargs -n1 dirname | sort -u
-)
+for root in "${roots[@]}"; do
+    [ -d "$root" ] || continue
+    while IFS= read -r dir; do
+        [ -n "$dir" ] && packages+=("$root $dir")
+    done < <(
+        cd "$root" && grep -rl --include='*.go' 'go:generate gomarkdoc' . \
+          | xargs -n1 dirname | sort -u
+    )
+done
 
 # An empty list would make this gate pass vacuously, which is exactly the
 # failure mode an allowlist-shaped check has to close explicitly.
 if [ "${#packages[@]}" -eq 0 ]; then
-    echo "✗ no pkg/v1 package declares //go:generate gomarkdoc — refusing to pass vacuously" >&2
+    echo "✗ no pkg/v1 or framework package declares //go:generate gomarkdoc — refusing to pass vacuously" >&2
     exit 1
 fi
 
@@ -65,14 +73,16 @@ fi
 # — which varies between a devcontainer checkout and the CI runner and
 # produces a phantom drift in the link shape that this gate then flags.
 drifted=()
-for pkg in "${packages[@]}"; do
-    if ! ( cd pkg/v1 && gomarkdoc --check \
+for entry in "${packages[@]}"; do
+    root="${entry%% *}"
+    pkg="${entry#* }"
+    if ! ( cd "$root" && gomarkdoc --check \
         --output '{{.Dir}}/README.md' \
         --repository.url 'https://github.com/kitsunium/sdk' \
         --repository.default-branch main \
-        --repository.path '/pkg/v1' \
+        --repository.path "/$root" \
         "$pkg" ); then
-        drifted+=("$pkg")
+        drifted+=("$root/${pkg#./}")
     fi
 done
 

@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_binary", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "cliprobe_lib",
+    srcs = ["main.go"],
+    importpath = "github.com/kitsunium/sdk/framework/kit/testdata/cliprobe",
+    visibility = ["//visibility:public"],
+    deps = ["//framework/kit"],
+)
+
+go_binary(
+    name = "cliprobe",
+    embed = [":cliprobe_lib"],
+    visibility = ["//visibility:public"],
+)

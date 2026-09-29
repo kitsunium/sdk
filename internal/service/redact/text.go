@@ -5,6 +5,7 @@ package redact
 import (
 	"regexp"
 	"strings"
+	"sync"
 	"unicode/utf8"
 )
 
@@ -13,8 +14,11 @@ import (
 // "https://user:p@ss@host" is one userinfo with an unescaped "@" in the
 // password, and stopping at the first "@" would show "ss". A "?" or "#" before
 // the "@" is read as part of the userinfo, which over-redacts a host — the
-// safe direction.
-var credentials = regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://)[^/\s]+@`)
+// safe direction. It is compiled at the first text that may hold one, not in
+// every program that links this package.
+var credentials = sync.OnceValue(func() *regexp.Regexp {
+	return regexp.MustCompile(`([A-Za-z][A-Za-z0-9+.\-]*://)[^/\s]+@`)
+})
 
 // Text returns s with the credentials of every URL in it replaced by
 // Placeholder, then cut to at most maxBytes bytes (raised to MinBytes) at a
@@ -35,7 +39,7 @@ func (r *Redactor) scrub(s string) string {
 		return s
 	}
 	//: the scheme is kept, so the reader still sees what kind of URL it was.
-	return credentials.ReplaceAllString(s, "${1}"+Placeholder+"@")
+	return credentials().ReplaceAllString(s, "${1}"+Placeholder+"@")
 }
 
 // clip cuts s to at most limit bytes at a rune boundary, the Ellipsis
