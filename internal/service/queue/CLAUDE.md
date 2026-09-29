@@ -238,7 +238,10 @@ process is found by the poll (no LISTEN/NOTIFY — a driver feature
 that transaction's isolation — on PostgreSQL REPEATABLE READ a leased row
 another transaction changed since the snapshot is a serialization failure,
 which the caller gets as `QUEUE_BACKEND_FAILED`; SKIP LOCKED needs MySQL 8.0.1
-or MariaDB 10.6, and an older server fails the lease the same way.
+or MariaDB 10.6, and an older server fails the lease the same way. And a
+database fails transiently where a directory rarely does, while `Consume` still
+returns on a storage failure: a consumer over the SQL broker runs under
+`lifecycle`'s supervisor (ADR 0112), and SQLite is opened with a busy timeout.
 
 ## Failures no retry can fix, and the dead letters' two decisions (ADR 0151)
 

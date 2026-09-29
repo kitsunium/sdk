@@ -227,7 +227,10 @@
 // consumer holds (FOR UPDATE SKIP LOCKED — MySQL 8.0.1, MariaDB 10.6) or, on
 // SQLite, takes the one write lock. A failure of the database is
 // [QueueBackendFailed], with the driver's error reachable through errors.As
-// and its text — which quotes rows — withheld.
+// and its text — which quotes rows — withheld; it ends [Consume], as a storage
+// failure always has, and a database fails transiently where a directory
+// rarely does — so run a consumer over it under lifecycle's supervisor, and
+// open SQLite with a busy timeout.
 //
 // # Three brokers
 //

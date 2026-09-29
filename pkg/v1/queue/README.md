@@ -161,7 +161,7 @@ err = sql.Transact(ctx, tm, func(ctx context.Context, _ sql.Executor) error {
 })
 ```
 
-Idle consumers are woken once the publication's transaction commits, never for one rolled back. An idle Receive is one indexed read and takes no lock; a Receive that leases locks the rows it takes and skips those another consumer holds \(FOR UPDATE SKIP LOCKED — MySQL 8.0.1, MariaDB 10.6\) or, on SQLite, takes the one write lock. A failure of the database is [QueueBackendFailed](<#QueueMisconfigured>), with the driver's error reachable through errors.As and its text — which quotes rows — withheld.
+Idle consumers are woken once the publication's transaction commits, never for one rolled back. An idle Receive is one indexed read and takes no lock; a Receive that leases locks the rows it takes and skips those another consumer holds \(FOR UPDATE SKIP LOCKED — MySQL 8.0.1, MariaDB 10.6\) or, on SQLite, takes the one write lock. A failure of the database is [QueueBackendFailed](<#QueueMisconfigured>), with the driver's error reachable through errors.As and its text — which quotes rows — withheld; it ends [Consume](<#Consume>), as a storage failure always has, and a database fails transiently where a directory rarely does — so run a consumer over it under lifecycle's supervisor, and open SQLite with a busy timeout.
 
 ### Three brokers
 
@@ -294,7 +294,7 @@ var (
 ```
 
 <a name="Consume"></a>
-## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L485>)
+## func [Consume](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L488>)
 
 ```go
 func Consume(ctx context.Context, broker Broker, cfg ConsumerConfig) error
@@ -307,7 +307,7 @@ It returns nil when ctx ends — a cancelled consumer is a stopped consumer, not
 cfg.HandlerIsIdempotent must be true; see the package documentation.
 
 <a name="DoNotRetry"></a>
-## func [DoNotRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L461>)
+## func [DoNotRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L464>)
 
 ```go
 func DoNotRetry(cause error) error
@@ -316,7 +316,7 @@ func DoNotRetry(cause error) error
 DoNotRetry marks cause as a failure no retry can fix: returned from a [Handler](<#Handler>), it makes [Consume](<#Consume>) dead\-letter the message at once, with cause, instead of handing it back for another attempt. An SDK error keeps its own reason, code and public words in the dead letter; any other error, or none, is recorded as [NotRetryable](<#QueueMisconfigured>).
 
 <a name="SQLMigration"></a>
-## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L451>)
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L454>)
 
 ```go
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -325,7 +325,7 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 SQLMigration returns the migration that creates the one table an SQL queue named table keeps on dialect, numbered version for the caller's own version table. Its Down drops the table, and every message in it. Its statement does nothing when the table exists.
 
 <a name="Broker"></a>
-## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L294>)
+## type [Broker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L297>)
 
 Broker is the public alias for the queue contract. It is FROZEN at four methods; capabilities arrive as siblings \([DeadLetterReader](<#DeadLetterReader>), [LeaseExtender](<#LeaseExtender>), [Waker](<#Waker>), [Rejecter](<#Rejecter>), [DeadLetterManager](<#DeadLetterManager>)\) reached by type assertion.
 
@@ -334,7 +334,7 @@ type Broker = corequeue.Broker
 ```
 
 <a name="NewFile"></a>
-### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L429>)
+### func [NewFile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L432>)
 
 ```go
 func NewFile(cfg FileConfig) (broker Broker, err error)
@@ -353,7 +353,7 @@ if closer, ok := broker.(io.Closer); ok { defer closer.Close() }
 The messages stay on disk; every call after Close fails.
 
 <a name="NewMemory"></a>
-### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L471>)
+### func [NewMemory](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L474>)
 
 ```go
 func NewMemory(cfg MemoryConfig) (broker Broker, err error)
@@ -364,7 +364,7 @@ NewMemory returns the in\-process test double: the port's full semantics, no dir
 It refuses the same policies [NewFile](<#NewFile>) refuses, through the same guard, which is what makes it an honest double.
 
 <a name="NewSQL"></a>
-### func [NewSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L442>)
+### func [NewSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L445>)
 
 ```go
 func NewSQL(cfg SQLConfig) (broker Broker, err error)
@@ -375,7 +375,7 @@ NewSQL returns a durable broker whose queue is one table of the caller's databas
 It refuses at construction — never at first use — a policy it cannot honour and a transactor, dialect or table it cannot use \([SQLQueueMisconfigured](<#QueueMisconfigured>)\). The transactor must be the SDK's, or another core/sql Joiner and Deferrer.
 
 <a name="ConsumerConfig"></a>
-## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L363>)
+## type [ConsumerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L366>)
 
 ConsumerConfig is the public alias for [Consume](<#Consume>)'s configuration.
 
@@ -384,7 +384,7 @@ type ConsumerConfig = svcqueue.ConsumerConfig
 ```
 
 <a name="DeadLetter"></a>
-## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L322>)
+## type [DeadLetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L325>)
 
 DeadLetter is the public alias for one abandoned message and its cause.
 
@@ -393,7 +393,7 @@ type DeadLetter = corequeue.DeadLetterValue
 ```
 
 <a name="DeadLetterManager"></a>
-## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L350>)
+## type [DeadLetterManager](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L353>)
 
 DeadLetterManager is the public alias for the capability of replaying a dead letter into its queue, its count reset, or deleting it. Every broker here implements it.
 
@@ -402,7 +402,7 @@ type DeadLetterManager = corequeue.DeadLetterManager
 ```
 
 <a name="DeadLetterReader"></a>
-## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L326>)
+## type [DeadLetterReader](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L329>)
 
 DeadLetterReader is the public alias for the capability of reading the dead\-letter store back. Every broker here implements it.
 
@@ -411,7 +411,7 @@ type DeadLetterReader = corequeue.DeadLetterReader
 ```
 
 <a name="Delivery"></a>
-## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L305>)
+## type [Delivery](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L308>)
 
 Delivery is the public alias for one message handed to one consumer, carrying the lease that proves the claim and the count that says whether this is a retry.
 
@@ -420,7 +420,7 @@ type Delivery = corequeue.DeliveryValue
 ```
 
 <a name="FileConfig"></a>
-## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L357>)
+## type [FileConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L360>)
 
 FileConfig is the public alias for [NewFile](<#NewFile>)'s configuration.
 
@@ -429,7 +429,7 @@ type FileConfig = svcqueue.FileConfig
 ```
 
 <a name="Handler"></a>
-## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L297>)
+## type [Handler](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L300>)
 
 Handler is the public alias for the function that processes one delivery.
 
@@ -438,7 +438,7 @@ type Handler = corequeue.Handler
 ```
 
 <a name="Lease"></a>
-## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L308>)
+## type [Lease](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L311>)
 
 Lease is the public alias for a consumer's exclusive claim on one message.
 
@@ -447,7 +447,7 @@ type Lease = corequeue.LeaseValue
 ```
 
 <a name="LeaseExtender"></a>
-## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L330>)
+## type [LeaseExtender](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L333>)
 
 LeaseExtender is the public alias for the capability of renewing a lease a handler is still working under. Every broker here implements it.
 
@@ -456,7 +456,7 @@ type LeaseExtender = corequeue.LeaseExtender
 ```
 
 <a name="MemoryConfig"></a>
-## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L360>)
+## type [MemoryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L363>)
 
 MemoryConfig is the public alias for [NewMemory](<#NewMemory>)'s configuration.
 
@@ -465,7 +465,7 @@ type MemoryConfig = svcqueue.MemoryConfig
 ```
 
 <a name="Message"></a>
-## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L300>)
+## type [Message](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L303>)
 
 Message is the public alias for one unit of work as the broker minted it.
 
@@ -474,7 +474,7 @@ type Message = corequeue.MessageValue
 ```
 
 <a name="Nack"></a>
-## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L316>)
+## type [Nack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L319>)
 
 Nack is the public alias for what [Broker](<#Broker>).Nack decided: retried, or dead\-lettered.
 
@@ -483,7 +483,7 @@ type Nack = corequeue.NackValue
 ```
 
 <a name="Policy"></a>
-## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L319>)
+## type [Policy](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L322>)
 
 Policy is the public alias for the delivery discipline a broker enforces.
 
@@ -492,7 +492,7 @@ type Policy = corequeue.PolicyValue
 ```
 
 <a name="Receipt"></a>
-## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L312>)
+## type [Receipt](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L315>)
 
 Receipt is the public alias for the opaque handle to one lease. Do not parse it and do not construct one.
 
@@ -501,7 +501,7 @@ type Receipt = corequeue.ReceiptValue
 ```
 
 <a name="Rejecter"></a>
-## type [Rejecter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L345>)
+## type [Rejecter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L348>)
 
 Rejecter is the public alias for the capability of dead\-lettering a leased message at once, with the cause that condemned it. Every broker here implements it, and Consume uses it for a [DoNotRetry](<#DoNotRetry>) failure.
 
@@ -510,7 +510,7 @@ type Rejecter = corequeue.Rejecter
 ```
 
 <a name="SQLConfig"></a>
-## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L354>)
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L357>)
 
 SQLConfig is the public alias for [NewSQL](<#NewSQL>)'s configuration: Transactor, Dialect and Table \(required\), Policy, and Clock.
 
@@ -519,7 +519,7 @@ type SQLConfig = svcqueue.SQLConfig
 ```
 
 <a name="Wake"></a>
-## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L340>)
+## type [Wake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L343>)
 
 Wake is the public alias for what an idle consumer waits on: a signal the next Publish or Nack in this process closes, and how long until something the broker holds becomes receivable on its own.
 
@@ -528,7 +528,7 @@ type Wake = corequeue.WakeValue
 ```
 
 <a name="Waker"></a>
-## type [Waker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L335>)
+## type [Waker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/queue/queue.go#L338>)
 
 Waker is the public alias for the capability of telling an idle consumer when to look again. Every broker here implements it, and Consume uses it; a broker of your own that omits it is simply polled.
 

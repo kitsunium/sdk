@@ -261,7 +261,7 @@ a downstream module cannot name.
   hold-and-release kit does for a publication on a database has nothing left to
   hold: the message is the outbox row, and a crash after the commit loses
   nothing. A publication outside a transaction is one INSERT, durable when it
-  returns.
+  returns. Its consumers run under a supervisor (item 5 below).
 - **What each call sends**, pinned by `TestSQLStatementsPerCall`:
 
 | call | statements |
@@ -295,7 +295,15 @@ a downstream module cannot name.
    `QUEUE_BACKEND_FAILED`.
 4. **Clocks that disagree.** Deadlines are the brokers' clocks; processes whose
    clocks disagree by more than a lease's margin redeliver early or late.
-5. Everything ADR 0054 already declines — exactly-once, order under retry.
+5. **A consumer that outlives its database's bad moment.** `Consume` returns
+   the broker's error when the storage fails (ADR 0054 §D10), and a database
+   fails transiently — a failover, a dropped connection, a deadlock, SQLite's
+   busy answer — where a directory rarely does. A consumer over the SQL broker
+   is therefore run under `lifecycle`'s supervisor (ADR 0112), which restarts it
+   on the published backoff; `Consume` itself does not retry a storage failure.
+   SQLite is opened with a busy timeout, without which a held write lock is a
+   failure at once, as ADR 0139 §D9 says for docstore.
+6. Everything ADR 0054 already declines — exactly-once, order under retry.
 
 ## Breaking changes
 
