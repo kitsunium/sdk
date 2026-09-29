@@ -384,9 +384,14 @@ behaviour; `Broker` and `Handler` are unchanged. Two things read differently:
   statements as text and the DDL per dialect.
 - `pkg/v1/queue/sql_external_test.go`: every new name through the facade.
 - `third-party/db/sql/queue_integration_test.go`, under `-tags integration`, on
-  SQLite, PostgreSQL 17 and MySQL 8.4: the lifecycle, an extended lease and an
-  empty payload, the caller's transaction, sixteen consumers never sharing a
-  message, `Consume` rejecting, a real driver's text withheld.
+  SQLite in process, PostgreSQL 17 and MySQL 8.4 — every statement the broker
+  sends: the lifecycle, an extended lease and an empty payload, lapsed leases
+  buried, a partial batch, the stream's order and a retry stepping aside, the
+  caller's transaction and the wake its commit sends, sixteen consumers never
+  sharing a message, `Consume` rejecting, a real driver's text withheld. The
+  full conformance table cannot run there: its cases are `internal/service/queue`
+  tests, and that module imports no driver (ADR 0055 §D2) — the fake engine
+  runs them on each dialect's statements instead, as docstore's does.
 
 ## References
 

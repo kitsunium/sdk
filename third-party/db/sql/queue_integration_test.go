@@ -297,6 +297,107 @@ func TestConsumeRejectsADoNotRetryFailureOnEveryEngine(t *testing.T) {
 	})
 }
 
+// TestLapsedLeasesAndTheStreamsOrderOnEveryEngine sends the statements the
+// lifecycle case does not: a lease lapsed with no attempt left, buried with
+// LEASE_EXPIRED by the read that finds it; a batch that does not fill, which
+// asks when the next message is due; and the order — publication order for
+// one consumer with no failure, and a single retry stepping aside.
+func TestLapsedLeasesAndTheStreamsOrderOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		clk := clock.NewManualClock(queueEpoch)
+		fx := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: queue.Policy{VisibilityTimeout: 10 * time.Second, RetryDelay: time.Second, MaxDeliveries: 1}})
+		ctx := t.Context()
+		for _, payload := range []string{"first", "second", "third"} {
+			clk.Advance(time.Millisecond)
+			_, err := fx.broker.Publish(ctx, []byte(payload))
+			must(t, err)
+		}
+		batch, err := fx.broker.Receive(ctx, 10)
+		must(t, err)
+		if len(batch) != 3 || string(batch[0].Message.Payload) != "first" || string(batch[2].Message.Payload) != "third" {
+			t.Fatalf("Receive(10) = %d deliveries, want the three in publication order", len(batch))
+		}
+		due := fx.broker.(queue.Waker).Wake()
+		if !due.Scheduled || due.In != 10*time.Second {
+			t.Fatalf("after a partial batch, Wake = %+v, want the leases' deadline in 10s", due)
+		}
+		clk.Advance(10 * time.Second)
+		leaseNone(t, fx.broker) // the read that finds the three lapsed leases buries them
+		dead, err := fx.broker.(queue.DeadLetterReader).DeadLetters(ctx, 10)
+		must(t, err)
+		if len(dead) != 3 {
+			t.Fatalf("DeadLetters() returned %d, want the three lapsed leases", len(dead))
+		}
+		for _, letter := range dead {
+			if letter.Reason != "LEASE_EXPIRED" || letter.Deliveries != 1 {
+				t.Fatalf("dead letter = %q after %d deliveries, want LEASE_EXPIRED after 1", letter.Reason, letter.Deliveries)
+			}
+		}
+
+		retrying := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: queuePolicy()})
+		for _, payload := range []string{"first", "second", "third"} {
+			clk.Advance(time.Millisecond)
+			_, err := retrying.broker.Publish(ctx, []byte(payload))
+			must(t, err)
+		}
+		failed := leaseOne(t, retrying.broker)
+		_, err = retrying.broker.Nack(ctx, failed.Lease.Receipt, nil)
+		must(t, err)
+		clk.Advance(time.Second)
+		var order []string
+		for range 3 {
+			delivery := leaseOne(t, retrying.broker)
+			order = append(order, string(delivery.Message.Payload))
+			must(t, retrying.broker.Ack(ctx, delivery.Lease.Receipt))
+		}
+		if strings.Join(order, ",") != "second,third,first" {
+			t.Fatalf("drained %v, want second, third, first — a single retry steps aside", order)
+		}
+	})
+}
+
+// TestACommittedPublicationWakesAnIdleConsumerOnEveryEngine pins the wake on
+// real engines: a consumer asleep on an hour's poll, a clock that never moves,
+// and a publication inside the caller's transaction — delivered once, and only
+// once, that transaction commits.
+func TestACommittedPublicationWakesAnIdleConsumerOnEveryEngine(t *testing.T) {
+	t.Parallel()
+	eachEngine(t, func(t *testing.T, e *engine) {
+		clk := clock.NewManualClock(queueEpoch)
+		fx := openQueue(t, e, queue.SQLConfig{Clock: clk, Policy: queuePolicy()})
+		handled := make(chan string, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		var wg sync.WaitGroup
+		wg.Go(func() {
+			consumeErr := queue.Consume(ctx, fx.broker, queue.ConsumerConfig{
+				Handler: func(_ context.Context, d queue.Delivery) error {
+					handled <- string(d.Message.Payload)
+					return nil
+				},
+				Clock: clk, HandlerIsIdempotent: true, PollInterval: time.Hour,
+			})
+			if consumeErr != nil {
+				t.Errorf("Consume() = %v", consumeErr)
+			}
+		})
+		defer func() { cancel(); wg.Wait() }()
+		clk.BlockUntil(1) // the consumer found nothing and sleeps on its hour
+		must(t, sql.Transact(t.Context(), fx.tm, func(ctx context.Context, _ sql.Executor) error {
+			_, err := fx.broker.Publish(ctx, []byte("after the commit"))
+			return err
+		}))
+		select {
+		case got := <-handled:
+			if got != "after the commit" {
+				t.Fatalf("handled %q", got)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("the committed publication did not wake the idle consumer")
+		}
+	})
+}
+
 // TestADatabaseFailureOfTheQueueWithholdsTheDriversText pins
 // QUEUE_BACKEND_FAILED on a real driver: a table that was never created fails
 // the probe, the driver's error is reachable through errors.As, and its words —
