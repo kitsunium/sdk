@@ -45,10 +45,12 @@
 // cgroup is the Job Object backend. ³ the Unix setrlimit-on-self model has no
 // Windows analogue; Windows resource limits are applied through the cgroup
 // (Job Object) container or at spawn via the process Spec, not a standalone rlimit.
-// ⁴ illumos and Solaris reap their own children like darwin, OpenBSD and NetBSD
-// do, and have no reparent-here facility: SetChildSubreaper returns
-// [UnsupportedPlatform]. Their column is proven on OmniOS r151054 and Oracle
-// Solaris 11.4 (amd64) by the SDK's cross-platform runtime lane.
+// ⁴ illumos and Solaris have no reparent-here facility, like darwin, OpenBSD
+// and NetBSD: SetChildSubreaper returns [UnsupportedPlatform]. Their reaper
+// also sweeps once a second, because the Go runtime forks every child there
+// with FORK_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven
+// on OmniOS r151054 and Oracle Solaris 11.4 (amd64) by the SDK's
+// cross-platform runtime lane.
 //
 // [Supported] consults runtime.GOOS only — it is the platform-level matrix, not
 // a runtime probe. A capability that is native on the GOOS may still be

@@ -8,6 +8,8 @@ go_library(
         "childwait.go",
         "childwait_other.go",
         "childwait_unix.go",
+        "waitany_solaris.go",
+        "waitany_unix.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/childwait",
     visibility = [
