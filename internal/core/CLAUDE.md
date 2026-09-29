@@ -56,7 +56,7 @@ Single Go module `github.com/kitsunium/sdk/internal/core` — one `go.mod`, one 
 
 - **Interface-first.** Core packages expose interfaces + immutable value structs. Any method with a non-trivial body belongs in `internal/service/*`.
 - **Role-suffix on exported structs** (ktn-linter `KTN-STRUCT-ROLE`): `AttrValue`, `RecordEvent`, `Value`. Short aliases (`Attr = AttrValue`) re-exported at `pkg/v1/logger`.
-- **Imports allowed**: stdlib + `internal/kernel/*`. Never `internal/service/*`, never `pkg/*`.
+- **Imports allowed**: stdlib + `internal/kernel/*` + **other `internal/core/*` packages**. Never `internal/service/*`, never `pkg/*`, never `third-party/`. A lateral import is not a violation: `scripts/check-layer-deps.sh`'s core query names what is above core and says nothing about siblings, and `core/trace` builds on `core/metrics`'s attribute model by decision (ADR 0051 §2). This line used to omit the sibling case, the gap `internal/CLAUDE.md` records for the service row.
 - **Plug-in registries** (codec, writer): constructors carry `// IFACE-PLUGIN:` markers — concrete types stay unexported; the registry hands instances back behind the domain interface (`Codec`, `Factory`).
 
 ## Do NOT

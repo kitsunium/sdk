@@ -1,7 +1,10 @@
-// Package token — the algorithm and registered-claim vocabulary.
+// Package token — the algorithm, registered-claim and JWK key vocabulary.
 package token
 
-import coretoken "github.com/kitsunium/sdk/internal/core/token"
+import (
+	coretoken "github.com/kitsunium/sdk/internal/core/token"
+	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+)
 
 // AlgorithmHS256 is JOSE "HS256" — HMAC-SHA-256 over a 256-bit shared secret
 // (RFC 7518 §3.2). Symmetric: a verifier can also mint.
@@ -43,3 +46,29 @@ const ClaimIssuedAt string = coretoken.ClaimIssuedAt
 
 // ClaimID is the registered claim "jti" (RFC 7519 §4.1.7).
 const ClaimID string = coretoken.ClaimID
+
+// KeyTypeEC is the JWK "kty" of an elliptic-curve key on a NIST prime curve
+// (RFC 7518 §6.2): public members "x" and "y", private member "d".
+const KeyTypeEC KeyType = jwk.TypeEC
+
+// KeyTypeOKP is the JWK "kty" of an octet key pair, an Edwards-curve key
+// (RFC 8037 §2): public member "x", private member "d".
+const KeyTypeOKP KeyType = jwk.TypeOKP
+
+// KeyTypeOct is the JWK "kty" of a symmetric key carried whole in "k"
+// (RFC 7518 §6.4). It has no public half and no curve.
+const KeyTypeOct KeyType = jwk.TypeOct
+
+// CurveP256 is NIST P-256 (RFC 7518 §6.2.1.1), the curve of an ES256 key.
+const CurveP256 Curve = jwk.CurveP256
+
+// CurveP384 is NIST P-384. [ParseJWK] accepts it, but nothing in this package
+// signs or verifies with it, so [NewVerifierFromJWK] refuses it with
+// [KeyUnsuitable].
+const CurveP384 Curve = jwk.CurveP384
+
+// CurveP521 is NIST P-521, accepted and refused exactly as P-384 is.
+const CurveP521 Curve = jwk.CurveP521
+
+// CurveEd25519 is the Edwards curve of an EdDSA key (RFC 8037 §2).
+const CurveEd25519 Curve = jwk.CurveEd25519

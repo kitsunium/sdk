@@ -92,9 +92,11 @@ Logger ── Handler (genericHandler / TextHandler)
   three emission paths (`Log`, `LogAttrs`, `Builder.Send`) call it and stamp
   `RecordEvent.TraceContext`. This package therefore keeps **zero edges to any
   other service-layer domain** — it never learns that `trace` exists, which is
-  the point, since `internal/service/trace` is a sibling it may not import.
-  `pkg/v1/logger` supplies the binding; `New(h)` leaves it nil and a nil source
-  costs nothing per emit.
+  the point. That is ADR 0062's decision, not a layer rule: a service package
+  MAY import a sibling (`internal/CLAUDE.md` §Dependency direction), and this one
+  does not import `internal/service/trace` because the two domains meet only at
+  the top layer. `pkg/v1/logger` supplies the binding; `New(h)` leaves it nil and
+  a nil source costs nothing per emit.
 - **The source is read AFTER the `Enabled` gate**, in all three paths, so a
   record dropped by the level threshold pays no `context` walk. It is read
   before `Handle`, so every Handler, Sink and middleware sees the identity on

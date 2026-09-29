@@ -368,6 +368,12 @@ type SamplingParams = coretrace.SamplingParams
 
 // Tracer configuration and the concrete tracer.
 type (
+	// SDKTracer is the concrete [Tracer] that [NewTracer] returns: the port's
+	// Start, plus Resource and Scope, which read back what it stamps on every
+	// span it starts. The port keeps the name Tracer; this is the SDK's
+	// implementation of it, in OpenTelemetry's sense of API and SDK. Name it
+	// to keep a tracer in a field, or to pass one to a function of your own.
+	SDKTracer = svctrace.Tracer
 	// TracerConfig configures a Tracer. Every field has a resolved meaning
 	// when left unset.
 	TracerConfig = svctrace.TracerConfig
@@ -384,7 +390,11 @@ type (
 // every field of TracerConfig has a resolved meaning, and the inputs that CAN be
 // refused — a sampling ratio, an OTLP endpoint — are refused by their own
 // constructors before they reach here.
-func NewTracer(cfg TracerConfig) *svctrace.Tracer {
+//
+// It returns the concrete [SDKTracer] rather than the [Tracer] port, so a caller
+// keeps Resource and Scope, and anything the concrete type grows later, without
+// the port having to grow (ADR 0039).
+func NewTracer(cfg TracerConfig) *SDKTracer {
 	//: the service layer owns the wiring; this facade only forwards.
 	return svctrace.NewTracer(cfg)
 }

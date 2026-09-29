@@ -20,7 +20,7 @@ case errs.HasCode(err, token.CodeSignatureInvalid): // 401, and alert
 
 All three answer 401, and a token addressed to another service is no exception: RFC 6750 §3.1 spends invalid\_token — and 401 — on a token that is "invalid for other reasons", while 403 \(insufficient\_scope\) says the token is valid HERE and merely too weak, which an audience mismatch is not. What differs between the rows is what the caller does next, not the status.
 
-Package token — the algorithm and registered\-claim vocabulary.
+Package token — the algorithm, registered\-claim and JWK key vocabulary.
 
 Package token — the constructor set, one per algorithm, plus the JWK loaders and bridges. Each constructor accepts only the Go key type its algorithm can use, which is what makes algorithm confusion a call that does not compile.
 
@@ -111,6 +111,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
 - [type Claims](<#Claims>)
   - [func NewClaims\(\) Claims](<#NewClaims>)
   - [func SetPrivateClaim\[T any\]\(claims Claims, name string, value T\) \(updated Claims, err error\)](<#SetPrivateClaim>)
+- [type Curve](<#Curve>)
 - [type Issuer](<#Issuer>)
   - [func NewES256Issuer\(priv \*ecdsa.PrivateKey, cfg IssuerConfig\) \(issuer Issuer, err error\)](<#NewES256Issuer>)
   - [func NewEdDSAIssuer\(priv ed25519.PrivateKey, cfg IssuerConfig\) \(issuer Issuer, err error\)](<#NewEdDSAIssuer>)
@@ -123,6 +124,7 @@ Move it between calls, or guard it with a mutex if a verifier reads it from anot
   - [func NewJWKSet\(keys ...JWK\) JWKSet](<#NewJWKSet>)
   - [func ParseJWKSet\(document \[\]byte\) \(set JWKSet, err error\)](<#ParseJWKSet>)
 - [type Key](<#Key>)
+- [type KeyType](<#KeyType>)
 - [type PasetoIssuerConfig](<#PasetoIssuerConfig>)
 - [type PasetoVerifierConfig](<#PasetoVerifierConfig>)
 - [type Verifier](<#Verifier>)
@@ -524,6 +526,39 @@ func SetPrivateClaim[T any](claims Claims, name string, value T) (updated Claims
 
 SetPrivateClaim returns a copy of claims carrying name encoded as JSON. It refuses an empty name, one of the seven registered names, and a claim set already at its private\-claim cap.
 
+<a name="Curve"></a>
+## type [Curve](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L47>)
+
+Curve is the public alias for a JWK's "crv" member, the curve [JWK](<#JWK>).Crv reports: [CurveP256](<#CurveP256>), [CurveP384](<#CurveP384>), [CurveP521](<#CurveP521>) or [CurveEd25519](<#CurveEd25519>). A symmetric key has no curve and reports the empty Curve.
+
+```go
+type Curve = jwk.Curve
+```
+
+<a name="CurveEd25519"></a>CurveEd25519 is the Edwards curve of an EdDSA key \(RFC 8037 §2\).
+
+```go
+const CurveEd25519 Curve = jwk.CurveEd25519
+```
+
+<a name="CurveP256"></a>CurveP256 is NIST P\-256 \(RFC 7518 §6.2.1.1\), the curve of an ES256 key.
+
+```go
+const CurveP256 Curve = jwk.CurveP256
+```
+
+<a name="CurveP384"></a>CurveP384 is NIST P\-384. [ParseJWK](<#ParseJWK>) accepts it, but nothing in this package signs or verifies with it, so [NewVerifierFromJWK](<#NewVerifierFromJWK>) refuses it with [KeyUnsuitable](<#Malformed>).
+
+```go
+const CurveP384 Curve = jwk.CurveP384
+```
+
+<a name="CurveP521"></a>CurveP521 is NIST P\-521, accepted and refused exactly as P\-384 is.
+
+```go
+const CurveP521 Curve = jwk.CurveP521
+```
+
 <a name="Issuer"></a>
 ## type [Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/token.go#L121>)
 
@@ -534,7 +569,7 @@ type Issuer = coretoken.Issuer
 ```
 
 <a name="NewES256Issuer"></a>
-### func [NewES256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L51>)
+### func [NewES256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L61>)
 
 ```go
 func NewES256Issuer(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)
@@ -543,7 +578,7 @@ func NewES256Issuer(priv *ecdsa.PrivateKey, cfg IssuerConfig) (issuer Issuer, er
 NewES256Issuer returns a JWT issuer signing with ECDSA P\-256 \+ SHA\-256, emitting the fixed\-width R||S signature of RFC 7518 §3.4.
 
 <a name="NewEdDSAIssuer"></a>
-### func [NewEdDSAIssuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L57>)
+### func [NewEdDSAIssuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L67>)
 
 ```go
 func NewEdDSAIssuer(priv ed25519.PrivateKey, cfg IssuerConfig) (issuer Issuer, err error)
@@ -552,7 +587,7 @@ func NewEdDSAIssuer(priv ed25519.PrivateKey, cfg IssuerConfig) (issuer Issuer, e
 NewEdDSAIssuer returns a JWT issuer signing with Ed25519 \(JOSE "EdDSA"\).
 
 <a name="NewHS256Issuer"></a>
-### func [NewHS256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L44>)
+### func [NewHS256Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L54>)
 
 ```go
 func NewHS256Issuer(secret Key, cfg IssuerConfig) (issuer Issuer, err error)
@@ -563,7 +598,7 @@ NewHS256Issuer returns a JWT issuer signing with HMAC\-SHA\-256 under secret.
 HS256 is symmetric: everyone who can verify these tokens can also mint them. Reach for [NewES256Issuer](<#NewES256Issuer>) or [NewEdDSAIssuer](<#NewEdDSAIssuer>) the moment the verifier is not in the same trust domain as the issuer.
 
 <a name="NewPasetoV4Issuer"></a>
-### func [NewPasetoV4Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L84>)
+### func [NewPasetoV4Issuer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L94>)
 
 ```go
 func NewPasetoV4Issuer(priv ed25519.PrivateKey, cfg PasetoIssuerConfig) (issuer Issuer, err error)
@@ -592,7 +627,7 @@ type JWK = jwk.KeyValue
 ```
 
 <a name="ParseJWK"></a>
-### func [ParseJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L116>)
+### func [ParseJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L126>)
 
 ```go
 func ParseJWK(document []byte) (key JWK, err error)
@@ -614,7 +649,7 @@ type JWKSet = jwk.Set
 ```
 
 <a name="NewJWKSet"></a>
-### func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L146>)
+### func [NewJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L156>)
 
 ```go
 func NewJWKSet(keys ...JWK) JWKSet
@@ -623,7 +658,7 @@ func NewJWKSet(keys ...JWK) JWKSet
 NewJWKSet assembles a [JWKSet](<#JWKSet>) from keys already parsed, in the given order — the order in which [NewSetVerifier](<#NewSetVerifier>) tries candidates sharing a "kid". It validates nothing further: the material of every non\-zero JWK already passed [ParseJWK](<#ParseJWK>), and a zero JWK in a set can never verify a token.
 
 <a name="ParseJWKSet"></a>
-### func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L136>)
+### func [ParseJWKSet](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L146>)
 
 ```go
 func ParseJWKSet(document []byte) (set JWKSet, err error)
@@ -642,6 +677,33 @@ Key is the public alias for the SDK's opaque, redacting 256\-bit symmetric key �
 
 ```go
 type Key = corecrypto.Key
+```
+
+<a name="KeyType"></a>
+## type [KeyType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L42>)
+
+KeyType is the public alias for a JWK's "kty" member, the key\-type family [JWK](<#JWK>).Kty reports: [KeyTypeEC](<#KeyTypeEC>), [KeyTypeOKP](<#KeyTypeOKP>) or [KeyTypeOct](<#KeyTypeOct>). The zero JWK reports the empty KeyType.
+
+```go
+type KeyType = jwk.Type
+```
+
+<a name="KeyTypeEC"></a>KeyTypeEC is the JWK "kty" of an elliptic\-curve key on a NIST prime curve \(RFC 7518 §6.2\): public members "x" and "y", private member "d".
+
+```go
+const KeyTypeEC KeyType = jwk.TypeEC
+```
+
+<a name="KeyTypeOKP"></a>KeyTypeOKP is the JWK "kty" of an octet key pair, an Edwards\-curve key \(RFC 8037 §2\): public member "x", private member "d".
+
+```go
+const KeyTypeOKP KeyType = jwk.TypeOKP
+```
+
+<a name="KeyTypeOct"></a>KeyTypeOct is the JWK "kty" of a symmetric key carried whole in "k" \(RFC 7518 §6.4\). It has no public half and no curve.
+
+```go
+const KeyTypeOct KeyType = jwk.TypeOct
 ```
 
 <a name="PasetoIssuerConfig"></a>
@@ -672,7 +734,7 @@ type Verifier = coretoken.Verifier
 ```
 
 <a name="NewES256Verifier"></a>
-### func [NewES256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L72>)
+### func [NewES256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L82>)
 
 ```go
 func NewES256Verifier(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)
@@ -681,7 +743,7 @@ func NewES256Verifier(pub *ecdsa.PublicKey, cfg VerifierConfig) (verifier Verifi
 NewES256Verifier returns a JWT verifier bound to ECDSA P\-256 under pub. The point is validated on the curve, not merely measured \(RFC 8725 §3.4\).
 
 <a name="NewEdDSAVerifier"></a>
-### func [NewEdDSAVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L78>)
+### func [NewEdDSAVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L88>)
 
 ```go
 func NewEdDSAVerifier(pub ed25519.PublicKey, cfg VerifierConfig) (verifier Verifier, err error)
@@ -690,7 +752,7 @@ func NewEdDSAVerifier(pub ed25519.PublicKey, cfg VerifierConfig) (verifier Verif
 NewEdDSAVerifier returns a JWT verifier bound to Ed25519 under pub.
 
 <a name="NewHS256Verifier"></a>
-### func [NewHS256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L65>)
+### func [NewHS256Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L75>)
 
 ```go
 func NewHS256Verifier(secret Key, cfg VerifierConfig) (verifier Verifier, err error)
@@ -699,7 +761,7 @@ func NewHS256Verifier(secret Key, cfg VerifierConfig) (verifier Verifier, err er
 NewHS256Verifier returns a JWT verifier bound to HMAC\-SHA\-256 under secret. It accepts a [Key](<#Key>) and nothing else, which is what makes the HMAC half of algorithm confusion unwritable rather than merely documented.
 
 <a name="NewPasetoV4Verifier"></a>
-### func [NewPasetoV4Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L92>)
+### func [NewPasetoV4Verifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L102>)
 
 ```go
 func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verifier Verifier, err error)
@@ -708,7 +770,7 @@ func NewPasetoV4Verifier(pub ed25519.PublicKey, cfg PasetoVerifierConfig) (verif
 NewPasetoV4Verifier returns a PASETO v4.public verifier bound to pub. A token of any other PASETO version or purpose — including v4.local — is refused with [SchemeUnsupported](<#Malformed>).
 
 <a name="NewSetVerifier"></a>
-### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L181>)
+### func [NewSetVerifier](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L191>)
 
 ```go
 func NewSetVerifier(set JWKSet, cfg VerifierConfig) (verifier Verifier, err error)
@@ -721,7 +783,7 @@ The kid chooses which key to TRY; the signature decides whether the token is val
 A set no token could ever verify against is refused here, with [PolicyMisconfigured](<#Malformed>), rather than built into a verifier that refuses everything: an empty set, and one whose every member either carries no kid or is a key this package does not verify with \(P\-384, P\-521\). A single key published without a kid belongs to [NewVerifierFromJWK](<#NewVerifierFromJWK>).
 
 <a name="NewVerifierFromJWK"></a>
-### func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L161>)
+### func [NewVerifierFromJWK](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L171>)
 
 ```go
 func NewVerifierFromJWK(key JWK, cfg VerifierConfig) (verifier Verifier, err error)

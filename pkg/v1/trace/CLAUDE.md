@@ -22,7 +22,7 @@ alphabetical order.
 |---|---|
 | Ports | `Tracer`, `Span`, `Sampler`, `SpanSink`, `Carrier`, `SpanExporter`, `ExporterName` |
 | Model | `TraceID`, `SpanID`, `TraceFlags`, `SpanContext`, `TraceState`, `Kind`, `Status`, `StatusCode`, `Event`, `Link`, `SpanData`, `Spans`, `Attr`, `AttrKind`, `Resource`, `Scope`, `SpanParams`, `SamplingParams` |
-| Config | `TracerConfig`, `RecorderConfig`, `OTLPHTTPConfig`, `Recorder` |
+| Config | `TracerConfig`, `RecorderConfig`, `OTLPHTTPConfig`, `Recorder`, `SDKTracer` |
 | Construction | `NewTracer`, `NewRecorder`, `NewTraceID`, `NewSpanID` |
 | Sampling | `AlwaysSample`, `NeverSample`, `ParentBased`, `Ratio` |
 | Propagation | `Inject`, `Extract`, `ParseTraceParent`, `FormatTraceParent`, `ParseTraceState`, `ParseTraceID`, `ParseSpanID`, `ContextWithSpanContext`, `SpanContextFromContext` |
@@ -43,6 +43,19 @@ could disagree about it.
 `TestPublicAttributeIsTheMetricsAttribute` pins the assignment in both
 directions. ADR 0051 §Decision 2 has the reasoning and the deferred extraction
 that would make the import graph read forwards.
+
+## `SDKTracer` is what `NewTracer` returns, and `Tracer` stays the port
+
+`NewTracer` returns the concrete `*svctrace.Tracer`, not the `Tracer` port, so a
+caller keeps `Resource` and `Scope`, and whatever the concrete type grows later,
+without widening a frozen port (ADR 0039). Until #259 no alias published that
+type: a consumer could call `NewTracer` and use the result, but could not write
+its type down, so a tracer could not sit in a field of the consumer's own. The
+alias cannot take the name `Tracer`, which the port has held since ADR 0051 and
+which renaming would break; `SDKTracer` follows OpenTelemetry's split between
+the API, which is the port, and the SDK, which implements it.
+`TestAConsumerCanNameTheTracerNewTracerReturns` keeps one in a struct field and
+still hands it to the port, from the `_test` package alone.
 
 ## What a consumer needs to know first
 
@@ -82,3 +95,4 @@ that would make the import graph read forwards.
 | `make docs-readme` | `README.md` unchanged |
 | `TestPublicAttributeIsTheMetricsAttribute` | `trace.Attr` and `metrics.Attr` are one type |
 | `TestFacadeRefusesTheAmbiguousRatio` | the ADR 0031 answer, at the public edge |
+| `TestAConsumerCanNameTheTracerNewTracerReturns` | what `NewTracer` returns has a public name, and is still the port |

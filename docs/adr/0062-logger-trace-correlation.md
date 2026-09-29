@@ -1,6 +1,9 @@
 # ADR 0062 — a log line names the span it came from, and the bridge lives at the top layer
 
-- **Status**: Accepted
+- **Status**: Accepted — **§Context amended 2026-09-29** (sibling service
+  packages may import each other, and nothing in Bazel stops it; this pair does
+  not, by the decision below). The original text is preserved; the amendment
+  follows it.
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0070](0070-logger-reserves-the-correlation-keys.md) — a caller's attribute named `trace_id` or `span_id` is renamed rather than written beside the field
@@ -39,6 +42,19 @@ the logger's allocation budget on every line a service emits.
 much is enforced by Bazel visibility. What is NOT enforced, and is the actual
 question, is whether the *logging* domain should depend on the *tracing* domain
 at all, at any layer.
+
+> **Amendment (2026-09-29) — siblings may import each other; this pair does
+> not.** The paragraph above states a layer rule that does not exist, and a
+> mechanism that never enforced it. A service package may import another one:
+> `internal/CLAUDE.md` §Dependency direction says so, ADR 0054 §D7 builds the
+> durable queue on `internal/service/vfs`, and the firewall ADR 0068 put on the
+> build graph asserts a direction, which a lateral edge is not. Bazel visibility
+> refused nothing either: Gazelle gives every library under `internal/` the
+> visibility `//:__subpackages__`, which admits the whole repository (ADR 0068
+> §Context). The decision below never rested on either sentence. It answers the
+> question the paragraph calls the actual one, and the code keeps that answer:
+> neither `internal/service/logger` nor `internal/service/trace` depends on the
+> other, and `pkg/v1/logger` is the one place the two domains meet (Decision 5).
 
 ## Decision
 
