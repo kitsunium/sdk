@@ -9,6 +9,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"runtime"
 	"syscall"
 	"testing"
 
@@ -26,7 +27,9 @@ const absentPID int = 0x7fff_fffe
 // invisible until it starves something.
 func Test_applyNice(t *testing.T) {
 	t.Parallel()
-	raise := 5
+	//: relative to the niceness the test process inherited: a runner that
+	//: starts it at nice 15 (a capped CI slice) cannot go back to 5.
+	raise := raisedNice(t, 5)
 	lower := -20
 
 	type tc struct {
@@ -84,6 +87,24 @@ func Test_applyNice(t *testing.T) {
 	if err != nil && !errs.HasCode(err, coreproc.CodeRlimitFailed) {
 		t.Errorf("applyNice(lower) = %v, want nil or RLIMIT_FAILED", err)
 	}
+}
+
+// raisedNice is the calling process's current niceness raised by delta,
+// capped at the kernel's 19: a value applyNice may set without privilege
+// whatever niceness the test inherited.
+func raisedNice(t *testing.T, delta int) int {
+	t.Helper()
+	prio, err := syscall.Getpriority(prioProcess, 0)
+	if err != nil {
+		t.Fatalf("getpriority: %v", err)
+	}
+	current := prio
+	//: Linux's raw getpriority(2) answers 20 - nice so the value is never
+	//: negative; the BSDs and macOS answer the niceness itself.
+	if runtime.GOOS == "linux" {
+		current = 20 - prio
+	}
+	return min(current+delta, 19)
 }
 
 // Test_applyOOMScoreAdj pins the same contract on the procfs write. A nil

@@ -96,3 +96,12 @@ func sudoMove(tmpPath, execPath string) error {
 	//: The binary was replaced in place.
 	return nil
 }
+
+// refusedElevation is the escalation of a Service built WithoutElevation: it
+// refuses whatever the opt-in says (ADR 0146).
+func (s SourceValue) refusedElevation(_, execPath string) error {
+	//: refuse, naming why the opt-in was not even read.
+	return refuse(coreupd.ElevationNotAuthorised,
+		errs.String("path", execPath),
+		errs.String("condition", "forbidden_by_product"))
+}

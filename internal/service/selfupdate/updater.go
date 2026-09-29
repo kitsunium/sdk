@@ -87,6 +87,16 @@ type Service struct {
 	// refuses every install rather than skipping verification — see
 	// signature.go for why that direction is the only safe one.
 	vendorKey ed25519.PublicKey
+	// vendorKeys are the keys a release may be signed with, in order, the
+	// first of them vendorKey (keys.go, ADR 0146); domain is the signature
+	// domain, now the clock the signed expiry is read against.
+	vendorKeys []ed25519.PublicKey
+	domain     string
+	now        func() time.Time
+	// probe is what a replacement must answer before it stands (probe.go).
+	probe probeSpec
+	// automatic is WithAutomaticConsent's (consent_product.go).
+	automatic bool
 }
 
 // NewService creates a new updater instance.
@@ -639,12 +649,17 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 		return classify(StagingFailed, err, errs.String("step", "chmod_temp"))
 	}
 
+	//: Keep the previous binary as <binary>.prev when a probe will judge the
+	//: new one (probe.go, ADR 0146).
+	kept := u.keepPrevious(execPath)
+
 	// Atomically replace old binary with new one
 	err = u.fs.Rename(tmpPath, execPath)
-	//: A clean rename is the common case — nothing left to elevate.
+	//: A clean rename is the common case — nothing left to elevate; the probe,
+	//: when the product declared one, decides whether the new binary stands.
 	if err == nil {
-		//: Return success indicator.
-		return nil
+		//: Success, or the probe's verdict and the rollback.
+		return u.probeReplacement(execPath, kept)
 	}
 	//: Anything other than a permission failure (missing path, cross-device
 	//: link, disk full, ...) won't be fixed by retrying as another user.
@@ -674,7 +689,7 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 	}
 
 	//: Return success indicator.
-	return nil
+	return u.probeReplacement(execPath, kept)
 }
 
 // getBinaryName returns the release asset name for the platform captured

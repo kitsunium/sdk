@@ -4,14 +4,17 @@ package stdhash
 import (
 	"hash"
 	"hash/crc32"
+	"sync"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 )
 
 var (
-	// castagnoli is the CRC-32C polynomial table, built once and shared by every
-	// crc32cHasher.New() call (the table is read-only after construction).
-	castagnoli = crc32.MakeTable(crc32.Castagnoli)
+	// castagnoli is the CRC-32C polynomial table, built at the first
+	// crc32cHasher.New() call and shared by every later one (the table is
+	// read-only after construction). Built at import, it cost every program
+	// linking the SDK 0.2 ms at start, whether it ever hashed or not.
+	castagnoli = sync.OnceValue(func() *crc32.Table { return crc32.MakeTable(crc32.Castagnoli) })
 	// Self-register CRC-32C at package import (no init(); package-level var).
 	_ = corecrypto.RegisterHasher(crc32cHasher{})
 )
@@ -29,5 +32,5 @@ func (crc32cHasher) Algorithm() corecrypto.Algorithm {
 // New returns a fresh CRC-32C hash over the shared Castagnoli table (4-byte sum).
 func (crc32cHasher) New() hash.Hash {
 	//: stdlib CRC-32C with the shared read-only table.
-	return crc32.New(castagnoli)
+	return crc32.New(castagnoli())
 }

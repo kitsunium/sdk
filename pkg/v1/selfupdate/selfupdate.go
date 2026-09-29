@@ -56,15 +56,34 @@
 // WIDGET_AUTO_UPGRADE and WIDGET_ALLOW_SUDO — by uppercasing and folding
 // punctuation to underscore.
 //
+// A product whose updates are silent by design builds its Service
+// WithAutomaticConsent — its own consent, given at build, which
+// Service.AuthoriseUnattendedUpgrade reads and an operator still overrules
+// with <PREFIX>_AUTO_UPGRADE=0. It grants no escalation, and WithoutElevation
+// forbids escalation outright, whatever <PREFIX>_ALLOW_SUDO says (ADR 0146).
+//
+// # Keys that rotate, a signature that names its release, a probe that rolls back
+//
+// Service.WithVendorKeys links several keys, in order, and a release verifies
+// against any of them: a rotation publishes under the new key while builds that
+// carry both accept it, and neither side has to be updated first (ADR 0146).
+// Service.WithSignatureDomain makes each signature cover a domain — so a key
+// that also signs other documents cannot have one read as a release — and makes
+// the signed manifest say which tag it is and until when it may be installed
+// ("# tag v1.4.0", "# expires 2026-12-31T00:00:00Z"): an older release replayed
+// under a newer name, or a stale one, is refused. Service.WithProbe keeps the
+// previous binary as <binary>.prev and runs the new one with the product's
+// probe arguments; a probe that fails puts the previous one back
+// (CodeProbeFailed).
+//
 // # Two limits a caller must know before relying on this
 //
-// **A compromised release host can serve an OLDER signed release.** The manifest
-// is signed, but it carries the version-independent asset name and no signed
-// release tag, so a host that answers a request for v2 with v1's manifest,
-// signature and archive passes every check here and installs v1. Verification
-// proves the bytes came from the vendor; it does not prove they are the version
-// that was asked for. Closing it needs the tag INSIDE the signed document,
-// which is a release-format decision rather than a code one.
+// **Without a signature domain, a compromised release host can serve an OLDER
+// signed release.** The historical manifest is signed but carries no release
+// tag, so a host that answers a request for v2 with v1's manifest, signature
+// and archive passes every check and installs v1. WithSignatureDomain closes it
+// by putting the tag and an expiry INSIDE the signed document; a product that
+// has not adopted the format keeps the gap.
 //
 // **Windows is not supported for the replacement step.** Windows will not let
 // a running executable be renamed over, so on a Windows build Upgrade refuses
@@ -78,10 +97,10 @@
 //
 // # What this package does not do
 //
-// It does not roll back. The replacement is atomic (temp file, chmod, rename)
-// so there is no window where the binary is half-written, but once the rename
-// lands the previous version is gone. A caller that needs to return to it keeps
-// its own copy.
+// It does not roll back on its own. The replacement is atomic (temp file,
+// chmod, rename) so there is no window where the binary is half-written, and
+// without WithProbe the previous version is gone once the rename lands; with a
+// probe it is kept as <binary>.prev and put back when the probe fails.
 package selfupdate
 
 import (
@@ -193,6 +212,11 @@ const CodeReplacementFailed errs.Code = svcupd.CodeReplacementFailed
 // that the system refused anyway. Unlike CodeElevationNotAuthorised, no
 // environment variable repairs it.
 const CodeElevationFailed errs.Code = svcupd.CodeElevationFailed
+
+// CodeProbeFailed identifies a replacement whose new binary did not answer the
+// probe the product declared with Service.WithProbe; the previous binary is put
+// back from <binary>.prev when it was kept (ADR 0146).
+const CodeProbeFailed errs.Code = svcupd.CodeProbeFailed
 
 // CandidateListSentinel is the tag value meaning "list the candidates rather
 // than install one".
@@ -335,6 +359,10 @@ var (
 	// authorise was refused by the system. Unlike ElevationNotAuthorised, no
 	// environment variable repairs it.
 	ElevationFailed = svcupd.ElevationFailed
+
+	// ProbeFailed is returned when the replaced binary did not answer its
+	// probe; rolled_back says whether <binary>.prev was put back.
+	ProbeFailed = svcupd.ProbeFailed
 )
 
 // Getter performs the HTTP GETs a self-update needs. It aliases the core port.

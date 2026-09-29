@@ -2,6 +2,10 @@ go 1.27.1
 
 use (
 	.
+	./framework
+	./framework/connectors/mysql
+	./framework/connectors/postgres
+	./framework/connectors/sqlite
 	./internal/core
 	./internal/kernel
 	./internal/service

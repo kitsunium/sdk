@@ -27,7 +27,7 @@ cd "$root"
 	# Match: <ConstName> errs.Code = 0x.. // <dotted-quad>. Keep the file path
 	# (no -h) so we can attribute each code to its package, then drop tests.
 	grep -rnE '[A-Za-z0-9_]+ +errs\.Code = 0x[0-9A-Fa-f_]+ +// +[0-9]+\.[0-9]+\.[0-9]+' \
-		--include='*.go' internal pkg third-party |
+		--include='*.go' internal pkg third-party framework |
 		grep -v '_test.go:' |
 		sed -E 's#^([^:]+):[0-9]+:.*[[:space:]]([A-Za-z0-9_]+) +errs\.Code = (0x[0-9A-Fa-f_]+) +// +([0-9.]+).*#\4|\2|\3|\1#' |
 		sort -t'|' -k1V |

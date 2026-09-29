@@ -416,7 +416,9 @@ func Test_spawnFiles(t *testing.T) {
 // the state the caller least expects.
 func Test_applyPostStart(t *testing.T) {
 	t.Parallel()
-	nice := 5
+	//: relative to the inherited niceness (raisedNice): a runner at nice 15
+	//: cannot be asked for 5.
+	nice := raisedNice(t, 5)
 	badOOM := 5000
 
 	type tc struct {

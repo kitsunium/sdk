@@ -1,0 +1,48 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "model",
+    srcs = [
+        "architecture.go",
+        "code.go",
+        "connector.go",
+        "devtools.go",
+        "doc.go",
+        "edge_kind.go",
+        "errors.go",
+        "event_type.go",
+        "graph.go",
+        "history.go",
+        "id.go",
+        "mermaid.go",
+        "model.go",
+        "module.go",
+        "node.go",
+        "node_info.go",
+        "node_kind.go",
+        "node_process.go",
+        "privacy.go",
+        "profile.go",
+        "runtime.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/model",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/model/internal/core",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":model",
+    visibility = ["//visibility:public"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

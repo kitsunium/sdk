@@ -1,0 +1,103 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "telemetry",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "exporter.go",
+        "exporter_compliance.go",
+        "telemetry.go",
+        "telemetry_interface.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/telemetry",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//framework/model",
+        "//internal/kernel/errs",
+        "//pkg/v1/ipc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":telemetry",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "telemetry_test",
+    srcs = [
+        "telemetry_alloc_test.go",
+        "telemetry_bench_test.go",
+        "telemetry_external_test.go",
+    ],
+    deps = [
+        ":telemetry",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:android": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//framework/model",
+            "//pkg/v1/errs",
+            "//pkg/v1/ipc",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

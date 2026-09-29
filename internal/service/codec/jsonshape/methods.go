@@ -12,6 +12,14 @@ import (
 // methods take their encoder and decoder from.
 const jsontextPackage string = "encoding/json/jsontext"
 
+// The two streaming methods.
+const (
+	// marshalJSONTo is func(*jsontext.Encoder) error.
+	marshalJSONTo streamMethod = iota
+	// unmarshalJSONFrom is func(*jsontext.Decoder) error.
+	unmarshalJSONFrom
+)
+
 // The interfaces encoding/json consults, by their reflect.Type.
 var (
 	jsonMarshalerType   = reflect.TypeFor[json.Marshaler]()
@@ -22,6 +30,9 @@ var (
 	isZeroerType        = reflect.TypeFor[interface{ IsZero() bool }]()
 	errorType           = reflect.TypeFor[error]()
 )
+
+// streamMethod names one of json/v2's two streaming methods.
+type streamMethod int
 
 // receives reports whether encoding/json calls iface's method on a value of t:
 // a value receiver's always, a pointer receiver's only when the value is
@@ -34,18 +45,33 @@ func receives(t, iface reflect.Type, addressable bool) bool {
 }
 
 // hasStreamMethod reports whether encoding/json calls json/v2's streaming
-// method of that name — func(*jsontext.<param>) error — on a value of t: by
-// value always, by pointer only on an addressable value. It is matched by
-// signature so this package does not import json/v2 to recognise it.
-func hasStreamMethod(t reflect.Type, name, param string, addressable bool) bool {
+// method m on a value of t: by value always, by pointer only on an
+// addressable value. It is matched by signature so this package does not
+// import json/v2 to recognise it.
+func hasStreamMethod(t reflect.Type, m streamMethod, addressable bool) bool {
 	//: a value receiver, then a pointer receiver on an addressable value.
-	return streamMethodOn(t, name, param) || (addressable && streamMethodOn(reflect.PointerTo(t), name, param))
+	return streamMethodOn(t, m) || (addressable && streamMethodOn(reflect.PointerTo(t), m))
 }
 
 // streamMethodOn reports whether the method set of receiver holds the
-// streaming method of that name and signature.
-func streamMethodOn(receiver reflect.Type, name, param string) bool {
-	method, found := receiver.MethodByName(name)
+// streaming method m, with its signature. Each name is looked up as a
+// constant: a MethodByName whose argument the compiler cannot see makes the
+// linker keep every exported method of every type a program uses, which is
+// how a product that imported this package linked all of the framework.
+func streamMethodOn(receiver reflect.Type, m streamMethod) bool {
+	var (
+		method reflect.Method
+		found  bool
+		param  string
+	)
+	switch m {
+	case marshalJSONTo:
+		method, found = receiver.MethodByName("MarshalJSONTo")
+		param = "Encoder"
+	default:
+		method, found = receiver.MethodByName("UnmarshalJSONFrom")
+		param = "Decoder"
+	}
 	//: no such method on this receiver.
 	if !found {
 		return false
@@ -65,7 +91,7 @@ func streamMethodOn(receiver reflect.Type, name, param string) bool {
 // or not.
 func writesJSON(t reflect.Type, addressable bool) bool {
 	//: either spelling of the method.
-	return receives(t, jsonMarshalerType, addressable) || hasStreamMethod(t, "MarshalJSONTo", "Encoder", addressable)
+	return receives(t, jsonMarshalerType, addressable) || hasStreamMethod(t, marshalJSONTo, addressable)
 }
 
 // writesText reports whether a value of t writes itself as text, which
@@ -84,7 +110,7 @@ func hasAnyMethod(t reflect.Type) bool {
 	//: the marshalers, then the unmarshalers.
 	return writesJSON(t, true) || writesText(t, true) ||
 		receives(t, jsonUnmarshalerType, true) || receives(t, textUnmarshalerType, true) ||
-		hasStreamMethod(t, "UnmarshalJSONFrom", "Decoder", true)
+		hasStreamMethod(t, unmarshalJSONFrom, true)
 }
 
 // isJSONTextValue reports whether t is jsontext.Value, the other type json/v2

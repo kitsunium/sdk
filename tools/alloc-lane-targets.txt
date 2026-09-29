@@ -145,3 +145,4 @@
 # as it stood before the fix allocates 12.9x the frame ceiling against a budget
 # of 4x.
 //pkg/v1/codec:codec_test
+//framework/telemetry:telemetry_test

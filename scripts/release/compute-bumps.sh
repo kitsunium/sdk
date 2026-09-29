@@ -1,10 +1,13 @@
 #!/usr/bin/env bash
-# scripts/release/compute-bumps.sh — decide whether the single public module
-# `pkg` (github.com/kitsunium/sdk/pkg) needs a patch bump since the previous
-# release tag, and emit the token `pkg` if so.
+# scripts/release/compute-bumps.sh — decide whether the public modules need a
+# release since the previous release tag: emit the token `pkg` when the public
+# module `pkg` (github.com/kitsunium/sdk/pkg) changed, and `framework` when the
+# framework module or one of its connectors did (ADR 0143). The chain is cut in
+# lockstep, so either token releases every module once (cut-tags.sh).
 #
 # Decision matrix (ADR 0007, updated for the bare-`pkg` module — ADR 0009):
 #   change under pkg/v*/** or pkg/go.mod  -> bump pkg
+#   change under framework/**             -> bump framework (ADR 0143)
 #   change under internal/**              -> bump pkg iff its bazel rdeps
 #                                            reach //pkg/...
 #   no relevant change                    -> emit nothing (exit 0)
@@ -17,10 +20,10 @@
 # it reduces a path to its module dir first, at which point the file's identity
 # is gone (#220). Filtering once, up front, is what makes the two agree.
 #
-# Output: the literal token "pkg" on a single line, or nothing. (Before the
-# bare-`pkg` migration this emitted one "vN" major per line; there is now a
-# single public module, so there is a single token.) Stable contract —
-# consumed by cut-tags.sh and CI.
+# Output: the literal token "pkg", then the literal token "framework", each on
+# its own line and each only when due — so "pkg", "framework", both, or
+# nothing. (Before the bare-`pkg` migration this emitted one "vN" major per
+# line.) Stable contract — consumed by cut-tags.sh and CI.
 
 set -euo pipefail
 shopt -s nullglob
@@ -43,7 +46,7 @@ for arg in "$@"; do
     --range=*) RANGE="${arg#--range=}" ;;
     --help|-h)
       cat <<EOF
-compute-bumps.sh — emit "pkg" if the public module needs a patch bump.
+compute-bumps.sh — emit "pkg" and/or "framework" when a public module needs a release.
 
 Usage: $0 [--dry-run] [--explain] [--require-bazel] [--range=<rev>..HEAD]
 
@@ -51,7 +54,7 @@ Without --range, infers from the last tag or, on a bootstrap repo,
 falls back to the root commit. Shallow-clone safe.
 
 --explain writes the verdict and the reason for it to stderr. stdout stays
-the stable contract ("pkg" or nothing), so a caller that parses it is
+the stable contract ("pkg", "framework", both, or nothing), so a caller that parses it is
 unaffected. It is opt-in rather than always-on because the BATS suite
 merges the two streams into one assertion.
 
@@ -83,6 +86,7 @@ if [ -z "$RANGE" ]; then
 fi
 
 need_bump=0
+need_framework=0
 
 # explain <line…> — the reason, on stderr, only when asked. #226 is that an
 # internal/-only change publishes nothing and "the log cannot say why": every
@@ -153,6 +157,16 @@ fi
 for path in ${counting[@]+"${counting[@]}"}; do
   case "$path" in
     pkg/v*/*|pkg/go.mod) need_bump=1; explain "rule 1: $path is a public-module change -> bump"; break ;;
+  esac
+done
+
+# 1b. Framework changes (ADR 0143): anything under framework/ that can carry a
+# consumer-visible change — its packages, its go.mod, a connector module. The
+# same maintainer-only filter applies, so a framework CLAUDE.md alone releases
+# nothing.
+for path in ${counting[@]+"${counting[@]}"}; do
+  case "$path" in
+    framework/*) need_framework=1; explain "rule 1b: $path is a framework-module change -> bump framework"; break ;;
   esac
 done
 
@@ -247,7 +261,7 @@ if [ "$need_bump" -eq 0 ]; then
       # exit code it never chose.
       rdeps_out=""
       rdeps_rc=0
-      rdeps_out="$(bazel query "rdeps(//pkg/..., //${modpath}/...)" 2>"$rdeps_err")" || rdeps_rc=$?
+      rdeps_out="$(bazel query "rdeps(//pkg/... + //framework/..., //${modpath}/...)" 2>"$rdeps_err")" || rdeps_rc=$?
       # LOUD. A release that cannot be computed must not be rendered as a release
       # that is not needed. The workflow step runs this with no `|| true`
       # precisely so a non-zero exit fails the job instead of becoming a silent
@@ -279,13 +293,20 @@ if [ "$need_bump" -eq 0 ]; then
   fi
 fi
 
-# 3. Emit the single token. Dry-run echoes the same payload, no side effects.
-if [ "$need_bump" -eq 0 ]; then
+# 3. Emit the tokens. Dry-run echoes the same payload, no side effects.
+if [ "$need_bump" -eq 0 ] && [ "$need_framework" -eq 0 ]; then
   explain "verdict: NO RELEASE (nothing consumer-visible changed in this range)"
   exit 0
 fi
-explain "verdict: RELEASE (token 'pkg')"
-echo "pkg"
+if [ "$need_bump" -eq 1 ] && [ "$need_framework" -eq 1 ]; then
+  explain "verdict: RELEASE (tokens 'pkg' and 'framework')"
+elif [ "$need_bump" -eq 1 ]; then
+  explain "verdict: RELEASE (token 'pkg')"
+else
+  explain "verdict: RELEASE (token 'framework')"
+fi
+[ "$need_bump" -eq 1 ] && echo "pkg"
+[ "$need_framework" -eq 1 ] && echo "framework"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "(dry-run: $RANGE)" >&2
 fi

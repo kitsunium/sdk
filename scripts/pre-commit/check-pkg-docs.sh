@@ -33,7 +33,7 @@ missing_pub_claude=0
 # Discover every directory that owns at least one production *.go file.
 # `_test.go` alone does not count — tests can sit in a package whose
 # production files live elsewhere (build-tag-separated test fixtures).
-go_dirs=$(find internal pkg -type f -name '*.go' ! -name '*_test.go' -print0 2>/dev/null \
+go_dirs=$(find internal pkg framework -type f -name '*.go' ! -name '*_test.go' -print0 2>/dev/null \
     | xargs -0 -n1 dirname \
     | sort -u \
     || true)
@@ -60,7 +60,7 @@ while IFS= read -r dir; do
     # loop already filtered to dirs with .go files, so this exemption is
     # implicit.
     case "$dir" in
-        pkg/v[0-9]*/*)
+        pkg/v[0-9]*/*|framework/*)
             if [ "$has_readme" -eq 0 ]; then
                 echo "✘ $dir — public package missing README.md (consumer-facing required)"
                 missing_pub_readme=1
@@ -77,7 +77,7 @@ if [ "$missing_any" -ne 0 ] || [ "$missing_pub_readme" -ne 0 ] || [ "$missing_pu
     echo ""
     echo "Pre-commit: package documentation policy violated."
     echo "  - internal/* packages must have CLAUDE.md OR README.md."
-    echo "  - pkg/v*/** public packages must have BOTH README.md (consumer-facing)"
+    echo "  - pkg/v*/** and framework/** public packages must have BOTH README.md (consumer-facing)"
     echo "    AND CLAUDE.md (agent-facing) — the two roles do not collapse."
     echo "Fix the missing files and re-commit."
     exit 1

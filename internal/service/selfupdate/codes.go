@@ -58,3 +58,8 @@ const CodeReplacementFailed errs.Code = 0x00_03_42_06 // 0.3.66.6
 // whole remedy: that one is fixed by setting one environment variable, this one
 // is not fixed by setting anything.
 const CodeElevationFailed errs.Code = 0x00_03_42_07 // 0.3.66.7
+
+// CodeProbeFailed identifies a replacement whose new binary did not answer the
+// probe the product declared (ADR 0146). The fields say whether the previous
+// binary, kept as <binary>.prev, was put back.
+const CodeProbeFailed errs.Code = 0x00_03_42_08 // 0.3.66.8

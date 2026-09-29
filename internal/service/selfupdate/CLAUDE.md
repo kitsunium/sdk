@@ -16,6 +16,8 @@ module.
 | `updater.go` | `Service`, the update flow, the atomic replacement |
 | `source.go` | `SourceValue` — the whole of what the original hard-coded |
 | `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey` |
+| `keys.go` | ADR 0146: `WithVendorKeys` (an ordered list, at most four, any key verifies), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` |
+| `probe.go` | ADR 0146: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
 | `checksum.go` | integrity: SHA-256 against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
@@ -62,11 +64,27 @@ Authorising an unattended upgrade must not grant privilege escalation.
 `AutoUpgradeEnv` and `SudoOptInEnv` derive separately and a test pins that they
 never collide.
 
-### The replacement is atomic, and one-way
+### The replacement is atomic, and one-way unless a probe is declared
 
 Temp file in the target directory → `chmod 0755` → `os.Rename`. There is no
-window where the binary is half-written. There is also no rollback: once the
-rename lands the previous version is gone.
+window where the binary is half-written. Without `WithProbe` there is no
+rollback: once the rename lands the previous version is gone. With it, the
+previous binary is hard-linked to `<binary>.prev` BEFORE the rename — so the
+binary's own name is never absent, which a rename-aside would make it for a
+moment — and a probe that fails renames it back (ADR 0146). A FileSystem
+without the `Link` sibling keeps nothing, and a failed probe then says
+`rolled_back=false`.
+
+### Keys rotate, a signature names its release, the product may consent
+
+ADR 0146 adds three things a daemon that updates itself needs, none of which
+changes the historical behaviour unless asked for: several vendor keys in
+order, any of which verifies (the rotation ADR 0091 gave the entitlement
+anchor); a signature DOMAIN, which binds each signature to this product's
+releases and requires the manifest to name its tag and an expiry — closing the
+older-release replay ADR 0077 §Deferred recorded —; and `Service.WithAutomaticConsent`
+(the product's own consent, an explicit environment `0` still refusing) with
+`Service.WithoutElevation` (never escalate, whatever the sudo opt-in says).
 
 ### Windows is refused, before the download (ADR 0095)
 
@@ -145,8 +163,9 @@ temp file that cannot be created next to the running binary.
   package constant. That is `SourceValue`'s job, and the suite injects a source
   naming a product the implementation never mentioned so a reintroduced constant
   fails rather than passes.
-- Add a second signature scheme. One anchor, one algorithm — a second would be a
-  second thing to get right and a second thing to downgrade to.
+- Add a second signature scheme. One algorithm — a second would be a second
+  thing to get right and a second thing to downgrade to. Several KEYS of that
+  one algorithm are a rotation (ADR 0146), bounded at four.
 - Call `fmt.Errorf` or `errors.New`. There are none left, the package is inside
   `//:audit_sources`, and the AST audit fails the build on the first one back.
 - Put a tag, an asset name, a path, a URL, a status or a host's own words into a

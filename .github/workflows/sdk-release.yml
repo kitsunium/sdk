@@ -6,6 +6,10 @@ name: SDK Release
 # sizes anything: the squash message is composed from contributor text, so it
 # could both bury a maintainer's request (#217) and set the size itself (#224).
 #
+# WHAT is released is the chain go.work declares — internal/*, pkg, the
+# framework and its connectors — tagged in lockstep at one version, so the
+# tokens "pkg" and "framework" both release all of it, once (ADR 0143 §9).
+#
 # Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
 # workflow_dispatch input force_bumps overrides the impact analysis when
 # the rdeps cache is stale or a maintainer wants to cut a tag manually.
@@ -57,7 +61,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bumps:
-        description: 'Force the public-module bump token "pkg" (empty = use compute-bumps.sh output).'
+        description: 'Force a bump token, "pkg" or "framework" — either releases the whole chain in lockstep, ADR 0143 (empty = use compute-bumps.sh output).'
         required: false
         default: ""
       bump:
@@ -189,7 +193,7 @@ jobs:
             # No `|| true` on the filter either: a force input that matches
             # nothing is a typo, and publishing nothing because of a typo is
             # the outcome this whole file now refuses to call a success.
-            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|v[0-9]+)$' > "$majors"
+            printf '%s\n' "$FORCE_BUMPS" | tr ' ' '\n' | grep -E '^(pkg|framework|v[0-9]+)$' > "$majors"
             reason="forced by workflow_dispatch: $(tr '\n' ' ' < "$majors")"
           else
             # No `|| true`: compute-bumps.sh exits 0 on a legitimate no-op

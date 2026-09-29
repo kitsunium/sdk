@@ -1,0 +1,56 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/kitsunium/sdk/framework/connectors/mysql
+
+# framework/connectors/mysql is a Go module of its own (ADR 0143 §7): one
+# database driver behind the framework's engine port.
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "mysql",
+    srcs = [
+        "credentials.go",
+        "mysql.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/connectors/mysql",
+    deps = [
+        "//framework/kit",
+        "//pkg/v1/errs",
+        "//pkg/v1/secret",
+        "//pkg/v1/sql",
+        "@com_github_go_sql_driver_mysql//:mysql",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":mysql",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "mysql_test",
+    srcs = [
+        "app_test.go",
+        "database_test.go",
+        "mysql_test.go",
+        "server_test.go",
+        "subsystems_test.go",
+    ],
+    deps = [
+        ":mysql",
+        "//framework/kit",
+        "//framework/kit/server",
+        "//framework/model",
+        "//pkg/v1/errs",
+        "//pkg/v1/secret",
+        "//pkg/v1/sql",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

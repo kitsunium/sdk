@@ -32,15 +32,26 @@ fi
 # same set by construction, which is the only version of this that stays true.
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
-readarray -t packages < <(
-    cd pkg/v1 && grep -rl 'go:generate gomarkdoc' . --include='*.go' \
-      | xargs -n1 dirname | sort -u
-)
+# Two roots publish generated READMEs: pkg/v1 and the framework module above it
+# (ADR 0143). Each package is recorded as "<root> <dir>", so the check runs from
+# the root its go:generate line is relative to.
+roots=(pkg/v1 framework)
+packages=()
+for root in "${roots[@]}"; do
+    [ -d "$root" ] || continue
+    readarray -t found < <(
+        cd "$root" && grep -rl 'go:generate gomarkdoc' . --include='*.go' \
+          | xargs -n1 dirname | sort -u
+    )
+    for dir in "${found[@]}"; do
+        [ -n "$dir" ] && packages+=("$root $dir")
+    done
+done
 
 # An empty list would make this gate pass vacuously, which is exactly the
 # failure mode an allowlist-shaped check has to close explicitly.
 if [ "${#packages[@]}" -eq 0 ]; then
-    echo "✗ no pkg/v1 package declares //go:generate gomarkdoc — refusing to pass vacuously" >&2
+    echo "✗ no pkg/v1 or framework package declares //go:generate gomarkdoc — refusing to pass vacuously" >&2
     exit 1
 fi
 
@@ -59,14 +70,16 @@ fi
 # — which varies between a devcontainer checkout and the CI runner and
 # produces a phantom drift in the link shape that this gate then flags.
 drifted=()
-for pkg in "${packages[@]}"; do
-    if ! ( cd pkg/v1 && gomarkdoc --check \
+for entry in "${packages[@]}"; do
+    root="${entry%% *}"
+    pkg="${entry#* }"
+    if ! ( cd "$root" && gomarkdoc --check \
         --output '{{.Dir}}/README.md' \
         --repository.url 'https://github.com/kitsunium/sdk' \
         --repository.default-branch main \
-        --repository.path '/pkg/v1' \
+        --repository.path "/$root" \
         "$pkg" ); then
-        drifted+=("$pkg")
+        drifted+=("$root/${pkg#./}")
     fi
 done
 

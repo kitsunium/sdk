@@ -251,3 +251,9 @@ func terminalLike(mode os.FileMode) bool {
 	//: A pipe (`echo x | tool run`) or a redirect to a file has no one behind it.
 	return mode&os.ModeCharDevice != 0
 }
+
+// consentFromEnvironment is the operator's explicit answer, when there is one.
+func (s SourceValue) consentFromEnvironment() (granted, decided bool) {
+	//: the same reading AuthoriseUnattendedUpgrade makes first.
+	return consentFromEnv(os.Getenv(s.AutoUpgradeEnv()))
+}

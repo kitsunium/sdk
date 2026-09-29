@@ -184,6 +184,13 @@ serialization_tags:
   - msgpack
   - cbor
   - bson
+  # framework/kit's request binding (ADR 0143): a field of an endpoint's
+  # request is read from the route's wildcard, the query, a header or a cookie
+  # by these tags, exactly as encoding/json reads a member by `json`.
+  - path
+  - query
+  - header
+  - cookie
 
 # ── Global file exclusions ────────────────────────────────────────────────────
 # Skip any path that matches one of the glob patterns below, for every rule.
@@ -1474,6 +1481,12 @@ rules:
       # that dwarfs it.
       - "**/internal/core/health/**"
       - "internal/core/health/**"
+      # TEMPORARY — kodflow/ktn-linter#694: BIGSTRUCT fires on aliases of external
+      # types in framework/internal/kit (false positive).
+      # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
+      # framework module only.
+      - "framework/**"
+      - "**/framework/**"
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue, and on
@@ -1558,6 +1571,12 @@ rules:
       - "internal/service/proc/exec/wrap.go"
       - "**/internal/service/proc/sdnotify/sdnotify.go"
       - "internal/service/proc/sdnotify/sdnotify.go"
+      # TEMPORARY — kodflow/ktn-linter#691: DEADCODE fires on methods of generic
+      # receivers and on promoted methods (false positive).
+      # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
+      # framework module only.
+      - "framework/**"
+      - "**/framework/**"
 
   KTN-CONST-UNUSED:
     exclude:
@@ -1616,6 +1635,26 @@ rules:
       # branch that returns empty SQL. Scoped to the one file.
       - "**/internal/service/sql/dialect_sql.go"
       - "internal/service/sql/dialect_sql.go"
+
+  # KTN-ITER-YIELD / KTN-STRUCT-ACCESSOR — false positives in the framework
+  # module (kodflow/ktn-linter#692, #693). TEMPORARY.
+  KTN-ITER-YIELD:
+    exclude:
+      # TEMPORARY — kodflow/ktn-linter#692: ITER-YIELD fires on a one-bool yield
+      # (false positive).
+      # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
+      # framework module only.
+      - "framework/**"
+      - "**/framework/**"
+
+  KTN-STRUCT-ACCESSOR:
+    exclude:
+      # TEMPORARY — kodflow/ktn-linter#693: STRUCT-ACCESSOR fires on Unwrap and
+      # promoted methods (false positive).
+      # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
+      # framework module only.
+      - "framework/**"
+      - "**/framework/**"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on

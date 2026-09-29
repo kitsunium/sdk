@@ -106,4 +106,13 @@ var (
 		"the elevated replacement was authorised and the system refused it",
 		"service/selfupdate: `sudo -n mv` exited non-zero; the fields carry sudo's own output, which names the real blocker far better than the exec error does",
 		errs.WithExitCode(exitCantCreate))
+
+	// ProbeFailed is returned when the replacement landed and the new binary
+	// did not answer the product's probe in time. The previous binary is put
+	// back from <binary>.prev when it was kept; rolled_back says whether it
+	// was.
+	ProbeFailed = errs.Define(CodeProbeFailed, "PROBE_FAILED",
+		"the new binary did not answer its probe and was not kept",
+		"service/selfupdate: the probe of the replaced binary failed or timed out; rolled_back says whether <binary>.prev was put back",
+		errs.WithExitCode(exitCantCreate))
 )

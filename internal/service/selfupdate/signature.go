@@ -74,15 +74,7 @@ const (
 // behaviour this file exists to end, and nothing would ever fail to point it
 // out.
 func (u *Service) WithVendorKey(key []byte) *Service {
-	//: A nil Service would panic on the field write; returning it unchanged
-	//: keeps the chaining expression total.
-	if u == nil {
-		//: Nothing to configure.
-		return nil
-	}
-	u.vendorKey = ed25519.PublicKey(key)
-	//: Return the receiver so the call chains off the constructor.
-	return u
+	return u.WithVendorKeys(key)
 }
 
 // verifyArchive proves the buffered archive is the one the vendor published,
@@ -124,12 +116,20 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 	//: STEP 1 — authenticity. ed25519.Verify over the manifest's exact bytes;
 	//: `string(raw)` in fetchChecksums round-trips byte-for-byte, so the
 	//: signed payload and the parsed payload are provably the same sequence.
-	if !ed25519.Verify(u.vendorKey, []byte(manifest), signature) {
+	//: With a signature domain the signed bytes are the domain, a NUL and the
+	//: manifest, and any linked key may have signed them (ADR 0146).
+	if !u.verifiedByAnyKey([]byte(u.signedMessage(manifest)), signature) {
 		//: Refuse: whoever produced this manifest is not the vendor.
 		return refuse(coreupd.SignatureInvalid,
 			errs.String("condition", "verify_failed"),
 			errs.String("asset", checksumsAssetName),
 			errs.String("tag", tag))
+	}
+	//: A domain also requires the manifest to name this tag and an expiry not
+	//: yet past — read only now that the signature vouches for them.
+	if err := u.checkStatement(tag, manifest); err != nil {
+		//: The statement's own refusal names the condition.
+		return err
 	}
 
 	//: STEP 2 — integrity, against a manifest that is now trusted.
@@ -144,16 +144,19 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 // panics on a key of the wrong length, so the length test is also what keeps
 // the verification path total.
 func (u *Service) canAuthenticate(tag string) error {
-	//: Any length but exactly the ed25519 public size is a build with no
-	//: usable anchor — never stamped, or stamped with something broken.
-	if len(u.vendorKey) != ed25519.PublicKeySize {
-		//: Name the tag so the operator knows which install was refused.
-		return refuse(coreupd.NoVendorKey,
-			errs.String("tag", tag),
-			errs.Int("key_bytes", len(u.vendorKey)))
+	//: A build can verify a release when ONE linked key has the ed25519
+	//: public size (ADR 0146): a list of broken keys is no anchor at all.
+	for _, k := range u.keys() {
+		if len(k) == ed25519.PublicKeySize {
+			//: A key this build can verify a release with.
+			return nil
+		}
 	}
-	//: A key this build can verify a release with.
-	return nil
+	//: Name the tag so the operator knows which install was refused.
+	return refuse(coreupd.NoVendorKey,
+		errs.String("tag", tag),
+		errs.Int("key_bytes", len(u.vendorKey)),
+		errs.Int("keys", len(u.vendorKeys)))
 }
 
 // fetchSignature downloads checksums.txt.sig from the same release as the
