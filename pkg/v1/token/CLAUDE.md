@@ -18,8 +18,8 @@ half.
 | File | Surface |
 |---|---|
 | `token.go` | package doc + the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`) + `NewClaims` / `PrivateClaim` / `SetPrivateClaim` |
-| `constants.go` | the four `Algorithm*` values and the seven `Claim*` names |
-| `constructors.go` | `Key` / `JWK` / `JWKSet` aliases + the ten issuer/verifier `New*` delegates + the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet` |
+| `constants.go` | the four `Algorithm*` values, the seven `Claim*` names, and the JWK vocabulary: three `KeyType*` and four `Curve*` values |
+| `constructors.go` | `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve` aliases + the ten issuer/verifier `New*` delegates + the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet` |
 | `sentinels.go` | the 29 verdict vars, re-exported from core, service and `service/crypto/jwk` (the six `JWK*` parse refusals) |
 | `codes.go` | the 29 `Code*` constants, re-exported for `errs.HasCode` |
 
@@ -60,6 +60,15 @@ name TOKEN verdicts in this package. The other five `0.3.42.*` sentinels
 (`NoPublicForm` .7, `NoPrivateMaterial` .8, `TypeMismatch` .9, `KeyNotFound`
 .10, `AmbiguousKid` .11) are never returned by loading — only by methods on the
 aliased types — and are not re-exported.
+
+`KeyType` and `Curve` alias `jwk.Type` and `jwk.Curve`, the types `JWK.Kty` and
+`JWK.Crv` return, and the seven `KeyType*` / `Curve*` constants are their values.
+They are here for the same reason as the loaders (#259): the methods were public
+through the `JWK` alias while their result types were not, so a consumer could
+compare `Kty()` with a string literal and could not declare a variable, a field
+or a parameter of its type. `TestAConsumerCanNameWhatAJWKReports` reads both
+from three parsed keys, typed by the published names, and holds every constant
+to its registered spelling (RFC 7518, RFC 8037).
 
 The whole `token_test` package now imports stdlib and `pkg/v1` only (check:
 `cd pkg && GOWORK=off go list -f '{{.XTestImports}}' ./v1/token/`), so a JWK

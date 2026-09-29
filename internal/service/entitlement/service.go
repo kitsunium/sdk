@@ -31,6 +31,13 @@ const maxArtefactBytes int64 = 4 << 20
 // number of origins, which is what makes adding an origin cheap.
 const fetchTimeout time.Duration = 3 * time.Second
 
+// Getter performs the roster HTTP GETs. Injected so tests exercise the
+// admission logic without a network.
+type Getter interface {
+	// Get retrieves a URL.
+	Get(url string) (*http.Response, error)
+}
+
 // BearerFetch performs the one request in this package that carries a
 // credential.
 //
@@ -39,13 +46,6 @@ const fetchTimeout time.Duration = 3 * time.Second
 // the roster fetch, which must never send one. Naming it as a single-method
 // interface would also force the -er form of GetWithBearer, which is not a
 // word.
-// Getter performs the roster HTTP GETs. Injected so tests exercise the
-// admission logic without a network.
-type Getter interface {
-	// Get retrieves a URL.
-	Get(url string) (*http.Response, error)
-}
-
 type BearerFetch func(url, bearer string) (resp *http.Response, err error)
 
 // Service verifies entitlement.

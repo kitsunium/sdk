@@ -296,6 +296,70 @@ func TestAMalformedJWKIsRefusedWithAMatchableCode(t *testing.T) {
 	}
 }
 
+// TestAConsumerCanNameWhatAJWKReports pins #259 for the two accessors that
+// describe a parsed key. Kty and Crv returned jwk.Type and jwk.Curve, declared
+// under internal/: a consumer could compare the result with a string literal,
+// and could not declare a variable of its type, write a function taking one,
+// or name the value it expected. Every row here is typed by the published
+// names, and this file imports nothing under internal/, so removing either
+// alias stops it compiling.
+//
+// The constants are held to the spellings of the registries they come from
+// (RFC 7518 §6.1 and §6.2.1.1, RFC 8037 §2), because a constant re-pointed at
+// the wrong internal value still compiles.
+//
+// MUTATION (2026-09-29): constants.go and constructors.go were put back as they
+// are on main. Observed: `undefined: token.KeyType`; the test package did not
+// build. Restored. Then CurveP384 was re-pointed at jwk.CurveP521, which the
+// facade compiles. Observed: `duplicate key "P-521" in map literal`, in this
+// test. Restored; both files are byte-identical to the pre-mutation ones by
+// SHA-256.
+func TestAConsumerCanNameWhatAJWKReports(t *testing.T) {
+	t.Parallel()
+	secret := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	for _, tc := range []struct {
+		name     string
+		document string
+		kty      token.KeyType
+		crv      token.Curve
+	}{
+		{"EC on P-256 (RFC 7515 §A.3.1)", rfc7515PublicJWK, token.KeyTypeEC, token.CurveP256},
+		{"OKP on Ed25519 (RFC 8037 §A.2)", rfc8037PublicJWK, token.KeyTypeOKP, token.CurveEd25519},
+		{"oct, which has no curve", `{"kty":"oct","k":"` + secret + `"}`, token.KeyTypeOct, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			key, err := token.ParseJWK([]byte(tc.document))
+			if err != nil {
+				t.Fatalf("ParseJWK: %v", err)
+			}
+			if key.Kty() != tc.kty || key.Crv() != tc.crv {
+				t.Errorf("Kty(), Crv() = %q, %q; want %q, %q", key.Kty(), key.Crv(), tc.kty, tc.crv)
+			}
+		})
+	}
+
+	for kty, wire := range map[token.KeyType]string{
+		token.KeyTypeEC:  "EC",
+		token.KeyTypeOKP: "OKP",
+		token.KeyTypeOct: "oct",
+	} {
+		if string(kty) != wire {
+			t.Errorf("a KeyType constant spells %q, want the registered %q", kty, wire)
+		}
+	}
+	for crv, wire := range map[token.Curve]string{
+		token.CurveP256:    "P-256",
+		token.CurveP384:    "P-384",
+		token.CurveP521:    "P-521",
+		token.CurveEd25519: "Ed25519",
+	} {
+		if string(crv) != wire {
+			t.Errorf("a Curve constant spells %q, want the registered %q", crv, wire)
+		}
+	}
+}
+
 // TestANullJWKSetEnvelopeIsMalformed pins the envelope half: a JWK Set
 // document that is JSON null is not a set whose keys are missing, it is not an
 // object at all. It read as JWKMissingMember before.

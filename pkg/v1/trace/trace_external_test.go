@@ -117,3 +117,53 @@ func TestFacadeRefusesAnEndpointWithoutAPath(t *testing.T) {
 		t.Errorf("Name = %q, want the configured name", exporter.Name())
 	}
 }
+
+// tracerHolder is a consumer's own wiring: the tracer kept in a field, which
+// needs a type a downstream module can write down.
+type tracerHolder struct {
+	// tracer is what NewTracer returned, typed by its public name.
+	tracer *trace.SDKTracer
+}
+
+// TestAConsumerCanNameTheTracerNewTracerReturns pins #259 at the public edge.
+// NewTracer returned *svctrace.Tracer, declared under internal/: a consumer
+// could call it and use the result, and could not write its type down, so the
+// tracer could not sit in a field of the consumer's own or cross a function
+// boundary it declared. This file imports nothing under internal/, so every
+// line spelling trace.SDKTracer is half the assertion: without the alias it
+// does not compile.
+//
+// MUTATION (2026-09-29): trace.go was put back as it is on main, with no
+// SDKTracer and NewTracer returning *svctrace.Tracer. Observed: `undefined:
+// trace.SDKTracer`, on the tracerHolder field; the test package did not build.
+// Restored; trace.go is byte-identical to the pre-mutation file by SHA-256.
+func TestAConsumerCanNameTheTracerNewTracerReturns(t *testing.T) {
+	recorder := trace.NewRecorder(trace.RecorderConfig{
+		Resource: trace.Resource{Attrs: []trace.Attr{trace.String(trace.ServiceNameKey, "checkout")}},
+	})
+	held := tracerHolder{tracer: trace.NewTracer(trace.TracerConfig{
+		Resource: recorder.Resource(),
+		Scope:    trace.Scope{Name: "example.com/checkout", Version: "1.2.3"},
+		Sink:     recorder.Sink(),
+	})}
+
+	//: what the concrete type carries beyond the port, read by name.
+	if got := held.tracer.Scope(); got.Name != "example.com/checkout" || got.Version != "1.2.3" {
+		t.Errorf("Scope() = %+v, want the configured scope", got)
+	}
+	named := false
+	for _, attr := range held.tracer.Resource().Attrs {
+		named = named || (attr.Key == trace.ServiceNameKey && attr.Str() == "checkout")
+	}
+	if !named {
+		t.Errorf("Resource() = %+v, want service.name=checkout", held.tracer.Resource())
+	}
+
+	//: and it is still the port a middleware takes, with no conversion.
+	var port trace.Tracer = held.tracer
+	_, span := port.Start(context.Background(), "charge", trace.SpanParams{})
+	span.End()
+	if got := len(recorder.Collect().Spans); got != 1 {
+		t.Fatalf("collected %d spans, want 1", got)
+	}
+}

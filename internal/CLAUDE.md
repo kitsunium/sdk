@@ -25,7 +25,7 @@ core  ──┼──▶ service ──▶ (pkg/v1 re-exports / consumes)
 | Layer | Imports allowed |
 |---|---|
 | `internal/kernel/**` | stdlib only |
-| `internal/core/**`   | stdlib + `internal/kernel/*` |
+| `internal/core/**`   | stdlib + `internal/kernel/*` + **sibling `internal/core/*`** |
 | `internal/service/**`| stdlib + kernel + core + **sibling `internal/service/*`** (+ vetted third-party encoders for codec/*) |
 | `pkg/v1/**` (consumes) | stdlib + kernel + core + service + **sibling `pkg/v1/*`** |
 
@@ -71,6 +71,14 @@ import paths, and a grep reports them as edges):
 go list -f '{{$p := .ImportPath}}{{range .Imports}}{{$p}} -> {{.}}{{"\n"}}{{end}}' ./pkg/v1/... \
   | grep ' -> github.com/kitsunium/sdk/pkg/v1/' | sed 's|github.com/kitsunium/sdk/||g' | sort -u
 ```
+
+A core package may import another core package on the same terms. The core
+query, `deps(//internal/core/...) intersect (//internal/service/... + //pkg/...
++ //third-party/...)`, names what is above core and nothing beside it, and
+`core/trace` builds on `core/metrics`'s attribute model by decision (ADR 0051
+§2). The row said "stdlib + `internal/kernel/*`", the gap the service row had.
+The same `go list`, run from `internal/core` over `./...` with the grep on
+`internal/core/`, lists the edges.
 
 Any import going "upward" fails `make lint` and CI: `scripts/check-layer-deps.sh` asserts the direction on the build graph (ADR 0068). Visibility does not — Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, so an upward import builds. `.golangci.yml` ships a code-quality second-opinion ruleset only.
 

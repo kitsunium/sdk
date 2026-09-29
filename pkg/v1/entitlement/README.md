@@ -74,6 +74,7 @@ No clock skew is added to the bound. The two\-minute allowance exists to ADMIT a
 - [Variables](<#variables>)
 - [func RequiresUpdate\(current, floor string\) bool](<#RequiresUpdate>)
 - [func UpdateRefusal\(current, floor string\) error](<#UpdateRefusal>)
+- [type BearerFetch](<#BearerFetch>)
 - [type BoundProver](<#BoundProver>)
 - [type Bundle](<#Bundle>)
 - [type CIEntitlement](<#CIEntitlement>)
@@ -83,6 +84,7 @@ No clock skew is added to the bound. The two\-minute allowance exists to ADMIT a
 - [type Origin](<#Origin>)
 - [type Product](<#Product>)
 - [type Roster](<#Roster>)
+- [type RoughtimeServer](<#RoughtimeServer>)
 - [type Service](<#Service>)
   - [func New\(identity Identity, vendor \[\]byte, product \*Product\) \*Service](<#New>)
   - [func NewWithAnchors\(identity Identity, anchors \[\]\[\]byte, product \*Product\) \*Service](<#NewWithAnchors>)
@@ -245,7 +247,7 @@ var (
 ```
 
 <a name="RequiresUpdate"></a>
-## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L390>)
+## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L415>)
 
 ```go
 func RequiresUpdate(current, floor string) bool
@@ -256,7 +258,7 @@ RequiresUpdate reports whether current is below the floor a roster mandates.
 It takes the running build's version and the minimum the roster requires — an empty floor requires nothing — and reports whether the build is below it.
 
 <a name="UpdateRefusal"></a>
-## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L399>)
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L424>)
 
 ```go
 func UpdateRefusal(current, floor string) error
@@ -265,6 +267,17 @@ func UpdateRefusal(current, floor string) error
 UpdateRefusal builds the typed refusal for a build below the roster's floor.
 
 It takes the running build's version and the minimum the roster requires, and returns an \*UpdateRequiredError carrying both.
+
+<a name="BearerFetch"></a>
+## type [BearerFetch](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L378>)
+
+BearerFetch performs the one request a [Service](<#Service>) makes with a credential: the GitHub Actions ID\-token mint on the CI path, which sends the runner's bearer token. It is a function rather than a [Getter](<#Getter>) method because the roster fetch must never carry one.
+
+[Service](<#Service>).WithBearerFetch replaces the default, and only a test should need to: the default refuses every redirect, so the runner's credential cannot be forwarded to a destination nobody vouched for, and a replacement takes that duty on. It aliases the service type \(ADR 0074\).
+
+```go
+type BearerFetch = svcent.BearerFetch
+```
 
 <a name="BoundProver"></a>
 ## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L284>)
@@ -363,6 +376,17 @@ Roster is a published, vendor\-signed entitlement roster.
 type Roster = coreent.RosterValue
 ```
 
+<a name="RoughtimeServer"></a>
+## type [RoughtimeServer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L392>)
+
+RoughtimeServer is one Roughtime server a [Service](<#Service>) may ask for a signed statement of the current time, and the ed25519 key its answer must be signed with: the key, not the address, is the whole trust decision.
+
+[Service](<#Service>).WithTimeServers takes the list. The check is off by default, and ADVISORY: a server that does not answer, or whose answer does not verify, is no signal and the verification carries on, while one that answers verifiably and disagrees with the local clock by more than five minutes, widened by its own stated uncertainty, refuses with [ErrClockRegressed](<#ErrNoLicense>). No server ships with the SDK: this client has been checked against its own test fixture and never against a live server, so adding one is a decision for whoever can watch it verify a real answer. It aliases the service type \(ADR 0074\).
+
+```go
+type RoughtimeServer = svcent.RoughtimeServerValue
+```
+
 <a name="Service"></a>
 ## type [Service](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L315>)
 
@@ -403,7 +427,7 @@ An EMPTY list is not a way to disable the signature check: every document is the
 Service.WithAnchors sets the same list on a verifier already built, which is what a test or a build assembling its anchors from elsewhere reaches for.
 
 <a name="NewWithGetter"></a>
-### func [NewWithGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L381>)
+### func [NewWithGetter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L406>)
 
 ```go
 func NewWithGetter(client Getter, identity Identity, vendor []byte, product *Product) *Service
@@ -423,7 +447,7 @@ type Subject = coreent.SubjectValue
 ```
 
 <a name="UpdateRequiredError"></a>
-## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L373>)
+## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/entitlement/entitlement.go#L398>)
 
 UpdateRequiredError carries the two versions a version\-floor refusal is about. It exists as a TYPE rather than a message because a caller that cannot read the required version out of the refusal re\-runs the upgrade, gets the same refusal, and loops forever.
 

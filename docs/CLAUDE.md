@@ -71,7 +71,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0059-no-mapper-domain.md` | There is no `mapper` domain: a projection is a type, not a tag | Accepted |
 | `adr/0060-sdk-health-domain.md` | Health probes where the wrong wiring does not compile: liveness takes a context-free `SelfCheck`, readiness a context-carrying `Check` | Accepted |
 | `adr/0061-sdk-config-schema.md` | Configuration schema: required keys, typed defaults, and a closed vocabulary | Accepted (§Deferred secret key closed by ADR 0097) |
-| `adr/0062-logger-trace-correlation.md` | A log line names the span it came from, and the bridge lives at the top layer | Accepted |
+| `adr/0062-logger-trace-correlation.md` | A log line names the span it came from, and the bridge lives at the top layer | Accepted (§Context amended 2026-09-29 — sibling service packages may import each other) |
 | `adr/0063-sdk-i18n-domain.md` | Message-translation domain (`i18n`): a named CLDR subset, everything outside it refused BY NAME, and the guarantees that are NOT made | Accepted |
 | `adr/0064-sdk-mail-domain.md` | Electronic-mail domain (`mail`): composition is a mechanism, SMTP is a stdlib protocol, and a provider is neither | Accepted |
 | `adr/0065-sdk-cli-domain.md` | Command-line domain (`cli`): what `flag` does not have, and the four things this adds instead of a framework | Accepted |
