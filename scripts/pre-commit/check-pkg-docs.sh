@@ -1,11 +1,13 @@
 #!/usr/bin/env bash
 # check-pkg-docs.sh — pre-commit guard: every Go package MUST be documented.
 #
-# Rule (project policy, see CLAUDE.md §SDK-wide rules):
-#   For every directory containing at least one .go file under internal/* or
-#   pkg/*, that directory MUST contain CLAUDE.md or README.md (or both).
-#   Public packages (pkg/v1/**) MUST additionally contain README.md — that's
-#   the consumer-facing surface and is non-negotiable post-v1.0.0.
+# Rule (project policy, see CLAUDE.md §SDK-wide rules, rule 8):
+#   Every directory under internal/ or pkg/ holding at least one production
+#   .go file (a *_test.go alone does not count) MUST contain CLAUDE.md or
+#   README.md (or both).
+#   Public packages (pkg/v*/**) MUST contain BOTH: README.md, the
+#   consumer-facing surface pkg.go.dev renders, AND CLAUDE.md, the
+#   agent-facing manual — non-negotiable post-v1.0.0.
 #
 # Rationale:
 #   - CLAUDE.md is the agent-facing operating manual (warmup hierarchy).
@@ -13,9 +15,9 @@
 #   - The two roles do not collapse; private packages can ship just CLAUDE.md
 #     because they have no external consumer.
 #
-# This check runs as part of the project-local pre-commit chain. It only
-# inspects files that exist on disk at HEAD or in the index; it does NOT
-# walk the worktree blindly.
+# This check runs as part of the project-local pre-commit chain. It walks the
+# working tree under internal/ and pkg/ with find, so a package directory not
+# yet committed, or not even staged, is judged like a committed one.
 #
 # Exit codes:
 #   0 — all packages documented

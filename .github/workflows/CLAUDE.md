@@ -3,7 +3,7 @@
 
 ## Purpose
 
-CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (the other required check), `sdk-release.yml` (auto-tag after the gate) and `release-size.yml` (the size a pull request would publish, asked before it merges), beside the scans, runtime suites, docs and benchmarks below; `docker-images.yml` and `release.yml` are inherited from the devcontainer-template repo.
+CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (the other required check), `sdk-release.yml` (auto-tag after the gate) and `release-size.yml` (the size a pull request would publish, asked before it merges), beside the scans, runtime suites, docs and benchmarks below; `docker-images.yml` is inherited from the devcontainer-template repo. `release.yml`, the template's other workflow, was deleted in #260: its job ran only in `kodflow/devcontainer-template`, and its `workflow_run` trigger listened for a workflow named "Build Docker Image", which does not exist here — `docker-images.yml` is "Build Docker Images".
 
 ## Workflows
 
@@ -19,7 +19,6 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel and `make sdk-bench` runs them through `go test` |
 | `docker-images.yml` | daily and weekly schedules, push and PRs on `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
-| `release.yml` | push to `main` on `.devcontainer/features/**` or `.devcontainer/hooks/**`, `workflow_run`, manual `workflow_dispatch` | Template-inherited; its job runs only in `kodflow/devcontainer-template` — DO NOT edit for SDK reasons |
 
 ## bazel-ci.yml (the SDK lane)
 

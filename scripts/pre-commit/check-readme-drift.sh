@@ -32,8 +32,14 @@ fi
 # same set by construction, which is the only version of this that stays true.
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
-readarray -t packages < <(
-    cd pkg/v1 && grep -rl 'go:generate gomarkdoc' . --include='*.go' \
+#
+# A read loop, not `readarray`: readarray is bash 4, and the hook runs under
+# macOS's /bin/bash 3.2 as well (#260).
+packages=()
+while IFS= read -r pkg; do
+    packages+=("$pkg")
+done < <(
+    cd pkg/v1 && grep -rl --include='*.go' 'go:generate gomarkdoc' . \
       | xargs -n1 dirname | sort -u
 )
 
