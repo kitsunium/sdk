@@ -67,8 +67,9 @@ They are here for the same reason as the loaders (#259): the methods were public
 through the `JWK` alias while their result types were not, so a consumer could
 compare `Kty()` with a string literal and could not declare a variable, a field
 or a parameter of its type. `TestAConsumerCanNameWhatAJWKReports` reads both
-from three parsed keys, typed by the published names, and holds every constant
-to its registered spelling (RFC 7518, RFC 8037).
+from three parsed keys, typed by the published names, and
+`TestTheJWKConstantsSpellTheRegisteredValues` holds every constant to its
+registered spelling (RFC 7518, RFC 8037).
 
 The whole `token_test` package now imports stdlib and `pkg/v1` only (check:
 `cd pkg && GOWORK=off go list -f '{{.XTestImports}}' ./v1/token/`), so a JWK

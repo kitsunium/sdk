@@ -699,6 +699,7 @@ func TestAConsumerCanBuildWhatTheServiceSettersTake(t *testing.T) {
 	t.Parallel()
 
 	serverKey, _, err := ed25519.GenerateKey(nil)
+	//: Without a key there is no server to pin.
 	if err != nil {
 		t.Fatalf("ed25519.GenerateKey: %v", err)
 	}
@@ -712,6 +713,7 @@ func TestAConsumerCanBuildWhatTheServiceSettersTake(t *testing.T) {
 	})
 
 	service := entitlement.New(stubIdentity{}, nil, nil)
+	//: Both setters hand back the receiver, so construction stays one expression.
 	if got := service.WithTimeServers(servers).WithBearerFetch(fetch); got != service {
 		t.Fatalf("the setters returned %p, want the receiver %p", got, service)
 	}

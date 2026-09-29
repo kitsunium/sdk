@@ -304,59 +304,94 @@ func TestAMalformedJWKIsRefusedWithAMatchableCode(t *testing.T) {
 // names, and this file imports nothing under internal/, so removing either
 // alias stops it compiling.
 //
-// The constants are held to the spellings of the registries they come from
-// (RFC 7518 §6.1 and §6.2.1.1, RFC 8037 §2), because a constant re-pointed at
-// the wrong internal value still compiles.
-//
 // MUTATION (2026-09-29): constants.go and constructors.go were put back as they
 // are on main. Observed: `undefined: token.KeyType`; the test package did not
-// build. Restored. Then CurveP384 was re-pointed at jwk.CurveP521, which the
-// facade compiles. Observed: `duplicate key "P-521" in map literal`, in this
-// test. Restored; both files are byte-identical to the pre-mutation ones by
+// build. Restored; both files are byte-identical to the pre-mutation ones by
 // SHA-256.
 func TestAConsumerCanNameWhatAJWKReports(t *testing.T) {
 	t.Parallel()
-	secret := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
-	for _, tc := range []struct {
+
+	//: Named, so the runCase closure below can take one.
+	type testCase struct {
 		name     string
 		document string
 		kty      token.KeyType
 		crv      token.Curve
-	}{
+	}
+
+	secret := base64.RawURLEncoding.EncodeToString([]byte("0123456789abcdef0123456789abcdef"))
+	tests := []testCase{
 		{"EC on P-256 (RFC 7515 §A.3.1)", rfc7515PublicJWK, token.KeyTypeEC, token.CurveP256},
 		{"OKP on Ed25519 (RFC 8037 §A.2)", rfc8037PublicJWK, token.KeyTypeOKP, token.CurveEd25519},
 		{"oct, which has no curve", `{"kty":"oct","k":"` + secret + `"}`, token.KeyTypeOct, ""},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			key, err := token.ParseJWK([]byte(tc.document))
-			if err != nil {
-				t.Fatalf("ParseJWK: %v", err)
-			}
-			if key.Kty() != tc.kty || key.Crv() != tc.crv {
-				t.Errorf("Kty(), Crv() = %q, %q; want %q, %q", key.Kty(), key.Crv(), tc.kty, tc.crv)
-			}
-		})
 	}
 
-	for kty, wire := range map[token.KeyType]string{
-		token.KeyTypeEC:  "EC",
-		token.KeyTypeOKP: "OKP",
-		token.KeyTypeOct: "oct",
-	} {
-		if string(kty) != wire {
-			t.Errorf("a KeyType constant spells %q, want the registered %q", kty, wire)
+	//: The case body lives in a local closure, the repository's table shape.
+	runCase := func(t *testing.T, tc testCase) {
+		t.Helper()
+		t.Parallel()
+
+		key, err := token.ParseJWK([]byte(tc.document))
+		//: A document that does not parse proves nothing about the accessors.
+		if err != nil {
+			t.Fatalf("ParseJWK: %v", err)
+		}
+		//: Both answers compare with the published types, with no conversion.
+		if key.Kty() != tc.kty || key.Crv() != tc.crv {
+			t.Errorf("Kty(), Crv() = %q, %q; want %q, %q", key.Kty(), key.Crv(), tc.kty, tc.crv)
 		}
 	}
-	for crv, wire := range map[token.Curve]string{
-		token.CurveP256:    "P-256",
-		token.CurveP384:    "P-384",
-		token.CurveP521:    "P-521",
-		token.CurveEd25519: "Ed25519",
-	} {
-		if string(crv) != wire {
-			t.Errorf("a Curve constant spells %q, want the registered %q", crv, wire)
+
+	//: One subtest per key type the SDK parses.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}
+
+// TestTheJWKConstantsSpellTheRegisteredValues holds the seven KeyType and Curve
+// constants to the spellings of the registries they come from (RFC 7518 §6.1
+// and §6.2.1.1, RFC 8037 §2). A constant re-pointed at the wrong internal value
+// still compiles, and a consumer comparing Kty() or Crv() with it would then
+// match the wrong keys.
+//
+// MUTATION (2026-09-29): CurveP384 was re-pointed at jwk.CurveP521, which the
+// facade compiles. Observed: `CurveP384 = "P-521", want the registered
+// "P-384"`, on that row only. Restored; constants.go is byte-identical to the
+// pre-mutation file by SHA-256.
+func TestTheJWKConstantsSpellTheRegisteredValues(t *testing.T) {
+	t.Parallel()
+
+	//: Named, so the runCase closure below can take one.
+	type testCase struct {
+		name string
+		got  string
+		want string
+	}
+
+	tests := []testCase{
+		{"KeyTypeEC", string(token.KeyTypeEC), "EC"},
+		{"KeyTypeOKP", string(token.KeyTypeOKP), "OKP"},
+		{"KeyTypeOct", string(token.KeyTypeOct), "oct"},
+		{"CurveP256", string(token.CurveP256), "P-256"},
+		{"CurveP384", string(token.CurveP384), "P-384"},
+		{"CurveP521", string(token.CurveP521), "P-521"},
+		{"CurveEd25519", string(token.CurveEd25519), "Ed25519"},
+	}
+
+	//: The case body lives in a local closure, the repository's table shape.
+	runCase := func(t *testing.T, tc testCase) {
+		t.Helper()
+		t.Parallel()
+
+		//: A wrong spelling is a constant that matches the wrong keys.
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want the registered %q", tc.name, tc.got, tc.want)
 		}
+	}
+
+	//: One subtest per published constant.
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
 	}
 }
 

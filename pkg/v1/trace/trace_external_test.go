@@ -147,22 +147,26 @@ func TestAConsumerCanNameTheTracerNewTracerReturns(t *testing.T) {
 		Sink:     recorder.Sink(),
 	})}
 
-	//: what the concrete type carries beyond the port, read by name.
+	//: What the concrete type carries beyond the port, read by name: the
+	//: scope it stamps on every span is the one it was configured with.
 	if got := held.tracer.Scope(); got.Name != "example.com/checkout" || got.Version != "1.2.3" {
 		t.Errorf("Scope() = %+v, want the configured scope", got)
 	}
 	named := false
+	//: The resource carries the service name the recorder was given.
 	for _, attr := range held.tracer.Resource().Attrs {
 		named = named || (attr.Key == trace.ServiceNameKey && attr.Str() == "checkout")
 	}
+	//: A resource without it would not be the one this tracer was built on.
 	if !named {
 		t.Errorf("Resource() = %+v, want service.name=checkout", held.tracer.Resource())
 	}
 
-	//: and it is still the port a middleware takes, with no conversion.
+	//: And it is still the port a middleware takes, with no conversion.
 	var port trace.Tracer = held.tracer
 	_, span := port.Start(context.Background(), "charge", trace.SpanParams{})
 	span.End()
+	//: The span started through the port reached the recorder's sink.
 	if got := len(recorder.Collect().Spans); got != 1 {
 		t.Fatalf("collected %d spans, want 1", got)
 	}
