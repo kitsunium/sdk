@@ -483,10 +483,10 @@ func TestTheProcessSample(t *testing.T) {
 	if p.PID != os.Getpid() || p.Goroutines < 1 || p.HeapBytes == 0 || p.MemoryBytes < p.HeapBytes || p.GCCycles == 0 || p.LastGC == nil {
 		t.Errorf("sample %+v", p)
 	}
-	// A pause's p99 may read 0 where every pause is below the histogram's
-	// first bucket or the clock is coarse (Windows): only a negative one is
-	// wrong.
-	if p.UptimeMs <= 0 || p.At.IsZero() || p.At.Location() != time.UTC || p.GCPauseP99Ms < 0 {
+	// The uptime and a pause's p99 may read 0 where the timer is coarse
+	// (Windows: ~0.5-15 ms) or every pause is below the histogram's first
+	// bucket: only a negative one is wrong.
+	if p.UptimeMs < 0 || p.At.IsZero() || p.At.Location() != time.UTC || p.GCPauseP99Ms < 0 {
 		t.Errorf("sample %+v", p)
 	}
 }
