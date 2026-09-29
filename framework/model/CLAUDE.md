@@ -3,7 +3,7 @@
 ## Purpose
 
 The JSON contract every part of the framework shares, and the grammar of
-every ID it carries — written once (ADR 0143 §4). Moved from
+every ID it carries — written once (ADR 0147 §4). Moved from
 `kitsunium/platform/model` at `Version` 5; the platform's `model` becomes a
 facade of aliases over this package, and its `studio/web/src/model.ts` is
 generated from the patterns and types here.

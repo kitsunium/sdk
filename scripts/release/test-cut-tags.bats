@@ -94,7 +94,7 @@ replace (
 )
 EOF
 
-  # The chain is read from go.work (ADR 0143 §9): every module it uses but the
+  # The chain is read from go.work (ADR 0147 §9): every module it uses but the
   # root is released.
   cat >go.work <<'EOF'
 go 1.26
@@ -820,7 +820,7 @@ commit_pkg_bench() {
   [ "$output" = "pkg/v0.1.10" ]
 }
 
-# ── ADR 0143: the framework joins the chain, read from go.work ──────────────
+# ── ADR 0147: the framework joins the chain, read from go.work ──────────────
 
 # add_framework — a framework module requiring pkg and replacing what pkg needs,
 # and one connector requiring the framework, both used by go.work: the shape of

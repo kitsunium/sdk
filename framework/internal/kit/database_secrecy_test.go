@@ -60,6 +60,7 @@ func TestDatabaseCredentialsNeverLeak(t *testing.T) {
 // A password rotated where it lives is used by the next connection: the
 // engine asks for the URL as it is now.
 func TestARotatedPasswordReachesTheNextConnection(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", fakeURL("ledger", "first", "tls=verify-full"))
 	var logs syncBuffer
@@ -78,6 +79,7 @@ func TestARotatedPasswordReachesTheNextConnection(t *testing.T) {
 // In dev the Studio samples the databases: a fresh check, the pool, the
 // migrations; a location, in dev only — never the URL.
 func TestTheStudioSamplesTheDatabases(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", fakeURL("ledger", "pw", ""))
 	var logs syncBuffer

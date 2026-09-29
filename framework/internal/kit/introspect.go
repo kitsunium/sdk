@@ -89,7 +89,7 @@ func EnableStudio() {
 // mountIntrospection serves, in dev, what the Studio reads about the
 // running product — the graph, live events, traces, source, instances, items
 // and the dev tools' reads. The Studio itself — its pages, its assets — is
-// the kit tool's (ADR 0143 §1), which reads these routes; the framework
+// the kit tool's (ADR 0147 §1), which reads these routes; the framework
 // links no user interface. Every route checks the Host header against an
 // allow-list, so a page on another site cannot read the product's source or
 // live traffic through DNS rebinding. None of them acts on the product (D13).

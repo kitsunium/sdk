@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/hash/
 
 ## Purpose
@@ -8,14 +9,15 @@ streaming `hash.Hash` for `io.Copy` over large inputs. Thin alias + delegation
 over `internal/core/crypto`'s Hasher registry — zero runtime cost, no business
 logic (per `pkg/` convention).
 
-Importing the package blank-imports `internal/service/crypto/stdhash`, activating
+Importing the package imports `internal/service/crypto/stdhash` (for the
+`DigestWriter` / `VerifyingReader` types, and for its registrations), activating
 all five stdlib hashers with **zero non-stdlib deps**.
 
 ## Surface
 
 | Identifier | Role |
 |---|---|
-| `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id) |
+| `Algorithm` | defined type over `corecrypto.Algorithm` (stable scheme id) — a MAC or signature constant does not compile into a hash call |
 | `SHA256` / `SHA512` / `SHA3256` | cryptographic-strength digest consts |
 | `CRC32C` / `FNV1a64` | fast **non**-cryptographic checksum/fingerprint consts |
 | `Sum(a, data) ([]byte, error)` | one-shot digest; unknown algo → `UnknownHashAlgorithm` |
@@ -31,8 +33,8 @@ This is the public-digest surface: content IDs, cache keys, dedup keys — NOT
 message authentication, password storage, or signatures. No hasher is keyed and
 a digest is public. The package deliberately offers **no secret-comparison
 equality helper**: never branch on a secret-dependent comparison of a digest.
-Keyed integrity lives on the AEAD (`pkg/v1/crypto`) and (future) signature
-surfaces, constant-time by construction there.
+Keyed integrity lives on the MAC (`pkg/v1/mac`), AEAD (`pkg/v1/crypto`) and
+signature (`pkg/v1/sign`) surfaces, constant-time by construction there.
 
 ## Public-digest verification carve-out (ADR 0014 §D4)
 
@@ -40,16 +42,20 @@ surfaces, constant-time by construction there.
 narrow one: it compares a **public** digest against an expected hex value, fails
 **only** on the terminal (EOF) read with the typed `DigestMismatch`, and never
 mid-stream. Because the digest is public there is no timing secret to protect, so
-a content-ID mismatch reintroduces no oracle. The mismatch sentinel lives in the
-emitter layer (`service/crypto/stdhash` → `core/crypto.DigestMismatch`); this
-facade only re-introspects it via `pkg/v1/errs` accessors. This carve-out covers
+a content-ID mismatch reintroduces no oracle. The mismatch sentinel is declared
+in `core/crypto` (`DigestMismatch`, `0.2.4.20`) and emitted by
+`service/crypto/stdhash`; this facade only re-introspects it via `pkg/v1/errs`
+accessors. This carve-out covers
 public content-addressing **only** — keyed MAC / AEAD verification stays on the
 constant-time crypto surfaces, never here.
 
 ## Conventions
 
-- **Aliases, not new types** — `Algorithm = corecrypto.Algorithm`; the consts
-  are the frozen wire strings (`"sha256"`, `"crc32c"`, …).
+- **Aliases for the stream types, a defined type for `Algorithm`** —
+  `DigestWriter` / `VerifyingReader` alias the `stdhash` types; `Algorithm` is
+  converted to `corecrypto.Algorithm` at the call, so the hash registry stays
+  its own keyspace. The consts are the frozen wire strings (`"sha256"`,
+  `"crc32c"`, …).
 - **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
   package doc comment in `hash.go`; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.** New algorithm consts can be added; existing

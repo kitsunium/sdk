@@ -82,6 +82,7 @@ func wronglyDeclared(t *testing.T) (*kit.App, int) {
 // like the product's and shown with the database's name; its URL is a
 // secret, shown set or not, never a value.
 func TestADatabasesTuningIsSettings(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	t.Setenv("LEDGER_DATABASE_MAX_OPEN", "3")

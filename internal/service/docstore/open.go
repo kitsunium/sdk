@@ -2,7 +2,11 @@
 // declared, and a persistent store loaded.
 package docstore
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"github.com/kitsunium/sdk/internal/kernel/clock"
+)
 
 // Open builds a store from cfg, with the secondary indexes given: in memory
 // without a filesystem, otherwise loaded from it — the snapshot, the overlay
@@ -36,14 +40,26 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
 // newStore builds the empty store a validated cfg and its indexes describe.
 func newStore[T any](cfg Config[T], indexes []IndexSpec[T]) *Store[T] {
 	store := &Store[T]{
-		key:     cfg.Key,
-		fs:      cfg.FS,
-		byName:  make(map[string]*index[T], len(indexes)),
-		docs:    map[string]json.RawMessage{},
-		pending: map[string]struct{}{},
-		path:    cfg.Path,
-		overlay: cfg.Path + overlaySuffix,
-		foldAt:  cfg.FoldAt,
+		key:          cfg.Key,
+		fs:           cfg.FS,
+		byName:       make(map[string]*index[T], len(indexes)),
+		docs:         map[string]json.RawMessage{},
+		pending:      map[string]struct{}{},
+		clock:        cfg.Clock,
+		held:         cfg.Held,
+		path:         cfg.Path,
+		overlay:      cfg.Path + overlaySuffix,
+		versionsPath: cfg.Path + versionsSuffix,
+		foldAt:       cfg.FoldAt,
+		keep:         cfg.Versions,
+	}
+	//: the system clock unless the caller brought one.
+	if store.clock == nil {
+		store.clock = clock.System
+	}
+	//: the versions, when the store keeps them.
+	if cfg.Versions > 0 {
+		store.versions = map[string]*versionsRecord{}
 	}
 	//: the indexes, in declaration order.
 	for _, spec := range indexes {

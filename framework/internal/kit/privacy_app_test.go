@@ -25,6 +25,7 @@ func (m privacyMember) key() string { return m.ID }
 // kit's own stores are placed by name only: the default database never
 // takes them, and kit.Keeps(kit.Privacy) places them like any service.
 func TestKitsOwnStoresArePlacedByName(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	t.Setenv("LEDGER_VAULT_URL", verifiedURL())

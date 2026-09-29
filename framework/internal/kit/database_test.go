@@ -158,6 +158,7 @@ func openLedger(t *testing.T) opened {
 // A database opens at start, runs the product's migrations under their own
 // version table, and answers its check.
 func TestADatabaseOpensAndMigrates(t *testing.T) {
+	needsFileStore(t)
 	o := openLedger(t)
 	if got := o.db.Versions("schema_migrations"); !slices.Equal(got, []int64{20260901120000, 20260902120000}) {
 		t.Errorf("schema_migrations holds %v", got)
@@ -193,6 +194,7 @@ func sameSet(x, y model.MigrationSet) bool {
 // A database is a lifecycle component after the secrets and before the
 // stores it keeps.
 func TestADatabaseStartsBeforeItsStores(t *testing.T) {
+	needsFileStore(t)
 	o := openLedger(t)
 	var order []string
 	for _, c := range o.g.Runtime.Components {
@@ -218,6 +220,7 @@ func before(list []string, first, then string) bool {
 // The default database keeps every store but a cache, whose data stays in
 // the data directory in this version of kit — and the start says so.
 func TestTheDefaultDatabaseKeepsEveryStore(t *testing.T) {
+	needsFileStore(t)
 	o := openLedger(t)
 	for id, want := range map[string]model.StoreInfo{
 		"books/store/entries": {Backend: "file", Database: "database"},
@@ -237,6 +240,7 @@ func TestTheDefaultDatabaseKeepsEveryStore(t *testing.T) {
 // settings, its declaration, no location outside dev, no store while their
 // data stays in files.
 func TestADatabaseIsDrawn(t *testing.T) {
+	needsFileStore(t)
 	o := openLedger(t)
 	c := containerByID(o.g, "container:database:database")
 	if c == nil {
@@ -261,6 +265,7 @@ func TestADatabaseIsDrawn(t *testing.T) {
 // data directory, which holds the stores the database keeps for now, is no
 // database.
 func TestADatabasesLink(t *testing.T) {
+	needsFileStore(t)
 	o := openLedger(t)
 	if l := linkTo(o.g, "container:database:database"); l == nil || l.From != "container:process" || l.Label != "Reads and writes" ||
 		!slices.Equal(l.Connectors, []string{model.ConnectorDatabase}) {
@@ -279,6 +284,7 @@ func TestADatabasesLink(t *testing.T) {
 // Readiness follows the database; liveness never depends on it: a database
 // outage must not restart every process.
 func TestReadinessFollowsTheDatabase(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	var logs syncBuffer
@@ -307,6 +313,7 @@ func TestReadinessFollowsTheDatabase(t *testing.T) {
 // A database that does not answer fails the start, which unwinds what
 // started.
 func TestADatabaseThatDoesNotAnswerFailsTheStart(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	db.SetDown(true)
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/gate/
 
 ## Purpose
@@ -15,8 +16,8 @@ and the process exit stay in the caller's control flow.
   - **Exemption is read FIRST, and `verify` is not CALLED when it holds.**
     `completion` runs from a shell hook where a network round trip is hostile,
     and `license status` must work on exactly the machine whose licence is
-    broken. Removing the check fails four cases, one of them on the call count:
-    `Decide() called the verifier 1 time(s) on an exempt invocation, want 0`.
+    broken. Removing the check fails four cases, three of them on the call count:
+    `Decide() called the verifier 1 time(s) when it should not have, want 0`.
   - **The floor is read BEFORE the refusal is propagated.** An out-of-date
     binary must be told to upgrade whether or not its entitlement is also in
     order: the action is the same either way, and reporting "your licence is

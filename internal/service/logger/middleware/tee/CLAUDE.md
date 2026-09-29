@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/middleware/tee/
 
 ## Purpose
@@ -17,9 +18,10 @@ seam, not a retry queue. Compose retry behind the spill sink.
 
 | File | Role |
 |---|---|
-| `tee.go` | `TeeSink` + `New` + `Write` / `Flush` / `Close` + wrap helpers |
+| `tee.go` | `TeeSink` + `NewTeeSink` (returns `*TeeSink`) + `Write` / `Flush` / `Close` + wrap helpers |
 | `config.go` | `Config` value type (`Primaries`, `Spill`) |
 | `failed.go` | sentinels — range 0.3.29.\* |
+| `doc.go` | package doc — scope, non-goals, concurrency |
 
 ## Spill semantics
 
@@ -56,7 +58,3 @@ Safe for concurrent producers when the primary and spill sinks are. The
 ```
 bazel test --config=race //internal/service/logger/middleware/tee:tee_test
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V30) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

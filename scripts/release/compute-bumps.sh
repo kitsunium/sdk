@@ -2,12 +2,12 @@
 # scripts/release/compute-bumps.sh — decide whether the public modules need a
 # release since the previous release tag: emit the token `pkg` when the public
 # module `pkg` (github.com/kitsunium/sdk/pkg) changed, and `framework` when the
-# framework module or one of its connectors did (ADR 0143). The chain is cut in
+# framework module or one of its connectors did (ADR 0147). The chain is cut in
 # lockstep, so either token releases every module once (cut-tags.sh).
 #
 # Decision matrix (ADR 0007, updated for the bare-`pkg` module — ADR 0009):
 #   change under pkg/v*/** or pkg/go.mod  -> bump pkg
-#   change under framework/**             -> bump framework (ADR 0143)
+#   change under framework/**             -> bump framework (ADR 0147)
 #   change under internal/**              -> bump pkg iff its bazel rdeps
 #                                            reach //pkg/...
 #   no relevant change                    -> emit nothing (exit 0)
@@ -160,7 +160,7 @@ for path in ${counting[@]+"${counting[@]}"}; do
   esac
 done
 
-# 1b. Framework changes (ADR 0143): anything under framework/ that can carry a
+# 1b. Framework changes (ADR 0147): anything under framework/ that can carry a
 # consumer-visible change — its packages, its go.mod, a connector module. The
 # same maintainer-only filter applies, so a framework CLAUDE.md alone releases
 # nothing.

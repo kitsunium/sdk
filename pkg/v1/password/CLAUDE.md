@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T00:30:00Z -->
 # pkg/v1/password/
 
 ## Purpose
@@ -8,17 +9,20 @@ over `internal/core/crypto`'s PasswordHasher registry — zero runtime cost, no
 business logic (per `pkg/` convention).
 
 Importing the package blank-imports `internal/service/crypto/pbkdf2pw`,
-activating PBKDF2-SHA256 with **zero non-stdlib deps**.
+activating PBKDF2-SHA256 with **zero non-stdlib deps**, and links the 76 KB
+list of common passwords `IsCommon` reads (`internal/service/crypto/commonpw`,
+sorted at its first question).
 
 ## Surface
 
 | Identifier | Role |
 |---|---|
-| `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id == PHC id segment) |
+| `Algorithm` | defined type over `corecrypto.Algorithm` (stable scheme id == PHC id segment) — distinct from the other crypto-family `Algorithm` types, so a hash or KDF constant does not compile into a password call |
 | `PBKDF2SHA256` | PBKDF2-SHA256, the stdlib stretcher |
 | `Hash(a, password) (string, error)` | PHC hash for NEW passwords; unknown algo → `UnknownPasswordAlgorithm` |
 | `Verify(password, phc) (bool, error)` | constant-time check; scheme read from `phc`; mismatch → `(false, nil)`; malformed → error |
 | `NeedsRehash(phc) bool` | true when `phc` is below its scheme's current cost policy |
+| `IsCommon(password) bool` | one of the ten thousand most common passwords, case-insensitively (SecLists' xato-net top 10 000, MIT, embedded byte for byte — ADR 0143 §D10); the empty password is a length rule's |
 
 ## This is the ONLY surface for human passwords
 
@@ -40,13 +44,15 @@ if ok && password.NeedsRehash(stored) {
 ## argon2id (opt-in, recommended in production)
 
 argon2id is memory-hard (OWASP first choice) but pulls `golang.org/x/crypto`, so
-it is NOT the dep-light default. Blank-import its `third-party/x-crypto` package
-to register it, then `Hash` with its `Algorithm`; `Verify`/`NeedsRehash` already
+it is NOT the dep-light default. Blank-import `third-party/x-crypto/argon2id`
+to register it, then `Hash` with `Algorithm("argon2id")`; `Verify`/`NeedsRehash` already
 work on any registered scheme's stored hashes (the PHC id routes them).
 
 ## Conventions
 
-- **Aliases, not new types**; the const is the frozen PHC id (`"pbkdf2-sha256"`).
+- **`Algorithm` is a defined type, not an alias** — converted to
+  `corecrypto.Algorithm` at the call into core, so the password registry stays
+  its own keyspace. The const is the frozen PHC id (`"pbkdf2-sha256"`).
 - **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
   `password.go` doc comment; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.**
@@ -65,7 +71,3 @@ bazel test --config=race //pkg/v1/password:password_test
 # Fallback
 cd pkg/v1 && GOWORK=off go test -race -cover ./password/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V83) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

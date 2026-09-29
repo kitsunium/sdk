@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/proc/sdnotify/
 
 ## Purpose
@@ -31,6 +32,9 @@ and `NotificationValue` value type declared in `internal/core/proc`. Backs the
   the socket's write deadline and reaches a write already parked through
   `context.AfterFunc`, which is the only way to interrupt a `net.Conn`. It
   bounds the WRITE and not the dial, since a unixgram dial takes no round trip.
+  A write the bound ends is `NotifyFailed` over the socket's error joined with
+  ctx's, so an expiry reads `os.ErrDeadlineExceeded` and a cancellation also
+  answers `errors.Is(err, context.Canceled)`.
   Only the two helpers with a caller that has a deadline to inherit have a
   sibling; the others gain one when something needs it.
 
@@ -87,8 +91,9 @@ the sender cannot forge. The temp dir (and socket inode) is removed on `Close`.
 
 ## Layering / platform split
 
-- Imports stdlib (`net`, `os`, `syscall`, `strings`, `strconv`, `time`,
-  `errors`, `path/filepath`) + `internal/core/proc` + `internal/kernel/errs`.
+- Imports stdlib (`context`, `net`, `os`, `syscall`, `strings`, `strconv`,
+  `time`, `errors`, `path/filepath`) + `internal/core/proc` +
+  `internal/kernel/errs`.
   Never imports `pkg/*` or `golang.org/x/sys`.
 - `notify.go` + `sdnotify.go` are portable (no build tag).
 - `listen_linux.go` (`//go:build linux`) holds the credential-passing listener;
@@ -110,6 +115,8 @@ go test -race ./...
 ktn-linter lint ./...
 ```
 
-The credential round-trip works in an unprivileged container (same-process
-`SO_PASSCRED` send); the external tests degrade to `t.Skip` if `Listen` cannot
-bind on a constrained host, while still asserting the typed-error contract.
+The credential round-trip (`TestListenRoundTrip`) works in an unprivileged
+container (same-process `SO_PASSCRED` send). The Linux listener tests fail,
+never skip, when `Listen` cannot bind; off Linux,
+`TestListenUnsupportedOffLinuxTagged` (`sdnotify_other_test.go`, `!linux`)
+asserts the typed `UnsupportedPlatform` with no listener and no path.

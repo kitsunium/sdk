@@ -98,7 +98,7 @@ func sudoMove(tmpPath, execPath string) error {
 }
 
 // refusedElevation is the escalation of a Service built WithoutElevation: it
-// refuses whatever the opt-in says (ADR 0146).
+// refuses whatever the opt-in says (ADR 0150).
 func (s SourceValue) refusedElevation(_, execPath string) error {
 	//: refuse, naming why the opt-in was not even read.
 	return refuse(coreupd.ElevationNotAuthorised,

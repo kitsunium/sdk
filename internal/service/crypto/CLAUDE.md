@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T00:30:00Z -->
 # internal/service/crypto/
 
 ## Purpose
@@ -9,9 +10,10 @@ lives in `third-party/x-crypto/*` and is opt-in (ADR 0013 / ADR 0014).
 
 Most packages **self-register** at import through a package-level `var`, never
 an `init()`, so a blank import from the matching `pkg/v1/*` facade is all it
-takes to make the core dispatch resolve. Three do not register anything:
+takes to make the core dispatch resolve. Four do not register anything:
 `keyenvelope` and `keytree` are compositions over already-registered schemes,
-and `jwk` is a wire format rather than an algorithm.
+`jwk` is a wire format rather than an algorithm, and `commonpw` is data — a
+list a password is checked against, with its source and licence beside it.
 
 ## Contents
 
@@ -28,7 +30,8 @@ and `jwk` is a wire format rather than an algorithm.
 | `x25519/` | `Agreement` — DH-style shared secret | `x25519` | `pkg/v1/agree` | core `0.2.4.*` |
 | `keyenvelope/` | composition — password-wrapped DEK at rest (AEAD + PBKDF2) | *not registered* | `pkg/v1/crypto` | core `0.2.4.19` |
 | `keytree/` | composition — path-addressed hierarchical derivation (HKDF) | *not registered* | `pkg/v1/kdf` | core `0.2.4.*` |
-| `jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | *internal only today* | **`0.3.42.*`** |
+| `jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/token` (`JWK`, `JWKSet`) | **`0.3.42.*`** |
+| `commonpw/` | **data** — the ten thousand most common passwords (SecLists' xato-net top 10 000, MIT, embedded byte for byte at a pinned commit), `IsCommon` case-insensitive — ADR 0143 | *not registered* | `pkg/v1/password` (`IsCommon`) | none |
 
 `jwk` is the only package in this subtree that owns a `PP` slot: every scheme
 routes through a core port and therefore emits the shared `core/crypto`
@@ -43,7 +46,8 @@ unsupported `kty`, off-curve point, ambiguous `kid`) that no port models.
   code.
 - **Schemes mint no error codes.** They return the shared `core/crypto`
   sentinels (`SigningFailed`, `DecryptionFailed`, …) or wrap a `crypto/rand`
-  fault as `KeyGenerationFailed`. `jwk` is the documented exception.
+  fault as `KeyGenerationFailed`, `EntropyFailed` or `PasswordHashFailed`.
+  `jwk` is the documented exception.
 - **Secrets stay redacting.** `core/crypto.Key` answers `<redacted>` under
   `%v` / `%s` / `%#v`, and anything here that holds or re-wraps key material
   keeps that property — including `jwk.KeyValue`, whose whole export surface is
@@ -64,8 +68,10 @@ unsupported `kty`, off-curve point, ambiguous `kid`) that no port models.
 ## Subtree
 
 Each package documents its own contract, encodings and refusals:
-`aesgcm/`, `ecdsasig/`, `ed25519sig/`, `hkdfsha256/`, `hmacsha2/`, `jwk/`,
-`keyenvelope/`, `keytree/`, `pbkdf2pw/`, `stdhash/`, `streamaead/`, `x25519/`.
+`aesgcm/`, `commonpw/`, `ecdsasig/`, `ed25519sig/`, `hkdfsha256/`,
+`hmacsha2/`, `jwk/`, `keyenvelope/`, `keytree/`, `pbkdf2pw/`, `stdhash/`,
+`streamaead/`, `x25519/`. `commonpw/` also records the source, the pinned
+commit, the digest and the licence of the list it embeds.
 
 ## Verification
 

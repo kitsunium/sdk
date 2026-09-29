@@ -29,6 +29,26 @@
 // third-party/x-crypto — blank-import it when you can take the x/crypto dep, then
 // hash with its Algorithm; Verify still works on either scheme's stored hashes.
 //
+// # Common passwords
+//
+// [IsCommon] reports whether a password is one of the ten thousand most common
+// ones, compared case-insensitively — the blocklist NIST SP 800-63B-4 requires
+// a verifier to check a new password against, past the top 3 000 OWASP ASVS
+// 5.0 (6.2.4) asks for:
+//
+//	if password.IsCommon([]byte(pw)) {
+//	    return errTooCommon // before hashing anything
+//	}
+//
+// The list is SecLists' xato-net-10-million-passwords-10000.txt, MIT-licensed,
+// Copyright (c) 2018 Daniel Miessler — the passwords that occur most often in
+// the ten million credentials Mark Burnett released into the public domain in
+// 2015 — embedded byte for byte at a pinned commit (ADR 0143 §D10;
+// internal/service/crypto/commonpw names the commit, the digest and the
+// licence). The empty password is left to a length rule. Nearly every entry is
+// shorter than fifteen characters, so the check matters most beside a shorter
+// minimum.
+//
 // # Stable algorithm strings
 //
 // The [Algorithm] constants are frozen post-v1.0.0; the PHC id segment equals
@@ -37,6 +57,7 @@ package password
 
 import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	"github.com/kitsunium/sdk/internal/service/crypto/commonpw"
 
 	// Activates the stdlib PBKDF2-SHA256 hasher. Stdlib-only, so importing
 	// pkg/v1/password pulls zero non-stdlib dependencies.
@@ -68,6 +89,14 @@ func Hash(a Algorithm, password []byte) (phc string, err error) {
 func Verify(password []byte, phc string) (ok bool, err error) {
 	//: delegate to the core registry dispatcher (scheme read from the PHC id).
 	return corecrypto.VerifyPassword(password, phc)
+}
+
+// IsCommon reports whether password is one of the ten thousand most common
+// passwords, compared case-insensitively — PASSWORD as password. The empty
+// password is not: refusing it is a length rule's job.
+func IsCommon(password []byte) bool {
+	//: delegate to the embedded list.
+	return commonpw.IsCommon(password)
 }
 
 // NeedsRehash reports whether the stored PHC hash was produced with cost

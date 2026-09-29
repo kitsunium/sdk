@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-13T17:40:00Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/logger/sink/file/
 
 ## Purpose
@@ -7,8 +7,12 @@ Terminal `Sink` that appends formatted bytes onto an on-disk file. Opens
 with `O_APPEND | O_CREATE | O_WRONLY` (+ `O_NOFOLLOW` on every Unix) so
 concurrent producers — and other processes appending to the same file —
 emit atomic records as long as the payload stays under `PIPE_BUF` on
-POSIX. Rotation is intentionally out of scope (compose with a future
-`sink/rotate` or lumberjack-style wrapper).
+POSIX. Rotation is out of scope here. The `file` writer
+(`internal/service/writer/file`) wraps this sink and never rotates; the
+`rotfile` writer (`internal/service/writer/rotfile`, ADR 0014, opt-in per
+ADR 0015) is a separate sink that owns its descriptor — a rotation closes,
+renames and reopens the path, which an append-only sink cannot — and carries
+its own copy of this hardening, re-run on every reopen.
 
 ## Contents
 
@@ -71,11 +75,11 @@ by `unix` and every one of them compiles the constant; the remaining 8 are
 `js/wasm`, `plan9/{386,amd64,arm}`, `windows/{386,amd64,arm64}` and
 `wasip1/wasm` — the second and third rows above.
 
-Of the `unix` GOOS, five are **executed** on a real kernel by the
+Of the `unix` GOOS, seven are **executed** on a real kernel by the
 `e2e-cross` lane (`SERVICE_FILE_PKGS` carries `./logger/sink/file`):
-linux, darwin, freebsd, openbsd, netbsd. DragonFly, aix, solaris, illumos,
-android and ios get the flag by build tag and by cross-compile, never by
-execution — they are covered, not proven, and this sentence is the
+linux, darwin, freebsd, openbsd, netbsd, illumos and solaris (ADR 0144).
+DragonFly, aix, android and ios get the flag by build tag and by
+cross-compile, never by execution — they are covered, not proven, and this sentence is the
 difference.
 
 Closing the gap on Windows needs a different primitive, not a different
@@ -127,7 +131,7 @@ rows planted and fails on zero.
 
 - Place the log file under an attacker-writable directory; the hardening
   is TOCTOU-safe only when the directory tree is not world-writable.
-- Expect rotation — sink composition or out-of-band tooling owns that.
+- Expect rotation — the `rotfile` writer or out-of-band tooling owns that.
 
 ## Verification
 
@@ -138,7 +142,8 @@ bazel test --config=race //internal/service/logger/sink/file:file_test
 The Bazel lane is Linux only, and Linux had `O_NOFOLLOW` before this package
 did. The off-Linux proof is `e2e-cross`, which runs
 `go test -count=1 -short ./logger/sink/file` on macos-15, freebsd 15.0,
-openbsd 7.9 and netbsd 10.1, and on windows through the whole-suite step,
+openbsd 7.9, netbsd 10.1, OmniOS r151054 and Oracle Solaris 11.4, and on
+windows through the whole-suite step,
 which gates there since ADR 0095. On Windows `TestNew_DefaultFilePermIs0600`
 asserts the one bit the mode reaches (`0666`, not read-only) and says why.
 A test that opens a sink closes it in `t.Cleanup` even on the paths that

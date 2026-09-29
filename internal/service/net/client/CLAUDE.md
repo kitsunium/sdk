@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-05T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/net/client/
 
 ## Purpose
@@ -167,7 +167,8 @@ this layer.
 Measured in `BENCH.md` against a **stub transport**, so these are this package's
 own numbers and not the network's. `pkg/v1/client/BENCH.md` prices the
 end-to-end call and is the one to read for "what does a request cost"; this is
-what is inside the 5.53 % it attributes to `guard.RoundTrip`.
+what is inside the 1.17 % of allocated objects it attributes to
+`guard.RoundTrip`.
 
 | | ns/op | B/op | allocs |
 |---|---:|---:|---:|
@@ -202,7 +203,8 @@ that ~500 patterns is where the linear scan stops being noise.
 
 The allocation claims above are gated by `client_alloc_internal_test.go`, which
 carries `//go:build !race` — `AllocsPerRun` under the race detector measures the
-detector — and therefore runs in exactly one place: the race-off alloc lane.
+detector — and therefore runs only with the detector off: in the race-off alloc
+lane, and again in CI's `test-386` job, which has no `-race`.
 `//internal/service/net/client:client_test` is listed in
 `tools/alloc-lane-targets.txt` for that reason (SDK-wide rule 12). Each gate is
 mutation-checked in its own doc comment.
@@ -211,7 +213,7 @@ mutation-checked in its own doc comment.
 
 ```
 bazel test --config=race //internal/service/net/client:client_test
-# The allocation gates run ONLY in the race-off lane:
+# The allocation gates run ONLY race-off (here, and in CI's test-386 job):
 bazel test --config=alloc //internal/service/net/client:client_test
 # Fallback:
 cd internal/service && GOWORK=off go test -race -cover ./net/client/...

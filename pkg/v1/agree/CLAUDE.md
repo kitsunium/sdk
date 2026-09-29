@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/agree/
 
 ## Purpose
@@ -15,9 +16,11 @@ through), activating both with **zero non-stdlib deps**.
 
 | Identifier | Role |
 |---|---|
-| `Algorithm` | alias of `corecrypto.Algorithm` (stable scheme id) |
+| `Algorithm` | defined type over `corecrypto.Algorithm` (stable scheme id) — distinct from the other crypto-family `Algorithm` types, so a hash or signature constant does not compile into an agreement call |
 | `Key` | alias of `corecrypto.Key` (redacting 256-bit key) |
+| `KeyLen` | `corecrypto.KeyLen` — the 32-byte length of every `Key` |
 | `X25519` | Diffie-Hellman over Curve25519 (RFC 7748) |
+| `NewKey(raw) (Key, error)` | builds a `Key` from exactly `KeyLen` bytes (copied); any other length → `InvalidKey` |
 | `GenerateKey(a) (pub, priv []byte, error)` | fresh keypair; `priv` is secret |
 | `SharedKey(a, priv, peerPub, info) (Key, error)` | HKDF'd shared key; low-order peer → `AgreementFailed` |
 
@@ -44,8 +47,10 @@ independent keys by passing different `info` labels.
 
 ## Conventions
 
-- **Aliases, not new types** — `Algorithm`/`Key = corecrypto.*`; the const is the
-  frozen wire string (`"x25519"`).
+- **`Key` is an alias, `Algorithm` a defined type** — `Key = corecrypto.Key`;
+  `Algorithm` is converted to `corecrypto.Algorithm` at the call into core, so
+  the agreement registry stays its own keyspace. The const is the frozen wire
+  string (`"x25519"`).
 - **README.md is generated** (`make docs-readme` → gomarkdoc, ADR 0008). Edit the
   package doc comment in `agree.go`; never hand-edit `README.md`.
 - **Signatures freeze at v1.0.0.** New scheme consts can be added; existing ones

@@ -1,11 +1,13 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/sink/
 
 ## Purpose
 
-Terminal `core/logger.Sink` implementations — the bottom of every sink
-chain. Each sub-package owns one transport and one PP slot in the dotted-
-quad error registry (ADR 0006).
+Terminal `core/logger.Sink` implementations — a sink chain ends in one of
+these or in a writer sink from `internal/service/writer/*` /
+`third-party/*/writer/*`. `console`, `file` and `syslog` each own one
+transport and one PP slot in the dotted-quad error registry (ADR 0006);
+`memory` keeps records in process and mints no code.
 
 ## Contents
 
@@ -14,17 +16,22 @@ quad error registry (ADR 0006).
 | `console/` | `io.Writer` (stderr / stdout / custom) under a mutex | 0.3.13.\* |
 | `file/`    | `*os.File` opened append-only, symlink-rejecting     | 0.3.14.\* |
 | `syslog/`  | `net.Conn` over UDP or TCP, RFC5424 minimal envelope | 0.3.15.\* |
+| `memory/`  | none — a slice of deep-cloned `RecordEvent`s, for test assertions | none |
 
 ## Conventions
 
 - **Constructors return the `Sink` interface**, never the concrete type
-  (IFACE-PLUGIN). The unexported struct stays in its own package.
+  (IFACE-PLUGIN). The unexported struct stays in its own package. The
+  exception is `memory`: `NewMemory` returns `*Memory`, whose `Records` /
+  `Len` / `Reset` sit outside the `Sink` port.
 - **Concurrency.** Every sink implements the "safe for concurrent use"
   Sink contract — typically via a `sync.Mutex` around the underlying
   writer (`console`, `file`, `syslog`). UDP datagrams under PIPE_BUF are
   already atomic but the mutex is kept uniform.
-- **Context cancellation.** Every `Write` / `Flush` checks `ctx` first and
-  returns a wrapped `CtxCancelled` sentinel; the cause remains
+- **Context cancellation.** Every `Write` / `Flush` checks `ctx` first.
+  `Write` returns a wrapped `CtxCancelled` sentinel in `console`, `file` and
+  `syslog`; `Flush` wraps it only in `syslog`, and `memory` returns the bare
+  `ctx.Err()` from both. Either way the cause remains
   `errors.Is(ctx.Err())` matchable.
 - **Wrapping I/O errors.** Underlying `Write` / `Sync` / `Close` failures
   flow through `errs.Wrap` so `errors.Is` against the original cause
@@ -75,3 +82,4 @@ bazel test --config=race //internal/service/logger/sink/...
 - `console/` — stderr/stdout/custom `io.Writer`
 - `file/`    — append-only on-disk file, symlink hardened
 - `syslog/`  — minimal RFC5424 UDP/TCP
+- `memory/`  — in-process record buffer for tests

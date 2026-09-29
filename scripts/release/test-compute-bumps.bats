@@ -460,7 +460,7 @@ STUB
   [ "$output" = "pkg" ]
 }
 
-# ── The framework module (ADR 0143) ─────────────────────────────────────────
+# ── The framework module (ADR 0147) ─────────────────────────────────────────
 # framework/ is a public module of its own, released in lockstep with pkg. A
 # change to it emits the token `framework`; the chain is cut once either way.
 

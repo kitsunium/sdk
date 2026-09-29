@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/trace/
 
 ## Purpose
@@ -28,6 +29,8 @@ alphabetical order.
 | Instrumentation | `RecordError`, `ServerMiddleware`, `ClientMiddleware` |
 | Export | `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`, `RegisterExporter`, `LookupExporter`, `AvailableExporters`, `Export` |
 | Attributes | `String`, `Bool`, `Int64`, `Float64` |
+| Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported`, `MaxTraceStateMembers`; the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
+| Sentinels | core: `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`; service: `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess` |
 
 ## `trace.Attr` IS `metrics.Attr`
 

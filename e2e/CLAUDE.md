@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # e2e/
 
 ## Purpose
@@ -5,15 +6,17 @@
 The SDK conformance binary: a runtime test harness that calls the **public
 `pkg/v1` API** and asserts the observable effect on the host, so we know the SDK
 *works* on a platform, not merely that it *compiles* (the build bar is the
-cross-platform matrix; this is the runtime bar — see ADR 0018). Built per-GOOS
-and run on each real OS VM by `.github/workflows/e2e-vm.yml`.
+cross-platform matrix; this is the runtime bar — see ADR 0018). Run on real
+kernels by `.github/workflows/e2e-cross.yml` (GitHub's Linux, macOS and Windows
+runners, the three BSDs, OmniOS and Oracle Solaris in VMs) and, on demand, on the lab's VMs by
+`.github/workflows/e2e-vm.yml`.
 
 ## Shape
 
 ```
 e2e/
 ├── go.mod              own module (github.com/kitsunium/sdk/e2e); replace → ../pkg + ../internal/*
-├── main.go            orchestrator: conformanceGroups() lists every domain, exit = Fail count
+├── main.go            orchestrator: conformanceGroups() lists every domain, exit 1 when any check fails
 ├── harness/           the runner
 │   ├── harness.go      Status, Result, Run, watchedRun (CheckTimeout), safeRun, report (table + summary)
 │   └── checkgroup.go   Check, CheckGroup — a domain's named group of checks
@@ -62,8 +65,9 @@ e2e/
 - **Outside `go.work`** on purpose: the Bazel `go_deps` extension reads `go.work`
   and cannot process this extra module, so `e2e` is in `.bazelignore` and built
   by `go build` only (`GOWORK=off`, via its `replace` directives). Validated by
-  the `cross-platform.yml` matrix (cross-compile) and `e2e-vm.yml` (real-kernel
-  run). It is intentionally NOT a Bazel target.
+  `bazel-ci.yml`'s `cross-build` (compile and vet on every GOOS/GOARCH cell) and
+  `test-386` jobs, which loop over the module census, and by `e2e-cross.yml` and
+  `e2e-vm.yml` (real-kernel runs). It is intentionally NOT a Bazel target.
 
 ## Do NOT
 

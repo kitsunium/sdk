@@ -144,10 +144,11 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_51_00: "internal/service/mail/spool",
 	0x00_03_58_00: "internal/service/statemachine",
 	0x00_03_59_00: "internal/service/profiling",
-	0x00_03_5A_00: "internal/service/ipc",          // ADR 0144
-	0x00_04_01_00: "framework/model/internal/core", // ADR 0143: layer 4 is the framework module
+	0x00_03_5A_00: "internal/service/codec/jsonpatch",
+	0x00_03_5B_00: "internal/service/ipc",          // ADR 0148
+	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework module
 	0x00_04_02_00: "framework/internal/kit",
-	0x00_04_03_00: "framework/telemetry", // ADR 0145
+	0x00_04_03_00: "framework/telemetry", // ADR 0149
 	0x00_04_10_00: "framework/connectors/postgres",
 	0x00_04_11_00: "framework/connectors/mysql",
 	0x00_04_12_00: "framework/connectors/sqlite",
@@ -394,7 +395,7 @@ func collectCodeDeclsInDir(dir, pkg string) (decls []codeDecl, unresolved []stri
 }
 
 // collectCodeDecls is the tree-wide counterpart, walking the same three roots
-// the Define audit walks (internal, pkg, third-party, framework — ADR 0143).
+// the Define audit walks (internal, pkg, third-party, framework — ADR 0147).
 func collectCodeDecls(tb testing.TB, root string) (decls []codeDecl, unresolved []string) {
 	tb.Helper()
 	seen := map[string]bool{}

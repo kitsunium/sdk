@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-11T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/clock/
 
 ## Purpose
@@ -65,14 +65,17 @@ only producer of — splitting them left three files nothing else referenced.
 
 ## Why `Clock` was NOT extended
 
-`Clock` is a **published port**, not an internal detail. `pkg/v1/cache.Config`
-is a *type alias* for `internal/kernel/cache.Config[K,V]`, whose `Clock` field
-carries this exact interface — so any consumer of the released `pkg` module can
-already write a two-method double and pass it in. Go interfaces are structural:
-they cannot *name* `clock.Clock`, but they satisfy it, and adding a method
-breaks them at compile time with no deprecation window.
+`Clock` is a **published port**, not an internal detail. `pkg/v1/clock`
+publishes it as an alias (ADR 0090), and `pkg/v1/cache.Config` is a *type
+alias* for `internal/kernel/cache.Config[K,V]`, whose `Clock` field carries this
+exact interface — so any consumer of the released `pkg` module can write a
+two-method double and pass it in. Go interfaces are structural: a double
+satisfies `clock.Clock` whether or not it names it, and adding a method breaks
+it at compile time with no deprecation window.
 
-In-tree there are **seven** such doubles today (all in `_test.go` files):
+In-tree there are **ten** hand-written implementations today, all in
+`_test.go` files — nine two-method doubles, and `pkg/v1/clock`'s `handClock`,
+a complete `Timed`:
 
 | Package | Type |
 |---|---|
@@ -82,8 +85,10 @@ In-tree there are **seven** such doubles today (all in `_test.go` files):
 | `internal/service/writer/rotfile` | `fakeClock` |
 | `internal/service/resilience` | `steppedClock` |
 | `internal/service/id` | `steppedClock` |
+| `internal/service/queue` | `steppingClock` |
+| `pkg/v1/clock` | `readOnlyClock`, `handClock` |
 
-Widening `Clock` would have broken all seven plus every downstream one. Adding
+Widening `Clock` would break all ten plus every downstream one. Adding
 `Waiter` alongside breaks nothing: `Clock` is byte-identical to what it was,
 and `System` moved from `Clock` to `Timed`, which is a *widening* of the value
 — every `clk = clock.System` assignment into a `Clock` field still compiles.
@@ -91,9 +96,11 @@ and `System` moved from `Clock` to `Timed`, which is a *widening* of the value
 regression guard: it declares a bare `Now`/`Since` type and assigns it to a
 `clock.Clock`, so re-widening the interface fails that test first.
 
-The seven in-tree doubles are **not** migrated to `ManualClock` in this change
-— they still compile and still pass, and rewriting seven packages' tests to
-prove a point belongs in its own commit. They are the obvious first consumers.
+None of the ten is migrated to `ManualClock` — they compile and pass as they
+are. The two in `pkg/v1/clock` exist to prove a consumer can write a double
+with no access to `internal/`, and `queue`'s `steppingClock` moves on at every
+reading, which `ManualClock` never does; the other seven are the obvious first
+consumers.
 
 ## Non-positive durations (ADR 0031)
 
@@ -177,8 +184,8 @@ inject anything to get simulated time in a bubble — that is
   for `id`'s snowflake clock-regression path and for any epoch-encoding test.
 - **Be a value you can hand to a constructor.** SDK constructors take a
   `clock.Clock` / `clock.Timed`. synctest patches a package; it hands you
-  nothing to inject, and a consumer of `pkg/v1` who needs a double still has to
-  write one.
+  nothing to inject. A consumer of `pkg/v1` injects `pkg/v1/clock`'s
+  `ManualClock`, the alias of this one (ADR 0090).
 - **Step time explicitly.** `Advance(30*time.Second)` and then assert. In a
   bubble time jumps to the next deadline on its own whenever everything blocks;
   holding time still while you poke at the system is not a thing you control.
@@ -258,9 +265,10 @@ m.Advance(time.Second)   // exactly one tick, at exactly +1s
 
 ## Do NOT
 
-- **Add a method to `Clock`.** See §"Why `Clock` was NOT extended". Waiting
-  capabilities go on `Waiter`; anything else needs a third interface and a
-  reason. *(This reverses the pre-2026-09 "Do NOT add `Sleep`, `After`,
+- **Add a method to `Clock`, `Waiter`, `Timed`, `Timer` or `Ticker`.** See
+  §"Why `Clock` was NOT extended". `pkg/v1/clock` publishes all five, so all
+  five are frozen (ADR 0090): a new capability is a sibling interface
+  discovered by type assertion (ADR 0039), and it needs a reason. *(This reverses the pre-2026-09 "Do NOT add `Sleep`, `After`,
   `NewTimer` here" rule, which kept the package thin at the cost of making
   "injecting this clock makes time testable" false: with only `Now`/`Since`,
   no timeout, retry backoff or ticker cadence could be driven from a test. The
@@ -274,10 +282,11 @@ m.Advance(time.Second)   // exactly one tick, at exactly +1s
   that inside `time.Since`.
 - **Emit an error code from this package.** It has none and needs none; a
   range allocation in `codeRangeOwners` (ADR 0035) is a separate decision.
-- **Alias `ManualClock` into `pkg/v1` on a whim.** It would be genuinely useful
-  to downstream test suites, but it is a new public package with the full
-  README/gomarkdoc obligation (rules 8 and 10) — a deliberate decision, not a
-  side effect of this one.
+- **Add an exported symbol here without its `pkg/v1/clock` alias.** The
+  facade is this package in full — `Clock`, `Waiter`, `Timed`, `Timer`,
+  `Ticker`, `System`, `ManualClock`, `NewManualClock` — as aliases and nothing
+  else (ADR 0090), and a facade that published a subset would recreate, on
+  whatever it left behind, the problem that ADR closed.
 
 ## Verification
 

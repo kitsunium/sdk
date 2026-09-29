@@ -1,6 +1,7 @@
 package kit
 
 import (
+	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
@@ -10,10 +11,13 @@ import (
 )
 
 func TestBuildOfATodoOnALocalKit(t *testing.T) {
+	// The replacement is an absolute directory of this OS: "/src/platform" is
+	// not one on Windows, and a relative one is never asked of git.
+	local := filepath.Join(t.TempDir(), "platform")
 	bi := &debug.BuildInfo{
 		Main: debug.Module{Path: "github.com/kitsunium/todo", Version: "v0.0.0-20260924095948-8cf38860b6ef"},
 		Deps: []*debug.Module{
-			{Path: frameworkModule, Version: "v0.0.0", Replace: &debug.Module{Path: "/src/platform", Version: "(devel)"}},
+			{Path: frameworkModule, Version: "v0.0.0", Replace: &debug.Module{Path: local, Version: "(devel)"}},
 			{Path: sdkModule, Version: "v0.4.6"},
 		},
 		Settings: []debug.BuildSetting{
@@ -32,7 +36,7 @@ func TestBuildOfATodoOnALocalKit(t *testing.T) {
 	if b.Product.Version != "" || !strings.HasPrefix(b.Product.Revision, "8cf3886") || !b.Product.Modified || b.Product.Time == nil || b.Product.Local {
 		t.Errorf("product %+v: a pseudo-version is not a version; the VCS stamp is the revision", b.Product)
 	}
-	if !b.Kit.Local || b.Kit.Version != "" || b.Kit.Revision != "814a8d1c0ffee" || b.Kit.Time == nil || !b.Kit.Time.Equal(at) || asked != "/src/platform" {
+	if !b.Kit.Local || b.Kit.Version != "" || b.Kit.Revision != "814a8d1c0ffee" || b.Kit.Time == nil || !b.Kit.Time.Equal(at) || asked != local {
 		t.Errorf("kit %+v (git asked about %q)", b.Kit, asked)
 	}
 	if b.SDK.Version != "v0.4.6" || b.SDK.Local {

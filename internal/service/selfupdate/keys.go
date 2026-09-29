@@ -1,5 +1,5 @@
 // Package selfupdate — the vendor key list and the signature domain of ADR
-// 0146: several keys any of which verifies, and a manifest that names its tag
+// 0150: several keys any of which verifies, and a manifest that names its tag
 // and its expiry.
 package selfupdate
 
@@ -26,7 +26,7 @@ const (
 )
 
 // WithVendorKeys links the keys a release may be signed with, in order: a
-// release verifies when ANY of them verifies its manifest (ADR 0146). A key
+// release verifies when ANY of them verifies its manifest (ADR 0150). A key
 // rotation publishes under the new key while builds carrying both accept it
 // and builds carrying only the old one keep reading the old — neither side has
 // to be updated first. Several keys are still ONE signer: no quorum is taken.

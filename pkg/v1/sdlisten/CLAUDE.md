@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/sdlisten
 
 Public facade for systemd-style **socket activation** (`sd_listen_fds(3)`) — the
@@ -13,8 +14,10 @@ systemd.
   zero behaviour. `Spec` is a type alias of the core port (so the same value drives
   `process.Start`).
 - **Symmetric, self-contained.** `Prepare` (activator) is the mirror of
-  `Files`/`Listeners` (service): it appends each listener's socket to the child
-  `Spec.ExtraFiles` and sets `LISTEN_FDS` / `LISTEN_FDNAMES` in `Spec.Env`. This is
+  `Files`/`Listeners` (service): it puts each listener's socket, in sorted-name
+  order, at the FRONT of the child `Spec.ExtraFiles` — the protocol fixes them at
+  fd 3 onward, so any `ExtraFiles` already set shift after them — and sets
+  `LISTEN_FDS` / `LISTEN_FDNAMES` in `Spec.Env`. This is
   what makes the family testable end-to-end without a real init system.
 - **LISTEN_PID convention.** A pre-fork activator cannot know the child's pid, so
   `Prepare` omits `LISTEN_PID`. The receiving side accepts an absent `LISTEN_PID`

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/plugin/
 
 ## Purpose
@@ -5,8 +6,10 @@
 One question, asked by every process-wide registry in the SDK before it
 publishes anything: **is this value usable as a registry entry at all?**
 
-`Unusable(v any) (why string)` returns the empty string when it is, and a
-reason fragment when it is not. ADR 0071.
+`Unusable[T any](v T) string` returns the empty string when it is, and a
+reason fragment when it is not. `T` is the registrar's port, inferred at the
+call; what is judged is the dynamic value behind it, which `reflect` reads
+through the boxing. ADR 0071.
 
 Code range: none. The answer is a string, not an error — see below.
 

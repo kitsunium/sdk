@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/strictjson/
 
 ## Purpose
@@ -15,8 +16,8 @@ ships without an experiment flag. Not a codec: it registers no Format.
 
 | File | Role |
 |---|---|
-| `strictjson.go` | package doc, `Decode`, `checkArguments`, `decode`, `classify`, `located`, `boundPointer`, `PointerOf` |
-| `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict` |
+| `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `checkArguments`, `decode`, `classify`, `located`, `boundPointer`, `PointerOf`, `misconfigured` |
+| `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `causeOf`, which names a read failure by its type |
 | `request.go` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839) |
 | `codes.go` / `errors.go` | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status |
 
@@ -41,8 +42,9 @@ ships without an experiment flag. Not a codec: it registers no Format.
 - **No cause is kept from the decoder.** `jsonv2`'s errors quote the offending
   member name and, through a field's own unmarshaler, the offending value; this
   package's refusals are built with the sentinel as the origin and carry only a
-  byte offset and a pointer. A failed READ keeps the transport's message as a
-  field (the `service/resilience` pattern), since that is not the document's.
+  byte offset and a pointer. A failed READ keeps only the failure's TYPE as its
+  `cause` field (`causeOf`, e.g. `*net.OpError`), never its message, which a
+  reader may have built from the bytes it read.
   `TestRefusalsNeverQuoteTheDocument` plants a value in each refusal's position
   and greps every rendering: `Error`, Public, Private, every field, and every
   error the chain unwraps to.

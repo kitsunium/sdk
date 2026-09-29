@@ -41,7 +41,7 @@ here="$(cd "$(dirname "$0")" && pwd)"
 . "$here/lib/release-size.sh"
 
 # The release chain is every workspace module but the root, read from go.work
-# by chain_modules (lib/tag-format.sh — ADR 0143 §9): internal/* (tagged only
+# by chain_modules (lib/tag-format.sh — ADR 0147 §9): internal/* (tagged only
 # so pkg resolves without `replace`; Go's internal/ rule still blocks a direct
 # consumer import), pkg, the framework and its connectors. All are tagged at
 # one version and cross-pinned, so the published graph resolves from the proxy.
@@ -439,7 +439,7 @@ publish_chain() {
 }
 
 # The tokens are read in full first. `pkg` and `framework` both mean "the chain
-# changed" and the chain is released in lockstep (ADR 0143 §9), so any number
+# changed" and the chain is released in lockstep (ADR 0147 §9), so any number
 # of valid tokens publishes it ONCE — a second pass would find the tag it just
 # pushed and cut the next patch on top of it.
 tokens=()

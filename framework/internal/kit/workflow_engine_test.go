@@ -19,6 +19,7 @@ import (
 // After a restart an instance keeps the instant it entered its state — its
 // timers keep counting — and its history.
 func TestAWorkflowKeepsItsInstancesAcrossARestart(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	clk := clock.NewManualClock(time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC))
 	run := func(during func(app *kit.App)) {

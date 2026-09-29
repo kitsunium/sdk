@@ -1,4 +1,5 @@
-// Package docstore — range 0.3.80.* (ADR 0110 service/docstore block).
+// Package docstore — range 0.3.80.* (ADR 0110 service/docstore block; ADR 0139
+// added 16 and 17, ADR 0143 18 to 20).
 package docstore
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -71,3 +72,16 @@ const CodeStatementFailed errs.Code = 0x00_03_50_10 // 0.3.80.16
 // CodeKeyTooLong identifies a write whose store key, or one of whose index
 // keys, is longer than the SQL store's key columns hold.
 const CodeKeyTooLong errs.Code = 0x00_03_50_11 // 0.3.80.17
+
+// CodeVersionsNotKept identifies a call on a document's versions to a store
+// that keeps none: its configuration's Versions is zero.
+const CodeVersionsNotKept errs.Code = 0x00_03_50_12 // 0.3.80.18
+
+// CodeVersionNotFound identifies a read of a version its document does not
+// keep: never made, or pruned.
+const CodeVersionNotFound errs.Code = 0x00_03_50_13 // 0.3.80.19
+
+// CodeVersionsRewriteRefused identifies a rewrite of a document's versions
+// whose function returned what a rewrite may not: a version it was not given,
+// out of order, with another instant, or that is not JSON.
+const CodeVersionsRewriteRefused errs.Code = 0x00_03_50_14 // 0.3.80.20

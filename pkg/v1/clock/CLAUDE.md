@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/clock/
 
 ## Purpose
@@ -16,14 +17,17 @@ than by method set, and the package declaring them was behind `internal/`. So
 `Timed` was unimplementable from outside the module and its `Clock` field could
 only hold nil.
 
-Nine configurations were affected, counted by resolving every `pkg/v1` alias
-to its internal type rather than by reading: `scheduler.Config`,
+Sixteen configurations take a `Timed`, counted by resolving every `pkg/v1`
+alias to its internal type rather than by reading: `scheduler.Config`,
 `lock.MemoryConfig`, `lock.FileConfig`, `lock.KeepaliveConfig`,
 `session.FileConfig`, `sql.Config`, `health.Config`, `lifecycle.Config`,
-`queue.ConsumerConfig` — none of them deterministically testable by a
-downstream consumer. Fourteen more carry a `clock.Clock`, which a two-method
-double could always satisfy structurally; what those lacked was a NAME for the
-type and any way to reach `System`.
+`queue.ConsumerConfig`, then `health.AskConfig`, `lifecycle.SupervisorConfig`,
+`resilience.RetryConfig`, `secret.FileConfig`, `secret.RotatorConfig`,
+`statemachine.Config` and `mail.SpoolConfig` — none of them deterministically
+testable by a downstream consumer without this package. Eighteen more carry a
+`clock.Clock`, which a two-method double can always satisfy structurally; what
+those lack without this package is a NAME for the type and any way to reach
+`System`.
 
 ## Surface
 
@@ -74,7 +78,9 @@ bazel test --config=race //pkg/v1/clock:clock_test
 ```
 
 `clock_external_test.go` is `package clock_test` and names `pkg/v1` only. It
-asserts the nine `Timed`-bearing configurations accept a hand-written clock,
-that a two-method double still reaches a `Clock`-typed field, that `System` is
-referenceable, and that a `ManualClock` fires a real scheduler with no
-`time.Sleep` and no wall-clock wait.
+asserts that a hand-written clock is accepted by the first nine `Timed`-bearing
+configurations listed above, that a two-method double still reaches a
+`Clock`-typed field, that `System` is referenceable, and that a `ManualClock`
+fires a real scheduler with no `time.Sleep` and no wall-clock wait. The table of
+`TestAHandWrittenTimedReachesEveryConfigThatTakesOne` does not carry the other
+seven `Timed`-bearing configurations.

@@ -1,5 +1,6 @@
-// Package docstore — opening a persistent store: the snapshot read, the
-// overlay replayed on top, and the resting state restored.
+// Package docstore — opening a persistent store: the snapshot and the
+// versions file read, the overlay replayed on top, and the resting state
+// restored.
 package docstore
 
 import (
@@ -42,13 +43,31 @@ func (s *Store[T]) load() (needsFold bool, err error) {
 		return false, readErr
 	}
 	//: LoadFailed.
-	if replayErr := s.readOverlay(); replayErr != nil {
-		//: no store over an overlay it could not replay.
+	if replayErr := s.replayOverSnapshot(); replayErr != nil {
+		//: no store over versions or an overlay it could not trust.
 		return false, replayErr
 	}
 	//: at rest already — one snapshot, an empty overlay that is durable — or
 	//: not yet.
 	return !snapshotFound || !overlayExisted || len(s.pending) > 0, nil
+}
+
+// replayOverSnapshot loads what the snapshot does not hold: the versions
+// file, then the overlay replayed over both, then the check that every
+// version belongs to a document.
+func (s *Store[T]) replayOverSnapshot() error {
+	//: LoadFailed.
+	if versionsErr := s.readVersions(); versionsErr != nil {
+		//: no store over versions it could not read, or does not keep.
+		return versionsErr
+	}
+	//: LoadFailed.
+	if replayErr := s.readOverlay(); replayErr != nil {
+		//: no store over an overlay it could not replay.
+		return replayErr
+	}
+	//: LoadFailed, or every version belongs to a document.
+	return s.versionsWithoutDocument()
 }
 
 // readSnapshot loads the snapshot into docs and reports whether there was
@@ -145,21 +164,189 @@ func (s *Store[T]) replay(name string) error {
 		//: LoadFailed, naming the file.
 		return loadFailed(file, "names another key than its file", nil)
 	}
+	//: versions the store would neither keep nor write back, or that no
+	//: store wrote.
+	if versionsErr := s.checkEntryVersions(file, record); versionsErr != nil {
+		//: LoadFailed, naming the file.
+		return versionsErr
+	}
 	switch {
-	//: the key was deleted after the snapshot.
+	//: the key was deleted after the snapshot, its versions with it.
 	case record.Deleted:
 		delete(s.docs, record.Key)
+		s.setVersions(record.Key, nil)
 	//: an entry that neither holds a document nor records a deletion.
 	case len(record.Document) == 0:
 		//: LoadFailed, naming the file.
 		return loadFailed(file, "holds no document", nil)
-	//: the key's latest document.
+	//: the key's latest document, and its versions.
 	default:
 		s.docs[record.Key] = record.Document
+		s.setVersions(record.Key, compacted(record.Versions))
 	}
 	s.pending[name] = struct{}{}
 	//: replayed.
 	return nil
+}
+
+// checkEntryVersions refuses, as LoadFailed naming file, the versions an
+// overlay entry holds when they are wrong: versions in a store that keeps
+// none, versions beside a deletion, which takes them, or versions no store
+// wrote.
+func (s *Store[T]) checkEntryVersions(file string, record entryRecord) error {
+	//: nothing recorded, which is always fine.
+	if record.Versions == nil {
+		//: nothing to refuse.
+		return nil
+	}
+	//: the store would drop them at its next fold.
+	if s.keep == 0 {
+		//: the configuration, not the file, is what to change.
+		return loadFailed(file, "keeps versions, and the store keeps none: open it with Versions", nil)
+	}
+	//: a deletion takes a document's versions with it.
+	if record.Deleted {
+		//: not an entry a store wrote.
+		return loadFailed(file, "records a deletion and keeps versions", nil)
+	}
+	//: numbered from 1, newest first, each holding a document.
+	return checkRecord(file, record.Versions)
+}
+
+// readVersions loads the versions file into versions when the store keeps
+// versions. A store that keeps none refuses one: it would neither maintain
+// the versions nor write them back, so a deletion would leave a document's
+// versions to the next document stored under its key, and a fold would drop
+// them all. An absent file is a store that has not folded since it began to
+// keep versions — or one that never did.
+func (s *Store[T]) readVersions() error {
+	//: a store that keeps none only checks there is nothing to keep.
+	if s.keep == 0 {
+		_, statErr := fs.Stat(s.fs, s.versionsPath)
+		switch {
+		//: nothing kept, as configured.
+		case errors.Is(statErr, fs.ErrNotExist):
+			//: nothing to load.
+			return nil
+		//: whether there is one is not known.
+		case statErr != nil:
+			//: LoadFailed, naming the file.
+			return loadFailed(s.versionsPath, "unreadable", statErr)
+		}
+		//: LoadFailed, saying what to do.
+		return loadFailed(s.versionsPath, "keeps versions, and the store keeps none: open it with Versions, or remove the file to drop them", nil)
+	}
+	raw, readErr := fs.ReadFile(s.fs, s.versionsPath)
+	//: none written yet.
+	if errors.Is(readErr, fs.ErrNotExist) {
+		//: every document is as it was before versions were kept.
+		return nil
+	}
+	//: there, and unreadable.
+	if readErr != nil {
+		//: LoadFailed, naming the file.
+		return loadFailed(s.versionsPath, "unreadable", readErr)
+	}
+	var records map[string]*versionsRecord
+	//: not a JSON object from key to versions.
+	if decodeErr := json.Unmarshal(raw, &records); decodeErr != nil {
+		//: LoadFailed, saying where the JSON broke and never what it held.
+		return kerrs.Wrap(LoadFailed, kerrs.WrapParams{},
+			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr)))
+	}
+	//: a JSON null decodes into no map at all.
+	if records == nil {
+		//: LoadFailed, naming the file.
+		return loadFailed(s.versionsPath, "is null, not a versions file", nil)
+	}
+	//: every document's versions under its key.
+	for key, record := range records {
+		//: versions nobody could ask for.
+		if key == "" {
+			//: LoadFailed, naming the file.
+			return loadFailed(s.versionsPath, "holds versions under the empty key", nil)
+		}
+		//: numbered from 1, newest first, each holding a document.
+		if recordErr := checkRecord(s.versionsPath, record); recordErr != nil {
+			//: LoadFailed, naming the file and never the key.
+			return recordErr
+		}
+		s.versions[key] = compacted(record)
+	}
+	//: loaded.
+	return nil
+}
+
+// versionsWithoutDocument refuses versions of a key the store holds no
+// document under. No write leaves any — a deletion takes them in its own
+// entry, and an entry keeping versions always holds a document — so they come
+// from an edited versions file.
+func (s *Store[T]) versionsWithoutDocument() error {
+	//: every key that has versions.
+	for key := range s.versions {
+		//: its document.
+		if _, found := s.docs[key]; !found {
+			//: LoadFailed, naming the file and never the key.
+			return loadFailed(s.versionsPath, "holds versions of a document the store does not hold", nil)
+		}
+	}
+	//: every version belongs to a document.
+	return nil
+}
+
+// checkRecord refuses, as LoadFailed naming file, versions no store wrote:
+// a store numbers them from 1, the current one the highest, and keeps the
+// former ones newest first, each holding a document.
+func checkRecord(file string, record *versionsRecord) error {
+	//: a key mapped to null.
+	if record == nil {
+		//: not versions.
+		return loadFailed(file, "holds versions that are null", nil)
+	}
+	newer := record.Current.Number
+	//: numbering starts at 1.
+	if newer == 0 {
+		//: not a number a store gives.
+		return loadFailed(file, "holds a version numbered 0", nil)
+	}
+	//: newest first, each below the one before.
+	for _, former := range record.Former {
+		switch {
+		//: numbering starts at 1.
+		case former.Number == 0:
+			//: not a number a store gives.
+			return loadFailed(file, "holds a version numbered 0", nil)
+		//: a number given twice, or out of order.
+		case former.Number >= newer:
+			//: not an order a store keeps.
+			return loadFailed(file, "holds versions out of order", nil)
+		//: a version holds a document.
+		case len(former.Document) == 0:
+			//: not a version.
+			return loadFailed(file, "holds a version without a document", nil)
+		//: a version a store wrote.
+		default:
+		}
+		newer = former.Number
+	}
+	//: versions a store wrote.
+	return nil
+}
+
+// compacted returns record with its former versions' documents compact, as
+// a write makes them: the files hold them indented. A nil record stays nil.
+func compacted(record *versionsRecord) *versionsRecord {
+	//: nothing recorded.
+	if record == nil {
+		//: nil.
+		return nil
+	}
+	//: a freshly decoded record is the loader's own to change.
+	for i := range record.Former {
+		record.Former[i].Document = compactJSON(record.Former[i].Document)
+	}
+	//: as a write would have left it.
+	return record
 }
 
 // origin names the file a loaded document came from: its overlay entry when

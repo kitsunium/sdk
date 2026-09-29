@@ -28,18 +28,18 @@ if proc.Supported(proc.CapCgroup) {
 ### Capability × platform matrix
 
 ```
-Capability           linux darwin windows freebsd openbsd netbsd dragonfly
-CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅
-CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅
-CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅
-CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌
-CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅
-CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅
-CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅
-CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅
+Capability           linux darwin windows freebsd openbsd netbsd dragonfly illumos solaris
+CapProcessSpawn        ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+CapSignalRelay         ✅     ✅     ✅      ✅      ✅      ✅      ✅        ✅      ✅
+CapReaper              ✅     ✅     ✅¹     ✅      ✅      ✅      ✅        ✅⁴     ✅⁴
+CapCgroup              ✅     ❌     ✅²     ❌      ❌      ❌      ❌        ❌      ❌
+CapRlimit              ✅     ✅     ❌³     ✅      ✅      ✅      ✅        ✅      ✅
+CapUmaskNiceOOM        ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+CapSdNotify            ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
+CapSocketActivation    ✅     ✅     ❌      ✅      ✅      ✅      ✅        ✅      ✅
 ```
 
-¹ Windows has no zombies; the reaper is a correct no\-op there. ² Windows cgroup is the Job Object backend. ³ the Unix setrlimit\-on\-self model has no Windows analogue; Windows resource limits are applied through the cgroup \(Job Object\) container or at spawn via the process Spec, not a standalone rlimit.
+¹ Windows has no zombies; the reaper is a correct no\-op there. ² Windows cgroup is the Job Object backend. ³ the Unix setrlimit\-on\-self model has no Windows analogue; Windows resource limits are applied through the cgroup \(Job Object\) container or at spawn via the process Spec, not a standalone rlimit. ⁴ illumos and Solaris have no reparent\-here facility, like darwin, OpenBSD and NetBSD: SetChildSubreaper returns [UnsupportedPlatform](<#UnsupportedPlatform>). Their reaper also sweeps once a second, because the Go runtime forks every child there with FORK\_NOSIGCHLD and its exit posts no SIGCHLD. Both columns are proven on OmniOS r151054 and Oracle Solaris 11.4 \(amd64\) by the SDK's cross\-platform runtime lane.
 
 [Supported](<#Supported>) consults runtime.GOOS only — it is the platform\-level matrix, not a runtime probe. A capability that is native on the GOOS may still be unavailable at runtime \(e.g. cgroup present but not delegated\); use the per\-facade probe for that \(e.g. cgroup.Available\(\)\).
 
@@ -67,7 +67,7 @@ var (
 ```
 
 <a name="MustSupport"></a>
-## func [MustSupport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L178>)
+## func [MustSupport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L186>)
 
 ```go
 func MustSupport(caps ...Capability)
@@ -76,7 +76,7 @@ func MustSupport(caps ...Capability)
 MustSupport panics when any requested capability is missing on the current platform, and is a no\-op otherwise. It is the consumer's OPT\-IN fail\-fast: the SDK never calls it. The panic value is the typed \[errs\] UnsupportedPlatform error \(code 0.2.6.1\), so a top\-level recover\(\) can classify it via errs.CodeOf / HasCode rather than a bare string.
 
 <a name="Supported"></a>
-## func [Supported](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L145>)
+## func [Supported](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L153>)
 
 ```go
 func Supported(c Capability) bool
@@ -85,7 +85,7 @@ func Supported(c Capability) bool
 Supported reports whether cap has a native backend on the current GOOS. It is pure, allocation\-free and race\-clean: it consults runtime.GOOS only, never a runtime delegation probe \(see the package doc on cgroup.Available\(\)\).
 
 <a name="Capability"></a>
-## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L71>)
+## type [Capability](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L77>)
 
 Capability identifies one process\-supervision capability whose native backend is present on some platforms and absent on others.
 
@@ -117,7 +117,7 @@ const (
 ```
 
 <a name="MissingCapabilities"></a>
-### func [MissingCapabilities](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L158>)
+### func [MissingCapabilities](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L166>)
 
 ```go
 func MissingCapabilities(caps ...Capability) []Capability
@@ -126,7 +126,7 @@ func MissingCapabilities(caps ...Capability) []Capability
 MissingCapabilities returns the subset of caps with no native backend on the current platform; an empty \(nil\) result means every capability is present.
 
 <a name="Capability.String"></a>
-### func \(Capability\) [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L132>)
+### func \(Capability\) [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/capability.go#L140>)
 
 ```go
 func (c Capability) String() string

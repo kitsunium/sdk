@@ -1,16 +1,16 @@
-# ADR 0144 — a private socket is gated by its directory, and the kernel names the peer where it can
+# ADR 0148 — a private socket is gated by its directory, and the kernel names the peer where it can
 
 - **Status**: Proposed
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0143](0143-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework's daemon profile and listeners are its first consumer), [ADR 0052](0052-sdk-lock-domain.md) / [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) (a directory another account can write to is refused), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (Windows entry points bound with `syscall.NewLazyDLL`, no `x/sys`), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no core package), [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the 104-byte `sun_path`)
+- **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework's daemon profile and listeners are its first consumer), [ADR 0052](0052-sdk-lock-domain.md) / [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) (a directory another account can write to is refused), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (Windows entry points bound with `syscall.NewLazyDLL`, no `x/sys`), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no core package), [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the 104-byte `sun_path`)
 
 ## Context
 
 Three consumers need the same thing within weeks of each other: a daemon
 that short-lived clients of the same user talk to (the statusline test bench,
 D5 of the platform's plan), a framework role that listens on something other
-than HTTP (ADR 0143 §5, V-A), and a telemetry exporter an operator's tool
+than HTTP (ADR 0147 §5, V-A), and a telemetry exporter an operator's tool
 attaches to (the plan's §6). Each needs a socket nobody else on the machine can
 use, and each has the same two failure modes: a listener that hands requests to
 anybody who can reach a path, and a client that sends its request — a token, a
@@ -20,7 +20,7 @@ account planted there first.
 ## Decision
 
 A new service package, `internal/service/ipc`, with the facade `pkg/v1/ipc`,
-code range `0.3.90.*`. No core package: one engine and no port (ADR 0074).
+code range `0.3.91.*`. No core package: one engine and no port (ADR 0074).
 
 1. **The directory is the gate, everywhere.** A socket lives in a directory
    its account owns and nobody else can write to — created `0700` when missing,

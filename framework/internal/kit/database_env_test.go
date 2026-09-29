@@ -30,6 +30,7 @@ func TestAURLIsRequiredOutsideDev(t *testing.T) {
 // In dev a database without a URL opens nothing and leaves its stores in
 // the data directory, and says so.
 func TestInDevADatabaseWithoutURLLeavesItsStoresInFiles(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
 	l := newLedger()
@@ -71,6 +72,7 @@ func TestTLSLeftToTheDriverIsRefusedOutsideDev(t *testing.T) {
 // TLS off is accepted when the URL writes it, for a private network, and
 // the diagram says so.
 func TestTLSOffIsAcceptedWhenWritten(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
 	t.Setenv("LEDGER_DATABASE_URL", fakeURL("ledger", "pw", "tls=off"))
@@ -88,6 +90,7 @@ func TestTLSOffIsAcceptedWhenWritten(t *testing.T) {
 // A SQLite database without a URL is <data>/<name>.sqlite, and the
 // configuration says where: kit's choice, and no secret.
 func TestSQLiteLandsBesideTheData(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectSQLite)
 	var logs syncBuffer
 	data := t.TempDir()
@@ -146,6 +149,7 @@ func TestInMemoryOpensNoDatabase(t *testing.T) {
 // The most precise wins: a store kept by name, then its service, then the
 // default database.
 func TestTheMostPreciseKeepWins(t *testing.T) {
+	needsFileStore(t)
 	a, b, c := kit.NewFakeDB(sql.DialectPostgres), kit.NewFakeDB(sql.DialectPostgres), kit.NewFakeDB(sql.DialectPostgres)
 	var logs syncBuffer
 	l := newLedger()

@@ -71,6 +71,43 @@ func BenchmarkPut(b *testing.B) {
 	}
 }
 
+// BenchmarkPutVersioned measures one durable write on a store keeping each
+// document's former versions — every document already holding as many as the
+// store keeps — over the in-memory filesystem. The write's entry carries the
+// document AND its versions (ADR 0143), so the cost is what those versions
+// weigh, and the store's size stays out of it as it does for BenchmarkPut.
+func BenchmarkPutVersioned(b *testing.B) {
+	const docs int = 100
+	for _, versions := range []int{0, 1, 10, 100} {
+		b.Run(fmt.Sprintf("versions=%d", versions), func(b *testing.B) {
+			cfg := accountConfig(svcvfs.NewMem())
+			cfg.Versions = versions
+			store, err := openWith(cfg)
+			if err != nil {
+				b.Fatalf("Open() = %v", err)
+			}
+			for round := range versions + 1 {
+				for i := range docs {
+					doc := benchDoc(i)
+					doc.Name = fmt.Sprintf("round %d", round)
+					if err := store.Put(doc); err != nil {
+						b.Fatalf("Put() = %v", err)
+					}
+				}
+			}
+			b.ReportAllocs()
+			b.ResetTimer()
+			for i := 0; b.Loop(); i++ {
+				doc := benchDoc(i % docs)
+				doc.Name = fmt.Sprintf("rewritten %d", i)
+				if err := store.Put(doc); err != nil {
+					b.Fatalf("Put() = %v", err)
+				}
+			}
+		})
+	}
+}
+
 // BenchmarkRewriteEverything measures what the whole-file store this package
 // replaces did on every write: encode every document into one indented
 // object and publish it. It is the baseline BenchmarkPut is read against.

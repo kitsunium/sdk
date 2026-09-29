@@ -2,7 +2,7 @@
 
 ## Purpose
 
-`github.com/kitsunium/sdk/framework` (ADR 0143): the layer above `pkg/v1`.
+`github.com/kitsunium/sdk/framework` (ADR 0147): the layer above `pkg/v1`.
 A product imports the framework and nothing from `kitsunium/platform` (D2);
 the platform keeps the tools a product runs but does not link — the Studio,
 the analyzer, the generator, `kit check`.
@@ -13,7 +13,7 @@ the analyzer, the generator, `kit check`.
 |---|---|---|
 | `model/` | the graph types and the ID grammar (`Version` 5) | V-0 |
 | `kit/` | the runtime a product imports — the platform's kit moved whole (V-A to V-D: declarations, stores and CQRS, workflows and history, privacy, modules, watches), minus the Studio's pages and every route that acts (D13), plus the process profiles, listeners, binaries and roles | moved |
-| `telemetry/` | the telemetry port and its exporter (ADR 0145) | new |
+| `telemetry/` | the telemetry port and its exporter (ADR 0149) | new |
 | `connectors/<engine>/` | `postgres`, `mysql`, `sqlite`: one driver each, a Go module each, in `go.work` | moved |
 
 ## Rules
@@ -35,7 +35,7 @@ the analyzer, the generator, `kit check`.
    `commands/dispatch`, `queries/ask`, `loops/wake`, `privacy/*`,
    `profile/cpu`. A person's rights are CLI commands of the product.
 5. **Release.** Lockstep with the rest of the chain: `framework/vX` at the
-   same `X` as `pkg/vX` (ADR 0143 §9). `go.mod` requires `pkg` and
+   same `X` as `pkg/vX` (ADR 0147 §9). `go.mod` requires `pkg` and
    `internal/kernel` at the last release and replaces them with the tree;
    the release commit pins and drops the replaces.
 

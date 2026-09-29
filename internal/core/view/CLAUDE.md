@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/view/
 
 ## Purpose
@@ -62,7 +63,7 @@ choosing stderr, but by having no destination in the port at all.
 | `RenderTooLarge` `0.2.27.4` | `Config.MaxBytes` reached; the partial output is discarded |
 | `UnsafeValue` `0.2.27.5` | render data carries one of the six refused trust types |
 | `EngineUnknown` `0.2.27.6` | `Open` for a name no factory claims |
-| `EngineInvalid` `0.2.27.7` | boot-time panic: nil `Factory` or empty `Engine` |
+| `EngineInvalid` `0.2.27.7` | boot-time panic: an unusable `Factory` — nil, a typed nil pointer or a non-comparable value (`internal/kernel/plugin`, ADR 0071) — or an empty `Engine` |
 | `DuplicateEngine` `0.2.27.8` | boot-time panic: two DISTINCT factories under one name |
 
 ## Conventions
@@ -105,8 +106,8 @@ choosing stderr, but by having no destination in the port at all.
   and cannot be cancelled; the byte cap is the only bound that exists.
 - **Let `Open` fall back to a default engine.** A typo in a configuration file
   would silently choose how every value in the program is escaped.
-- **Weaken the paragraph about what `Trusted` does not prevent.** A `Trusted`
-  the caller built wrongly is an XSS the SDK cannot see. It is stated in four
+- **Weaken the paragraph about what `TrustedHTML` does not prevent.** A
+  `TrustedHTML` the caller built wrongly is an XSS the SDK cannot see. It is stated in four
   places on purpose.
 
 ## Verification

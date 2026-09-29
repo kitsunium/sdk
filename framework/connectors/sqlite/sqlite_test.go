@@ -126,6 +126,7 @@ func ledger(t *testing.T, dir string, opts ...kit.DatabaseOption) *kit.App {
 // Without a URL, the database is <data>/<name>.sqlite: it opens, answers
 // its check and is ready.
 func TestTheFileLandsBesideTheData(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := ledger(t, dir)
 	run(t, app)
@@ -161,6 +162,7 @@ func containerOf(g *model.Graph, id string) *model.Container {
 
 // With a URL, the database is the URL's file.
 func TestTheURLNamesTheFile(t *testing.T) {
+	needsFileStore(t)
 	elsewhere := filepath.Join(t.TempDir(), "kept.sqlite")
 	t.Setenv("LEDGER_ARCHIVE_URL", elsewhere)
 	app := ledger(t, t.TempDir())

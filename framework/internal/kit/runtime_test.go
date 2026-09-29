@@ -65,6 +65,7 @@ func TestStoreSemantics(t *testing.T) {
 }
 
 func TestStorePersistsAcrossRestarts(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	run := func(during func()) {
 		app := kit.NewApp("shop", Shop, Audit).With(kit.DataDir(dir), kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.Logs(io.Discard))

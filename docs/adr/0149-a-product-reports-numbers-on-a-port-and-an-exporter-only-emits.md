@@ -1,9 +1,9 @@
-# ADR 0145 — a product reports numbers on a port, and its exporter only emits
+# ADR 0149 — a product reports numbers on a port, and its exporter only emits
 
 - **Status**: Proposed
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0143](0143-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework module; layer `4`), [ADR 0144](0144-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the private socket the exporter listens on), [ADR 0051](0051-sdk-trace-domain.md) (the trace domain this is not), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (nothing armed by an import)
+- **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework module; layer `4`), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the private socket the exporter listens on), [ADR 0051](0051-sdk-trace-domain.md) (the trace domain this is not), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (nothing armed by an import)
 
 ## Context
 
@@ -32,7 +32,7 @@ A new framework package, `framework/telemetry` (`0.4.3.*`).
 2. **Inert unless configured at the start.** `Nop` is the default. The
    framework's `App` builds an exporter only when `KIT_TELEMETRY` (or
    `kit.Telemetry`) names a socket at the start; a CLI run never exports.
-3. **The exporter only emits.** It listens on a private socket (ADR 0144):
+3. **The exporter only emits.** It listens on a private socket (ADR 0148):
    the product's account and the groups `KIT_TELEMETRY_GIDS` names — the
    on-call group declared at deployment —, under the runtime directory, a
    stale socket replaced and a live one refused. A client reads one JSON
@@ -65,7 +65,7 @@ None: a new package; the framework's default port is `Nop`.
 
 - **OTLP spans from `trace`.** Refused for this path: attributes are text, the
   context travels by `WithValue`, and a span allocates.
-- **A TCP port.** Refused: any account reaches loopback (ADR 0144).
+- **A TCP port.** Refused: any account reaches loopback (ADR 0148).
 - **JSON records.** Refused: an encoder allocates and a record's size would
   depend on its content; the handshake is JSON because it is sent once.
 

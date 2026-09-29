@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/telemetry .
 
 // Package telemetry is the port a running product reports what it does on,
-// and the exporter that hands it to a tool attached to the product (ADR 0145).
+// and the exporter that hands it to a tool attached to the product (ADR 0149).
 //
 // It is not the trace domain. pkg/v1/trace builds spans a backend stores and
 // carries its context through context.WithValue; this port carries nothing
@@ -27,7 +27,7 @@
 // [Nop] is the emitter a product holds by default: Emit returns at once. An
 // [Exporter] exists only when the product was started with one, and it only
 // EMITS — it never reads what a client sends, so nothing reaches the product
-// through it. It listens on a private socket (pkg/v1/ipc, ADR 0144): the
+// through it. It listens on a private socket (pkg/v1/ipc, ADR 0148): the
 // product's account and the UIDs and GIDs the deployment names, under the
 // runtime directory; a stale socket is replaced, a live one refused. A client
 // connects, reads one handshake line — product, binary, role, instance,

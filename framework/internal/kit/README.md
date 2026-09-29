@@ -12,9 +12,9 @@ Package kit — activities: what a daemon's idle stop waits for besides its conn
 
 Package kit — the App: the services a product mounts, served by one process.
 
-Package kit — the static analysis a product can be given: the platform's analyzer, run in the background in dev \(ADR 0143 §1\).
+Package kit — the static analysis a product can be given: the platform's analyzer, run in the background in dev \(ADR 0147 §1\).
 
-Package kit — process profiles: what an app does with its process \(ADR 0143 §5\) — serve, run as a daemon, or run one CLI command — and the singleton lock.
+Package kit — process profiles: what an app does with its process \(ADR 0147 §5\) — serve, run as a daemon, or run one CLI command — and the singleton lock.
 
 Package kit — the architecture the graph draws: where each store keeps its data.
 
@@ -106,7 +106,7 @@ Package kit — idempotency keys and their leases.
 
 Package kit — the compile\-time proof of which roles each declaration plays: the interfaces the app reaches its nodes and options through.
 
-Package kit — listeners: inbound ports that are not HTTP, a private socket speaking a versioned contract \(ADR 0144\).
+Package kit — listeners: inbound ports that are not HTTP, a private socket speaking a versioned contract \(ADR 0148\).
 
 Package kit — the compile\-time proof that a listener is a starter.
 
@@ -216,7 +216,7 @@ Package kit — stores: a typed, keyed collection of entities.
 
 Package kit — the engines a store runs on: memory, files or a database.
 
-Package kit — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them \(ADR 0145\).
+Package kit — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them \(ADR 0149\).
 
 Package kit — topics and subscriptions: asynchronous messages of one type.
 
@@ -546,7 +546,7 @@ const (
 )
 ```
 
-<a name="WireInvalid"></a>The wire codes a caller branches on: an [Error](<#Error>)'s Code, snake\_case, kept byte\-for\-byte from the platform's kit \(ADR 0143 §6\). They are named Wire\*, not Code\*, because Code\* names a dotted\-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
+<a name="WireInvalid"></a>The wire codes a caller branches on: an [Error](<#Error>)'s Code, snake\_case, kept byte\-for\-byte from the platform's kit \(ADR 0147 §6\). They are named Wire\*, not Code\*, because Code\* names a dotted\-quad errs.Code in the SDK and the registry audit holds every Code\* constant to that.
 
 ```go
 const (
@@ -565,7 +565,7 @@ const (
 )
 ```
 
-<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework module, PP 2 this package \(ADR 0143 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
+<a name="CodeStoreDecode"></a>The framework's own failures carry SDK error codes in 0.4.2.\* — layer 4 is the framework module, PP 2 this package \(ADR 0147 §3\) — so a product keeps the whole application range 0x40–0x7F for its own codes. Match them with errs.HasCode. Their Public text is the only part that may reach a caller; none of them is a 4xx, so a caller only ever reads "internal error".
 
 ```go
 const (
@@ -943,7 +943,7 @@ type ActivityHandler struct {
 <a name="AnalyzeFunc"></a>
 ## type [AnalyzeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app_analysis.go#L18>)
 
-AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer \(ADR 0143 §1\): the platform's kit tool gives one, in dev, through [Analyzer](<#Analyzer>).
+AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer \(ADR 0147 §1\): the platform's kit tool gives one, in dev, through [Analyzer](<#Analyzer>).
 
 ```go
 type AnalyzeFunc func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
@@ -1998,7 +1998,7 @@ type ListenHandler func(ctx context.Context, conn *ipc.Conn) error
 <a name="Listener"></a>
 ## type [Listener](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go#L33-L45>)
 
-Listener is an inbound port that is not HTTP: a private socket on this machine — a Unix socket in a directory only the product's account can reach, the kernel naming the peer on Linux \(ADR 0144\) — speaking a versioned contract. It is how a daemon profile serves its clients, and how two process roles of one binary talk \(D22\): through the contract, never through each other's code.
+Listener is an inbound port that is not HTTP: a private socket on this machine — a Unix socket in a directory only the product's account can reach, the kernel naming the peer on Linux \(ADR 0148\) — speaking a versioned contract. It is how a daemon profile serves its clients, and how two process roles of one binary talk \(D22\): through the contract, never through each other's code.
 
 ```go
 type Listener struct {

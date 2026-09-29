@@ -1,5 +1,5 @@
 // Package kit — telemetry: the numbers a product reports, exported on a
-// private socket when the deployment asks for them (ADR 0145).
+// private socket when the deployment asks for them (ADR 0149).
 package kit
 
 import (
@@ -16,7 +16,7 @@ import (
 )
 
 // Telemetry: a server or a daemon reports every span and every phase change
-// on framework/telemetry's port (ADR 0145) — a no-op unless the app was
+// on framework/telemetry's port (ADR 0149) — a no-op unless the app was
 // started with an exporter, which only EMITS, on a private socket a tool
 // attaches to (`kit attach`). It is configured at the start and never after:
 // KIT_TELEMETRY names the socket ("on" is <runtime dir>/telemetry.sock, or

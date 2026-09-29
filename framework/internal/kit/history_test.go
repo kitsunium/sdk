@@ -230,6 +230,7 @@ func crashed(t *testing.T, dir string) {
 // the next change replaces —, never a former value lost; a history whose
 // record is gone is removed at the next start.
 func TestACrashLeavesADuplicateNeverAGap(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startKeeper(t, kit.DataDir(dir))
 	ctx := t.Context()

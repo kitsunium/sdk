@@ -40,5 +40,5 @@ Three native backends implement the `Group` port:
 - **FreeBSD** — rctl (per-process memory / CPU rules; pids / IO + Freeze/Thaw
   return `UnsupportedPlatform`).
 
-On every other GOOS (darwin, OpenBSD, NetBSD, DragonFly) `Available()` is
+On every other GOOS (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris) `Available()` is
 `false` and `Create` returns `UnsupportedPlatform`.

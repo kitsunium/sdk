@@ -20,7 +20,7 @@ const defaultMails int = 200
 // What the dev tools read, in dev: the process, the heap profile, goroutines,
 // logs, the mailbox, a field's former values. mountIntrospection mounts every
 // route here behind hostGuard; none of them exists outside dev (invariant 4),
-// and none of them acts on the product (D13, ADR 0143 §8): no mock, no fault,
+// and none of them acts on the product (D13, ADR 0147 §8): no mock, no fault,
 // no run, no fire, no dispatch, no ask, no wake, no CPU capture.
 
 // mountDevTools registers the dev tools' routes through api, which puts each

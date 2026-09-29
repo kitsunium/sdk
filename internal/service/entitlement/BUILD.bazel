@@ -63,6 +63,8 @@ go_test(
         "ci_external_test.go",
         "ci_internal_test.go",
         "ciseat_internal_test.go",
+        "fifo_mkfifo_internal_test.go",
+        "fifo_mknod_internal_test.go",
         "fixtures_external_test.go",
         "identity_external_test.go",
         "identity_internal_test.go",

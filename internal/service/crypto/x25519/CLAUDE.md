@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/x25519/
 
 ## Purpose
@@ -34,8 +35,9 @@ peer point flows up to the dispatcher which wraps it as `AgreementFailed`
 
 ## Behaviour
 
-- **GenerateKey** — `ecdh.X25519().GenerateKey(rand.Reader)`; `KeyGenerationFailed`
-  (wrapping the cause) on an entropy fault, otherwise raw 32-byte `(pub, priv)`.
+- **GenerateKey** — `ecdh.X25519().GenerateKey(nil)`, which draws from the
+  standard library's secure source; `KeyGenerationFailed` (wrapping the cause)
+  on an entropy fault, otherwise raw 32-byte `(pub, priv)`.
 - **Shared** — rebuilds the local private key and the peer public key (rejecting
   low-order/garbage points), then `priv.ECDH(peerPub)`. A bad input returns a
   non-nil error that the dispatcher wraps as `AgreementFailed`.

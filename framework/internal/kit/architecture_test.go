@@ -56,6 +56,7 @@ func linkOf(arch *model.Architecture, from, to string) *model.Link {
 
 // A product's context and containers follow from what it declares.
 func TestArchitectureFollowsTheDeclarations(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := kit.NewApp("web", Web, Shop, Audit).With(kit.DataDir(dir), kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {
@@ -113,6 +114,7 @@ func TestArchitectureFollowsTheDeclarations(t *testing.T) {
 
 // Outside dev, the architecture says where nothing is: no address, no path.
 func TestArchitectureDisclosesNoLocationOutsideDev(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := kit.NewApp("web", Web, Shop, Audit).With(kit.DataDir(dir), kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvProduction), kit.Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {

@@ -1,10 +1,10 @@
-# ADR 0146 — a release names its tag, its keys rotate, and a replacement answers before it stands
+# ADR 0150 — a release names its tag, its keys rotate, and a replacement answers before it stands
 
 - **Status**: Proposed
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (§Deferred: the older-release replay; the one-way replacement)
-- **Related**: [ADR 0091](0091-a-single-trust-anchor-is-a-key-with-no-way-out.md) (an ordered, bounded anchor list), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the `Link` sibling), [ADR 0143](0143-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the status line, first consumer)
+- **Related**: [ADR 0091](0091-a-single-trust-anchor-is-a-key-with-no-way-out.md) (an ordered, bounded anchor list), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the `Link` sibling), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the status line, first consumer)
 
 ## Context
 

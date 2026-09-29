@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/baseenc/
 
 ## Purpose
@@ -25,7 +26,7 @@ registered Name, not a tagged enum.
 | Base62 | `"base62"` | `application/base62` | `.b62` | yes (buffered) | yes |
 
 Nine singletons exported (`Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`,
-`Ascii85`, `Base45`, `Base58`, `Base62`) — registered via package-level var
+`ASCII85`, `Base45`, `Base58`, `Base62`) — registered via package-level var
 initialisers, no `init()` function.
 
 - **Base45** is a block transform (2 bytes → 3 chars), O(n), so it shares the
@@ -122,8 +123,12 @@ at 2× base64's cost, and base32's decode is 3.8× its own encode.
 
 ```
 bazel test --config=race //internal/service/codec/baseenc:baseenc_test
+# fuzz one target at a time (fuzz_internal_test.go): FuzzBaseConvRoundTrip,
+# FuzzBaseConvDecode, FuzzBase45RoundTrip, FuzzBase45Decode
+cd internal/service && GOWORK=off go test -run='^$' -fuzz='^FuzzBaseConvDecode$' -fuzztime=30s ./codec/baseenc/
 ```
 
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V62, V64, V65) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
+The four fuzz targets cover the hand-rolled transforms, base conversion and
+Base45: exact recovery of any byte string, its leading zeros included, and
+canonicality — an input the decoder accepts re-encodes to itself. Their seed
+corpora run with the ordinary suite.

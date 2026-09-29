@@ -1,5 +1,5 @@
 // Package kit — process profiles: what an app does with its process (ADR
-// 0143 §5) — serve, run as a daemon, or run one CLI command — and the
+// 0147 §5) — serve, run as a daemon, or run one CLI command — and the
 // singleton lock.
 package kit
 
@@ -23,7 +23,7 @@ const CodeSingletonHeld errs.Code = 0x00_04_02_3A // 0.4.2.58 — another proces
 // minIdleStep bounds how often the idle watch looks at the listeners.
 const minIdleStep time.Duration = 10 * time.Millisecond
 
-// Process profiles: what an app does with its process (ADR 0143 §5). A
+// Process profiles: what an app does with its process (ADR 0147 §5). A
 // product that is not a web server — a status line, a CLI with a daemon —
 // is a kit product too.
 //

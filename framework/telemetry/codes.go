@@ -1,4 +1,4 @@
-// The codes of framework/telemetry: range 0.4.3.* (ADR 0145).
+// The codes of framework/telemetry: range 0.4.3.* (ADR 0149).
 
 package telemetry
 

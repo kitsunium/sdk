@@ -66,6 +66,7 @@ var _ = Cache.Store("entries", func(c cached) string { return c.Key }, kit.InMem
 // The links to the data directory and to memory each carry exactly the
 // connectors of the nodes they hold: the resource is not the connector.
 func TestLinksCarryTheirConnectors(t *testing.T) {
+	needsFileStore(t)
 	app := kit.NewApp("web", Web, Shop, Audit, Cache).With(kit.DataDir(t.TempDir()), kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {
 		t.Fatal(err)

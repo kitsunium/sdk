@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/entitlement/
 
 ## Purpose
@@ -19,14 +20,16 @@ product (ADR 0078 §1).
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
-| `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance |
-| `cache_lock.go` | exclusion over the cache directory — what rename does not give |
+| `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance; `DefaultCacheDir`, `WithCache` |
+| `cache_lock.go` | exclusion over the cache directory — what rename does not give; `holdCacheForWrite` skips a write it cannot guard |
+| `cache_lock_unix.go` / `cache_lock_windows.go` | `holdCacheForRead`: no exclusion where rename is atomic for a reader, the write's exclusion on Windows |
 | `ci.go` / `ciseat.go` | GitHub Actions OIDC: mint, verify, then look up the seat |
+| `jsonnames.go` | `checkNoDuplicateNames` — a document naming one member twice, at any depth, is refused by the roster, bundle, JWKS and token decoders |
 | `jwks.go` | the issuer's published RSA keys |
 | `oidc.go` | the token's claim set and its strict decoding |
 | `roughtime*.go` | signed network time — advisory, fail-open, servers ship empty |
 | `version.go` | the version floor a roster can mandate |
-| `product.go` | `ProductValue`, `Label`, `DefaultCacheDir`, `Validate` |
+| `product.go` | `ProductValue`, `Label`, `PublishedOrigins`, `Validate` |
 | `errors.go` | the one code this implementation owns, `0.3.67.*`, and its sentinel |
 | `wrap.go` | `refuse` / `classify` / `classifyForeign` / `annotate`, plus `diagnose` |
 
@@ -159,8 +162,9 @@ product (ADR 0078 §1).
 - **A CI seat is bounded by its own token.** `ciseat.go` passed
   `GrantDeadline` the roster's window and the account's term — the two bounds a
   DEVICE grant rests on — and never `claims.ExpiresAt`, so a seat established by a
-  thirty-minute proof outlived it by up to a day, against `core/grant.go`'s own
-  stated invariant that "a grant may not outlive the document that authorised it".
+  thirty-minute proof outlived it by up to a day, against
+  `core/entitlement/grant.go`'s own stated invariant that "a grant may not
+  outlive the document that authorised it".
   `GrantDeadline` is variadic now so a third document can be named. No `clockSkew`
   is added: `checkTiming` allows it to ADMIT a token, which is the permissive
   direction, and applying it to a BOUND would extend the grant past the proof.
@@ -206,7 +210,7 @@ product (ADR 0078 §1).
   Without a lock between them two writers both read the same mark, both
   conclude they are newer, and whichever renames LAST sets it — measured at 183
   of 400 rounds, and what it loses is anti-rollback distance, since `checkClock`
-  refuses a clock earlier than that mark. `holdCache` makes the pair one
+  refuses a clock earlier than that mark. `holdCacheForWrite` makes the pair one
   operation; `markWhileHeld` is the read a caller already holding it uses,
   because the guard is not reentrant.
 - **Exclusion is not the whole ratchet, because a write can be SKIPPED.**
@@ -230,7 +234,7 @@ product (ADR 0078 §1).
   control — antivirus, backup, indexer — still can, and that residue is
   accepted and logged rather than retried past.
 - **The public sentence names no particular, and that is the point.** Every
-  refusal here is built with `refuse` or `classify` over one of the fifteen
+  refusal here is built with `refuse` or `classify` over one of the fourteen
   contract sentinels, so `err.Error()` is the wire-safe half and nothing else:
   no url, no host, no path, no subject, no kid. Where it happened travels in
   `Fields`, and `particulars` reads it back.
@@ -267,8 +271,9 @@ product (ADR 0078 §1).
 ## Known debt
 
 A cache refresh can still be refused by a file holder outside this process —
-antivirus, backup, a search indexer on Windows. `holdCache` excludes every
-holder that takes the same lock, which is every one this SDK controls, and no
+antivirus, backup, a search indexer on Windows. `holdCacheForWrite` and
+`holdCacheForRead` exclude every holder that takes the same lock, which is
+every one this SDK controls, and no
 lock reaches the others. The refusal is logged and the next invocation retries
 it.
 
@@ -316,3 +321,10 @@ it.
 ```sh
 bazel test --config=race //internal/service/entitlement:entitlement_test
 ```
+
+The suite also runs on real kernels in `e2e-cross.yml` (`./entitlement` is in
+`SERVICE_PKGS`), illumos and Solaris included since ADR 0144. The FIFO test
+creates its pipe through `makeFifo`: `syscall.Mkfifo` where the stdlib has it
+(`fifo_mkfifo_internal_test.go`), `syscall.Mknod` of an `S_IFIFO` node on
+illumos and Solaris, whose stdlib has no `Mkfifo`
+(`fifo_mknod_internal_test.go`).

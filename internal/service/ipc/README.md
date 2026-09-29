@@ -17,4 +17,4 @@ func (l *Listener) Close() error
 ```
 
 See `CLAUDE.md` for the two gates (the directory, the peer's credentials) and
-ADR 0144 for the decision.
+ADR 0148 for the decision.

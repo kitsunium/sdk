@@ -9,6 +9,7 @@ import (
 	"os/signal"
 	"sync"
 	"syscall"
+	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -94,8 +95,9 @@ func (r *unixReaper) Start() {
 	go r.loop(r.sigCh, r.done, r.stopped)
 }
 
-// loop drains children on each SIGCHLD until done is closed, then performs one
-// final drain so no zombie outlives Stop, detaches the signal handler, and
+// loop drains children on each SIGCHLD — and, on illumos and Solaris, on a
+// timer as well (timersweep_solaris.go) — until done is closed, then performs
+// one final drain so no zombie outlives Stop, detaches the signal handler, and
 // closes stopped to acknowledge.
 func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 	//: subscribe to SIGCHLD here so Notify and its defer signal.Stop are paired.
@@ -112,9 +114,19 @@ func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 	defer r.markStopped()
 	//: an initial drain catches children that exited before we subscribed.
 	r.drain()
+	//: where a child's exit posts no SIGCHLD (illumos, Solaris), a ticker stands
+	//: in for the signal; elsewhere tick stays nil and its case never fires.
+	var tick <-chan time.Time
+	//: timerSweepEvery is a per-platform constant: zero where SIGCHLD suffices.
+	if timerSweepEvery > 0 {
+		ticker := time.NewTicker(timerSweepEvery)
+		//: stop the ticker with the loop so a Start/Stop cycle leaks nothing.
+		defer ticker.Stop()
+		tick = ticker.C
+	}
 	//: react to signals until shutdown is requested.
 	for {
-		//: wait for either a SIGCHLD or the stop request.
+		//: wait for a SIGCHLD, a timer sweep, or the stop request.
 		select {
 		case _, ok := <-sigCh:
 			//: a closed sigCh would spin; only drain on a real delivery.
@@ -123,6 +135,9 @@ func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 				return
 			}
 			//: a child changed state — drain every reapable child to ECHILD.
+			r.drain()
+		case <-tick:
+			//: a child may have exited without a signal — sweep as if one came.
 			r.drain()
 		case <-done:
 			//: shutdown requested — one last sweep, then exit the goroutine.

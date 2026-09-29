@@ -225,6 +225,7 @@ func startOn(t *testing.T, dir string, clk clock.Timed) *kit.App {
 // is queued when the app stops is handled at its next start: here, a
 // dispatch whose first attempt failed, its retry due after the stop.
 func TestAQueuedCommandSurvivesARestart(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	resetLab()
 	labFailures.Store(1)

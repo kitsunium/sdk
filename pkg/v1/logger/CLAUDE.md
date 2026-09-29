@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/logger/
 
 ## Purpose
@@ -9,17 +9,20 @@ Stable v1 public API for SDK logging. Everything consumer code needs — `Logger
 
 ```
 logger.go      — Logger / Attr / Level aliases, 4 Level constants, Config struct,
-                 NewText, Default, Debug|Info|Warn|Error emission helpers,
+                 NewText, Default, DefaultMulti (console + one file, through NewMulti),
+                 Debug|Info|Warn|Error emission helpers,
                  String|Int|Bool|Float64|Int64|Uint64|Duration|Time|Any Attr constructors
 sink.go        — Sink / Record / Encoder aliases, SinkConfig struct, NewWithSink,
                  Multi fan-out helper, LevelGate (a per-branch floor over
-                 writer/levelgate.Floor — ADR 0132), ConsoleStderr|ConsoleStdout,
-                 TextEncoder
+                 writer/levelgate.Floor — ADR 0132), NewWriterSink (an io.Writer as
+                 a Sink), ConsoleStderr|ConsoleStdout, TextEncoder
                  (ConsoleConfig{} / StreamStderr is the zero value — ADR 0030)
-writer.go      — WriterName / *Config aliases, WriterSpec, NewMulti (named writers;
-                 the Logger it returns owns them and is an io.Closer)
+writer.go      — WriterName / *Config / ConsoleStream aliases, StreamStderr|StreamStdout,
+                 CredentialProvider / CredentialValue aliases + NewCredentialValue,
+                 WriterSpec, NewMulti (named writers; the Logger it returns owns them
+                 and is an io.Closer)
 fromconfig.go  — Format alias, FromConfig (build a Logger from a config blob),
-                 + parseLevel / decode / resolve helpers (ADR 0014 §D5)
+                 + parseLevel / decodeTopology / resolveSinks helpers (ADR 0014 §D5)
 topology.go    — TopologyConfig DTO (Level + Writers)
 writer_entry.go — WriterEntryConfig DTO (Name + raw Options map)
 builder.go     — Builder alias, Build (chainable hot path), LogAttrs (slice overload)
@@ -32,13 +35,28 @@ codes.go       — CodeWriterRequired / CodeSinkConfigRequired / CodeWriterSpecI
                  / CodeTopologyInvalid (range 1.1.0.*)
 errors.go      — WriterRequired / SinkConfigRequired / WriterSpecInvalid /
                  TopologyInvalid sentinels (errs.Define)
+caller.go      — WithCaller (adds the emitting call site; skip reserves frames for
+                 wrapper layers)
+encoder.go     — NewTextEncoder / NewJSONEncoder (one JSON object per line, groups
+                 flattened to dotted keys)
+levelvar.go    — Leveler / LevelVar aliases, NewLevelVar (a floor retuned without
+                 rebuilding), ParseLevel (strict; never echoes its input)
+memory.go      — RecordSnapshot / MemorySink aliases + NewMemorySink, the test sink
+witherror.go   — WithError: an error as error.code / error.reason / error.public /
+                 error.trail.<n> Attrs, or one error.message for a non-SDK error
+BENCH.md       — the emit-path benchmarks (logger_bench_test.go), then a separate
+                 trace-correlation run (ADR 0062)
+USES.md        — the interactive use-case tabs a Go doc comment cannot render
+*_test.go      — *_external_test.go suites, fromconfig / witherror internal suites,
+                 and the three `!race` *_integration_test.go allocation gates (builder,
+                 fanout, tracecontext) run by the alloc lane
 ```
 
 `README.md` is the consumer-facing quickstart (text-on-stderr example, custom sink topology, Builder hot path).
 
 ## `FromConfig` — build a Logger from a config blob (ADR 0014 §D5)
 
-`FromConfig(format codec.Format, raw []byte) (*Logger, error)` is the capstone of
+`FromConfig(format Format, raw []byte) (Logger, error)` is the capstone of
 the config-driven writer subsystem: it builds a fully wired Logger from a config
 file with **zero Go glue**. It unmarshals `raw` into a `TopologyConfig{Level,
 Writers}` where each `WriterEntryConfig{Name, Options map[string]any}` names a
@@ -57,18 +75,21 @@ sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
   codec the **consumer already registered** (blank-import `pkg/v1/codec` or a
   single service codec). It MUST NOT blank-import `pkg/v1/codec` or any service
   codec from this package — otherwise every `pkg/v1/logger` consumer inherits the
-  four vendor codec modules. Proof:
+  five vendor codec modules (mongo-driver, cbor, msgpack, go-toml, yaml.v3). Proof:
 
   ```sh
   cd pkg/v1 && GOWORK=off go list -deps ./logger/... \
-    | grep -iE 'fxamacker|yaml|pelletier|vmihailenco|x/crypto' && echo LEAK || echo "dep-light OK"
+    | grep -iE 'mongo|fxamacker|yaml|pelletier|vmihailenco|x/crypto' && echo LEAK || echo "dep-light OK"
   ```
 
-- **Secret gate (LOCKED).** S3 / CloudWatch `Decode` parse credentials from the
-  option map. `TopologyInvalid` and every error path REDACT: they name only the
-  writer Name and the failure kind — never a decoded credential or option value.
+- **Secret gate (LOCKED).** An option map may carry a credential.
+  `TopologyInvalid` and every error path REDACT: they name only the writer Name
+  and a fixed failure kind — never a decoded credential or option value.
   The `map[string]any` contents are never echoed into `Public` / `Private` /
-  `Fields`.
+  `Fields`. The writers that implement `Decode` are console, file, journald,
+  nettransport and rotfile; the S3 and CloudWatch writers
+  (`third-party/aws/writer/*`) implement none, and their `Open` accepts only a
+  typed config, so an entry naming either fails as a redacted `TopologyInvalid`.
 - **Errors.** `TopologyInvalid` (1.1.0.4 / `TOPOLOGY_INVALID`) on a malformed
   blob, an unregistered format, an empty writer list, an unknown writer Name, or a
   Factory / `Decode` rejection — all redacted.
@@ -161,7 +182,7 @@ ADR 0039 never came into play.
 - Import `github.com/kitsunium/sdk/internal/*` from consumer code. Go's `internal/` rule blocks it AND API-wise stay on `pkg/v1/*` for long-term stability.
 - Set `Version` at runtime from application code. Use the ldflags recipe (or Bazel `--stamp`) so every binary commits its version at link time.
 - Use a `Builder` after `Send` — the next caller will reuse the same struct from the `sync.Pool`.
-- Re-export internal sink / middleware constructors here ad hoc. The current convenience helpers (`Multi`, `ConsoleStderr`, `ConsoleStdout`, `TextEncoder`, and `LevelGate` over `writer/levelgate.Floor` — decided in ADR 0132, not ad hoc) are deliberate; richer outputs reach into `internal/service/logger/{sink,middleware}` until contracts stabilise enough for a re-export.
+- Re-export internal sink / middleware constructors here ad hoc. The current convenience helpers (`Multi`, `ConsoleStderr`, `ConsoleStdout`, `NewWriterSink`, `TextEncoder`, `NewTextEncoder`, `NewJSONEncoder`, `NewMemorySink`, `WithCaller`, and `LevelGate` over `writer/levelgate.Floor` — decided in ADR 0132, not ad hoc) are deliberate; richer outputs reach into `internal/service/logger/{sink,middleware}` until contracts stabilise enough for a re-export.
 - Build a parallel `slog.Logger` pointed at the same stream as an SDK Logger.
   Use `slogbridge` so there is one pipeline, one threshold, one format (ADR 0032).
 - Forge SDK errors from consumer code via `errs.Define` — introspect via `pkg/v1/errs` accessors instead.
@@ -184,7 +205,3 @@ cd pkg/v1 && GOWORK=off go test -race -cover ./logger/...
 ```
 
 `logger_external_test.go` covers the happy path + `WriterRequired`; `sink_external_test.go` covers `NewWithSink` / `SinkConfigRequired` / `Multi` / `Build` / `LogAttrs` / `WithGroup`; `builder_external_test.go` exercises the chainable hot path; `version_external_test.go` pins `FrameworkVersion()` non-empty contract.
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V102, V107) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

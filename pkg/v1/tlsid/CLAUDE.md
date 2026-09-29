@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-02T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/tlsid/
 
 ## Purpose
@@ -17,7 +17,7 @@ type means the validation and redaction rules cannot drift between them.
 |---|---|
 | `Identity` | alias of `corenet.IdentityValue` — opaque, redacting |
 | `Params` | alias of `corenet.IdentityParams` — in-memory material |
-| `FileParams` | alias of `svctlsid.FileParams` — on-disk material |
+| `FileParams` | alias of `corenet.IdentityFileParams` — on-disk material; `Load` reads it through `internal/service/net/tlsid` |
 | `New(Params) (Identity, error)` | validate in-memory material |
 | `Load(FileParams) (Identity, error)` | read + validate on-disk material |
 | `MaterialInvalid` | sentinel `0.2.11.15` — missing/malformed/unusable material |

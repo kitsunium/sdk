@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/rlimit/
 
 ## Purpose
@@ -6,7 +7,8 @@ Applies per-process **setrlimit(2)** / **prlimit64(2)** resource ceilings for th
 OS process-supervision domain (ADR 0016). It maps the abstract
 `core/proc.Resource` enum to the platform `RLIMIT_*` constant and issues the
 syscall, wrapping failures in the central `core/proc` sentinels. **Stdlib-only**
-(`syscall`, `unsafe`) plus `internal/kernel/errs` — no `golang.org/x/sys`.
+(`syscall`, `unsafe`) plus `internal/core/proc` and `internal/kernel/errs` — no
+`golang.org/x/sys`.
 
 ## Contents
 
@@ -41,9 +43,10 @@ codes and never calls `errs.Define`.
 ## Platform notes
 
 - **Native on every Unix target** (linux, darwin, freebsd, netbsd, openbsd,
-  dragonfly). `setrlimit(2)` on the calling process is the shared mechanic; a
-  lowered ceiling is observable via `getrlimit(2)` (`rlimit_unix_test.go`) on all
-  of them, and via `/proc/self/limits` additionally on Linux.
+  dragonfly, illumos, solaris — the last two run in `e2e-cross` since ADR 0144). `setrlimit(2)` on the calling process is the shared mechanic, and
+  a lowered ceiling reads back through `getrlimit(2)` — asserted on Linux by
+  `Test_applyLimits` (`rlimit_linux_internal_test.go`). `TestApply`
+  (`rlimit_external_test.go`, every GOOS) pins the refusals and the empty set.
 - **Linux-only extras.** `RLIMIT_NPROC` (6) and `RLIMIT_MEMLOCK` (8) are absent
   from Go's `syscall` package and are restated from the kernel generic ABI
   (`asm-generic/resource.h`); off Linux they live in `golang.org/x/sys` (banned),
@@ -75,7 +78,7 @@ necessary one.
 
 ## Do NOT
 
-- Call `errs.Define` — all 22 codes live in `core/proc`; adding one breaks the
+- Call `errs.Define` — all 23 codes live in `core/proc`; adding one breaks the
   AST audit. Restate the sentinel fields in `errs.Wrap` instead.
 - Pretend `SysProcAttr` can carry rlimits; it cannot. Keep the post-fork model.
 
@@ -87,5 +90,7 @@ bazel test --config=race //internal/service/proc/rlimit:rlimit_test
 go test -race ./internal/service/proc/rlimit/...
 ```
 
-The acceptance test applies a lowered `RLIMIT_NOFILE` to the running process and
-reads `/proc/self/limits` to assert the new soft ceiling is observable.
+The acceptance test (`Test_applyLimits`, Linux) lowers the running process's
+soft `RLIMIT_NOFILE` by one and by two, reads it back with `getrlimit(2)`, and
+restores the original on every exit path; it is not parallel, since the ceiling
+is process-wide.

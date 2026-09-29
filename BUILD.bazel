@@ -80,6 +80,7 @@ filegroup(
         "//internal/service/codec/flatbuffers:audit_srcs",
         "//internal/service/codec/form:audit_srcs",
         "//internal/service/codec/json:audit_srcs",
+        "//internal/service/codec/jsonpatch:audit_srcs",
         "//internal/service/codec/msgpack:audit_srcs",
         "//internal/service/codec/multipart:audit_srcs",
         "//internal/service/codec/ndjson:audit_srcs",

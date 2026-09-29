@@ -241,6 +241,7 @@ func TestARecordKeyedByPersonalDataIsDeleted(t *testing.T) {
 // The subject index is rebuilt from the documents at every start: a new
 // index key finds the same records.
 func TestALostIndexKeyRebuildsTheIndex(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	t.Setenv("KIT_INDEX_KEY", "the first index key, long enough")
 	app := startPrivacyOn(t, kit.DataDir(dir))
@@ -264,6 +265,7 @@ func TestALostIndexKeyRebuildsTheIndex(t *testing.T) {
 // The journal's chain verifies, and an entry changed on disk breaks it at
 // its number. The erased bytes leave every file of the data directory.
 func TestErasureLeavesNoTrace(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startPrivacyOn(t, kit.DataDir(dir))
 	ctx := t.Context()

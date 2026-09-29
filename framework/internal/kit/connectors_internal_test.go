@@ -22,6 +22,7 @@ var stoppable = func() *Mailer {
 // stream carries it — the Studio's connector turns "en échec" from that, not
 // from a guess. The test drives the poll with the app's clock.
 func TestAStoppedOutboxSaysSo(t *testing.T) {
+	needsFileStore(t)
 	clk := clock.NewManualClock(time.Date(2026, 9, 26, 9, 0, 0, 0, time.UTC))
 	app := NewApp("stops", stoppable.svc).With(DataDir(t.TempDir()), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard), Clock(clk))
 	if err := app.Start(t.Context()); err != nil {

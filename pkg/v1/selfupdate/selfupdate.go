@@ -60,13 +60,13 @@
 // WithAutomaticConsent — its own consent, given at build, which
 // Service.AuthoriseUnattendedUpgrade reads and an operator still overrules
 // with <PREFIX>_AUTO_UPGRADE=0. It grants no escalation, and WithoutElevation
-// forbids escalation outright, whatever <PREFIX>_ALLOW_SUDO says (ADR 0146).
+// forbids escalation outright, whatever <PREFIX>_ALLOW_SUDO says (ADR 0150).
 //
 // # Keys that rotate, a signature that names its release, a probe that rolls back
 //
 // Service.WithVendorKeys links several keys, in order, and a release verifies
 // against any of them: a rotation publishes under the new key while builds that
-// carry both accept it, and neither side has to be updated first (ADR 0146).
+// carry both accept it, and neither side has to be updated first (ADR 0150).
 // Service.WithSignatureDomain makes each signature cover a domain — so a key
 // that also signs other documents cannot have one read as a release — and makes
 // the signed manifest say which tag it is and until when it may be installed
@@ -215,7 +215,7 @@ const CodeElevationFailed errs.Code = svcupd.CodeElevationFailed
 
 // CodeProbeFailed identifies a replacement whose new binary did not answer the
 // probe the product declared with Service.WithProbe; the previous binary is put
-// back from <binary>.prev when it was kept (ADR 0146).
+// back from <binary>.prev when it was kept (ADR 0150).
 const CodeProbeFailed errs.Code = svcupd.CodeProbeFailed
 
 // CandidateListSentinel is the tag value meaning "list the candidates rather

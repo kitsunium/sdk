@@ -12,9 +12,9 @@ Package kit — activities: what a daemon's idle stop waits for besides its conn
 
 Package kit — the App: the services a product mounts, served by one process.
 
-Package kit — the static analysis a product can be given: the platform's analyzer, run in the background in dev \(ADR 0143 §1\).
+Package kit — the static analysis a product can be given: the platform's analyzer, run in the background in dev \(ADR 0147 §1\).
 
-Package kit — process profiles: what an app does with its process \(ADR 0143 §5\) — serve, run as a daemon, or run one CLI command — and the singleton lock.
+Package kit — process profiles: what an app does with its process \(ADR 0147 §5\) — serve, run as a daemon, or run one CLI command — and the singleton lock.
 
 Package kit — authentication: the handler that says who calls, and the user it names.
 
@@ -107,7 +107,7 @@ Package kit — secondary indexes of a store.
 
 Package kit — jobs: scheduled work run by the daemon's loop.
 
-Package kit — listeners: inbound ports that are not HTTP, a private socket speaking a versioned contract \(ADR 0144\).
+Package kit — listeners: inbound ports that are not HTTP, a private socket speaking a versioned contract \(ADR 0148\).
 
 Package kit — loops: work the daemon waits for, woken by time or by events.
 
@@ -161,7 +161,7 @@ Package kit — frontends: static assets the product serves.
 
 Package kit — stores: a typed, keyed collection of entities.
 
-Package kit — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them \(ADR 0145\).
+Package kit — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them \(ADR 0149\).
 
 Package kit — topics and subscriptions: asynchronous messages of one type.
 
@@ -834,7 +834,7 @@ type Activity = ikit.ActivityHandler
 <a name="AnalyzeFunc"></a>
 ## type [AnalyzeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_analysis.go#L14>)
 
-AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer \(ADR 0143 §1\): the platform's kit tool gives one, in dev, through [Analyzer](<#Analyzer>).
+AnalyzeFunc reads the product's source — the Go module rooted at dir, and the packages that declare the modules it mounts — into a graph the runtime merges into its own: the edges found in handler bodies, each function's steps. The framework links no analyzer \(ADR 0147 §1\): the platform's kit tool gives one, in dev, through [Analyzer](<#Analyzer>).
 
 ```go
 type AnalyzeFunc = ikit.AnalyzeFunc
@@ -1497,7 +1497,7 @@ type ListenHandler = ikit.ListenHandler
 <a name="Listener"></a>
 ## type [Listener](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go#L20>)
 
-Listener is an inbound port that is not HTTP: a private socket on this machine — a Unix socket in a directory only the product's account can reach, the kernel naming the peer on Linux \(ADR 0144\) — speaking a versioned contract. It is how a daemon profile serves its clients, and how two process roles of one binary talk \(D22\): through the contract, never through each other's code.
+Listener is an inbound port that is not HTTP: a private socket on this machine — a Unix socket in a directory only the product's account can reach, the kernel naming the peer on Linux \(ADR 0148\) — speaking a versioned contract. It is how a daemon profile serves its clients, and how two process roles of one binary talk \(D22\): through the contract, never through each other's code.
 
 ```go
 type Listener = ikit.Listener

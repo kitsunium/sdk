@@ -17,12 +17,16 @@ type Option func(*config)
 type config struct {
 	// onReap, when non-nil, is invoked after every drain sweep with the number
 	// of children reaped in that sweep (including zero). It must not block; it
-	// runs on the reaper's own goroutine or the ReapOnce caller's goroutine.
+	// runs on the reaper's own goroutine or the ReapOnce caller's goroutine. On
+	// illumos and Solaris the loop also sweeps once a second, so an idle reaper
+	// there reports zero once a second.
 	onReap func(int)
 }
 
 // WithOnReap registers fn as a post-sweep callback receiving the count of
 // children reaped in each sweep. It is purely observational; fn must not block.
+// On illumos and Solaris the loop also sweeps once a second (their exits post
+// no SIGCHLD), so there fn hears zero once a second from an idle reaper.
 func WithOnReap(fn func(int)) Option {
 	//: capture fn into the accumulator so New can copy it onto the reaper.
 	return func(c *config) {

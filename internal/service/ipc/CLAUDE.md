@@ -2,7 +2,7 @@
 
 ## Purpose
 
-A private socket between processes of one machine (ADR 0144): a listener only
+A private socket between processes of one machine (ADR 0148): a listener only
 its own account — and the accounts it names — can reach, a client that refuses
 a socket another account planted, and the kernel's word on the peer where the
 kernel gives it. Public facade: `pkg/v1/ipc`. Consumers: the framework's
@@ -12,7 +12,7 @@ socket, the statusline daemon.
 Stdlib only (`net`, `syscall` for `SO_PEERCRED` and `Stat_t`; on Windows
 `syscall.NewLazyDLL` for the named pipe's kernel32/advapi32 entry points, no
 `x/sys`). Code range
-`0.3.90.*`.
+`0.3.91.*`.
 
 ## Contents
 
@@ -20,10 +20,10 @@ Stdlib only (`net`, `syscall` for `SO_PEERCRED` and `Stat_t`; on Windows
 |---|---|
 | `ipc.go` | package doc, `Config`, `PeerValue` (`SID` on Windows), `Conn`, `Listener` over an `acceptor`, `NewListener`, `Accept` (refused peers closed and counted), `Dial`, `RuntimeDir`, `admit`, `closeBestEffort` |
 | `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket, `0600`), `socketAcceptor`, `admits`, `dial` (directory and owner checked before a byte is sent, within one second) |
-| `pipe_windows.go` | the named pipe (ADR 0144 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused) |
+| `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused) |
 | `dir_unix.go` / `dir_other.go` | `prepareDir`, `checkDir`, `ownerOf`: mode and owner on Unix, a refusal elsewhere |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
-| `codes.go` / `errors.go` | `0.3.90.1`–`8`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`, `LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED` |
+| `codes.go` / `errors.go` | `0.3.91.1`–`8`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`, `LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED` |
 
 ## Why-this-shape
 

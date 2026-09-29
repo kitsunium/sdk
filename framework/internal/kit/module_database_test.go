@@ -45,6 +45,7 @@ func withDatabases(t *testing.T, names ...string) {
 // kit.Keeps(module) keeps every store of the module; a store's service
 // kept by another database wins over its module.
 func TestKeepsPlacesAModule(t *testing.T) {
+	needsFileStore(t)
 	withDatabases(t, "DATABASE", "ARCHIVE")
 	n := newNotebook()
 	var logs syncBuffer
@@ -63,6 +64,7 @@ func TestKeepsPlacesAModule(t *testing.T) {
 // A module's migrations run on the database that keeps it, under
 // <module>_migrations, beside the product's own.
 func TestAModulesMigrationsRunOnItsDatabase(t *testing.T) {
+	needsFileStore(t)
 	withDatabases(t, "DATABASE", "ARCHIVE")
 	n := newNotebook(kit.Migrations(noteMigrations...))
 	main, archive := kit.NewFakeDB(sql.DialectPostgres), kit.NewFakeDB(sql.DialectPostgres)

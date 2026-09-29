@@ -2314,6 +2314,18 @@ codes:
     const: CodeKeyTooLong
     hex: "0x00_03_50_11"
     package: internal/service/docstore
+  - code: "0.3.80.18"
+    const: CodeVersionsNotKept
+    hex: "0x00_03_50_12"
+    package: internal/service/docstore
+  - code: "0.3.80.19"
+    const: CodeVersionNotFound
+    hex: "0x00_03_50_13"
+    package: internal/service/docstore
+  - code: "0.3.80.20"
+    const: CodeVersionsRewriteRefused
+    hex: "0x00_03_50_14"
+    package: internal/service/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"
@@ -2451,36 +2463,40 @@ codes:
     hex: "0x00_03_59_07"
     package: internal/service/profiling
   - code: "0.3.90.1"
-    const: CodeMisconfigured
+    const: CodeNotJSON
     hex: "0x00_03_5A_01"
+    package: internal/service/codec/jsonpatch
+  - code: "0.3.91.1"
+    const: CodeMisconfigured
+    hex: "0x00_03_5B_01"
     package: internal/service/ipc
-  - code: "0.3.90.2"
+  - code: "0.3.91.2"
     const: CodeDirectoryUnsafe
-    hex: "0x00_03_5A_02"
+    hex: "0x00_03_5B_02"
     package: internal/service/ipc
-  - code: "0.3.90.3"
+  - code: "0.3.91.3"
     const: CodeInUse
-    hex: "0x00_03_5A_03"
+    hex: "0x00_03_5B_03"
     package: internal/service/ipc
-  - code: "0.3.90.4"
+  - code: "0.3.91.4"
     const: CodeListenFailed
-    hex: "0x00_03_5A_04"
+    hex: "0x00_03_5B_04"
     package: internal/service/ipc
-  - code: "0.3.90.5"
+  - code: "0.3.91.5"
     const: CodePeerRefused
-    hex: "0x00_03_5A_05"
+    hex: "0x00_03_5B_05"
     package: internal/service/ipc
-  - code: "0.3.90.6"
+  - code: "0.3.91.6"
     const: CodeDialFailed
-    hex: "0x00_03_5A_06"
+    hex: "0x00_03_5B_06"
     package: internal/service/ipc
-  - code: "0.3.90.7"
+  - code: "0.3.91.7"
     const: CodeEndpointForeign
-    hex: "0x00_03_5A_07"
+    hex: "0x00_03_5B_07"
     package: internal/service/ipc
-  - code: "0.3.90.8"
+  - code: "0.3.91.8"
     const: CodeClosed
-    hex: "0x00_03_5A_08"
+    hex: "0x00_03_5B_08"
     package: internal/service/ipc
   - code: "0.4.1.1"
     const: CodeInvalidID

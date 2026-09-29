@@ -42,7 +42,7 @@ is_valid_internal_tag() {
   [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
 }
 
-# Framework-module tags (ADR 0143): `framework/vX.Y.Z` for the framework itself
+# Framework-module tags (ADR 0147): `framework/vX.Y.Z` for the framework itself
 # and `framework/connectors/<engine>/vX.Y.Z` for each database connector, a Go
 # module of its own. Cut in lockstep with the pkg tag, same X.Y.Z, for the same
 # reason the internal tags are: each requires the one below it EXACTLY.
@@ -68,7 +68,7 @@ is_valid_chain_tag() {
 # out: it is the umbrella that hosts third-party/ and nothing requires it
 # (ADR 0012). Deriving the chain from go.work is what makes a module added to
 # the workspace released without anyone editing this file — ADR 0137's census
-# argument, applied to tags (ADR 0143 §9).
+# argument, applied to tags (ADR 0147 §9).
 #
 # It REFUSES rather than guesses: a missing go.work, one it cannot read, or one
 # whose chain lacks `pkg` is an exit 1 with the reason on stderr, because a

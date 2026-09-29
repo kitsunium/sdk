@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/reaper/
 
 ## Purpose
@@ -5,10 +6,12 @@
 The OS implementation of the `core/proc.Reaper` port (ADR 0016): a PID1 /
 subreaper zombie collector. On Unix it installs an `os/signal` SIGCHLD handler
 and drains every reapable child with a non-blocking `childwait.ReapAny()` loop
-until `ECHILD`. Off Unix it degrades to a no-op so the package links and runs
-everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`) +
-`internal/kernel/errs` + `internal/service/proc/childwait` — no
-`golang.org/x/sys`.
+until `ECHILD` — on illumos and Solaris also once a second, because a child's
+exit posts no SIGCHLD there (ADR 0144). Off Unix it degrades to a no-op so the package links and runs
+everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`, and `time`
+for the illumos/Solaris ticker) +
+`internal/core/proc` + `internal/kernel/errs` +
+`internal/service/proc/childwait` — no `golang.org/x/sys`.
 
 ## Who owns `wait4`
 
@@ -34,27 +37,39 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 | `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
 | `reaper_unix.go` | `unix` | `unixReaper`, `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
-| `subreaper_other.go` | `unix && !linux` | `SetChildSubreaper` → `UnsupportedPlatform` (no prctl on darwin/bsd) |
+| `subreaper_bsd.go` | `freebsd \|\| dragonfly` | `SetChildSubreaper` via `procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL)`, a raw `syscall.Syscall6` |
+| `subreaper_freebsd.go` / `subreaper_dragonfly.go` | `freebsd` / `dragonfly` | the `procctl(2)` ABI constants each kernel numbers differently (`sysProcctl`, `procReapAcquire`) |
+| `subreaper_other.go` | `unix && !linux && !freebsd && !dragonfly` | `SetChildSubreaper` → `UnsupportedPlatform` (no reparent-here facility on darwin, OpenBSD, NetBSD, illumos, Solaris) |
+| `timersweep_unix.go` | `unix && !solaris` | `timerSweepEvery = 0`: the loop sweeps on SIGCHLD alone |
+| `timersweep_solaris.go` | `solaris` (illumos too) | `timerSweepEvery = time.Second`: the loop also sweeps on a ticker |
 | `reaper_other.go` | `!unix` | no-op `noopReaper`, `New`, `Start`/`Stop`/`ReapOnce`, `SetChildSubreaper` → `UnsupportedPlatform`, `IsPID1` → false |
 
 No `codes.go` / `errors.go`: the package mints no codes. It returns the central
 `core/proc` sentinels — bare `UnsupportedPlatform`, and `errs.Wrap` of a syscall
 cause restating the exact `ReapFailed` / `SubreaperFailed` fields.
 
-## Why the three-way platform split
+## Why the four-way platform split
 
 `syscall.Wait4` and SIGCHLD exist on every Unix, so the reaping **loop** is
 tagged `unix`. `prctl(PR_SET_CHILD_SUBREAPER)` is **Linux-only** (constant 36,
-not exported by `syscall`), so `SetChildSubreaper` is split into a `linux` real
-implementation and a `unix && !linux` stub. The `!unix` file carries the entire
-no-op reaper plus its own `SetChildSubreaper`. The four tag sets are disjoint, so
-exactly one definition of each exported symbol compiles per GOOS.
+not exported by `syscall`); FreeBSD and DragonFly have the same facility as
+`procctl(PROC_REAP_ACQUIRE)`, with a system-call number and a command constant
+that differ between the two kernels. So `SetChildSubreaper` has a `linux`
+implementation, a `freebsd || dragonfly` one over a per-OS constants file, and
+a `unix && !linux && !freebsd && !dragonfly` stub. The `!unix` file carries the
+entire no-op reaper plus its own `SetChildSubreaper`. The four tag sets are
+disjoint, so exactly one definition of each exported symbol compiles per GOOS.
 
 ## Behaviour
 
 - **Start** — idempotent; subscribes to SIGCHLD inside the loop goroutine (so
   `signal.Notify` and `defer signal.Stop` stay paired) and drains on every
   signal. An initial drain catches children that exited before subscription.
+  On illumos and Solaris it also drains on a one-second ticker, stopped with
+  the loop: the Go runtime forks every child there with
+  `forkx(FORK_NOSIGCHLD)`, so the exit of a child this process spawned posts
+  no SIGCHLD and would otherwise wait for its own `Wait`, another signal or
+  `Stop`. Orphans re-parented here still signal (ADR 0144).
 - **Stop** — closes `done` (guarded by a per-cycle `sync.Once`), the loop runs a
   final drain, detaches the handler, and closes `stopped`; Stop blocks on
   `stopped` so no goroutine and no zombie outlives it. Safe without a prior
@@ -95,7 +110,7 @@ uncached — hoist it, do not loop on it.
 - Call `syscall.Wait4(-1, …)` directly. The status of a child a `Process`
   spawned would be discarded and its `Wait` would report `WAIT_FAILED`; collect
   through `childwait.ReapAny`.
-- Add codes here — all 22 proc codes are central in `internal/core/proc`.
+- Add codes here — all 23 proc codes are central in `internal/core/proc`.
 - Call `prctl` outside `subreaper_linux.go`; it does not exist elsewhere.
 
 ## Verification
@@ -106,9 +121,12 @@ bazel test --config=race //internal/service/proc/reaper:reaper_test
 cd internal/service && GOWORK=off go test -race ./proc/reaper/...
 ```
 
-Privileged behaviour (subreaper reparent-and-reap) is gated: if
-`PR_SET_CHILD_SUBREAPER` is unavailable the acceptance test asserts the typed
-`SubreaperFailed` contract and `t.Skip`s the behavioural half.
+`TestSetChildSubreaper` (Linux) arms subreaper mode once and five times over,
+and accepts nil or the typed `SUBREAPER_FAILED` / `UNSUPPORTED_PLATFORM` —
+never a bare errno. The privileged behaviour (an orphaned grandchild
+reparented here and reaped) is the e2e harness's orphan-adoption check
+(`e2e/checks/reaper.go`), which reports skipped when `SetChildSubreaper`
+fails.
 
 `handoff_unix_external_test.go` runs the reaper while children that exit 0 are
 spawned through `exec` and waited — at once, after the reaper has collected

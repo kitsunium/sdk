@@ -1,5 +1,5 @@
 // Package kit — listeners: inbound ports that are not HTTP, a private socket
-// speaking a versioned contract (ADR 0144).
+// speaking a versioned contract (ADR 0148).
 package kit
 
 import (
@@ -26,7 +26,7 @@ type ListenHandler func(ctx context.Context, conn *ipc.Conn) error
 
 // Listener is an inbound port that is not HTTP: a private socket on this
 // machine — a Unix socket in a directory only the product's account can
-// reach, the kernel naming the peer on Linux (ADR 0144) — speaking a
+// reach, the kernel naming the peer on Linux (ADR 0148) — speaking a
 // versioned contract. It is how a daemon profile serves its clients, and how
 // two process roles of one binary talk (D22): through the contract, never
 // through each other's code.

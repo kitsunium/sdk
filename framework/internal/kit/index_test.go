@@ -208,6 +208,7 @@ func TestIndexesInTheGraph(t *testing.T) {
 // Indexes are rebuilt when a store loads its file; data that breaks a unique
 // index refuses to start rather than answer lies.
 func TestIndexesAreRebuiltOnLoad(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SMTP_URL", "")
 	dir := t.TempDir()
 	run := func(during func()) error {

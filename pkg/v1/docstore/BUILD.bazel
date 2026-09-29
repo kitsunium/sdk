@@ -25,7 +25,9 @@ go_test(
     srcs = ["docstore_external_test.go"],
     deps = [
         ":docstore",
+        "//pkg/v1/clock",
         "//pkg/v1/errs",
+        "//pkg/v1/sql",
         "//pkg/v1/vfs",
     ],
 )

@@ -1,4 +1,4 @@
-// Package selfupdate — the probe of ADR 0146: the previous binary kept as
+// Package selfupdate — the probe of ADR 0150: the previous binary kept as
 // <binary>.prev, the new one asked to answer, and put back when it does not.
 package selfupdate
 

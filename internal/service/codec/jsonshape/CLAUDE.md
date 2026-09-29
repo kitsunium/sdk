@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-26T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/codec/jsonshape/
 
 ## Purpose
@@ -10,7 +10,8 @@ member, the Go field behind it (tag, Go name, index path) (ADR 0133). Public
 facade: `pkg/v1/codec/jsonshape`.
 
 Stdlib only; not a codec — it registers no Format and encodes nothing. It
-imports `encoding/json` for three types and two interfaces, and recognises
+imports `encoding/json` for one type (`Number`) and two interfaces
+(`Marshaler`, `Unmarshaler`), and recognises
 json/v2's streaming methods by signature so it does not import json/v2.
 
 ## Contents

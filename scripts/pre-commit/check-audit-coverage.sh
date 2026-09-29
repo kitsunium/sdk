@@ -42,7 +42,7 @@ fi
 # `find -printf '%h\n'` with stderr discarded, and -printf is GNU-only — BSD
 # find (macOS) rejects it, printed nothing, and the loop below saw an empty
 # tree and passed. A find that fails now stops the script.
-# framework/ (ADR 0143) is walked when it exists: a fixture repository built
+# framework/ (ADR 0147) is walked when it exists: a fixture repository built
 # before it, or without it, still has its three historical roots checked.
 roots=(internal pkg third-party)
 [ -d framework ] && roots+=(framework)

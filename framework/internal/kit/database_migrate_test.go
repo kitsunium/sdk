@@ -38,6 +38,7 @@ func migrateCommand(t *testing.T, newApp func() *kit.App, args ...string) (int, 
 // With <name>-migrate: manual, pending migrations refuse the start, naming
 // the command that runs them.
 func TestManualMigrationsRefuseTheStart(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	err := manualLedger(t, db)().Start(t.Context())
 	if !errs.HasCode(err, kit.CodeDatabaseMigrate) || !strings.Contains(err.Error(), "ledger migrate up") {
@@ -71,6 +72,7 @@ func TestMigrateStatusAndUp(t *testing.T) {
 // `migrate down SET VERSION` reverses the set's migrations above the
 // version, newest first.
 func TestMigrateDown(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	newApp := manualLedger(t, db)
 	if code, _, errOut := migrateCommand(t, newApp, "up"); code != 0 {
@@ -104,6 +106,7 @@ func TestTheMigrateCommandRefusesItsMistakes(t *testing.T) {
 // A migration that fails stops the start, naming its version in kit's
 // words, never the driver's.
 func TestAFailedMigrationStopsTheStart(t *testing.T) {
+	needsFileStore(t)
 	db := kit.NewFakeDB(sql.DialectPostgres)
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	var logs syncBuffer

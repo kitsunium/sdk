@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/codec/scratch/
 
 ## Purpose
@@ -25,7 +26,7 @@ mechanism was duplicated, the thresholds drifted.)
 | Symbol | Contract |
 |---|---|
 | `MaxRetainedBufBytes` | `const = 256 << 10`. Buffers larger than this are dropped on release, never re-pooled. |
-| `AcquireBuffer() *bytes.Buffer` | Returns a **already-Reset** buffer from the shared pool. Caller owns it until `ReleaseBuffer`. |
+| `AcquireBuffer() *bytes.Buffer` | Returns an **already-Reset** buffer from the shared pool. Caller owns it until `ReleaseBuffer`. |
 | `ReleaseBuffer(*bytes.Buffer)` | Repools the buffer unless `Cap() > MaxRetainedBufBytes` (then orphaned for the GC). |
 | `AcquireReader(src []byte) *bytes.Reader` | Returns a `*bytes.Reader` positioned at `src`. Caller owns it until `ReleaseReader`; `src` must stay alive + unmodified while the reader is used. |
 | `ReleaseReader(*bytes.Reader)` | Repools the reader. No cap-discard — a `bytes.Reader` is a fixed-size struct. |
@@ -49,9 +50,9 @@ are unchanged.
 
 ## Consumers
 
-`BufferPool`: `service/codec/{cbor,csv,json,msgpack,multipart,ndjson,pem,toml,xml,yaml}`
-plus the `baseenc` JSON-mediation buffer — eleven consumers. `ReaderPool`:
-`service/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
+`AcquireBuffer` / `ReleaseBuffer`: `service/codec/{cbor,csv,json,msgpack,multipart,ndjson,pem,toml,xml,yaml}`
+plus the `baseenc` JSON-mediation buffer — eleven consumers. `AcquireReader` /
+`ReleaseReader`: `service/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
 a recyclable `*bytes.Reader`). The `≥2-consumer` rule for a shared primitive
 is satisfied many times over.
 

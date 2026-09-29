@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # pkg/v1/cgroup/
 
 ## Purpose
@@ -10,14 +11,16 @@ package; the service and `core/proc` stay internal.
 
 | Symbol | Kind | Notes |
 |---|---|---|
-| `Group` | type alias | `= coreproc.Group` port (SetMemoryMax/SetCPUMax/SetPidsMax/SetIOMax/Add/Delete) |
+| `Group` | type alias | `= coreproc.Group` port (SetMemoryMax/SetCPUMax/SetPidsMax/SetIOMax/Add/Kill/Freeze/Thaw/Delete) |
 | `Option` | type alias | `= svccgroup.Option` functional option |
 | `WithRoot(root)` | func | target a delegated sub-tree; delegates |
 | `Available()` | func | honest delegation probe; delegates |
 | `Create(name, opts...)` | func | makes a sub-group; delegates |
+| `MustCreate(name, opts...)` | func | `Create` that panics with the typed error — a consumer's start-up opt-in |
 
 `Group` and `Option` are **aliases**, never new named types. The functions are
-one-line delegations — no logic lives here.
+one-line delegations — `MustCreate` adds only the panic; no other logic lives
+here.
 
 ## README is generated
 
@@ -28,15 +31,19 @@ one-line delegations — no logic lives here.
 ## Semantics
 
 `Set*Max` writes the matching cgroup v2 interface file; a negative numeric value
-means "no limit" (`"max"`). `Create` returns `CgroupUnavailable` on a
-non-delegated Linux host and `UnsupportedPlatform` where there is no backend at
-all (darwin, OpenBSD, NetBSD, DragonFly) — always check `Available()` first, and
+means "no limit" (`"max"`). On Linux, `Kill` writes `cgroup.kill` and `Freeze` /
+`Thaw` write `cgroup.freeze`; each returns `UnsupportedPlatform` on a kernel
+without that file. `Create` returns `CgroupUnavailable` on a
+non-delegated Linux host, `CgroupCreateFailed` when creation itself fails, and
+`UnsupportedPlatform` where there is no backend at
+all (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris) — always check `Available()` first, and
 prefer `WithRoot` to a delegated sub-tree over the top-level mount.
 
 Windows (Job Objects) and FreeBSD (rctl) have backends of their own, mirrored
-from `internal/service/proc/cgroup`: `Available()` is true there and `Create`
-returns a working `Group`. `WithRoot` is a cgroup v2 path, so both accept it and
-ignore it. The facade suite follows the service's split —
+from `internal/service/proc/cgroup`: `Available()` is true there (on FreeBSD,
+when the kernel carries RACCT) and `Create` returns a working `Group` whose
+`Kill` works and whose `Freeze` / `Thaw` return `UnsupportedPlatform`.
+`WithRoot` is a cgroup v2 path, so both accept it and ignore it. The facade suite follows the service's split —
 `cgroup_other_test.go` is `!linux && !windows && !freebsd`,
 `cgroup_windows_test.go` asserts the Job Object backend through the public
 names, and `TestWithRootOption` asserts the ignored root where a backend has no

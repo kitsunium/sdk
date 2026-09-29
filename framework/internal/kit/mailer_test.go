@@ -538,6 +538,7 @@ func TestMailCredentialsNeverLeak(t *testing.T) {
 // A mail queued in a file outbox outlives the process: the next run delivers
 // it.
 func TestMailOutboxSurvivesARestart(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	run := func(url string, fn func(app *kit.App)) {
 		t.Helper()

@@ -47,11 +47,11 @@ Replacing a binary in a directory the user cannot write needs a SECOND opt\-in. 
 
 Both variable names are derived from Source.Product — \`widget\` yields WIDGET\_AUTO\_UPGRADE and WIDGET\_ALLOW\_SUDO — by uppercasing and folding punctuation to underscore.
 
-A product whose updates are silent by design builds its Service WithAutomaticConsent — its own consent, given at build, which Service.AuthoriseUnattendedUpgrade reads and an operator still overrules with \<PREFIX\>\_AUTO\_UPGRADE=0. It grants no escalation, and WithoutElevation forbids escalation outright, whatever \<PREFIX\>\_ALLOW\_SUDO says \(ADR 0146\).
+A product whose updates are silent by design builds its Service WithAutomaticConsent — its own consent, given at build, which Service.AuthoriseUnattendedUpgrade reads and an operator still overrules with \<PREFIX\>\_AUTO\_UPGRADE=0. It grants no escalation, and WithoutElevation forbids escalation outright, whatever \<PREFIX\>\_ALLOW\_SUDO says \(ADR 0150\).
 
 ### Keys that rotate, a signature that names its release, a probe that rolls back
 
-Service.WithVendorKeys links several keys, in order, and a release verifies against any of them: a rotation publishes under the new key while builds that carry both accept it, and neither side has to be updated first \(ADR 0146\). Service.WithSignatureDomain makes each signature cover a domain — so a key that also signs other documents cannot have one read as a release — and makes the signed manifest say which tag it is and until when it may be installed \("\# tag v1.4.0", "\# expires 2026\-12\-31T00:00:00Z"\): an older release replayed under a newer name, or a stale one, is refused. Service.WithProbe keeps the previous binary as \<binary\>.prev and runs the new one with the product's probe arguments; a probe that fails puts the previous one back \(CodeProbeFailed\).
+Service.WithVendorKeys links several keys, in order, and a release verifies against any of them: a rotation publishes under the new key while builds that carry both accept it, and neither side has to be updated first \(ADR 0150\). Service.WithSignatureDomain makes each signature cover a domain — so a key that also signs other documents cannot have one read as a release — and makes the signed manifest say which tag it is and until when it may be installed \("\# tag v1.4.0", "\# expires 2026\-12\-31T00:00:00Z"\): an older release replayed under a newer name, or a stale one, is refused. Service.WithProbe keeps the previous binary as \<binary\>.prev and runs the new one with the product's probe arguments; a probe that fails puts the previous one back \(CodeProbeFailed\).
 
 ### Two limits a caller must know before relying on this
 
@@ -199,7 +199,7 @@ const CodeNoVendorKey errs.Code = coreupd.CodeNoVendorKey
 const CodeNotPrerelease errs.Code = coreupd.CodeNotPrerelease
 ```
 
-<a name="CodeProbeFailed"></a>CodeProbeFailed identifies a replacement whose new binary did not answer the probe the product declared with Service.WithProbe; the previous binary is put back from \<binary\>.prev when it was kept \(ADR 0146\).
+<a name="CodeProbeFailed"></a>CodeProbeFailed identifies a replacement whose new binary did not answer the probe the product declared with Service.WithProbe; the previous binary is put back from \<binary\>.prev when it was kept \(ADR 0150\).
 
 ```go
 const CodeProbeFailed errs.Code = svcupd.CodeProbeFailed

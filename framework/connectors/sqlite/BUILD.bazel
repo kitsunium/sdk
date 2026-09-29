@@ -2,7 +2,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 # gazelle:prefix github.com/kitsunium/sdk/framework/connectors/sqlite
 
-# framework/connectors/sqlite is a Go module of its own (ADR 0143 §7): one
+# framework/connectors/sqlite is a Go module of its own (ADR 0147 §7): one
 # database driver behind the framework's engine port.
 
 package(default_visibility = ["//visibility:public"])
@@ -29,6 +29,7 @@ alias(
 go_test(
     name = "sqlite_test",
     srcs = [
+        "filestore_test.go",
         "sqlite_internal_test.go",
         "sqlite_test.go",
         "subsystems_test.go",

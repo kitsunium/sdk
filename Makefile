@@ -67,7 +67,7 @@ test:
 # one module at a time and GOWORK=off, as a product builds them. It is the
 # gate of //framework/internal/kit:kit_test, `manual` under Bazel because the suite
 # reads its own sources and positions relative to the module root (rule 12,
-# ADR 0143).
+# ADR 0147).
 test-framework:
 	@set -e; for m in $$(bash scripts/ci/go-modules.sh | grep '^framework'); do \
 	  echo "→ $$m"; (cd $$m && GOWORK=off go test -race -count=1 ./...); \

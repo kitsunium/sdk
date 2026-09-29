@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/process
 
 Public facade for the SDK's keystone process-spawn primitive (ADR 0016). Start a
@@ -31,6 +32,8 @@ the build it came from.
 | `SIGTERM` / `SIGKILL` / `SIGINT` / `SIGHUP` / `SIGQUIT` | typed `Signal` constants |
 | `ResourceNoFile` / `ResourceCore` / `ResourceCPU` / `ResourceAS` | the common `Spec.Rlimits` keys |
 | `Start`, `MustStart` | spawn; a bare `Spec.Path` is searched in the child's PATH (Spec.Env's, else the parent's), `exec.ErrDot`/`ErrNotFound` wrapped in `SpawnFailed` |
+| `Self`, `Build`, `ParseBuild`; `Stats`, `Distribution`, `BuildInfo`, `Module` | the running process and the build it came from — one-line delegations to, and aliases of, `internal/service/proc/self` (ADR 0100) |
+
 - **README is generated.** `README.md` is produced by `gomarkdoc` from the
   package doc comment in `process.go` (Rule 10). Edit the doc comment, then
   `make docs-readme` (or run the `//go:generate` line). Maintainer rationale
@@ -69,9 +72,12 @@ Every error is a central `internal/core/proc` sentinel; match with
 `errs.HasCode(err, coreproc.CodeX)` (or, downstream, the read-only
 `pkg/v1/errs` introspection helpers). `Start` surfaces `InvalidSpec`,
 `UnknownUser`, `UnknownGroup`, `UnknownResource`, `RlimitFailed`, `SpawnFailed`,
-or `UnsupportedPlatform` (a Unix-only Spec field on Windows, or a platform
+`CgroupUnavailable` / `CgroupWriteFailed` (a Linux `Spec.CgroupPath` that is
+not a cgroup v2 directory, or whose placement the kernel refused), or
+`UnsupportedPlatform` (a Unix-only Spec field on Windows, or a platform
 with no spawn backend); the handle surfaces `WaitFailed`,
-`SignalFailed`, `StopFailed`.
+`StdioCaptureFailed` (from `Wait`, when a capture writer failed and the exit
+status still stands), `SignalFailed`, `StopFailed`.
 
 ## Platform
 

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/writer/
 
 ## Purpose
@@ -6,7 +7,9 @@ Declares the **transport-factory port** of the logger: a named, config-driven
 constructor (`Factory`) that yields a `core/logger.Sink`, plus the process-wide
 registry mapping a writer `Name` to its `Factory`. Peer of
 `internal/core/codec` — the registry resolves a `Name` to a `Factory` exactly
-as codec resolves a `Format` to a `Codec` (ADR 0012).
+as codec resolves a `Format` to a `Codec` (ADR 0012). It also holds each SDK
+writer's plain-data configuration value and the credential port the network
+writers share, so `pkg/v1/logger` can alias them without importing a vendor SDK.
 
 A writer is **not** a transport — it builds one. `Factory.Open` runs once at
 logger-construction time and returns a `Sink`; the hot path (`Sink.Write`) is
@@ -24,7 +27,13 @@ Code range: `0.2.3.*` (ADR 0012).
 | `writer_spec.go` | `Spec` value type (`Name` + `Config`); re-exported as `logger.WriterSpec` |
 | `config_decoder.go` | `Decoder` **optional** Factory extension (`Decode(map[string]any) (Config, error)`) — mirrors codec's `Appender`; detected by type assertion (ADR 0014 §D5) |
 | `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/codec/registry.go`) |
-| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) |
+| `config_console.go` | `ConsoleConfig` (`Stream` / `MinLevel`) + `ConsoleStream`: `ConsoleStderr` is the zero value, because stdout may be the process's protocol channel (ADR 0030); `ConsoleStdout` is reached only by naming it |
+| `config_file.go` | `FileConfig` (`Path` / `MinLevel`) for `"file"` |
+| `config_rotfile.go` | `RotFileConfig` for `"rotfile"` — `Path`, size cap, backups, compression, age, time-based rotation, injectable clock, `OnError`, `MinLevel` |
+| `config_s3.go` / `config_cloudwatch.go` | `S3Config` / `CloudWatchConfig` — the AWS writers' configs, plain data carrying no AWS type |
+| `config_mysql.go` / `config_clickhouse.go` / `config_redis.go` | `MySQLConfig` / `ClickHouseConfig` / `RedisStreamConfig` — the DB writers' configs, plain data carrying no driver type |
+| `credentials.go` | `CredentialProvider` port + the redacting `CredentialValue` (`NewCredentialValue`, accessors, `String` / `GoString`) the network writers share |
+| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) — `.1`, `.4` and `.5` label `Register`'s boot-time panics and have no `errs.Define` sentinel |
 | `errors.go`   | `WriterUnknownName` + the shared `WriterConfigInvalid` sentinel (the latter returned by every factory on a wrong-type `Config`) |
 
 ## `Decoder` optional extension (ADR 0014 §D5)
@@ -63,9 +72,10 @@ the very vendor tiers the tier exists to quarantine — ADR 0015 §"Why not enco
 anything other than `stdlib` MUST NOT have its factory package under
 `internal/service/writer/*`. The in-tree tree is **stdlib-only by
 construction**, so `go list -deps ./pkg/v1/...` is provably free of vendor SDKs
-without auditing every file. Enforced by the existing dep-light check (zero
-`x/crypto` / cloud / DB SDKs in `pkg/v1` deps) + Bazel visibility — not a new
-test.
+without auditing every file. What is mechanical is the direction:
+`scripts/check-layer-deps.sh` (ADR 0068) refuses any `internal/service/...` or
+`pkg/...` dependency on `third-party/...`, which keeps `pkg/v1` dep-light. Bazel
+visibility is no guard here — Gazelle's admits the whole repository.
 
 **Writer taxonomy (classes are documentation, not code — there is no class enum,
 field, or per-class interface; the registry stays a flat `Name → Factory` map):**
@@ -74,9 +84,9 @@ field, or per-class interface; the registry stays a flat `Name → Factory` map)
 |---|---|---|---|
 | console | `"console"` | `internal/service/writer/console` | `stdlib` |
 | file | `"file"`, `"rotfile"` | `internal/service/writer/{file,rotfile}` | `stdlib` |
-| transport | `"net"`, `"journald"` | `internal/service/writer/{nettransport,journald}` | `stdlib` |
+| transport | `"tcp"`, `"udp"`, `"http"`, `"journald"` | `internal/service/writer/{nettransport,journald}` | `stdlib` |
 | api | `"s3"`, `"cloudwatch"` | `third-party/aws/writer/{s3,cloudwatch}` | `third-party` |
-| db | `"mysql"`, `"clickhouse"`, `"redis-stream"` | `third-party/db/writer/{mysql,clickhouse,redis}` | `third-party` |
+| db | `"mysql"`, `"clickhouse"`, `"redis"` | `third-party/db/writer/{mysql,clickhouse,redis}` | `third-party` |
 
 A `Decoder` (above) makes a writer's knobs **YAML-reachable** regardless of its
 tier. Adding a class is an ADR-level act (ADR 0015 §D1).
@@ -101,7 +111,9 @@ hot path (`Build().Send()`), never to a batching `Write` (ADR 0015 §D5).
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var Writer = writer.Register(&fileFactory{})` in each concrete package.
 - **Idempotent re-registration** of the same `Name` is fine; a *distinct*
-  factory claiming a taken `Name` **panics at boot** with the dotted-quad code.
+  factory claiming a taken `Name` **panics at boot** with the dotted-quad code,
+  and so do an empty `Name` and an unusable factory — a typed nil pointer or a
+  non-comparable value (`internal/kernel/plugin`, ADR 0071).
 - **`Name("")` is the reserved invalid zero value** — `Known()` is false,
   `Lookup` always misses.
 - **One shared `WriterConfigInvalid`** — factories return it (with an `errs`

@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/
 
 ## Purpose
@@ -47,7 +47,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
-- `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.typeInfoFor`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**, and it still has none besides `pkg/v1/cache`. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
+- `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/cache` and `internal/service/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
 - `plugin` admitted by ADR 0071 — `Unusable(v any) (why string)` names no domain and knows no port; what it judges is the VALUE, and the two shapes it refuses are properties of Go's interfaces, not of any registry. It has **fifteen** in-tree consumers on day one, in eight core packages, which is unusual here and is the consolidation argument ADR 0010 made for `recycler`: the guard existed fifteen times as `if x == nil` and was wrong in the same way fifteen times.
 - `pathchain` admitted on rule 1: stdlib-only, and its signatures name a path
   and its components — no lock, no directory role, no policy. It ships with one
@@ -69,8 +69,9 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   concerns exactly one primitive (`worker`). The governing precedent is the row
   above it — **ADR 0025 admitted `cache` with ZERO consumers** — and ADR 0010's
   "three copies already existed" was a *consolidation* argument, not a gate.
-  `topic` is the second kernel package to consume another (`snapshot`, for a
-  copy-on-write membership list), after `ring`'s use of `errs`.
+  `topic` consumes another kernel package (`snapshot`, for a copy-on-write
+  membership list), as `ring` and `batcher` consume `errs`, `buffer`
+  `recycler`, and `cache` `clock`.
 
 ## Conventions unique to kernel
 
@@ -94,7 +95,7 @@ bazel test --config=race //internal/kernel/...
 # Fallback (go test — quick local iteration)
 cd internal/kernel
 GOWORK=off go test -race -cover ./...
-# expected: buffer 90%, clock 100%, errs 97.3%, ring 90%
+# expected: buffer 100%, clock 100%, errs 99.7%, ring 100%
 ```
 
 ## Subtree
@@ -113,3 +114,4 @@ GOWORK=off go test -race -cover ./...
 - `heap/` — see `internal/kernel/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
 - `topic/` — see `internal/kernel/topic/CLAUDE.md` (typed broadcast — why the delivery policy has no default, and why the value channel is never closed)
 - `plugin/` — see `internal/kernel/plugin/CLAUDE.md` (the registry entry guard — why it returns a reason string and not an error)
+- `pathchain/` — see `internal/kernel/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)

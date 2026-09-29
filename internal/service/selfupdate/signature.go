@@ -117,7 +117,7 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 	//: `string(raw)` in fetchChecksums round-trips byte-for-byte, so the
 	//: signed payload and the parsed payload are provably the same sequence.
 	//: With a signature domain the signed bytes are the domain, a NUL and the
-	//: manifest, and any linked key may have signed them (ADR 0146).
+	//: manifest, and any linked key may have signed them (ADR 0150).
 	if !u.verifiedByAnyKey([]byte(u.signedMessage(manifest)), signature) {
 		//: Refuse: whoever produced this manifest is not the vendor.
 		return refuse(coreupd.SignatureInvalid,
@@ -145,7 +145,7 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 // the verification path total.
 func (u *Service) canAuthenticate(tag string) error {
 	//: A build can verify a release when ONE linked key has the ed25519
-	//: public size (ADR 0146): a list of broken keys is no anchor at all.
+	//: public size (ADR 0150): a list of broken keys is no anchor at all.
 	for _, k := range u.keys() {
 		if len(k) == ed25519.PublicKeySize {
 			//: A key this build can verify a release with.

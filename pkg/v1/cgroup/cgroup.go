@@ -8,7 +8,8 @@
 // service implementation. The kernel-enforced control-group backend is the
 // unified cgroup v2 hierarchy on Linux, a Job Object on Windows and rctl(8) on
 // FreeBSD; the facade degrades gracefully — on a platform with no such backend
-// (darwin, OpenBSD, NetBSD, DragonFly, a FreeBSD kernel without RACCT), a cgroup
+// (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris, a FreeBSD kernel
+// without RACCT), a cgroup
 // v1 host, or an unprivileged/non-delegated Linux host it returns the typed
 // UnsupportedPlatform or CgroupUnavailable error rather than panicking.
 //
@@ -54,7 +55,7 @@
 // The backend is cgroup v2 on Linux, a Job Object on Windows and rctl(8) on
 // FreeBSD. On those, Available reports true (Linux additionally requires the
 // hierarchy delegated, FreeBSD a kernel with RACCT) and Create returns a usable
-// Group. On every other platform (darwin, OpenBSD, NetBSD, DragonFly) Available
+// Group. On every other platform (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris) Available
 // returns false and Create returns UnsupportedPlatform. The Group surface is
 // uniform; SetIOMax / Freeze / Thaw degrade to UnsupportedPlatform on the Job
 // Object backend, which has no equivalent for them. WithRoot names a directory of
@@ -88,7 +89,7 @@ func WithRoot(root string) Option {
 // Linux, that the unified cgroup v2 hierarchy is mounted AND a sub-group can be
 // created under it by the caller; on Windows, that Job Objects are available
 // (always true); on FreeBSD, that the kernel carries RACCT. It returns false on
-// platforms with no backend (darwin, OpenBSD, NetBSD, DragonFly), on cgroup v1,
+// platforms with no backend (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), on cgroup v1,
 // and on a Linux host where the hierarchy is read-only.
 func Available() bool {
 	//: delegate verbatim to the service probe.
@@ -100,7 +101,7 @@ func Available() bool {
 // Windows, a tracked rctl group on FreeBSD. It returns CgroupUnavailable when the
 // Linux hierarchy is absent or not delegated, CgroupCreateFailed when creation
 // fails, and UnsupportedPlatform on a platform with no control-group backend
-// (darwin, OpenBSD, NetBSD, DragonFly).
+// (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris).
 func Create(name string, opts ...Option) (g Group, err error) {
 	//: delegate verbatim to the service constructor.
 	return svccgroup.Create(name, opts...)
@@ -108,7 +109,7 @@ func Create(name string, opts ...Option) (g Group, err error) {
 
 // MustCreate is like [Create] but panics with the typed error when creation
 // fails — UnsupportedPlatform on a platform with no control-group backend
-// (darwin, OpenBSD, NetBSD, DragonFly), or CgroupUnavailable when the Linux hierarchy is not
+// (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris), or CgroupUnavailable when the Linux hierarchy is not
 // delegated. It is the idiomatic Go MustX opt-in (like
 // [regexp.MustCompile]) for a consumer that chooses crash-on-unsupported at its
 // own startup; the SDK itself never panics, and [Create] is the non-panicking

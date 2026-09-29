@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/events/
 
 ## Purpose
@@ -93,7 +94,8 @@ that arrives too late to mean anything.
   into an error field.
 - **The recovered value is a FIELD, never the wrap origin**, so a
   `panic(someSentinel)` cannot hijack `LISTENER_PANICKED` — the
-  `service/lifecycle.guard` precedent, with the same named test.
+  `service/lifecycle.guard` precedent;
+  `TestAPanicCarryingAnSDKErrorCannotHijackTheCode` pins it here.
 - **`New()` takes no configuration.** Every knob considered was a contract
   rather than a setting; a `Config` today would be an empty struct, which
   CLAUDE.md rule 5 refuses. A genuine knob arrives as a sibling constructor

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/token/
 
 ## Purpose
@@ -37,7 +38,7 @@ so no call site can request it and no configuration can enable it.
 | File | Surface |
 |---|---|
 | `token.go` | `Algorithm` (+ `String` / `Known`), `Issuer`, `Verifier` |
-| `claims.go` | the seven `Claim*` name constants, `MaxPrivateClaims`, `IsRegisteredClaim`, the immutable `ClaimsValue` + accessors + the redacting `String`/`GoString` |
+| `claims.go` | the seven `Claim*` name constants, `MaxPrivateClaims`, `IsRegisteredClaim`, the immutable `ClaimsValue` + `NewClaimsValue` + accessors + the redacting `String`/`GoString` |
 | `claims_with.go` | the copy-on-write `With*` setters, including `WithPrivateRaw` |
 | `codes.go` | `Code*` constants — range 0.2.13.\* |
 | `errors.go` | `Malformed` (.1), `AlgorithmNone` (.2), `AlgorithmMismatch` (.3), `SignatureInvalid` (.4), `Expired` (.5), `NotYetValid` (.6), `ExpiryRequired` (.7), `AudienceMismatch` (.8), `IssuerMismatch` (.9), `TooLarge` (.10), `TooDeep` (.11), `KeyUnsuitable` (.12), `PolicyMisconfigured` (.13), `IssueFailed` (.14), `ClaimNameInvalid` (.15), `LifetimeTooLong` (.16) |

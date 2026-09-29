@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/writer/rotfile/
 
 ## Purpose
@@ -169,7 +170,8 @@ a passing row: the parent counts planted rows and fails at zero rather than
 going green on an empty table.
 
 `./writer/rotfile` runs on real kernels in `.github/workflows/e2e-cross.yml`
-(`SERVICE_FILE_PKGS`): linux, macos-15, freebsd, openbsd, netbsd — and on
+(`SERVICE_FILE_PKGS`): linux, macos-15, freebsd, openbsd, netbsd, OmniOS
+r151054 (illumos) and Oracle Solaris 11.4 — and on
 windows through the whole-suite step, which gates there since ADR 0095. Two
 things differ on Windows and the suite says which: `assertPerm0600` asserts the
 one bit a mode reaches there (`0666`, not read-only), and the failure branches
@@ -194,7 +196,3 @@ bazel test --config=race //internal/service/writer/rotfile:rotfile_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/rotfile/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V48) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

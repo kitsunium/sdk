@@ -23,7 +23,7 @@ Rules:
   the user and the host. kit shows no engine's or driver's text anyway.
 - The MySQL driver's own logger is silenced: a product logs through the SDK.
 - Each engine is a module of the SDK's workspace (`go.work`) and of its
-  release chain (ADR 0143 §9): tags carry the module's subdirectory
+  release chain (ADR 0147 §9): tags carry the module's subdirectory
   (`framework/connectors/postgres/vX.Y.Z`), at the same version as
   `framework/vX.Y.Z`, which the release commit pins. In development its
   `go.mod` replaces the framework and the SDK with this tree.

@@ -88,7 +88,7 @@ type Service struct {
 	// signature.go for why that direction is the only safe one.
 	vendorKey ed25519.PublicKey
 	// vendorKeys are the keys a release may be signed with, in order, the
-	// first of them vendorKey (keys.go, ADR 0146); domain is the signature
+	// first of them vendorKey (keys.go, ADR 0150); domain is the signature
 	// domain, now the clock the signed expiry is read against.
 	vendorKeys []ed25519.PublicKey
 	domain     string
@@ -650,7 +650,7 @@ func (u *Service) finalizeReplacement(tmpPath, execPath string) error {
 	}
 
 	//: Keep the previous binary as <binary>.prev when a probe will judge the
-	//: new one (probe.go, ADR 0146).
+	//: new one (probe.go, ADR 0150).
 	kept := u.keepPrevious(execPath)
 
 	// Atomically replace old binary with new one

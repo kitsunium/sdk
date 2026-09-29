@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/i18n/
 
 ## Purpose
@@ -14,7 +15,7 @@ Code range: `0.3.60.*` (ADR 0063).
 
 | File | Surface |
 |---|---|
-| `plural.go` | the CLDR rule table (13 entries) + `Rules` / `SupportedTags` + the thirteen transcribed rules |
+| `plural.go` | the CLDR rule table (13 entries) + `Rules` / `SupportedTags` + the nine transcribed rule functions (`ja` and `zh` carry none; `de`, `en` and `nl` share one) |
 | `plural_value.go` | `PluralValue` — one language's categories and its rule |
 | `entry_value.go` | `EntryValue` + `Catalogue` + `Plain` / `PluralForms` |
 | `store.go` | `Store` + `NewStore` + `Lookup` / `Tags` / `Keys` / `Fallback` / `Missing` |
@@ -22,8 +23,8 @@ Code range: `0.3.60.*` (ADR 0063).
 | `load.go` | `LoadFS` — one catalogue file per language, decoded through `codec`, read through `io/fs` |
 | `printer.go` | `Printer` + `NewPrinter` + `Tag` / `Render` / `RenderCount` |
 | `printer_link.go` | the resolution chain: `link` + `buildChain` / `appendLineage` |
-| `negotiator.go` | `Negotiator` + `NewNegotiator` + `Supported` |
-| `negotiate.go` | `Negotiate` + RFC 4647 §3.4 lookup / §3.3.1 refusal + `subtagPrefixFold` |
+| `negotiator.go` | `Negotiator` + `NewNegotiator` + `Supported` + `Negotiate` |
+| `negotiate.go` | RFC 4647 §3.4 `lookup` / §3.3.1 refusal (`refused`) + `subtagPrefixFold` + the stable `sortByQuality` |
 | `accept.go` | the RFC 9110 `Accept-Language` parser (bounded, allocation-free) |
 | `codes.go` | `Code*` constants — range 0.3.60.* |
 | `errors.go` | `UnsupportedLanguage` / `CatalogInvalid` / `CatalogLoadFailed` / `TranslationIncomplete` / `NegotiationEmpty` + `failLoad` |

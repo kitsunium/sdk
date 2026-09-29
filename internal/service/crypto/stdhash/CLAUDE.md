@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/stdhash/
 
 ## Purpose
@@ -11,7 +12,7 @@ pulls zero non-stdlib deps, keeping `pkg/v1/hash` consumers dep-light.
 
 Peer of `internal/service/crypto/aesgcm` but on the **Hasher** port, not the
 AEAD port: these are **NOT authentication**. No hasher is keyed and a digest is
-public. Keyed integrity belongs to the AEAD / signature ports.
+public. Keyed integrity belongs to the MAC / AEAD / signature ports.
 
 ## Contents
 
@@ -54,8 +55,9 @@ input.
 
 ## Do NOT
 
-- Add a keyed or password hash here — those belong to the (future) KDF /
-  password ports, not the public-digest Hasher port.
+- Add a keyed or password hash here — those belong to the MAC, KDF and
+  password ports (`hmacsha2`, `hkdfsha256`, `pbkdf2pw`), not the public-digest
+  Hasher port.
 - Treat `crc32c` / `fnv1a-64` as secure; document any new fast hash as
   non-cryptographic.
 - Mint error codes here — dispatch errors and `DigestMismatch` live in

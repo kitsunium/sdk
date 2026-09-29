@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/health/
 
 ## Purpose
@@ -17,10 +18,12 @@ and fail faster. **The probe caused the outage.**
 |---|---|
 | `Check func(ctx context.Context) error` | a **readiness or startup** check. It receives a context because it is expected to talk to something outside this process. |
 | `SelfCheck func() error` | a **liveness** check. It receives **no context, on purpose** — see below. |
-| `Health` | registry + probe answering; implementations MUST be concurrency-safe. |
+| `StartupCheckValue` / `ReadinessCheckValue` / `LivenessCheckValue` | one registration: a `Name`, the body (`Check`, or a `SelfCheck` for liveness) and a `Timeout`; readiness adds `NonCritical` and `MaxAge`. |
+| `Health` | registry + probe answering — `AddStartup` / `AddReadiness` / `AddLiveness` / `Probe` / `Drain` (one-way: readiness reports not-ready from then on); implementations MUST be concurrency-safe. |
 | `Probe` | `ProbeStartup` / `ProbeReadiness` / `ProbeLiveness`. |
-| `Status`, `Worst`, `Status.Serving()` | the aggregate verdict and its combination rule. `Serving` is true for exactly `StatusDegraded` and `StatusHealthy`; a `Status` outside the three does not serve. |
-| `ResultValue` | one check's outcome, carried into the report. |
+| `Status`, `Worst`, `Status.Serving()` | the aggregate verdict and its combination rule. `Serving` is true for exactly `StatusDegraded` and `StatusHealthy`; a `Status` outside the three does not serve, and `Worst` ranks it with `StatusUnhealthy`, so it cannot fold into a healthier verdict. |
+| `ResultValue` | one check's outcome, carried into the report; `Age(now)` says how stale it is. |
+| `ReportValue` | one probe's whole answer: the `Probe`, the aggregate `Status`, `At`, and the `Results` that produced it. |
 
 ## Why the two checks are different types
 

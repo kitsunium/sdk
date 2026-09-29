@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-25T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -26,6 +26,9 @@ Public façade: `pkg/v1/server`.
 | `packet_loop.go` | the datagram read loop and dispatch |
 | `batch.go` | the `datagramSource` seam + reusable read slots |
 | `batch_portable.go` | one datagram per syscall — the floor everywhere |
+| `datagram_source_{linux,other}.go` | `newDatagramSource` — the batched reader for a socket exposing a raw descriptor (Linux only), the portable one otherwise — and `batchAvailable`, which feeds `State` |
+| `raw_conn_provider_linux.go` | `rawConnProvider` — the raw-descriptor contract the batched reader needs, declared rather than asserting `*net.UDPConn` |
+| `kernel_len_linux.go` | `setKernelLen` — a kernel length field written at the width the architecture gives it (`uint64` or `uint32`) |
 | `multireader_linux.go` | `recvmmsg` batched reader |
 | `multireader_mmsghdr_linux.go` | the cited `struct mmsghdr` layout |
 | `sockaddr_linux.go` | kernel sockaddr decoding for the batched path |
@@ -40,6 +43,9 @@ Public façade: `pkg/v1/server`.
 | `conn_tracked.go` | `trackedConn` — the socket that reports its own `Close`, so a hijacked connection's slot comes back when it ends |
 | `listen_tracked.go` | `trackedListener` — hands out `trackedConn`s beneath TLS, for a group that serves HTTP under a ceiling |
 | `adopt.go` | adoption of listeners inherited from a supervisor |
+| `handshake.go` | the bounded TLS handshake — `handshakeHandler`, and `defaultHandshakeTimeout` (10 s) for a group that sets none |
+| `swallow.go` | `swallowErr` — the recorded discard of a non-actionable cleanup error |
+| `{batch,conn,linux}_compliance.go` | compile-time interface assertions (`KTN-IFACE-ASSERT-PLACEMENT`) |
 
 ## Why-this-shape
 
@@ -52,8 +58,7 @@ Public façade: `pkg/v1/server`.
 - **`Group` returns the group, not `(group, error)`.** A declaration mistake is
   recorded in `declErr` and surfaced by `Start`. This is the trade that keeps
   wiring a server to five statements; it is only acceptable because `Start`
-  reports every recorded error, and `TestDeclarationErrorsSurfaceAtStart` pins
-  that it does.
+  reports every recorded error, and `TestServer_Start` pins that it does.
 - **TLS is applied at the listener, not in the accept loop.** `tls.NewListener`
   defers the handshake to the connection's own goroutine, so a slow or hostile
   peer stalls only itself. Doing the handshake inline in `Accept` would let one
@@ -69,8 +74,9 @@ Public façade: `pkg/v1/server`.
   through the `live` registry and returns `DRAIN_TIMEOUT` **without** waiting on
   the WaitGroup. The first implementation did wait, which made the budget
   meaningless: a handler blocked on something other than its socket hung
-  `Shutdown` forever. `TestShutdownReportsAnExpiredBudget` is the regression
-  guard, and it went from a 120-second hang to 1.1 seconds when fixed.
+  `Shutdown` forever. `TestServer_Shutdown_ReportsAnExpiredBudget` is the
+  regression guard, and it went from a 120-second hang to 1.1 seconds when
+  fixed.
 - **A handler panic closes only its connection.** One malformed peer must never
   take the process down.
 - **`release` always runs, via defer.** A handler that returns early, errors, or
@@ -113,8 +119,8 @@ Public façade: `pkg/v1/server`.
   and counts like any other. `WSAEMSGSIZE` lives in `internal/syscall/windows`,
   which nothing outside the stdlib may import, so it is declared and cited in
   `truncation_windows.go`.
-- **`TestLinuxSelectsTheBatchedReader` is the only test that proves the batched
-  path is in use.** Every behavioural datagram test passes identically on the
+- **`Test_newDatagramSource` is the only test that proves the batched path is
+  in use.** Every behavioural datagram test passes identically on the
   portable fallback, so without it a broken type assertion would degrade the
   engine to one syscall per datagram with the whole suite still green.
 - **Handlers run inline on the read goroutine.** A hand-off would cost a channel
@@ -160,7 +166,7 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
   deliberate and match `net/http`'s own carve-out ("Shutdown does not attempt to
   close nor wait for hijacked connections such as WebSockets"): such a
   connection is **not waited for** by the drain, and it stops counting toward
-  `State().Active`. The drain SIGNAL is what reaches it instead.
+  `State().ActiveConns`. The drain SIGNAL is what reaches it instead.
   `TestAHijackedConnectionSurvivesTheEngine` provokes the defect with a plain
   `http.Handler` and is mutation-checked — forcing the close back on fails it
   and nothing else.

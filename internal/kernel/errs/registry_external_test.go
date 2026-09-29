@@ -53,7 +53,7 @@ func sdkRoot(tb testing.TB) (root string) {
 // call) pair whose callee resolves to errs.Define. third-party is included so
 // the opt-in vendor-dependent emitters (e.g. the AWS writers, ADR 0012) are
 // audited for the same Public-is-literal / reason / code-uniqueness invariants
-// as the rest of the SDK, and framework so the layer above pkg/v1 (ADR 0143)
+// as the rest of the SDK, and framework so the layer above pkg/v1 (ADR 0147)
 // is too. Used by the audits below.
 func collectDefineCalls(tb testing.TB, root string) (out []defineCall) {
 	tb.Helper()

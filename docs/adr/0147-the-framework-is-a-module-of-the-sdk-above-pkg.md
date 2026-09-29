@@ -1,4 +1,4 @@
-# ADR 0143 — the framework is a module of the SDK, above `pkg`, and a product imports nothing else
+# ADR 0147 — the framework is a module of the SDK, above `pkg`, and a product imports nothing else
 
 - **Status**: Proposed
 - **Date**: 2026-09-28

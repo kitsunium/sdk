@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-25T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/buffer/
 
 ## Purpose
@@ -46,7 +46,8 @@ cd internal/kernel && GOWORK=off go test -race -cover ./buffer
 
 Tests: `buffer_external_test.go` (public contract: fresh length, oversize drop,
 nil-safety), `buffer_internal_test.go` (constants, fresh-buffer capacity via the
-package recycler). The zero-alloc steady-state of `Get`/`Put` is gated by
-`recycler`'s `TestZeroAllocInvariant` (race-off).
-
-A longer-form companion lives in `README.md`.
+package recycler), `buffer_bench_test.go` (warm `Get`, the `Get`/write/`Put`
+round trip, and the round trip under `RunParallel` — the numbers are in
+`BENCH.md`; there is no isolated `Put` benchmark, because a `Put` without its
+`Get` measures pool growth). The zero-alloc steady-state of `Get`/`Put` is
+gated by `recycler`'s `TestZeroAllocInvariant` (race-off).

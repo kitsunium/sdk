@@ -40,6 +40,7 @@ func TestAPlainValueIsRefused(t *testing.T) {
 // that does not change it passes, one that puts another plain value is
 // refused.
 func TestALegacyValueIsLeftAsItWas(t *testing.T) {
+	needsFileStore(t)
 	useFakeHashing(t)
 	dir := t.TempDir()
 	before := NewService("locks-legacy", "")

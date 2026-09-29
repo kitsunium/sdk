@@ -1,4 +1,4 @@
-// Package selfupdate — The consent a product declares, and the escalation it forbids (ADR 0146).
+// Package selfupdate — The consent a product declares, and the escalation it forbids (ADR 0150).
 // Both are properties of the Service a product builds rather than fields of
 // SourceValue: a source says where releases come from, a Service how this
 // binary treats them.

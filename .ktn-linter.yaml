@@ -184,7 +184,7 @@ serialization_tags:
   - msgpack
   - cbor
   - bson
-  # framework/kit's request binding (ADR 0143): a field of an endpoint's
+  # framework/kit's request binding (ADR 0147): a field of an endpoint's
   # request is read from the route's wildcard, the query, a header or a cookie
   # by these tags, exactly as encoding/json reads a member by `json`.
   - path
@@ -1241,6 +1241,25 @@ rules:
       - "internal/service/secret/**"
       - "**/pkg/v1/secret/**"
       - "pkg/v1/secret/**"
+      # service/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
+      # gave both Versions (8), Clock (16, an interface) and Held (8): the key
+      # function (8), the filesystem (16) and the path (16), or the transactor
+      # (16), IndexKey (8), the table (16) and the dialect (8), were already 48
+      # and 56. Every field is a collaborator or an option a caller must be able
+      # to omit. Value semantics are the contract, as for sql.Config above: Open
+      # and OpenSQL validate the struct they were given — a negative Versions, a
+      # Held without Versions — and taking a pointer would let a caller change
+      # Versions or the key function after validation passed. The copy happens
+      # once per store, next to a load that reads every file or a transactor
+      # that opened a pool, so the performance concern the rule guards is not
+      # measurable here.
+      #
+      # pkg/v1/docstore is included because Open and OpenSQL there are pure
+      # forwarders of the same aliases.
+      - "**/internal/service/docstore/**"
+      - "internal/service/docstore/**"
+      - "**/pkg/v1/docstore/**"
+      - "pkg/v1/docstore/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies

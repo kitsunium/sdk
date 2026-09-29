@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-11T00:00:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/server/websocket/
 
 ## Purpose
@@ -63,7 +63,9 @@ discussed, and the package stands alone for a consumer using plain `net/http`.
 - **A close code that must never travel is refused, in both directions.**
   `CloseWith(CloseAbnormal, …)` is an error, and a peer that sends 1006 fails
   the connection. One predicate — `CloseCode.Sendable` — answers both, so the
-  two cannot drift.
+  two cannot drift. `CloseWith` also refuses `CloseExtensionRequired` (1010),
+  the one code only a client may open a closing handshake with; `Sendable`
+  still accepts it, so a client's own 1010 can be echoed back.
 - **Zero ping interval is clamped, negative is refused** (ADR 0031), and
   "never" has its own spelling. `WithoutPing` disables the connection's ONLY
   liveness check, which the doc comment says out loud rather than leaving to be
@@ -72,13 +74,18 @@ discussed, and the package stands alone for a consumer using plain `net/http`.
   `AllowAnyOrigin()` — a name a reviewer can grep for. The browser's same-origin
   policy does not apply to WebSocket, so the default-off switch is the
   difference between an endpoint and a CSRF primitive.
-- **The default rule compares the scheme only where it can see it.** When this
-  server terminates TLS itself the Origin must be `https` as well as name the
-  request's host; behind a TLS-terminating proxy the request arrives in
-  plaintext, the scheme is invisible, and an `http://` page for the same host is
-  accepted. That gap is stated in the package doc comment rather than guessed
-  away: `AllowOrigins` closes it, and `X-Forwarded-Proto` is not consulted
-  because where no proxy overwrites it the client wrote it.
+- **The default rule compares the scheme only where it can see it, and refuses
+  where a proxy announces it cannot.** When this server terminates TLS itself
+  the Origin must be `https` as well as name the request's host. Behind a
+  TLS-terminating proxy the request arrives in plaintext and the scheme is
+  invisible: a request carrying `Forwarded` or `X-Forwarded-Proto` on a
+  connection this server did not terminate is refused with a message naming
+  `AllowOrigins` (ADR 0069). Only the PRESENCE of those headers is read, never
+  their value — where no proxy overwrites it the client wrote it — so a header
+  can make the check stricter and never looser. Behind a proxy that announces
+  nothing, an `http://` page for the same host is still accepted; `AllowOrigins`,
+  which names the scheme outright, is the only way to have it checked there, and
+  the package doc comment says so.
 - **The sentinels are the engine's own values, not copies.**
   `TestSentinelsAreMatchableThroughTheFacade` pins that `errors.Is` still
   answers across the module boundary; re-declared sentinels would quietly answer
@@ -145,6 +152,7 @@ cd pkg && GOWORK=off go test -race -cover ./v1/server/...
 ## Reference
 
 - ADR 0047 — `docs/adr/0047-sdk-net-websocket.md`
+- ADR 0069 (the origin rule behind a proxy) — `docs/adr/0069-websocket-origin-behind-a-proxy.md`
 - ADR 0029 (the net domain), ADR 0043 (drain is a signal)
 - ADR 0030 (stdout is a protocol channel), ADR 0031 (zero values are never inert)
 - `internal/service/net/websocket/CLAUDE.md`, `internal/core/net/CLAUDE.md`

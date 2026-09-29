@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/config/
 
 ## Purpose
@@ -51,5 +52,9 @@ Code range: `0.2.10.*` (ADR 0028 + ADR 0061).
 ## Verification
 
 ```
-bazel test --config=race //internal/core/config:config_test
+bazel test --config=race //internal/service/config:config_test
 ```
+
+This package has no test target of its own: it declares ports, values and
+sentinels only. `internal/service/config`'s suite exercises them, and the errs
+AST audit (`//internal/kernel/errs:errs_test`) checks its `errs.Define` calls.

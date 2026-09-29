@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/validation/
 
 ## Purpose
@@ -35,7 +36,10 @@ Code range: `0.2.15.*` (ADR 0046).
   members joined by `.`, elements by `[n]`, so `user.addresses[2].zip`. Build
   child paths with `JoinField` / `JoinIndex`, never by concatenation, or the
   grammar stops being one. `RootPath` (`""`) is the value as a whole — what a
-  cross-field rule reports.
+  cross-field rule reports. The grammar does not quote: a member name that
+  itself contains `.`, `[` or `]` (`json:"log.level"` is legal) yields a path
+  indistinguishable from a nested one, and ADR 0046 §Deferred defers the quoted
+  segment that would settle it together with map descent.
 - **The member name is the caller's, not the type's.** Core has no opinion; the
   service tag compiler derives it from the `json` tag because `config.Load`
   decodes every format through a JSON round trip, and the programmatic `Field`

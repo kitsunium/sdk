@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/statemachine/
 
 ## Purpose
@@ -42,7 +43,7 @@ arrive at once: the port says so, and says a journal may read the machine but
 never tell it anything.
 
 **`RecordValue.History` is a slice, as the core values' collections are**
-(`logger.RecordValue.Attrs`, `mail.MessageValue.To`). The engine hands every
+(`logger.RecordEvent.Attrs`, `mail.MessageValue.To`). The engine hands every
 caller — the journal, `Record`, `Records` — a copy it owns.
 
 **`Trigger` has no text marshalling.** A value-receiver `String` beside a

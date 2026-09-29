@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:31:45Z -->
 # internal/service/writer/file/
 
 ## Purpose
@@ -120,7 +121,3 @@ bazel test --config=race //internal/service/writer/file:file_test
 # Fallback
 cd internal/service && GOWORK=off go test -race -cover ./writer/file/...
 ```
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V44) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.

@@ -1,5 +1,5 @@
 // Package kit — process profiles: what an app does with its process (ADR
-// 0143 §5) — serve, run as a daemon, or run one CLI command — and the
+// 0147 §5) — serve, run as a daemon, or run one CLI command — and the
 // singleton lock.
 package kit
 

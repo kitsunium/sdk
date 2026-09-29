@@ -22,7 +22,7 @@ Rules:
   server, and a product logs through the SDK alone.
 - `go.mod` requires the framework at the last release and replaces it — and
   the SDK modules below it — with this tree; the release commit pins them
-  (ADR 0143 §9). It is a module of the SDK's `go.work`.
+  (ADR 0147 §9). It is a module of the SDK's `go.work`.
 
 ## Test
 

@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/worker/
 
 ## Purpose
@@ -31,7 +32,14 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 
 - **The Loop MUST return promptly on `stop`.** A `Loop` that ignores its `stop`
   channel deadlocks `Stop`, which blocks on the join. Loops `select` on `stop`
-  (see the async drainer) and exit their work loop when it is closed.
+  (see the `net/sse` and `net/websocket` watchers and pingers) and exit their
+  work loop when it is closed. A loop that ends by other means must be ended
+  before `Stop`, or joined through `Done`: the async drainer exits on its
+  sink's own stop channel, which `Close` closes before it calls `Stop`, and
+  `net/server`'s `Serve` loop returns when its listener closes, the adapter
+  waiting on `Done` rather than calling `Stop`.
+- **A nil `Loop`, a nil `tick` or a non-positive `Every` interval panics** at
+  the call, not inside the spawned goroutine.
 - **`Stop` is idempotent and joins.** A `sync.Once` guards `close(stop)`, so
   concurrent / repeated `Stop` never double-closes; every caller blocks on the
   closed `done` channel, so `Stop` returning means the loop has returned.
@@ -43,13 +51,19 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 
 ## Consumers it collapses
 
-`worker.LoopDaemon` replaces the hand-rolled `stop/stopOnce/done/doneOnce`
-lifecycle in:
+`worker.LoopDaemon` owns the background goroutine, in place of a hand-rolled
+`stop/stopOnce/done/doneOnce` lifecycle, in:
 
 - `internal/service/logger/middleware/async` — the drainer goroutine (retrofitted
   in the same commit that introduced this package, as the proving consumer).
-- the s3 / cloudwatch batching sinks under `third-party/*` (cut over in a later
-  commit of the same wave).
+- `internal/service/net/server` — the goroutine running `http.Server.Serve`.
+- `internal/service/net/sse` and `internal/service/net/websocket` — each
+  stream's or connection's drain watcher and keep-alive pinger.
+- `internal/service/writer/rotfile` — interval rotation, through `Every`.
+
+The s3 / cloudwatch batching sinks under `third-party/aws/writer/*` do not use
+it: they are built on `kernel/batcher`, which drives its own `time.Ticker`
+(ADR 0014 §D6).
 
 ## Conventions
 

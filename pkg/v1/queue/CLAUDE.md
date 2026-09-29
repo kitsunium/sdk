@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/queue/
 
 ## Purpose
@@ -14,7 +15,7 @@ consumer engine.
 | Values | `Message`, `Delivery`, `Lease`, `Receipt`, `Nack`, `Policy`, `DeadLetter` |
 | ADR 0039 siblings | `DeadLetterReader`, `LeaseExtender`, `Waker` (+ its value `Wake`) — reached by type assertion |
 | Configs | `FileConfig`, `MemoryConfig`, `ConsumerConfig` |
-| Constructors | `NewFile`, `NewMemory` |
+| Constructors | `NewFile` (its broker also answers `io.Closer` by type assertion, releasing its two directory descriptors; the messages stay on disk), `NewMemory` |
 | Engine | `Consume` |
 | Constants | `DefaultMaxMessageBytes`, `MaxDeadlineOffset`, `DefaultPollInterval` |
 | Sentinels | `QueueMisconfigured`, `MessageTooLarge`, `UnknownReceipt`, `LeaseExpired`, `InvalidBatchSize`, `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` |

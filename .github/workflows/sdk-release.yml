@@ -8,7 +8,7 @@ name: SDK Release
 #
 # WHAT is released is the chain go.work declares — internal/*, pkg, the
 # framework and its connectors — tagged in lockstep at one version, so the
-# tokens "pkg" and "framework" both release all of it, once (ADR 0143 §9).
+# tokens "pkg" and "framework" both release all of it, once (ADR 0147 §9).
 #
 # Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
 # workflow_dispatch input force_bumps overrides the impact analysis when
@@ -61,7 +61,7 @@ on:
   workflow_dispatch:
     inputs:
       force_bumps:
-        description: 'Force a bump token, "pkg" or "framework" — either releases the whole chain in lockstep, ADR 0143 (empty = use compute-bumps.sh output).'
+        description: 'Force a bump token, "pkg" or "framework" — either releases the whole chain in lockstep, ADR 0147 (empty = use compute-bumps.sh output).'
         required: false
         default: ""
       bump:

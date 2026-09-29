@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/core/net/
 
 ## Purpose
@@ -29,14 +29,24 @@ name.
 | `codes.go` | the 34 `Code` constants, `0.2.11.1` – `0.2.11.34` |
 | `errors.go` | the matching `*errs.Error` sentinels + the local sysexits constants |
 | `wrap.go` | `wrapAs(sentinel, cause, fields...)` — origin-wins sentinel wrapping |
-| `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentity` |
+| `identity.go` | `IdentityValue` — the opaque, redacting TLS identity + `NewIdentityValue` |
 | `identity_params.go` | `IdentityParams` — in-memory TLS material |
 | `identity_file_params.go` | `IdentityFileParams` — on-disk TLS material; the twin of `IdentityParams`, loaded by `service/net/tlsid` |
-| `client_config.go` | `ClientConfig` — the outbound client's knobs, beside the inbound `LimitsValue` / `TimeoutsValue` |
+| `client_config.go` | `ClientConfig` — the outbound client's knobs, the counterpart of the inbound `LimitsValue` / `TimeoutsValue` |
 | `material.go` | PEM parsing helpers; **the `AppendCertsFromPEM` trap is closed here** |
 | `duration.go` | `DurationValue` — config-friendly duration (`"30s"` or nanoseconds) |
 | `address.go` | `AddressValue` — one socket to bind |
+| `limits.go` | `LimitsValue` — one listener group's resource ceilings; a zero field means the domain default, never unbounded |
+| `timeouts.go` | `TimeoutsValue` — per-operation deadlines, one per phase (`Read` / `Write` / `Idle` / `Handshake`) |
+| `conn.go` | `Conn` — one accepted stream connection, embedding `net.Conn` — plus the `ConnHandler` port and its `ConnHandlerFunc` adapter |
+| `packet.go` | `Packet` — one received datagram — plus the `PacketHandler` port and its `PacketHandlerFunc` adapter |
+| `handler_compliance.go` | the compile-time proof that both func adapters satisfy their ports |
+| `middleware.go` | `Middleware[H]` + `Chain` — one generic decorator shape for stream and datagram handlers, the first listed outermost |
+| `phase.go` | `Phase` — `PhaseNew` / `PhaseStarting` / `PhaseServing` / `PhaseDraining` / `PhaseStopped` + `String` |
+| `state.go` | `StateValue` (+ `Degraded`) and `ListenerStateValue` — the server's reported state |
 | `policy.go` | `Policy` / `PolicyFunc` — outbound authorisation port |
+| `policy_compliance.go` | the compile-time proof that `PolicyFunc` satisfies `Policy` |
+| `response.go` | `ResponseValue` — a fully-read outbound response — and `RequestValue`, the request a `Policy` judges |
 | `call.go` | `CallValue` — one completed outbound call — and `CallHook`, the observation function port |
 | `sse.go` | `SSEEventValue` — the Server-Sent Events frame, its validation and its wire form, plus `AppendSSEComment` |
 | `drain.go` | `WithDrainSignal` / `DrainSignal` — the shutdown signal a long-lived handler observes |
@@ -67,8 +77,9 @@ name.
   empty, truncated or key-only bundle yields a pool that parses fine and
   **verifies nothing**. Here that is `TLS_MATERIAL_INVALID`. An *absent* bundle
   (nil pool → platform trust store) is deliberately distinct from an *unusable*
-  one. `TestNewIdentityRejectsUnusableTrustBundle` is the regression guard, and
-  it has been mutation-checked: reintroducing the ignored boolean fails it.
+  one. The trust-bundle cases of `TestNewIdentityValue`, and `Test_parsePool`,
+  are the regression guard: with the boolean ignored, a garbage, key-only or
+  truncated bundle would construct without error, and both tests fail.
 - **The TLS floor is TLS 1.3 by default and never zero.** A zero-value
   `IdentityValue` still reports TLS 1.3, so a caller who never configured TLS
   does not silently inherit the stdlib default. TLS 1.0/1.1 are refused
@@ -79,7 +90,7 @@ name.
 - **`Policy` is a port because it is enforced under the call site.** The whole
   value is that implementations run inside the `RoundTripper`, so "read-only"
   is a property of the code rather than a convention. `RequestValue` carries
-  `Scheme`/`Host` as well as `Method`/`Path` because a policy that sees only the
+  `Scheme`/`Host` as well as `Method`/`EscapedPath` because a policy that sees only the
   path cannot defend against a redirect that keeps the path and swaps the origin.
 - **`RequestValue` carries the ESCAPED path, never the decoded one.** `url.URL.Path`
   is already percent-decoded, so a policy that judges it accepts `%2e%2e` — which
@@ -146,7 +157,7 @@ name.
   takes 32 bytes per iteration, then 8, then 1 — **16.1×** the byte-at-a-time
   throughput, **6.17×** on the whole in-situ receive path — with no assembly, no
   build-tagged per-architecture file and no `unsafe`, which is the only reason
-  it can be one implementation across all eight GOOS the SDK targets (ADR 0018).
+  it can be one implementation across every GOOS the SDK targets (ADR 0018, ADR 0144).
   The compiler renders each word as a single memory-destination XOR; there is no
   vector instruction involved and none is wanted. Endianness safety is not a
   property of choosing little-endian — it is a property of using **one** order
@@ -216,12 +227,12 @@ facts that decide how this package is used:
   same bytes in one frame. A peer chooses its own chunk size and a server cannot
   refuse it, so this is the axis a peer can turn against the reader for free.
 - **An SSE frame is now bounded by the memory hierarchy, not by a scan.**
-  Encoding got **2.56×–4.62×** faster, `Validate` 1.73× and the keep-alive
+  Encoding a single-line frame got **2.56×–4.62×** faster, `Validate` 1.73× and the keep-alive
   comment 1.59×, by replacing `strings.IndexAny` — which had no `bytealg` path
   and was 91 % of a 4 KiB frame — with two forward cursors over `IndexByte`.
   The scan is still the largest profile entry at 65 %, and now it should be:
   two assembly passes is the floor for proving two bytes are absent.
-- **A multi-line SSE payload costs 2.4× a single-line one of the same size**
+- **A multi-line SSE payload costs 5.1× a single-line one of the same size**
   (33 653 ns against 6 582 for 64 KiB with CRLF every 64 bytes), because every
   line is a separate `data:` field and a CRLF cut refreshes BOTH cursors. That
   is per-FIELD cost, not per-byte cost, and it is the axis a payload's shape
@@ -275,8 +286,9 @@ the close reason as a string once per connection.
 
 ## Imports allowed
 
-stdlib (`crypto/tls`, `crypto/x509`, `crypto/sha1`, `encoding/base64`,
-`encoding/binary`, `net`, `time`, `strconv`, `unicode/utf8`) +
+stdlib (`context`, `crypto/tls`, `crypto/x509`, `crypto/sha1`, `encoding/base64`,
+`encoding/binary`, `math`, `net`, `net/http`, `slices`, `strconv`, `strings`,
+`time`, `unicode/utf8`) +
 `internal/kernel/errs`. `crypto/sha1` appears for one reason only: RFC 6455
 §1.3 names it, and the digest proves a handshake was parsed rather than
 replayed. It is not a security primitive here and the doc comment says so. Never `internal/service/*`, never `pkg/*`, and never

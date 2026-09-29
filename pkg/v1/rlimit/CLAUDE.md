@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T16:42:12Z -->
 # pkg/v1/rlimit/
 
 ## Purpose
@@ -28,10 +29,13 @@ conversion. The functions are one-line delegations — no logic lives here.
 
 ## Spec integration
 
-Go's `os/exec.SysProcAttr` has no rlimit field. `PrepareSysProcAttr` validates a
-limit set without acting; actual application is post-fork (`Apply(0, …)` in the
-child) or via `prlimit64` against a spawned pid. The doc comment documents this
-honestly.
+Go's `os/exec.SysProcAttr` has no rlimit field. `process.Start` applies a
+`Spec.Rlimits` set itself, through a re-exec trampoline; this package is the
+standalone primitive for the other cases. `PrepareSysProcAttr` validates a
+limit set without acting; application is post-fork (`Apply(0, …)` in the
+child, `setrlimit(2)` on every Unix) or via `prlimit64` against a spawned pid
+(Linux only — another Unix answers `UnsupportedPlatform` for a foreign pid).
+The doc comment documents this honestly.
 
 ## Verification
 

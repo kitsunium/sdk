@@ -1,7 +1,7 @@
 // Package ipc is a private socket between processes of one machine: a
 // listener only its own account — and the accounts it names — can reach, a
 // client that refuses to talk to a socket another account planted, and the
-// kernel's word on who is at the other end (ADR 0144).
+// kernel's word on who is at the other end (ADR 0148).
 //
 // Two gates, and which one holds where is said rather than assumed:
 //

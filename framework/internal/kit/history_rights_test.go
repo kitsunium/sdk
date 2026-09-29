@@ -42,6 +42,7 @@ func TestAHeldRecordKeepsItsFormerValues(t *testing.T) {
 // A person's erasure takes the former values of what it clears with them —
 // from the files too, once folded —, and keeps a public field's.
 func TestAnErasureTakesTheFormerValues(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	startKeeper(t, kit.DataDir(dir))
 	ctx := t.Context()

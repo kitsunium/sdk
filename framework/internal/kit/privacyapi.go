@@ -13,7 +13,7 @@ import (
 // gaps, the holds, the journal's latest entries and whether its chain
 // holds. It reads only: running a retention, exporting and erasing a person
 // are the product's CLI commands (`privacy`, privacycmd.go), run by an
-// operator — never an HTTP route (D13, ADR 0143 §8). A personal, special or
+// operator — never an HTTP route (D13, ADR 0147 §8). A personal, special or
 // secret value never reaches the Studio.
 
 // journalShown is how many of the journal's latest entries the page shows.

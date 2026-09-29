@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # pkg/v1/git/
 
 ## Purpose
@@ -20,6 +21,7 @@ binary. Consumers import this package; the service and `core/vcs` stay internal.
 | `ShowFile(ctx, root, sha, rel)` | func | delegates verbatim |
 | `HeadState` | type alias | `= svcgit.HeadValue` — `Revision`, `Time`, `Modified` (ADR 0100) |
 | `Head(ctx, dir)` | func | delegates verbatim — HEAD's commit, its committer date, tracked changes |
+| `CodeRepositoryUnresolved` / `CodeCommandFailed` / `CodePathAbsent` | const | the `core/vcs` codes (`0.2.33.1`–`0.2.33.3`), for `errs.HasCode` |
 
 `Config` and `Include` alias the **service**, not core, and ADR 0074 is why: they
 are meaningful to exactly one engine. `ChangedSet`, `LineRange` and `Resolution`

@@ -22,7 +22,8 @@ kernel mechanics:
 | GOOS | Reaping loop | SetChildSubreaper |
 |---|---|---|
 | linux | real SIGCHLD/Wait4 | real `prctl` |
-| darwin, *bsd | real SIGCHLD/Wait4 | `UnsupportedPlatform` |
+| darwin, *bsd | real SIGCHLD/Wait4 | `UnsupportedPlatform` (FreeBSD/DragonFly: real `procctl`) |
+| illumos, solaris | real SIGCHLD/Wait4, plus a sweep every second — a child's exit posts no SIGCHLD there (ADR 0144) | `UnsupportedPlatform` |
 | windows, others | no-op | `UnsupportedPlatform` |
 
 The package compiles and runs on every GOOS; only behaviour degrades.

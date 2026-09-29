@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/crypto/jwk/
 
 ## Purpose
@@ -19,6 +20,11 @@ TTLs, SSRF against a caller-supplied URL) and they belong to whatever later
 package owns them — see **Do NOT**.
 
 Code range: `0.3.42.*`.
+
+Public facade: `pkg/v1/token`, which aliases `KeyValue` as `JWK` and `Set` as
+`JWKSet`, wraps `Parse` / `ParseSet` / `NewSet` as `ParseJWK` / `ParseJWKSet` /
+`NewJWKSet`, and re-exports the six parse refusals (`.1`–`.6`) as `CodeJWK*`
+codes and `JWK*` sentinels.
 
 ## The decision this package exists to make
 

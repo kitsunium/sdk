@@ -18,6 +18,8 @@ type RenderedSQL struct {
 	SharedKeys func(n int) string
 	// MarkUnique renders Reindex's constraint over n indexes.
 	MarkUnique func(n int) string
+	// InsertVersions renders the insertion of n version rows.
+	InsertVersions func(n int) string
 }
 
 // RenderSQLForTest renders the statements of a store keeping its documents in
@@ -31,10 +33,14 @@ func RenderSQLForTest(dialect coresql.Dialect, table string) RenderedSQL {
 			s.lockDoc: "lockDoc", s.writeLocked: "writeLocked", s.deleteDoc: "deleteDoc",
 			s.deleteIndex: "deleteIndex", s.clearIndex: "clearIndex", s.pageAfter: "pageAfter",
 			s.lookup: "lookup", s.find: "find",
+			s.claim: "claim", s.versionHead: "versionHead", s.retireHead: "retireHead", s.pruneCut: "pruneCut",
+			s.pruneVersions: "pruneVersions", s.dropVersions: "dropVersions", s.dropFormers: "dropFormers",
+			s.readVersions: "readVersions", s.lockFormers: "lockFormers",
 		},
 		InsertIndexRows: s.insertIndexRows,
 		UniqueTaken:     s.uniqueTaken,
 		SharedKeys:      s.sharedKeys,
 		MarkUnique:      s.markUnique,
+		InsertVersions:  s.insertVersions,
 	}
 }

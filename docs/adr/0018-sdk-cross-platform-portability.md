@@ -1,6 +1,6 @@
 # ADR 0018 — Cross-platform portability strategy
 
-**Status**: Accepted
+**Status**: Accepted (both bars extended to illumos and Solaris by [ADR 0144](0144-illumos-and-solaris-supervise-on-their-own-kernels-word.md))
 **Date**: 2026-06-14
 **Deciders**: @kodflow
 **Related**: ADR 0016 (process-supervision domain — the source of platform-specific calls),

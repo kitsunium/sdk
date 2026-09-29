@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/selfupdate/
 
 ## Purpose
@@ -16,8 +17,8 @@ module.
 | `updater.go` | `Service`, the update flow, the atomic replacement |
 | `source.go` | `SourceValue` — the whole of what the original hard-coded |
 | `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey` |
-| `keys.go` | ADR 0146: `WithVendorKeys` (an ordered list, at most four, any key verifies), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` |
-| `probe.go` | ADR 0146: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
+| `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` |
+| `probe.go` | ADR 0150: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
 | `checksum.go` | integrity: SHA-256 against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
@@ -27,7 +28,10 @@ module.
 | `codes.go`, `errors.go` | this package's own range `0.3.66.*` and its sentinels |
 | `wrap.go` | `refuse` and `classify` — the only two ways an error is built here |
 | `diagnose.go` | the half of an error `Error()` never renders, for the reader entitled to it |
-| `interfaces.go`, `osfilesystem.go`, `stdiocopier.go` | the port implementations |
+| `release_info.go` | `releaseInfo` / `releaseAsset` — the release host's JSON shape |
+| `update_info.go` | `UpdateValue`, an alias of the core value |
+| `interfaces.go` | the ports `Getter`, `FileSystem`, `Copier`, aliased from core |
+| `osfilesystem.go`, `stdiocopier.go` (+ `osfilesystem_compliance.go`, `stdiocopier_compliance.go`) | the port implementations, and the compile-time assertions that they still satisfy the ports |
 
 ## Why-this-shape
 
@@ -71,13 +75,13 @@ window where the binary is half-written. Without `WithProbe` there is no
 rollback: once the rename lands the previous version is gone. With it, the
 previous binary is hard-linked to `<binary>.prev` BEFORE the rename — so the
 binary's own name is never absent, which a rename-aside would make it for a
-moment — and a probe that fails renames it back (ADR 0146). A FileSystem
+moment — and a probe that fails renames it back (ADR 0150). A FileSystem
 without the `Link` sibling keeps nothing, and a failed probe then says
 `rolled_back=false`.
 
 ### Keys rotate, a signature names its release, the product may consent
 
-ADR 0146 adds three things a daemon that updates itself needs, none of which
+ADR 0150 adds three things a daemon that updates itself needs, none of which
 changes the historical behaviour unless asked for: several vendor keys in
 order, any of which verifies (the rotation ADR 0091 gave the entitlement
 anchor); a signature DOMAIN, which binds each signature to this product's
@@ -124,7 +128,7 @@ between them is whether this package DECIDED the failure or was TOLD about one.
 - `classify(sentinel, cause, fields...)` — a failure from outside, under the
   sentinel that says what it means here. The sentinel's Code, Reason, Public,
   Private and exit status are READ from it rather than restated at the call
-  site, because twelve sites in five files reach `DownloadFailed` — eight of
+  site, because thirteen sites in five files reach `DownloadFailed` — ten of
   them through `classify` — and four hand-copied strings drift. `TestClassifyCarriesTheSentinelVerbatim` is what
   makes that impossible rather than unlikely.
 
@@ -165,7 +169,7 @@ temp file that cannot be created next to the running binary.
   fails rather than passes.
 - Add a second signature scheme. One algorithm — a second would be a second
   thing to get right and a second thing to downgrade to. Several KEYS of that
-  one algorithm are a rotation (ADR 0146), bounded at four.
+  one algorithm are a rotation (ADR 0150), bounded at four.
 - Call `fmt.Errorf` or `errors.New`. There are none left, the package is inside
   `//:audit_sources`, and the AST audit fails the build on the first one back.
 - Put a tag, an asset name, a path, a URL, a status or a host's own words into a

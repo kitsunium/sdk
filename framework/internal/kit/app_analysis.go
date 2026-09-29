@@ -1,5 +1,5 @@
 // Package kit — the static analysis a product can be given: the platform's
-// analyzer, run in the background in dev (ADR 0143 §1).
+// analyzer, run in the background in dev (ADR 0147 §1).
 package kit
 
 import (
@@ -13,7 +13,7 @@ import (
 // AnalyzeFunc reads the product's source — the Go module rooted at dir, and
 // the packages that declare the modules it mounts — into a graph the runtime
 // merges into its own: the edges found in handler bodies, each function's
-// steps. The framework links no analyzer (ADR 0143 §1): the platform's kit
+// steps. The framework links no analyzer (ADR 0147 §1): the platform's kit
 // tool gives one, in dev, through [Analyzer].
 type AnalyzeFunc func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
 

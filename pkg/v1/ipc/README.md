@@ -6,7 +6,7 @@
 import "github.com/kitsunium/sdk/pkg/v1/ipc"
 ```
 
-Package ipc is a private socket between processes of one machine — a daemon and the short\-lived clients that talk to it, a product and the tool that attaches to it \(ADR 0144\).
+Package ipc is a private socket between processes of one machine — a daemon and the short\-lived clients that talk to it, a product and the tool that attaches to it \(ADR 0148\).
 
 ```
 cfg := ipc.Config{Path: filepath.Join(ipc.RuntimeDir("statusline"), "daemon.sock")}

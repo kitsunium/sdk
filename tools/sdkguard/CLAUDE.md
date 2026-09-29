@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # tools/sdkguard/
 
 ## Purpose
@@ -158,11 +159,13 @@ or the line above it, matching how `//nolint` is already written.
 |---|---|
 | `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-version-check`, `-list`), exit codes |
 | `analyze.go` | walking, parsing, import-alias resolution, suppression directives |
+| `file_ctx.go` | `fileCtx` — what every rule reads about one parsed file: its path, the local name of each import, the lines carrying an exemption |
 | `rules.go` | the rule table and the five checks |
+| `pipeline_call.go` | the `log/slog` entry points SDK001 watches, in reporting order |
 | `version.go` | the freshness probe: go.mod reading, GOPROXY resolution, semver ordering |
+| `probe.go` | the module-proxy client behind the probe, its proxy and HTTP client fields so a test points it at `httptest` |
 | `errors.go` | `errProxyDisabled` — sdkguard cannot use `pkg/v1/errs`, since it must run without pulling the library it audits |
-| `sdkguard_test.go` | one fire + one silence case per rule, plus alias, suppression, level and ordering |
-| `version_test.go` | semver ordering, go.mod shapes, GOPROXY resolution, and the degrade-to-silence paths — served by `httptest`, so no test touches the network |
+| `main_test.go` | every test: one fire + one silence case per rule, alias, suppression, level and ordering, and the probe — semver ordering, go.mod shapes, GOPROXY resolution and the degrade-to-silence paths, served by `httptest` so no test touches the network |
 
 Exit codes: `0` clean, `1` findings, `2` the tool itself failed — so CI can tell
 "rules broken" from "tool broke".

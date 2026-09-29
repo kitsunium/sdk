@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/session/
 
 ## Purpose
@@ -112,7 +113,9 @@ syscall no cancellation reaches, so a request whose client hung up kept waiting
 for a lock nobody would read the result of — and the in-process gate is a
 one-slot channel rather than a `sync.Mutex`, whose `Lock` cannot be told its
 caller has gone. A caller who leaves gets `STORE_UNAVAILABLE` with its own
-context error in the fields.
+context error in the fields. `withLock` checks the context once more after both
+are held, before the section runs: every wait is a select, and a select whose
+cancellation and acquisition become ready together picks either at random.
 
 ### Every rename and every unlink is flushed
 
@@ -247,7 +250,8 @@ cd internal/service && GOWORK=off go test -race -cover ./session
 |---|---|
 | `store_external_test.go` | the lifecycle, the sliding window, the ceiling ending a continuously-used session, expired-record dropping across a backwards clock step, idempotent `Destroy`, the zero identifier, and `Sweep` — all against both stores |
 | `fixation_external_test.go` | the fixation attack end to end, `Save`'s refusal of a forged subject, the ordinary data path, the two rotation lifetime rules, a dead session refusing to be re-authenticated, the 4 KiB subject bound (4096 accepted and read back, 4097 refused with the session untouched) in both stores, and the ADR 0031 constructor refusals |
-| `file_cancel_external_test.go` | both waits being left: a cancelled caller parked on the lock poll, the poll ending in ACQUISITION once the holder goes (so "cancellable" is not satisfied by a store that never acquires), and a goroutine cancelled while parked on the in-process gate — in a `synctest` bubble, because the cancel has to happen after it is parked there or the context check at the top of `withLock` answers instead |
+| `file_cancel_external_test.go` | both waits being left: a cancelled caller parked on the lock poll, the poll ending in ACQUISITION once the holder goes (so "cancellable" is not satisfied by a store that never acquires), and a goroutine cancelled while parked on the in-process gate — in a `synctest` bubble, because the cancel has to happen after it is parked there or the context check at the top of `withLock` answers instead; and a caller gone by the time both are held never running the section (`TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection`) |
+| `withlock_internal_test.go` | the in-process gate excluding goroutines that share the store's one `flock` descriptor — which `flock` itself does not, a re-lock of one open file description being a conversion rather than a wait — asserted on observed occupancy, not on a final counter |
 | `file_store_external_test.go` | directory and record modes on disk, the operator-owned refusal, no identifier anywhere on disk, filename binding via AAD, tamper/truncation/foreign-key refusal, survival across a reopen, the failed-publish invariant checked byte-for-byte (a failure at temp creation), a sweep that leaves foreign `*.session` files alone, and context cancellation. The rename-onto-a-directory test fails at `Save`'s read and never reaches the rename — its doc says so |
 | `dirsync_internal_test.go` | the directory flush after every rename and unlink, observed through `syncDir` (after the change, once per sweep, again on a retried `Destroy`); a failed flush reported and not rolled back; a failed rotation withdrawing the record it published when the old record's unlink fails, and undoing nothing when only the flush after it does; and the orphan cleanup behind a rename that really fails, over a temporary that was written, synced and closed |
 | `sealer_external_test.go` | round trip, cookie-safety, nonce freshness, the seven non-oracle failures, one spelling per sealed value, the empty-purpose refusal, and that opening is not authorising |

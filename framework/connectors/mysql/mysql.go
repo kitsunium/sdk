@@ -40,7 +40,7 @@ import (
 )
 
 const (
-	// CodeURLMalformed identifies a URL the driver cannot read (ADR 0143: layer 4,
+	// CodeURLMalformed identifies a URL the driver cannot read (ADR 0147: layer 4,
 	// one PP per connector).
 	CodeURLMalformed errs.Code = 0x00_04_11_01 // 0.4.17.1
 

@@ -4,6 +4,7 @@ package docstore
 
 import (
 	corevfs "github.com/kitsunium/sdk/internal/core/vfs"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -21,6 +22,10 @@ const DefaultFoldAt int = 1024
 // overlaySuffix names the overlay directory beside the snapshot.
 const overlaySuffix string = ".d"
 
+// versionsSuffix names the versions file beside the snapshot: every
+// document's former versions, as the last fold left them (ADR 0143).
+const versionsSuffix string = ".versions"
+
 // Config configures [Open]. Key is required; every other field is optional,
 // and leaving all of them empty opens a working store kept in memory. The
 // secondary indexes are Open's other arguments.
@@ -34,6 +39,17 @@ type Config[T any] struct {
 	// the snapshot, in the directory Path + ".d". A nil FS keeps the store in
 	// memory: nothing survives the process, and nothing is written anywhere.
 	FS corevfs.FullFS
+	// Clock stamps each version with the instant of the write that made it.
+	// Nil is the system clock.
+	Clock clock.Clock
+	// Held reports whether the document stored under key is held — a legal
+	// hold — so that no write prunes its versions: they pile up beyond
+	// Versions until a write finds the document released, and that write
+	// prunes them. It is called with the document's key by a write that would
+	// prune, under the writers' lock, so it may read this store and must not
+	// write to it; a panic in it reaches the writer, and nothing is written.
+	// Nil holds nothing. It is refused without Versions.
+	Held func(key string) bool
 	// Path is the snapshot's name inside FS. It is required with FS and
 	// refused without it, because a path with nowhere to be written is a
 	// store that would silently keep nothing.
@@ -43,6 +59,15 @@ type Config[T any] struct {
 	// as the store holds documents, and at least [DefaultFoldAt]. A negative
 	// value never folds on a write; Fold, Open and Close still do.
 	FoldAt int
+	// Versions is how many former versions each document keeps beside its
+	// current one, the newest: a write that changes a document makes a new
+	// version, and prunes the oldest beyond Versions in the same durable
+	// write. Zero keeps no versions — the store writes exactly the files it
+	// wrote before versions existed — and a negative value is refused. A
+	// persistent store keeps them in the file Path + ".versions" once a fold
+	// ran, and a store opened with zero over files that keep versions is
+	// refused rather than left to drop or corrupt them (ADR 0143).
+	Versions int
 }
 
 // IndexSpec declares one secondary index: a name to read it by, whether it is
@@ -101,8 +126,31 @@ func (c *Config[T]) validate(indexes []IndexSpec[T]) error {
 		//: StoreMisconfigured, naming the setting.
 		return pathErr
 	}
+	//: how many versions, and a hold only where versions are kept.
+	if versionsErr := validateVersions(c.Versions, c.Held != nil); versionsErr != nil {
+		//: StoreMisconfigured, naming the setting.
+		return versionsErr
+	}
 	//: the declarations every engine refuses alike.
 	return validateIndexes(indexes)
+}
+
+// validateVersions refuses a negative number of versions, and a hold on a
+// store that keeps none: a caller who sets Held believes versions are kept.
+// Both engines refuse through it.
+func validateVersions(versions int, held bool) error {
+	//: no number of versions is negative.
+	if versions < 0 {
+		//: StoreMisconfigured, naming the setting.
+		return misconfigured("Versions", "negative")
+	}
+	//: a hold keeps versions from pruning, and there would be none.
+	if held && versions == 0 {
+		//: StoreMisconfigured, naming the setting.
+		return misconfigured("Held", "set without Versions")
+	}
+	//: a number of versions the store can keep.
+	return nil
 }
 
 // validateIndexes refuses index declarations no engine could serve: an index

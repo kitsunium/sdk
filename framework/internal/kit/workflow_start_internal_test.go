@@ -17,6 +17,7 @@ type watched struct {
 // Start adds them once; a workflow that stops takes back its own, and
 // another workflow over the same store keeps its.
 func TestAWorkflowTakesBackItsOwnStoreHooks(t *testing.T) {
+	needsFileStore(t)
 	svc := NewService("watch", "")
 	items := svc.Store("items", func(w watched) string { return w.ID })
 	svc.Workflow("first", items, func(w *watched) *string { return &w.State }).Initial("new").On("go", "new", "gone")

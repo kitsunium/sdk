@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/core/entitlement/
 
 ## Purpose
@@ -14,8 +15,8 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 | File | Role |
 |---|---|
 | `entitlement.go` | the package doc, the `Identity` port and its `BoundProver` sibling |
-| `roster.go` | `RosterValue`, `SubjectValue`, `CIEntitlementValue`, `RosterLifetime` |
-| `grant.go` | `GrantValue` — what a successful verification hands back |
+| `roster.go` | `RosterValue` (+ its lookups `SubjectFor` / `CIEntitlementFor`), `SubjectValue`, `CIEntitlementValue`, `RosterLifetime` |
+| `grant.go` | `GrantValue` (+ `Deadline` / `Expired`) — what a successful verification hands back — and `GrantDeadline` |
 | `origin.go` | `OriginValue` — one place a roster is published |
 | `codes.go` / `errors.go` | the range (fifteen codes) and its fourteen sentinels |
 | `grant_internal_test.go` | the three dates a grant is bounded by |
@@ -55,10 +56,10 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
   and nothing here can close it for an implementation that has not offered to
   have it closed. Said in the port's doc comment, in `(*Service).prove`'s, and in
   ADR 0092 — never guaranteed in one place and caveated in another.
-- **`RosterUnreachable` is not a refusal.** It says "cannot decide", and a
+- **`ErrRosterUnreachable` is not a refusal.** It says "cannot decide", and a
   caller that treats it as "decided no" turns a network outage into a
   revocation. It is the single most important distinction in the range, which
-  is why it has its own code rather than sharing one with `Revoked`.
+  is why it has its own code rather than sharing one with `ErrRevoked`.
 - **`SubjectFor` reports absence as revocation.** A subject that was never
   approved and one that was removed are indistinguishable from a roster, and the
   safe reading of both is the same. Its doc comment says so where a caller reads
@@ -69,7 +70,7 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
   `pkg/v1/entitlement`, so a consumer can hold a nil one; `CIEntitlementFor` has
   refused it since it was written and `SubjectFor` used to dereference it. Both
   now refuse, fail-closed, with `condition=no roster to check against`. Not
-  `RosterUnreachable`, which means "cannot decide, retry" — retrying a nil
+  `ErrRosterUnreachable`, which means "cannot decide, retry" — retrying a nil
   pointer never terminates.
 - **`Deadline()` exists because the FIELD cannot answer the question a
   scheduler asks.** `NotAfter`'s zero value means "not recorded" — the shape a

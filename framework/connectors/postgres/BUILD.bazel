@@ -2,7 +2,7 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 # gazelle:prefix github.com/kitsunium/sdk/framework/connectors/postgres
 
-# framework/connectors/postgres is a Go module of its own (ADR 0143 §7): one
+# framework/connectors/postgres is a Go module of its own (ADR 0147 §7): one
 # database driver behind the framework's engine port.
 
 package(default_visibility = ["//visibility:public"])

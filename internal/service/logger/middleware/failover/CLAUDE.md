@@ -1,4 +1,4 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/service/logger/middleware/failover/
 
 ## Purpose
@@ -25,7 +25,8 @@ logs survive a network outage.
 - `Write` walks the chain in order; first non-error wins (its byte count
   is returned). Every branch failure is collected into the `errors.Join`
   set surfaced by `Exhausted`.
-- `Flush` and `Close` forward to every branch unconditionally — they never
+- `Flush` and `Close` forward to every distinct branch unconditionally — a
+  sink repeated in the chain is flushed and closed once, and they never
   short-circuit on a failure — and aggregate per-branch errors via
   `errors.Join`. Callers see every cause via `errors.Is`.
 
@@ -61,15 +62,18 @@ only when a branch actually fails. See BENCH.md §0.
 
   This one is **guarded**, not merely written down:
   `TestChainDepthAddsNoAllocationOnTheHealthyPath` (`alloc_external_test.go`)
-  compares the allocations of a write at depths 2/3/4/8 against the depth-1
-  baseline and fails on any difference. It was checked against the defect it
-  exists for — restoring the pre-sized slate takes the healthy write from 0 to
-  1 alloc/op at depths 3, 4 and 8 while depth 2 still passes.
+  compares the total allocations of 2 000 writes at depths 2/3/4/8 against the
+  depth-1 total and fails on any difference — a total, since
+  `testing.AllocsPerRun` rounds an amortised allocation down to 0. It was
+  checked against the defect it exists for — restoring the pre-sized slate
+  takes the healthy write from 0 to 1 alloc/op at depths 3, 4 and 8 while
+  depth 2 still passes.
 
 ## Verification
 
 ```
 bazel test --config=race //internal/service/logger/middleware/failover:failover_test
-# the depth guard carries //go:build !race and runs in exactly one lane:
+# the depth guard carries //go:build !race; the race-off alloc lane runs it
+# (and CI's test-386 job runs it again, without -race):
 bazel test --config=alloc //internal/service/logger/middleware/failover:failover_test
 ```

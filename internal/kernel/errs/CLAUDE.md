@@ -1,15 +1,19 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-09-28T19:19:15Z -->
 # internal/kernel/errs/
 
 ## Purpose
 
-SDK-wide typed-error meta-infrastructure. Every error returned from SDK code is a `*errs.Error` carrying a dotted-quad `Code`, a stable `Reason`, a wire-safe `Public` message, a log-only `Private` message, optional structured `Fields`, and an intrinsic wrap trail. Consumers introspect via `pkg/v1/errs` (read-only) — only emitter packages call `Define` / `Wrap`. Code range `0.0.0.*` is reserved for documentary meta-codes (`0.0.0.1`..`0.0.0.6`, never instantiated as `*Error` sentinels).
+SDK-wide typed-error meta-infrastructure. Every error returned from SDK code is a `*errs.Error` carrying a dotted-quad `Code`, a stable `Reason`, a wire-safe `Public` message, a log-only `Private` message, optional structured `Fields`, and an intrinsic wrap trail. Consumers reach it through `pkg/v1/errs`, which re-exports the introspection surface and a construction half that never panics (`New`, over `NewRuntime`, and `Wrap`); inside the SDK, emitter packages call `Define` / `Wrap`. Code range `0.0.0.*` is reserved for documentary meta-codes (`0.0.0.1`..`0.0.0.6`, never instantiated as `*Error` sentinels).
 
 ## Surface
 
 ```go
 // Sentinel-style constructor (panics at init on invalid args).
 func Define(code Code, reason, public, private string, opts ...DefineOption) *Error
+func NewError(code Code, reason, public, private string, opts ...DefineOption) *Error // alias of Define, for tooling
+
+// Runtime constructor: never panics — invalid args return a 0.0.0.1-4 validation *Error.
+func NewRuntime(code Code, reason, public, private string, fields ...FieldValue) *Error
 
 // Per-error overrides.
 func WithHTTPStatus(status int) DefineOption // default 500
@@ -22,21 +26,29 @@ type WrapParams struct{ Code Code; Reason, Public, Private string; ExitCode int 
 func Wrap(cause error, params WrapParams, fields ...FieldValue) *Error
 
 // Closed scalar union for structured metadata.
-type FieldValue struct{ /* ... */ }
+type FieldValue struct{ /* ... */ }             // read back with Key() / StringValue()
 func String(key, val string) FieldValue
-func Int(key string, val int64) FieldValue
+func Int(key string, val int) FieldValue
+func Int64(key string, val int64) FieldValue
 func Bool(key string, val bool) FieldValue
 func Float(key string, val float64) FieldValue
+func NewFieldValue(key, val string) FieldValue // same as String
+
+// Canonical "M.L.P.S" text → Code; any other shape is a 0.0.0.5 *Error.
+func ParseCode(s string) (Code, error)
 
 // Sentinel matching.
 func HasCode(err error, c Code) bool                  // walks Unwrap() error AND Unwrap() []error
 func HasReason(err error, reason string) bool
 func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher // CIDR-style; pass to errors.Is
+
+// The audit's package marker — there is no runtime registry.
+func RegistryMarker() string
 ```
 
 Getters on `*Error`: `Code() / Reason() / Public() / Private() / Fields() / Trail() / TrailTruncated() / HTTPStatus() / ExitCode() / Error() / Unwrap() / Source()`. The Layer/Major/Package/Serial octets are reached via `e.Code().Layer()` etc. — composable on the typed `Code`.
 
-Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / HTTPStatusOf / ExitCodeOf`. All return the typed `Code` / `string` / etc. — no int variants.
+Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf / PrivateOf / FieldsOf / HTTPStatusOf / ExitCodeOf / TrailOf`. All return the typed `Code` / `string` / etc. — no int variants.
 
 ## Conventions
 
@@ -53,7 +65,7 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 - **Trail cap 16, origin-preserving truncation.** `appendTrail` keeps `[origin] + last (cap-2) entries + newest`; `trailTruncated` is monotonic. A `next == 0` is silently dropped (poison-pill defence).
 - **`Error()` format (ADR 0005).** `"[<origin>[ <- <wrap1>[ <- <wrap2>...]][ (truncated)] <REASON>] <public>"`. Regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`. NEVER contains Private or Fields — safe to bubble across any boundary.
 - **`Is` protocol three-way dispatch.** `*PrefixMatcher` → CIDR match over origin + trail. `*Error` with non-zero Code → semantic equality by (Code, Reason). Anything else → pointer equality.
-- **AST audit (`registry_external_test.go`).** Enforces three invariants across `internal/` + `pkg/` + `third-party/` + `framework/` (ADR 0143) — over every package shipped in the `//:audit_sources` filegroup, which since ADR 0020 is the COMPLETE set of `errs.Define` emitters (ring + every logger middleware/sink were previously excluded — issue #35):
+- **AST audit (`registry_external_test.go`).** Enforces three invariants across `internal/` + `pkg/` + `third-party/` + `framework/` (ADR 0147) — over every package shipped in the `//:audit_sources` filegroup, which since ADR 0020 is the COMPLETE set of `errs.Define` emitters (ring + every logger middleware/sink were previously excluded — issue #35):
   1. Every `errs.Define` Public is a string literal (no `fmt.Sprintf`, no concat).
   2. Reason mirrors EITHER `screamingSnake(varName)` (bare style, `WriterNil` ↔ `"WRITER_NIL"`) OR `screamingSnake(CodeConst − "Code")` (namespaced style per ADR 0006, `CodeRingFull` ↔ `"RING_FULL"` while the short var `Full` would not). Either derivation passes — ADR 0020.
   3. No two `errs.Define` calls resolve to the same **numeric Code value**. Keyed on the resolved value, not the identifier name: two distinct identifiers folding to one dotted-quad (aliases, masked expressions) is exactly the collision the old name-keyed audit passed green (V1/V93/V100).
@@ -75,7 +87,7 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 
 ```go
 // service/logger/codes.go
-const CodeWriterNil errs.Code = 0x01_03_02_01 // 1.3.2.1
+const CodeWriterNil errs.Code = 0x00_03_01_01 // 0.3.1.1
 
 // service/logger/errors.go
 var WriterNil = errs.Define(CodeWriterNil, "WRITER_NIL",
@@ -102,10 +114,4 @@ cd internal/kernel && GOWORK=off go test -race -cover ./errs
 # coverage target: 97.3%
 ```
 
-Tests: `error_external_test.go` (Define/Wrap/getters/Error() invariants), `accessors_external_test.go` (every Of-accessor against sdk/stdlib/nil), `field_external_test.go` + `field_internal_test.go` (closed FieldValue union), `code_external_test.go` (dotted-quad packing + masks), `parse_external_test.go` (`ParseCode` string→Code), `prefix_matcher_external_test.go` (CIDR matching over origin + trail), `trail_internal_test.go` (cap + truncation), `validate_internal_test.go` (every structural rule), `registry_external_test.go` (SDK-wide AST audit).
-
-A longer-form companion lives in `README.md`.
-
-## Accepted audit findings
-
-- Deferred/accepted low+info audit findings (V2, V3, V4, V5) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
+Tests: `error_external_test.go` (Define/Wrap/getters/Error() invariants), `accessors_external_test.go` (every Of-accessor against sdk/stdlib/nil), `field_external_test.go` + `field_internal_test.go` (closed FieldValue union), `code_external_test.go` (dotted-quad packing + masks), `parse_external_test.go` (`ParseCode` string→Code), `parse_fuzz_external_test.go` (`FuzzParseCode`: a parsed string is the one canonical form of its Code, the `Padded()` form is refused, and `Pack` → `String` → `ParseCode` round-trips), `prefix_matcher_external_test.go` (CIDR matching over origin + trail), `trail_internal_test.go` (cap + truncation), `trailof_external_test.go` (`TrailOf`), `validate_internal_test.go` (every structural rule), `registry_external_test.go` (SDK-wide AST audit), `registry_ownership_external_test.go` (range-ownership audit, ADR 0035). The `*_bench_test.go` files produce `BENCH.md`.

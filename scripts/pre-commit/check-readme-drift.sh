@@ -33,7 +33,7 @@ fi
 # (check-readme-determinism.sh keeps a small fixed sample on purpose: it tests
 # gomarkdoc's own reproducibility, not per-package coverage.)
 # Two roots publish generated READMEs: pkg/v1 and the framework module above it
-# (ADR 0143). Each package is recorded as "<root> <dir>", so the check runs from
+# (ADR 0147). Each package is recorded as "<root> <dir>", so the check runs from
 # the root its go:generate line is relative to.
 roots=(pkg/v1 framework)
 packages=()

@@ -62,7 +62,7 @@ func TestStudioChecksTheHost(t *testing.T) {
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("a probe by IP must pass the host check: %d", resp.StatusCode)
 	}
-	// The Studio's pages are the kit tool's (ADR 0143 §1): the product serves
+	// The Studio's pages are the kit tool's (ADR 0147 §1): the product serves
 	// its API only, and still under the Studio's policy.
 	r := call(t, app, "GET /_kit/", noBody)
 	if r.status != http.StatusNotFound || !strings.Contains(r.header.Get("Content-Security-Policy"), "default-src 'self'") {
@@ -250,7 +250,7 @@ var devRoutes = []struct{ method, path, body string }{
 	{"GET", "/_kit/api/privacy", ""},
 }
 
-// actionRoutes are the Studio's former controls (D13, ADR 0143 §8): none of
+// actionRoutes are the Studio's former controls (D13, ADR 0147 §8): none of
 // them exists, in dev either.
 var actionRoutes = []struct{ method, path, body string }{
 	{"POST", "/_kit/api/profile/cpu", `{"seconds":1}`},

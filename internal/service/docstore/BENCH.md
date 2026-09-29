@@ -103,3 +103,33 @@ document, to check the key the document is stored under (ADR 0110 §D6). A rerun
 on this machine allocated exactly as before (1 511 and 140 692 allocations per
 open). Its timings are not quoted here because the machine was loaded (load
 average 55) and they would measure the load.
+
+### A version costs what it weighs (ADR 0143)
+
+`BenchmarkPutVersioned` rewrites a document in a store keeping `versions`
+former versions of each of its 100 documents, every document already holding
+that many, over the in-memory filesystem.
+
+| Dimension | Value |
+|---|---|
+| Machine | as above (10-core Apple M1 Pro, 16 GiB, macOS 26.6.2, go1.27.1 darwin/arm64) |
+| Git branch | `feat/docstore-versions` |
+| Git commit | `cdcbe78f` (pre-commit: the tree these rows ship with) |
+| Generated (UTC) | 2026-09-28, load average 1.8 / 2.3 / 3.7 |
+| Command | `cd internal/service && GOWORK=off go test -run='^$' -bench='PutVersioned\|BenchmarkPut$' -benchmem -benchtime=1s ./docstore/` |
+
+```
+BenchmarkPut/docs=100-10                    463015        2574 ns/op      1777 B/op       27 allocs/op
+BenchmarkPutVersioned/versions=0-10         441181        2664 ns/op      1850 B/op       29 allocs/op
+BenchmarkPutVersioned/versions=1-10         306878        3920 ns/op      2875 B/op       37 allocs/op
+BenchmarkPutVersioned/versions=10-10        152655        8192 ns/op      7684 B/op       46 allocs/op
+BenchmarkPutVersioned/versions=100-10        28453       41911 ns/op     50517 B/op      136 allocs/op
+```
+
+A store that keeps no versions writes what it wrote before: 2 664 ns, the
+plain `Put`'s cost. A write that keeps them publishes the document AND its
+versions in its one entry, because that is what makes the pair survive a crash
+together, so its cost grows with what the versions weigh — about 0.39 µs a
+kept version of this hundred-byte document — and not with the store's size.
+On a disk the two flushes still dominate: 42 µs of encoding at a hundred
+versions is 0.4 % of the 11 ms a durable write costs here.

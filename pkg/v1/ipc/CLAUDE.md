@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Public facade over `internal/service/ipc` (ADR 0144): a private socket between
+Public facade over `internal/service/ipc` (ADR 0148): a private socket between
 processes of one machine, with the kernel's word on the peer where it gives
 one.
 

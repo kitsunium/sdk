@@ -25,6 +25,7 @@ import (
 // A module's routes are served under its prefix, "/<module>/" by default,
 // and its data lies in its services' qualified directories.
 func TestAModulesRoutesAreUnderItsPrefix(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startOnDisk(t, dir, kit.Mount(ReviewsModule))
 	r := call(t, app, "POST /reviews/reviews", Review{ID: "r1", Text: "lovely"})
