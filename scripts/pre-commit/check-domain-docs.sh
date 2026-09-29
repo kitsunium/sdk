@@ -35,7 +35,9 @@ doc="CLAUDE.md"
 
 # --- 1. the architecture tree's core/ list vs the directories on disk --------
 
-on_disk="$(find internal/core -mindepth 1 -maxdepth 1 -type d -printf '%f\n' | sort)"
+# The prefix is stripped with sed rather than printed away with `-printf '%f'`:
+# -printf is GNU find's, and the BSD find macOS ships refuses it (#260).
+on_disk="$(find internal/core -mindepth 1 -maxdepth 1 -type d | sed 's#^internal/core/##' | sort)"
 
 # The tree block: the `├── core/` line plus every `│` continuation under it.
 # Names are comma-separated and may carry a parenthesised note, e.g.
@@ -78,7 +80,8 @@ if [ -z "$purpose" ]; then
 fi
 
 # More than one Purpose paragraph is itself the defect this guard was written for.
-count="$(printf '%s\n' "$purpose" | wc -l)"
+# BSD wc pads its count with spaces; tr keeps the message below readable.
+count="$(printf '%s\n' "$purpose" | wc -l | tr -d '[:space:]')"
 if [ "$count" -ne 1 ]; then
 	echo "✗ $doc: found $count paragraphs starting 'Go SDK providing' — there must" >&2
 	echo "  be exactly one. Two coexisting Purpose paragraphs is what a union" >&2

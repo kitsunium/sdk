@@ -232,7 +232,7 @@ After cloning, wire the in-repo hooks with `bash scripts/install-hooks.sh` (one-
 ├── .bazelversion          pins Bazel to 9.0.2
 ├── Makefile               build / test / test-alloc / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── scripts/               pre-commit guards (scripts/pre-commit/), release (scripts/release/) and CI (scripts/ci/) scripts, the layer firewall (check-layer-deps.sh)
-├── .githooks/             pre-commit (the devcontainer template's checks, then every scripts/pre-commit/*.sh) + commit-msg (refuses AI attribution); wired by scripts/install-hooks.sh
+├── .githooks/             pre-commit (the devcontainer template's checks where a bash ≥ 4 can run them, then every scripts/pre-commit/*.sh) + commit-msg (refuses AI attribution); both run on macOS's /bin/bash 3.2 and BSD find as shipped (#260); wired by scripts/install-hooks.sh
 ├── .ktn-linter.yaml       ktn-linter configuration — the phases 1-7 gate every commit runs
 ├── e2e/                   real-kernel conformance harness — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
