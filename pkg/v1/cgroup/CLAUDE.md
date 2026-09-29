@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-09-29T03:41:17Z -->
 # pkg/v1/cgroup/
 
 ## Purpose
@@ -36,7 +36,7 @@ means "no limit" (`"max"`). On Linux, `Kill` writes `cgroup.kill` and `Freeze` /
 without that file. `Create` returns `CgroupUnavailable` on a
 non-delegated Linux host, `CgroupCreateFailed` when creation itself fails, and
 `UnsupportedPlatform` where there is no backend at
-all (darwin, OpenBSD, NetBSD, DragonFly) — always check `Available()` first, and
+all (darwin, OpenBSD, NetBSD, DragonFly, illumos, Solaris) — always check `Available()` first, and
 prefer `WithRoot` to a delegated sub-tree over the top-level mount.
 
 Windows (Job Objects) and FreeBSD (rctl) have backends of their own, mirrored

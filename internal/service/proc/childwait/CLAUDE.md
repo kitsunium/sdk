@@ -1,3 +1,4 @@
+<!-- updated: 2026-09-29T03:41:17Z -->
 # internal/service/proc/childwait/
 
 ## Purpose
@@ -16,7 +17,7 @@ it, so `Process.Wait` always reports the child's real exit.
 
 | Call | Where | Collects |
 |---|---|---|
-| `ReapAny` → `wait4(-1, WNOHANG)` | this package; called only by the reaper's drain | any exited child of the process |
+| `ReapAny` → `wait4(-1, WNOHANG)`; `wait4(0, WNOHANG)` on illumos and Solaris | this package; called only by the reaper's drain | any exited child of the process |
 | `os.Process.Wait` (`waitid(P_PIDFD)` on Linux ≥ 5.4, `wait4(pid)` elsewhere) | `exec`'s `collectExit`, for its own child | that child only |
 
 Nothing else in the SDK calls `wait4`. The reaper is the only collector that
@@ -37,6 +38,8 @@ allocation and one map insert per spawn, removed by `Release` after the wait.
 |---|---|---|
 | `childwait.go` | (all) | package doc; `Claim`; the process-wide `ledger`; `Spawn`; `Claim.Collected` / `Reclaim` / `Release`; `deliver` / `handOver` / `forget` |
 | `childwait_unix.go` | `unix` | `StatusValue` (`syscall.WaitStatus` + `syscall.Rusage`); `ReapAny` |
+| `waitany_unix.go` | `unix && !solaris` | `anyChildPID = -1` |
+| `waitany_solaris.go` | `solaris` (illumos too) | `anyChildPID = 0`: libc's SunOS 4 `wait4` (see below) |
 | `childwait_other.go` | `!unix` | `StatusValue` as an empty struct: no `wait4`, no sweep, a claim is never filled |
 
 ## Surface
@@ -110,6 +113,20 @@ what it waits for through `pkg/v1/process`.
 Off pidfd (everything but Linux ≥ 5.4) a window remains between reading an empty
 claim and the handle's own `wait4(pid)`: hitting it needs a sweep to take the
 child AND the pid to be recycled to another child in between.
+
+## "Any child" is not -1 everywhere (ADR 0144)
+
+illumos and Solaris keep SunOS 4 semantics in libc's `wait4`: a negative pid is
+the process group `-pid` and `0` is every child (illumos-gate
+`usr/src/lib/libc/port/gen/waitpid.c`). `wait4(-1)` there asks for process
+group 1 and answers `ECHILD` beside live children — measured on OmniOS r151054
+and Oracle Solaris 11.4, where no sweep collected anything until
+`waitany_solaris.go` passed 0. The stdlib wrapper there also returns libc's
+32-bit `pid_t` without sign extension (a failed call reads 4294967295) and
+reports errno whatever the call returned, so `reapAny` reads every result as
+POSIX states it, on every Unix: `int32(pid) == -1` is a failure with its
+errno, anything else carries no error — a no-op where the wrapper was right. `wait4(pid)` — the owner's own wait —
+means the same on every Unix.
 
 ## Do NOT
 

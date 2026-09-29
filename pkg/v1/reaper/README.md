@@ -35,7 +35,7 @@ ECHILD \("no children"\) is treated as a clean end of a sweep, not an error; any
 
 ### Platform notes
 
-The real implementation is Unix\-only. On platforms without SIGCHLD/waitpid \(e.g. Windows\), [New](<#New>) returns a no\-op reaper \(Start/Stop do nothing, ReapOnce returns 0\) and [SetChildSubreaper](<#SetChildSubreaper>) returns [UnsupportedPlatform](<#ReapFailed>). Code that links this package therefore builds and runs everywhere; only the behaviour degrades. [SetChildSubreaper](<#SetChildSubreaper>) requires no privilege but is a per\-process Linux capability; where the prctl is unavailable it returns a typed error rather than panicking.
+The real implementation is Unix\-only. On platforms without SIGCHLD/waitpid \(e.g. Windows\), [New](<#New>) returns a no\-op reaper \(Start/Stop do nothing, ReapOnce returns 0\) and [SetChildSubreaper](<#SetChildSubreaper>) returns [UnsupportedPlatform](<#ReapFailed>). On illumos and Solaris the Go runtime forks every child with FORK\_NOSIGCHLD, so the exit of a child this process spawned posts no SIGCHLD there; the loop also sweeps once a second on those two, which keeps "reap children as they exit" true. Code that links this package therefore builds and runs everywhere; only the behaviour degrades. [SetChildSubreaper](<#SetChildSubreaper>) requires no privilege but is a per\-process Linux capability; where the prctl is unavailable it returns a typed error rather than panicking.
 
 ## Index
 
@@ -67,7 +67,7 @@ var (
 ```
 
 <a name="IsPID1"></a>
-## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L111>)
+## func [IsPID1](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L114>)
 
 ```go
 func IsPID1() bool
@@ -76,7 +76,7 @@ func IsPID1() bool
 IsPID1 reports whether the current process is the init process \(pid 1\). It is false on platforms where the convention does not apply.
 
 <a name="SetChildSubreaper"></a>
-## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L104>)
+## func [SetChildSubreaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L107>)
 
 ```go
 func SetChildSubreaper() error
@@ -85,7 +85,7 @@ func SetChildSubreaper() error
 SetChildSubreaper marks the calling process as a child subreaper so orphaned descendants reparent to it rather than to PID1. It returns [SubreaperFailed](<#ReapFailed>) on a prctl error and [UnsupportedPlatform](<#ReapFailed>) off Unix.
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L70>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L73>)
 
 Option configures a [Reaper](<#Reaper>) returned by [New](<#New>). It is an alias of the service option type so callers compose options without importing internal packages.
 
@@ -94,7 +94,7 @@ type Option = svc.Option
 ```
 
 <a name="WithOnReap"></a>
-### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L89>)
+### func [WithOnReap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L92>)
 
 ```go
 func WithOnReap(fn func(int)) Option
@@ -103,7 +103,7 @@ func WithOnReap(fn func(int)) Option
 WithOnReap registers fn as a post\-sweep observer receiving the number of children reaped in each sweep \(including zero\). fn must not block.
 
 <a name="Reaper"></a>
-## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L66>)
+## type [Reaper](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L69>)
 
 Reaper collects terminated child processes so they do not linger as zombies — the core duty of any PID1 or subreaper. It is an alias of the core port; the concrete value is platform\-selected by [New](<#New>).
 
@@ -112,7 +112,7 @@ type Reaper = coreproc.Reaper
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L96>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/reaper/reaper.go#L99>)
 
 ```go
 func New(opts ...Option) Reaper

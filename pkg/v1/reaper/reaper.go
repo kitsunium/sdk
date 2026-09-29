@@ -48,7 +48,10 @@
 //
 // The real implementation is Unix-only. On platforms without SIGCHLD/waitpid
 // (e.g. Windows), [New] returns a no-op reaper (Start/Stop do nothing, ReapOnce
-// returns 0) and [SetChildSubreaper] returns [UnsupportedPlatform]. Code that
+// returns 0) and [SetChildSubreaper] returns [UnsupportedPlatform]. On illumos
+// and Solaris the Go runtime forks every child with FORK_NOSIGCHLD, so the exit
+// of a child this process spawned posts no SIGCHLD there; the loop also sweeps
+// once a second on those two, which keeps "reap children as they exit" true. Code that
 // links this package therefore builds and runs everywhere; only the behaviour
 // degrades. [SetChildSubreaper] requires no privilege but is a per-process
 // Linux capability; where the prctl is unavailable it returns a typed error

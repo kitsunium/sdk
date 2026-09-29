@@ -373,12 +373,15 @@ jobs:
   # leg. pkg's ./v1/proc suite runs here too: it asserts the capability matrix
   # for the GOOS it runs on, which is the claim this lane exists to back.
   #
-  # 20 min is a first bound, not a measured one: a guest boots in 2 to 5 min and
-  # the suites take about as long again on the BSD legs. Measure before moving it.
+  # 15 min rests on ONE green run per kernel: 3m17s on OmniOS, 3m01s on
+  # Solaris, of which about 1m45s / 1m30s boot the guest and about 50s run every
+  # suite — a x4.5 margin. A red leg takes longer than a green one: the reaper
+  # suite's cases wait 30s for a collection before failing, three attempts each.
+  # Measure before moving it.
   solarish:
     name: ${{ matrix.name }}
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 15
     strategy:
       fail-fast: false
       matrix:

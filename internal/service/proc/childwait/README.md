@@ -28,7 +28,9 @@ means.
 
 `ReapAny` and the populated `StatusValue` are Unix-only. Off Unix there is no
 `wait4` and no reaper, so a claim is never filled and the owner's own wait is
-the only waiter; the package still compiles everywhere.
+the only waiter; the package still compiles everywhere. On illumos and Solaris
+"any child" is `wait4(0)`, not `wait4(-1)`: their libc reads a negative pid as
+a process group (ADR 0144).
 
 ## Tests
 
