@@ -90,7 +90,7 @@ type memoryBroker struct {
 // use, through the same core/queue.PolicyValue.Validate the file broker runs
 // — which is what makes this an honest double for it.
 func NewMemory(cfg MemoryConfig) (broker corequeue.Broker, err error) {
-	//: the shared guard, so both brokers refuse identical inputs identically.
+	//: the shared guard, so every broker refuses identical inputs identically.
 	if invalid := cfg.Policy.Validate(); invalid != nil {
 		//: QueueMisconfigured, naming the field.
 		return nil, invalid
