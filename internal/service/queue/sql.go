@@ -177,6 +177,12 @@ func (b *sqlBroker) Publish(
 		return corequeue.MessageValue{}, backendFailed("rand", "", entropyErr)
 	}
 	now := b.clk.Now()
+	//: an instant an identifier cannot carry would mint a message whose
+	//: receipts this broker refuses: nothing is sent.
+	if !nameable(now) {
+		//: QueueMisconfigured, naming the clock.
+		return corequeue.MessageValue{}, clockRefused(now)
+	}
 	id := messageID(now.UnixNano(), entropy)
 	insertErr := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
 		//: one row: live, queued, visible now, never delivered. A nil or empty
@@ -227,6 +233,13 @@ func (b *sqlBroker) Nack(
 		return corequeue.NackValue{}, err
 	}
 	now := b.clk.Now()
+	visibleAt := now.Add(retryDelay(b.policy, held.deliveries))
+	//: an instant the table cannot hold is refused before anything moves,
+	//: and the lease the caller holds stays valid.
+	if !nameable(now) || !nameable(visibleAt) {
+		//: QueueMisconfigured, naming the clock.
+		return corequeue.NackValue{}, clockRefused(now)
+	}
 	//: the BROKER owns this decision: the count is the row's, and the
 	//: statement below refuses a receipt whose count is not.
 	if held.deliveries >= b.policy.MaxDeliveries {
@@ -238,9 +251,8 @@ func (b *sqlBroker) Nack(
 		//: never delivered again, unless replayed.
 		return corequeue.NackValue{Deliveries: held.deliveries, DeadLettered: true}, nil
 	}
-	visibleAt := now.Add(retryDelay(b.policy, held.deliveries)).UnixNano()
 	retryErr := b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
-		result, execErr := ex.ExecContext(txCtx, b.stmts.retry, append([]any{visibleAt}, held.args(now.UnixNano())...)...)
+		result, execErr := ex.ExecContext(txCtx, b.stmts.retry, append([]any{visibleAt.UnixNano()}, held.args(now.UnixNano())...)...)
 		//: queued again, LeaseExpired, or QueueBackendFailed.
 		return b.leased(result, execErr, "hand a message back")
 	})
@@ -251,7 +263,7 @@ func (b *sqlBroker) Nack(
 	}
 	b.announce(ctx)
 	//: queued again, eligible at VisibleAt.
-	return corequeue.NackValue{Deliveries: held.deliveries, VisibleAt: time.Unix(0, visibleAt)}, nil
+	return corequeue.NackValue{Deliveries: held.deliveries, VisibleAt: time.Unix(0, visibleAt.UnixNano())}, nil
 }
 
 // Extend renews a lease and mints the receipt that replaces it.
@@ -361,6 +373,12 @@ func (b *sqlBroker) announce(ctx context.Context) {
 
 // buryHeld dead-letters the leased message a receipt names, with cause.
 func (b *sqlBroker) buryHeld(ctx context.Context, held sqlReceipt, cause causeValue, now time.Time) error {
+	//: the failure's instant is written down, so it must be one the table
+	//: holds; the lease stays valid when it is not.
+	if !nameable(now) {
+		//: QueueMisconfigured, naming the clock.
+		return clockRefused(now)
+	}
 	//: one statement: dead only if the receipt still holds its lease.
 	return b.run(ctx, false, func(txCtx context.Context, ex coresql.Executor) error {
 		args := append(causeArgs(now.UnixNano(), cause), held.args(now.UnixNano())...)
@@ -411,6 +429,16 @@ func (b *sqlBroker) leased(result stdsql.Result, execErr error, step string) err
 	}
 	//: still held, and now ended or renewed.
 	return nil
+}
+
+// clockRefused is QueueMisconfigured for a clock reading this broker cannot
+// write down: before 1970, or so late that an instant it computes from it
+// passes 2262-04-11, where 64-bit Unix nanoseconds end. The file broker's
+// names end at the same instant.
+func clockRefused(now time.Time) error {
+	//: the clock, and the instant it read — never a payload.
+	return kerrs.Wrap(corequeue.QueueMisconfigured, kerrs.WrapParams{},
+		kerrs.String("field", "Clock"), kerrs.String("instant", now.UTC().Format(time.RFC3339Nano)))
 }
 
 // failed is QueueBackendFailed for step, with the driver's error beside it and

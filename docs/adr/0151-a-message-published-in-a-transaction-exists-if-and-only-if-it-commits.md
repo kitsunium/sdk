@@ -110,7 +110,11 @@ docstore's device (ADR 0139 §D3).
 - **The instants are the broker's clock, never the database's `NOW()`.** A test
   drives every deadline with a `ManualClock`, as for the other two brokers,
   and processes over one table compare instants their own clocks wrote — the
-  file broker's premise, stated rather than changed.
+  file broker's premise, stated rather than changed. A reading the table
+  cannot hold — before 1970, or so late that a deadline computed from it passes
+  2262 — is refused (`QUEUE_MISCONFIGURED`, field `Clock`) before any statement,
+  where it would have minted an identifier its own receipts are refused under,
+  or wrapped a lease's deadline negative.
 - **A table name** is a lower-case identifier of at most `MaxSQLTableLen` (63,
   PostgreSQL's limit) bytes that holds no `___` — docstore derives its tables
   with it, so a queue can never be one of them — and does not start with
@@ -140,9 +144,14 @@ docstore's device (ADR 0139 §D3).
   `LEASE_EXPIRED` by the same read, as the other brokers' reclaim does. There is
   no sweeper, here either.
 - **The next instant.** A Receive that did not fill its batch reads
-  `MIN(due)` after now and records it for `Wake`; one that did records now.
-  Inside the caller's transaction the probe is skipped: on MySQL a plain read
-  answers from the transaction's snapshot, where the locking read does not.
+  `MIN(due)` after now and records for `Wake` the earlier of that and the
+  deadline a lease taken now gets — its own, or one another consumer was
+  taking on a row the locked read skipped, which the read cannot see; early
+  costs one empty Receive, late would cost a poll. One that filled its batch
+  records now. The probe keeps NULL — nothing live — apart from an instant of
+  zero. Inside the caller's transaction the probe is skipped: on MySQL a plain
+  read answers from the transaction's snapshot, where the locking read does
+  not.
 
 ### D5 — ending or renewing a lease is one statement
 
@@ -230,7 +239,9 @@ Each broker keeps the promise its storage allows, and says which:
 - **memory** moves the record back into its ready list;
 - **file** publishes the payload into `ready/` atomically and durably, as
   `Publish` does, and removes every record of the identifier AFTER — the order
-  that degrades into a duplicate rather than a loss. Two replays racing each
+  that degrades into a duplicate rather than a loss. A record whose header
+  names another message than its file name does — truncated, or planted — is
+  never queued. Two replays racing each
   other can therefore queue it twice, which at-least-once permits: a record
   cannot be renamed into the queue, because a queued message is its payload
   alone, so there is no rename for the loser to lose;

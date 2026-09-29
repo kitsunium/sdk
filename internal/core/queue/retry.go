@@ -34,7 +34,11 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // never the message. A panic is never read as the mark — the recovered value
 // travels as a field of the engine's own verdict, not as its origin.
 func DoNotRetry(cause error) error {
-	//: the cause stays the origin when it can be; the mark rides its trail.
+	//: ONE call for both paths, by errs.Wrap's own rule: an SDK cause stays
+	//: the origin and takes only the Code, onto its wrap trail; anything else
+	//: — a foreign error, or nil — takes all of these as its origin. The
+	//: Reason and words below are therefore what a dead letter records for a
+	//: cause that has none of its own, and never replace one that has.
 	return errs.Wrap(cause, errs.WrapParams{
 		Code: CodeNotRetryable, Reason: "NOT_RETRYABLE",
 		Public:   "The message cannot be processed and was dead-lettered without a retry",

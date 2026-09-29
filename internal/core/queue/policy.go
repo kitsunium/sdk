@@ -194,12 +194,16 @@ func (p PolicyValue) validateRetryGrowth() error {
 	var problem string
 	//: the four ways a ceiling is no ceiling, most basic first.
 	switch {
+	//: not a bound at all, and the caller who wrote it meant something.
 	case p.MaxRetryDelay < 0:
 		problem = "negative"
+	//: a retry deadline a durable broker could not write down.
 	case p.MaxRetryDelay > MaxDeadlineOffset:
 		problem = "past MaxDeadlineOffset"
+	//: growth from zero is zero forever: a knob that does nothing.
 	case p.RetryDelay <= 0:
 		problem = "no RetryDelay to grow from"
+	//: a ceiling under the first step would shorten every wait asked for.
 	case p.MaxRetryDelay < p.RetryDelay:
 		problem = "below RetryDelay"
 	default:

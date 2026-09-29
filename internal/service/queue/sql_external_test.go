@@ -3,6 +3,7 @@ package queue_test
 import (
 	"context"
 	"errors"
+	"math"
 	"slices"
 	"strings"
 	"testing"
@@ -397,4 +398,56 @@ func TestSQLAnEmptyAndANilPayloadReadBackEmpty(t *testing.T) {
 			}
 		}
 	})
+}
+
+// TestSQLAMessageAtTheUnixEpochIsReceivable pins that the probe tells an empty
+// queue — MIN(due) is NULL — from a message due at instant zero: both used to
+// read as zero, and a message published at 1970-01-01T00:00:00Z was never
+// leased, however far the clock then moved.
+func TestSQLAMessageAtTheUnixEpochIsReceivable(t *testing.T) {
+	t.Parallel()
+	for _, dialect := range sqlDialects {
+		t.Run(dialect.String(), func(t *testing.T) {
+			t.Parallel()
+			clk := clock.NewManualClock(time.Unix(0, 0))
+			fx := newSQLFixture(t, dialect, clk, defaultPolicy())
+			publish(t, fx.broker, "at the epoch")
+			if got := receiveOne(t, fx.broker); string(got.Message.Payload) != "at the epoch" {
+				t.Fatalf("received %q", got.Message.Payload)
+			}
+		})
+	}
+}
+
+// TestSQLAClockItCannotWriteDownIsRefused pins the instants the table can
+// hold: 64-bit Unix nanoseconds, 1970 to 2262. A clock before 1970 would mint
+// an identifier its own receipts are refused under, and one so late that a
+// lease's deadline passes 2262 would wrap it negative and hand the message to
+// the next consumer at once — so both are refused before any statement.
+func TestSQLAClockItCannotWriteDownIsRefused(t *testing.T) {
+	t.Parallel()
+	last := time.Unix(0, math.MaxInt64)
+	for name, tc := range map[string]struct {
+		at   time.Time
+		call func(corequeue.Broker) error
+	}{
+		"a Publish before 1970": {time.Unix(0, -1), func(b corequeue.Broker) error {
+			_, err := b.Publish(t.Context(), []byte("m"))
+			return err
+		}},
+		"a Receive whose lease would pass 2262": {last.Add(-testVisibility / 2), func(b corequeue.Broker) error {
+			_, err := b.Receive(t.Context(), 1)
+			return err
+		}},
+	} {
+		fx := newSQLFixture(t, coresql.DialectPostgres, clock.NewManualClock(tc.at), defaultPolicy())
+		fx.engine.resetLog()
+		err := tc.call(fx.broker)
+		if !errs.HasCode(err, corequeue.CodeQueueMisconfigured) || fieldValue(err, "field") != "Clock" {
+			t.Errorf("%s = %v, want QueueMisconfigured naming the clock", name, err)
+		}
+		if sent := fx.engine.roles(); len(sent) != 0 {
+			t.Errorf("%s sent %v; a refused call sends nothing", name, sent)
+		}
+	}
 }

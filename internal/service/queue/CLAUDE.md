@@ -208,8 +208,11 @@ exists if and only if that transaction commits** — the transactional outbox.
   identifiers a statement. A lapsed lease with no attempt left is buried with
   `LEASE_EXPIRED` by the same read; one with attempts left is leased again,
   its count moved on. A Receive that did not fill its batch asks when the next
-  row is due (`MIN(due) > now`) and records it for `Wake`; one that did
-  records now. No sweeper, as for the other two.
+  row is due (`MIN(due) > now`) and records for `Wake` the earlier of that and
+  a lease's deadline taken now — a concurrent consumer's lease on a row the
+  locked read skipped is invisible to it; one that did records now. The
+  probe keeps NULL apart from an instant of zero. No sweeper, as for the
+  other two.
 - **Ack, Nack, Extend and Reject are ONE statement each**, matching the
   receipt's identifier, lease and delivery count, a live row, and a deadline
   still ahead of the instant the call read — so a lapsed lease is refused
@@ -221,7 +224,9 @@ exists if and only if that transaction commits** — the transactional outbox.
   twenty, are one queue, so a receipt minted elsewhere is legitimate.
 - **The instants are the broker's clock, never the database's `NOW()`**, so a
   test drives every deadline with a `ManualClock` — and brokers in several
-  processes compare instants their own clocks wrote.
+  processes compare instants their own clocks wrote. A reading 64-bit Unix
+  nanoseconds cannot hold, or whose lease or retry deadline passes 2262, is
+  refused `QUEUE_MISCONFIGURED` (field `Clock`) before any statement.
 - **A storage failure is `QUEUE_BACKEND_FAILED`**, JOINED with the driver's
   error — never wrapped, so the verdict stays the origin — whose text is
   WITHHELD from every rendering (`withheld`, docstore's rule): a driver quotes
@@ -257,7 +262,9 @@ returns on a storage failure: a consumer over the SQL broker runs under
   durably, as `Publish` does — and removes every record of the ID AFTER, the
   order that degrades into a duplicate rather than a loss; two replays racing
   can therefore queue it twice, which at-least-once permits (a record cannot be
-  renamed into the queue: a queued message is its payload alone). The SQL
+  renamed into the queue: a queued message is its payload alone). A record
+  whose header names another message than its file name does is never
+  queued. The SQL
   broker's replay is one UPDATE of the row's state, so the second of two racing
   replays is refused `DEAD_LETTER_NOT_FOUND`.
 - **The growing retry delay is `retry.go`'s one function**, so the double waits

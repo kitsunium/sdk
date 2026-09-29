@@ -41,8 +41,10 @@ func (b *fileBroker) ReplayDeadLetter(ctx context.Context, id string) error {
 			//: QueueBackendFailed.
 			return readErr
 		}
-		//: removed meanwhile by a concurrent replay or deletion, or unreadable.
-		if !ok {
+		//: removed meanwhile by a concurrent replay or deletion, unreadable, or
+		//: a record whose header names another message than its file name
+		//: does — a truncated or planted file is never queued as a message.
+		if !ok || record.Message.ID != id {
 			continue
 		}
 		name, _ := parseDead(base)

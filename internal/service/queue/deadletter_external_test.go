@@ -2,6 +2,8 @@ package queue_test
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -330,4 +332,23 @@ func manager(t *testing.T, broker corequeue.Broker) corequeue.DeadLetterManager 
 		t.Fatalf("%T does not implement queue.DeadLetterManager", broker)
 	}
 	return capability
+}
+
+// TestTheFileBrokerNeverReplaysARecordItCannotVouchFor pins the file broker's
+// replay against a record whose file name is a dead letter's and whose content
+// is not the message it names — truncated by a filesystem that lost it, or
+// planted: nothing is queued, and the identifier is refused as unknown.
+func TestTheFileBrokerNeverReplaysARecordItCannotVouchFor(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	broker := newFileBroker(t, dir, defaultPolicy())
+	const id = "0000000000000000001-0123456789abcdef"
+	record := filepath.Join(dir, "dead", "0000000000000000001.0123456789abcdef.003.dead")
+	if err := os.WriteFile(record, []byte("ktnq/1\n\n"), 0o600); err != nil {
+		t.Fatalf("WriteFile() = %v", err)
+	}
+	if err := manager(t, broker).ReplayDeadLetter(t.Context(), id); !errs.HasCode(err, corequeue.CodeDeadLetterNotFound) {
+		t.Fatalf("ReplayDeadLetter(a record naming no message) = %v, want CodeDeadLetterNotFound", err)
+	}
+	receiveNone(t, broker)
 }

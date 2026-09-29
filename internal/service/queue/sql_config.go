@@ -124,12 +124,16 @@ func validateSQLTable(table string) error {
 	var problem string
 	//: the four rules, the injection defence first.
 	switch {
+	//: the shape, which is what makes interpolating it safe.
 	case !sqlTablePattern.MatchString(table):
 		problem = "not a lower-case SQL identifier"
+	//: longer than PostgreSQL keeps, which would truncate it into another.
 	case len(table) > MaxSQLTableLen:
 		problem = "longer than " + strconv.Itoa(MaxSQLTableLen) + " bytes"
+	//: the separator of docstore's derived tables, which this one could be.
 	case strings.Contains(table, sqlTableSeparator):
 		problem = "holds three underscores in a row"
+	//: SQLite's own names, refused on every engine alike.
 	case strings.HasPrefix(table, sqlReservedPrefix):
 		problem = "starts with sqlite_, which SQLite reserves"
 	default:
