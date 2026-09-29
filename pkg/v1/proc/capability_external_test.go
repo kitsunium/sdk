@@ -12,7 +12,7 @@ import (
 // isUnixGOOS mirrors the package's Unix-target set for the expected matrix.
 func isUnixGOOS(goos string) bool {
 	switch goos {
-	case "linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly":
+	case "linux", "darwin", "freebsd", "openbsd", "netbsd", "dragonfly", "illumos", "solaris":
 		return true
 	default:
 		return false
