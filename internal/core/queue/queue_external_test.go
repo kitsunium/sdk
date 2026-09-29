@@ -185,7 +185,8 @@ func TestEverySentinelCarriesAWireSafePublic(t *testing.T) {
 	t.Parallel()
 	sentinels := []*errs.Error{
 		corequeue.QueueMisconfigured, corequeue.MessageTooLarge, corequeue.UnknownReceipt,
-		corequeue.LeaseExpired, corequeue.InvalidBatchSize,
+		corequeue.LeaseExpired, corequeue.InvalidBatchSize, corequeue.NotRetryable,
+		corequeue.DeadLetterNotFound,
 	}
 	for _, sentinel := range sentinels {
 		public := errs.PublicOf(sentinel)
@@ -203,14 +204,16 @@ func TestEverySentinelCarriesAWireSafePublic(t *testing.T) {
 	}
 }
 
-// TestTheFiveCodesAreDistinctAndInTheOwnedRange pins the ADR 0005 allocation:
-// five codes, all in 0.2.23.*, none repeated.
-func TestTheFiveCodesAreDistinctAndInTheOwnedRange(t *testing.T) {
+// TestTheSevenCodesAreDistinctAndInTheOwnedRange pins the ADR 0005 allocation:
+// seven codes, all in 0.2.23.*, none repeated — the five of ADR 0054 and the
+// two of ADR 0151.
+func TestTheSevenCodesAreDistinctAndInTheOwnedRange(t *testing.T) {
 	t.Parallel()
 	const prefix errs.Code = 0x00_02_17_00
 	codes := []errs.Code{
 		corequeue.CodeQueueMisconfigured, corequeue.CodeMessageTooLarge,
 		corequeue.CodeUnknownReceipt, corequeue.CodeLeaseExpired, corequeue.CodeInvalidBatchSize,
+		corequeue.CodeNotRetryable, corequeue.CodeDeadLetterNotFound,
 	}
 	seen := map[errs.Code]bool{}
 	for _, code := range codes {

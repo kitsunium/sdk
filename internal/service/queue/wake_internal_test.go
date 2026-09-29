@@ -4,7 +4,6 @@ import (
 	"runtime"
 	"testing"
 	"time"
-	"weak"
 )
 
 // Test_earliest pins that zero means "none" and never wins, which is what lets
@@ -57,18 +56,18 @@ func Test_wakeSignal_fire(t *testing.T) {
 	}
 }
 
-// Test_directoryWakes_sharesAndForgets pins the two halves of the table: two
-// lookups of one directory share a signal, and once nothing references it
-// the entry is dropped, so a process that opens queues in fresh directories
-// does not accumulate one entry per directory forever.
-func Test_directoryWakes_sharesAndForgets(t *testing.T) {
+// Test_wakeTable_sharesAndForgets pins the two halves of the table: two
+// lookups of one queue share a signal, and once nothing references it the
+// entry is dropped, so a process that opens queues in fresh directories — or
+// over fresh tables — does not accumulate one entry per queue forever.
+func Test_wakeTable_sharesAndForgets(t *testing.T) {
 	t.Parallel()
-	table := &directoryWakes{byDir: make(map[string]weak.Pointer[wakeSignal])}
-	dir := t.TempDir()
+	table := newWakeTable[string]()
+	dir := canonicalDir(t.TempDir())
 	//: the only strong references live in this closure, and die with it.
 	func() {
-		first := table.forDir(dir)
-		if table.forDir(dir) != first {
+		first := table.forKey(dir)
+		if table.forKey(dir) != first {
 			t.Fatal("two lookups of one directory returned two signals")
 		}
 		first.fire()
@@ -83,9 +82,9 @@ func Test_directoryWakes_sharesAndForgets(t *testing.T) {
 	}
 }
 
-// size returns how many directories the table holds.
-func (d *directoryWakes) size() int {
+// size returns how many queues the table holds.
+func (d *wakeTable[K]) size() int {
 	d.mu.Lock()
 	defer d.mu.Unlock()
-	return len(d.byDir)
+	return len(d.byQueue)
 }

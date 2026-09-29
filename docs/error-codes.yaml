@@ -738,6 +738,14 @@ codes:
     const: CodeInvalidBatchSize
     hex: "0x00_02_17_05"
     package: internal/core/queue
+  - code: "0.2.23.6"
+    const: CodeNotRetryable
+    hex: "0x00_02_17_06"
+    package: internal/core/queue
+  - code: "0.2.23.7"
+    const: CodeDeadLetterNotFound
+    hex: "0x00_02_17_07"
+    package: internal/core/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
     hex: "0x00_02_18_01"
@@ -1893,6 +1901,10 @@ codes:
   - code: "0.3.53.4"
     const: CodeHandlerPanicked
     hex: "0x00_03_35_04"
+    package: internal/service/queue
+  - code: "0.3.53.5"
+    const: CodeSQLQueueMisconfigured
+    hex: "0x00_03_35_05"
     package: internal/service/queue
   - code: "0.3.54.1"
     const: CodeConfigInvalid

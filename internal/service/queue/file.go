@@ -120,7 +120,7 @@ func NewFile(cfg FileConfig) (broker corequeue.Broker, err error) {
 	}
 	//: usable.
 	return &fileBroker{
-		root: root, publisher: publisher, wake: fileWakes.forDir(cfg.Dir),
+		root: root, publisher: publisher, wake: forDir(cfg.Dir),
 		policy: cfg.Policy.Normalized(), clk: clockOrSystem(cfg.Clock),
 	}, nil
 }

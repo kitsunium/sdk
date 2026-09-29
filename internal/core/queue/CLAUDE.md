@@ -24,13 +24,15 @@ construction; a change to `events` that moves it right is wrong the same way.
 
 | File | Holds |
 |---|---|
-| `queue.go` | package doc (the frontier, the guarantee, the three non-guarantees), `Broker` (FROZEN at four methods), `Handler` (FUNC port), `NackValue` |
+| `queue.go` | package doc (the frontier, why a publication may join the publisher's transaction while the handler never does, the guarantee, the three non-guarantees), `Broker` (FROZEN at four methods), `Handler` (FUNC port), `NackValue` |
 | `message.go` | `MessageValue`, `ReceiptValue`, `LeaseValue`, `DeliveryValue` |
 | `capability.go` | the ADR 0039 siblings `DeadLetterReader` and `LeaseExtender`, and `DeadLetterValue` |
 | `wake.go` | the third sibling, `Waker`, and the `WakeValue` it answers with (ADR 0104) |
-| `policy.go` | `PolicyValue`, `Validate`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
-| `codes.go` | the five `0.2.23.*` codes |
-| `errors.go` | the five sentinels |
+| `deadletter.go` | the fourth and fifth siblings (ADR 0151): `Rejecter` — dead-letter a leased message at once — and `DeadLetterManager` — `ReplayDeadLetter` and `DeleteDeadLetter` |
+| `retry.go` | `DoNotRetry(cause)`: the mark a handler puts on a failure no retry can fix (ADR 0151) |
+| `policy.go` | `PolicyValue` (with `MaxRetryDelay`, ADR 0151), `Validate` + `validateRetryGrowth`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
+| `codes.go` | the seven `0.2.23.*` codes |
+| `errors.go` | the seven sentinels |
 
 ## The five things this domain decided
 
@@ -66,14 +68,51 @@ construction; a change to `events` that moves it right is wrong the same way.
    with a receipt reading `UNKNOWN_RECEIPT`. `Validate` has no clock, so the
    ceiling is fixed; it keeps every deadline representable for any clock
    before 2162, and a negative `RetryDelay` is still "no delay". Pinned by
-   `TestPolicyRefusesADeadlineOffsetPastTheCeiling` here and, on both brokers,
-   by `service/queue`'s `TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry`.
+   `TestPolicyRefusesADeadlineOffsetPastTheCeiling` here and, on every broker,
+   by `service/queue`'s `TestEveryBrokerRefusesADeadlineOffsetNoInstantCanCarry`.
+
+## What ADR 0151 added, and why each piece is where it is
+
+- **`MaxRetryDelay` makes the retry delay grow.** Positive, the message nacked
+  on its n-th delivery waits `RetryDelay × 2^(n−1)`, held at the ceiling —
+  `resilience.Backoff`'s curve (ADR 0103), which the brokers call; this package
+  cannot import it and only holds the numbers. Zero keeps the constant delay
+  every policy had, which is the zero's one reading and what keeps the field
+  backward compatible. A ceiling that is no ceiling is refused by field and
+  problem: negative, past `MaxDeadlineOffset`, above no `RetryDelay` (growth
+  from zero is zero forever, an inert knob), or below `RetryDelay` (it would
+  silently shorten every wait). `TestAGrowingRetryDelayNeedsARealCeiling`.
+- **`DoNotRetry(cause)` is the handler's half of immediate dead-lettering.** It
+  is an `errs.Wrap` onto the cause with `CodeNotRetryable` as the wrap-site
+  code, so ORIGIN WINS: an SDK cause keeps its own Reason, Code and Public — the
+  three things a dead letter records, D10 of ADR 0054 — and the mark rides the
+  wrap trail, where `errs.HasCode` finds it. A stdlib cause, or none, records
+  `NOT_RETRYABLE` itself. `errors.Is(err, NotRetryable)` sees only the origin,
+  which is why the recognition is by code and the doc says so.
+  `TestDoNotRetryMarksTheFailureAndKeepsTheCauseItsOrigin`.
+- **`Rejecter` is the broker's half**, a sibling because `Broker` is frozen and
+  a connector with no in-band dead-letter move cannot implement it — the engine
+  falls back to `Nack` then, which loses the shortcut and never the message.
+  It lives in core because a type the port speaks lives in core (ADR 0074).
+- **`DeadLetterManager` replays or deletes one dead letter by `MessageValue.ID`.**
+  Reading the store stays evidence that no read consumes; these two are the
+  decisions an operator takes after it. A replay keeps the ID, the payload and
+  the enqueue instant, resets the count to zero and loses the cause record;
+  an ID the store does not hold is `DEAD_LETTER_NOT_FOUND` (404, `EX_NOINPUT`).
+- **`TestTheQueueSiblingsKeepTheirMethodCounts`** pins `Broker` at four methods
+  and each sibling at the count it shipped with.
 
 ## Conventions
 
 - **Frozen ports.** `Broker` has four methods and gets no fifth. `Handler` is a
   func type, so it cannot grow one at all. A capability is a sibling interface
-  reached by type assertion.
+  reached by type assertion: `DeadLetterReader`, `LeaseExtender`, `Waker`,
+  `Rejecter`, `DeadLetterManager` — each frozen at the methods it shipped with.
+- **A publication may join the publisher's transaction; the handler never
+  does.** The frontier's Transaction row is about where the WORK runs, and it
+  is untouched by the SQL broker (ADR 0151): its `Publish` makes the MESSAGE
+  part of the caller's transaction — the transactional outbox — while the
+  handler still runs later, on a consumer's goroutine, in its own.
 - **`Waker` is a hint, and says so (ADR 0104).** `Wake()` hands out a signal
   closed by the next Publish or Nack IN THIS PROCESS, and how long until
   something the broker holds becomes receivable on its own. A wake may find
@@ -83,7 +122,8 @@ construction; a change to `events` that moves it right is wrong the same way.
   so a consumer on a different clock waits the right length instead of
   comparing two clocks.
 - **No registry.** One `Broker` value is one queue; the name of the queue is
-  the implementation's configuration (a directory, for the file broker). A
+  the implementation's configuration (a directory for the file broker, a
+  database and a table for the SQL one). A
   registry would have one entry per queue and would add a way to misconfigure a
   wiring at runtime.
 - **The routing key is a NAME, and it has to be.** `events` routes on
@@ -118,5 +158,6 @@ construction; a change to `events` that moves it right is wrong the same way.
 - ADR 0053 §D1 — the frontier table, written before this domain existed
 - ADR 0031 — a zero value is a safe default or an explicit refusal
 - ADR 0039 — a published port grows by siblings, never by widening
-- `internal/service/queue/CLAUDE.md` — the two brokers and the consumer engine
+- ADR 0151 — the SQL broker, a growing retry delay, immediate dead-lettering, dead-letter replay and deletion
+- `internal/service/queue/CLAUDE.md` — the three brokers and the consumer engine
 - `internal/service/queue/BENCH.md` — what durability costs, measured

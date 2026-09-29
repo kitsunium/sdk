@@ -14,17 +14,33 @@ const exitConfig int = 78
 const exitIOErr int = 74
 
 var (
-	// QueueBackendFailed wraps a refusal from the operating system: an open,
-	// a rename, an unlink, a directory read or a flush.
+	// QueueBackendFailed reports a refusal from a durable broker's storage:
+	// for the file broker the operating system's — an open, a rename, an
+	// unlink, a directory read or a flush — and for the SQL broker a
+	// statement its database did not complete.
 	//
 	// The cause stays in the chain, so a caller may still ask
-	// errors.Is(err, fs.ErrNotExist) or reach the *fs.PathError. Its fields
-	// name the operation and, where it is not the payload, the path — never
-	// the message bytes.
+	// errors.Is(err, fs.ErrNotExist), reach the *fs.PathError, or reach a
+	// driver's own error with errors.As. Its fields name the operation and,
+	// where it is not the payload, the path or the table — never the message
+	// bytes; and the SQL broker WITHHOLDS the driver's text from every
+	// rendering, because a driver quotes the row a statement touched.
 	QueueBackendFailed = errs.Define(CodeQueueBackendFailed, "QUEUE_BACKEND_FAILED",
 		"The queue's storage refused an operation",
-		"service/queue: a filesystem call failed; the fields name the operation and the path, never the payload",
+		"service/queue: a filesystem call or a SQL statement failed; the fields name the operation and where, never the payload",
 		errs.WithExitCode(exitIOErr))
+
+	// SQLQueueMisconfigured refuses, at construction, an SQLConfig no SQL
+	// broker could run: a nil Transactor, one that is not a core/sql Joiner
+	// and Deferrer — without which a publication could neither join the
+	// caller's transaction nor wake a consumer after its commit — a dialect
+	// the SDK does not speak, or a table name that is not a lower-case SQL
+	// identifier the broker can interpolate safely. The "setting" and
+	// "problem" fields name which (ADR 0151).
+	SQLQueueMisconfigured = errs.Define(CodeSQLQueueMisconfigured, "SQL_QUEUE_MISCONFIGURED",
+		"The SQL queue's configuration cannot be used",
+		"service/queue: the SQL broker's transactor, dialect or table is unusable; the fields name the setting and the problem",
+		errs.WithExitCode(exitConfig))
 
 	// QueueDirectoryUnusable refuses a queue directory at CONSTRUCTION.
 	//

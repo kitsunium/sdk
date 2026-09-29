@@ -16,6 +16,19 @@ const exitConfig int = 78
 // consumer's next Receive is the retry.
 const exitTempFail int = 75
 
+// exitDataErr matches sysexits EX_DATAERR (65). A failure a handler declares
+// no retry can fix is almost always the message itself — a payload that does
+// not decode, a reference to something since deleted — and the same bytes are
+// refused the same way however often they are delivered.
+const exitDataErr int = 65
+
+// exitNoInput matches sysexits EX_NOINPUT (66): the dead letter a replay or a
+// deletion names is not there to be read.
+const exitNoInput int = 66
+
+// httpNotFound is 404: the identifier names no dead letter.
+const httpNotFound int = 404
+
 var (
 	// QueueMisconfigured refuses a PolicyValue a broker cannot honour — a
 	// zero with opposite readings, or a duration past MaxDeadlineOffset — and
@@ -81,4 +94,29 @@ var (
 		"A batch size must be positive",
 		"core/queue: Receive/DeadLetters called with max <= 0, which would poll forever and deliver nothing",
 		errs.WithExitCode(exitConfig))
+
+	// NotRetryable is the failure a handler reports when no retry can fix it:
+	// returned as it is, or — the usual form — added by DoNotRetry to the
+	// handler's own cause. The consumer engine recognises its code with
+	// errs.HasCode and dead-letters the message at once through a broker's
+	// Rejecter, instead of spending MaxDeliveries leases on an outcome
+	// already known.
+	//
+	// Returned bare, it is the cause the dead letter records. Added by
+	// DoNotRetry to an SDK error it is only a mark in the wrap trail, and the
+	// error's own Reason, Code and Public are what the dead letter keeps:
+	// origin wins (CLAUDE.md rule 6), which is the reason an investigator
+	// needs.
+	NotRetryable = errs.Define(CodeNotRetryable, "NOT_RETRYABLE",
+		"The message cannot be processed and was dead-lettered without a retry",
+		"core/queue: a handler declared a failure no retry can fix; the engine dead-letters the message at once with the handler's own cause",
+		errs.WithExitCode(exitDataErr))
+
+	// DeadLetterNotFound refuses a replay or a deletion naming a dead letter
+	// the store does not hold: one that never died, or was already replayed
+	// or deleted — by this caller or, concurrently, by another. Nothing moved.
+	DeadLetterNotFound = errs.Define(CodeDeadLetterNotFound, "DEAD_LETTER_NOT_FOUND",
+		"No dead letter has that identifier",
+		"core/queue: the dead-letter store holds no message under the identifier; nothing was replayed or deleted",
+		errs.WithExitCode(exitNoInput), errs.WithHTTPStatus(httpNotFound))
 )

@@ -11,7 +11,9 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
+	coresql "github.com/kitsunium/sdk/internal/core/sql"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
+	svcsql "github.com/kitsunium/sdk/internal/service/sql"
 )
 
 // The shared policy numbers. They are named rather than inlined so a case
@@ -22,6 +24,9 @@ const (
 	testDeliveries int           = 3
 )
 
+// jobsTable is the table every SQL case keeps its queue in.
+const jobsTable string = "app__jobs"
+
 // epoch anchors every ManualClock in this suite, so an instant printed in a
 // failure is readable rather than being 1970 plus some nanoseconds.
 var epoch = time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
@@ -29,7 +34,7 @@ var epoch = time.Date(2026, time.September, 10, 12, 0, 0, 0, time.UTC)
 // brokerFactory builds one broker over an injected clock.
 //
 // The suite is written against this rather than against a constructor so the
-// SAME cases run over both implementations. That is the whole reason the
+// SAME cases run over every implementation. That is the whole reason the
 // memory broker is worth having: a double nobody checks against the real
 // thing is a double that has already drifted.
 type brokerFactory struct {
@@ -37,12 +42,47 @@ type brokerFactory struct {
 	make func(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) corequeue.Broker
 }
 
-// bothBrokers is the table every conformance case ranges over.
-func bothBrokers() []brokerFactory {
+// everyBroker is the table every conformance case ranges over: the memory
+// broker, the file broker, and the SQL broker on each dialect's statements
+// over the fake engine.
+func everyBroker() []brokerFactory {
 	return []brokerFactory{
 		{name: "memory", make: makeMemory},
 		{name: "file", make: makeFile},
+		{name: "sql/postgres", make: makeSQL(coresql.DialectPostgres)},
+		{name: "sql/mysql", make: makeSQL(coresql.DialectMySQL)},
+		{name: "sql/sqlite", make: makeSQL(coresql.DialectSQLite)},
 	}
+}
+
+// sqlFixture is one dialect's SQL broker over a fresh fake engine, with the
+// transactor it runs on.
+type sqlFixture struct {
+	engine *sqlEngine
+	tm     coresql.Transactor
+	broker corequeue.Broker
+}
+
+// makeSQL returns the factory of the SQL broker on dialect.
+func makeSQL(dialect coresql.Dialect) func(*testing.T, clock.Clock, corequeue.PolicyValue) corequeue.Broker {
+	return func(t *testing.T, clk clock.Clock, policy corequeue.PolicyValue) corequeue.Broker {
+		t.Helper()
+		return newSQLFixture(t, dialect, clk, policy).broker
+	}
+}
+
+// newSQLFixture builds the SQL broker on dialect over a fresh fake engine.
+func newSQLFixture(t *testing.T, dialect coresql.Dialect, clk clock.Clock, policy corequeue.PolicyValue) *sqlFixture {
+	t.Helper()
+	engine := newSQLEngine(dialect, jobsTable)
+	tm := newSQLTransactor(t, engine, dialect)
+	broker, err := svcqueue.NewSQL(svcqueue.SQLConfig{
+		Transactor: tm, Dialect: dialect, Table: jobsTable, Policy: policy, Clock: clk,
+	})
+	if err != nil {
+		t.Fatalf("NewSQL() = %v, want nil", err)
+	}
+	return &sqlFixture{engine: engine, tm: tm, broker: broker}
 }
 
 // makeMemory builds the in-process double.
@@ -185,4 +225,23 @@ func nack(
 // test's own.
 func discard() context.Context {
 	return context.Background()
+}
+
+// newSQLTransactor returns the SDK's transactor over a pool onto engine.
+func newSQLTransactor(t *testing.T, engine *sqlEngine, dialect coresql.Dialect) coresql.Transactor {
+	t.Helper()
+	tm, err := svcsql.NewTransactor(svcsql.Config{
+		DB: engine.open(t), Dialect: dialect, Pool: svcsql.PoolConfig{MaxOpen: 8},
+	})
+	if err != nil {
+		t.Fatalf("NewTransactor() = %v", err)
+	}
+	return tm
+}
+
+// sqlTransactor returns a transactor over a fresh fake engine on dialect, for
+// a case that only needs NewSQL to get past its transactor.
+func sqlTransactor(t *testing.T, dialect coresql.Dialect) coresql.Transactor {
+	t.Helper()
+	return newSQLTransactor(t, newSQLEngine(dialect, jobsTable), dialect)
 }

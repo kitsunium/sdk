@@ -54,7 +54,7 @@ func (b *fileBroker) Nack(
 		return b.nackDead(name, held, cause, now.UnixNano())
 	}
 	requeued := nameValue{
-		At: now.Add(b.policy.RetryDelay).UnixNano(), EnqueuedAt: name.EnqueuedAt,
+		At: now.Add(retryDelay(b.policy, name.Deliveries)).UnixNano(), EnqueuedAt: name.EnqueuedAt,
 		Entropy: name.Entropy, Deliveries: name.Deliveries,
 	}
 	renameErr := b.root.Rename(
@@ -71,6 +71,22 @@ func (b *fileBroker) Nack(
 	return corequeue.NackValue{
 		Deliveries: name.Deliveries, VisibleAt: time.Unix(0, requeued.At),
 	}, nil
+}
+
+// Reject dead-letters the leased message at once with cause, whatever its
+// delivery count (core/queue.Rejecter): the same burial a nack on the last
+// attempt makes, reached sooner.
+func (b *fileBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValue, cause error) error {
+	held := string(receipt)
+	name, resolveErr := b.resolve(ctx, held)
+	//: the same refusals Ack makes, and nothing moves.
+	if resolveErr != nil {
+		//: UnknownReceipt or LeaseExpired.
+		return resolveErr
+	}
+	failedAt := b.clk.Now().UnixNano()
+	//: the record first, then the in-flight file, as every burial.
+	return b.bury(name, held, describeCause(cause), failedAt)
 }
 
 // nackDead buries a message that has run out of attempts.

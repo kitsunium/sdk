@@ -2,28 +2,44 @@
 
 ## Purpose
 
-The two brokers implementing `internal/core/queue` (ADR 0054) and the consumer
-engine that drives a `Handler` against either: `NewFile` (the durable one,
-whose state is a directory), `NewMemory` (the test double), and `Consume` (the
-pull loop that runs handlers on goroutines it owns).
+The three brokers implementing `internal/core/queue` (ADR 0054) and the
+consumer engine that drives a `Handler` against any of them: `NewFile` (durable,
+its state a directory), `NewSQL` (durable, its state one table of the caller's
+own database, every call on the transaction its context carries — ADR 0151),
+`NewMemory` (the test double), and `Consume` (the pull loop that runs handlers
+on goroutines it owns).
+
+All three implement every capability sibling: `DeadLetterReader`,
+`LeaseExtender`, `Waker`, and since ADR 0151 `Rejecter` and
+`DeadLetterManager`; and all three wait the same growing retry delay when the
+policy's `MaxRetryDelay` asks for one (`retry.go`).
 
 ## Contents
 
 | File | Holds |
 |---|---|
-| `queue.go` | package doc, the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`) |
-| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion |
+| `queue.go` | package doc, the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
+| `retry.go` | `retryDelay`: RetryDelay, or `resilience.Backoff` from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
+| `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
 | `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through `internal/service/lock`'s reader |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
-| `file_dead.go` | `Nack`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
+| `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
+| `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `deadRecordsOf` — every record of one message by its ID |
+| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the withheld cause), the process-wide `sqlWakes` table |
+| `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
+| `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter` on the table |
+| `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
+| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL |
+| `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/sql` migration the caller numbers |
+| `sql_withheld.go` | `withheld`: the driver's error for `errors.Is`/`errors.As`, its text out of every rendering |
 | `consume.go` | `Consume`, the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
-| `wake.go` | `wakeSignal` (the broadcast both brokers close on Publish and Nack, and the durable broker's recorded due instant), `wakeValue`, `earliest`, and `fileWakes` — the process-wide, weakly-held table that makes every durable broker over one directory share one signal |
+| `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
-| `codes.go` / `errors.go` | the four `0.3.53.*` codes and their sentinels |
+| `codes.go` / `errors.go` | the five `0.3.53.*` codes and their sentinels |
 
 ## Why the durable broker's state is a FILENAME
 
@@ -74,7 +90,8 @@ Two consequences of "the state is a name" are enforced rather than assumed:
   deadline, and refuses the same `by` anyway, in the same order: it is the
   double, and a double more permissive than the durable broker is a test that
   passes where production strands the message.
-  `TestBothBrokersRefuseAnExtensionANameCannotCarry` runs on both.
+  `TestEveryBrokerRefusesAnExtensionANameCannotCarry` runs on all three — the
+  SQL broker keeps its deadlines as the same int64 of Unix nanoseconds.
 
 ## On Windows: the directory rules read the DACL, and the broker is then refused
 
@@ -158,6 +175,92 @@ slightly less likely would buy nothing the contract does not already give away.
 the enqueue IS the round trip, to within the noise — and it is independent of
 the payload size across a 1 024× range.
 
+## The SQL broker (ADR 0151)
+
+`NewSQL` keeps the queue in ONE table of a PostgreSQL, MySQL or SQLite database
+the caller owns and hands over as a `core/sql` transactor — which must also be
+a `Joiner` and a `Deferrer`, as the SDK's is. It exists for one property the
+other two cannot have: **a message published inside the caller's transaction
+exists if and only if that transaction commits** — the transactional outbox.
+
+- **Every call runs where its context says**, exactly as docstore's SQL engine
+  (ADR 0139 §D5): inside the caller's transaction every call that writes is a
+  SAVEPOINT of it — a failed statement undoes itself alone and, on PostgreSQL,
+  clears the aborted state — and outside one, a call of one statement runs on
+  the pool and a Receive that leases runs in a transaction of the broker's
+  own, READ COMMITTED on MySQL. A publication's wake goes through `Defer`, so
+  consumers are woken after the commit and never for a rollback.
+- **One table, three columns of state.** `dead` (0 live, 1 dead letter),
+  `lease` (NULL queued, the lease's random half when leased) and `due` — the
+  instant the row next matters on its own: a queued message's visibility, a
+  leased one's deadline, a dead letter's failure. So every live row whose `due`
+  has passed is either receivable or a lease whose holder may have died, and
+  ONE ordered read over the `UNIQUE (dead, due, id)` index finds both. That
+  constraint can never be broken — `id` is the key — and exists to build the
+  index, which PostgreSQL and SQLite declare no other way inside CREATE TABLE.
+- **An idle Receive is one read and takes no lock**: `SELECT MIN(due)` over the
+  live rows (the probe). Only when something is due does it open the lease
+  transaction: on SQLite a write that writes nothing first (ADR 0140's
+  statement — SQLite's lock is taken by a transaction's first WRITE, and a
+  lease that read first could be refused busy at its update), then the due
+  rows in `(due, id)` order `FOR UPDATE SKIP LOCKED` on PostgreSQL and MySQL,
+  then one UPDATE leasing them all under one deadline and one random half, 500
+  identifiers a statement. A lapsed lease with no attempt left is buried with
+  `LEASE_EXPIRED` by the same read; one with attempts left is leased again,
+  its count moved on. A Receive that did not fill its batch asks when the next
+  row is due (`MIN(due) > now`) and records it for `Wake`; one that did
+  records now. No sweeper, as for the other two.
+- **Ack, Nack, Extend and Reject are ONE statement each**, matching the
+  receipt's identifier, lease and delivery count, a live row, and a deadline
+  still ahead of the instant the call read — so a lapsed lease is refused
+  whether or not anybody reclaimed it, as ADR 0054 §D2 requires, and zero rows
+  is `LEASE_EXPIRED`. Every UPDATE changes a column, which keeps MySQL's
+  affected-row count exact.
+- **A receipt is `<id>.<count>.<lease>`**, refused `UNKNOWN_RECEIPT` by SHAPE
+  as the file broker's is: two brokers over one table, in one process or in
+  twenty, are one queue, so a receipt minted elsewhere is legitimate.
+- **The instants are the broker's clock, never the database's `NOW()`**, so a
+  test drives every deadline with a `ManualClock` — and brokers in several
+  processes compare instants their own clocks wrote.
+- **A storage failure is `QUEUE_BACKEND_FAILED`**, JOINED with the driver's
+  error — never wrapped, so the verdict stays the origin — whose text is
+  WITHHELD from every rendering (`withheld`, docstore's rule): a driver quotes
+  the row a statement touched. The transactor's own verdicts pass through.
+- **`SQLMigration(dialect, table, version)`** creates the table in one
+  `CREATE TABLE IF NOT EXISTS`; the SDK numbers nothing (ADR 0055 §D12).
+- **Two brokers over one pool and table share a wake** (`sqlWakes`), keyed by
+  the executor `Join` answers outside a transaction and the table; a joiner
+  whose pool is nil or incomparable gets a signal of its own.
+
+What is NOT guaranteed, and says so in the ADR: a publication from another
+process is found by the poll (no LISTEN/NOTIFY — a driver feature
+`database/sql` does not carry); a call inside the caller's transaction runs at
+that transaction's isolation — on PostgreSQL REPEATABLE READ a leased row
+another transaction changed since the snapshot is a serialization failure,
+which the caller gets as `QUEUE_BACKEND_FAILED`; SKIP LOCKED needs MySQL 8.0.1
+or MariaDB 10.6, and an older server fails the lease the same way.
+
+## Failures no retry can fix, and the dead letters' two decisions (ADR 0151)
+
+- **`Consume` rejects a `DoNotRetry` failure.** `settle` asks for the
+  `Rejecter` sibling and `errs.HasCode(failure, CodeNotRetryable)`; both true,
+  the message is dead-lettered at once with the handler's cause, at the count
+  it had. A broker without the sibling is nacked as before. A panic is never
+  the mark: `guard` carries the recovered value as a FIELD of
+  `HANDLER_PANICKED`, never as its origin.
+- **`ReplayDeadLetter` and `DeleteDeadLetter`**, by `MessageValue.ID`, on all
+  three brokers. The memory broker moves the record back into its ready list.
+  The file broker publishes the payload into `ready/` — atomically and
+  durably, as `Publish` does — and removes every record of the ID AFTER, the
+  order that degrades into a duplicate rather than a loss; two replays racing
+  can therefore queue it twice, which at-least-once permits (a record cannot be
+  renamed into the queue: a queued message is its payload alone). The SQL
+  broker's replay is one UPDATE of the row's state, so the second of two racing
+  replays is refused `DEAD_LETTER_NOT_FOUND`.
+- **The growing retry delay is `retry.go`'s one function**, so the double waits
+  exactly what the durable brokers wait. The curve's jitter stays at zero: the
+  retry instant is what `Wake` reports and what a test asserts.
+
 ## Consume, and the one piece of ceremony
 
 `ConsumerConfig.HandlerIsIdempotent` must be `true`; its zero value is refused
@@ -174,8 +277,10 @@ one sensible reading at zero and none of them is dangerous.
 
 `Consume` used to find work only by polling, so latency and idle cost were one
 knob: a downstream framework ran a dozen consumers at 50 ms and paid ~3 % of a
-core for nothing. Both brokers now implement `core/queue.Waker`, an ADR 0039
-sibling — `Broker` keeps its four methods — and `Consume` waits on it.
+core for nothing. Every broker here implements `core/queue.Waker`, an ADR 0039
+sibling — `Broker` keeps its four methods — and `Consume` waits on it. The SQL
+broker's due instant is recorded by its Receive, as the file broker's is, and
+its signal is closed after the COMMIT of the publication it announces.
 
 - **A signal, closed and replaced.** `Publish` and `Nack` close the channel
   every idle worker holds; closing is what makes it a broadcast, where a send
@@ -238,8 +343,21 @@ the code.
   lane (CLAUDE.md rule 12).
 - **`TestASingleRetryReordersTheStream`** demonstrates the thing everyone
   discovers in production, on purpose, so it is documented rather than found.
-- **The conformance suite is table-driven over BOTH brokers.** A double nobody
-  checks against the real thing is a double that has already drifted.
+- **The conformance suite is table-driven over EVERY broker** — memory, file,
+  and SQL on each dialect's statements (`everyBroker`). A double nobody checks
+  against the real thing is a double that has already drifted.
+- **`sqlfake_external_test.go` is a SQL engine** that understands exactly the
+  SQL broker's statements, as docstore's does its store's: the real pool,
+  `*sql.Tx`, savepoints, `Join` and `Defer` above a table in a map, serialised
+  transactions, PostgreSQL's aborted state, a statement log, and failures at a
+  named statement. It verifies neither the SQL an engine accepts nor SKIP
+  LOCKED; `sql_statements_external_test.go` pins the text, and
+  `third-party/db/sql` runs the broker on the three real engines under the
+  `integration` tag — see its CLAUDE.md.
+- **`TestSQLAPublicationExistsIfAndOnlyIfItsTransactionCommits`** is the SQL
+  broker's reason to exist, and **`TestSQLStatementsPerCall`** what each call
+  costs: one read for an idle Receive, one statement per Ack, Nack, Extend or
+  Reject.
 - **`TestAStrayFileInTheQueueDirectoryIsNeverDelivered`** plants a
   `.vfs-<hex>.tmp` in `ready/` — the temporary a CONCURRENT atomic publication
   is genuinely writing there — and asserts the scan skips it. Delivering it
@@ -252,7 +370,7 @@ A handler may extend its OWN lease through `LeaseExtender` and return nil — th
 mail spool (`internal/service/mail/spool`, ADR 0111) does exactly that to wait
 a backoff that grows with the attempt instead of the fixed `RetryDelay`. The
 extension replaces the receipt, so `Consume`'s acknowledgement of the old one
-is refused `LEASE_EXPIRED` by BOTH brokers and ignored by `settle` like every
+is refused `LEASE_EXPIRED` by EVERY broker and ignored by `settle` like every
 lapsed acknowledgement; the message comes back when the new lease lapses, its
 delivery count incremented. That is a contract now: a broker that answered
 `UNKNOWN_RECEIPT` for a replaced receipt would stop `Consume` instead.
@@ -271,8 +389,19 @@ delivery count incremented. That is a contract now: a broker that answered
   to prove `Close` does it without one.
 - Flush on `Ack`, `Nack` or `Receive`. See above; it buys nothing.
 - Add a sweeper goroutine, a timer, or a background reclaim. Expiry is noticed
-  by whoever looks next, in both brokers, deliberately. `Wake` does not change
+  by whoever looks next, in every broker, deliberately. `Wake` does not change
   that: it tells the consumer WHEN to look, and the look is still a `Receive`.
+- Render SQL outside `sql_dialect.go`, interpolate anything but the validated
+  table name, or read the database's `NOW()`: every instant is the broker's
+  clock.
+- Parse a driver's error, or let its text into a rendering — join it through
+  `withheld`. The service module imports no driver (ADR 0055 §D2).
+- Fire the SQL broker's wake before the transaction a publication joined has
+  committed: `announce` goes through `Defer`, and a wake for a rolled-back
+  message would find nothing.
+- Make the SQL broker's idle `Receive` open a transaction. The probe is one
+  read and no lock — on SQLite, none of the one write lock every writer of the
+  application shares.
 - Send on the wake channel instead of closing it, or close it before the
   state it announces is visible. A send wakes one worker or none; a close
   before `Nack`'s rename wakes a worker into a directory that does not show
@@ -291,5 +420,9 @@ delivery count incremented. That is a contract now: a broker that answered
 - ADR 0053 §D1 — the frontier this domain is the right-hand column of
 - ADR 0056 — `vfs`, whose `WriteAtomic` is this package's durable publish
 - ADR 0052 — `lock`, whose `flock(2)` measurement is why there is no lock here
+- ADR 0104 — the `Waker` an idle consumer sleeps on
+- ADR 0139 — docstore over SQL, whose transaction rules the SQL broker follows
+- ADR 0151 — the SQL broker, the growing retry delay, `Rejecter`, `DeadLetterManager`
 - `internal/core/queue/CLAUDE.md` — the port and the five decisions
+- `third-party/db/sql/CLAUDE.md` — the SQL broker on the three real engines
 - `BENCH.md` — the cost of durability, and the two defects the numbers found

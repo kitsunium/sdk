@@ -16,7 +16,7 @@ import (
 func TestOneConsumerAndNoFailuresDeliversInPublicationOrder(t *testing.T) {
 	t.Parallel()
 	const count int = 25
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -55,7 +55,7 @@ func TestOneConsumerAndNoFailuresDeliversInPublicationOrder(t *testing.T) {
 // and here.
 func TestASingleRetryReordersTheStream(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -110,7 +110,7 @@ func drainPayloads(t *testing.T, broker corequeue.Broker) []string {
 func TestTwoConsumersNeverSeeTheSameMessage(t *testing.T) {
 	t.Parallel()
 	const count int = 40
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)

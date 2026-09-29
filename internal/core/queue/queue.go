@@ -25,6 +25,17 @@
 // give them a faster version of it: [Broker.Publish] costs a disk flush,
 // because that flush IS the guarantee.
 //
+// # A publication may join the publisher's transaction; the handler never does
+//
+// The Transaction row is about where the WORK runs, and a handler always runs
+// in a transaction of its own, on a consumer's goroutine. What a broker over
+// the publisher's own database may do is make the MESSAGE part of the
+// publisher's transaction (ADR 0151): published inside it, the message exists
+// if and only if that transaction commits — the transactional outbox, and the
+// only way a message and the write that caused it are never one without the
+// other. That moves no row of the table: the handler still runs later,
+// elsewhere, and in its own transaction.
+//
 // # The delivery guarantee is AT-LEAST-ONCE, and the type says so
 //
 // Exactly-once delivery does not exist over a transport. What exists is
@@ -62,8 +73,8 @@
 //
 // # Layers
 //
-// The two concrete brokers — one in memory, one on the filesystem — the
-// consumer engine, and the dead-letter record live in
+// The three concrete brokers — one in memory, one on the filesystem, one in a
+// SQL database — the consumer engine, and the dead-letter record live in
 // internal/service/queue. This package owns the contract, the domain values,
 // the policy and its guard, and the typed sentinels a refusal carries.
 package queue
@@ -85,7 +96,8 @@ import (
 // interfaces are structural, and a fifth method would break every downstream
 // implementation at compile time with no deprecation window (ADR 0039). A new
 // capability arrives as a sibling interface reached by type assertion —
-// [DeadLetterReader] and [LeaseExtender] are the two that ship.
+// [DeadLetterReader], [LeaseExtender], [Waker], [Rejecter] and
+// [DeadLetterManager] are the ones that ship.
 //
 // # Why the BROKER owns the delivery count
 //
@@ -107,7 +119,11 @@ type Broker interface {
 	//
 	// When it returns nil, a durable implementation has flushed the message
 	// to its device: a crash one instruction later does not lose it. That
-	// flush is most of what the call costs — see the domain's BENCH.md.
+	// flush is most of what the call costs — see the domain's BENCH.md. An
+	// implementation that joins the transaction ctx carries (ADR 0151) has
+	// instead made the message part of that transaction: it is durable, and
+	// receivable, once the transaction commits, and it never existed if the
+	// transaction rolls back.
 	//
 	// A payload larger than [PolicyValue.MaxMessageBytes] is
 	// [MessageTooLarge]; an empty payload is legitimate, because a message
@@ -144,9 +160,11 @@ type Broker interface {
 	// Nack reports that processing failed and hands the message back.
 	//
 	// The broker decides what happens next and reports it: the message
-	// becomes visible again after [PolicyValue.RetryDelay], or — when it has
-	// now been delivered [PolicyValue.MaxDeliveries] times — it is moved to
-	// the dead-letter store together with cause. See [NackValue].
+	// becomes visible again after [PolicyValue.RetryDelay] — grown by
+	// [PolicyValue.MaxRetryDelay] when the policy asks for it — or, when it
+	// has now been delivered [PolicyValue.MaxDeliveries] times, it is moved to
+	// the dead-letter store together with cause. See [NackValue]. A failure
+	// no retry can fix is not nacked but rejected ([Rejecter]).
 	//
 	// cause is recorded. What is kept of it is the implementation's to
 	// document, and the rule this domain follows is CLAUDE.md rule 4: the
@@ -176,7 +194,9 @@ type Broker interface {
 //
 // Returning nil acknowledges. Returning an error nacks: the message is
 // retried, or dead-lettered once it has exhausted
-// [PolicyValue.MaxDeliveries]. ctx is the consumer's and IS honoured: unlike
+// [PolicyValue.MaxDeliveries]. Returning [DoNotRetry](err) says no retry can
+// fix it, and the message is dead-lettered at once, with err, through a
+// broker's [Rejecter]. ctx is the consumer's and IS honoured: unlike
 // events.Listener, a handler that outlives its context is holding a lease it
 // is about to lose, so abandoning the work is the correct response and the
 // message will simply be redelivered.
@@ -198,6 +218,7 @@ type NackValue struct {
 	VisibleAt time.Time
 	// DeadLettered reports that the message exhausted
 	// [PolicyValue.MaxDeliveries] and was moved to the dead-letter store
-	// with its cause. It will not be delivered again.
+	// with its cause. It will not be delivered again, unless somebody replays
+	// it ([DeadLetterManager]).
 	DeadLettered bool
 }
