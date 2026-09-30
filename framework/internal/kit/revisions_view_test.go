@@ -35,7 +35,10 @@ func TestTheStudioShowsVersionsRedacted(t *testing.T) {
 		opts         func(t *testing.T) []kit.AppConfigurer
 	}{
 		{"memory", "[redacted]", func(*testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.InMemory()} }},
-		{"files", model.SealedPlaceholder, func(t *testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.DataDir(t.TempDir())} }},
+		{"files", model.SealedPlaceholder, func(t *testing.T) []kit.AppConfigurer {
+			needsFileStore(t)
+			return []kit.AppConfigurer{kit.DataDir(t.TempDir())}
+		}},
 	} {
 		t.Run(b.name, func(t *testing.T) {
 			app := startFolk(t, b.opts(t)...)

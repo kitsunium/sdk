@@ -98,6 +98,7 @@ func memberNames(t *testing.T, key string) []string {
 // A member's versions rest sealed, as the record does, and open again after
 // a restart; the bio, which kit does not seal, rests in clear.
 func TestVersionsRestSealed(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startFolk(t, kit.DataDir(dir))
 	ctx := t.Context()
@@ -129,6 +130,7 @@ func TestAnErasureClearsTheVersions(t *testing.T) {
 	}{
 		{"memory", func(*testing.T) (string, []kit.AppConfigurer) { return "", []kit.AppConfigurer{kit.InMemory()} }},
 		{"files", func(t *testing.T) (string, []kit.AppConfigurer) {
+			needsFileStore(t)
 			dir := t.TempDir()
 			return dir, []kit.AppConfigurer{kit.DataDir(dir)}
 		}},
@@ -179,6 +181,7 @@ func TestAnErasureClearsTheVersions(t *testing.T) {
 // record's own key: its person's erasure leaves them readable. Its first
 // write after the release prunes them.
 func TestAHoldKeepsTheVersions(t *testing.T) {
+	needsFileStore(t)
 	startFolk(t, kit.DataDir(t.TempDir()))
 	ctx := t.Context()
 	must(t, Folks.Insert(ctx, Member{ID: "m1", Email: "ann@folk.test", Name: "n1"}))
@@ -258,6 +261,7 @@ func TestAnExportCarriesTheVersions(t *testing.T) {
 // Held, a record keeps its versions whatever writes it: kit's own write in
 // place makes no version either.
 func TestAHoldMakesNoVersion(t *testing.T) {
+	needsFileStore(t)
 	startFolk(t, kit.DataDir(t.TempDir()))
 	ctx := context.Background()
 	must(t, Folks.Insert(ctx, Member{ID: "m1", Email: "ann@folk.test", Name: "n1"}))
@@ -271,6 +275,7 @@ func TestAHoldMakesNoVersion(t *testing.T) {
 // each records a change once, neither records a write of the same record,
 // and a person's erasure takes both.
 func TestFormerValuesAndVersionsSideBySide(t *testing.T) {
+	needsFileStore(t)
 	startFolk(t, kit.DataDir(t.TempDir()))
 	ctx := t.Context()
 	must(t, Handles.Insert(ctx, Handle{ID: "h1", Email: "ann@folk.test", Name: "n1"}))

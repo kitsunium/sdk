@@ -80,7 +80,10 @@ var pressBackends = []struct {
 	opts func(t *testing.T) []kit.AppConfigurer
 }{
 	{"memory", func(*testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.InMemory()} }},
-	{"files", func(t *testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.DataDir(t.TempDir())} }},
+	{"files", func(t *testing.T) []kit.AppConfigurer {
+		needsFileStore(t)
+		return []kit.AppConfigurer{kit.DataDir(t.TempDir())}
+	}},
 }
 
 // eachPress runs fn on each backend, on a manual clock at epoch.
@@ -366,6 +369,7 @@ func TestRevisionsOutOfRangeRefuseTheStart(t *testing.T) {
 // A store whose files keep versions, declared without kit.Revisions, does
 // not open, and says why: the document store never drops them unasked.
 func TestFilesThatKeepVersionsNeedRevisions(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startPress(t, kit.DataDir(dir))
 	must(t, Pages.Insert(t.Context(), Page{ID: "p1", Slug: "home", Title: "t1"}))
