@@ -52,6 +52,7 @@ func eachSealingBackend(t *testing.T, test func(t *testing.T, v *vault, app *kit
 		}},
 	} {
 		t.Run(b.name, func(t *testing.T) {
+			needsFileStore(t)
 			t.Setenv("KIT_SMTP_URL", "")
 			t.Setenv("KIT_SECRETS", "memory")
 			t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")

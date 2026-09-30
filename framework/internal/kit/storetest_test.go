@@ -16,9 +16,11 @@ func TestStoresConform(t *testing.T) {
 		return []kit.AppConfigurer{kit.InMemory()}
 	}})
 	storetest.Run(t, storetest.BackendConfig{Name: "files", Options: func(t *testing.T, _ string) []kit.AppConfigurer {
+		needsFileStore(t)
 		return []kit.AppConfigurer{kit.DataDir(t.TempDir())}
 	}})
 	storetest.Run(t, storetest.BackendConfig{Name: "fake-database", Options: func(t *testing.T, _ string) []kit.AppConfigurer {
+		needsFileStore(t)
 		t.Setenv("STORETEST_DATABASE_URL", verifiedURL())
 		return []kit.AppConfigurer{kit.DataDir(t.TempDir()), kit.Database("database", kit.NewFakeDB(sql.DialectPostgres).Engine())}
 	}})

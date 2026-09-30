@@ -270,6 +270,18 @@ func spanOf(t *testing.T, tr model.Trace, node string) model.Span {
 	return model.Span{}
 }
 
+// opSpanOf returns the first span of tr on node whose op is op.
+func opSpanOf(t *testing.T, tr model.Trace, node, op string) model.Span {
+	t.Helper()
+	for _, s := range tr.Spans {
+		if s.Node == node && s.Op == op {
+			return s
+		}
+	}
+	t.Fatalf("no %s span on %s in %+v", op, node, tr.Spans)
+	return model.Span{}
+}
+
 // loopOf returns the loop called name in the app's graph.
 func loopOf(t *testing.T, app *kit.App, name string) model.Loop {
 	t.Helper()

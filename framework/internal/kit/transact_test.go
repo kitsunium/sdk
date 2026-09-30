@@ -90,8 +90,12 @@ type backend struct {
 // backends are the three.
 var backends = []backend{
 	{"memory", func(*testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.InMemory()} }},
-	{"files", func(t *testing.T) []kit.AppConfigurer { return []kit.AppConfigurer{kit.DataDir(t.TempDir())} }},
+	{"files", func(t *testing.T) []kit.AppConfigurer {
+		needsFileStore(t)
+		return []kit.AppConfigurer{kit.DataDir(t.TempDir())}
+	}},
 	{"database", func(t *testing.T) []kit.AppConfigurer {
+		needsFileStore(t)
 		t.Setenv("TILL_DATABASE_URL", verifiedURL())
 		return []kit.AppConfigurer{kit.DataDir(t.TempDir()), kit.Database("database", kit.NewFakeDB(sql.DialectPostgres).Engine())}
 	}},
@@ -321,6 +325,7 @@ func TestAHeldEffectIsCheckedWhenMade(t *testing.T) {
 // refused, CodeTransactionSpan, and the data directory counts as one —
 // reading them is not.
 func TestATransactionWritesOneDatabase(t *testing.T) {
+	needsFileStore(t)
 	tl := newTill()
 	t.Setenv("TILL_MAIN_URL", verifiedURL())
 	t.Setenv("TILL_ARCHIVE_URL", verifiedURL())
@@ -351,6 +356,7 @@ func TestATransactionWritesOneDatabase(t *testing.T) {
 // The data directory counts as one database: a transaction on a database
 // refuses a write to a store kept in files.
 func TestTheDataDirectoryCountsAsADatabase(t *testing.T) {
+	needsFileStore(t)
 	tl := newTill()
 	t.Setenv("TILL_MAIN_URL", verifiedURL())
 	runTill(t, tl, kit.DataDir(t.TempDir()), kit.Database("main", kit.NewFakeDB(sql.DialectPostgres).Engine(), kit.Keeps(tl.cash)))
@@ -380,6 +386,7 @@ func TestTheDataDirectoryCountsAsADatabase(t *testing.T) {
 // Goroutine lifecycle: the transactions run on goroutines the test waits
 // for, each reporting on its own channel before the test ends.
 func TestDataDirectoryTransactionsTakeTurns(t *testing.T) {
+	needsFileStore(t)
 	tl := newTill()
 	runTill(t, tl, kit.DataDir(t.TempDir()))
 	wrote, release := make(chan struct{}), make(chan struct{})

@@ -34,6 +34,7 @@ type editor struct {
 var errUndone = errors.New("the transaction is undone")
 
 func TestRevisionsOnTheFile(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
 	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")

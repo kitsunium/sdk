@@ -229,6 +229,7 @@ func clinicFiles(t *testing.T, dir string, words ...string) []string {
 // through a subscription and a queued command. A plain member, a public
 // one and the key of a store keyed by its subject stay in clear.
 func TestNothingPersonalRestsInClear(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startClinic(t, dir)
 	ctx := t.Context()
@@ -327,6 +328,7 @@ func checkIndexesRead(t *testing.T, want Patient) {
 // was held — still opens where it lives now, and another person's records
 // are untouched.
 func TestAnErasureReachesEveryCopy(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app := startClinic(t, dir)
 	ctx := t.Context()
@@ -417,6 +419,7 @@ func copyDir(t *testing.T, dir string) string {
 // former values show it sealed; the graph, the logs and the Studio's
 // answers hold no sealed value.
 func TestTheStudioShowsSealedMembersSealed(t *testing.T) {
+	needsFileStore(t)
 	logs := &lockedBuffer{}
 	app := startClinic(t, t.TempDir(), kit.Logs(logs))
 	ctx := t.Context()
@@ -444,6 +447,7 @@ func TestTheStudioShowsSealedMembersSealed(t *testing.T) {
 // The model says what kit seals: a store on disk's fields and its register
 // line; a store in memory seals nothing.
 func TestTheModelSaysWhatIsSealed(t *testing.T) {
+	needsFileStore(t)
 	for _, onDisk := range []bool{true, false} {
 		opts := []kit.AppConfigurer{kit.InMemory()}
 		if onDisk {

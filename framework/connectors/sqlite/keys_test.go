@@ -124,6 +124,7 @@ func received[T any](t *testing.T, what string, ch <-chan T) T {
 // Where kit.Privacy's stores live on a SQLite database: the holds and the
 // journal on the file, the data keys in the data directory.
 func TestTheDataKeysStayOffTheFile(t *testing.T) {
+	needsFileStore(t)
 	g := startDesk(t, true).app.Graph()
 	for id, want := range map[string]string{
 		"kit.privacy/store/keys": "file", "kit.privacy/store/holds": "sqlite",
@@ -140,6 +141,7 @@ func TestTheDataKeysStayOffTheFile(t *testing.T) {
 // record seals under that key in another; a hold that replaces one rewrites
 // it in the holds' own. Each makes its key without waiting.
 func TestAHoldOnSQLiteMakesItsKeysWithoutWaiting(t *testing.T) {
+	needsFileStore(t)
 	d := startDesk(t, true)
 	ctx := t.Context()
 	timed(t, "the case of a person who has no key yet", func() error {
@@ -166,6 +168,7 @@ func TestAHoldOnSQLiteMakesItsKeysWithoutWaiting(t *testing.T) {
 // commit opens. The cases in the data directory are how a product kept
 // kit.Privacy on SQLite before its keys left the file.
 func TestATransactionOnSQLiteMakesDataKeysWithoutWaiting(t *testing.T) {
+	needsFileStore(t)
 	for _, onFile := range []bool{false, true} {
 		name := "cases in the data directory"
 		if onFile {

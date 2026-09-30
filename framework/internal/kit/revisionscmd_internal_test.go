@@ -49,6 +49,7 @@ func draftsIn(t *testing.T, dir string, fn func(ctx context.Context)) {
 // version by nobody, the secret kept —, a member alone with -field, and is
 // what the Studio shows instead of restoring (ADR 0010, D13).
 func TestTheRevisionsCommandRestoresAVersion(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	draftsIn(t, dir, func(ctx context.Context) {
 		must(t, cmdDrafts.Insert(ctx, draft{ID: "d1", Title: "one", Body: "first", Token: "t1"}))
@@ -90,6 +91,7 @@ func TestTheRevisionsCommandRestoresAVersion(t *testing.T) {
 
 // The command refuses what it cannot restore, and says how it is used.
 func TestTheRevisionsCommandRefuses(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	draftsIn(t, dir, func(ctx context.Context) {
 		must(t, cmdDrafts.Insert(ctx, draft{ID: "d1", Title: "one"}))

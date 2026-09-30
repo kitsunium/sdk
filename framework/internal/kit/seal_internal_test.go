@@ -102,6 +102,7 @@ func restingAt(t *testing.T, s *StoreService[card], key string) []byte {
 // A box opens only where it was sealed: moved into another record, or into
 // another field of its own, it is refused, never read as the other's value.
 func TestABoxOpensOnlyWhereItLies(t *testing.T) {
+	needsFileStore(t)
 	_, cards := sealedCards(t, "binding", t.TempDir())
 	ctx := t.Context()
 	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Secret: "s1", Note: "n1"}))
@@ -137,6 +138,7 @@ type badge struct {
 // the key is in its files anyway —, seals the rest, says so, and opens
 // again at the next start.
 func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
+	needsFileStore(t)
 	pinDataKeyWithoutFileStore(t)
 	dir := t.TempDir()
 	svc := NewService("badges", "Badges keyed by their holder, for the sealing tests.")
@@ -172,6 +174,7 @@ func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
 // with it: deleted, nothing opens what it sealed. A person's key stays
 // when one of their records is deleted by the product.
 func TestADeletedRecordTakesItsOwnKey(t *testing.T) {
+	needsFileStore(t)
 	app, cards := sealedCards(t, "ownkeys", t.TempDir())
 	ctx := t.Context()
 	keys := app.privacyKeyStore()
@@ -212,6 +215,7 @@ var legacyNotes = legacySvc.Store("notes", func(n legacyNote) string { return n.
 // its record's next write; `privacy seal` seals the rest of the store at
 // once, its former values too, and says what it did.
 func TestAPlainMemberIsSealedAtItsNextWrite(t *testing.T) {
+	needsFileStore(t)
 	pinDataKeyWithoutFileStore(t)
 	dir := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(dir, "legacy"), 0o700))
@@ -285,6 +289,7 @@ func restingFiles(t *testing.T, dir string, words ...string) []string {
 // verified, a former one refused — and no hash, current or former, rests
 // in clear.
 func TestThePasswordPolicyVerifiesSealedHashes(t *testing.T) {
+	needsFileStore(t)
 	pinDataKeyWithoutFileStore(t)
 	f := useFakeHashing(t)
 	dir := t.TempDir()
@@ -319,6 +324,7 @@ type letter2 struct {
 // A dead letter about a person is sealed under their key: once they are
 // erased, it reads as empty.
 func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
+	needsFileStore(t)
 	pinDataKeyWithoutFileStore(t)
 	svc := NewService("post2", "Letters no one accepts, for the sealing tests.")
 	letters := svc.Topic[letter2]("letters")
@@ -363,6 +369,7 @@ func TestADeadLetterOfAPersonErasedReadsEmpty(t *testing.T) {
 // puts the holds and the journal there, and the keys stay in the data
 // directory — a store that seals starts beside them.
 func TestTheDataKeysArePlacedApartFromWhatTheySeal(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
 	svc := NewService("placed", "Cards placed by the app, for the sealing tests.")
 	svc.Store("cards", func(c card) string { return c.ID })
@@ -434,6 +441,7 @@ func eventuallyInternal(t *testing.T, what string, cond func() bool) {
 // erasure never reaches it —, and a write of the held record keeps it
 // there.
 func TestAHeldRecordRestsUnderItsOwnKey(t *testing.T) {
+	needsFileStore(t)
 	app, cards := sealedCards(t, "heldcards", t.TempDir())
 	ctx := t.Context()
 	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "kept for a court"}))
@@ -473,6 +481,7 @@ func TestAHeldRecordRestsUnderItsOwnKey(t *testing.T) {
 // open. Erasing their last destroys it — a copy of that record taken
 // before opens nothing —, and the journal says so by reference.
 func TestErasingAPersonsLastRecordDestroysTheirKey(t *testing.T) {
+	needsFileStore(t)
 	app, cards := sealedCards(t, "lastcards", t.TempDir())
 	ctx := t.Context()
 	must(t, cards.Insert(ctx, card{ID: "c1", Owner: "ann", Note: "first"}))
@@ -512,6 +521,7 @@ type relabeled struct {
 // data directory holds kit's data keys, so kit's own service stays, and the
 // next write keeps the record in clear.
 func TestAFieldThatLosesItsClassStillOpens(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	app, cards := sealedCards(t, "relabel", dir)
 	must(t, cards.Insert(t.Context(), card{ID: "c1", Owner: "ann", Secret: "s1", Note: "sealed once"}))

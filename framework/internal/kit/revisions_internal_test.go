@@ -25,6 +25,7 @@ var legacyPages = legacyPagesSvc.Store("pages", func(p legacyPage) string { retu
 // written before their field was sealed — as it seals the record, and they
 // read back as they were (ADR 0007 §4).
 func TestPrivacySealSealsTheVersions(t *testing.T) {
+	needsFileStore(t)
 	pinDataKeyWithoutFileStore(t)
 	dir := t.TempDir()
 	must(t, os.MkdirAll(filepath.Join(dir, "legacy-pages"), 0o700))

@@ -69,6 +69,7 @@ func runRegister(t *testing.T, r register, db *kit.FakeDB) *kit.App {
 // table, and its index keys as keyed hashes: an e-mail never reaches the
 // table, and a lookup still finds it.
 func TestAStoreOnADatabaseHashesItsIndexKeys(t *testing.T) {
+	needsFileStore(t)
 	db, r := kit.NewFakeDB(sql.DialectPostgres), newRegister()
 	app := runRegister(t, r, db)
 	ada := member{ID: "m1", Email: "ada@example.com", Nick: "ada", State: "new"}
@@ -106,6 +107,7 @@ func isConflict(err error) bool {
 // A store that remembers keeps its former values on its database, beside
 // its table, written in the record's transaction.
 func TestAStoreOnADatabaseRemembers(t *testing.T) {
+	needsFileStore(t)
 	db, r := kit.NewFakeDB(sql.DialectPostgres), newRegister()
 	runRegister(t, r, db)
 	for _, nick := range []string{"one", "two", "three"} {
@@ -138,6 +140,7 @@ func TestAStoreOnADatabaseRemembers(t *testing.T) {
 // transition is one transaction: its record and its entity commit
 // together, and its OnTransition hooks run once they did.
 func TestAWorkflowOnADatabase(t *testing.T) {
+	needsFileStore(t)
 	db, r := kit.NewFakeDB(sql.DialectPostgres), newRegister()
 	runRegister(t, r, db)
 	if _, err := r.lifecycle.Start(t.Context(), member{ID: "m1", Email: "m@example.com"}); err != nil {

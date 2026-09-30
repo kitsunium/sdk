@@ -146,6 +146,7 @@ func equalGaps(got, want []string) bool {
 // is sealed at rest, exported — the store's retention said in the
 // product's words — and erased with them.
 func TestAStoreTheProductRetainsIsStillAPersons(t *testing.T) {
+	needsFileStore(t)
 	dir := t.TempDir()
 	startLounge(t, kit.DataDir(dir))
 	ctx := t.Context()

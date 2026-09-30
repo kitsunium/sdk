@@ -223,6 +223,7 @@ func status(t *testing.T, base, path string) int {
 // tables, then the product's — under the file's own lock (the SDK's ADR
 // 0140), and its stores live in it.
 func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
+	needsFileStore(t)
 	m := sql.Migration{Version: 1, Name: "create", Up: sql.Statements("CREATE TABLE x (id TEXT)"), Down: sql.Statements("DROP TABLE x")}
 	dir := t.TempDir()
 	app := ledger(t, dir, kit.Migrations(m))
@@ -252,6 +253,7 @@ func TestMigrationsAndStoresRunOnTheFile(t *testing.T) {
 // The stores' conformance suite, on SQLite: no server, so it always runs.
 func TestStoresConform(t *testing.T) {
 	storetest.Run(t, storetest.BackendConfig{Name: "sqlite", Options: func(t *testing.T, _ string) []kit.AppOption {
+		needsFileStore(t)
 		return []kit.AppOption{kit.DataDir(t.TempDir()), kit.Database("database", sqlite.Engine())}
 	}})
 }
@@ -270,6 +272,7 @@ type patient struct {
 // nothing; one that commits destroys the person's data key, and their row
 // as a backup kept it then reads as empty, never as an error.
 func TestASealedStoreRoundTripsAndErases(t *testing.T) {
+	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
 	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("KIT_INDEX_KEY", "an index key of more than 16 bytes")

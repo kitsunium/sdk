@@ -52,6 +52,7 @@ func TestManualMigrationsRefuseTheStart(t *testing.T) {
 // `migrate status` says where each set is, and `migrate up` runs what is
 // pending, once.
 func TestMigrateStatusAndUp(t *testing.T) {
+	needsFileStore(t)
 	newApp := manualLedger(t, kit.NewFakeDB(sql.DialectPostgres))
 	code, out, errOut := migrateCommand(t, newApp, "status")
 	// kit's own set first — its registry, the two stores' tables —, then
