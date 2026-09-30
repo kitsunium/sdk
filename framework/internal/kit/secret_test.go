@@ -18,9 +18,13 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/mail"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
 )
+
+// partnerTokenID is the optional secret's node.
+const partnerTokenID = "partners/secret/partner-token"
 
 // Two services with a secret each: one the operator provides, one kit
 // generates and rotates every day, keeping two versions.
@@ -32,6 +36,11 @@ var APIToken = Tokens.Secret("api-token")
 var Keys = kit.NewService("keys", "A generated secret, for the tests.")
 
 var SealKey = Keys.Secret("seal-key", kit.Generated(32), kit.RotateEvery(24*time.Hour), kit.KeepVersions(2))
+
+// A third service's secret the product can do without: a partner's token.
+var Partners = kit.NewService("partners", "An optional secret, for the tests.")
+
+var PartnerToken = Partners.Secret("partner-token", kit.Optional())
 
 // secretApp starts an app named "vault" — its variables are VAULT_<NAME> —
 // and stops it when the test ends.
@@ -117,6 +126,72 @@ func TestAMissingProvidedSecretStopsTheStart(t *testing.T) {
 	var de *kit.DiagnosticsError
 	if !errors.As(err, &de) || !strings.Contains(err.Error(), "secret tokens/secret/api-token is not set: set VAULT_API_TOKEN, or VAULT_API_TOKEN_FILE") {
 		t.Fatalf("Start = %v", err)
+	}
+}
+
+// An optional secret set nowhere does not stop the start, nor is it a
+// problem: Present says it is absent, a use answers CodeSecretMissing, and
+// the graph says it is optional and found nowhere.
+func TestAnOptionalSecretMayBeAbsent(t *testing.T) {
+	app := secretApp(t, []*kit.Service{Partners})
+	if ok, err := PartnerToken.Present(t.Context()); ok || err != nil {
+		t.Fatalf("Present = %v, %v while it is set nowhere", ok, err)
+	}
+	if _, err := PartnerToken.Value(t.Context()); !errs.HasCode(err, kit.CodeSecretMissing) {
+		t.Fatalf("Value = %v, want CodeSecretMissing", err)
+	}
+	if _, err := PartnerToken.Sign(t.Context(), []byte("m")); !errs.HasCode(err, kit.CodeSecretMissing) {
+		t.Fatalf("Sign = %v, want CodeSecretMissing", err)
+	}
+	g := app.Graph()
+	if i := g.Node(partnerTokenID).Secret; !i.Optional || i.Origin != model.SecretProvided || i.From != "" || i.Problem != "" || i.Variable != "VAULT_PARTNER_TOKEN" {
+		t.Fatalf("absent: %+v", i)
+	}
+	for _, d := range g.Diagnostics {
+		if d.Node == partnerTokenID {
+			t.Errorf("an absent optional secret is a problem: %+v", d)
+		}
+	}
+}
+
+// An optional secret given after the start — in the environment's store,
+// then its variable, which wins — is found at its next use, with no
+// restart; the graph says where, and never the value.
+func TestAnOptionalSecretGivenLaterIsFound(t *testing.T) {
+	store := secret.NewMemory(secret.MemoryConfig{})
+	app := secretApp(t, []*kit.Service{Partners}, kit.SecretStore(store))
+	if _, err := store.Put(t.Context(), "partner-token", secret.FromString("from-the-store")); err != nil {
+		t.Fatal(err)
+	}
+	if ok, err := PartnerToken.Present(t.Context()); !ok || err != nil {
+		t.Fatalf("Present = %v, %v once it is in the store", ok, err)
+	}
+	if v, err := PartnerToken.Value(t.Context()); err != nil || v.RevealString() != "from-the-store" {
+		t.Fatalf("Value = %v, %v", v, err)
+	}
+	if i := app.Graph().Node(partnerTokenID).Secret; i.From != model.SecretFromStore || i.Version != 1 {
+		t.Fatalf("in the store: %+v", i)
+	}
+	t.Setenv("VAULT_PARTNER_TOKEN", "from-the-variable")
+	if v, err := PartnerToken.Value(t.Context()); err != nil || v.RevealString() != "from-the-variable" {
+		t.Fatalf("the variable does not win: Value = %v, %v", v, err)
+	}
+	g := app.Graph()
+	if i := g.Node(partnerTokenID).Secret; i.From != model.SecretFromEnv {
+		t.Fatalf("under its variable: %+v", i)
+	}
+	raw, err := json.Marshal(g)
+	if err != nil || strings.Contains(string(raw), "from-the-") {
+		t.Fatalf("the graph shows the secret's value: %v", err)
+	}
+}
+
+// An optional secret its variable names a file for that cannot be read is
+// no absence: the start refuses, as for any secret.
+func TestAnOptionalSecretThatCannotBeReadStopsTheStart(t *testing.T) {
+	t.Setenv("VAULT_PARTNER_TOKEN_FILE", filepath.Join(t.TempDir(), "missing"))
+	if _, err := startSecretApp(t, []*kit.Service{Partners}); err == nil {
+		t.Fatal("the start went on with an unreadable secret")
 	}
 }
 
@@ -369,6 +444,7 @@ func TestSecretDeclarationProblems(t *testing.T) {
 	bad.Secret("too-short", kit.Generated(8))
 	bad.Secret("provided", kit.RotateEvery(time.Hour))
 	bad.Secret("one-version", kit.Generated(32), kit.KeepVersions(1))
+	bad.Secret("made-or-not", kit.Generated(32), kit.Optional())
 	other := kit.NewService("other-secrets", "The same name twice.")
 	other.Secret("shared")
 	bad.Secret("shared")
@@ -380,6 +456,7 @@ func TestSecretDeclarationProblems(t *testing.T) {
 		`secret "too-short": Generated takes 16 to 4096 bytes`,
 		`secret "provided" is provided: RotateEvery and KeepVersions apply to a Generated one`,
 		`secret "one-version": KeepVersions needs at least 2`,
+		`secret "made-or-not" is Generated and Optional`,
 		`secret "shared" is declared by`,
 	} {
 		if err == nil || !strings.Contains(err.Error(), want) {

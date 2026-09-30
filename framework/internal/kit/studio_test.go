@@ -237,7 +237,8 @@ func captureStdout(t *testing.T, fn func()) string {
 	return <-done
 }
 
-// devRoutes are the dev tools' routes, with a body that would pass.
+// devRoutes are the dev tools' routes, with a body that would pass. They
+// read: none acts on the product (ADR 0010, D13).
 var devRoutes = []struct{ method, path, body string }{
 	{"GET", "/_kit/api/process", ""},
 	{"GET", "/_kit/api/databases", ""},
@@ -247,6 +248,7 @@ var devRoutes = []struct{ method, path, body string }{
 	{"GET", "/_kit/api/mail", ""},
 	{"GET", "/_kit/api/mail/m1", ""},
 	{"GET", "/_kit/api/former?store=shop/store/items&key=x", ""},
+	{"GET", "/_kit/api/revisions?store=shop/store/items&key=x", ""},
 	{"GET", "/_kit/api/privacy", ""},
 }
 
@@ -260,6 +262,7 @@ var actionRoutes = []struct{ method, path, body string }{
 	{"POST", "/_kit/api/jobs/run", `{"job":"audit/job/tally"}`},
 	{"POST", "/_kit/api/workflows/fire", `{"workflow":"shop/workflow/lifecycle","instance":"x","event":"publish"}`},
 	{"POST", "/_kit/api/loops/wake", `{"loop":"bench/loop/tick"}`},
+	{"POST", "/_kit/api/revisions/restore", `{"store":"shop/store/items","key":"x","number":1}`},
 	{"POST", "/_kit/api/commands/dispatch", `{"command":"bench/command/none","input":{}}`},
 	{"POST", "/_kit/api/queries/ask", `{"query":"bench/query/none"}`},
 	{"POST", "/_kit/api/privacy/retention", `{}`},

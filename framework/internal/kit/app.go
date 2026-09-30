@@ -131,6 +131,9 @@ type App struct {
 	// privacy is what the app keeps for personal data: kit's own service,
 	// the reference keys, the journal's chain (privacy.go).
 	privacy privacyRun
+	// turn is the data's writer turn: a transaction on the data directory
+	// or in memory holds it alone (transact_turn.go).
+	turn writerTurn
 	// roots are where the modules' Go modules lie on this machine, for the
 	// source endpoint (gomodule.go).
 	roots moduleRoots
@@ -625,7 +628,9 @@ func (a *App) announce(ctx context.Context) {
 		logger.Info(ctx, a.log, "running", logger.String("profile", a.runProfile()), logger.String("env", a.cfg.env))
 	}
 	if a.cfg.studio.on {
-		logger.Info(ctx, a.log, "the product, as a diagram", logger.String("studio", a.URL()+"/_kit/"))
+		// The Studio is kit's own process (ADR 0010, D8): the product says
+		// where its read routes are, and who shows them.
+		logger.Info(ctx, a.log, "the product, as a diagram: kit dev prints the Studio's link", logger.String("api", a.URL()+"/_kit/api/"))
 	}
 	for _, d := range a.declarationProblems() {
 		logger.Warn(ctx, a.log, d.Message, logger.String("node", d.Node))

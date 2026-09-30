@@ -16,8 +16,8 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
-// Databases (ADR 0004, step 1), on kit's fake database: no network, no
-// driver. The engine modules run the same on PostgreSQL and MySQL. This file
+// Databases (ADR 0004), on kit's fake database: no network, no driver. The
+// engine modules run the same on PostgreSQL, MySQL and SQLite. This file
 // holds the product the tests run and a database opening, answering and
 // drawn; database_*_test.go the rest.
 
@@ -180,8 +180,19 @@ func TestADatabaseOpensAndMigrates(t *testing.T) {
 	want := model.MigrationSet{Name: "product", Table: "schema_migrations", Applied: []model.Migration{
 		{Version: 20260901120000, Name: "create entries"}, {Version: 20260902120000, Name: "create trail"},
 	}}
-	if len(rt.Migrations) != 1 || !sameSet(rt.Migrations[0], want) {
+	if len(rt.Migrations) != 2 || !sameSet(rt.Migrations[1], want) {
 		t.Errorf("migrations %+v", rt.Migrations)
+	}
+	var kitsOwn []string
+	for _, m := range rt.Migrations[0].Applied {
+		kitsOwn = append(kitsOwn, m.Name)
+	}
+	if kit := rt.Migrations[0]; kit.Name != "kit" || kit.Table != "kit_migrations" || len(kit.Pending) != 0 ||
+		!slices.Equal(kitsOwn, []string{"docstore kit_tables", "docstore audit__trail", "docstore books__entries"}) {
+		t.Errorf("kit's own set, first: %+v", rt.Migrations[0])
+	}
+	if got := o.db.Tables(); !slices.Equal(got, []string{"audit__trail", "books__entries", "kit_tables"}) {
+		t.Errorf("the database's tables: %v", got)
 	}
 }
 
@@ -217,28 +228,24 @@ func before(list []string, first, then string) bool {
 	return i >= 0 && j >= 0 && i < j
 }
 
-// The default database keeps every store but a cache, whose data stays in
-// the data directory in this version of kit — and the start says so.
+// The default database keeps every store but a cache, each in a table of
+// its own.
 func TestTheDefaultDatabaseKeepsEveryStore(t *testing.T) {
 	needsFileStore(t)
 	o := openLedger(t)
 	for id, want := range map[string]model.StoreInfo{
-		"books/store/entries": {Backend: "file", Database: "database"},
-		"audit/store/trail":   {Backend: "file", Database: "database"},
+		"books/store/entries": {Backend: "postgres", Database: "database", Table: "books__entries"},
+		"audit/store/trail":   {Backend: "postgres", Database: "database", Table: "audit__trail"},
 		"books/store/cache":   {Backend: "memory"},
 	} {
-		if got := o.g.Node(id).Store; got.Backend != want.Backend || got.Database != want.Database {
+		if got := o.g.Node(id).Store; got.Backend != want.Backend || got.Database != want.Database || got.Table != want.Table || got.Location != "" {
 			t.Errorf("%s: %+v", id, got)
 		}
-	}
-	if !warns(o.g, `database "database" keeps 2 store(s)`) {
-		t.Errorf("the start does not say the stores stay in the data directory: %+v", o.g.Diagnostics)
 	}
 }
 
 // A database is drawn: its container — its engine, its technology, its
-// settings, its declaration, no location outside dev, no store while their
-// data stays in files.
+// settings, its declaration, no location outside dev, the stores it keeps.
 func TestADatabaseIsDrawn(t *testing.T) {
 	needsFileStore(t)
 	o := openLedger(t)
@@ -247,7 +254,8 @@ func TestADatabaseIsDrawn(t *testing.T) {
 		t.Fatal("no container for the database")
 	}
 	type seen struct{ kind, engine, technology, location string }
-	if got := (seen{c.Kind, c.Engine, c.Technology, c.Location}); got != (seen{model.ContainerDatabase, "postgres", "PostgreSQL · fake · TLS verify-full", ""}) || len(c.Nodes) != 0 {
+	if got := (seen{c.Kind, c.Engine, c.Technology, c.Location}); got != (seen{model.ContainerDatabase, "postgres", "PostgreSQL · fake · TLS verify-full", ""}) ||
+		!slices.Equal(c.Nodes, []string{"audit/store/trail", "books/store/entries"}) {
 		t.Errorf("container %+v", c)
 	}
 	if want := (model.Source{File: "internal/kit/database_test.go", Line: o.line}); c.Source == nil || *c.Source != want || !slices.Contains(o.g.Files(), model.File{File: want.File}) {
@@ -261,17 +269,18 @@ func TestADatabaseIsDrawn(t *testing.T) {
 	}
 }
 
-// The process's link to a database carries the database connector; the
-// data directory, which holds the stores the database keeps for now, is no
-// database.
+// The process's link to a database carries the database connector and the
+// store connector, with the stores it keeps; the data directory keeps none
+// of them.
 func TestADatabasesLink(t *testing.T) {
 	needsFileStore(t)
 	o := openLedger(t)
 	if l := linkTo(o.g, "container:database:database"); l == nil || l.From != "container:process" || l.Label != "Reads and writes" ||
-		!slices.Equal(l.Connectors, []string{model.ConnectorDatabase}) {
+		!slices.Equal(l.Connectors, []string{model.ConnectorDatabase, model.ConnectorStore}) ||
+		!slices.Equal(l.Nodes, []string{"audit/store/trail", "books/store/entries"}) {
 		t.Errorf("link %+v", l)
 	}
-	if l := linkTo(o.g, "container:volume"); l == nil || slices.Contains(l.Connectors, model.ConnectorDatabase) {
+	if l := linkTo(o.g, "container:volume"); l != nil && (slices.Contains(l.Connectors, model.ConnectorDatabase) || slices.Contains(l.Nodes, "books/store/entries")) {
 		t.Errorf("the link to the data directory: %+v", l)
 	}
 	if !slices.ContainsFunc(o.g.Connectors, func(c model.Connector) bool {

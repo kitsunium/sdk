@@ -223,12 +223,12 @@ func TestSpansNameTheirUser(t *testing.T) {
 	app := startBench(t)
 	stream := subscribe(t, app)
 	ctx := kit.WithUser(t.Context(), "user_42", struct{}{})
-	out, err := BenchWhoAPI.Call(ctx, kit.EmptyValue{})
+	out, err := BenchWho.Ask(ctx, kit.EmptyValue{})
 	if err != nil || out.User != "user_42" {
 		t.Fatalf("who: %+v %v", out, err)
 	}
 	e := awaitEvent(t, stream, "the call's span", func(e model.Event) bool {
-		return e.Type == model.EventSpan && e.Span.Node == "bench/endpoint/Who"
+		return e.Type == model.EventSpan && e.Span.Node == "bench/query/who"
 	})
 	if e.Span.User != "user_42" {
 		t.Errorf("span user %q", e.Span.User)

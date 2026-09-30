@@ -136,7 +136,9 @@ func (s *StoreService[T]) keep() kept { return kept{store: &s.nodeBase} }
 // module's stores. The most precise wins: a store kept by name, then its
 // service, then its module, then the default database — the one declared
 // without Keeps —, then the data directory, then memory. [InMemory] wins
-// over all of them, on the app as on a store.
+// over all of them, on the app as on a store. kit's data keys never live on
+// SQLite: Keeps(kit.Privacy) there keeps its holds and its journal
+// ([Privacy]).
 func Keeps(things ...Keeper) DatabaseConfigurer {
 	return databaseOption(func(o *databaseOptions) {
 		o.keeps, o.keepsGiven = append(o.keeps, things...), true

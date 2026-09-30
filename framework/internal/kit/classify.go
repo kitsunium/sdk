@@ -184,11 +184,12 @@ func (t *fieldTag) any() bool {
 	return t.class != "" || t.marks.has(markSubject) || t.marks.has(markModerated) || t.marks.has(markPlain) || t.marks.has(markErased) || t.history > 0 || len(t.problems) > 0
 }
 
-// sealedAtRest reports whether kit keeps the field sealed at rest. Sealing
-// needs per-subject data keys the SDK does not have yet (ADR 0006, step 3):
-// until it lands, nothing is sealed, and the model says so. This is the one
-// place step 3 changes: sensitive() && !(plain && class != special).
-func (t *fieldTag) sealedAtRest() bool { return false }
+// sealedAtRest reports whether kit keeps the field sealed where it keeps it
+// at rest (seal.go): a personal, special or secret member, or the subject,
+// unless it is plain — which special refuses.
+func (t *fieldTag) sealedAtRest() bool {
+	return t.sensitive() && (!t.marks.has(markPlain) || t.class == model.ClassSpecial)
+}
 
 // redactedByTag reports whether a kit tag makes its field redacted wherever
 // kit shows it: a sensitive class or the subject option among its words,
@@ -204,13 +205,15 @@ func redactedByTag(raw string) bool {
 	return false
 }
 
-// classify fills a schema field with what its kit tag says.
-func classify(field *model.Field, tag reflect.StructTag) {
+// classify fills a schema field with what its kit tag says. sealed says the
+// schema is of what kit keeps sealed at rest — a store's entity on disk, a
+// message in a queue on disk —: a field is marked sealed only there.
+func classify(field *model.Field, tag reflect.StructTag, sealed bool) {
 	t := parseTag(tag.Get("kit"))
 	field.Class = t.effective()
 	field.Subject = t.marks.has(markSubject)
 	field.Moderated = t.marks.has(markModerated)
-	field.Sealed = t.sealedAtRest()
+	field.Sealed = sealed && t.sealedAtRest()
 	field.Erased = t.marks.has(markErased)
 	field.History = t.history
 }

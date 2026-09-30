@@ -26,6 +26,7 @@ go_library(
         "privacy.go",
         "profile.go",
         "runtime.go",
+        "table.go",
     ],
     importpath = "github.com/kitsunium/sdk/framework/model",
     visibility = ["//visibility:public"],

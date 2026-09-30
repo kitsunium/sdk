@@ -25,13 +25,6 @@ type EndpointOption = ikit.EndpointConfigurer
 // [Bulkhead]).
 type OperationOption = ikit.OperationOption
 
-// Private keeps an endpoint off the HTTP listener: only other services reach
-// it, through [Endpoint].Call.
-func Private() EndpointOption {
-	//: the implementation is framework/internal/kit's; this facade only forwards.
-	return ikit.Private()
-}
-
 // Name overrides the endpoint's name, which otherwise is its handler's
 // function name, or its route when the handler is a function literal.
 func Name(name string) EndpointOption {

@@ -17,6 +17,9 @@ const (
 	BlockGo     string = core.BlockGo     // a go statement: runs beside the caller
 	BlockDefer  string = core.BlockDefer  // a defer statement: runs when the function returns
 	BlockFunc   string = core.BlockFunc   // a function literal: runs when it is called
+	// BlockTransaction is the function a kit.Transact runs: its steps run in
+	// one transaction, and the effects they make leave at its commit.
+	BlockTransaction string = core.BlockTransaction
 )
 
 type (

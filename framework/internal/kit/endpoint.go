@@ -24,9 +24,12 @@ import (
 // endpoint answering EmptyValue replies 204 No Content.
 type EmptyValue struct{}
 
-// EndpointService is an HTTP endpoint with a typed request and a typed response.
-// Declare it with [Service.Endpoint]; call it from another service with
-// [EndpointService.Call], which is how the diagram sees service-to-service calls.
+// EndpointService is an HTTP endpoint with a typed request and a typed response:
+// what HTTP itself is about — a webhook a third party calls, say —, the
+// exposure of a command or a query ([Command.Expose], [Query.Expose]), or
+// the implementation of a port ([Service.Implement]). A business operation
+// is a command or a query, which other code runs with [Command.Dispatch]
+// and [Query.Ask] and HTTP reaches through its exposure.
 type EndpointService[Req, Resp any] struct {
 	nodeBase
 	method string
@@ -38,8 +41,10 @@ type EndpointService[Req, Resp any] struct {
 	// authn is the app's auth handler, resolved when the endpoint is mounted.
 	authn authenticator
 	// impl is the port the endpoint implements (Service.Implement); nil for
-	// an endpoint with a route.
-	impl node
+	// an endpoint with a route. routeless is set for every implementation,
+	// even one of a nil port: it has no route, and the port reaches it.
+	impl      node
+	routeless bool
 	// exposes is the command or the query the endpoint exposes (Expose):
 	// its authentication is the operation's. accepted answers 202 for a
 	// queued command.
@@ -47,16 +52,21 @@ type EndpointService[Req, Resp any] struct {
 	accepted bool
 }
 
-// EndpointConfigurer configures an endpoint.
+// EndpointConfigurer configures an endpoint; each is an [ExposeConfigurer] too.
 type EndpointConfigurer interface {
+	ExposeConfigurer
 	endpointConfigure(o *endpointOptions)
 }
 
 type endpointOptions struct {
 	callOptions
-	private bool
 	name    string
 	maxBody int64
+	// access is how an exposure says it is open on purpose — Anyone,
+	// AnyUser: model.AccessAnyone, model.AccessAnyUser —; clash is set once
+	// both were given (expose.go).
+	access string
+	clash  bool
 }
 
 // callOptions are what an endpoint, a command and a query all take: the
@@ -83,6 +93,9 @@ type callOption func(o *callOptions)
 // endpointConfigure sets the option on what it configures.
 func (f callOption) endpointConfigure(o *endpointOptions) { f(&o.callOptions) }
 
+// exposeConfigure sets the option on what it configures.
+func (f callOption) exposeConfigure(o *endpointOptions) { f(&o.callOptions) }
+
 // commandConfigure sets the option on what it configures.
 func (f callOption) commandConfigure(o *commandOptions) { f(&o.callOptions) }
 
@@ -100,11 +113,8 @@ type endpointOption func(o *endpointOptions)
 // endpointConfigure sets the option on what it configures.
 func (f endpointOption) endpointConfigure(o *endpointOptions) { f(o) }
 
-// Private keeps an endpoint off the HTTP listener: only other services reach
-// it, through [EndpointService.Call].
-func Private() EndpointConfigurer {
-	return endpointOption(func(o *endpointOptions) { o.private = true })
-}
+// exposeConfigure sets the option on what it configures.
+func (f endpointOption) exposeConfigure(o *endpointOptions) { f(o) }
 
 // Name overrides the endpoint's name, which otherwise is its handler's
 // function name, or its route when the handler is a function literal.
@@ -214,6 +224,11 @@ func parseRoute(route string) (method, path string, wildcards []string, problem 
 // to the policies ([RateLimit], [Timeout], [Bulkhead]) and the handler. The
 // response is JSON, or 204 No Content when it is [EmptyValue].
 //
+// An endpoint is for what HTTP itself is about — a webhook a third party
+// calls. A business operation is a command or a query, exposed on its route
+// ([Command.Expose], [Query.Expose]), and run in process by the code that
+// needs it ([Command.Dispatch], [Query.Ask]).
+//
 // The endpoint's name, and so its node ID, is the handler's function name.
 //
 //go:noinline
@@ -258,15 +273,15 @@ func invalidRoute(label string) func(reflect.Type, string) phrase {
 	}
 }
 
-// Implement declares that the service implements port: a private endpoint
-// of the service, with no route, which the port calls when the app binds
-// nothing else and this is the one implementation among the services it
-// mounts. It runs as every endpoint does — the request's validate tags, the
-// options' policies, the caller's user — and is named like one: its
-// [Name], else its handler's name, else, for a function literal, the port's
-// name. A handler whose request or response is not the port's does not
-// compile. A host implements a module's port on its own service: it never
-// adds a node to the module's.
+// Implement declares that the service implements port: an endpoint of the
+// service with no route, which only the port reaches, in process, when the
+// app binds nothing else and this is the one implementation among the
+// services it mounts. It runs as every endpoint does — the request's
+// validate tags, the options' policies, the caller's user — and is named
+// like one: its [Name], else its handler's name, else, for a function
+// literal, the port's name. A handler whose request or response is not the
+// port's does not compile. A host implements a module's port on its own
+// service: it never adds a node to the module's.
 //
 //	var _ = posts.Service.Implement(desk.Enforcer, Enforce)
 //
@@ -278,7 +293,7 @@ func (s *Service) Implement[Req, Resp any](port *PortService[Req, Resp], handler
 		o.endpointConfigure(&e.opts)
 	}
 	e.pipe = pipeline[Req, Resp]{handler: handler, policies: e.opts.policies}
-	e.opts.private = true
+	e.routeless = true
 	e.kind, e.decl = model.KindEndpoint, decl
 	hp, short := funcInfo(handler)
 	if hp.file != "" {
@@ -360,10 +375,11 @@ func (e *EndpointService[Req, Resp]) maxBody() int64 {
 }
 
 // Call runs the endpoint in-process, from another building block: the same
-// validation, the same policies, the same handler, and an edge in the
-// diagram from the caller to this endpoint. It is how services call each
-// other; calling the handler function directly works, but the product
-// cannot see it.
+// validation, the same policies, the same handler, and a calls edge in the
+// diagram from the caller to this endpoint. A port calls its implementation
+// so. Services run each other's operations as commands and queries
+// ([Command.Dispatch], [Query.Ask]); calling a handler function directly
+// works, but the product cannot see it.
 func (e *EndpointService[Req, Resp]) Call(ctx context.Context, req Req) (Resp, error) {
 	a := e.app()
 	if a == nil {
@@ -522,7 +538,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) int {
 // mount registers the endpoint's route on r, or says why it cannot.
 func (e *EndpointService[Req, Resp]) mount(a *App, r *routes) phrase {
 	e.authn = a.authHandler()
-	if e.opts.private || e.dec == nil {
+	if e.routeless || e.dec == nil {
 		return phrase{}
 	}
 	return r.handle(e.route(a), e.id, e.serve(a))
@@ -532,7 +548,7 @@ func (e *EndpointService[Req, Resp]) mount(a *App, r *routes) phrase {
 // returns its edges.
 func (e *EndpointService[Req, Resp]) describe(a *App, out *model.Node) []model.Edge {
 	expose := model.ExposePublic
-	if e.opts.private {
+	if e.routeless {
 		expose = model.ExposePrivate
 	}
 	path, _ := e.servedPath(a)
@@ -541,6 +557,7 @@ func (e *EndpointService[Req, Resp]) describe(a *App, out *model.Node) []model.E
 		Path:     path,
 		Expose:   expose,
 		Auth:     e.authMode(),
+		Access:   e.opts.access,
 		Request:  requestSchemaOf(reflect.TypeFor[Req]()),
 		Response: schemaOf(reflect.TypeFor[Resp]()),
 	}
@@ -563,7 +580,7 @@ func (e *EndpointService[Req, Resp]) drawn(a *App) []model.Mechanic {
 	if e.authMode() != "" {
 		out = append(out, authMechanic(a, e.authMode()))
 	}
-	if e.dec != nil && e.dec.hasBody && !e.opts.private {
+	if e.dec != nil && e.dec.hasBody {
 		out = append(out, model.Mechanic{
 			Kind: "decode", Label: "json ≤ " + humanBytes(e.maxBody()), Package: "encoding/json/v2",
 			Config: map[string]string{"maxBytes": strconv.FormatInt(e.maxBody(), 10), "unknownMembers": "rejected"},

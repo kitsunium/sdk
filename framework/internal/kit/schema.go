@@ -26,7 +26,14 @@ var (
 // reads encoding/json: the members an object has and under which names, which
 // may be omitted and which may be null.
 func schemaOf(t reflect.Type) *model.Schema {
-	return schemaFrom(jsonshape.Of(t))
+	return schemaFrom(jsonshape.Of(t), false)
+}
+
+// keptSchemaOf is schemaOf for a type kit keeps — a store's entity, a
+// topic's message, a queued command's input —: with sealed, its fields that
+// kit seals at rest say so (ADR 0006 §4).
+func keptSchemaOf(t reflect.Type, sealed bool) *model.Schema {
+	return schemaFrom(jsonshape.Of(t), sealed)
 }
 
 // requestSchemaOf describes a request type, saying where each field is read
@@ -36,7 +43,7 @@ func schemaOf(t reflect.Type) *model.Schema {
 // order.
 func requestSchemaOf(t reflect.Type) *model.Schema {
 	shape := jsonshape.Of(t)
-	s := schemaFrom(shape)
+	s := schemaFrom(shape, false)
 	st := t
 	for st.Kind() == reflect.Pointer {
 		st = st.Elem()
@@ -87,7 +94,7 @@ func paramEntries(st reflect.Type, written map[string]bool) []fieldEntry {
 		}
 		if in, name := paramTag(f); in != "" {
 			field := model.Field{Name: name, In: in, Type: schemaOf(f.Type), Optional: in != "path", Rules: f.Tag.Get("validate")}
-			classify(&field, f.Tag)
+			classify(&field, f.Tag, false)
 			entries = append(entries, fieldEntry{index: f.Index, field: field})
 		}
 	}
@@ -103,7 +110,7 @@ func typeName(t reflect.Type) (string, bool) {
 }
 
 // schemaFrom is a wire shape as the model spells it.
-func schemaFrom(sh *jsonshape.Shape) *model.Schema {
+func schemaFrom(sh *jsonshape.Shape, sealed bool) *model.Schema {
 	s := &model.Schema{Type: sh.Kind.String(), Name: sh.Name, Format: sh.Format, Nullable: sh.Nullable, Ref: sh.Ref}
 	if sh.Kind == jsonshape.Unsupported {
 		s.Type = "any"
@@ -112,19 +119,19 @@ func schemaFrom(sh *jsonshape.Shape) *model.Schema {
 		s.Name = ""
 	}
 	if sh.Items != nil {
-		s.Items = schemaFrom(sh.Items)
+		s.Items = schemaFrom(sh.Items, sealed)
 	}
 	if sh.Values != nil {
-		s.Values = schemaFrom(sh.Values)
+		s.Values = schemaFrom(sh.Values, sealed)
 	}
 	for _, f := range sh.Fields {
-		member := schemaFrom(f.Shape)
+		member := schemaFrom(f.Shape, sealed)
 		if omitsNil(f.Tag) {
 			// A nil value is left out, never written null.
 			member.Nullable = false
 		}
 		field := model.Field{Name: f.Name, Type: member, Optional: f.Optional, Rules: f.Rules}
-		classify(&field, f.Tag)
+		classify(&field, f.Tag, sealed)
 		s.Fields = append(s.Fields, field)
 	}
 	return s

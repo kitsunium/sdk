@@ -22,7 +22,9 @@ Its URL, in the variable \<APP\>\_\<NAME\>\_URL, is the file's path — or a fil
 
 On dragonfly, illumos and solaris, which modernc.org/sqlite does not port to, the module builds and Open refuses with proc.UnsupportedPlatform.
 
-kit cannot run migrations on SQLite yet: the SDK's migrator refuses a dialect with no advisory lock, and its SQLite migrator — the file's own lock — is an SDK change to come.
+Its migrations — kit's own, which make the tables of the stores it keeps, then the product's and the modules' — run under the database file's own write lock, one transaction per run \(the SDK's ADR 0140\).
+
+kit.Keeps\(kit.Privacy\) on the file keeps kit's legal holds and privacy journal there, in the product's transactions, and kit's data keys in the data directory: a data key is written apart from every transaction, and the file's one writer may be held by the transaction of the very write that needs the key.
 
 ## Index
 
@@ -44,7 +46,7 @@ const (
 ```
 
 <a name="Engine"></a>
-## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/sqlite/sqlite.go#L72>)
+## func [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/connectors/sqlite/sqlite.go#L78>)
 
 ```go
 func Engine() kit.Engine

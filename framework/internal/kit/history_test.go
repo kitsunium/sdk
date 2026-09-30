@@ -40,12 +40,12 @@ var Holders = Keeper.Store("holders", Holder.Key,
 var HolderPasswords = Holders.Passwords(func(h *Holder) *string { return &h.Password }, kit.NotReused(2))
 
 var (
-	KeeperExport = Keeper.Endpoint("POST /export", func(ctx context.Context, in Identities) (kit.PersonalData, error) {
+	KeeperExport = Keeper.Query("export", func(ctx context.Context, in Identities) (kit.PersonalData, error) {
 		return kit.Export(ctx, in.IDs...)
-	}, kit.Private())
-	KeeperErase = Keeper.Endpoint("POST /erase", func(ctx context.Context, in Identities) (kit.Erasure, error) {
+	})
+	KeeperErase = Keeper.Command("erase", func(ctx context.Context, in Identities) (kit.Erasure, error) {
 		return kit.Erase(ctx, "erasure requested by the person", in.IDs...)
-	}, kit.Private())
+	})
 )
 
 // startKeeper runs the history product in dev, in memory unless opts give a
@@ -53,6 +53,7 @@ var (
 func startKeeper(t *testing.T, opts ...kit.AppConfigurer) *kit.App {
 	t.Helper()
 	t.Setenv("KIT_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t)
 	app := kit.NewApp("keeper", Keeper).With(append([]kit.AppConfigurer{
 		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard),
 	}, opts...)...)

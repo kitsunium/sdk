@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -101,7 +102,10 @@ func TestAKeyIsItsSpansInstance(t *testing.T) {
 	app := startCounter(t)
 	placed := place(t, "alice", "tea")
 	r := call(t, app, "POST /orders/"+placed.ID+"/cancel", noBody, badge("alice")...)
-	if s := spanOf(t, traceOf(t, app, r), "counter/command/cancel-order"); s.Attrs["instance"] != placed.ID {
+	// The dispatch's span, and not its transaction's on the same node: on a
+	// coarse clock both start at one instant, and the trace lists either
+	// first.
+	if s := opSpanOf(t, traceOf(t, app, r), "counter/command/cancel-order", model.OpDispatch); s.Attrs["instance"] != placed.ID {
 		t.Errorf("the dispatch's span: %+v", s)
 	}
 }

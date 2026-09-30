@@ -34,6 +34,7 @@ func (a *App) mountDevTools(api func(pattern string, h http.HandlerFunc)) {
 	api("GET /_kit/api/mail", a.serveMails)
 	api("GET /_kit/api/mail/{id}", a.serveMail)
 	api("GET /_kit/api/former", a.serveFormer)
+	api("GET /_kit/api/revisions", a.serveRevisions)
 	a.mountPrivacyTools(api)
 }
 

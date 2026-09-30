@@ -13,7 +13,6 @@ var (
 	_ starter    = (*Command[struct{}, struct{}])(nil)
 	_ typeSource = (*Command[struct{}, struct{}])(nil)
 
-	_ exposed    = (*EndpointService[struct{}, struct{}])(nil)
 	_ mounter    = (*EndpointService[struct{}, struct{}])(nil)
 	_ typeSource = (*EndpointService[struct{}, struct{}])(nil)
 
@@ -34,7 +33,12 @@ var (
 
 	_ CommandConfigurer  = callOption(nil)
 	_ EndpointConfigurer = callOption(nil)
+	_ ExposeConfigurer   = callOption(nil)
 	_ QueryConfigurer    = callOption(nil)
+
+	_ ExposeConfigurer = endpointOption(nil)
+
+	_ sealingSource = (*Command[struct{}, struct{}])(nil)
 
 	_ CommandConfigurer      = deliveryOption(nil)
 	_ SubscriptionConfigurer = deliveryOption(nil)
@@ -76,13 +80,32 @@ var (
 	_ starter         = (*StoreService[struct{}])(nil)
 	_ typeSource      = (*StoreService[struct{}])(nil)
 	_ feeder          = (*StoreService[struct{}])(nil)
+	_ sealingSource   = (*StoreService[struct{}])(nil)
+	_ revisionsSource = (*StoreService[struct{}])(nil)
+	_ sealAller       = (*StoreService[struct{}])(nil)
+	_ tabled          = (*StoreService[struct{}])(nil)
 
 	_ folder = (*docEngine[struct{}])(nil)
 	_ folder = (*historied[struct{}])(nil)
+	_ folder = (*sealedEngine[struct{}])(nil)
 
-	_ topicWaker = (*TopicService[struct{}])(nil)
-	_ typeSource = (*TopicService[struct{}])(nil)
+	_ entriesSource = (*docEngine[struct{}])(nil)
+	_ entriesSource = (*sqlEngine[struct{}])(nil)
 
-	_ autoLoop = (*WorkflowService[struct{}, string])(nil)
-	_ starter  = (*WorkflowService[struct{}, string])(nil)
+	_ databaseSource = (*historied[struct{}])(nil)
+	_ databaseSource = (*sealedEngine[struct{}])(nil)
+	_ databaseSource = (*sqlEngine[struct{}])(nil)
+
+	_ versionKeeper = (*docEngine[struct{}])(nil)
+	_ versionKeeper = (*historied[struct{}])(nil)
+	_ versionKeeper = (*sealedEngine[struct{}])(nil)
+	_ versionKeeper = (*sqlEngine[struct{}])(nil)
+
+	_ sealingSource = (*TopicService[struct{}])(nil)
+	_ topicWaker    = (*TopicService[struct{}])(nil)
+	_ typeSource    = (*TopicService[struct{}])(nil)
+
+	_ autoLoop  = (*WorkflowService[struct{}, string])(nil)
+	_ journaled = (*WorkflowService[struct{}, string])(nil)
+	_ starter   = (*WorkflowService[struct{}, string])(nil)
 )

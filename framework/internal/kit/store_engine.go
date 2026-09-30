@@ -4,6 +4,8 @@ package kit
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"sync"
 
 	"github.com/kitsunium/sdk/pkg/v1/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/vfs"
@@ -15,20 +17,23 @@ import (
 
 // storeEngine is what a store runs on. Store[T] holds one while its app
 // runs, opened by the app's placement of the store: in memory or in the data
-// directory today — both the SDK's document store (docEngine) — and, once
-// the SDK ships its SQL document store, on a database.
+// directory — the SDK's document store (docEngine) —, or on a database — the
+// SDK's document store over SQL (sqlEngine, store_sql.go).
 //
 // An engine's refusals are the SDK document store's sentinels —
 // docstore.DocumentNotFound, DocumentExists, UniqueKeyTaken, DocumentKeyEmpty,
 // DocumentKeyChanged, IndexUnknown, IndexNotUnique, DocumentUndecodable,
-// DocumentUnencodable, PersistFailed, StoreClosed, WriteUnconfirmed —, which
-// Store.said words for the caller: every engine speaks them, so said speaks
-// for every engine unchanged, and no engine quotes a key in an error.
+// DocumentUnencodable, PersistFailed, StoreClosed, WriteUnconfirmed, and on a
+// database StatementFailed and KeyTooLong —, which Store.said words for the
+// caller: every engine speaks them, so said speaks for every engine
+// unchanged, and no engine quotes a key in an error.
 //
 // Every call takes the caller's context: an engine on a database runs the
 // call on the transaction the context carries for it and within its
-// timeout. The document store needs none. The port grows by sibling
-// interfaces an engine may implement, never by a method (the SDK's ADR 0039).
+// timeout; the document store records, in a transaction of the data's, what
+// a write replaced, and holds the write's hooks until the commit. The port
+// grows by sibling interfaces an engine may implement, never by a method
+// (the SDK's ADR 0039).
 type storeEngine[T any] interface {
 	// Get returns the entity under key.
 	Get(ctx context.Context, key string) (T, error)
@@ -54,8 +59,9 @@ type storeEngine[T any] interface {
 	// Delete removes the entity under key.
 	Delete(ctx context.Context, key string) error
 	// Watch registers the functions told the key of every entity written
-	// and deleted, once the write stands, outside every lock of the engine.
-	// kit registers once, when the store starts.
+	// and deleted, once the write stands — at the commit of the transaction
+	// that made it —, outside every lock of the engine. kit registers once,
+	// when the store starts.
 	Watch(onWrite, onDelete func(key string))
 	// Close releases the engine; a document store folds what was written
 	// into its snapshot first.
@@ -82,17 +88,50 @@ type storeFS struct {
 // snapshot and the small files written since in the data directory. The
 // document store keeps every entity in memory, persists each write before
 // returning, and keeps the indexes in step with the entities.
-type docEngine[T any] struct{ ds *docstore.Store[T] }
+//
+// The data directory and memory have no transactions: in one of kit's
+// (transact.go), a write records the value it replaces, which a rollback
+// writes back, and its hooks wait for the commit.
+type docEngine[T any] struct {
+	ds  *docstore.Store[T]
+	key func(T) string
+	// name is the store's, which a rollback that cannot write a value back
+	// names in the log.
+	name string
+	// keep is how many former versions the document store keeps of each
+	// record (ADR 0007 §3): none when zero.
+	keep int
+	// undoing are the keys a rollback writes back, whose versions no write
+	// prunes meanwhile (before).
+	undoing sync.Map
+	// onWrite and onDelete are what Watch registered.
+	onWrite, onDelete func(key string)
+}
 
 // openDocEngine opens the document store of a store: loaded from where fs
 // says — the snapshot, what was written since replayed on it, the indexes
-// rebuilt — or empty in memory.
-func openDocEngine[T any](key func(T) string, where storeFS, specs []docstore.IndexSpec[T]) (*docEngine[T], error) {
-	ds, err := docstore.Open(docstore.Config[T]{Key: key, FS: where.fs, Path: where.path}, specs...)
+// rebuilt — or empty in memory; keeping each record's versions as vs says.
+func openDocEngine[T any](key func(T) string, where storeFS, specs []docstore.IndexSpec[T], vs versionsOn) (*docEngine[T], error) {
+	e := &docEngine[T]{key: key, name: where.path, keep: vs.keep}
+	cfg := docstore.Config[T]{Key: key, FS: where.fs, Path: where.path}
+	if vs.keep > 0 {
+		cfg.Versions, cfg.Clock = vs.keep, vs.clock
+		// Asked under the writers' lock by a write that would prune: it may
+		// read this store, and kit's holds. A rollback's write back prunes
+		// nothing: what it takes out of the history is its own (forget).
+		cfg.Held = func(key string) bool {
+			if _, undoing := e.undoing.Load(key); undoing {
+				return true
+			}
+			return vs.held != nil && vs.held(context.Background(), key)
+		}
+	}
+	ds, err := docstore.Open(cfg, specs...)
 	if err != nil {
 		return nil, err
 	}
-	return &docEngine[T]{ds: ds}, nil
+	e.ds = ds
+	return e, nil
 }
 
 // Get reads the document key.
@@ -131,6 +170,12 @@ func (e *docEngine[T]) Find(_ context.Context, index, key string) ([]T, error) {
 //ktn:allow-unused-param: the storeEngine interface passes a context the local document store does not take
 func (e *docEngine[T]) Count(_ context.Context) (int, error) { return e.ds.Stats().Documents, nil }
 
+// KeyedEntries are up to limit entities as the store keeps them, with
+// their keys: what a sealing store reads its records by (seal_store.go).
+func (e *docEngine[T]) KeyedEntries(_ context.Context, limit int) ([]docstore.Entry, error) {
+	return e.ds.Entries(limit)
+}
+
 // Entries are the latest limit documents, raw.
 //
 //ktn:allow-unused-param: the storeEngine interface passes a context the local document store does not take
@@ -147,37 +192,138 @@ func (e *docEngine[T]) Entries(_ context.Context, limit int) ([]json.RawMessage,
 }
 
 // Write writes v in mode.
-//
-//ktn:allow-unused-param: the storeEngine interface passes a context the local document store does not take
-func (e *docEngine[T]) Write(_ context.Context, v T, mode writeMode) error {
+func (e *docEngine[T]) Write(ctx context.Context, v T, mode writeMode) error {
+	key := e.keyOf(v)
+	undo := e.before(ctx, key)
+	stamp := e.stamp(ctx)
+	var err error
 	switch mode {
 	case insertOnly:
-		return e.ds.Insert(v)
+		err = e.ds.InsertStamped(v, stamp)
 	case replaceOnly:
-		return e.ds.Replace(v)
+		err = e.ds.ReplaceStamped(v, stamp)
 	case upsert:
-		return e.ds.Put(v)
+		err = e.ds.PutStamped(v, stamp)
 	default:
-		return e.ds.Put(v)
+		err = e.ds.PutStamped(v, stamp)
 	}
+	e.after(ctx, err, key, false, undo)
+	return err
 }
 
 // Update changes the document key with fn, under the store's lock.
-//
-//ktn:allow-unused-param: the storeEngine interface passes a context the local document store does not take
-func (e *docEngine[T]) Update(_ context.Context, key string, fn func(*T) error) (T, error) {
-	return e.ds.Update(key, fn)
+func (e *docEngine[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
+	undo := e.before(ctx, key)
+	v, err := e.ds.UpdateStamped(key, e.stamp(ctx), fn)
+	e.after(ctx, err, key, false, undo)
+	return v, err
 }
 
 // Delete removes the document key.
-//
-//ktn:allow-unused-param: the storeEngine interface passes a context the local document store does not take
-func (e *docEngine[T]) Delete(_ context.Context, key string) error { return e.ds.Delete(key) }
+func (e *docEngine[T]) Delete(ctx context.Context, key string) error {
+	undo := e.before(ctx, key)
+	err := e.ds.Delete(key)
+	e.after(ctx, err, key, true, undo)
+	return err
+}
 
-// Watch calls onWrite and onDelete after each write and removal.
+// Watch registers the store's hooks: the engine tells them each write it
+// made, once it stands — at the commit, in a transaction.
 func (e *docEngine[T]) Watch(onWrite, onDelete func(key string)) {
-	e.ds.OnWrite(onWrite)
-	e.ds.OnDelete(onDelete)
+	e.onWrite, e.onDelete = onWrite, onDelete
+}
+
+// keyOf is v's key, "" when the key function panics: the document store
+// says why the write failed.
+func (e *docEngine[T]) keyOf(v T) (key string) {
+	defer func() {
+		if recover() != nil {
+			key = ""
+		}
+	}()
+	return e.key(v)
+}
+
+// before is what writes back the value under key, when ctx runs in a
+// transaction of the data's: the entity it holds now, or its absence; nil
+// outside one. Nothing else writes the data meanwhile: the transaction holds
+// the writer turn.
+//
+// On a store that keeps versions (ADR 0007 §3) the write back is a version
+// of its own — the document store numbers every write, and never gives a
+// number twice —, kit's, by nobody, and it prunes nothing; the versions the
+// rolled back writes made are then taken out of the history, and the one
+// they found holds what it held again — a write in place changed it
+// (forget) —, so that what never committed never shows. The versions those writes pruned
+// stay pruned, and an entity whose deletion is rolled back comes back
+// without its versions, which the deletion took (kitsunium/sdk ADR 0143,
+// deferred: a key's document and versions restored together).
+func (e *docEngine[T]) before(ctx context.Context, key string) func(context.Context) error {
+	if key == "" || !inLocal(ctx) {
+		return nil
+	}
+	prev, err := e.ds.Get(key)
+	switch {
+	case err == nil:
+		head := e.head(key)
+		return func(context.Context) error {
+			e.undoing.Store(key, true)
+			defer e.undoing.Delete(key)
+			err := e.ds.Put(prev)
+			e.tell(key, false, err)
+			if err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
+				return err
+			}
+			return errors.Join(err, e.forget(key, head, prev))
+		}
+	case errors.Is(err, docstore.DocumentNotFound):
+		return func(context.Context) error {
+			err := e.ds.Delete(key)
+			if errors.Is(err, docstore.DocumentNotFound) {
+				return nil
+			}
+			e.tell(key, true, err)
+			return err
+		}
+	}
+	// What the key holds no longer decodes: it cannot be written back.
+	return func(context.Context) error { return err }
+}
+
+// after keeps, once a write stands, what writes back what it replaced, and
+// tells the store's hooks — at the commit, in a transaction.
+func (e *docEngine[T]) after(ctx context.Context, err error, key string, deleted bool, undo func(context.Context) error) {
+	if err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
+		return
+	}
+	if undo != nil {
+		recordUndo(ctx, undoStep{store: e.name, restore: undo})
+	}
+	fn := e.onWrite
+	if deleted {
+		fn = e.onDelete
+	}
+	if fn == nil {
+		return
+	}
+	if !hold(ctx, heldEffect{release: func() error { fn(key); return nil }, inside: true}) {
+		fn(key)
+	}
+}
+
+// tell tells the store's hooks that a rollback wrote key back: what the
+// write woke reads it anew.
+func (e *docEngine[T]) tell(key string, deleted bool, err error) {
+	if err != nil && !errors.Is(err, docstore.WriteUnconfirmed) {
+		return
+	}
+	fn := e.onWrite
+	if deleted {
+		fn = e.onDelete
+	}
+	if fn != nil {
+		fn(key)
+	}
 }
 
 // Close closes the document store.

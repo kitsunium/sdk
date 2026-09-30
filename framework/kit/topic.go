@@ -41,3 +41,16 @@ func Parallelism(n int) DeliveryOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Parallelism(n)
 }
+
+// OwnStores lets a watch ([Service].Watch) hear the stores of its own
+// module too — the product's own, for a watch of the product's —, which a
+// watch never hears by default. Such a watch never hears the writes its own
+// handler makes, in its handler's context — a handler that writes what it
+// watches, a screening that stamps the record it screened, would otherwise
+// hear itself forever —; a write the handler only causes, later and
+// elsewhere — a queued command's handling, a topic's delivery — is heard.
+// A subscription to a topic refuses it: a topic has no stores.
+func OwnStores() SubscriptionOption {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.OwnStores()
+}

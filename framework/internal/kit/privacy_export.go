@@ -16,7 +16,8 @@ type PersonalData = model.PersonalData
 
 // Export returns every record whose subject is one of ids, in every store of
 // the app: each without its secret members, with the former values its
-// fields keep (ADR 0007) — never a secret field's —, and per store what
+// fields keep (ADR 0007) — never a secret field's — and the versions its
+// store keeps of it, without their secret members, and per store what
 // GDPR art. 15(1) asks beside the data — the purpose, the retention and the
 // recipients inside the product. A held record is exported like any other.
 // The result is JSON, structured and machine-readable (art. 20); keeping the
@@ -83,8 +84,9 @@ func (a *App) exportStore(ctx context.Context, st privacyStore, ids []string, pr
 // storeExport is one store's records about a person, and their former
 // values (ADR 0007).
 type storeExport struct {
-	records []json.RawMessage
-	former  []model.RecordFormer
+	records  []json.RawMessage
+	former   []model.RecordFormer
+	versions []model.ExportedVersions
 }
 
 // storeData is a store's part of an export: its records and their former
@@ -93,7 +95,7 @@ func (a *App) storeData(st privacyStore, part storeExport, recipients map[string
 	id, line := st.base().id, st.registerLine(a)
 	return model.StoreData{
 		Store: id, Purpose: line.Purpose, Retention: retentionWords(line), Recipients: recipients[id],
-		Records: part.records, Former: part.former,
+		Records: part.records, Former: part.former, Versions: part.versions,
 	}
 }
 
@@ -105,6 +107,9 @@ func retentionWords(l model.RegisterStore) string {
 	}
 	if l.Delete != "" {
 		parts = append(parts, "records deleted "+l.Delete)
+	}
+	if l.ByProduct != nil {
+		parts = append(parts, byProductWords(l.ByProduct))
 	}
 	if l.HeldUntil != "" {
 		parts = append(parts, "held "+l.HeldUntil)
@@ -146,6 +151,13 @@ func (s *StoreService[T]) exportOf(ctx context.Context, keys []string, preview b
 		}
 		if len(former) > 0 {
 			out.former = append(out.former, model.RecordFormer{Record: len(out.records), Fields: former})
+		}
+		versions, err := s.exportVersions(ctx, key, preview)
+		if err != nil {
+			return storeExport{}, err
+		}
+		if len(versions) > 0 {
+			out.versions = append(out.versions, model.ExportedVersions{Record: len(out.records), Versions: versions})
 		}
 		out.records = append(out.records, raw)
 	}

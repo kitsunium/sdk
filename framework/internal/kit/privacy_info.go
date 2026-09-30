@@ -32,6 +32,9 @@ func (s *StoreService[T]) privacyInfo(a *App) *model.StorePrivacy {
 func (p *storePrivacy[T]) describe(a *App, info *model.StorePrivacy) {
 	info.Purpose, info.DeleteOnErasure = p.purpose, p.erasureDelete
 	info.Erase, info.Delete = retentionInfo(a, p.erase), retentionInfo(a, p.delete)
+	if p.byProduct != nil {
+		info.ByProduct = new(*p.byProduct)
+	}
 	if p.heldUntil != nil {
 		info.HeldUntil = &model.HeldUntil{At: a.source(p.heldAt), Reason: p.heldReason}
 	}
@@ -59,7 +62,8 @@ func (s *StoreService[T]) describeRun(a *App, info *model.StorePrivacy) {
 // privacyProblems judges what the app does with personal data: the kit tags
 // of every type it shows or keeps (errors), KIT_RETENTION, and — when kit
 // explains — a store that keeps personal data with no retention or no
-// subject, and fields whose names read like personal data (warnings).
+// subject, unless the product keeps its retention, and fields whose names
+// read like personal data (warnings).
 func (a *App) privacyProblems() []model.Diagnostic {
 	a.privacy.mu.Lock()
 	explain := a.privacy.explain
@@ -84,20 +88,31 @@ func (a *App) retentionProblems() []model.Diagnostic {
 }
 
 // storeWarnings are the warnings of the stores that keep personal data with
-// no retention, or with no subject.
+// no retention, or with no subject — none for a store whose product keeps
+// its retention itself (RetentionByProduct), which asks kit for neither.
 func (a *App) storeWarnings() []model.Diagnostic {
 	var out []model.Diagnostic
 	for _, st := range a.productStores() {
-		if !st.plan().personal() {
-			continue
+		if st.plan().personal() {
+			out = append(out, a.storeWarningsOf(st)...)
 		}
-		b := st.base()
-		if info := st.privacyInfo(a); info == nil || (info.Erase == nil && info.Delete == nil) {
-			out = append(out, diagnosticOf("warning", b.id, a.source(&b.decl), say("privacy.no-retention", "store", b.id)))
-		}
-		if st.plan().subject == nil {
-			out = append(out, diagnosticOf("warning", b.id, a.source(&b.decl), say("privacy.no-subject", "store", b.id)))
-		}
+	}
+	return out
+}
+
+// storeWarningsOf are the warnings of st, a store that keeps personal data.
+func (a *App) storeWarningsOf(st privacyStore) []model.Diagnostic {
+	info := st.privacyInfo(a)
+	if info != nil && info.ByProduct != nil {
+		return nil
+	}
+	var out []model.Diagnostic
+	b := st.base()
+	if info == nil || (info.Erase == nil && info.Delete == nil) {
+		out = append(out, diagnosticOf("warning", b.id, a.source(&b.decl), say("privacy.no-retention", "store", b.id)))
+	}
+	if st.plan().subject == nil {
+		out = append(out, diagnosticOf("warning", b.id, a.source(&b.decl), say("privacy.no-subject", "store", b.id)))
 	}
 	return out
 }

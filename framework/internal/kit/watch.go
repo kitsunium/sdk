@@ -17,8 +17,11 @@ import (
 // store whose entity holds a field with the watch's mark (ADR 0006:
 // kit.Personal, kit.Special, kit.Moderated) feeds it — the product's and the
 // other modules', never those of the watch's own module; for a watch of the
-// product's, never the product's own —, and draws a declared delivers edge
-// to it. kit's own stores feed none.
+// product's, never the product's own, unless the watch asks for them
+// (OwnStores) —, and draws a declared delivers edge to it. kit's own stores
+// feed none. A watch that hears its own module's stores never hears the
+// writes its own handler makes: the handler's context says whose it is
+// (handling), and the funnels skip them.
 //
 // A store tells its watches where kit confirms a write: in Store.write,
 // modify and remove, and in a workflow's transitionWrite — the four funnels
@@ -65,6 +68,9 @@ type Watch struct {
 	handler     func(context.Context, WrittenEvent) error
 	maxDeliver  int
 	parallelism int
+	// ownStores: it hears its own module's stores too, and never the
+	// writes of its own handler (OwnStores).
+	ownStores bool
 
 	// run is the watch in its app's current run, or its last one.
 	run atomic.Pointer[watchRun]
@@ -77,21 +83,23 @@ var marks = []Mark{Personal, Special, Moderated}
 // confirms on a store whose entity holds a field that carries mark — the
 // product's stores and the other modules', never those of the module the
 // service belongs to (for a service of the product's, never the product's
-// own). The notice says which store, which record and whether it was
-// deleted; the handler reads the record itself ([RecordsOf]). Delivery is at
-// least once and in no set order, retried and dead-lettered after
-// [MaxDeliveries] attempts: handler must be idempotent, and it hears the
-// writes it makes itself on another's store.
+// own) unless [OwnStores] says so. The notice says which store, which
+// record and whether it was deleted; the handler reads the record itself
+// ([RecordsOf]). Delivery is at least once and in no set order, retried and
+// dead-lettered after [MaxDeliveries] attempts: handler must be idempotent,
+// and it hears the writes it makes itself on another's store — with
+// OwnStores, never a write its own handler makes.
 //
 //	var Content = Service.Watch("content", kit.Moderated, Screen)
+//	var Posts = Service.Watch("posts", kit.Moderated, Stamp, kit.OwnStores())
 //
 //go:noinline
 func (s *Service) Watch(name string, mark Mark, handler func(context.Context, WrittenEvent) error, opts ...SubscriptionConfigurer) *Watch {
-	o := subscriptionOptions{deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}}
+	o := subscriptionOptions{deliveryOptions: defaultDeliveries()}
 	for _, opt := range opts {
 		opt.subscriptionConfigure(&o)
 	}
-	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism}
+	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores}
 	w.kind, w.name, w.decl = model.KindSubscription, name, callerPos()
 	if p, _ := funcInfo(handler); p.file != "" {
 		w.body = &p
@@ -170,23 +178,40 @@ type watchRun struct {
 
 // feeders are the stores of a that feed w, in the order the app mounts
 // them: those whose entity holds a field with its mark, but its own
-// module's — kit's own are never among them.
+// module's — unless it hears its own (OwnStores) —; kit's own are never
+// among them.
 func (w *Watch) feeders(a *App) []feeder {
 	var out []feeder
 	for _, st := range a.productStores() {
 		ws, ok := st.(feeder)
-		if ok && st.base().svc.module != w.svc.module && len(markedFields(st, w.mark)) > 0 {
+		if ok && (w.ownStores || st.base().svc.module != w.svc.module) && len(markedFields(st, w.mark)) > 0 {
 			out = append(out, ws)
 		}
 	}
 	return out
 }
 
+// handlingKey marks the context of a watch's handler with its watch.
+type handlingKey struct{}
+
+// handling returns ctx marked as the context of w's handler: what the
+// handler writes in it is its own.
+func handling(ctx context.Context, w *Watch) context.Context {
+	return context.WithValue(ctx, handlingKey{}, w)
+}
+
+// ownWrite reports whether a write made in ctx is w's own handler's, which
+// a watch that hears its own module's stores never hears.
+func (w *Watch) ownWrite(ctx context.Context) bool {
+	h, _ := ctx.Value(handlingKey{}).(*Watch)
+	return w.ownStores && h == w
+}
+
 // describe says the watch as the graph draws it: a subscription with a mark,
 // the stores that feed it — each a declared delivers edge —, its attempts,
 // and on a runtime graph its dead letters.
 func (w *Watch) describe(a *App, out *model.Node) []model.Edge {
-	info := &model.SubscriptionInfo{Mark: string(w.mark), MaxDeliveries: w.maxDeliver, Parallelism: w.parallelism}
+	info := &model.SubscriptionInfo{Mark: string(w.mark), OwnStores: w.ownStores, MaxDeliveries: w.maxDeliver, Parallelism: w.parallelism}
 	out.Subscription = info
 	var edges []model.Edge
 	if a != nil {
@@ -240,13 +265,25 @@ func (s *StoreService[T]) setFeeds(ws []*Watch) {
 
 // notify tells the watches the store feeds that kit confirmed a write under
 // key — a deletion when deleted is set —, with the write's context: each
-// queues its notice. A store no watch hears pays this one load.
+// queues its notice, once the transaction the write runs in commits — a
+// rollback drops it —, at once outside any; a watch that hears its own
+// module's stores is not told of its own handler's write. A store no watch
+// hears pays this one load.
 func (s *StoreService[T]) notify(ctx context.Context, key string, deleted bool) {
 	feeds := s.feeds.Load()
 	if feeds == nil {
 		return
 	}
 	for _, w := range *feeds {
-		w.notice(ctx, s.id, key, deleted)
+		if w.ownWrite(ctx) {
+			continue
+		}
+		release := func() error {
+			w.notice(withoutUnit(ctx), s.id, key, deleted)
+			return nil
+		}
+		if !hold(ctx, heldEffect{node: w.id, release: release}) {
+			w.notice(ctx, s.id, key, deleted)
+		}
 	}
 }

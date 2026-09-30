@@ -48,7 +48,7 @@ func TestAnErasureTakesTheFormerValues(t *testing.T) {
 	ctx := t.Context()
 	must(t, Holders.Insert(ctx, Holder{ID: "h1", Email: "erase-me-1@x.dev", Nick: "n1"}))
 	must(t, Holders.Put(ctx, Holder{ID: "h1", Email: "erase-me-2@x.dev", Nick: "n2"}))
-	if _, err := KeeperErase.Call(ctx, Identities{IDs: []string{"erase-me-2@x.dev"}}); err != nil {
+	if _, err := KeeperErase.Dispatch(ctx, Identities{IDs: []string{"erase-me-2@x.dev"}}); err != nil {
 		t.Fatal(err)
 	}
 	if got := formerValues(t, "h1", "/email"); len(got) != 0 {
@@ -76,7 +76,7 @@ func TestAnExportCarriesTheFormerValues(t *testing.T) {
 	ctx := t.Context()
 	must(t, Holders.Insert(ctx, Holder{ID: "h1", Email: "a1@x.dev", Nick: "n1", Password: "$test$c2FsdA$aGFzaDE"}))
 	must(t, Holders.Put(ctx, Holder{ID: "h1", Email: "a2@x.dev", Nick: "n2", Password: "$test$c2FsdA$aGFzaDI"}))
-	data, err := KeeperExport.Call(ctx, Identities{IDs: []string{"a2@x.dev"}})
+	data, err := KeeperExport.Ask(ctx, Identities{IDs: []string{"a2@x.dev"}})
 	must(t, err)
 	if len(data.Stores) != 1 || len(data.Stores[0].Former) != 1 {
 		t.Fatalf("the export: %+v", data)

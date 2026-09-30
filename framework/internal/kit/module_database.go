@@ -37,10 +37,10 @@ func moduleTable(module string) string {
 	return strings.ReplaceAll(module, "-", "_") + "_migrations"
 }
 
-// migrationSets are the sets a database runs, in order: the modules' it
-// keeps, in the order they start, then the product's. kit's own set — its
-// document tables, under kit_migrations — comes with kit's SQL backend (ADR
-// 0004, step 2).
+// migrationSets are the sets a database runs after kit's own — its tables,
+// under kit_migrations, which kit resolves against its registry when the
+// database opens (store_sql_migrate.go) —, in order: the modules' it keeps,
+// in the order they start, then the product's.
 func (a *App) migrationSets(d *database) []migrationSet {
 	var out []migrationSet
 	for _, mm := range a.modules {
@@ -108,9 +108,6 @@ func (a *App) moduleMigrationProblems() []model.Diagnostic {
 		case 0:
 			out = append(out, diagnosticOf("warning", "", a.source(&m.decl), say("module.migrations-nowhere", "module", m.name)))
 		case 1:
-			if keepers[0].engine != nil && keepers[0].dialect() == sql.DialectSQLite {
-				out = append(out, diagnosticOf("error", "", a.source(&m.decl), say("database.sqlite-migrations", "name", keepers[0].name)))
-			}
 		default:
 			out = append(out, diagnosticOf("error", "", a.source(&m.decl),
 				say("module.migrations-twice", "module", m.name, "first", keepers[0].name, "second", keepers[1].name)))

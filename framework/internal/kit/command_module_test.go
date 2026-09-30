@@ -22,7 +22,7 @@ type LedgerEntry struct {
 
 var LedgerEntries = Ledgering.Store("entries", func(e LedgerEntry) string { return e.ID })
 
-var LedgerRecord = Ledgering.Command("record", LedgerRecordEntry).Expose("POST /entries/{id}")
+var LedgerRecord = Ledgering.Command("record", LedgerRecordEntry).Expose("POST /entries/{id}", kit.Anyone())
 
 var LedgerTotal = Ledgering.Query("total", LedgerSum)
 

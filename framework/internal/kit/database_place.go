@@ -1,12 +1,16 @@
 // Package kit — the placement of each store: which database keeps its data.
 package kit
 
-import "github.com/kitsunium/sdk/framework/model"
+import (
+	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/sql"
+)
 
 // Where a store's data is (ADR 0004): the most precise declaration wins — a
 // store kept by name, then its service, then the default database, the one
 // declared without Keeps —, and InMemory, on the app or on the store, wins
-// over all of them.
+// over all of them. A store apart from every transaction — kit's own store
+// of data keys — is never on a SQLite file: it stays in the data directory.
 
 // placement is where a store's data is, and which database keeps it.
 type placement struct {
@@ -22,33 +26,52 @@ type placement struct {
 type placementSource interface {
 	node
 	memoryOnly() bool
+	// apart reports whether the store is in no transaction (Store.apart).
+	apart() bool
 }
 
 // placementOf says where a store's data is. A store InMemory keeps its data
 // in memory and no database keeps it: a cache, unless a database keeps it by
-// name, which the declarations refuse.
+// name, which the declarations refuse. A store a database keeps lives on it
+// once it opens (store_sql.go), in dev without its URL in the data
+// directory.
 //
-// In this version of kit a store a database keeps stays in the data
-// directory: the SQL backend is ADR 0004's step 2, where placement chooses
-// the engine.
+// A store apart from every transaction is never on SQLite: kit's own store
+// of data keys, which kit.Keeps(kit.Privacy) would put there, stays in the
+// data directory. A SQLite file has one writer, and a data key is written
+// apart, on a connection of its own, while the write that needs it may hold
+// that writer — kit.Transact's transaction on the file, or the store's own
+// around an update —: the key would wait for it the file's busy timeout,
+// then fail.
 func (a *App) placementOf(s placementSource) placement {
-	p := placement{memory: a.opts.memory || s.memoryOnly() || a.dataDir == ""}
+	p := placement{memory: a.opts.memory || s.memoryOnly() || a.dataDir == "", db: a.keeperOf(s)}
+	if p.db != nil && s.apart() && p.db.dialect() == sql.DialectSQLite {
+		p.db = nil
+	}
+	return p
+}
+
+// keeperOf is the database that keeps s: the one that keeps it by name,
+// else — a cache kept by none — its service's, its module's, or the default
+// database.
+func (a *App) keeperOf(s placementSource) *database {
 	byName, byService, byModule, byDefault := a.keepersOf(s.base())
 	switch {
 	case byName != nil:
-		p.db = byName
+		return byName
 	case s.memoryOnly():
 		// A cache: no database keeps it.
+		return nil
 	case byService != nil:
-		p.db = byService
+		return byService
 	case byModule != nil:
-		p.db = byModule
+		return byModule
 	case !kitOwn(s.base().svc):
 		// The default database. kit's own services (ADR 0006's kit.Privacy)
 		// are never taken by it: they are placed by name only.
-		p.db = byDefault
+		return byDefault
 	}
-	return p
+	return nil
 }
 
 // keepersOf are the first database that keeps a store by name, the first
@@ -110,7 +133,8 @@ func safeKept(k Keeper) (named kept) {
 }
 
 // storesKeptBy counts the stores d keeps whose data is not in memory: the
-// ones this version of kit leaves in the data directory.
+// ones that live on it — or, in dev without its URL, in the data
+// directory.
 func (a *App) storesKeptBy(d *database) int {
 	n := 0
 	for _, s := range a.placedStores() {

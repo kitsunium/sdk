@@ -33,3 +33,27 @@ type (
 	// values, a personal or special one's redacted.
 	RecordHistory = core.RecordHistoryMessage
 )
+
+type (
+	// RecordVersion is one version of a record whose store keeps revisions
+	// (ADR 0007 §3): its number, when the write that made it ran, who made
+	// it and which command, and the record as it was.
+	RecordVersion = core.RecordVersionMessage
+)
+
+type (
+	// Edit is one change between two versions of a record, in RFC 6902's
+	// words: an add, a remove or a replace at a JSON pointer.
+	Edit = core.EditMessage
+)
+
+type (
+	// RecordVersions is a record's versions as the Studio's data view shows
+	// them (GET /_kit/api/revisions), and what changed between two.
+	RecordVersions = core.RecordVersionsMessage
+)
+
+type (
+	// ExportedVersions are the versions of one exported record.
+	ExportedVersions = core.ExportedVersionsMessage
+)

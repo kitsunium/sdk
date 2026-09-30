@@ -43,6 +43,7 @@ go_test(
         ":postgres",
         "//framework/kit",
         "//framework/kit/server",
+        "//framework/kit/storetest",
         "//framework/model",
         "//pkg/v1/errs",
         "//pkg/v1/secret",

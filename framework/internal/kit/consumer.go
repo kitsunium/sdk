@@ -84,3 +84,9 @@ func (c *consumer) deliver(ctx context.Context, d *queue.Delivery, from origin, 
 	}()
 	return handle(ctx, sp)
 }
+
+// defaultDeliveries are a consumer's delivery options until one is given:
+// defaultMaxDeliveries attempts, one message at a time.
+func defaultDeliveries() deliveryOptions {
+	return deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}
+}

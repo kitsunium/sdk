@@ -34,10 +34,12 @@ Rules:
 
 Each module is tested in its own directory, `go test -race ./...`. The
 engines' unit tests always run; the end-to-end ones (a kit app on the
-engine: migrations, two processes migrating together, `migrate` status, up
-and down, readiness through a proxy taken away and back, credentials that
-never leak, a rotated credential used by the next connection once
-`<name>-max-lifetime` retires the old one) run when `KIT_TEST_POSTGRES_URL`
+engine: migrations — kit's own set first, which makes the store's table —,
+two processes migrating together, `migrate` status, up and down, readiness
+through a proxy taken away and back, credentials that never leak, a rotated
+credential used by the next connection once `<name>-max-lifetime` retires
+the old one, and `kit/storetest`, the stores' conformance suite, each case
+on a fresh `kit_test`) run when `KIT_TEST_POSTGRES_URL`
 or `KIT_TEST_MYSQL_URL` names a server they may create and drop a database
 and users on — CI's service containers. Every statement they send, and
 every value they bind, is a constant (`server_test.go`): the database
@@ -51,4 +53,9 @@ KIT_TEST_POSTGRES_URL='postgres://postgres@127.0.0.1:5432/postgres?sslmode=disab
 KIT_TEST_MYSQL_URL='mysql://root@127.0.0.1:3306/mysql?tls=false' go test -race ./...                      # in mysql/
 ```
 
-SQLite needs no server: its tests always run.
+SQLite needs no server: its tests — the conformance suite among them —
+always run. The suite runs a record's revisions too (ADR 0007 §3: kept,
+pruned, restored, rolled back) on every engine, and
+`sqlite/revisions_test.go` runs them end to end on a file: versions sealed in
+`<table>___vs`, a hold on the same file read in the write's transaction, an
+erasure, a restart.

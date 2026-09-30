@@ -191,12 +191,16 @@ func (h *hub) record(s model.Span, root bool) {
 	end := s.Start.Add(time.Duration(s.Ms * float64(time.Millisecond)))
 	failed := s.Status == model.StatusError
 	h.mu.Lock()
-	c := h.nodes[s.Node]
-	if c == nil {
-		c = &counter{}
-		h.nodes[s.Node] = c
+	// A transaction is part of its node's run, not a run of its own: its
+	// span joins the trace and leaves the node's counters as they are.
+	if s.Op != model.OpTransaction {
+		c := h.nodes[s.Node]
+		if c == nil {
+			c = &counter{}
+			h.nodes[s.Node] = c
+		}
+		c.add(end, s.Ms, failed)
 	}
-	c.add(end, s.Ms, failed)
 	newEdge := h.countEdge(&s, end, failed)
 	if s.TraceID != "" {
 		h.keepSpan(&s, root)

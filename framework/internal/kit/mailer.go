@@ -213,6 +213,9 @@ func (s *Service) Mailer(name string, opts ...MailerConfigurer) *Mailer {
 // Send validates msg with the SDK's mail rules — a header carrying a line
 // break, an unusable address, an empty body are refused here, not at
 // delivery — and puts it in the outbox. It returns the message's outbox ID.
+// Inside a transaction ([Transact], a command's) the mail waits for the
+// commit — a rollback drops it —, and the ID returned at once is the one
+// the mail keeps.
 //
 // A message without a sender gets the mailer's ([From]); without a date, the
 // app's time; without a Message-ID, one made of its outbox ID, which every
@@ -249,18 +252,44 @@ func (m *Mailer) enqueue(ctx context.Context, msg mail.Message) (string, error) 
 	if spool == nil {
 		return "", Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
 	}
+	if unitOf(ctx) != nil {
+		// Minted now, kept by the mail once the transaction commits.
+		id := NewID("mail")
+		release := func() error {
+			m.mu.Lock()
+			spool := m.spool
+			m.mu.Unlock()
+			if spool == nil {
+				return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+			}
+			return m.spooled(spool.SendWithID(withoutUnit(context.WithoutCancel(ctx)), id, msg))
+		}
+		if hold(ctx, heldEffect{node: m.id, release: release}) {
+			markSpan(ctx, m.id, "held", "commit")
+			return id, nil
+		}
+	}
 	id, err := spool.Send(ctx, msg)
+	if err != nil {
+		return "", m.spooled(err)
+	}
+	return id, nil
+}
+
+// spooled is the spool's refusal of a mail in kit's words: a mail the
+// outbox cannot hold is the caller's to change, the rest kit's failure.
+func (m *Mailer) spooled(err error) error {
 	switch {
 	case err == nil:
-		return id, nil
+		return nil
 	case errors.Is(err, mail.SpoolClosed):
-		return "", Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
+		return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
 	case errs.HasReason(err, "MESSAGE_TOO_LARGE"):
-		return "", Invalid(fmt.Sprintf("the mail is larger than the outbox accepts (%s)", humanBytes(maxMailBytes))).Wrap(err)
+		return Invalid(fmt.Sprintf("the mail is larger than the outbox accepts (%s)", humanBytes(maxMailBytes))).Wrap(err)
 	case errors.Is(err, mail.SpooledMailUnencodable):
-		return "", failure(CodeMailEncode, "MAIL_ENCODE", "the mail cannot be encoded for the outbox", err, errs.String("mailer", m.id))
+		return failure(CodeMailEncode, "MAIL_ENCODE", "the mail cannot be encoded for the outbox", err, errs.String("mailer", m.id))
 	}
-	return "", failure(CodeMailQueue, "MAIL_QUEUE", "the mail could not be put in the outbox", err, errs.String("mailer", m.id))
+	return failure(CodeMailQueue, "MAIL_QUEUE", "the mail could not be put in the outbox", err, errs.String("mailer", m.id))
 }
 
 // annotate is what the spool keeps of a Send for its deliveries: the trace

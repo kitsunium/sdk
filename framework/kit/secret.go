@@ -47,3 +47,17 @@ func KeepVersions(n int) SecretOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.KeepVersions(n)
 }
+
+// Optional makes a provided secret one the product can do without — the key
+// of a feature that stays off while nobody gives it. A start where it is set
+// nowhere goes on; [Secret].Present says whether it is set now, and a use of
+// it while it is absent — [Secret].Value, Seal, Open, Sign or Verify —
+// answers an error errs.HasCode matches with [CodeSecretMissing]. It is read
+// where it lives at every use, as every provided secret is: given later —
+// `secrets set` in the environment's store, a new content in the file its
+// _FILE variable names —, it is found at its next use. A generated secret
+// is kit's to make and never absent: Optional with [Generated] is refused.
+func Optional() SecretOption {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.Optional()
+}

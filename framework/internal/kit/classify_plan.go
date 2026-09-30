@@ -11,6 +11,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/codec/jsonshape"
 )
 
@@ -37,12 +38,24 @@ var (
 // own rules, so a walk over a value follows it as deep as the value goes.
 type rules struct {
 	fields []fieldRule
+	// byName finds a field of fields by its JSON name, for a walk over a
+	// document rather than a value (seal_json.go).
+	byName map[string]*fieldRule
 	// elem are the rules of every element of a slice or an array, or every
 	// value of a map; nil when they hold nothing classified.
 	elem *rules
 	// warnings are the fields of this struct, promoted ones included, whose
-	// name and type read like personal data and whose tag gives no class.
+	// name and type read like personal data and whose tag gives no class —
+	// or gives secret, a credential's.
 	warnings []fieldWarning
+}
+
+// field is the field whose JSON name is name, or nil.
+func (r *rules) field(name []byte) *fieldRule {
+	if r == nil {
+		return nil
+	}
+	return r.byName[string(name)]
 }
 
 // fieldRule is one struct field a value walk visits.
@@ -267,15 +280,32 @@ func structRules(t reflect.Type, seen map[reflect.Type]*rules) *rules {
 	for _, f := range jsonshape.Of(t).Fields {
 		sf := t.FieldByIndex(f.Index)
 		tag := parseTag(f.Tag.Get("kit"))
-		if tag.effective() == "" && looksPersonal(sf.Type, f.Name, f.GoName) {
-			r.warnings = append(r.warnings, looksPersonalWarning(t, f.Index, f.GoName))
+		if w, ok := nameWarning(t, sf.Type, tag, f); ok {
+			r.warnings = append(r.warnings, w)
 		}
 		sub := buildRules(sf.Type, seen)
 		if tag.any() || sub != nil {
 			r.fields = append(r.fields, fieldRule{index: f.Index, name: f.Name, goName: f.GoName, owner: t, typ: sf.Type, tag: tag, sub: sub})
 		}
 	}
+	r.byName = make(map[string]*fieldRule, len(r.fields))
+	for i := range r.fields {
+		r.byName[r.fields[i].name] = &r.fields[i]
+	}
 	return r
+}
+
+// nameWarning is the warning the field f of struct t, of type ft, deserves
+// by its name: one unclassified that reads like personal data, one tagged
+// secret that reads so and says no credential.
+func nameWarning(t, ft reflect.Type, tag fieldTag, f jsonshape.Field) (fieldWarning, bool) {
+	switch class := tag.effective(); {
+	case class == "" && looksPersonal(ft, f.Name, f.GoName):
+		return looksPersonalWarning(t, f.Index, f.GoName), true
+	case class == model.ClassSecret && secretLooksPersonal(ft, f.Name, f.GoName):
+		return secretPersonalWarning(t, f.Index, f.GoName), true
+	}
+	return fieldWarning{}, false
 }
 
 // flatten lists the classified members under r, as JSON pointers under
@@ -326,6 +356,12 @@ func (p *classPlan) sensitive() bool {
 // personal reports whether the type holds data about a person.
 func (p *classPlan) personal() bool {
 	return slices.ContainsFunc(p.members, func(m member) bool { return m.tag.personal() })
+}
+
+// sealsAny reports whether the type holds a member kit seals at rest: a
+// personal, special or secret one, or the subject, that is not plain.
+func (p *classPlan) sealsAny() bool {
+	return slices.ContainsFunc(p.members, func(m member) bool { return m.tag.sealedAtRest() })
 }
 
 // member returns the member at pointer, or nil.

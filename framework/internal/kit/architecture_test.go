@@ -101,8 +101,10 @@ func TestArchitectureFollowsTheDeclarations(t *testing.T) {
 	if l := linkOf(arch, spa.ID, "container:process"); l == nil || !slices.Equal(l.Nodes, []string{"shop/endpoint/Search"}) {
 		t.Errorf("spa → process names the endpoints its pages called: %+v", l)
 	}
-	if l := linkOf(arch, "system:clients", "container:process"); l == nil || !slices.Contains(l.Nodes, "shop/endpoint/CreateItem") || slices.Contains(l.Nodes, "shop/endpoint/Count") {
-		t.Errorf("clients → process lists the public endpoints: %+v", l)
+	g := app.Graph()
+	routeless := func(id string) bool { n := g.Node(id); return n == nil || n.Endpoint == nil || n.Endpoint.Path == "" }
+	if l := linkOf(arch, "system:clients", "container:process"); l == nil || !slices.Contains(l.Nodes, "shop/endpoint/CreateItem") || slices.ContainsFunc(l.Nodes, routeless) {
+		t.Errorf("clients → process lists the routed endpoints: %+v", l)
 	}
 	if l := linkOf(arch, "container:process", "container:volume"); l == nil || l.Technology == "" {
 		t.Errorf("process → volume %+v", l)

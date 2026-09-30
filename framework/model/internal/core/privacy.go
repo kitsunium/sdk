@@ -22,7 +22,7 @@ const (
 // The gaps a register lists for a store that keeps personal data.
 const (
 	GapPurpose   = "purpose"   // no kit.Purpose
-	GapRetention = "retention" // no retention: its personal data is kept forever
+	GapRetention = "retention" // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   = "subject"   // no subject field: no person can have their records
 )
 
@@ -36,13 +36,19 @@ const (
 	// MeasureJournal: every export, erasure, deletion and hold is journaled,
 	// each entry chained to the previous one by SHA-256.
 	MeasureJournal = "journal"
-	// MeasureNotSealed: the store's classified members are kept in clear at
-	// rest, until kit's sealing lands (ADR 0006, step 3).
+	// MeasureNotSealed: the store's classified members are in clear: it is
+	// kept in memory, where nothing is at rest, or its members are plain.
 	MeasureNotSealed = "not-sealed"
 	// MeasureSealed: its classified members are sealed at rest, AES-256-GCM
-	// under per-subject data keys (ADR 0006, step 3).
+	// under per-subject data keys a person's erasure destroys (ADR 0006 §4).
 	MeasureSealed = "sealed"
 )
+
+// SealedPlaceholder is what the Studio receives in place of a value kit
+// keeps sealed at rest — a record's member in the data browser, a former
+// value —: never the value, nor its box (ADR 0006 §9). A value it opens and
+// may not show is "[redacted]".
+const SealedPlaceholder = "[sealed]"
 
 // The operations of the privacy journal.
 const (
@@ -87,6 +93,19 @@ type StoreDataMessage struct {
 	// Former are the former values of the records' fields that keep them
 	// (ADR 0007), record by record; a secret field's are left out.
 	Former []RecordFormerMessage `json:"former,omitempty" kit:"personal"`
+	// Versions are the versions of the records a store with revisions keeps
+	// (ADR 0007 §3), record by record, their secret members left out.
+	Versions []ExportedVersionsMessage `json:"versions,omitempty" kit:"personal"`
+}
+
+// ExportedVersionsMessage are the versions of one exported record, as a
+// StoreDataMessage carries them beside its records.
+type ExportedVersionsMessage struct {
+	// Record is the record's position in its StoreData's Records.
+	Record int `json:"record"`
+	// Versions are its versions, newest first — the record as it is now
+	// first —, each without its secret members.
+	Versions []RecordVersionMessage `json:"versions"`
 }
 
 // ErasureMessage is what kit.Erase did, store by store.
@@ -164,6 +183,10 @@ type RegisterStoreMessage struct {
 	Erase     string `json:"erase,omitempty"`
 	Delete    string `json:"delete,omitempty"`
 	HeldUntil string `json:"heldUntil,omitempty"`
+	// ByProduct is point (f) when the product keeps the store's retention
+	// itself (kit.RetentionByProduct), in its own words: no retention gap,
+	// and no subject gap either.
+	ByProduct *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// Security is point (g): the measures kit takes.
 	Security []string `json:"security,omitempty"`
 	// Gaps are the Gap constants the store lacks.

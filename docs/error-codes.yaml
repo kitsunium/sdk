@@ -2742,6 +2742,42 @@ codes:
     const: CodeScopeUnknown
     hex: "0x00_04_02_3C"
     package: framework/internal/kit
+  - code: "0.4.2.61"
+    const: CodeSealKey
+    hex: "0x00_04_02_3D"
+    package: framework/internal/kit
+  - code: "0.4.2.62"
+    const: CodeSealWrite
+    hex: "0x00_04_02_3E"
+    package: framework/internal/kit
+  - code: "0.4.2.63"
+    const: CodeSealOpen
+    hex: "0x00_04_02_3F"
+    package: framework/internal/kit
+  - code: "0.4.2.64"
+    const: CodeSealRewrap
+    hex: "0x00_04_02_40"
+    package: framework/internal/kit
+  - code: "0.4.2.65"
+    const: CodeSealShred
+    hex: "0x00_04_02_41"
+    package: framework/internal/kit
+  - code: "0.4.2.66"
+    const: CodeTransactionSpan
+    hex: "0x00_04_02_42"
+    package: framework/internal/kit
+  - code: "0.4.2.67"
+    const: CodeRevisionRead
+    hex: "0x00_04_02_43"
+    package: framework/internal/kit
+  - code: "0.4.2.68"
+    const: CodeRevisionWrite
+    hex: "0x00_04_02_44"
+    package: framework/internal/kit
+  - code: "0.4.2.69"
+    const: CodeRevisionDecode
+    hex: "0x00_04_02_45"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"

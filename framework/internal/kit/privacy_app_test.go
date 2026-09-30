@@ -23,10 +23,13 @@ type privacyMember struct {
 func (m privacyMember) key() string { return m.ID }
 
 // kit's own stores are placed by name only: the default database never
-// takes them, and kit.Keeps(kit.Privacy) places them like any service.
+// takes them, and kit.Keeps(kit.Privacy) places them like any service. The
+// secrets live in memory: data-key is pinned, so that the sealed members
+// open at the next start.
 func TestKitsOwnStoresArePlacedByName(t *testing.T) {
 	needsFileStore(t)
 	t.Setenv("KIT_SECRETS", "memory")
+	t.Setenv("KIT_DATA_KEY", "a data key of exactly 32 bytes..")
 	t.Setenv("LEDGER_DATABASE_URL", verifiedURL())
 	t.Setenv("LEDGER_VAULT_URL", verifiedURL())
 	for keeps, want := range map[bool]string{false: "", true: "vault"} {
@@ -43,10 +46,11 @@ func TestKitsOwnStoresArePlacedByName(t *testing.T) {
 		run(t, app)
 		g := app.Graph()
 		got := map[string]string{}
-		for _, id := range []string{"people/store/members", "kit.privacy/store/holds", "kit.privacy/store/journal"} {
+		for _, id := range []string{"people/store/members", "kit.privacy/store/keys", "kit.privacy/store/holds", "kit.privacy/store/journal"} {
 			got[id] = g.Node(id).Store.Database
 		}
-		if exp := map[string]string{"people/store/members": "database", "kit.privacy/store/holds": want, "kit.privacy/store/journal": want}; !maps.Equal(got, exp) {
+		exp := map[string]string{"people/store/members": "database", "kit.privacy/store/keys": want, "kit.privacy/store/holds": want, "kit.privacy/store/journal": want}
+		if !maps.Equal(got, exp) {
 			t.Errorf("Keeps(kit.Privacy) %v: %v, want %v", keeps, got, exp)
 		}
 	}

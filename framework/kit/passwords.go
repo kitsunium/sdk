@@ -38,3 +38,15 @@ func NotReused(n int) PasswordOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.NotReused(n)
 }
+
+// NotCommon refuses a password among the ten thousand most common ones —
+// the SDK's password.IsCommon, which compares them without regard to case —:
+// the blocklist NIST SP 800-63B-4 requires a verifier to check, beyond the
+// three thousand OWASP ASVS 5.0 (6.2.4) asks for. Every policy checks it (ADR
+// 0007 §2: on by default once the SDK has the list); the option says so
+// where a policy is declared. Beside NIST's fifteen characters the list has
+// little left to refuse; beside a shorter MinLength, it matters.
+func NotCommon() PasswordOption {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.NotCommon()
+}

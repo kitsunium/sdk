@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"path"
 	"reflect"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"sync"
@@ -165,7 +166,11 @@ func (s *Service) Workflow[E any, S comparable](name string, store *StoreService
 	s.add(w, true)
 	if store == nil || state == nil {
 		s.problem(w.decl, w.id, "workflow.needs", "name", name)
+		return w
 	}
+	// The state is the workflow's: a restore of a version keeps it, and a
+	// transition that changes only it makes no version (ADR 0007 §3).
+	store.states = append(store.states, w.stateField)
 	return w
 }
 
@@ -319,13 +324,34 @@ func (w *WorkflowService[E, S]) Start(ctx context.Context, e E) (E, error) {
 	out, err := e, notRunning(&w.nodeBase)
 	if m := w.engine(); m != nil {
 		key := w.store.keyOf(e)
-		out, err = m.Start(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), e)
+		err = w.inTransaction(ctx, a, func(ctx context.Context) error {
+			var err error
+			out, err = m.Start(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), e)
+			return err
+		})
 		if err != nil {
 			out, err = e, w.refusal(ctx, a, err, key, statemachine.CreateEvent, e)
 		}
 	}
 	sp.end(err)
 	return out, err
+}
+
+// inTransaction runs a transition Start or Fire asks for in one transaction
+// (ADR 0004) — the caller's when it runs in one, a savepoint of it —: the
+// entity, what its OnEnter hooks wrote and its record commit together, and
+// its OnTransition hooks run once the outermost transaction committed. On
+// the data directory and in memory the transaction takes the writer turn
+// before the engine takes the entity: a write is its outermost lock.
+func (w *WorkflowService[E, S]) inTransaction(ctx context.Context, a *App, run func(context.Context) error) error {
+	return transact(ctx, a, func(ctx context.Context) error {
+		if w.store.local() && !w.store.apart() {
+			if err := unitOf(ctx).claimLocal(ctx, a, w.store.id); err != nil {
+				return err
+			}
+		}
+		return run(ctx)
+	})
 }
 
 // Fire moves the entity with the given key along the event transition
@@ -352,7 +378,12 @@ func (w *WorkflowService[E, S]) fire(ctx context.Context, a *App, key, event, ca
 		var zero E
 		return zero, notRunning(&w.nodeBase)
 	}
-	e, err := m.Fire(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), key, event)
+	var e E
+	err := w.inTransaction(ctx, a, func(ctx context.Context) error {
+		var err error
+		e, err = m.Fire(context.WithValue(ctx, transitionOf{}, firing{caller: caller, key: key}), key, event)
+		return err
+	})
 	if err != nil {
 		return e, w.refusal(ctx, a, err, key, event, e)
 	}
@@ -658,48 +689,94 @@ func changeOf[E any, S comparable](c statemachine.Change[E, S]) ChangeEvent[E, S
 	}
 }
 
+// declare declares the transition to the SDK's engine: a guard's, an
+// instant's, a timer's — its delay as its setting holds it in this run — or
+// an event's.
+func (x *arrow[E, S]) declare(def *statemachine.Definition[E, S]) {
+	switch {
+	case x.guard != nil:
+		def.When(x.event, x.from, x.to, x.guard)
+	case x.instant != nil:
+		def.At(x.event, x.from, x.to, x.instant)
+	case x.trigger == model.TriggerTimer:
+		def.After(x.event, x.wait(), x.from, x.to)
+	default:
+		def.On(x.event, x.from, x.to)
+	}
+}
+
 // definition declares the workflow to the SDK's engine: its states, its
 // transitions — a timer's delay as its setting holds it in this run — and
 // its hooks, kit's own OnTransition hook first.
 func (w *WorkflowService[E, S]) definition(a *App) *statemachine.Definition[E, S] {
 	def := statemachine.Define(w.state).Initial(w.initial)
 	for _, x := range w.arrows {
-		switch {
-		case x.guard != nil:
-			def.When(x.event, x.from, x.to, x.guard)
-		case x.instant != nil:
-			def.At(x.event, x.from, x.to, x.instant)
-		case x.trigger == model.TriggerTimer:
-			def.After(x.event, x.wait(), x.from, x.to)
-		default:
-			def.On(x.event, x.from, x.to)
-		}
+		x.declare(def)
 	}
 	for _, st := range w.order {
 		for _, h := range w.enter[st] {
 			def.OnEnter(st, h.fn)
 		}
 	}
-	def.OnTransition(func(_ context.Context, c statemachine.Change[E, S]) error {
-		w.transitioned(a, c)
+	// A transition runs in a transaction: its hooks wait for the commit,
+	// kit's own — the Studio's events — as the product's.
+	def.OnTransition(func(ctx context.Context, c statemachine.Change[E, S]) error {
+		if !hold(ctx, heldEffect{node: w.id, release: func() error { w.transitioned(a, c); return nil }, inside: true}) {
+			w.transitioned(a, c)
+		}
 		return nil
 	})
 	for _, h := range w.after {
-		def.OnTransition(afterHook(h.fn))
+		def.OnTransition(w.heldHook(a, h.fn))
 	}
 	return def
 }
 
-// observe makes each transition the engine's loop fires a span of its own:
-// the instance, and what triggered it. A transition that lost a race — its
-// entity deleted meanwhile — is not a failure.
+// heldHook is a product's OnTransition hook fn as the engine runs it: held
+// until the transition's transaction commits.
+func (w *WorkflowService[E, S]) heldHook(a *App, fn func(context.Context, ChangeEvent[E, S]) error) func(context.Context, statemachine.Change[E, S]) error {
+	return func(ctx context.Context, c statemachine.Change[E, S]) error {
+		if hold(ctx, heldEffect{node: w.id, release: func() error { w.afterCommit(ctx, a, fn, c); return nil }}) {
+			return nil
+		}
+		return fn(ctx, changeOf(c))
+	}
+}
+
+// afterCommit runs an OnTransition hook the transition's transaction held,
+// once it committed: its error, or its panic, is reported as the engine
+// reports a hook's, and the transition stands.
+func (w *WorkflowService[E, S]) afterCommit(ctx context.Context, a *App, fn func(context.Context, ChangeEvent[E, S]) error, c statemachine.Change[E, S]) {
+	ctx = withoutUnit(ctx)
+	fields := []errs.Field{errs.String("hook", "on-transition"), errs.String("event", c.Event), errs.String("key", c.Key)}
+	defer func() {
+		if p := recover(); p != nil {
+			w.report(ctx, a, errs.Wrap(statemachine.HookPanicked, errs.WrapParams{}, append(fields,
+				errs.String("panic", fmt.Sprint(p)), errs.String("stack", string(debug.Stack())))...))
+		}
+	}()
+	if err := fn(ctx, changeOf(c)); err != nil {
+		w.report(ctx, a, errors.Join(errs.Wrap(statemachine.HookFailed, errs.WrapParams{}, fields...), err))
+	}
+}
+
+// observe makes each transition the engine's loop fires a span of its own —
+// the instance, and what triggered it — and one transaction (ADR 0004): the
+// entity, what its OnEnter hooks wrote and its record commit together when
+// the engine says the transition stood, and its OnTransition hooks run once
+// they did. A transition that lost a race — its entity deleted meanwhile —
+// is not a failure.
 func (w *WorkflowService[E, S]) observe(a *App) func(context.Context, statemachine.Firing[S]) (context.Context, func(error)) {
 	return func(ctx context.Context, f statemachine.Firing[S]) (context.Context, func(error)) {
 		tctx, sp := a.begin(ctx, &spanStart{node: w.id, label: f.Event, op: model.OpTransition, name: f.Event})
 		sp.attr("instance", f.Key)
 		sp.attr("trigger", kitTrigger(f.Trigger))
 		tctx = context.WithValue(tctx, transitionOf{}, firing{key: f.Key})
+		tctx, tx := beginTransaction(tctx, a)
 		return tctx, func(err error) {
+			if cerr := tx.finish(tctx, err); err == nil {
+				err = cerr
+			}
 			if errors.Is(err, statemachine.EntityMissing) {
 				err = nil
 			}
@@ -817,7 +894,7 @@ func wakeReason(wake statemachine.Wake) string {
 // forgotten.
 func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
 	cfg := &statemachine.Config[E, S]{
-		Store: storePort[E]{s: w.store},
+		Store: storePort[E]{s: w.store, state: w.stateField()},
 		Clock: a.clock,
 		Actor: func(ctx context.Context) string {
 			f, _ := ctx.Value(transitionOf{}).(firing)
@@ -830,7 +907,14 @@ func (w *WorkflowService[E, S]) start(ctx context.Context, a *App) error {
 		Backoff:    loopBackoff,
 		MaxHistory: maxHistory,
 	}
-	if a.data != nil && !w.store.inMemory {
+	switch r := a.databaseOf(w.store); {
+	case r != nil:
+		j, err := w.openSQLJournal(a, r)
+		if err != nil {
+			return err
+		}
+		cfg.Journal = j
+	case a.data != nil && !w.store.inMemory:
 		cfg.Journal = &workflowJournal[E, S]{w: w, data: a.data, file: path.Join(w.svc.name, w.name+".workflow.json")}
 	}
 	// The engine is set before a write can reach it: a write between its
@@ -978,9 +1062,4 @@ func (x *arrow[E, S]) info(a *App) model.TransitionInfo {
 // declares it, which is how a product gets one.
 func NewWorkflowService[E any, S comparable](store *StoreService[E], state func(*E) *S) *WorkflowService[E, S] {
 	return &WorkflowService[E, S]{store: store, state: state, enter: map[S][]hook[E]{}}
-}
-
-// afterHook adapts an OnTransition hook to the engine's change.
-func afterHook[E any, S comparable](fn func(context.Context, ChangeEvent[E, S]) error) func(context.Context, statemachine.Change[E, S]) error {
-	return func(ctx context.Context, c statemachine.Change[E, S]) error { return fn(ctx, changeOf(c)) }
 }

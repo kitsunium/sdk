@@ -49,9 +49,10 @@ var Lifecycle = Service.Workflow("lifecycle", Todos, func(t *Todo) *Status { ret
 	After("auto-archive", 2*time.Minute, Done, Archived).
 	OnTransition(announce)
 
-var _ = Service.Endpoint("POST /todos/{id}/complete", Complete)
+var Complete = Service.Command("complete", complete).
+	Expose("POST /todos/{id}/complete", kit.Anyone())
 
-func Complete(ctx context.Context, in ByID) (Todo, error) {
+func complete(ctx context.Context, in ByID) (Todo, error) {
 	return Lifecycle.Fire(ctx, in.ID, "complete")
 }
 ```
@@ -70,8 +71,10 @@ The values a product declares are also its description. [App](<#App>).Graph retu
 
 ### Building blocks
 
-- [Service](<#Service>).Endpoint: a typed HTTP endpoint. The request is decoded strictly — path, query and header fields by tag, the rest from a JSON body — validated from its \`validate\` tags, then run through the endpoint's mechanics \([RateLimit](<#RateLimit>), [RateLimitPerClient](<#RateLimitPerClient>), [Timeout](<#Timeout>), [Bulkhead](<#Bulkhead>)\). [Endpoint](<#Endpoint>).Call runs it in\-process from another building block.
-- [Service](<#Service>).Store: a typed, keyed collection, persisted atomically when the app has a data directory.
+- [Service](<#Service>).Command and [Service](<#Service>).Query: the product's operations — a command changes something and runs in one transaction, a query reads. Each is internal until it is exposed: the code that needs it runs it with [Command](<#Command>).Dispatch or [Query](<#Query>).Ask, which is how one service reaches another. [Command](<#Command>).Expose and [Query](<#Query>).Expose give it a route, which says who may run it: the operation's permission \([Command](<#Command>).Allow\) or rule \([Command](<#Command>).Authorize\), or a marker that it is open on purpose — [Anyone](<#Anyone>), [AnyUser](<#AnyUser>). The start refuses an exposure that says none.
+- [Service](<#Service>).Endpoint: a typed HTTP endpoint, for what HTTP itself is about — a webhook a third party calls. The request is decoded strictly — path, query and header fields by tag, the rest from a JSON body — validated from its \`validate\` tags, then run through the endpoint's mechanics \([RateLimit](<#RateLimit>), [RateLimitPerClient](<#RateLimitPerClient>), [Timeout](<#Timeout>), [Bulkhead](<#Bulkhead>)\). [Endpoint](<#Endpoint>).Call runs it in\-process; a port calls its implementation \([Service](<#Service>).Implement\) so.
+- [Service](<#Service>).Store: a typed, keyed collection, persisted atomically when the app has a data directory, or in a table of the database that keeps it.
+- [Transact](<#Transact>): one transaction — what it writes commits together, what it publishes, mails or dispatches leaves at the commit.
 - [Service](<#Service>).Topic and [Service](<#Service>).Subscribe: asynchronous messages, delivered at least once to every subscription, retried, dead\-lettered.
 - [Service](<#Service>).Workflow: a state machine over a store — event transitions fired by code, timer and guard transitions fired by the daemon's own loop, hooks on entry and after every transition.
 - [Service](<#Service>).Every and [Service](<#Service>).Cron: scheduled jobs.
@@ -79,7 +82,7 @@ The values a product declares are also its description. [App](<#App>).Graph retu
 - [Service](<#Service>).Listen: an inbound port that is not HTTP — a private socket on this machine speaking a versioned contract \(pkg/v1/ipc\).
 - [Service](<#Service>).CLI: a short command\-line command, run once by [App](<#App>).Main.
 
-The app, the composition root, says where the data lives: [Database](<#Database>) declares a database on an engine module the product's main imports — github.com/kitsunium/sdk/framework/connectors/postgres and its siblings, the only code that imports a driver — and [Keeps](<#Keeps>) which stores it keeps. A service never names a database: its handle is its store.
+The app, the composition root, says where the data lives: [Database](<#Database>) declares a database on an engine module the product's main imports — github.com/kitsunium/sdk/framework/connectors/postgres and its siblings, the only code that imports a driver — and [Keeps](<#Keeps>) which stores it keeps. A service never names a database: its handle is its store, which runs on the SDK's document store over SQL there, a table per store.
 
 Declaring never fails: a mistake is recorded with its position and [App](<#App>).Start reports every one at once \([DiagnosticsError](<#DiagnosticsError>)\).
 
@@ -98,6 +101,8 @@ An app has a process profile \([Profile](<#Profile>)\): a server \(the default\)
 Package kit — endpoints: an HTTP route and the operation it serves.
 
 Package kit — the errors a product returns to its callers, and their wire mapping.
+
+Package kit — exposures: an operation an endpoint serves over HTTP, and who may run it.
 
 Package kit — reading a record's former values.
 
@@ -143,6 +148,8 @@ Package kit — the HTTP request and response an endpoint can reach.
 
 Package kit — retention: how long a store keeps its personal data.
 
+Package kit — revisions: a record keeps its versions, diffed and restored.
+
 Package kit — binaries and their process roles: one executable, several Apps, and the versioned contracts between them \(D22\).
 
 Package kit — scopes: the parts of a singleton's lock or of a socket's path that are only known at the start — the user, the executable, a configuration directory —, so one declaration keeps one process per user, per installed copy or per configuration.
@@ -164,6 +171,8 @@ Package kit — stores: a typed, keyed collection of entities.
 Package kit — telemetry: the numbers a product reports, exported on a private socket when the deployment asks for them \(ADR 0149\).
 
 Package kit — topics and subscriptions: asynchronous messages of one type.
+
+Package kit — transactions: what a unit of work writes commits together, and what it sends leaves at its commit.
 
 Package kit — watches: how a module hears the writes of a product's marked fields.
 
@@ -199,6 +208,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [func SetCookie\(ctx context.Context, c \*http.Cookie\)](<#SetCookie>)
 - [func SocketPathFor\(product, service, name string, scopes ...Scope\) \(string, error\)](<#SocketPathFor>)
 - [func Stop\(ctx context.Context\) bool](<#Stop>)
+- [func Transact\(ctx context.Context, fn func\(context.Context\) error\) error](<#Transact>)
 - [func UserAgent\(ctx context.Context\) string](<#UserAgent>)
 - [func WithUser\[D any\]\(ctx context.Context, uid UID, data D\) context.Context](<#WithUser>)
 - [type Activity](<#Activity>)
@@ -237,6 +247,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type Change](<#Change>)
 - [type Command](<#Command>)
 - [type CommandOption](<#CommandOption>)
+  - [func NoTransaction\(\) CommandOption](<#NoTransaction>)
   - [func Queued\(\) CommandOption](<#Queued>)
 - [type DatabaseOption](<#DatabaseOption>)
   - [func Keeps\(things ...Keepable\) DatabaseOption](<#Keeps>)
@@ -246,12 +257,12 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func MaxDeliveries\(n int\) DeliveryOption](<#MaxDeliveries>)
   - [func Parallelism\(n int\) DeliveryOption](<#Parallelism>)
 - [type DiagnosticsError](<#DiagnosticsError>)
+- [type Edit](<#Edit>)
 - [type Empty](<#Empty>)
 - [type Endpoint](<#Endpoint>)
 - [type EndpointOption](<#EndpointOption>)
   - [func MaxBody\(bytes int64\) EndpointOption](<#MaxBody>)
   - [func Name\(name string\) EndpointOption](<#Name>)
-  - [func Private\(\) EndpointOption](<#Private>)
 - [type Engine](<#Engine>)
 - [type Erasure](<#Erasure>)
   - [func Erase\(ctx context.Context, reason string, ids ...string\) \(Erasure, error\)](<#Erase>)
@@ -262,6 +273,9 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func NotFound\(message string\) \*Error](<#NotFound>)
   - [func Unauthenticated\(message string\) \*Error](<#Unauthenticated>)
   - [func Unavailable\(message string\) \*Error](<#Unavailable>)
+- [type ExposeOption](<#ExposeOption>)
+  - [func AnyUser\(\) ExposeOption](<#AnyUser>)
+  - [func Anyone\(\) ExposeOption](<#Anyone>)
 - [type FieldRef](<#FieldRef>)
 - [type Former](<#Former>)
 - [type Frontend](<#Frontend>)
@@ -299,6 +313,7 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func Timeout\(d time.Duration\) OperationOption](<#Timeout>)
 - [type PasswordOption](<#PasswordOption>)
   - [func MinLength\(n int\) PasswordOption](<#MinLength>)
+  - [func NotCommon\(\) PasswordOption](<#NotCommon>)
   - [func NotReused\(n int\) PasswordOption](<#NotReused>)
 - [type PasswordPolicy](<#PasswordPolicy>)
 - [type PersonalData](<#PersonalData>)
@@ -310,6 +325,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type QueryOption](<#QueryOption>)
 - [type Records](<#Records>)
   - [func RecordsOf\(ctx context.Context, store string\) \(Records, error\)](<#RecordsOf>)
+- [type Revision](<#Revision>)
 - [type Routine](<#Routine>)
 - [type Scope](<#Scope>)
   - [func PerEnv\(name, fallback string\) Scope](<#PerEnv>)
@@ -317,6 +333,7 @@ Package kit — workflows: a state machine over the entities of one store.
 - [type SecretOption](<#SecretOption>)
   - [func Generated\(bytes int\) SecretOption](<#Generated>)
   - [func KeepVersions\(n int\) SecretOption](<#KeepVersions>)
+  - [func Optional\(\) SecretOption](<#Optional>)
   - [func RotateEvery\(d time.Duration\) SecretOption](<#RotateEvery>)
 - [type Service](<#Service>)
   - [func NewService\(name, doc string\) \*Service](<#NewService>)
@@ -339,9 +356,12 @@ Package kit — workflows: a state machine over the entities of one store.
   - [func Index\[T any\]\(name string, keys func\(T\) \[\]string\) StoreOption](<#Index>)
   - [func Purpose\(text string\) StoreOption](<#Purpose>)
   - [func ReadModel\(\) StoreOption](<#ReadModel>)
+  - [func RetentionByProduct\(limits string\) StoreOption](<#RetentionByProduct>)
+  - [func Revisions\(n int\) StoreOption](<#Revisions>)
   - [func Unique\[T any\]\(name string, key func\(T\) string\) StoreOption](<#Unique>)
 - [type Subscription](<#Subscription>)
 - [type SubscriptionOption](<#SubscriptionOption>)
+  - [func OwnStores\(\) SubscriptionOption](<#OwnStores>)
 - [type Topic](<#Topic>)
 - [type UID](<#UID>)
   - [func UserID\(ctx context.Context\) \(UID, bool\)](<#UserID>)
@@ -514,6 +534,9 @@ const (
     // CodeDatabaseConfig is CodeDatabaseConfig.
     CodeDatabaseConfig errs.Code = ikit.CodeDatabaseConfig
 
+    // CodeTransactionSpan is CodeTransactionSpan.
+    CodeTransactionSpan errs.Code = ikit.CodeTransactionSpan
+
     // Privacy (ADR 0006).
     CodePrivacyKey errs.Code = ikit.CodePrivacyKey
 
@@ -552,6 +575,30 @@ const (
 
     // Watches (ADR 0008).
     CodeWatchQueue errs.Code = ikit.CodeWatchQueue
+
+    // Sealing at rest (ADR 0006, step 3).
+    CodeSealKey errs.Code = ikit.CodeSealKey
+
+    // CodeSealWrite is CodeSealWrite.
+    CodeSealWrite errs.Code = ikit.CodeSealWrite
+
+    // CodeSealOpen is CodeSealOpen.
+    CodeSealOpen errs.Code = ikit.CodeSealOpen
+
+    // CodeSealRewrap is CodeSealRewrap.
+    CodeSealRewrap errs.Code = ikit.CodeSealRewrap
+
+    // CodeSealShred is CodeSealShred.
+    CodeSealShred errs.Code = ikit.CodeSealShred
+
+    // Revisions (ADR 0007 §3).
+    CodeRevisionRead errs.Code = ikit.CodeRevisionRead
+
+    // CodeRevisionWrite is CodeRevisionWrite.
+    CodeRevisionWrite errs.Code = ikit.CodeRevisionWrite
+
+    // CodeRevisionDecode is CodeRevisionDecode.
+    CodeRevisionDecode errs.Code = ikit.CodeRevisionDecode
 
     // The framework's own signals and refusals, typed since the move into the
     // SDK (rule 2: no fmt.Errorf, no errors.New in production code).
@@ -803,6 +850,35 @@ func Stop(ctx context.Context) bool
 ```
 
 Stop asks the app ctx runs in to end its run: Run returns as it does on a signal, its stop draining every component — a daemon told "stop" by its client, on its listener, ends itself so. It returns at once, before the stop; it reports false when ctx runs in no app — a handler's, a loop's, a command's context does — or the app does not run.
+
+<a name="Transact"></a>
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/framework/kit/transact.go#L52>)
+
+```go
+func Transact(ctx context.Context, fn func(context.Context) error) error
+```
+
+Transact runs fn in one transaction and returns fn's error: nil commits what fn wrote, an error undoes it — a panic too, which then continues.
+
+```
+err := kit.Transact(ctx, func(ctx context.Context) error {
+	if _, err := Cases.Update(ctx, id, closeCase); err != nil {
+		return err // what this function wrote is undone
+	}
+	if err := Decisions.Insert(ctx, d); err != nil {
+		return err
+	}
+	return Changes.Publish(ctx, Closed{ID: id}) // held: queued after the commit
+})
+```
+
+A transaction belongs to one database: the one its first store call reaches — at its first call on a database, at its first write on the data directory, which counts as one, memory with it. Inside it, a store of another database is read as usual; writing one is refused \([Invalid](<#Invalid>), [CodeTransactionSpan](<#WireInvalid>)\). A Transact inside another is a savepoint: its failure undoes its own writes, and the outer transaction goes on if its caller handles the error.
+
+What leaves the process waits for the outermost commit: a topic's publish, a queued command's dispatch, a mail — whose outbox ID [Mailer](<#Mailer>).Send returns at once —, a watch's notice, the store's write hooks that wake workflows and loops, a workflow's OnTransition hooks. Each is checked when it is made, so a caller's mistake returns to the caller; a rollback drops them, and a savepoint's rollback its own. One a queue refuses after the commit is logged and reported, and the commit stands; a process that dies between the commit and the release loses what was held.
+
+On a database the transaction is the database's own, at its default isolation. On the data directory and in memory kit keeps its own: it takes the data's writer turn — one transaction at a time; a write outside any waits for it, and such writes share the turn among themselves —, its writes land at once, and an error writes each entity's previous value back, newest first. It is atomic against an error, not against a crash, and a reader may see a write before its commit. A store kept in memory by [InMemory](<#InMemory>) — a cache — is in no transaction: its writes land and stay.
+
+A command's handler runs in one already \([NoTransaction](<#NoTransaction>) opts out\), and so does a workflow's transition.
 
 <a name="UserAgent"></a>
 ## func [UserAgent](<https://github.com/kitsunium/sdk/blob/main/framework/kit/request.go#L45>)
@@ -1205,6 +1281,15 @@ CommandOption configures a command: [Queued](<#Queued>); the options every opera
 type CommandOption = ikit.CommandConfigurer
 ```
 
+<a name="NoTransaction"></a>
+### func [NoTransaction](<https://github.com/kitsunium/sdk/blob/main/framework/kit/command.go#L60>)
+
+```go
+func NoTransaction() CommandOption
+```
+
+NoTransaction runs a command outside a transaction of its own: its writes land as its handler makes them, and its effects leave when made — a failed command may have written or announced something. On the data directory and in memory, where a writing command's transaction takes the writer turn, it lets such commands run side by side. Dispatched inside another command, it still runs in that one's transaction.
+
 <a name="Queued"></a>
 ### func [Queued](<https://github.com/kitsunium/sdk/blob/main/framework/kit/command.go#L49>)
 
@@ -1292,6 +1377,15 @@ DiagnosticsError is returned by Start when declarations are wrong. It lists ever
 type DiagnosticsError = ikit.DiagnosticsError
 ```
 
+<a name="Edit"></a>
+## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go#L43>)
+
+Edit is one change between two versions of a record, in RFC 6902's words: Op is add, remove or replace, Path the RFC 6901 JSON pointer of the member it changes, From the value it had and To the value it has, as JSON. A secret member says it changed, never what: its From and To are empty.
+
+```go
+type Edit = ikit.Edit
+```
+
 <a name="Empty"></a>
 ## type [Empty](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L12>)
 
@@ -1320,7 +1414,7 @@ type EndpointOption = ikit.EndpointConfigurer
 ```
 
 <a name="MaxBody"></a>
-### func [MaxBody](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L44>)
+### func [MaxBody](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L37>)
 
 ```go
 func MaxBody(bytes int64) EndpointOption
@@ -1329,22 +1423,13 @@ func MaxBody(bytes int64) EndpointOption
 MaxBody bounds the request body the endpoint reads. The default is [DefaultMaxBody](<#DefaultMaxBody>).
 
 <a name="Name"></a>
-### func [Name](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L37>)
+### func [Name](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L30>)
 
 ```go
 func Name(name string) EndpointOption
 ```
 
 Name overrides the endpoint's name, which otherwise is its handler's function name, or its route when the handler is a function literal.
-
-<a name="Private"></a>
-### func [Private](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L30>)
-
-```go
-func Private() EndpointOption
-```
-
-Private keeps an endpoint off the HTTP listener: only other services reach it, through [Endpoint](<#Endpoint>).Call.
 
 <a name="Engine"></a>
 ## type [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/kit/database_interface.go#L13>)
@@ -1376,7 +1461,7 @@ Erase erases every record whose subject is one of ids, in every store of the app
 Once sealing lands \(ADR 0006, step 3\), an erasure also moves the held records under keys of their own and destroys the subject's data key, so that it reaches every copy kit sealed.
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L228>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L255>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error](<#Error>).Wrap is logged and never sent.
 
@@ -1387,7 +1472,7 @@ type Error = ikit.Error
 ```
 
 <a name="Conflict"></a>
-### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L247>)
+### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L274>)
 
 ```go
 func Conflict(message string) *Error
@@ -1396,7 +1481,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses \(409\).
 
 <a name="Forbidden"></a>
-### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L259>)
+### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L286>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1405,7 +1490,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this \(403\).
 
 <a name="Invalid"></a>
-### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L235>)
+### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L262>)
 
 ```go
 func Invalid(message string) *Error
@@ -1414,7 +1499,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying \(400\).
 
 <a name="NotFound"></a>
-### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L241>)
+### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L268>)
 
 ```go
 func NotFound(message string) *Error
@@ -1423,7 +1508,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist \(404\).
 
 <a name="Unauthenticated"></a>
-### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L253>)
+### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L280>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -1432,13 +1517,52 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are \(401\).
 
 <a name="Unavailable"></a>
-### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L265>)
+### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L292>)
 
 ```go
 func Unavailable(message string) *Error
 ```
 
 Unavailable reports a transient failure worth retrying later \(503\).
+
+<a name="ExposeOption"></a>
+## type [ExposeOption](<https://github.com/kitsunium/sdk/blob/main/framework/kit/expose.go#L13>)
+
+ExposeConfigurer configures an exposure \([Command](<#Command>).Expose, [Query](<#Query>).Expose\): every [EndpointOption](<#EndpointOption>) — [Name](<#Name>), [MaxBody](<#MaxBody>), [RateLimitPerClient](<#RateLimitPerClient>)… — and the markers that say who may run an operation declaring no rule of its own: [Anyone](<#Anyone>), [AnyUser](<#AnyUser>).
+
+```go
+type ExposeOption = ikit.ExposeConfigurer
+```
+
+<a name="AnyUser"></a>
+### func [AnyUser](<https://github.com/kitsunium/sdk/blob/main/framework/kit/expose.go#L39>)
+
+```go
+func AnyUser() ExposeOption
+```
+
+AnyUser says that an exposure is open to any signed\-in user, on purpose: its operation asks for a user \([Auth](<#Auth>)\) and declares no permission and no rule — its handler reads [UserID](<#UserID>) and keeps to what that user owns.
+
+```
+var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /orders", kit.AnyUser())
+```
+
+It adds no authentication of its own: an exposure authenticates as its operation asks, so the operation declares [Auth](<#Auth>).
+
+<a name="Anyone"></a>
+### func [Anyone](<https://github.com/kitsunium/sdk/blob/main/framework/kit/expose.go#L26>)
+
+```go
+func Anyone() ExposeOption
+```
+
+Anyone says that an exposure is open to everyone, on purpose: its operation declares no permission and no rule, and whoever reaches the route may run it — a public form, say. It says so on the exposure's node, where the diagram and the API page read it. An exposure whose operation declares no rule refuses the start unless it says this, or [AnyUser](<#AnyUser>).
+
+```
+var Report = Service.Command("report", file).Expose("POST /reports", kit.Anyone())
+```
+
+It adds no authentication: an operation that asks for a user \([Auth](<#Auth>)\) takes [AnyUser](<#AnyUser>) instead, and one with [AuthOptional](<#AuthOptional>) still knows the caller who signed in.
 
 <a name="FieldRef"></a>
 ## type [FieldRef](<https://github.com/kitsunium/sdk/blob/main/framework/kit/watch.go#L26>)
@@ -1768,7 +1892,7 @@ AuthOptional runs the app's auth handler when the request carries credentials, a
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Bulkhead"></a>
-### func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L75>)
+### func [Bulkhead](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L68>)
 
 ```go
 func Bulkhead(maxConcurrent int) OperationOption
@@ -1779,7 +1903,7 @@ Bulkhead caps how many requests the handler serves at once; the overflow answers
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="RateLimit"></a>
-### func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L55>)
+### func [RateLimit](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L48>)
 
 ```go
 func RateLimit(perSecond float64, burst int) OperationOption
@@ -1803,7 +1927,7 @@ Buckets unused for ten minutes are forgotten, and at most 10 000 are kept: the l
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Timeout"></a>
-### func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L65>)
+### func [Timeout](<https://github.com/kitsunium/sdk/blob/main/framework/kit/endpoint.go#L58>)
 
 ```go
 func Timeout(d time.Duration) OperationOption
@@ -1832,6 +1956,15 @@ func MinLength(n int) PasswordOption
 MinLength refuses a password shorter than n characters, counted as NIST counts them: one per Unicode code point. The default is 15, NIST's figure for a password used alone; 8 is the floor NIST allows with a second factor, and a smaller n is refused. There is no composition rule, ever: NIST says SHALL NOT.
 
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="NotCommon"></a>
+### func [NotCommon](<https://github.com/kitsunium/sdk/blob/main/framework/kit/passwords.go#L49>)
+
+```go
+func NotCommon() PasswordOption
+```
+
+NotCommon refuses a password among the ten thousand most common ones — the SDK's password.IsCommon, which compares them without regard to case —: the blocklist NIST SP 800\-63B\-4 requires a verifier to check, beyond the three thousand OWASP ASVS 5.0 \(6.2.4\) asks for. Every policy checks it \(ADR 0007 §2: on by default once the SDK has the list\); the option says so where a policy is declared. Beside NIST's fifteen characters the list has little left to refuse; beside a shorter MinLength, it matters.
 
 <a name="NotReused"></a>
 ### func [NotReused](<https://github.com/kitsunium/sdk/blob/main/framework/kit/passwords.go#L37>)
@@ -1957,6 +2090,15 @@ func Screen(ctx context.Context, w kit.Written) error {
 	record, err := recs.Get(ctx, w.Key)
 ```
 
+<a name="Revision"></a>
+## type [Revision](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go#L37>)
+
+Revision is one version of a record a store with [Revisions](<#Revisions>) keeps: its number — from 1, never given twice while the record exists —, when the write that made it ran, on the app's clock, zero for a record stored before its store kept revisions; who made it — the caller's [UserID](<#UserID>), empty for a write with no user —; which command made it — its node ID, empty outside a command —; and the record as it was, its secret members zeroed.
+
+```go
+type Revision[T any] = ikit.RevisionEvent[T]
+```
+
 <a name="Routine"></a>
 ## type [Routine](<https://github.com/kitsunium/sdk/blob/main/framework/kit/loop.go#L29>)
 
@@ -2041,6 +2183,15 @@ func KeepVersions(n int) SecretOption
 KeepVersions is how many versions of a generated secret a rotation leaves, the new one included: at least 2, so that what the version it replaces sealed or signed still opens and verifies. Cover the longest\-lived box or signature in flight: its lifetime divided by the interval, plus one.
 
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
+
+<a name="Optional"></a>
+### func [Optional](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go#L60>)
+
+```go
+func Optional() SecretOption
+```
+
+Optional makes a provided secret one the product can do without — the key of a feature that stays off while nobody gives it. A start where it is set nowhere goes on; [Secret](<#Secret>).Present says whether it is set now, and a use of it while it is absent — [Secret](<#Secret>).Value, Seal, Open, Sign or Verify — answers an error errs.HasCode matches with [CodeSecretMissing](<#WireInvalid>). It is read where it lives at every use, as every provided secret is: given later — \`secrets set\` in the environment's store, a new content in the file its \_FILE variable names —, it is found at its next use. A generated secret is kit's to make and never absent: Optional with [Generated](<#Generated>) is refused.
 
 <a name="RotateEvery"></a>
 ### func [RotateEvery](<https://github.com/kitsunium/sdk/blob/main/framework/kit/secret.go#L34>)
@@ -2266,6 +2417,37 @@ ReadModel marks a store as derived from others \(ADR 0005\): written by projecti
 var Summaries = Service.Store("summaries", Summary.Key, kit.ReadModel())
 ```
 
+<a name="RetentionByProduct"></a>
+### func [RetentionByProduct](<https://github.com/kitsunium/sdk/blob/main/framework/kit/retention.go#L84>)
+
+```go
+func RetentionByProduct(limits string) StoreOption
+```
+
+RetentionByProduct says the product keeps the store's retention itself: its own code erases and deletes what it no longer needs — a record whose life the product's own rules end, a lifecycle kit cannot read from the entity. limits says, in the product's words, for how long and how, which the register publishes as the store's time limits \(GDPR art. 30\(1\)\(f\)\); "" says only that the product keeps them.
+
+kit then runs no retention for the store, and warns of neither a missing retention nor a missing subject. Its classified fields keep every other promise: sealed at rest, never shown, exported with their person — when the store names one — and erased by kit.Erase and Store.Erase. It goes with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure; with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is refused: a store's retention is kit's or the product's, never both.
+
+<a name="Revisions"></a>
+### func [Revisions](<https://github.com/kitsunium/sdk/blob/main/framework/kit/revisions.go#L26>)
+
+```go
+func Revisions(n int) StoreOption
+```
+
+Revisions keeps the n previous versions of each record of the store, n from 1 to 100, as WordPress keeps a post's revisions: every write that changes a record makes a version, numbered from 1 and never renumbered, stamped with when it was made, the caller's user and the command that made it; the oldest beyond n are pruned by the write that makes a newer one, unless a legal hold keeps the record.
+
+```
+var Pages = Service.Store("pages", Page.Key, kit.Revisions(20))
+
+revs, err := Pages.Revisions(ctx, id)                            // newest first
+edits, err := Pages.Diff(ctx, id, revs[3].Number, revs[0].Number)
+page, err := Pages.Restore(ctx, id, revs[3].Number)              // a new version
+page, err = Pages.Restore(ctx, id, revs[3].Number, "/title")     // the title only
+```
+
+A store with Revisions\(n\) holds up to n\+1 times its records: in memory with the store in the data directory, in the table \<table\>\_\_\_vs on a database, which kit's migrations create.
+
 <a name="Unique"></a>
 ### func [Unique](<https://github.com/kitsunium/sdk/blob/main/framework/kit/index.go#L14>)
 
@@ -2298,6 +2480,15 @@ SubscriptionOption configures a subscription.
 type SubscriptionOption = ikit.SubscriptionConfigurer
 ```
 
+<a name="OwnStores"></a>
+### func [OwnStores](<https://github.com/kitsunium/sdk/blob/main/framework/kit/topic.go#L53>)
+
+```go
+func OwnStores() SubscriptionOption
+```
+
+OwnStores lets a watch \([Service](<#Service>).Watch\) hear the stores of its own module too — the product's own, for a watch of the product's —, which a watch never hears by default. Such a watch never hears the writes its own handler makes, in its handler's context — a handler that writes what it watches, a screening that stamps the record it screened, would otherwise hear itself forever —; a write the handler only causes, later and elsewhere — a queued command's handling, a topic's delivery — is heard. A subscription to a topic refuses it: a topic has no stores.
+
 <a name="Topic"></a>
 ## type [Topic](<https://github.com/kitsunium/sdk/blob/main/framework/kit/topic.go#L11>)
 
@@ -2326,7 +2517,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in\-process [Endpoint](<#Endpoint>).Call carries its caller's user along.
 
 <a name="Violation"></a>
-## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L232>)
+## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L259>)
 
 Violation is one validation rule a request failed: where, which rule, and why — never the value.
 

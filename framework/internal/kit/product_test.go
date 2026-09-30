@@ -63,8 +63,9 @@ var (
 	_ = Shop.Endpoint("DELETE /items/{id}", DeleteItem)
 	_ = Shop.Endpoint("POST /notes", AddNote)
 
-	// CountAPI is only reachable in-process.
-	CountAPI = Shop.Endpoint("GET /internal/count", Count, kit.Private())
+	// CountAPI counts the items; the audit's job runs it in process too
+	// (Endpoint.Call).
+	CountAPI = Shop.Endpoint("GET /count", Count)
 )
 
 // The endpoints a test replaces (kit.Replace) are named.
@@ -80,8 +81,8 @@ var Quote = Shop.Port[QuoteInput, Quoted]("quote", kit.Fallback(ListPriceAPI))
 var (
 	_ = Shop.Endpoint("GET /items/{id}/quote", QuoteItem)
 
-	// ListPriceAPI is the quote's fallback.
-	ListPriceAPI = Shop.Endpoint("POST /internal/list-price", ListPrice, kit.Private())
+	// ListPriceAPI is the quote's fallback, on a route of its own too.
+	ListPriceAPI = Shop.Endpoint("POST /list-price", ListPrice)
 )
 
 var Audit = kit.NewService("audit", "Records every event of the shop.")
@@ -122,8 +123,9 @@ var (
 	_ = Members.Endpoint("GET /greeting", Greet, kit.AuthOptional())
 	_ = Members.Endpoint("POST /invite", Invite, kit.Auth())
 
-	// WhoAPI is reachable in-process only, by an authenticated caller.
-	WhoAPI = Members.Endpoint("GET /internal/who", WhoIs, kit.Auth(), kit.Private())
+	// WhoAPI answers an authenticated caller, over HTTP and in process:
+	// EndpointService.Call carries the caller's user.
+	WhoAPI = Members.Endpoint("GET /who", WhoIs, kit.Auth())
 )
 
 // MeAPI is named: a test replaces it.

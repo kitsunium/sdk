@@ -64,6 +64,11 @@ func operationMechanics() []model.Mechanic {
 			Snippet: "Service.Command(\"cancel-order\", cancelOrder).Key(func(in ByID) string { return in.ID })",
 		},
 		{
+			Kind: "transaction", Label: "transaction", Package: "github.com/kitsunium/sdk/pkg/v1/sql",
+			Doc:     "Runs a command's authorization and handler in one transaction, opened once its key is held: on a database the database's own, on the data directory and in memory kit's, which takes the writer turn. A failed command changes nothing; what it publishes, mails or dispatches leaves at the commit. kit.Transact opens one anywhere; kit.NoTransaction opts a command out.",
+			Snippet: "err := kit.Transact(ctx, func(ctx context.Context) error { return Orders.Insert(ctx, o) })",
+		},
+		{
 			Kind: "queue", Label: "queued command", Package: "github.com/kitsunium/sdk/pkg/v1/queue",
 			Doc:     "Sends a command to the background: Dispatch returns once its own queue accepted it, and a consumer handles it as the user who dispatched it, retried, then dead-lettered. Exposed, it answers 202.",
 			Snippet: "Service.Command(\"reindex\", reindex, kit.Queued(), kit.MaxDeliveries(3))",

@@ -79,8 +79,16 @@ func expectBinding(t *testing.T, g *model.Graph, port string, want model.PortInf
 	if got != want {
 		t.Errorf("%s: %+v, want %+v", port, got, want)
 	}
-	if e := g.Edge(port + "|calls|" + want.Bound); want.Bound != "" && (e == nil || !e.Declared) {
-		t.Errorf("the binding of %s is not a declared edge: %+v", port, e)
+	// The binding draws the verb of what it calls: a query is asked, a
+	// command dispatched, an endpoint called.
+	verb := model.EdgeCalls
+	if b := g.Node(want.Bound); b != nil && b.Kind == model.KindQuery {
+		verb = model.EdgeAsks
+	} else if b != nil && b.Kind == model.KindCommand {
+		verb = model.EdgeDispatches
+	}
+	if e := g.Edge(port + "|" + string(verb) + "|" + want.Bound); want.Bound != "" && (e == nil || !e.Declared) {
+		t.Errorf("the binding of %s is not a declared %s edge: %+v", port, verb, e)
 	}
 }
 
@@ -130,14 +138,14 @@ func TestWhatAPortCallsValidatesItsRequest(t *testing.T) {
 // app chose.
 func TestBindWinsOverTheFallback(t *testing.T) {
 	pricing := kit.NewService("pricing", "Prices set by hand.")
-	fixed := pricing.Endpoint("POST /internal/fixed", fixedPrice, kit.Private())
+	fixed := pricing.Query("fixed", fixedPrice)
 	app := startApp(t, []*kit.Service{Shop, Audit, pricing}, kit.Bind(Quote, fixed))
 	it := create(t, app, "lamp", 1)
 	if q, _ := quote(t, app, it.ID); q.By != "fixed" {
 		t.Fatalf("the bound operation's answer: %+v", q)
 	}
 	g := app.Graph()
-	expectBinding(t, g, "shop/port/quote", model.PortInfo{Fallback: "shop/endpoint/ListPrice", Bound: "pricing/endpoint/fixedPrice", Via: model.ViaBind})
+	expectBinding(t, g, "shop/port/quote", model.PortInfo{Fallback: "shop/endpoint/ListPrice", Bound: "pricing/query/fixed", Via: model.ViaBind})
 	if g.Edge("shop/port/quote|calls|shop/endpoint/ListPrice") != nil {
 		t.Error("the fallback the app did not choose is drawn as the port's binding")
 	}
@@ -166,7 +174,7 @@ func startUnbindable(t *testing.T) *kit.DiagnosticsError {
 	t.Helper()
 	desk := kit.NewService("desk", "Ports that cannot be bound.")
 	away := kit.NewService("away", "A service the app does not mount.")
-	remote := away.Endpoint("POST /internal/remote", fixedPrice, kit.Private())
+	remote := away.Query("remote", fixedPrice)
 	elsewhere := away.Port[QuoteInput, Quoted]("elsewhere")
 	lonely := desk.Port[QuoteInput, Quoted]("lonely")
 	desk.Port[QuoteInput, Quoted]("loop", kit.Fallback(lonely))
@@ -194,9 +202,9 @@ func TestPortProblemsRefuseTheStart(t *testing.T) {
 	for said, where := range map[string]string{
 		"port desk/port/lonely has nothing bound: implement it on a service the app mounts — var _ = Service.Implement(port, handler), the handler a func(context.Context, kit_test.QuoteInput) (kit_test.Quoted, error)": `lonely := desk.Port`,
 		"port desk/port/loop falls back to port desk/port/lonely: a port calls an operation, never another port":                                                                                                          `desk.Port[QuoteInput, Quoted]("loop"`,
-		`port desk/port/far falls back to away/endpoint/fixedPrice, of service "away", which the app does not mount`:                                                                                                      `desk.Port[QuoteInput, Quoted]("far"`,
+		`port desk/port/far falls back to away/query/remote, of service "away", which the app does not mount`:                                                                                                             `desk.Port[QuoteInput, Quoted]("far"`,
 		"kit.Bind binds port desk/port/to-port to port desk/port/lonely":                                                                                                                                                  `kit.Bind(toPort, lonely)`,
-		`kit.Bind binds port desk/port/to-away to away/endpoint/fixedPrice, of service "away", which the app does not mount`:                                                                                              `kit.Bind(toAway, remote)`,
+		`kit.Bind binds port desk/port/to-away to away/query/remote, of service "away", which the app does not mount`:                                                                                                     `kit.Bind(toAway, remote)`,
 		`kit.Bind binds port away/port/elsewhere, of service "away", which the app does not mount`:                                                                                                                        `kit.Bind(elsewhere, remote)`,
 		`service "desk" implements a nil port`: `desk.Implement(nowhere, fixedPrice)`,
 	} {

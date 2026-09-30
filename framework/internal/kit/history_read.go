@@ -4,6 +4,7 @@ package kit
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"reflect"
@@ -57,7 +58,7 @@ func (s *StoreService[T]) former(ctx context.Context, key, pointer string) ([]Fo
 	for _, e := range all[pointer] {
 		f := Former{Until: e.Until, By: e.By}
 		if shown {
-			f.Value = fromHistory(e.Value)
+			f.Value = e.Value
 		}
 		out = append(out, f)
 	}
@@ -72,10 +73,11 @@ func (s *StoreService[T]) historied() *historied[T] {
 }
 
 // formerAll reads the former values of every field of the record under key,
-// newest first: the record first, then its history, whose head is skipped
-// where it is the field's value in the record read — left by a write that
-// did not stand. Read in this order, the answer is the record's past as of
-// the value read, never that value: a write meanwhile puts it at the head.
+// newest first, opened: the record first, then its history, whose head is
+// skipped where it is the field's value in the record read — left by a
+// write that did not stand. Read in this order, the answer is the record's
+// past as of the value read, never that value: a write meanwhile puts it at
+// the head. A former value whose data key is destroyed is gone.
 func (h *historied[T]) formerAll(ctx context.Context, key string) (map[string][]formerEntry, error) {
 	v, err := h.Get(ctx, key)
 	if err != nil {
@@ -91,12 +93,35 @@ func (h *historied[T]) formerAll(ctx context.Context, key string) (map[string][]
 	now := h.values(v)
 	out := make(map[string][]formerEntry, len(doc.Fields))
 	for p, list := range doc.Fields {
-		if cur, ok := now[p]; ok && len(list) > 0 && bytes.Equal(fromHistory(list[0].Value), cur.raw) {
-			list = list[1:]
+		opened, err := h.opened(ctx, key, p, list)
+		if err != nil {
+			return nil, err
 		}
-		if len(list) > 0 {
-			out[p] = list
+		if cur, ok := now[p]; ok && len(opened) > 0 && bytes.Equal(opened[0].Value, cur.raw) {
+			opened = opened[1:]
 		}
+		if len(opened) > 0 {
+			out[p] = opened
+		}
+	}
+	return out, nil
+}
+
+// opened is the former values of the field at pointer, opened: those whose
+// data key is destroyed left out.
+func (h *historied[T]) opened(ctx context.Context, key, pointer string, list []formerEntry) ([]formerEntry, error) {
+	out := make([]formerEntry, 0, len(list))
+	for _, e := range list {
+		v, err := h.fromHistory(ctx, key, pointer, e.Value)
+		switch {
+		case errors.Is(err, errErased):
+			continue
+		case err != nil:
+			return nil, err
+		}
+		e.sealed = isBoxValue(e.Value)
+		e.Value = v
+		out = append(out, e)
 	}
 	return out, nil
 }
@@ -123,7 +148,7 @@ func (s *StoreService[T]) exportFormer(ctx context.Context, key string, preview 
 			continue
 		}
 		for _, e := range all[p] {
-			f := Former{Value: fromHistory(e.Value), Until: e.Until, By: e.By}
+			f := Former{Value: e.Value, Until: e.Until, By: e.By}
 			if preview {
 				f.Value = plan.shownFormer(p, f.Value)
 			}
@@ -182,10 +207,11 @@ func within(pointer, parent string) bool {
 }
 
 // erasable reports whether an erasure of v would clear anything: a member
-// it clears, or a former value of one — a record whose members are already
-// cleared may still remember what they held.
+// it clears, or a former value or a version of one — a record whose members
+// are already cleared may still remember what they held.
 func (s *StoreService[T]) erasable(ctx context.Context, v T) bool {
-	return !s.plan().cleared(reflect.ValueOf(&v).Elem()) || s.keepsErasable(ctx, s.keyOf(v))
+	return !s.plan().cleared(reflect.ValueOf(&v).Elem()) || s.keepsErasable(ctx, s.keyOf(v)) ||
+		s.versionsErasable(ctx, s.keyOf(v))
 }
 
 // keepsErasable reports whether the record under key keeps former values an

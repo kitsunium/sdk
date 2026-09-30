@@ -5,11 +5,15 @@
 // a CLI prints it, a Studio draws it, and an AI agent or an editor extension
 // reads it.
 //
-// A graph is a projection of code, never a second source of truth. Every node
-// says where it was declared ([Source]) and every edge says how it is known:
-// declared by construction ([Edge].Declared), found in a handler body by a
-// static analyzer ([Edge].Static), or seen at runtime ([Edge].Observed). A
-// diagram that cannot say why an arrow exists is a drawing; this one can.
+// A graph is a projection: of the code for what runs, and — since the
+// platform's ADR 0010 — of the design (a product's design/ directory) for
+// what its structure must be. The design, not the graph, is authoritative on
+// structure; the graph shows what the code is and where it differs from the
+// design. Every node says where it was declared ([Source]) and every edge
+// says how it is known: declared by construction ([Edge].Declared), found in
+// a handler body by a static analyzer ([Edge].Static), or seen at runtime
+// ([Edge].Observed). A diagram that cannot say why an arrow exists is a
+// drawing; this one can.
 //
 // # Identity
 //

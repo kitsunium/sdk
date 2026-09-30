@@ -16,6 +16,7 @@ Nothing is implemented here: a change of behaviour is made there.
 | `facade_external_test.go` | the declarations' positions, taken through the facade, point at the product's lines |
 | `fresh_process_bench_test.go`, `testdata/cliprobe`, `BENCH.md` | a fresh process of the smallest product (one default fail-safe command), built and exec'd: what a status line pays per render when nothing is warm |
 | `server/`, `studio/`, `config/yaml/`, `config/toml/` | the subsystems, each enabled by a blank import: HTTP in the server profile, the Studio's dev API, YAML and TOML configuration files. A product links only those it imports; the behaviour is in `framework/internal/kit` (see each `CLAUDE.md`) |
+| `storetest/` | the conformance suite of kit's stores (`storetest.Run`, `BackendConfig`), run by kit's tests and by each engine module's on its engine |
 | `facade_generics_external_test.go` | no function of the facade names a generic alias of the facade in its signature: `Bind`, `Fallback`, `WakeOn`, `Replace` take `ikit.PortService`, `ikit.Operation`, `ikit.TopicService` — an instance of a generic alias read from export data races in go/types (golang/go#79035) |
 | `facade_sync_external_test.go` | every exported name of the implementation is here, under its product-facing name, and nothing else is: the rename table (`StoreService` → `Store`, `AppConfigurer` → `AppOption`…) and the constructors left out (`NewStoreService`…) |
 

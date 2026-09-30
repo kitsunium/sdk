@@ -211,3 +211,64 @@ func TestFieldsThatPrintAlikeAreWarnedOfApart(t *testing.T) {
 		t.Errorf("warns of %q", got)
 	}
 }
+
+// secretive's fields are tagged secret: credentials, and personal data put
+// under the one word kit once had to hide a value.
+type secretive struct {
+	ID           string `json:"id"`
+	Email        string `json:"email" kit:"secret"`
+	PostalAddr   string `json:"postalAddress" kit:"secret"`
+	EmailHash    string `json:"emailHash" kit:"secret"`
+	PasswordHash string `json:"passwordHash" kit:"secret"`
+	PhoneToken   string `json:"phoneToken" kit:"secret"`
+	APIKey       string `json:"apiKey" kit:"secret"`
+	Mobile       bool   `json:"mobile" kit:"secret"`
+	Phone        string `json:"phone" kit:"personal"`
+}
+
+// secretPersonalSaid is the warning of a secret field named label.
+func secretPersonalSaid(label string) string {
+	return say("classify.secret-personal", "field", label).String()
+}
+
+// A field tagged secret whose name reads like personal data — and not like
+// a credential: a password, a token, a key, a hash — is warned of: secret
+// means a credential since ADR 0006, which kit never exports. The same
+// heuristic reads its type: a switch is never warned of.
+func TestASecretThatReadsLikePersonalDataIsWarnedOf(t *testing.T) {
+	want := []string{secretPersonalSaid("kit.secretive.Email"), secretPersonalSaid("kit.secretive.PostalAddr")}
+	if said := warningsOf(reflect.TypeFor[secretive]()); !slices.Equal(said, want) {
+		t.Errorf("warned of\n%s\nwant\n%s", strings.Join(said, "\n"), strings.Join(want, "\n"))
+	}
+	for _, c := range []struct {
+		names []string
+		want  bool
+	}{
+		{[]string{"email"}, true},
+		{[]string{"firstName", "FirstName"}, true},
+		{[]string{"emailHash", "EmailHash"}, false},
+		{[]string{"email", "EmailDigest"}, false},
+		{[]string{"resetToken"}, false},
+		{[]string{"addressKey"}, false},
+		{[]string{"password"}, false},
+		{[]string{"organisation"}, false},
+	} {
+		if got := secretLooksPersonal(reflect.TypeFor[string](), c.names...); got != c.want {
+			t.Errorf("%v: warned %v, want %v", c.names, got, c.want)
+		}
+	}
+	// The app says it where it says the heuristic's other warnings: in dev,
+	// in config and privacy — when kit explains —, at the declaration.
+	svc := NewService("secretive", "")
+	svc.Store("people", func(p secretive) string { return p.ID })
+	var warned []string
+	for _, d := range NewApp("secretive", svc).classificationProblems(true) {
+		warned = append(warned, d.Severity+" "+d.Node+": "+d.Message)
+	}
+	if !slices.Contains(warned, "warning secretive/store/people: "+want[0]) || len(warned) != 2 {
+		t.Errorf("the app warned of\n%s", strings.Join(warned, "\n"))
+	}
+	if quiet := NewApp("secretive", svc).classificationProblems(false); len(quiet) != 0 {
+		t.Errorf("a start that does not explain warned of %+v", quiet)
+	}
+}

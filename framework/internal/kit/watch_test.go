@@ -31,12 +31,21 @@ var heard struct {
 	sync.Mutex
 	notices []kit.WrittenEvent
 	values  map[string]string
+	// down fails every notice before it is kept: the moderation is down.
+	down bool
 }
 
 func resetHeard() {
 	heard.Lock()
 	defer heard.Unlock()
-	heard.notices, heard.values = nil, map[string]string{}
+	heard.notices, heard.values, heard.down = nil, map[string]string{}, false
+}
+
+// moderationDown makes the watch fail every notice, or lets them through.
+func moderationDown(down bool) {
+	heard.Lock()
+	heard.down = down
+	heard.Unlock()
 }
 
 // Hear keeps what a notice says, and reads the record back through the
@@ -44,6 +53,10 @@ func resetHeard() {
 // time it reads is no failure: a later notice says it was deleted.
 func Hear(ctx context.Context, w kit.WrittenEvent) error {
 	heard.Lock()
+	if heard.down {
+		heard.Unlock()
+		return kit.Unavailable("the moderation is down")
+	}
 	heard.notices = append(heard.notices, w)
 	heard.Unlock()
 	if w.Deleted || len(w.Fields) == 0 {
@@ -186,6 +199,27 @@ func TestAWatchHearsTheOthersOnly(t *testing.T) {
 		if heardFrom(store) {
 			t.Errorf("the watch heard %s", store)
 		}
+	}
+}
+
+// A delivery that fails is retried; the record is read at the retry, and a
+// handler that is back lets it through.
+func TestAFailedNoticeIsRetried(t *testing.T) {
+	resetHeard()
+	app := startReviews(t)
+	moderationDown(true)
+	it := create(t, app, "flaky", 1)
+	eventually(t, "a failed delivery", func() bool {
+		n := app.Graph().Node(watchID)
+		return n.Stats != nil && n.Stats.Errors > 0
+	})
+	if got := noticesOf("shop/store/items", it.ID); len(got) != 0 {
+		t.Fatalf("a faulted delivery ran its handler: %+v", got)
+	}
+	moderationDown(false)
+	eventually(t, "the retried delivery", func() bool { return valueOf("shop/store/items", it.ID) == "flaky" })
+	if got := noticesOf("shop/store/items", it.ID); len(got) != 1 {
+		t.Errorf("the retry was heard %d times", len(got))
 	}
 }
 

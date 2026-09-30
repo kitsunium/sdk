@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -42,6 +43,12 @@ type Erasure = model.Erasure
 // kept what it generalises —, its erased fields stamped, the rest kept; or
 // the record deleted. What an erasure overwrote leaves the store's files
 // when kit folds it, even when the journal then fails.
+//
+// What is sealed at rest is erased cryptographically too (seal.go): a
+// person's erasure moves their held records under keys of their own, then
+// destroys their data key — every copy of what it sealed, former values and
+// dead letters included, stops opening —; a retention's erasure, or a
+// deletion, destroys it once no record of the person is left.
 
 // Erase erases one record now, as its retention would: its personal,
 // special and secret members and its subject cleared — after the store's
@@ -55,13 +62,18 @@ func (s *StoreService[T]) Erase(ctx context.Context, key, reason string) error {
 		return notRunning(&s.nodeBase)
 	}
 	ctx, sp := a.beginPrivacy(ctx, s.id, model.EdgeWrites, "", "Erase")
-	unlock := a.lockHolds(s.id)
-	err := s.holdRefusal(ctx, a, key)
+	// The writer turn before the hold lock: a write's outermost lock
+	// (transact_turn.go).
+	ctx, release, err := s.turn(ctx)
 	wrote := false
 	if err == nil {
-		wrote, err = s.eraseRecord(ctx, a, key, reason)
+		unlock := a.lockHolds(s.id)
+		if err = s.holdRefusal(ctx, a, key); err == nil {
+			wrote, err = s.eraseRecord(ctx, a, key, reason)
+		}
+		unlock()
 	}
-	unlock()
+	release()
 	if wrote {
 		err = errors.Join(err, s.fold(ctx))
 	}
@@ -76,8 +88,9 @@ func (s *StoreService[T]) Erase(ctx context.Context, key, reason string) error {
 // personal data — the record is deleted instead, and the store says so
 // once. The caller holds the store's hold lock, and checked the holds.
 //
-// Sealing (step 3) plugs in here: the record's boxes are opened when it is
-// read, and nothing more is needed — clearing a member removes its box.
+// Clearing a sealed member removes its box: the erasure's write seals
+// nothing it cleared. The person's data key goes when this was their last
+// record (shredIfLast).
 func (s *StoreService[T]) eraseRecord(ctx context.Context, a *App, key, reason string) (bool, error) {
 	subject, err := s.clearRecord(ctx, key, a.clock.Now().UTC())
 	switch {
@@ -89,7 +102,8 @@ func (s *StoreService[T]) eraseRecord(ctx context.Context, a *App, key, reason s
 		return false, err
 	}
 	s.counted(1, 0)
-	return true, a.journal(ctx, &journalLine{op: model.JournalErase, store: s.id, key: key, subject: subject, reason: reason})
+	err = a.journal(ctx, &journalLine{op: model.JournalErase, store: s.id, key: key, subject: subject, reason: reason})
+	return true, errors.Join(err, a.shredIfLast(ctx, subject))
 }
 
 // clearRecord runs the store's Anonymise function on the record under key,
@@ -100,9 +114,12 @@ func (s *StoreService[T]) eraseRecord(ctx context.Context, a *App, key, reason s
 // say it wrote nothing.
 func (s *StoreService[T]) clearRecord(ctx context.Context, key string, now time.Time) (subject string, err error) {
 	plan, panicked := s.plan(), false
+	// Read before the update: on a database, a read inside it outside a
+	// transaction of kit's would wait for the update's own.
+	versions := s.versionsErasable(ctx, key)
 	_, err = s.modify(s.erasing(ctx, nil), key, func(v *T) error {
 		rv := reflect.ValueOf(v).Elem()
-		if plan.cleared(rv) && !s.keepsErasable(ctx, key) {
+		if plan.cleared(rv) && !versions && !s.keepsErasable(ctx, key) {
 			return errNothingToErase
 		}
 		subject, _ = plan.subjectOf(rv)
@@ -118,6 +135,15 @@ func (s *StoreService[T]) clearRecord(ctx context.Context, key string, now time.
 	})
 	if panicked {
 		return "", failure(CodePrivacyErase, "ANONYMISE_PANICKED", "the store's Anonymise function panicked", nil, errs.String("store", s.id))
+	}
+	if err == nil {
+		// The record's versions are cleared as it is (ADR 0007 §4).
+		err = s.eraseVersions(ctx, key, func(v *T) {
+			rv := reflect.ValueOf(v).Elem()
+			s.anonymise(v)
+			plan.clearSensitive(rv)
+			plan.stampErased(rv, now)
+		})
 	}
 	if endedWithoutWriting(err) {
 		return subject, err
@@ -175,7 +201,9 @@ func (s *StoreService[T]) deleteRecord(ctx context.Context, a *App, key string, 
 		return false, err
 	}
 	s.counted(0, 1)
-	return true, a.journal(ctx, &journalLine{op: model.JournalDelete, store: s.id, key: key, subject: s.subjectOf(v), reason: reason})
+	subject := s.subjectOf(v)
+	err := a.journal(ctx, &journalLine{op: model.JournalDelete, store: s.id, key: key, subject: subject, reason: reason})
+	return true, errors.Join(err, a.shredIfLast(ctx, subject))
 }
 
 // counted adds to what this run erased and deleted, for the graph.
@@ -189,25 +217,93 @@ func (s *StoreService[T]) counted(erased, deleted int) {
 }
 
 // eraseOnRequest erases, or deletes where the store says DeleteOnErasure,
-// one record of a person who asked; a held record is left and reported. The
-// outcome says what changed, even when the journal then failed.
-func (s *StoreService[T]) eraseOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, error) {
+// one record of a person who asked; a held record is left and reported,
+// moved under a data key of its own before the person's is destroyed. The
+// outcome says what changed, even when the journal then failed, and refs
+// the data keys the record was sealed under: the erasure destroys them.
+func (s *StoreService[T]) eraseOnRequest(ctx context.Context, a *App, key, reason string) (erasureOutcome, []string, error) {
+	ctx, release, err := s.turn(ctx)
+	defer release()
+	if err != nil {
+		return outcomeNone, nil, err
+	}
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	switch err := s.holdRefusal(ctx, a, key); {
 	case isConflict(err):
-		return outcomeHeld, nil
+		return outcomeHeld, nil, s.moveOwn(ctx, a, key)
 	case err != nil:
-		return outcomeNone, err
+		return outcomeNone, nil, err
+	}
+	refs, err := s.sealedRefs(ctx, a, key)
+	if err != nil {
+		return outcomeNone, nil, err
 	}
 	if s.privacy != nil && s.privacy.erasureDelete {
-		return s.deleteOnRequest(ctx, a, key, reason)
+		out, err := s.deleteOnRequest(ctx, a, key, reason)
+		return out, refs, err
 	}
 	wrote, err := s.eraseRecord(ctx, a, key, reason)
 	if wrote {
-		return outcomeErased, err
+		return outcomeErased, refs, err
 	}
-	return outcomeNone, err
+	return outcomeNone, nil, err
+}
+
+// sealedRefs are the data keys the record under key is sealed under, as it
+// rests, and its own: none when the store seals nothing, or the record is
+// gone.
+func (s *StoreService[T]) sealedRefs(ctx context.Context, a *App, key string) ([]string, error) {
+	se := s.sealing()
+	if se == nil {
+		return nil, nil
+	}
+	refs, err := se.refsAt(ctx, key)
+	switch {
+	case errors.Is(err, docstore.DocumentNotFound):
+		return nil, nil
+	case err != nil:
+		return nil, s.said(err, key, "")
+	}
+	keys, err := a.referenceKeys(ctx)
+	if err != nil {
+		return nil, err
+	}
+	return append(refs, keys.ownRef(s.id, key)), nil
+}
+
+// moveOwn seals the held record under key again, under a data key of its
+// own — a record a hold keeps is sealed so at every write (sealedEngine's
+// refOf) —, and its former values sealed under its person's key, so that
+// the person's erasure leaves it readable: a held record is kept, whoever
+// asks. Former values sealed under another person's key stay theirs.
+func (s *StoreService[T]) moveOwn(ctx context.Context, a *App, key string) error {
+	eng, se := s.engine(), s.sealing()
+	if eng == nil || se == nil {
+		return nil
+	}
+	v, err := eng.Update(ctx, key, func(*T) error { return nil })
+	switch {
+	case errors.Is(err, docstore.DocumentNotFound):
+		return nil
+	case err != nil:
+		return s.said(err, key, "")
+	}
+	id := s.subjectOf(v)
+	if id == "" {
+		return nil
+	}
+	keys, err := a.referenceKeys(ctx)
+	if err != nil {
+		return err
+	}
+	from, to := keys.personRef(id), keys.ownRef(s.id, key)
+	var moved error
+	if h := s.historied(); h != nil {
+		moved = h.moveFormer(ctx, key, from, to)
+	}
+	// Its versions too (ADR 0007 §4): a hold keeps them readable.
+	return errors.Join(moved, s.moveVersions(ctx, key, from, to))
 }
 
 // deleteOnRequest deletes one record of a person who asked.
@@ -228,7 +324,7 @@ func (s *StoreService[T]) deleteOnRequest(ctx context.Context, a *App, key, reas
 
 // fold folds what the store's writes left beside its data into it, so that
 // what an erasure overwrote leaves the store's files: an engine that keeps
-// such files folds them (storeFolder); a store in memory has nothing to
+// such files folds them (folder); a store in memory has nothing to
 // fold.
 func (s *StoreService[T]) fold(ctx context.Context) error {
 	eng := s.engine()
@@ -249,9 +345,12 @@ func (s *StoreService[T]) fold(ctx context.Context) error {
 // Telling the recipients (GDPR art. 19) is the product's job; the register
 // lists them. reason is journaled.
 //
-// Once sealing lands (ADR 0006, step 3), an erasure also moves the held
-// records under keys of their own and destroys the subject's data key, so
-// that it reaches every copy kit sealed.
+// What kit seals at rest, it erases cryptographically too (ADR 0006 §4): a
+// held record is moved under a data key of its own, then the data key of
+// each identity, and every data key the erased records were sealed under,
+// is destroyed — every copy of what they sealed stops opening: a store's
+// former values, a dead letter, a backup. An erasure that failed in a store
+// destroys nothing: its retry does.
 func Erase(ctx context.Context, reason string, ids ...string) (Erasure, error) {
 	a := appOf(ctx)
 	if a == nil || !a.running() {
@@ -272,30 +371,41 @@ func (a *App) erase(ctx context.Context, reason string, ids []string) (Erasure, 
 		return out, Invalid("an erasure needs a reason, for the journal")
 	}
 	var failed []error
+	refs := map[string]bool{}
 	for _, st := range a.productStores() {
 		if st.plan().subject == nil {
 			continue
 		}
 		sctx, sp := a.beginPrivacy(ctx, st.base().id, model.EdgeWrites, "erase", "Erase")
-		part, err := a.eraseIn(sctx, st, reason, ids)
+		part, err := a.eraseIn(sctx, st, reason, ids, refs)
 		sp.end(err)
 		failed = append(failed, err)
 		if len(part.Erased)+len(part.Deleted)+len(part.Held) > 0 {
 			out.Stores = append(out.Stores, part)
 		}
 	}
-	return out, errors.Join(failed...)
+	if err := errors.Join(failed...); err != nil {
+		// The keys stay: a held record may not have moved yet. What failed
+		// is erased by a retry, which destroys them.
+		return out, err
+	}
+	return out, a.shredPeople(ctx, ids, refs)
 }
 
 // eraseIn erases a person's records in one store, then folds it: after a
-// failure too, when a record was written.
-func (a *App) eraseIn(ctx context.Context, st privacyStore, reason string, ids []string) (model.StoreErasure, error) {
+// failure too, when a record was written. It adds to refs the data keys the
+// records it erased were sealed under.
+func (a *App) eraseIn(ctx context.Context, st privacyStore, reason string, ids []string, refs map[string]bool) (model.StoreErasure, error) {
 	part := model.StoreErasure{Store: st.base().id}
 	keys, err := st.subjectKeys(ctx, a, ids)
 	for _, key := range keys {
 		var outcome erasureOutcome
-		outcome, err = st.eraseOnRequest(ctx, a, key, reason)
+		var sealed []string
+		outcome, sealed, err = st.eraseOnRequest(ctx, a, key, reason)
 		addOutcome(&part, outcome, key)
+		for _, r := range sealed {
+			refs[r] = true
+		}
 		if err != nil {
 			break
 		}

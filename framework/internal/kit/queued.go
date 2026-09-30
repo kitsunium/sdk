@@ -3,7 +3,6 @@ package kit
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"path/filepath"
 	"strconv"
@@ -96,7 +95,7 @@ func (c *Command[C, R]) accept(ctx context.Context, a *App, from string, in C) (
 	if err != nil || !fresh {
 		return err
 	}
-	if err := c.put(ctx, q, queuedEnvelope[C]{From: from, Key: key, Input: in}); err != nil {
+	if err := c.put(ctx, q, key, queuedEnvelope[C]{From: from, Key: key, Input: in}); err != nil {
 		q.release(key)
 		return err
 	}
@@ -125,20 +124,39 @@ func (c *Command[C, R]) claim(ctx context.Context, a *App, q *commandQueue, in C
 	return key, true, nil
 }
 
-// put queues env, with the dispatch's trace and user.
-func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, env queuedEnvelope[C]) error {
+// put queues env, with the dispatch's trace and user — inside a
+// transaction, encoded now and queued once it commits: a rollback drops it,
+// and gives its key back.
+func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, key string, env queuedEnvelope[C]) error {
 	env.Trace, _ = trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
 	if uid, ok := UserID(ctx); ok {
 		env.User = string(uid)
 	}
-	payload, err := json.Marshal(env)
-	if err != nil {
+	payload, err := c.encode(ctx, c.app(), env)
+	switch {
+	case errs.HasCode(err, CodeSealWrite), errs.HasCode(err, CodeSealKey):
+		return err
+	case err != nil:
 		return failure(CodeCommandEncode, "COMMAND_ENCODE", "the command cannot be queued", err, errs.String("command", c.id))
 	}
-	if _, err := q.broker.Publish(ctx, payload); err != nil {
-		return failure(CodeCommandQueue, "COMMAND_QUEUE", "the command's queue refused it", err, errs.String("command", c.id))
+	queue := func(ctx context.Context) error {
+		if _, err := q.broker.Publish(ctx, payload); err != nil {
+			return failure(CodeCommandQueue, "COMMAND_QUEUE", "the command's queue refused it", err, errs.String("command", c.id))
+		}
+		return nil
 	}
-	return nil
+	release := func() error {
+		err := queue(withoutUnit(context.WithoutCancel(ctx)))
+		if err != nil {
+			q.release(key)
+		}
+		return err
+	}
+	if hold(ctx, heldEffect{node: c.id, release: release, drop: func() { q.release(key) }}) {
+		markSpan(ctx, c.id, "held", "commit")
+		return nil
+	}
+	return queue(ctx)
 }
 
 // handler is the consumer's: it restores the dispatch's trace and user,
@@ -147,8 +165,7 @@ func (c *Command[C, R]) put(ctx context.Context, q *commandQueue, env queuedEnve
 // or dead-lettered after its last attempt, gives its key back.
 func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.Handler {
 	return func(ctx context.Context, d queue.Delivery) (err error) {
-		var env queuedEnvelope[C]
-		decodeErr := json.Unmarshal(d.Message.Payload, &env)
+		env, decodeErr, openErr := c.decode(ctx, a, d.Message.Payload)
 		if decodeErr == nil {
 			ctx = env.restore(ctx)
 		}
@@ -165,7 +182,10 @@ func (c *Command[C, R]) handler(a *App, q *commandQueue, loop *loopState) queue.
 				q.release(env.Key)
 			}
 		}()
-		if decodeErr != nil {
+		switch {
+		case openErr != nil:
+			return openErr
+		case decodeErr != nil:
 			return failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the queued command does not decode into its input", decodeErr,
 				errs.String("command", c.id), errs.String("message", d.Message.ID))
 		}
@@ -185,13 +205,13 @@ func (c *Command[C, R]) handleSpan(ctx context.Context, a *App, env *queuedEnvel
 	return ctx, sp
 }
 
-// handle runs a queued dispatch: the Studio's fault first, then the
-// policies around its key and its handler.
+// handle runs a queued dispatch: the policies around its key and its
+// handler.
 func (c *Command[C, R]) handle(ctx context.Context, a *App, sp *span, env queuedEnvelope[C]) error {
 	if sp.detailed() {
 		sp.request(env.Input)
 	}
-	_, err := c.pipe.around(ctx, a, c, env.Input, c.handling(a, env.Key))
+	_, err := c.pipe.around(withCommand(ctx, c.id), a, c, env.Input, c.handling(a, env.Key))
 	return err
 }
 
@@ -209,14 +229,18 @@ func (qe queuedEnvelope[C]) restore(ctx context.Context) context.Context {
 	return ctx
 }
 
-// handling are a queued command's steps at its handling: its key — then,
-// with ADR 0004's step 2, its transaction — around its handler.
+// handling are a queued command's steps at its handling: its key, then its
+// transaction (ADR 0004), around its handler.
 func (c *Command[C, R]) handling(a *App, key string) steps[C] {
-	if key == "" {
+	if key == "" && c.opts.noTransaction {
 		return nil
 	}
 	return func(ctx context.Context, _ C, handle func(context.Context) error) error {
-		return c.keys.run(ctx, a, c, key, handle)
+		run := c.transacted(a, handle)
+		if key == "" {
+			return run(ctx)
+		}
+		return c.keys.run(ctx, a, c, key, run)
 	}
 }
 

@@ -15,6 +15,11 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
+// formerBinding is the last part a former value's box is bound to, after
+// the store, the record and the field: a former value never opens as the
+// field's value, nor the field's as a former one.
+const formerBinding = "former"
+
 // What a write does to a record's history (history.go).
 
 // historyIntent is what a write of kit's own means to the history: an
@@ -65,8 +70,13 @@ type historyWrite struct {
 // before the record.
 func (h *historied[T]) updating(ctx context.Context, key string, v *T, fn func(*T) error, w *historyWrite) error {
 	var before map[string]memberValue
+	ref := ""
 	if h.hist != nil {
 		before = h.values(*v)
+		var err error
+		if ref, err = h.sealRef(ctx, key, *v); err != nil {
+			return err
+		}
 	}
 	hashes := h.s.passwordHashes(v)
 	if err := fn(v); err != nil {
@@ -78,7 +88,17 @@ func (h *historied[T]) updating(ctx context.Context, key string, v *T, fn func(*
 	if h.hist == nil || h.s.keyOf(*v) != key {
 		return nil // the engine refuses an update that renames: nothing to remember
 	}
-	return h.record(ctx, key, before, *v, w)
+	return h.record(ctx, key, ref, before, *v, w)
+}
+
+// sealRef is the data key the former values of was — the record under key
+// as a write found it — are sealed under: the record's own, "" when the
+// store seals nothing.
+func (h *historied[T]) sealRef(ctx context.Context, key string, was T) (string, error) {
+	if h.seal == nil || !h.s.plan().sealsAny() {
+		return "", nil
+	}
+	return h.seal.refOf(ctx, key, was)
 }
 
 // values reads the historied fields of v.
@@ -114,7 +134,7 @@ func valueAt(rv reflect.Value, path []step) memberValue {
 // record writes, before the record, what the write changes in its history:
 // the former values of the fields it changed, or — for an erasure — the
 // former values of the fields it clears, removed.
-func (h *historied[T]) record(ctx context.Context, key string, before map[string]memberValue, after T, w *historyWrite) error {
+func (h *historied[T]) record(ctx context.Context, key, ref string, before map[string]memberValue, after T, w *historyWrite) error {
 	in := intentOf(ctx)
 	changed := changedFields(before, h.values(after), in.same)
 	if len(changed) == 0 && in.erases == nil {
@@ -130,7 +150,11 @@ func (h *historied[T]) record(ctx context.Context, key string, before map[string
 	}
 	uid, _ := UserID(ctx)
 	for _, p := range changed {
-		next.Fields[p] = pushed(next.Fields[p], before[p], h.now(), string(uid))
+		list, err := h.pushed(ctx, formerAt{key: key, pointer: p, ref: ref}, next.Fields[p], before[p], formerEntry{Until: h.now(), By: string(uid)})
+		if err != nil {
+			return err
+		}
+		next.Fields[p] = list
 	}
 	if in.erases != nil {
 		maps.DeleteFunc(next.Fields, func(p string, _ []formerEntry) bool { return in.erases(p) })
@@ -156,17 +180,31 @@ func changedFields(before, after map[string]memberValue, same string) []string {
 	return out
 }
 
-// pushed is a field's former values with the value a write replaced at
-// their head. A head that equals it was left by a write that did not stand,
-// and goes; a zero value is no former value.
-func pushed(list []formerEntry, was memberValue, now time.Time, by string) []formerEntry {
-	if len(list) > 0 && bytes.Equal(fromHistory(list[0].Value), was.raw) {
-		list = list[1:]
+// formerAt is where a field's former values lie: the record's key, the
+// field's pointer, and the data key they are sealed under.
+type formerAt struct {
+	key, pointer, ref string
+}
+
+// pushed is the former values of the field at with the value a write
+// replaced at their head, sealed under at's ref and stamped as stamp says. A
+// head that equals it was left by a write that did not stand, and goes; a
+// zero value is no former value.
+func (h *historied[T]) pushed(ctx context.Context, at formerAt, list []formerEntry, was memberValue, stamp formerEntry) ([]formerEntry, error) {
+	if len(list) > 0 {
+		if head, err := h.fromHistory(ctx, at.key, at.pointer, list[0].Value); err == nil && bytes.Equal(head, was.raw) {
+			list = list[1:]
+		}
 	}
 	if was.zero {
-		return list
+		return list, nil
 	}
-	return append([]formerEntry{{Value: toHistory(was.raw), Until: now, By: by}}, list...)
+	value, err := h.toHistory(ctx, at.key, at.pointer, at.ref, was.raw)
+	if err != nil {
+		return nil, err
+	}
+	stamp.Value = value
+	return append([]formerEntry{stamp}, list...), nil
 }
 
 // prune keeps each field's newest former values, as many as it keeps —
@@ -250,11 +288,115 @@ func (h *historied[T]) put(ctx context.Context, w *historyWrite) error {
 	return nil
 }
 
-// toHistory is a former value as the history keeps it, and fromHistory
-// what it was when read back. Sealing at rest (ADR 0006, step 3) seals and
-// opens here, under the record's subject's key, bound to the store, the
-// record and the field: today both keep the value as it is.
-func toHistory(raw json.RawMessage) json.RawMessage { return raw }
+// toHistory is a former value of the field at pointer as the history keeps
+// it: sealed under ref when the store seals the field — or the field it
+// sits in —, as it is otherwise.
+func (h *historied[T]) toHistory(ctx context.Context, key, pointer, ref string, raw json.RawMessage) (json.RawMessage, error) {
+	if ref == "" || !h.s.plan().sealedAt(pointer) {
+		return raw, nil
+	}
+	return h.seal.z.seal(ctx, ref, raw, h.s.id, key, pointer, formerBinding)
+}
 
-// fromHistory is a former value the history kept, as it was.
-func fromHistory(raw json.RawMessage) json.RawMessage { return raw }
+// fromHistory is a former value the history kept, as it was: opened when it
+// rests sealed, as written otherwise — kept before its field was sealed. A
+// value whose data key is destroyed is errErased: it is gone.
+func (h *historied[T]) fromHistory(ctx context.Context, key, pointer string, raw json.RawMessage) (json.RawMessage, error) {
+	if !isBoxValue(raw) {
+		return raw, nil
+	}
+	if h.seal == nil {
+		return nil, errErased // no key to open it with: gone as surely
+	}
+	return h.seal.z.open(ctx, raw, h.s.id, key, pointer, formerBinding)
+}
+
+// sealedAt reports whether kit seals the field at pointer, or a field it
+// sits in.
+func (p *classPlan) sealedAt(pointer string) bool {
+	return slices.ContainsFunc(p.members, func(m member) bool {
+		return m.tag.sealedAtRest() && within(pointer, m.pointer)
+	})
+}
+
+// sealFormer seals, under ref, the former values of the record under key
+// that a sealed field kept in clear — written before it was sealed —: what
+// the privacy command seals. A value already sealed is left under its key.
+func (h *historied[T]) sealFormer(ctx context.Context, key, ref string) error {
+	return h.rewriteFormer(ctx, key, func(p string, value json.RawMessage) (json.RawMessage, error) {
+		if isBoxValue(value) || zeroJSON(value, nil) {
+			return value, nil
+		}
+		return h.toHistory(ctx, key, p, ref, value)
+	})
+}
+
+// moveFormer seals again, under to, the former values of the record under
+// key sealed under from: a held record's, moved away from its person
+// before their key is destroyed. A value whose key is destroyed stays as it
+// is: nothing opens it.
+func (h *historied[T]) moveFormer(ctx context.Context, key, from, to string) error {
+	return h.rewriteFormer(ctx, key, func(p string, value json.RawMessage) (json.RawMessage, error) {
+		if ref, _ := boxRef(value); ref != from {
+			return value, nil
+		}
+		v, err := h.fromHistory(ctx, key, p, value)
+		switch {
+		case errors.Is(err, errErased):
+			return value, nil
+		case err != nil:
+			return nil, err
+		}
+		return h.toHistory(ctx, key, p, to, v)
+	})
+}
+
+// rewriteFormer writes the history of the record under key again, each
+// former value of a sealed field as fn returns it.
+func (h *historied[T]) rewriteFormer(ctx context.Context, key string, fn func(pointer string, value json.RawMessage) (json.RawMessage, error)) error {
+	if h.hist == nil || h.seal == nil {
+		return nil
+	}
+	plan := h.s.plan()
+	_, err := h.hist.Update(ctx, key, func(doc *historyRecord) error {
+		for p, list := range doc.Fields {
+			if !plan.sealedAt(p) {
+				continue
+			}
+			for i, e := range list {
+				v, err := fn(p, e.Value)
+				if err != nil {
+					return err
+				}
+				list[i].Value = v
+			}
+		}
+		return nil
+	})
+	switch {
+	case err == nil, errors.Is(err, docstore.DocumentNotFound), errors.Is(err, docstore.WriteUnconfirmed):
+		return nil
+	}
+	return h.failed(CodeHistoryWrite, err)
+}
+
+// inClear reports whether the history of the record under key keeps a
+// former value of a sealed field in clear: kept before it was sealed.
+func (h *historied[T]) inClear(ctx context.Context, key string) bool {
+	if h.hist == nil || h.seal == nil {
+		return false
+	}
+	doc, _, err := h.load(ctx, key, CodeHistoryRead)
+	if err != nil {
+		return false
+	}
+	plan := h.s.plan()
+	for p, list := range doc.Fields {
+		for _, e := range list {
+			if plan.sealedAt(p) && !isBoxValue(e.Value) && !zeroJSON(e.Value, nil) {
+				return true
+			}
+		}
+	}
+	return false
+}

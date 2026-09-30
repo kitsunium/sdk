@@ -129,7 +129,7 @@ func TestAnOperationIsRateLimited(t *testing.T) {
 	// stay empty for the next run of the test.
 	limits := kit.NewService("limits", "A query with a rate limit.")
 	limits.Query("limited", func(context.Context, LabInput) (int, error) { return 1, nil }, kit.RateLimit(0.001, 1)).
-		Expose("POST /lab/limited")
+		Expose("POST /lab/limited", kit.Anyone())
 	app := startApp(t, []*kit.Service{Staff, Counter, Lab, limits})
 	expectAnswer(t, call(t, app, "POST /lab/limited", LabInput{Key: "x"}), http.StatusOK, "")
 	expectAnswer(t, call(t, app, "POST /lab/limited", LabInput{Key: "x"}), http.StatusTooManyRequests, kit.WireRateLimited)

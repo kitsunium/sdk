@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kitsunium/sdk/framework/model"
 )
 
 // letter is what the privacy command's product keeps.
@@ -116,9 +118,14 @@ func TestThePrivacyCommand(t *testing.T) {
 		{args: []string{"erase", "-reason", "asked by letter", "ann@x.dev"}, out: "cmd-privacy/store/letters: 1 erased, 0 deleted, 0 held\n"},
 		{args: []string{"retention", "-dry-run"}, out: "cmd-privacy/store/letters: 1 to erase, 0 to delete (dry run: journaled, nothing changed)\n"},
 		{args: []string{"retention"}, out: "cmd-privacy/store/letters: 1 erased, 0 deleted\n"},
-		{args: []string{"journal", "-verify"}, has: []string{"the chain holds: 4 entries", "cli"}, hasNot: []string{"ann@x.dev"}},
+		// An export, ann's erasure and her data key destroyed — her last
+		// record —, the retention's dry run, then its erasure of bob's
+		// letter and his key.
+		{args: []string{"journal", "-verify"}, has: []string{"the chain holds: 6 entries", "cli", "shred"}, hasNot: []string{"ann@x.dev"}},
 		{args: []string{"holds"}, out: "no record is held\n"},
-		{args: []string{"seal", "cmd-privacy/store/letters"}, code: 1, errHas: "step 3"},
+		{args: []string{"seal", "cmd-privacy/store/letters"}, out: "cmd-privacy/store/letters: 0 of 2 records sealed now, the others were already\n"},
+		{args: []string{"seal", "cmd-privacy/store/nothing"}, code: 1, errHas: "no such store"},
+		{args: []string{"seal"}, code: 2, errHas: "usage"},
 		{code: 2},
 	} {
 		step.run(t, dir)
@@ -189,5 +196,27 @@ func TestWhatKitCannotReadStopsIt(t *testing.T) {
 	}
 	if _, err := app.privacyView(t.Context()); err == nil {
 		t.Error("the Privacy page reads a journal kit cannot read")
+	}
+}
+
+// A store whose product keeps its retention says so in the register the
+// command writes — its time limits in the product's words —, and so does a
+// person's export.
+func TestTheRegisterWritesTheProductsRetention(t *testing.T) {
+	var out bytes.Buffer
+	line := model.RegisterStore{
+		Store: "post/store/drafts", Personal: []string{"/body"}, Purpose: "Draft letters",
+		ByProduct: &model.ProductRetention{Limits: "a draft goes once it is sent"},
+	}
+	writeRegister(&out, model.Register{App: "post", Stores: []model.RegisterStore{line}})
+	if said := strings.Join(strings.Fields(out.String()), " "); !strings.Contains(said, "retention (f): kept by the product itself: a draft goes once it is sent") ||
+		strings.Contains(said, "GAP") {
+		t.Errorf("the register:\n%s", out.String())
+	}
+	if w := retentionWords(line); w != "kept by the product itself: a draft goes once it is sent" {
+		t.Errorf("an export says %q", w)
+	}
+	if w := retentionWords(model.RegisterStore{ByProduct: &model.ProductRetention{}}); w != "kept by the product itself" {
+		t.Errorf("an export says %q", w)
 	}
 }

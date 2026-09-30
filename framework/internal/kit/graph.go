@@ -36,7 +36,7 @@ func (a *App) Graph() *model.Graph {
 	edges = append(edges, a.describeBinary(graph)...)
 	graph.Edges = a.withObserved(edges)
 	listStates(graph, a.services)
-	graph.Diagnostics = slices.Concat(a.declarationProblems(), a.problemsCopy(), a.passwordWarnings(graph, static))
+	graph.Diagnostics = slices.Concat(a.declarationProblems(), a.problemsCopy(), a.passwordWarnings(graph, static), a.transactionWarnings(graph, static))
 	if a.running() {
 		graph.Runtime = a.runtimeOf(started)
 	}

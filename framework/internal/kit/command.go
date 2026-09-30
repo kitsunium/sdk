@@ -14,22 +14,27 @@ import (
 // Command changes something: a typed input, a typed result, and one handler
 // — the one declared with it. Declare it with [Service.Command]; dispatch it
 // with [Command.Dispatch] from any building block, which draws a dispatches
-// edge from the caller; give it a route with [Command.Expose].
+// edge from the caller; give it a route with [Command.Expose]. A command is
+// internal until it is exposed: how one service has another change
+// something.
 //
 // A dispatch runs, in this order: the caller's user when the command asks
 // for one ([Auth], implied by [Command.Allow]) — an in-process dispatch
 // carries its caller's and is not authenticated again —, the input's
 // validate tags, the policies ([RateLimit], [RateLimitPerClient],
-// [Timeout], [Bulkhead]), the key ([Command.Key]), the authorization
-// ([Command.Allow], then [Command.Authorize]), then the handler. A queued
-// command ([Queued]) is checked at its dispatch, as its caller — its
-// validate tags, its authorization, its key —, and handled by its queue's
-// consumer, the policies around the handling.
+// [Timeout], [Bulkhead]), the key ([Command.Key]), the transaction, the
+// authorization ([Command.Allow], then [Command.Authorize]), then the
+// handler. A queued command ([Queued]) is checked at its dispatch, as its
+// caller — its validate tags, its authorization, its key —, and handled by
+// its queue's consumer, the policies around the handling, its key then its
+// transaction around the handler.
 //
-// ADR 0004's step 2 makes a command its unit of work: its authorization and
-// its handler will run in one transaction, which holds its effects until
-// the commit. Until then, a command's writes and effects are made as the
-// handler makes them.
+// A command is its unit of work (ADR 0004): its authorization and its
+// handler run in one transaction ([Transact]), opened once its key is held,
+// which holds its effects — a publish, a mail, a queued command's dispatch
+// — until the commit. A failed command changes nothing and announces
+// nothing; one dispatched inside another runs in its transaction.
+// [NoTransaction] opts a command out.
 type Command[C, R any] struct {
 	nodeBase
 	pipe pipeline[C, R]
@@ -53,8 +58,10 @@ type CommandConfigurer interface {
 
 type commandOptions struct {
 	callOptions
-	queued     bool
-	deliveries deliveryOptions
+	queued bool
+	// noTransaction opts the command out of its transaction (NoTransaction).
+	noTransaction bool
+	deliveries    deliveryOptions
 	// deliveriesGiven is set once MaxDeliveries or Parallelism was: a command
 	// that is not queued refuses them.
 	deliveriesGiven bool
@@ -83,6 +90,16 @@ func Queued() CommandConfigurer {
 	return commandOption(func(o *commandOptions) { o.queued = true })
 }
 
+// NoTransaction runs a command outside a transaction of its own: its
+// writes land as its handler makes them, and its effects leave when made —
+// a failed command may have written or announced something. On the data
+// directory and in memory, where a writing command's transaction takes the
+// writer turn, it lets such commands run side by side. Dispatched inside
+// another command, it still runs in that one's transaction.
+func NoTransaction() CommandConfigurer {
+	return commandOption(func(o *commandOptions) { o.noTransaction = true })
+}
+
 // Command declares a command of the service: an operation named name, run by
 // handler, that changes something. Its node is "<service>/command/<name>".
 //
@@ -93,7 +110,7 @@ func Queued() CommandConfigurer {
 //go:noinline
 func (s *Service) Command[C, R any](name string, handler func(context.Context, C) (R, error), opts ...CommandConfigurer) *Command[C, R] {
 	c := NewCommand[C, R]()
-	c.opts.deliveries = deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}
+	c.opts.deliveries = defaultDeliveries()
 	for _, o := range opts {
 		if o != nil {
 			o.commandConfigure(&c.opts)
@@ -206,8 +223,14 @@ func (c *Command[C, R]) Key(fn func(C) string) *Command[C, R] {
 // dispatch and an in-process one are checked alike. It answers 200 with the
 // result, 204 for [EmptyValue], 202 for a queued command.
 //
+// An exposed command says who may run it: a permission ([Command.Allow]), a
+// rule ([Command.Authorize]), or, when it declares neither, a marker that
+// it is open on purpose — [Anyone], or [AnyUser] for any signed-in user.
+// The start refuses an exposure that says none of them. A command nobody
+// exposes is internal: the code that needs it dispatches it.
+//
 //go:noinline
-func (c *Command[C, R]) Expose(route string, opts ...EndpointConfigurer) *Command[C, R] {
+func (c *Command[C, R]) Expose(route string, opts ...ExposeConfigurer) *Command[C, R] {
 	expose[C, R](c.svc, callerPos(), c, route, opts)
 	return c
 }
@@ -236,24 +259,26 @@ func (c *Command[C, R]) Dispatch(ctx context.Context, in C) (R, error) {
 			var zero R
 			return zero, err
 		}
-		return c.pipe.invoke(ctx, a, c, in, c.steps(a, key))
+		// What the command writes names it: a record's version says which
+		// command made it (ADR 0007 §3).
+		return c.pipe.invoke(withCommand(ctx, c.id), a, c, in, c.steps(a, key))
 	})
 }
 
 // steps are a command's own, inside its policies: its key, then its
-// authorization and its handler — which ADR 0004's step 2 runs in one
-// transaction, opened once the key is held.
+// transaction — opened once the key is held —, and in it its authorization
+// and its handler.
 func (c *Command[C, R]) steps(a *App, key string) steps[C] {
-	if c.key == nil && !c.guarded() {
+	if c.key == nil && !c.guarded() && c.opts.noTransaction {
 		return nil
 	}
 	return func(ctx context.Context, in C, handle func(context.Context) error) error {
-		authorized := func(ctx context.Context) error {
+		authorized := c.transacted(a, func(ctx context.Context) error {
 			if err := c.check(ctx, a, c.id, in); err != nil {
 				return err
 			}
 			return handle(ctx)
-		}
+		})
 		if c.key == nil {
 			return authorized(ctx)
 		}
@@ -262,6 +287,15 @@ func (c *Command[C, R]) steps(a *App, key string) steps[C] {
 		}
 		return c.keys.run(ctx, a, c, key, authorized)
 	}
+}
+
+// transacted is run in the command's transaction (ADR 0004), unless the
+// command opted out.
+func (c *Command[C, R]) transacted(a *App, run func(context.Context) error) func(context.Context) error {
+	if c.opts.noTransaction {
+		return run
+	}
+	return func(ctx context.Context) error { return transact(ctx, a, run) }
 }
 
 // keyFor is the key the input names, marked on the dispatch's span; "" for a
@@ -305,7 +339,7 @@ func (c *Command[C, R]) queued() bool { return c.opts.queued }
 // returns its edges.
 func (c *Command[C, R]) describe(a *App, out *model.Node) []model.Edge {
 	info := &model.CommandInfo{
-		Input:       schemaOf(reflect.TypeFor[C]()),
+		Input:       keptSchemaOf(reflect.TypeFor[C](), a != nil && c.sealsAtRest(a)),
 		Result:      schemaOf(reflect.TypeFor[R]()),
 		Mode:        model.ModeSync,
 		Auth:        c.authMode(),
@@ -339,17 +373,40 @@ func (c *Command[C, R]) drawn(a *App) []model.Mechanic {
 		policies[i] = p.mech
 	}
 	if c.opts.queued {
-		out = append(out, c.mechanics()...)
-		if c.key != nil {
-			out = append(out, keyMechanic("not queued again while one waits or runs"))
-		}
-		return append(append(out, c.queueMechanic(a)), policies...)
+		return append(out, c.drawnQueued(a, policies)...)
 	}
 	out = append(out, policies...)
 	if c.key != nil {
 		out = append(out, keyMechanic("one run at a time per key"))
 	}
+	out = append(out, c.transactionDrawn()...)
 	return append(out, c.mechanics()...)
+}
+
+// drawnQueued is a queued command's pipeline after its authentication and
+// validation: what it checks at its dispatch, its queue, then the policies
+// around its handling.
+func (c *Command[C, R]) drawnQueued(a *App, policies []model.Mechanic) []model.Mechanic {
+	out := c.mechanics()
+	if c.key != nil {
+		out = append(out, keyMechanic("not queued again while one waits or runs"))
+	}
+	out = append(append(out, c.queueMechanic(a)), policies...)
+	return append(out, c.transactionDrawn()...)
+}
+
+// transactionDrawn is the command's transaction, none with NoTransaction.
+func (c *Command[C, R]) transactionDrawn() []model.Mechanic {
+	if c.opts.noTransaction {
+		return nil
+	}
+	return []model.Mechanic{transactionMechanic()}
+}
+
+// transactionMechanic is a command's transaction: its writes commit
+// together, and its effects leave at the commit.
+func transactionMechanic() model.Mechanic {
+	return model.Mechanic{Kind: "transaction", Label: "one transaction · effects at the commit", Package: "github.com/kitsunium/sdk/pkg/v1/sql"}
 }
 
 // keyMechanic is the key's step: the SDK's lock, in the process.

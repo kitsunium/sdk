@@ -193,6 +193,36 @@ func TestReuseIsOffByDefault(t *testing.T) {
 	}
 }
 
+// A policy refuses the most common passwords — whatever their case, before
+// anything is hashed or verified —, NotCommon or not: every policy does (ADR
+// 0007 §2), and the model says so.
+func TestACommonPasswordIsRefused(t *testing.T) {
+	f := useFakeHashing(t)
+	for _, opts := range [][]PasswordConfigurer{{MinLength(8)}, {MinLength(8), NotCommon()}} {
+		l := startLocks(t, fmt.Sprintf("locks-common-%d", len(opts)), opts)
+		ctx := t.Context()
+		must(t, l.accounts.Insert(ctx, lockAccount{ID: "a1"}))
+		f.counts()
+		for _, word := range []string{"password", "PassWord", "iloveyou", "12345678"} {
+			err := l.policy.Set(ctx, "a1", []byte(word))
+			if !isInvalid(err) || !strings.Contains(err.Error(), "most common") {
+				t.Errorf("%q was set: %v", word, err)
+			}
+		}
+		if hashes, verifies := f.counts(); hashes != 0 || verifies != 0 {
+			t.Errorf("a common password cost %d hashes and %d verifications", hashes, verifies)
+		}
+		must(t, l.policy.Set(ctx, "a1", []byte("zq8#Lm2!")))
+		if err := l.policy.Change(ctx, "a1", []byte("zq8#Lm2!"), []byte("baseball")); !isInvalid(err) {
+			t.Errorf("a change to a common password: %v", err)
+		}
+		h := l.app.Graph().Node(l.accounts.ID()).Store.History
+		if h == nil || len(h.Passwords) != 1 || !h.Passwords[0].NotCommon {
+			t.Errorf("the model: %+v", h)
+		}
+	}
+}
+
 // Every former hash is verified, whichever matches, concurrently and at
 // most GOMAXPROCS at once.
 func TestTheVerificationsRunConcurrently(t *testing.T) {
