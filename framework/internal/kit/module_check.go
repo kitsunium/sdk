@@ -117,7 +117,7 @@ func (a *App) foreignBuilders(m *Module, home goModule, n node) []model.Diagnost
 	calls := b.builders()
 	for i := range calls {
 		at := &calls[i].at
-		if from, ok := goModuleOf(at.pkg); ok && from.path != home.path {
+		if from, ok := goModuleOf(at.pkg()); ok && from.path != home.path {
 			out = append(out, diagnosticOf("error", n.base().id, a.source(at),
 				say("module.foreign-builder", "node", n.base().id, "builder", calls[i].name, "module", m.name, "gomodule", home.path)))
 		}
@@ -137,7 +137,7 @@ func (a *App) foreignPolicies(m *Module, home goModule, n node) []model.Diagnost
 	}
 	var out []model.Diagnostic
 	for _, at := range st.policies() {
-		if from, ok := goModuleOf(at.pkg); ok && from.path != home.path {
+		if from, ok := goModuleOf(at.pkg()); ok && from.path != home.path {
 			out = append(out, diagnosticOf("error", n.base().id, a.source(&at),
 				say("module.foreign-passwords", "store", n.base().id, "at", a.where(&n.base().decl), "module", m.name, "gomodule", home.path)))
 		}
@@ -150,13 +150,13 @@ func (a *App) foreignPolicies(m *Module, home goModule, n node) []model.Diagnost
 // commands, topics and settings, never by adding to its services. Nothing is
 // judged when the binary does not say its Go modules.
 func (a *App) foreignDeclarations(m *Module) []model.Diagnostic {
-	home, ok := goModuleOf(m.decl.pkg)
+	home, ok := goModuleOf(m.decl.pkg())
 	if !ok {
 		return nil
 	}
 	var out []model.Diagnostic
 	foreign := func(at *pos, what string, s *Service) {
-		if from, ok := goModuleOf(at.pkg); ok && from.path != home.path {
+		if from, ok := goModuleOf(at.pkg()); ok && from.path != home.path {
 			out = append(out, diagnosticOf("error", what, a.source(at),
 				say("module.foreign", "node", what, "service", s.name, "module", m.name, "gomodule", home.path)))
 		}

@@ -232,7 +232,7 @@ func (w *WorkflowService[E, S]) After[D Delay](event string, d D, from, to S) *W
 //go:noinline
 func (w *WorkflowService[E, S]) At(event string, from, to S, instant func(E) (time.Time, bool)) *WorkflowService[E, S] {
 	a := arrow[E, S]{event: event, from: from, to: to, trigger: model.TriggerTimer, instant: instant, at: callerPos()}
-	if p, _ := funcInfo(instant); p.file != "" {
+	if p, _ := funcInfo(instant); p.file() != "" {
 		a.fnAt = &p
 	}
 	if instant == nil {
@@ -249,7 +249,7 @@ func (w *WorkflowService[E, S]) At(event string, from, to S, instant func(E) (ti
 //go:noinline
 func (w *WorkflowService[E, S]) When(event string, from, to S, guard func(E) bool) *WorkflowService[E, S] {
 	a := arrow[E, S]{event: event, from: from, to: to, trigger: model.TriggerGuard, guard: guard, at: callerPos()}
-	if p, _ := funcInfo(guard); p.file != "" {
+	if p, _ := funcInfo(guard); p.file() != "" {
 		a.fnAt = &p
 	}
 	if guard == nil {
@@ -284,7 +284,7 @@ func (w *WorkflowService[E, S]) arrow(a arrow[E, S]) *WorkflowService[E, S] {
 // ([CodeWorkflowReentrant]): transitions of one entity run one at a time.
 func (w *WorkflowService[E, S]) OnEnter(state S, fn func(context.Context, *E) error) *WorkflowService[E, S] {
 	h := hook[E]{fn: fn}
-	if p, _ := funcInfo(fn); p.file != "" {
+	if p, _ := funcInfo(fn); p.file() != "" {
 		h.at = &p
 	}
 	w.enter[state] = append(w.enter[state], h)
@@ -298,7 +298,7 @@ func (w *WorkflowService[E, S]) OnEnter(state S, fn func(context.Context, *E) er
 // still run.
 func (w *WorkflowService[E, S]) OnTransition(fn func(context.Context, ChangeEvent[E, S]) error) *WorkflowService[E, S] {
 	h := changeHook[E, S]{fn: fn}
-	if p, _ := funcInfo(fn); p.file != "" {
+	if p, _ := funcInfo(fn); p.file() != "" {
 		h.at = &p
 	}
 	w.after = append(w.after, h)

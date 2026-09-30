@@ -10,7 +10,10 @@
 // does not import it is refused at the start, naming the import.
 package server
 
-import ikit "github.com/kitsunium/sdk/framework/internal/kit"
+import (
+	ikit "github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/framework/internal/kit/serverkit"
+)
 
 // Importing the package makes kit serve HTTP: a blank package-level value
 // rather than an init, the SDK's convention.
@@ -18,6 +21,7 @@ var _ = enable()
 
 // enable turns HTTP on for every app in the server profile.
 func enable() bool {
+	serverkit.Enable()
 	ikit.EnableServer()
 	return true
 }

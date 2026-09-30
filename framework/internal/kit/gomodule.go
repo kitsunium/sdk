@@ -28,8 +28,8 @@ type goModule struct {
 // buildModules are the Go modules the running binary was built from, the
 // main module first; nil when the binary carries no build information.
 var buildModules = sync.OnceValue(func() []goModule {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+	bi := readBuild()
+	if bi == nil {
 		return nil
 	}
 	out := []goModule{{path: bi.Main.Path, id: bi.Main.Path}}
@@ -120,17 +120,17 @@ func (a *App) goModuleSource(p *pos) *model.Source {
 	if a == nil {
 		return nil
 	}
-	pkg := p.pkg
-	if pkg == "" && p.fn != "" {
-		pkg, _ = packageOf(p.fn)
+	pkg := p.pkg()
+	if pkg == "" && p.fn() != "" {
+		pkg, _ = packageOf(p.fn())
 	}
 	m, ok := goModuleOf(pkg)
 	if !ok || m.path == a.module || a.module == "" {
 		return nil
 	}
 	dir := packageDir(pkg, m.path)
-	a.rememberRoot(m, dir, p.file)
-	return &model.Source{File: moduleFile(dir, p.file), Line: p.line, Func: p.fn, GoModule: m.id}
+	a.rememberRoot(m, dir, p.file())
+	return &model.Source{File: moduleFile(dir, p.file()), Line: p.line(), Func: p.fn(), GoModule: m.id}
 }
 
 // moduleFile is the file a graph names for a position in package directory

@@ -30,7 +30,7 @@ func toolsPos(t *testing.T) pos {
 		t.Skip("a -trimpath build: no file to read")
 	}
 	pkg, _ := packageOf(fn.Name())
-	return pos{file: file, line: line, pkg: pkg}
+	return posAt(file, line, "", pkg)
 }
 
 func TestPackageOf(t *testing.T) {
@@ -55,7 +55,7 @@ func TestAModuleRefusesAForeignDeclaration(t *testing.T) {
 	desk := NewService("desk", "A module's service.")
 	own := desk.Store("own", func(s string) string { return s })
 	m := NewModule("tools", "A module of another Go module.", desk)
-	m.decl.pkg, desk.decl.pkg, own.decl.pkg = home.pkg, home.pkg, home.pkg
+	m.decl, desk.decl, own.decl = m.decl.withPkg(home.pkg()), desk.decl.withPkg(home.pkg()), own.decl.withPkg(home.pkg())
 	desk.Store("foreign", func(s string) string { return s })
 	err := NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Logs(io.Discard)).Start(t.Context())
 	var de *DiagnosticsError
@@ -81,7 +81,7 @@ func toolsAccounts(t *testing.T) (*Module, *StoreService[lockAccount]) {
 	desk := NewService("desk", "A module's service.")
 	accounts := desk.Store("accounts", func(a lockAccount) string { return a.ID })
 	m := NewModule("tools", "A module of another Go module.", desk)
-	m.decl.pkg, desk.decl.pkg, accounts.decl = home.pkg, home.pkg, home
+	m.decl, desk.decl, accounts.decl = m.decl.withPkg(home.pkg()), desk.decl.withPkg(home.pkg()), home
 	return m, accounts
 }
 
@@ -96,14 +96,14 @@ func TestAModuleRefusesAForeignPasswordPolicy(t *testing.T) {
 	if !errors.As(err, &de) {
 		t.Fatalf("Start = %v, want the foreign policy refused", err)
 	}
-	mod, _ := goModuleOf(accounts.decl.pkg)
+	mod, _ := goModuleOf(accounts.decl.pkg())
 	want := fmt.Sprintf("tools.desk/store/accounts, declared at %s/v1/clock/clock.go:%d, of module tools, "+
-		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg:", mod.id, accounts.decl.line)
+		"is given a password policy from outside its Go module github.com/kitsunium/sdk/pkg:", mod.id, accounts.decl.line())
 	if len(de.Diagnostics) != 1 || !strings.HasPrefix(de.Diagnostics[0].Message, want) {
 		t.Fatalf("the start said %+v, want only %q", de.Diagnostics, want)
 	}
-	if src := de.Diagnostics[0].Source; src == nil || src.File != "internal/kit/module_internal_test.go" || src.Line != policy.decl.line {
-		t.Errorf("the refusal is at %+v, want the policy's line, %d", src, policy.decl.line)
+	if src := de.Diagnostics[0].Source; src == nil || src.File != "internal/kit/module_internal_test.go" || src.Line != policy.decl.line() {
+		t.Errorf("the refusal is at %+v, want the policy's line, %d", src, policy.decl.line())
 	}
 }
 
@@ -112,7 +112,7 @@ func TestAModuleRefusesAForeignPasswordPolicy(t *testing.T) {
 func TestAModuleKeepsItsOwnPasswordPolicy(t *testing.T) {
 	m, accounts := toolsAccounts(t)
 	policy := accounts.Passwords(func(a *lockAccount) *string { return &a.Password })
-	policy.decl.pkg = m.decl.pkg
+	policy.decl = policy.decl.withPkg(m.decl.pkg())
 	app := NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {
 		t.Fatalf("a module's policy on its own store is refused: %v", err)
@@ -130,7 +130,7 @@ func TestAModulesSourceIsServedFromItsGoModule(t *testing.T) {
 	home := toolsPos(t)
 	desk := NewService("desk", "A module's service.")
 	m := NewModule("tools", "A module of another Go module.", desk)
-	m.decl, desk.decl.pkg = home, home.pkg
+	m.decl, desk.decl = home, desk.decl.withPkg(home.pkg())
 	app := NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {
 		t.Fatal(err)
@@ -141,8 +141,8 @@ func TestAModulesSourceIsServedFromItsGoModule(t *testing.T) {
 		}
 	}()
 	src := app.Graph().ModuleOf("tools").Source
-	mod, _ := goModuleOf(home.pkg)
-	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line, GoModule: mod.id}); src == nil || *src != want {
+	mod, _ := goModuleOf(home.pkg())
+	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the module's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)
@@ -165,8 +165,8 @@ func TestALibrarysSourceIsServedFromItsGoModule(t *testing.T) {
 		}
 	}()
 	src := app.Graph().Node("lib").Source
-	mod, _ := goModuleOf(home.pkg)
-	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line, GoModule: mod.id}); src == nil || *src != want {
+	mod, _ := goModuleOf(home.pkg())
+	if want := (model.Source{File: "v1/clock/clock.go", Line: home.line(), GoModule: mod.id}); src == nil || *src != want {
 		t.Fatalf("the library's source: %+v, want %+v", src, want)
 	}
 	servesOnlyWhatTheGraphNames(t, app, mod.id, src.File)

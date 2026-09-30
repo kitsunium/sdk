@@ -136,8 +136,10 @@ func (a *App) report(sp *span, err error) {
 			ev.Code = uint32(code)
 		}
 	}
-	sc := sp.sdk.SpanContext()
-	ev.TraceID, ev.SpanID = sc.TraceID, sc.SpanID
+	if sp.sdk != nil {
+		sc := sp.sdk.SpanContext()
+		ev.TraceID, ev.SpanID = sc.TraceID, sc.SpanID
+	}
 	ex.Emit(&ev)
 }
 

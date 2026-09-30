@@ -118,7 +118,7 @@ func (s *Service) Command[C, R any](name string, handler func(context.Context, C
 	}
 	c.kind, c.name, c.decl = model.KindCommand, name, callerPos()
 	c.pipe = pipeline[C, R]{handler: handler, policies: c.opts.policies}
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		c.body = &p
 	}
 	s.add(c, true)

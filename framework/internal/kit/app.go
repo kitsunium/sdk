@@ -19,6 +19,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
@@ -28,7 +29,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/metrics"
 	"github.com/kitsunium/sdk/pkg/v1/scheduler"
-	"github.com/kitsunium/sdk/pkg/v1/server"
 	"github.com/kitsunium/sdk/pkg/v1/signal"
 	"github.com/kitsunium/sdk/pkg/v1/trace"
 	"github.com/kitsunium/sdk/pkg/v1/vfs"
@@ -294,7 +294,7 @@ func (a *App) resolve() error {
 		Scope:    trace.Scope{Name: "github.com/kitsunium/sdk/framework/internal/kit", Version: kitVersion()},
 		Clock:    a.clock,
 	})
-	a.root, a.module = findModule(a.decl.file)
+	a.root, a.module = findModule(a.decl.file())
 	// kit's own service first, when the app keeps personal data (privacy.go).
 	a.mountPrivacy()
 	return nil
@@ -303,7 +303,7 @@ func (a *App) resolve() error {
 // findModule walks up from the file that declared the app to the go.mod that
 // owns it. It returns nothing under -trimpath, where files are not paths.
 func findModule(file string) (root, module string) {
-	if bi, ok := debug.ReadBuildInfo(); ok {
+	if bi := readBuild(); bi != nil {
 		module = bi.Main.Path
 	}
 	if !filepath.IsAbs(file) {
@@ -320,36 +320,16 @@ func findModule(file string) (root, module string) {
 	}
 }
 
-// kitVersion is the version of this module in the product's build.
-func kitVersion() string {
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
-		return "(unknown)"
-	}
-	if bi.Main.Path == frameworkModule {
-		return bi.Main.Version
-	}
-	for _, d := range bi.Deps {
-		if d.Path == frameworkModule {
-			if d.Replace != nil {
-				return "(replaced)"
-			}
-			return d.Version
-		}
-	}
-	return "(devel)"
-}
-
 // source relativizes a runtime position to the module root — or, for a
 // module's code, to its own Go module's (gomodule.go).
 func (a *App) source(p *pos) *model.Source {
-	if p == nil || p.file == "" {
+	if p == nil || p.file() == "" {
 		return nil
 	}
 	if s := a.goModuleSource(p); s != nil {
 		return s
 	}
-	return &model.Source{File: a.relativeFile(p.file), Line: p.line, Func: p.fn}
+	return &model.Source{File: a.relativeFile(p.file()), Line: p.line(), Func: p.fn()}
 }
 
 // relativeFile is file as the graph names it: under the product's root when
@@ -842,11 +822,9 @@ func (a *App) addHTTP() error {
 	return a.component("http", "", func(ctx context.Context) error { return (*start)(a, ctx) }, a.stopHTTP)
 }
 
-// httpEngine is what kit asks of the SDK's server engine once it runs.
-type httpEngine interface {
-	State() server.State
-	Shutdown(ctx context.Context) error
-}
+// httpEngine is what kit asks of the HTTP engine once it runs: the SDK's
+// server, which framework/kit/server plugs in.
+type httpEngine = plug.HTTPServer
 
 // httpStart starts the HTTP server — startHTTP — once framework/kit/server
 // is imported, and is nil before: a daemon or a CLI links none of the
@@ -1125,13 +1103,15 @@ func (l *loopState) ran(a *App, started, finished time.Time, err error) {
 // drains the connections, net/http speaks the protocol. It returns once the
 // address is bound.
 func (a *App) startHTTP(ctx context.Context) error {
-	srv := server.New()
-	srv.Group("http",
-		server.Listen("tcp", a.cfg.addr), server.Shards(httpShards),
-		server.ReadHeaderTimeout(httpReadHeader), server.ReadTimeout(httpRead),
-		server.WriteTimeout(httpWrite), server.IdleTimeout(httpIdle),
-		server.MaxHeaderBytes(httpMaxHeader),
-	).HandleHTTP(a.handler)
+	newServer := plug.NewHTTPServer.Load()
+	if newServer == nil {
+		return failure(CodeAppListen, "LISTEN_FAILED", "the product serves HTTP without framework/kit/server", nil, errs.String("addr", a.cfg.addr))
+	}
+	srv := (*newServer)(plug.HTTPConfig{
+		Addr: a.cfg.addr, Shards: httpShards,
+		ReadHeader: httpReadHeader, Read: httpRead, Write: httpWrite, Idle: httpIdle,
+		MaxHeaderBytes: httpMaxHeader, Handler: a.handler,
+	})
 	// In dev, the engine's goroutines — started by Start — inherit the HTTP
 	// loop's label: the goroutine view and the profiles name them.
 	var startErr error
@@ -1145,10 +1125,7 @@ func (a *App) startHTTP(ctx context.Context) error {
 		// kit's words: the SDK's would not name the setting to change.
 		return explain(CodeAppListen, "LISTEN_FAILED", "the product could not listen on its address: change KIT_ADDR", err, errs.String("addr", a.cfg.addr))
 	}
-	addr := a.cfg.addr
-	if listeners := srv.State().Listeners; len(listeners) > 0 {
-		addr = listeners[0].Address
-	}
+	addr := cmp.Or(srv.State().Addr, a.cfg.addr)
 	a.mu.Lock()
 	a.server, a.addr = srv, addr
 	a.mu.Unlock()

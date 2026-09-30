@@ -83,14 +83,14 @@ func TestASourceIsNeverALink(t *testing.T) {
 // package of github.com/kitsunium/sdk/pkg, as they say, from a file of the test's
 // directory: that directory is the Go module's root, and .env lies there.
 func TestTheSourceEndpointServesNoLink(t *testing.T) {
-	tools, _ := goModuleOf(toolsPos(t).pkg)
+	tools, _ := goModuleOf(toolsPos(t).pkg())
 	dir := t.TempDir()
 	file := filepath.Join(dir, "packages.go")
 	must(t, os.WriteFile(file, []byte("// Package clock\npackage clock\n"), 0o600))
 	must(t, os.WriteFile(filepath.Join(dir, ".env"), []byte("TOKEN=hunter2\n"), 0o600))
 	desk := NewService("desk", "A module's service.")
 	m := NewModule("tools", "A module of another Go module.", desk)
-	m.decl = pos{file: file, line: 1, pkg: tools.path}
+	m.decl = posAt(file, 1, "", tools.path)
 	desk.decl = m.decl
 	app := NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
 	must(t, app.Start(t.Context()))

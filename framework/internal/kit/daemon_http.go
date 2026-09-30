@@ -75,7 +75,7 @@ func (a *App) countAccepts() {
 	if srv == nil || l == nil {
 		return
 	}
-	accepted := int64(srv.State().TotalConns)
+	accepted := int64(srv.State().Total)
 	a.mu.Lock()
 	l.Runs = accepted
 	a.mu.Unlock()
@@ -102,9 +102,9 @@ func (a *App) describeHTTP() *model.HTTPServer {
 			"idle":       httpIdle.String(),
 		},
 		Conns: map[string]int64{
-			"active":   state.ActiveConns,
-			"total":    int64(state.TotalConns),
-			"rejected": int64(state.RejectedConns),
+			"active":   state.Active,
+			"total":    int64(state.Total),
+			"rejected": int64(state.Rejected),
 		},
 		InFlight: st.inFlight.Load(),
 		Served:   st.served.Load(),

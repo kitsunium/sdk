@@ -70,7 +70,7 @@ func (a *App) runAnalysis(ctx context.Context) {
 func (a *App) modulePackages() []string {
 	var out []string
 	for _, mm := range a.modules {
-		if pkg := mm.module.decl.pkg; pkg != "" {
+		if pkg := mm.module.decl.pkg(); pkg != "" {
 			out = append(out, pkg)
 		}
 	}

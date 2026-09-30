@@ -7,7 +7,7 @@ import (
 )
 
 // Engine is an SQL engine a database runs on. An engine module returns one —
-// github.com/kitsunium/platform/connectors/postgres, …/mysql, …/sqlite —;
+// github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —;
 // kit calls it when the database starts. Like an SDK port, it grows by
 // sibling interfaces, never by a method.
 type Engine = ikit.Engine

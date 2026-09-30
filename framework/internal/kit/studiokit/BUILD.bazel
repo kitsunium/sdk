@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "studiokit",
+    srcs = [
+        "events.go",
+        "profile.go",
+        "studiokit.go",
+        "studiokit_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/kit/studiokit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/kit/plug",
+        "//framework/model",
+        "//pkg/v1/profiling",
+        "//pkg/v1/server/sse",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":studiokit",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "studiokit_test",
+    srcs = ["profile_internal_test.go"],
+    embed = [":studiokit"],
+    deps = [
+        "//framework/internal/kit/plug",
+        "//framework/model",
+        "//pkg/v1/profiling",
+    ],
+)

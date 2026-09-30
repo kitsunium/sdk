@@ -7,25 +7,116 @@ import (
 	"reflect"
 	"runtime"
 	"strings"
+	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
 )
+
+// callerDepth bounds the frames callerFrame reads: a declaration, and the
+// facade's forwarders above it.
+const callerDepth int = 3
 
 // facadePackage is framework/kit, the package a product imports: its
 // functions forward to this one's, and a frame of it is never a declaration.
 const facadePackage string = "github.com/kitsunium/sdk/framework/kit"
 
-// pos is a source position captured at runtime. file is whatever the
+// pos is a source position: a declaration's, captured at runtime as the
+// return addresses of its call and resolved — file, line, function, package —
+// only when something reads it; or one given whole. file is whatever the
 // compiler recorded: absolute in a normal build, module-prefixed under
-// -trimpath. The App relativizes it once it knows the module root.
-type pos struct {
+// -trimpath. The App relativizes it once it knows the module root. The zero
+// pos is no position.
+type pos struct{ s *site }
+
+// site is what a pos resolves to, and, until it did, the call stack it
+// resolves from.
+type site struct {
+	once sync.Once
+	// pcs are the return addresses of a declaration's call, innermost
+	// first; the facade's frames are skipped when they are resolved.
+	pcs [callerDepth]uintptr
+	n   int
+	// file, line and fn say where the code is; pkg is the import path of
+	// the package whose code is there, when the runtime says it: a
+	// declaration's Go module decides who owns it, and where its file is
+	// relative to (gomodule.go).
 	file string
 	line int
 	fn   string
-	// pkg is the import path of the package whose code is there, when the
-	// runtime says it: a declaration's Go module decides who owns it, and
-	// where its file is relative to (gomodule.go).
-	pkg string
+	pkg  string
+}
+
+// posAt is the position file:line of the function fn of package pkg, given
+// whole.
+func posAt(file string, line int, fn, pkg string) pos {
+	s := &site{file: file, line: line, fn: fn, pkg: pkg}
+	s.once.Do(func() {})
+	return pos{s: s}
+}
+
+// at is p resolved; nil for the zero pos.
+func (p pos) at() *site {
+	if p.s == nil {
+		return nil
+	}
+	p.s.once.Do(p.s.resolve)
+	return p.s
+}
+
+// file is the position's file, "" for none.
+func (p pos) file() string {
+	if s := p.at(); s != nil {
+		return s.file
+	}
+	return ""
+}
+
+// line is the position's line, 0 for none.
+func (p pos) line() int {
+	if s := p.at(); s != nil {
+		return s.line
+	}
+	return 0
+}
+
+// fn is the function at the position, "" when it was given none.
+func (p pos) fn() string {
+	if s := p.at(); s != nil {
+		return s.fn
+	}
+	return ""
+}
+
+// pkg is the import path of the package at the position, "" when the
+// runtime said none.
+func (p pos) pkg() string {
+	if s := p.at(); s != nil {
+		return s.pkg
+	}
+	return ""
+}
+
+// withPkg is p, said to be in package pkg.
+func (p pos) withPkg(pkg string) pos { return posAt(p.file(), p.line(), p.fn(), pkg) }
+
+// resolve reads the call stack the site captured: the first frame that is
+// not the facade's.
+func (s *site) resolve() {
+	frames := runtime.CallersFrames(s.pcs[:s.n])
+	for {
+		f, more := frames.Next()
+		if f.PC == 0 {
+			return
+		}
+		pkg, _ := packageOf(f.Function)
+		if pkg != facadePackage {
+			s.file, s.line, s.pkg = f.File, f.Line, pkg
+			return
+		}
+		if !more {
+			return
+		}
+	}
 }
 
 // callerPos returns the position of the code that called the kit function
@@ -42,19 +133,11 @@ func callerPos() pos { return callerFrame(3) }
 // frame of the facade — framework/kit, whose functions only forward here —
 // is not a declaration's: the position is the frame that called the facade.
 func callerFrame(skip int) pos {
-	for ; ; skip++ {
-		pc, file, line, ok := runtime.Caller(skip)
-		if !ok {
-			return pos{}
-		}
-		p := pos{file: file, line: line}
-		if f := runtime.FuncForPC(pc); f != nil {
-			p.pkg, _ = packageOf(f.Name())
-		}
-		if p.pkg != facadePackage {
-			return p
-		}
-	}
+	// The return addresses alone: what they say is read when something
+	// asks (site.resolve), which a product's start seldom does.
+	s := &site{}
+	s.n = runtime.Callers(skip+1, s.pcs[:])
+	return pos{s: s}
 }
 
 // packageOf is the import path of the package a function belongs to, read
@@ -115,7 +198,7 @@ func funcInfo[F any](fn F) (p pos, short string) {
 	qualified := f.Name()
 	file, line := f.FileLine(f.Entry())
 	if !strings.HasPrefix(file, "<") {
-		p = pos{file: file, line: line, fn: qualified}
+		p = posAt(file, line, qualified, "")
 	}
 	// Strip the package path, then an instantiation suffix.
 	rest := qualified[strings.LastIndex(qualified, "/")+1:]

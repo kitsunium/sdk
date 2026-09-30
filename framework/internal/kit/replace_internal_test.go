@@ -4,9 +4,27 @@ import (
 	"context"
 	"errors"
 	"io"
+	"reflect"
 	"strings"
 	"testing"
 )
+
+// initSawATest is what the guard said during this package's
+// initialisation, before the test main registered any flag: a replacement a
+// test declares in a package-level value starts there.
+var initSawATest = testBinary()
+
+// The guard is what the linker set when go test built the binary, never a
+// run-time signal a product could send — a flag named test.v, a call to
+// testing.Init —, and a test's own initialisation already sees it.
+func TestATestBinaryIsWhatTheLinkerSays(t *testing.T) {
+	if reflect.ValueOf(testBinary).Pointer() != reflect.ValueOf(testing.Testing).Pointer() {
+		t.Error("testBinary is not testing.Testing: a product's run-time state could turn it on")
+	}
+	if !initSawATest {
+		t.Error("a test's package initialisation is not known as a test")
+	}
+}
 
 // A program go test did not build refuses a replacement: neither a
 // production binary nor kit dev can carry one. The guard is testing.Testing,

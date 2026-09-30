@@ -101,7 +101,7 @@ func (s *Service) Watch(name string, mark Mark, handler func(context.Context, Wr
 	}
 	w := &Watch{mark: mark, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism, ownStores: o.ownStores}
 	w.kind, w.name, w.decl = model.KindSubscription, name, callerPos()
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		w.body = &p
 	}
 	s.add(w, true)

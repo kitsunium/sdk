@@ -13,9 +13,12 @@ import (
 )
 
 // testBinary reports whether the program is a test binary, the one place a
-// replacement may run: testing.Testing, behind a variable an internal test
-// sets to prove the refusal. It is why kit's non-test code imports testing.
-var testBinary = testing.Testing
+// replacement may run, behind a variable an internal test sets to prove the
+// refusal. testing.Testing reads what the linker set when go test built the
+// binary: nothing a product does at run time — a flag named test.v, a call to
+// testing.Init — can make it say yes, and a test's own package initialisation
+// already sees it.
+var testBinary func() bool = testing.Testing
 
 // replaceDecl is one kit.Replace the app was given.
 type replaceDecl struct {

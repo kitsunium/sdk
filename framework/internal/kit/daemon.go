@@ -8,6 +8,7 @@ import (
 	"slices"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
@@ -24,10 +25,10 @@ const maxPhaseHistory int = 64
 const (
 	// labelNode names the node whose work the goroutine is doing. begin sets
 	// it and end restores what was there before.
-	labelNode = "kit_node"
+	labelNode string = plug.LabelNode
 	// labelLoop names the loop the goroutine belongs to: the HTTP server,
 	// the scheduler, a consumer.
-	labelLoop = "kit_loop"
+	labelLoop string = plug.LabelLoop
 )
 
 // stopSignals are the signals that end App.Run: an interrupt from a

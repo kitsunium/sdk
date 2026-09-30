@@ -67,8 +67,8 @@ func (p *storePrivacy[T]) registerDeclared(a *App, line *model.RegisterStore) {
 		return
 	}
 	fn := "an instant the record carries"
-	if p.heldAt != nil && p.heldAt.fn != "" {
-		fn = shortFunc(p.heldAt.fn)
+	if p.heldAt != nil && p.heldAt.fn() != "" {
+		fn = shortFunc(p.heldAt.fn())
 	}
 	line.HeldUntil = "until " + fn
 	if p.heldReason != "" {

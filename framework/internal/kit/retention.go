@@ -279,7 +279,7 @@ func (d *privacyDecl[T]) anonymiser(o *privacyOption) {
 		return
 	}
 	d.p.anonymise = fn
-	if at, _ := funcInfo(fn); at.file != "" {
+	if at, _ := funcInfo(fn); at.file() != "" {
 		d.p.anonymiseAt = &at
 	}
 }
@@ -291,7 +291,7 @@ func (d *privacyDecl[T]) held(o *privacyOption) {
 		return
 	}
 	d.p.heldUntil, d.p.heldReason = fn, strings.TrimSpace(o.text)
-	if at, _ := funcInfo(fn); at.file != "" {
+	if at, _ := funcInfo(fn); at.file() != "" {
 		d.p.heldAt = &at
 	}
 }
@@ -304,7 +304,7 @@ func (d *privacyDecl[T]) rule(o *privacyOption, prev *retentionRule[T]) *retenti
 		return prev
 	}
 	r := &retentionRule[T]{}
-	if at, _ := funcInfo(fn); at.file != "" {
+	if at, _ := funcInfo(fn); at.file() != "" {
 		r.fnAt = &at
 	}
 	if !o.delayed {
