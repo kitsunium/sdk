@@ -32,10 +32,50 @@ const (
 	maxDevChanged int = 20
 )
 
-// gitCache keeps git's answer per directory for the life of the process:
-// kit dev restarts the process on every rebuild, and a test starts many
-// apps.
-var gitCache sync.Map // dir → gitAnswer
+var (
+	// gitCache keeps git's answer per directory for the life of the process:
+	// kit dev restarts the process on every rebuild, and a test starts many
+	// apps.
+	gitCache sync.Map // dir → gitAnswer
+	// kitVersion is the version of this module in the product's build, read
+	// once.
+	kitVersion = sync.OnceValue(func() string {
+		bi := readBuild()
+		if bi == nil {
+			return "(unknown)"
+		}
+		if bi.Main.Path == frameworkModule {
+			return bi.Main.Version
+		}
+		for _, d := range bi.Deps {
+			if d.Path == frameworkModule {
+				if d.Replace != nil {
+					return "(replaced)"
+				}
+				return d.Version
+			}
+		}
+		return "(devel)"
+	})
+	// readBuild is the running binary's build information, read once: the
+	// runtime parses it anew at every debug.ReadBuildInfo.
+	readBuild = sync.OnceValue(func() *debug.BuildInfo {
+		bi, _ := debug.ReadBuildInfo()
+		return bi
+	})
+	// parsedBuild is readBuild as the SDK reads it, parsed once; nil when the
+	// binary carries no build information.
+	parsedBuild = sync.OnceValue(func() *process.BuildInfo {
+		bi := readBuild()
+		if bi == nil {
+			return nil
+		}
+		return new(process.ParseBuild(bi))
+	})
+	// productionBuild is the build as a production run describes it — no
+	// question to git —, the same for every app of the process.
+	productionBuild = sync.OnceValue(func() *model.Build { return buildOf(readBuild(), nil) })
+)
 
 // gitHead asks git where a local module's directory is: its commit, the
 // commit's time, and whether tracked files differ from it.
@@ -150,13 +190,13 @@ func cachedHeadAt(dir string) (git.HeadState, bool) {
 }
 
 // describeBuild is the build and, in dev, kit dev's account of it. Only dev
-// asks git about local modules: a production binary never runs a command.
+// asks git about local modules: a production binary never runs a command,
+// and describes its build once per process.
 func describeBuild(dev bool, getenv func(string) string) (*model.Build, *model.DevBuild) {
-	bi, _ := debug.ReadBuildInfo()
 	if !dev {
-		return buildOf(bi, nil), nil
+		return productionBuild(), nil
 	}
-	return buildOf(bi, cachedHeadAt), devBuildOf(getenv)
+	return buildOf(readBuild(), cachedHeadAt), devBuildOf(getenv)
 }
 
 // moduleBuild is the Go module that holds package pkg, as the build says
@@ -167,11 +207,10 @@ func (a *App) moduleBuild(pkg string) *model.ModuleVersion {
 	if !ok {
 		return nil
 	}
-	bi, ok := debug.ReadBuildInfo()
-	if !ok {
+	info := parsedBuild()
+	if info == nil {
 		return nil
 	}
-	info := process.ParseBuild(bi)
 	mod, ok := info.Module(m.path)
 	if !ok {
 		return nil

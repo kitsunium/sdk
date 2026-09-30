@@ -15,11 +15,11 @@ import (
 	"strings"
 	"sync/atomic"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/health"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/server/sse"
 )
 
 // studioCSP is the content security policy of the Studio. It shares the
@@ -232,7 +232,12 @@ func (a *App) findNode(id string) node {
 // server/sse; the Studio's own is only which events, in which order.
 func (a *App) serveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
-	stream, err := sse.New(w, r)
+	open := plug.OpenEventStream.Load()
+	if open == nil {
+		writeJSON(w, http.StatusNotFound, wireError{Error: wireBody{Code: WireNotFound, Message: "the Studio is not linked: import framework/kit/studio"}})
+		return
+	}
+	stream, err := (*open)(w, r)
 	if err != nil {
 		writeJSON(w, http.StatusInternalServerError, wireError{Error: wireBody{Code: WireInternal, Message: "internal error"}})
 		return
@@ -251,7 +256,7 @@ func (a *App) serveEvents(w http.ResponseWriter, r *http.Request) {
 		if err != nil {
 			return nil
 		}
-		return stream.Send(sse.Event{Data: string(raw)})
+		return stream.Send(string(raw))
 	}
 	g := a.Graph()
 	if send(model.Event{Type: model.EventHello, Time: a.clock.Now().UTC(), Revision: g.Revision, StartedAt: g.App.StartedAt, Phase: a.currentPhase()}) != nil {

@@ -7,9 +7,9 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/server/static"
 )
 
 // frontendCSP is the content security policy of a frontend: its own origin
@@ -108,7 +108,11 @@ func (f *Frontend) mount(a *App, r *routes) phrase {
 	if f.fsys == nil {
 		return phrase{}
 	}
-	files, err := static.New(f.fsys, static.Config{ContentSecurityPolicy: frontendCSP, SinglePageApp: true})
+	newFiles := plug.NewStaticFiles.Load()
+	if newFiles == nil {
+		return say("static.unservable", "name", f.name, "detail", "framework/kit/server is not imported")
+	}
+	files, err := (*newFiles)(f.fsys, frontendCSP)
 	if err != nil {
 		return say("static.unservable", "name", f.name, "detail", errs.PublicOf(err))
 	}

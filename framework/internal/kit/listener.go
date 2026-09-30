@@ -110,7 +110,7 @@ func (s *Service) Listen(name, contract string, handler ListenHandler, opts ...L
 			o.listenerConfigure(&l.opts)
 		}
 	}
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		l.body = &p
 	}
 	s.add(l, true)

@@ -90,7 +90,7 @@ func (x *access[Req]) authorize(s *Service, at pos, id string, fn func(context.C
 		return
 	}
 	x.rule = fn
-	if p, _ := funcInfo(fn); p.file != "" {
+	if p, _ := funcInfo(fn); p.file() != "" {
 		x.ruleAt = &p
 	}
 }
@@ -173,7 +173,7 @@ func (x *access[Req]) mechanics() []model.Mechanic {
 	if x.rule != nil {
 		m := model.Mechanic{Kind: "authorize", Label: "Authorize"}
 		if x.ruleAt != nil {
-			m.Label, m.Config = shortFunc(x.ruleAt.fn), map[string]string{"func": x.ruleAt.fn}
+			m.Label, m.Config = shortFunc(x.ruleAt.fn()), map[string]string{"func": x.ruleAt.fn()}
 		}
 		out = append(out, m)
 	}

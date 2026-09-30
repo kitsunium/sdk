@@ -55,7 +55,7 @@ type AuthenticatorHandler[P, D any] struct {
 func (s *Service) AuthHandler[P, D any](name string, handler func(context.Context, P) (UID, D, error)) *AuthenticatorHandler[P, D] {
 	a := &AuthenticatorHandler[P, D]{handler: handler}
 	a.kind, a.name, a.decl = model.KindAuth, name, callerPos()
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		a.body = &p
 	}
 	s.add(a, true)

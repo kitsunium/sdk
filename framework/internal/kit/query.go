@@ -55,7 +55,7 @@ func (s *Service) Query[Q, R any](name string, handler func(context.Context, Q) 
 	}
 	q.kind, q.name, q.decl = model.KindQuery, name, callerPos()
 	q.pipe = pipeline[Q, R]{handler: handler, policies: q.opts.policies}
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		q.body = &p
 	}
 	s.add(q, true)

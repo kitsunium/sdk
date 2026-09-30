@@ -21,7 +21,7 @@ func TestTheListenerIsOneSocket(t *testing.T) {
 	first.mu.Lock()
 	srv, addr := first.server, first.addr
 	first.mu.Unlock()
-	if n := len(srv.State().Listeners); n != 1 {
+	if n := srv.State().Listeners; n != 1 {
 		t.Errorf("%d listening sockets on %s, want 1", n, addr)
 	}
 

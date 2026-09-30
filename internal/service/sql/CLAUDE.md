@@ -123,9 +123,10 @@ Code range: `0.3.54.*` (ADR 0055).
   that held it**; a failed savepoint drops ids at or above its own — scopes
   are a stack and ids only grow — and the root runs what is left after its
   COMMIT, before `Transact` returns (ADR 0139).
-- **The version table name is validated against `identifierPattern`, never
-  bound.** An identifier cannot be a parameter, so it is interpolated — that
-  regexp is the whole defence.
+- **The version table name is validated by `isIdentifier`, never bound.**
+  An identifier cannot be a parameter, so it is interpolated — that check,
+  `^[A-Za-z_][A-Za-z0-9_]*$` written out rather than a regular expression
+  compiled at the package's initialisation, is the whole defence.
 - **Errors are JOINED, never wrapped.** `failed()` uses `errors.Join(verdict,
   driverErr)` so origin-wins (CLAUDE.md rule 6) cannot relabel the SDK's
   verdict with the driver's code. `errs.HasCode(err, CodeCommitFailed)` and the

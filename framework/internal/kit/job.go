@@ -57,7 +57,7 @@ func (s *Service) job(name string, fn func(context.Context) error, kind, schedul
 	j.kind, j.name = model.KindJob, name
 	j.decl = callerFrame(3) // callerFrame ← job ← Every/Cron ← the declaration
 
-	if p, _ := funcInfo(fn); p.file != "" {
+	if p, _ := funcInfo(fn); p.file() != "" {
 		j.body = &p
 	}
 	s.add(j, true)

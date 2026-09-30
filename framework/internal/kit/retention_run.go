@@ -235,8 +235,8 @@ func retentionText[T any](a *App, r *retentionRule[T]) (string, bool) {
 		return "", false
 	}
 	fn := "an instant the record carries"
-	if r.fnAt != nil && r.fnAt.fn != "" {
-		fn = shortFunc(r.fnAt.fn)
+	if r.fnAt != nil && r.fnAt.fn() != "" {
+		fn = shortFunc(r.fnAt.fn())
 	}
 	if r.at != nil {
 		return "at " + fn, true

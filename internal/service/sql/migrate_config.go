@@ -3,7 +3,6 @@
 package sql
 
 import (
-	"regexp"
 	"slices"
 	"strconv"
 	"time"
@@ -32,11 +31,28 @@ const DefaultLockTimeout time.Duration = 2 * time.Minute
 // [MigrateConfig.LockRetryInterval] clamps to it.
 const DefaultLockRetryInterval time.Duration = 250 * time.Millisecond
 
-// identifierPattern is the only shape accepted for a version-table name. A
-// table name cannot be a bound parameter, so it is interpolated — and this
-// pattern is the whole thing standing between a configuration string and an
-// injection.
-var identifierPattern = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*$`)
+// isIdentifier reports whether name has the only shape accepted for a
+// version-table name — ^[A-Za-z_][A-Za-z0-9_]*$, one ASCII letter or
+// underscore, then letters, digits and underscores. A table name cannot be a
+// bound parameter, so it is interpolated — and this check is the whole thing
+// standing between a configuration string and an injection. It is written
+// out rather than a regular expression compiled at the package's
+// initialisation, which every program that imports the package paid.
+func isIdentifier(name string) bool {
+	if name == "" || !identStart(name[0]) {
+		return false
+	}
+	for i := range len(name) {
+		if c := name[i]; !identStart(c) && (c < '0' || c > '9') {
+			return false
+		}
+	}
+	return true
+}
+
+// identStart reports whether c may start an identifier: an ASCII letter or
+// an underscore.
+func identStart(c byte) bool { return c == '_' || 'a' <= c && c <= 'z' || 'A' <= c && c <= 'Z' }
 
 // MigrateConfig parameterises [NewMigrator].
 //
@@ -101,7 +117,7 @@ func (m MigrateConfig) resolvedTable() (table string, err error) {
 		name = DefaultVersionTable
 	}
 	//: an identifier cannot be bound, so it must be proven safe here.
-	if !identifierPattern.MatchString(name) {
+	if !isIdentifier(name) {
 		//: the offending name is the caller's own configuration, not a secret.
 		return "", kerrs.Wrap(VersionTableInvalid, kerrs.WrapParams{}, kerrs.String("table", name))
 	}

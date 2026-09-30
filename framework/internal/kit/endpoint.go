@@ -242,7 +242,7 @@ func (s *Service) Endpoint[Req, Resp any](route string, handler func(context.Con
 	e.kind = model.KindEndpoint
 	e.decl = decl
 	hp, short := funcInfo(handler)
-	if hp.file != "" {
+	if hp.file() != "" {
 		e.body = &hp
 	}
 	e.name = firstNonEmpty(e.opts.name, short, route)
@@ -296,7 +296,7 @@ func (s *Service) Implement[Req, Resp any](port *PortService[Req, Resp], handler
 	e.routeless = true
 	e.kind, e.decl = model.KindEndpoint, decl
 	hp, short := funcInfo(handler)
-	if hp.file != "" {
+	if hp.file() != "" {
 		e.body = &hp
 	}
 	portName := "implementation"

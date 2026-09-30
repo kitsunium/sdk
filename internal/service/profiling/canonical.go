@@ -5,15 +5,20 @@ package profiling
 import (
 	"regexp"
 	"strings"
+	"sync"
 )
 
-var (
-	// generics matches the instantiation a runtime name carries: "[...]".
-	generics = regexp.MustCompile(`\[[^\[\]]*\]`)
-	// closure matches the suffixes the compiler gives a function literal, a
-	// go or defer wrapper, a method value: they are their function's code.
-	closure = regexp.MustCompile(`(\.func\d+|\.gowrap\d+|\.deferwrap\d+|-fm|\.\d+)+$`)
-)
+// canonicalPatterns compiles, at the first CanonicalName and never at the
+// package's initialisation, the two patterns it rewrites a name with:
+// generics, the instantiation a runtime name carries ("[...]"), and
+// closure, the suffixes the compiler gives a function literal, a go or
+// defer wrapper, a method value — which are their function's code. A
+// program that imports the package and never canonicalises a name pays
+// nothing for them.
+var canonicalPatterns = sync.OnceValues(func() (generics, closure *regexp.Regexp) {
+	return regexp.MustCompile(`\[[^\[\]]*\]`),
+		regexp.MustCompile(`(\.func\d+|\.gowrap\d+|\.deferwrap\d+|-fm|\.\d+)+$`)
+})
 
 // CanonicalName spells a function the same way whoever named it, so a frame
 // of a profile or a dump meets the function a static analysis found:
@@ -25,6 +30,7 @@ var (
 //     enclosing function: "pkg.F.func1.2", "pkg.F.gowrap1" and "pkg.T.M-fm"
 //     are "pkg.F", "pkg.F" and "pkg.T.M".
 func CanonicalName(name string) string {
+	generics, closure := canonicalPatterns()
 	name = generics.ReplaceAllString(name, "")
 	//: go/types puts the receiver, package-qualified, in parentheses first.
 	if strings.HasPrefix(name, "(") {

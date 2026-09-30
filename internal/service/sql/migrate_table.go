@@ -39,7 +39,7 @@ const (
 //     value is deterministic in a test.
 //
 // The identifier is interpolated, not bound — a table name cannot be a
-// parameter. It was validated against identifierPattern at construction,
+// parameter. It was validated by isIdentifier at construction,
 // which is the whole defence.
 func createTableSQL(table string) string {
 	//: IF NOT EXISTS is supported by all three dialects; the engines that do

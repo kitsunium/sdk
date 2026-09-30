@@ -26,7 +26,7 @@ func toolsDesk(t *testing.T) (*Module, *Command[toolsEntry, toolsEntry], *Query[
 	cmd := desk.Command("place", echo)
 	qry := desk.Query("read", echo)
 	m := NewModule("tools", "A module of another Go module.", desk)
-	m.decl.pkg, desk.decl.pkg, cmd.decl.pkg, qry.decl.pkg = home.pkg, home.pkg, home.pkg, home.pkg
+	m.decl, desk.decl, cmd.decl, qry.decl = m.decl.withPkg(home.pkg()), desk.decl.withPkg(home.pkg()), cmd.decl.withPkg(home.pkg()), qry.decl.withPkg(home.pkg())
 	return m, cmd, qry
 }
 
@@ -78,7 +78,7 @@ func TestAModuleBuildsItsOwnOperations(t *testing.T) {
 	m, cmd, _ := toolsDesk(t)
 	cmd.Key(func(in toolsEntry) string { return in.ID })
 	for i := range cmd.calls {
-		cmd.calls[i].at.pkg = m.decl.pkg
+		cmd.calls[i].at = cmd.calls[i].at.withPkg(m.decl.pkg())
 	}
 	app := NewApp("x").With(m, InMemory(), Listen("127.0.0.1:0"), Logs(io.Discard))
 	if err := app.Start(t.Context()); err != nil {

@@ -4,18 +4,21 @@ package kit
 import (
 	"cmp"
 	"context"
+	"flag"
 	"reflect"
 	"slices"
 	"sync/atomic"
-	"testing"
 
 	"github.com/kitsunium/sdk/framework/model"
 )
 
 // testBinary reports whether the program is a test binary, the one place a
-// replacement may run: testing.Testing, behind a variable an internal test
-// sets to prove the refusal. It is why kit's non-test code imports testing.
-var testBinary = testing.Testing
+// replacement may run, behind a variable an internal test sets to prove the
+// refusal. It asks for the flag every test binary registers before its first
+// test — testing.Init's -test.v — rather than calling testing.Testing: a
+// product's binary would otherwise link and initialise the testing package
+// on every start.
+var testBinary func() bool = func() bool { return flag.Lookup("test.v") != nil }
 
 // replaceDecl is one kit.Replace the app was given.
 type replaceDecl struct {

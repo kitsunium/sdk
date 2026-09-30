@@ -405,12 +405,16 @@ func (a *App) begin(ctx context.Context, st *spanStart) (context.Context, *span)
 	if !ok {
 		kind = trace.KindInternal
 	}
-	ctx, sdk := a.tracer.Start(ctx, st.name, trace.SpanParams{Kind: kind})
-	sc := sdk.SpanContext()
-	sp := &span{a: a, sdk: sdk, start: a.clock.Now(), root: startsTrace(parent, st.op)}
+	sp := &span{a: a, start: a.clock.Now(), root: startsTrace(parent, st.op)}
+	var sc trace.SpanContext
+	if a.traces() {
+		ctx, sp.sdk = a.tracer.Start(ctx, st.name, trace.SpanParams{Kind: kind})
+		sc = sp.sdk.SpanContext()
+	}
+	traceID, spanID := spanIDs(sc)
 	sp.s = model.Span{
-		TraceID: sc.TraceID.String(),
-		SpanID:  sc.SpanID.String(),
+		TraceID: traceID,
+		SpanID:  spanID,
 		Node:    st.node,
 		From:    st.from,
 		Edge:    st.edge,
@@ -427,6 +431,24 @@ func (a *App) begin(ctx context.Context, st *spanStart) (context.Context, *span)
 		a.callSite(sp)
 	}
 	return a.inside(ctx, sp, st.node), sp
+}
+
+// traces reports whether the run's spans are traced — their identifiers
+// minted, their SDK spans recorded. A command of the product's CLI is not: it
+// exports nothing and shows nothing, and a trace would cost it the entropy of
+// every identifier.
+func (a *App) traces() bool { return !a.cliRun || a.hub.enabled }
+
+// spanIDs are sc's trace and span identifiers as a span shows them, none
+// for an identifier sc does not carry.
+func spanIDs(sc trace.SpanContext) (traceID, spanID string) {
+	if sc.TraceID.IsValid() {
+		traceID = sc.TraceID.String()
+	}
+	if sc.SpanID.IsValid() {
+		spanID = sc.SpanID.String()
+	}
+	return traceID, spanID
 }
 
 // startsTrace reports whether a span of op under parent starts a trace: when
@@ -529,10 +551,14 @@ func (sp *span) end(err error) {
 		sp.s.Code = body.Code
 		if status >= http.StatusInternalServerError {
 			sp.s.Status, sp.s.Error = model.StatusError, body.Message
-			sp.sdk.SetStatus(otelStatusError, body.Message)
+			if sp.sdk != nil {
+				sp.sdk.SetStatus(otelStatusError, body.Message)
+			}
 		}
 	}
-	sp.sdk.End()
+	if sp.sdk != nil {
+		sp.sdk.End()
+	}
 	if sp.restore != nil {
 		pprof.SetGoroutineLabels(sp.restore)
 	}
@@ -551,7 +577,7 @@ func (a *App) callSite(sp *span) {
 	for {
 		f, more := frames.Next()
 		if f.Function != "" && !slices.ContainsFunc(machinery, func(p string) bool { return strings.HasPrefix(f.Function, p) }) {
-			if src := a.source(&pos{file: f.File, line: f.Line}); src != nil && filepath.IsLocal(filepath.FromSlash(src.File)) {
+			if src := a.source(new(posAt(f.File, f.Line, "", ""))); src != nil && filepath.IsLocal(filepath.FromSlash(src.File)) {
 				sp.attr("code.filepath", src.File)
 				sp.attr("code.lineno", strconv.Itoa(src.Line))
 			}

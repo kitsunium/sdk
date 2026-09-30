@@ -225,7 +225,7 @@ func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler 
 	}
 	sub := &SubscriptionWorker[T]{topic: topic, handler: handler, maxDeliver: o.maxDeliveries, parallelism: o.parallelism}
 	sub.kind, sub.name, sub.decl = model.KindSubscription, name, callerPos()
-	if p, _ := funcInfo(handler); p.file != "" {
+	if p, _ := funcInfo(handler); p.file() != "" {
 		sub.body = &p
 	}
 	s.add(sub, true)

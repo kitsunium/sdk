@@ -170,7 +170,7 @@ Package kit — \`privacy seal\`: a whole store sealed now.
 
 Package kit — the process sample: what the running process uses.
 
-Package kit — CPU profiles of the running process, for the Studio.
+Package kit — the Studio's profiler: the live heap and the goroutines, folded onto the graph.
 
 Package kit — queries: an operation that reads and changes nothing.
 
@@ -849,7 +849,7 @@ func ClientIP(ctx context.Context) string
 ClientIP returns the address of the client of the request ctx serves: the connection's peer, or — only when KIT\_TRUST\_PROXY=on — the last address of X\-Forwarded\-For, the one the trusted proxy appended. It is "" outside an HTTP request.
 
 <a name="EnableServer"></a>
-## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L858>)
+## func [EnableServer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L836>)
 
 ```go
 func EnableServer()
@@ -1148,7 +1148,7 @@ func (a *App) Records(store string) (RecordsService, error)
 Records returns the untyped port to the records of the store whose node ID is store: what kit's export and erasure run on, and what a module reads and erases through. A store the app does not mount is a [NotFound](<#NotFound>) error.
 
 <a name="App.Run"></a>
-### func \(\*App\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L1221>)
+### func \(\*App\) [Run](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L1198>)
 
 ```go
 func (a *App) Run(ctx context.Context) error
@@ -1159,7 +1159,7 @@ Run starts the product, serves until ctx ends or the process receives SIGINT or 
 Goroutine lifecycle: one goroutine turns a signal into the run's cancellation; it ends when a signal arrives or when the run returns, which cancels the context it also watches.
 
 <a name="App.Start"></a>
-### func \(\*App\) [Start](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L447>)
+### func \(\*App\) [Start](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L427>)
 
 ```go
 func (a *App) Start(ctx context.Context) error
@@ -1168,7 +1168,7 @@ func (a *App) Start(ctx context.Context) error
 Start brings the product up: it checks every declaration, opens the data directory, loads the stores, starts the consumers, the scheduler and the HTTP listener — in that order, through the SDK lifecycle, so a failure unwinds what already started. It returns once the product serves.
 
 <a name="App.Stop"></a>
-### func \(\*App\) [Stop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L1177>)
+### func \(\*App\) [Stop](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L1154>)
 
 ```go
 func (a *App) Stop(ctx context.Context) error
@@ -1268,8 +1268,8 @@ Database declares a database the product keeps its stores in, named name, on eng
 
 ```
 import (
-	"github.com/kitsunium/platform/connectors/postgres"
-	"github.com/kitsunium/platform/connectors/sqlite"
+	"github.com/kitsunium/sdk/framework/connectors/postgres"
+	"github.com/kitsunium/sdk/framework/connectors/sqlite"
 )
 
 var App = kit.NewApp("vigie", intake.Service, desk.Service, audit.Service).With(
@@ -1353,7 +1353,7 @@ func Profile(p string) AppConfigurer
 Profile selects the app's process profile: model.ProfileServer \(the default\), model.ProfileDaemon or model.ProfileCLI.
 
 <a name="Replace"></a>
-### func [Replace](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/replace.go#L51>)
+### func [Replace](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/replace.go#L54>)
 
 ```go
 func Replace[Req, Resp any](op Operation[Req, Resp], fn func(context.Context, Req) (Resp, error)) AppConfigurer
@@ -1803,7 +1803,7 @@ type DiagnosticsError struct {
 ```
 
 <a name="DiagnosticsError.Error"></a>
-### func \(\*DiagnosticsError\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L430>)
+### func \(\*DiagnosticsError\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/app.go#L410>)
 
 ```go
 func (e *DiagnosticsError) Error() string
@@ -1891,7 +1891,7 @@ Call runs the endpoint in\-process, from another building block: the same valida
 <a name="Engine"></a>
 ## type [Engine](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/database_interface.go#L17-L27>)
 
-Engine is an SQL engine a database runs on. An engine module returns one — github.com/kitsunium/platform/connectors/postgres, …/mysql, …/sqlite —; kit calls it when the database starts. Like an SDK port, it grows by sibling interfaces, never by a method.
+Engine is an SQL engine a database runs on. An engine module returns one — github.com/kitsunium/sdk/framework/connectors/postgres, …/mysql, …/sqlite —; kit calls it when the database starts. Like an SDK port, it grows by sibling interfaces, never by a method.
 
 ```go
 type Engine interface {

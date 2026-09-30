@@ -244,7 +244,7 @@ func (a *App) describeModules() []model.Module {
 		m := mm.module
 		doc, docs := model.SplitDoc(m.doc)
 		d := model.Module{
-			Name: m.name, Doc: doc, Docs: docs, Package: m.decl.pkg, Build: a.moduleBuild(m.decl.pkg),
+			Name: m.name, Doc: doc, Docs: docs, Package: m.decl.pkg(), Build: a.moduleBuild(m.decl.pkg()),
 			Prefix: mm.prefix, Source: a.source(&m.decl), Mount: a.source(mm.at),
 		}
 		for _, s := range m.services {
