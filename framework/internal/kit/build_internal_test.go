@@ -1,12 +1,14 @@
 package kit
 
 import (
+	"io"
 	"path/filepath"
 	"runtime/debug"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/git"
 )
 
@@ -89,5 +91,44 @@ func TestPseudoVersionsAreCommits(t *testing.T) {
 	}
 	if m := buildOf(bi, nil).SDK; m.Version != "" || m.Revision != "abcdefabcdef" || m.Time == nil || m.Local {
 		t.Errorf("a pseudo-versioned dependency is a commit: %+v", m)
+	}
+}
+
+// Every app of a process gets its own copy of the build: the process reads
+// and describes it once, and a caller that edits what one graph returns
+// changes no other graph, nor what telemetry reports.
+func TestEachAppOwnsItsBuild(t *testing.T) {
+	first := NewApp("first-build", NewService("first-build", "A first product.")).With(InMemory(), Env(EnvProduction), Logs(io.Discard))
+	second := NewApp("second-build", NewService("second-build", "A second product.")).With(InMemory(), Env(EnvProduction), Logs(io.Discard))
+	for _, a := range []*App{first, second} {
+		if err := a.resolve(); err != nil {
+			t.Fatal(err)
+		}
+	}
+	b1 := first.Graph().App.Build
+	if b1 == nil {
+		t.Fatal("a production app describes no build: the test binary carries build information")
+	}
+	b1.Product.Module, b1.Kit.Version = "edited", "edited"
+	if b2 := second.Graph().App.Build; b2 == nil || b2.Product.Module == "edited" || b2.Kit.Version == "edited" {
+		t.Errorf("an edit of one graph's build reached another app's: %+v", b2)
+	}
+	if again := first.Graph().App.Build; again.Product.Module == "edited" {
+		t.Errorf("an edit of a graph's build reached the app's next graph: %+v", again)
+	}
+}
+
+// A copy of a build shares no instant with it.
+func TestACopiedBuildSharesNothing(t *testing.T) {
+	at := time.Date(2026, 9, 30, 0, 0, 0, 0, time.UTC)
+	b := &model.Build{Product: model.ModuleVersion{Module: "p", Time: &at}, Kit: model.ModuleVersion{Time: &at}, SDK: model.ModuleVersion{Time: &at}}
+	c := cloneBuild(b)
+	*c.Product.Time, *c.Kit.Time, *c.SDK.Time = time.Time{}, time.Time{}, time.Time{}
+	c.Product.Module = "q"
+	if !b.Product.Time.Equal(at) || !b.Kit.Time.Equal(at) || !b.SDK.Time.Equal(at) || b.Product.Module != "p" {
+		t.Errorf("the copy shares with its build: %+v", b)
+	}
+	if cloneBuild(nil) != nil {
+		t.Error("a copy of no build is one")
 	}
 }

@@ -73,9 +73,28 @@ var (
 		return new(process.ParseBuild(bi))
 	})
 	// productionBuild is the build as a production run describes it — no
-	// question to git —, the same for every app of the process.
+	// question to git —, described once for the process; every app gets its
+	// own copy (cloneBuild), which a caller of App.Graph may edit.
 	productionBuild = sync.OnceValue(func() *model.Build { return buildOf(readBuild(), nil) })
 )
+
+// cloneBuild is a copy of b that shares nothing with it; nil for nil.
+func cloneBuild(b *model.Build) *model.Build {
+	if b == nil {
+		return nil
+	}
+	out := *b
+	out.Product, out.Kit, out.SDK = cloneVersion(b.Product), cloneVersion(b.Kit), cloneVersion(b.SDK)
+	return &out
+}
+
+// cloneVersion is a copy of v that shares nothing with it.
+func cloneVersion(v model.ModuleVersion) model.ModuleVersion {
+	if v.Time != nil {
+		v.Time = new(*v.Time)
+	}
+	return v
+}
 
 // gitHead asks git where a local module's directory is: its commit, the
 // commit's time, and whether tracked files differ from it.
@@ -194,7 +213,7 @@ func cachedHeadAt(dir string) (git.HeadState, bool) {
 // and describes its build once per process.
 func describeBuild(dev bool, getenv func(string) string) (*model.Build, *model.DevBuild) {
 	if !dev {
-		return productionBuild(), nil
+		return cloneBuild(productionBuild()), nil
 	}
 	return buildOf(readBuild(), cachedHeadAt), devBuildOf(getenv)
 }

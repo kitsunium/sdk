@@ -233,6 +233,8 @@ func (a *App) findNode(id string) node {
 func (a *App) serveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	open := plug.OpenEventStream.Load()
+	//: a product that did not import framework/kit/studio has no stream to
+	//: open: the route answers as the Studio's absence, never a 500.
 	if open == nil {
 		writeJSON(w, http.StatusNotFound, wireError{Error: wireBody{Code: WireNotFound, Message: "the Studio is not linked: import framework/kit/studio"}})
 		return

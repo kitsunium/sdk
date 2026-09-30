@@ -82,16 +82,22 @@ func TestCanonicalFunc(t *testing.T) {
 		"github.com/x/kit_test.glob..func3":        "github.com/x/kit_test.glob.",
 		"github.com/x/shop.(*Store[go.shape.int])": "github.com/x/shop.(*Store)",
 	} {
-		if got := profiling.CanonicalName(in); got != want {
-			t.Errorf("CanonicalName(%q) = %q, want %q", in, got, want)
-		}
+		runCase(t, in, want)
 	}
 }
 
-// A function belongs to a node when exactly one node's code holds it; an
-// entry beats a function merely reached; the innermost owned frame wins.
-func TestFunctionsAreAttributedToTheirOneNode(t *testing.T) {
-	g := &model.Graph{Nodes: []model.Node{
+// runCase checks one name's canonical spelling.
+func runCase(t *testing.T, in, want string) {
+	t.Helper()
+	if got := profiling.CanonicalName(in); got != want {
+		t.Errorf("CanonicalName(%q) = %q, want %q", in, got, want)
+	}
+}
+
+// twoEndpoints is a graph of two endpoints that share a helper: A's code
+// reaches a store's method too.
+func twoEndpoints() *model.Graph {
+	return &model.Graph{Nodes: []model.Node{
 		{
 			ID: "a/endpoint/A", Handler: &model.Source{File: "a.go", Line: 1, Func: "github.com/x/a.A"},
 			Code: &model.CodeInfo{Entry: "github.com/x/a.A", Funcs: []model.CodeFunc{
@@ -103,7 +109,18 @@ func TestFunctionsAreAttributedToTheirOneNode(t *testing.T) {
 			Code: &model.CodeInfo{Entry: "github.com/x/a.B", Funcs: []model.CodeFunc{{Func: "github.com/x/a.B"}, {Func: "github.com/x/a.shared"}}},
 		},
 	}}
-	o := ownersOf(g)
+}
+
+// A function belongs to a node when exactly one node's code holds it; an
+// entry beats a function merely reached; the innermost owned frame wins.
+func TestFunctionsAreAttributedToTheirOneNode(t *testing.T) {
+	o := ownersOf(twoEndpoints())
+	runOwner := func(fn, want string) {
+		t.Helper()
+		if got, _ := o.owner(fn); got != want {
+			t.Errorf("owner(%q) = %q, want %q", fn, got, want)
+		}
+	}
 	for fn, want := range map[string]string{
 		"github.com/x/a.A":                   "a/endpoint/A",
 		"github.com/x/a.A.func2":             "a/endpoint/A",
@@ -113,9 +130,7 @@ func TestFunctionsAreAttributedToTheirOneNode(t *testing.T) {
 		"encoding/json.Marshal":              "",
 		"github.com/x/a.(*Store[...]).other": "",
 	} {
-		if got, _ := o.owner(fn); got != want {
-			t.Errorf("owner(%q) = %q, want %q", fn, got, want)
-		}
+		runOwner(fn, want)
 	}
 	if got := o.attribute(framesOf("runtime.mallocgc", "github.com/x/a.shared", "github.com/x/a.B", "net/http.(*conn).serve")); got != "a/endpoint/B" {
 		t.Errorf("a shared helper under B is B's: %q", got)
@@ -123,23 +138,30 @@ func TestFunctionsAreAttributedToTheirOneNode(t *testing.T) {
 	if src := o.source("github.com/x/a.(*Store).visible"); src == nil || src.File != "a/store.go" {
 		t.Errorf("source %+v", src)
 	}
+}
 
-	// A CPU profile: 30 ms of A's, 10 ms of B's, 60.1 ms of nobody's.
-	ms := int64(time.Millisecond)
-	sample := func(node string, value int64, stack ...string) profiling.Sample {
-		s := profiling.Sample{Stack: framesOf(stack...), Values: []int64{value}}
-		if node != "" {
-			s.Labels = map[string][]string{plug.LabelNode: {node}}
-		}
-		return s
+// labelled is a CPU sample of value on stack, labelled with node's work
+// unless node is empty.
+func labelled(node string, value int64, stack ...string) profiling.Sample {
+	s := profiling.Sample{Stack: framesOf(stack...), Values: []int64{value}}
+	if node != "" {
+		s.Labels = map[string][]string{plug.LabelNode: {node}}
 	}
+	return s
+}
+
+// A fold charges each sample to its node, keeps the rest unattributed, and
+// prunes the flame's frames under half a percent: 30 ms of A's, 10 ms of B's,
+// 60.1 ms of nobody's.
+func TestAFoldChargesEachSampleToItsNode(t *testing.T) {
+	ms := int64(time.Millisecond)
 	cpu := &profiling.Profile{SampleTypes: []profiling.SampleType{{Type: "cpu", Unit: "nanoseconds"}}, Samples: []profiling.Sample{
-		sample("a/endpoint/A", 30*ms, "runtime.memmove", "github.com/x/a.A"),
-		sample("a/endpoint/B", 10*ms, "github.com/x/a.B"),
-		sample("", 60*ms, "runtime.gcBgMarkWorker"),
-		sample("", ms/10, "github.com/x/a.tiny"),
+		labelled("a/endpoint/A", 30*ms, "runtime.memmove", "github.com/x/a.A"),
+		labelled("a/endpoint/B", 10*ms, "github.com/x/a.B"),
+		labelled("", 60*ms, "runtime.gcBgMarkWorker"),
+		labelled("", ms/10, "github.com/x/a.tiny"),
 	}}
-	pp, ppErr := foldProfile(cpu, model.ProfileCPU, o, nil)
+	pp, ppErr := foldProfile(cpu, model.ProfileCPU, ownersOf(twoEndpoints()), nil)
 	if ppErr != nil {
 		t.Fatal(ppErr)
 	}
