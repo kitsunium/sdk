@@ -311,6 +311,7 @@ go_test(
         "transact_warn_internal_test.go",
         "watch_graph_test.go",
         "watch_internal_test.go",
+        "watch_own_test.go",
         "watch_test.go",
         "words_internal_test.go",
         "workflow_engine_test.go",
