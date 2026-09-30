@@ -42,8 +42,8 @@ func Migrations(m ...sql.Migration) interface {
 // on engine — an engine module's, which the product's main imports:
 //
 //	import (
-//		"github.com/kitsunium/platform/connectors/postgres"
-//		"github.com/kitsunium/platform/connectors/sqlite"
+//		"github.com/kitsunium/sdk/framework/connectors/postgres"
+//		"github.com/kitsunium/sdk/framework/connectors/sqlite"
 //	)
 //
 //	var App = kit.NewApp("vigie", intake.Service, desk.Service, audit.Service).With(
