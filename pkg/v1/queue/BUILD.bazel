@@ -9,7 +9,9 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/queue",
+        "//internal/kernel/errs",
         "//internal/service/queue",
+        "//pkg/v1/sql",
     ],
 )
 
@@ -22,11 +24,15 @@ alias(
 go_test(
     name = "queue_test",
     size = "small",
-    srcs = ["queue_external_test.go"],
+    srcs = [
+        "queue_external_test.go",
+        "sql_external_test.go",
+    ],
     deps = [
         ":queue",
         "//pkg/v1/errs",
         "//pkg/v1/proc",
+        "//pkg/v1/sql",
     ],
 )
 

@@ -5,8 +5,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // range: 0.3.53.0 - 0.3.53.255
 
-// CodeQueueBackendFailed identifies a filesystem operation the durable broker
-// depends on that the operating system refused.
+// CodeQueueBackendFailed identifies an operation a durable broker depends on
+// that its storage refused: a filesystem call the operating system refused,
+// or a statement the SQL broker's database did not complete.
 const CodeQueueBackendFailed errs.Code = 0x00_03_35_01 // 0.3.53.1
 
 // CodeQueueDirectoryUnusable identifies a queue directory that cannot be
@@ -28,3 +29,8 @@ const CodeConsumerMisconfigured errs.Code = 0x00_03_35_03 // 0.3.53.3
 // already say "a handler failed", and an engine verdict wrapped around the
 // cause would displace the reason an investigator needs.
 const CodeHandlerPanicked errs.Code = 0x00_03_35_04 // 0.3.53.4
+
+// CodeSQLQueueMisconfigured identifies an SQLConfig the SQL broker refuses at
+// construction: no transactor, one it cannot join a transaction of, a dialect
+// it cannot spell, or a table name it cannot interpolate safely (ADR 0151).
+const CodeSQLQueueMisconfigured errs.Code = 0x00_03_35_05 // 0.3.53.5

@@ -1,6 +1,7 @@
-// Package queue — waking an idle consumer: the broadcast both brokers close on
-// a publication, and the table that lets two durable brokers over one
-// directory in one process wake each other's consumers.
+// Package queue — waking an idle consumer: the broadcast every broker closes on
+// a publication, and the table that lets two durable brokers over one queue —
+// one directory, or one database and table — in one process wake each other's
+// consumers.
 package queue
 
 import (
@@ -94,35 +95,50 @@ func earliest(instants ...int64) int64 {
 	return first
 }
 
-// directoryWakes holds, per queue directory, the signal every durable broker
-// over that directory in this process shares — weakly, so a directory whose
-// brokers have all been collected does not keep an entry forever.
+// wakeTable holds, per queue, the signal every durable broker over that queue
+// in this process shares — weakly, so a queue whose brokers have all been
+// collected does not keep an entry forever.
 //
-// Two brokers over one directory are ONE queue (FileConfig.Dir says so), so a
-// publication through either must wake the consumers of both. Keying the
-// signal by broker instance would have made that true only when the producer
-// and the consumer happened to hold the same value.
-type directoryWakes struct {
-	byDir map[string]weak.Pointer[wakeSignal]
-	mu    sync.Mutex
+// Two brokers over one queue are ONE queue — two over one FileConfig.Dir, two
+// over one database pool and SQLConfig.Table — so a publication through either
+// must wake the consumers of both. Keying the signal by broker instance would
+// have made that true only when the producer and the consumer happened to hold
+// the same value. K is what names a queue: a directory's canonical spelling
+// for the file broker, the pool and the table for the SQL one.
+type wakeTable[K comparable] struct {
+	byQueue map[K]weak.Pointer[wakeSignal]
+	mu      sync.Mutex
 }
 
-// fileWakes is the process's table. It is process-wide by necessity: the
-// point is to connect brokers that know nothing of each other.
-var fileWakes = &directoryWakes{byDir: make(map[string]weak.Pointer[wakeSignal])}
+// newWakeTable returns an empty table.
+func newWakeTable[K comparable]() *wakeTable[K] {
+	//: one entry per queue some broker in this process is over.
+	return &wakeTable[K]{byQueue: make(map[K]weak.Pointer[wakeSignal])}
+}
 
-// forDir returns the signal shared by every broker over dir, creating it.
+// fileWakes is the process's table of directories. It is process-wide by
+// necessity: the point is to connect brokers that know nothing of each other.
+var fileWakes = newWakeTable[string]()
+
+// forDir returns the signal shared by every durable broker over dir, creating
+// it.
 //
 // The key is the directory resolved through its symbolic links, so /tmp/q and
 // /private/tmp/q — one directory on macOS — share a signal. A spelling this
 // cannot reconcile only costs a wake: the consumer finds the message at its
 // next poll, exactly as a consumer in another process does.
-func (d *directoryWakes) forDir(dir string) *wakeSignal {
-	key := canonicalDir(dir)
+func forDir(dir string) *wakeSignal {
+	//: one spelling per directory.
+	return fileWakes.forKey(canonicalDir(dir))
+}
+
+// forKey returns the signal shared by every broker over the queue key names,
+// creating it.
+func (d *wakeTable[K]) forKey(key K) *wakeSignal {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	//: a live signal is shared, which is the whole point.
-	if held, found := d.byDir[key]; found {
+	if held, found := d.byQueue[key]; found {
 		//: still referenced by some broker in this process.
 		if signal := held.Value(); signal != nil {
 			//: the same queue, the same wake.
@@ -130,21 +146,21 @@ func (d *directoryWakes) forDir(dir string) *wakeSignal {
 		}
 	}
 	signal := newWakeSignal()
-	d.byDir[key] = weak.Make(signal)
+	d.byQueue[key] = weak.Make(signal)
 	//: the entry goes when the last broker holding the signal is collected —
 	//: unless a newer signal has taken the key meanwhile.
 	runtime.AddCleanup(signal, d.drop, key)
-	//: the first broker over this directory in this process.
+	//: the first broker over this queue in this process.
 	return signal
 }
 
 // drop removes key's entry once its signal has been collected.
-func (d *directoryWakes) drop(key string) {
+func (d *wakeTable[K]) drop(key K) {
 	d.mu.Lock()
 	defer d.mu.Unlock()
 	//: a key re-armed by a newer broker keeps its live signal.
-	if held, found := d.byDir[key]; found && held.Value() == nil {
-		delete(d.byDir, key)
+	if held, found := d.byQueue[key]; found && held.Value() == nil {
+		delete(d.byQueue, key)
 	}
 }
 

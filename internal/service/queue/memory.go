@@ -90,7 +90,7 @@ type memoryBroker struct {
 // use, through the same core/queue.PolicyValue.Validate the file broker runs
 // — which is what makes this an honest double for it.
 func NewMemory(cfg MemoryConfig) (broker corequeue.Broker, err error) {
-	//: the shared guard, so both brokers refuse identical inputs identically.
+	//: the shared guard, so every broker refuses identical inputs identically.
 	if invalid := cfg.Policy.Validate(); invalid != nil {
 		//: QueueMisconfigured, naming the field.
 		return nil, invalid
@@ -275,12 +275,98 @@ func (b *memoryBroker) Nack(
 		//: abandoned, with its cause, and never delivered again.
 		return corequeue.NackValue{Deliveries: record.deliveries, DeadLettered: true}, nil
 	}
-	record.visibleAt = now.Add(b.policy.RetryDelay)
+	record.visibleAt = now.Add(retryDelay(b.policy, record.deliveries))
 	b.insertReady(record)
 	//: an idle consumer re-reads when to look, which now includes VisibleAt.
 	b.wake.fire()
 	//: queued again, eligible at VisibleAt.
 	return corequeue.NackValue{Deliveries: record.deliveries, VisibleAt: record.visibleAt}, nil
+}
+
+// Reject dead-letters the leased message at once with cause, whatever its
+// delivery count (core/queue.Rejecter).
+func (b *memoryBroker) Reject(ctx context.Context, receipt corequeue.ReceiptValue, cause error) error {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	record, resolveErr := b.resolve(receipt)
+	//: the same refusals Ack makes, and nothing moves.
+	if resolveErr != nil {
+		//: UnknownReceipt or LeaseExpired.
+		return resolveErr
+	}
+	delete(b.inflight, record.receipt)
+	b.bury(record, b.clk.Now(), describeCause(cause))
+	//: abandoned with the handler's cause, at the count it had.
+	return nil
+}
+
+// ReplayDeadLetter queues the dead letter id again, visible now, with its
+// delivery count reset (core/queue.DeadLetterManager). It keeps its ID, its
+// payload and its enqueue instant.
+func (b *memoryBroker) ReplayDeadLetter(ctx context.Context, id string) error {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	dead, found := b.takeDead(id)
+	//: nothing under that identifier.
+	if !found {
+		//: DeadLetterNotFound, and nothing is queued.
+		return deadLetterNotFound("memory", id)
+	}
+	now := b.clk.Now()
+	b.seq++
+	//: the payload the store kept is its own copy, so it moves as it is.
+	b.insertReady(&memRecord{
+		payload: dead.Message.Payload, id: dead.Message.ID,
+		enqueuedAt: dead.Message.EnqueuedAt, visibleAt: now, seq: b.seq,
+	})
+	//: an idle consumer looks again now.
+	b.wake.fire()
+	//: queued; its next delivery counts 1.
+	return nil
+}
+
+// DeleteDeadLetter removes the dead letter id for good
+// (core/queue.DeadLetterManager).
+func (b *memoryBroker) DeleteDeadLetter(ctx context.Context, id string) error {
+	//: a cancelled caller.
+	if ctx.Err() != nil {
+		//: the caller's deadline.
+		return ctx.Err()
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	//: nothing under that identifier.
+	if _, found := b.takeDead(id); !found {
+		//: DeadLetterNotFound, and nothing is removed.
+		return deadLetterNotFound("memory", id)
+	}
+	//: gone, payload, cause and all.
+	return nil
+}
+
+// takeDead removes and returns the dead letter id. The caller holds the write
+// lock.
+func (b *memoryBroker) takeDead(id string) (dead corequeue.DeadLetterValue, found bool) {
+	at := slices.IndexFunc(b.dead, func(record corequeue.DeadLetterValue) bool { return record.Message.ID == id })
+	//: never dead, or already replayed or deleted.
+	if at < 0 {
+		//: not found.
+		return corequeue.DeadLetterValue{}, false
+	}
+	dead = b.dead[at]
+	b.dead = slices.Delete(b.dead, at, at+1)
+	//: the record, out of the store.
+	return dead, true
 }
 
 // Extend renews a lease and mints the receipt that replaces it.

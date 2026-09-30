@@ -24,3 +24,12 @@ const CodeLeaseExpired errs.Code = 0x00_02_17_04 // 0.2.23.4
 // CodeInvalidBatchSize identifies a Receive or DeadLetters asked for a
 // non-positive number of messages.
 const CodeInvalidBatchSize errs.Code = 0x00_02_17_05 // 0.2.23.5
+
+// CodeNotRetryable identifies a handler's failure no retry can fix. DoNotRetry
+// adds it to the wrap trail of the handler's own cause, so errs.HasCode finds
+// it while the cause stays the origin a dead letter records (ADR 0151).
+const CodeNotRetryable errs.Code = 0x00_02_17_06 // 0.2.23.6
+
+// CodeDeadLetterNotFound identifies a replay or a deletion naming a dead
+// letter the store does not hold.
+const CodeDeadLetterNotFound errs.Code = 0x00_02_17_07 // 0.2.23.7

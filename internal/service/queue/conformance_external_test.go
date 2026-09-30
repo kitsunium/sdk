@@ -11,6 +11,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
+	coresql "github.com/kitsunium/sdk/internal/core/sql"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
 )
 
@@ -19,7 +20,7 @@ import (
 // nothing in between removes anything.
 func TestAMessageIsRemovedAtAcknowledgementAndNotAtRead(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -60,7 +61,7 @@ func TestAMessageIsRemovedAtAcknowledgementAndNotAtRead(t *testing.T) {
 // then exercises for real.
 func TestALapsedLeaseRedeliversTheMessageWithTheCountIncremented(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -93,7 +94,7 @@ func TestALapsedLeaseRedeliversTheMessageWithTheCountIncremented(t *testing.T) {
 // holder's turn, and must find out that it lost.
 func TestAnAcknowledgementFromALapsedLeaseIsRefusedAndRemovesNothing(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -123,7 +124,7 @@ func TestAnAcknowledgementFromALapsedLeaseIsRefusedAndRemovesNothing(t *testing.
 // wrong one half the time.
 func TestAReceiptThisQueueNeverIssuedIsUnknownRatherThanExpired(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), defaultPolicy())
@@ -142,7 +143,7 @@ func TestAReceiptThisQueueNeverIssuedIsUnknownRatherThanExpired(t *testing.T) {
 // that it holds the message, and that it holds WHY.
 func TestANackRetriesUntilTheBudgetIsSpentAndThenDeadLetters(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -219,7 +220,7 @@ func assertDeadLetter(t *testing.T, broker corequeue.Broker, wantID, wantPayload
 // is.
 func TestAMessageThatNobodyEverNacksStillReachesTheDeadLetterStore(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -249,7 +250,7 @@ func TestAMessageThatNobodyEverNacksStillReachesTheDeadLetterStore(t *testing.T)
 // investigator does not get.
 func TestReadingTheDeadLetterStoreDoesNotConsumeIt(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -284,7 +285,7 @@ func TestReadingTheDeadLetterStoreDoesNotConsumeIt(t *testing.T) {
 func TestAReaderThatEditsADeadLetterPayloadDoesNotRewriteTheStore(t *testing.T) {
 	t.Parallel()
 	want := []string{"first", "second"}
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -326,7 +327,7 @@ func TestAReaderThatEditsADeadLetterPayloadDoesNotRewriteTheStore(t *testing.T) 
 // take for a bug in the SDK.
 func TestANackWithNoCauseIsRecordedAsUnreported(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), corequeue.PolicyValue{
@@ -349,7 +350,7 @@ func TestANackWithNoCauseIsRecordedAsUnreported(t *testing.T) {
 // atomic way to change a name is to replace it.
 func TestExtendRenewsTheLeaseAndVoidsTheOldReceipt(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -388,7 +389,7 @@ func TestExtendRenewsTheLeaseAndVoidsTheOldReceipt(t *testing.T) {
 // exactly when it needed to know.
 func TestExtendRefusesALapsedLeaseEvenWhenNobodyHasTakenIt(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -409,7 +410,7 @@ func TestExtendRefusesALapsedLeaseEvenWhenNobodyHasTakenIt(t *testing.T) {
 // now" and "never lapse" are opposites, so neither is guessed.
 func TestExtendRefusesANonPositiveRenewal(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), defaultPolicy())
@@ -430,7 +431,7 @@ func TestExtendRefusesANonPositiveRenewal(t *testing.T) {
 // forever is a consumer loop that spins and looks exactly like an idle queue.
 func TestABatchIsBoundedAndANonPositiveOneIsRefused(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), defaultPolicy())
@@ -456,7 +457,7 @@ func TestABatchIsBoundedAndANonPositiveOneIsRefused(t *testing.T) {
 func TestAnOversizedPayloadIsRefusedAtTheProducer(t *testing.T) {
 	t.Parallel()
 	const bound int = 16
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), corequeue.PolicyValue{
@@ -482,7 +483,7 @@ func TestAnOversizedPayloadIsRefusedAtTheProducer(t *testing.T) {
 // the whole meaning" a thing a caller may send.
 func TestAnEmptyPayloadIsALegitimateMessage(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			broker := factory.make(t, clock.NewManualClock(epoch), defaultPolicy())
@@ -494,10 +495,11 @@ func TestAnEmptyPayloadIsALegitimateMessage(t *testing.T) {
 	}
 }
 
-// TestBothBrokersRefuseTheSamePolicies is what makes the memory broker an
-// honest double: they share core/queue.PolicyValue.Validate, so a consumer's
-// test that passes against one is not passing for a reason the other lacks.
-func TestBothBrokersRefuseTheSamePolicies(t *testing.T) {
+// TestEveryBrokerRefusesTheSamePolicies is what makes the memory broker an
+// honest double: all three share core/queue.PolicyValue.Validate, so a
+// consumer's test that passes against one is not passing for a reason the
+// others lack.
+func TestEveryBrokerRefusesTheSamePolicies(t *testing.T) {
 	t.Parallel()
 	broken := corequeue.PolicyValue{MaxDeliveries: 3}
 	if _, err := svcqueue.NewMemory(svcqueue.MemoryConfig{Policy: broken}); !errs.HasCode(
@@ -510,25 +512,30 @@ func TestBothBrokersRefuseTheSamePolicies(t *testing.T) {
 	}); !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
 		t.Fatalf("NewFile(broken) = %v, want CodeQueueMisconfigured", err)
 	}
+	if _, err := svcqueue.NewSQL(svcqueue.SQLConfig{
+		Transactor: sqlTransactor(t, coresql.DialectSQLite), Dialect: coresql.DialectSQLite, Table: jobsTable, Policy: broken,
+	}); !errs.HasCode(err, corequeue.CodeQueueMisconfigured) {
+		t.Fatalf("NewSQL(broken) = %v, want CodeQueueMisconfigured", err)
+	}
 }
 
-// TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry pins the upper bound
-// Validate puts on the two durations every deadline is built from. A
+// TestEveryBrokerRefusesADeadlineOffsetNoInstantCanCarry pins the upper bound
+// Validate puts on the durations every deadline is built from. A
 // visibility timeout of math.MaxInt64 — the value somebody reaches for to mean
 // "never" — is 292 years, so the durable broker's lease deadline now+timeout
 // wrapped negative: pad wrote a sign, parseNano refused the name on the way
 // back, and the leased message was stranded in inflight/ for good, never
 // reclaimed, never delivered, its receipt reading UNKNOWN_RECEIPT. The retry
-// delay did the same to a nacked message in ready/. Both brokers share the
-// guard, so both refuse, which is what keeps the memory broker an honest
-// double.
+// delay did the same to a nacked message in ready/, and a growing delay's
+// ceiling (ADR 0151) would do it too. Every broker shares the guard, so every
+// broker refuses, which is what keeps the memory broker an honest double.
 //
 // Seen failing: with Validate's two new bounds removed, both cases printed,
 // for the memory broker and the file broker alike,
 //
 //	NewMemory(VisibilityTimeout = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
 //	NewFile(RetryDelay = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
-func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
+func TestEveryBrokerRefusesADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 	t.Parallel()
 	cases := []struct {
 		name   string
@@ -540,6 +547,10 @@ func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 		}},
 		{"RetryDelay = math.MaxInt64", "RetryDelay", corequeue.PolicyValue{
 			VisibilityTimeout: testVisibility, RetryDelay: math.MaxInt64, MaxDeliveries: testDeliveries,
+		}},
+		{"MaxRetryDelay = math.MaxInt64", "MaxRetryDelay", corequeue.PolicyValue{
+			VisibilityTimeout: testVisibility, RetryDelay: testRetryDelay, MaxRetryDelay: math.MaxInt64,
+			MaxDeliveries: testDeliveries,
 		}},
 	}
 	builders := []struct {
@@ -553,6 +564,13 @@ func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 		{"NewFile", func(t *testing.T, policy corequeue.PolicyValue) error {
 			_, err := svcqueue.NewFile(svcqueue.FileConfig{
 				Dir: t.TempDir(), Policy: policy, Clock: clock.NewManualClock(epoch),
+			})
+			return err
+		}},
+		{"NewSQL", func(t *testing.T, policy corequeue.PolicyValue) error {
+			_, err := svcqueue.NewSQL(svcqueue.SQLConfig{
+				Transactor: sqlTransactor(t, coresql.DialectPostgres), Dialect: coresql.DialectPostgres,
+				Table: jobsTable, Policy: policy, Clock: clock.NewManualClock(epoch),
 			})
 			return err
 		}},
@@ -573,7 +591,7 @@ func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 	}
 }
 
-// TestBothBrokersRefuseAnExtensionANameCannotCarry is the same bound on the
+// TestEveryBrokerRefusesAnExtensionANameCannotCarry is the same bound on the
 // one duration Validate never sees: Extend's, which a handler chooses at
 // runtime. Its deadline is now+by, written into the in-flight name like any
 // other, so a by that carries it past 2262 would strand the message exactly as
@@ -581,17 +599,19 @@ func TestBothBrokersRefuseADeadlineOffsetNoInstantCanCarry(t *testing.T) {
 // is renamed, so the lease the handler already holds is untouched and still
 // acknowledgeable.
 //
-// It runs on both brokers. The memory broker's time.Time could hold the
-// deadline, but a double that accepted what the durable broker refuses would
-// let a handler pass its tests and strand messages in production.
+// It runs on every broker. The memory broker's time.Time could hold the
+// deadline, but a double that accepted what the durable brokers refuse would
+// let a handler pass its tests and strand messages in production; the SQL
+// broker keeps the deadline as the same int64 of Unix nanoseconds a name
+// carries.
 //
 // Seen failing: with Extend's representability check removed from the file
 // broker, and then from the memory one, each printed
 //
 //	Extend(by = math.MaxInt64) = <nil>, want CodeQueueMisconfigured
-func TestBothBrokersRefuseAnExtensionANameCannotCarry(t *testing.T) {
+func TestEveryBrokerRefusesAnExtensionANameCannotCarry(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -637,7 +657,7 @@ func TestBothBrokersRefuseAnExtensionANameCannotCarry(t *testing.T) {
 func TestAnExtensionIsStoredAtTheInstantItWasChecked(t *testing.T) {
 	t.Parallel()
 	last := time.Unix(0, math.MaxInt64)
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := &steppingClock{now: epoch, step: time.Second}

@@ -1260,6 +1260,25 @@ rules:
       - "internal/service/docstore/**"
       - "**/pkg/v1/docstore/**"
       - "pkg/v1/docstore/**"
+      # service/queue.FileConfig is 72 bytes and SQLConfig 96 since ADR 0151
+      # gave core/queue.PolicyValue MaxRetryDelay (8), taking it to 40: the
+      # clock (16, an interface) and the directory (16), or the transactor and
+      # the clock (16 each), the table (16) and the dialect (8), were already
+      # 32 and 56 beside it. Every field is a collaborator or a policy knob a
+      # caller must be able to omit. Value semantics are the contract, as for
+      # sql.Config above: NewFile and NewSQL validate the struct they were
+      # given — a policy, a directory, a table — and taking a pointer would let
+      # a caller change the policy or the table after validation passed. The
+      # copy happens once per broker, next to a directory check or a
+      # transactor that opened a pool, so the performance concern the rule
+      # guards is not measurable here.
+      #
+      # pkg/v1/queue is included because NewFile and NewSQL there are pure
+      # forwarders of the same aliases.
+      - "**/internal/service/queue/**"
+      - "internal/service/queue/**"
+      - "**/pkg/v1/queue/**"
+      - "pkg/v1/queue/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies

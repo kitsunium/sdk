@@ -1,9 +1,9 @@
 //go:build integration
 
 // Package sql_test runs the SDK's SQL mechanisms on the three real engines,
-// through real drivers: the document store over SQL (pkg/v1/docstore) and the
-// transactor's and migration runner's contracts (pkg/v1/sql), SQLite's file
-// lock among them.
+// through real drivers: the document store over SQL (pkg/v1/docstore), the
+// queue's SQL broker (pkg/v1/queue), and the transactor's and migration
+// runner's contracts (pkg/v1/sql), SQLite's file lock among them.
 //
 // The SDK ships no driver and its workspace modules import none (ADR 0055
 // §D2), so the default suite runs the same contracts over a fake engine. This

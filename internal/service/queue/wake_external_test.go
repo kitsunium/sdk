@@ -71,7 +71,7 @@ func accept(context.Context, corequeue.DeliveryValue) error { return nil }
 // moves, so only the wake can deliver the message.
 func TestAPublicationWakesAnIdleConsumer(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -99,7 +99,7 @@ func TestAPublicationWakesAnIdleConsumer(t *testing.T) {
 // the consumer sleeps exactly that long rather than its hour.
 func TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -135,7 +135,7 @@ func TestARetryIsDeliveredWhenItsDelayEndsNotAtTheNextPoll(t *testing.T) {
 // lapses, and an idle consumer is woken for exactly that — not an hour later.
 func TestALapsedLeaseWakesTheConsumerWhenItLapses(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)
@@ -197,7 +197,7 @@ func TestTwoDurableBrokersOverOneDirectoryWakeEachOther(t *testing.T) {
 // before it.
 func TestWakeSaysWhatTheBrokerKnows(t *testing.T) {
 	t.Parallel()
-	for _, factory := range bothBrokers() {
+	for _, factory := range everyBroker() {
 		t.Run(factory.name, func(t *testing.T) {
 			t.Parallel()
 			clk := clock.NewManualClock(epoch)

@@ -66,13 +66,16 @@ const MaxDeadlineOffset time.Duration = 100 * 365 * 24 * time.Hour
 //     A zero retry delay means "as soon as the lease lapses", which is one
 //     reading, is harmless, and is what a caller who has not thought about
 //     backoff wants. A zero size bound means [DefaultMaxMessageBytes].
+//   - [PolicyValue.MaxRetryDelay] is neither: its zero is the behaviour the
+//     struct had before the field existed — a retry delay that does not grow —
+//     which is one reading and the only backward-compatible one.
 //
 // Both branches in one struct is the point. A domain in which every zero is
 // refused teaches a reader nothing except that the author was nervous.
 //
-// The two durations are bounded from ABOVE as well, by [MaxDeadlineOffset],
+// The three durations are bounded from ABOVE as well, by [MaxDeadlineOffset],
 // and that refusal is about arithmetic rather than about readings: a deadline
-// further out than that cannot be recorded by the durable broker at all.
+// further out than that cannot be recorded by a durable broker at all.
 type PolicyValue struct {
 	// VisibilityTimeout is how long a [Broker.Receive] hides a message from
 	// every other consumer. It is the deadline the consumer is racing, and
@@ -96,7 +99,30 @@ type PolicyValue struct {
 	// Zero is a working value and means "eligible as soon as the nack
 	// returns". Negative is read as zero. Above [MaxDeadlineOffset] it is
 	// refused ([QueueMisconfigured]).
+	//
+	// It is the same wait after every failure unless [PolicyValue]
+	// .MaxRetryDelay makes it grow.
 	RetryDelay time.Duration
+	// MaxRetryDelay makes the retry delay GROW, and is where the growth
+	// stops. When it is positive, a message nacked on its n-th delivery waits
+	// RetryDelay × 2^(n−1), held at MaxRetryDelay — the SDK's one backoff
+	// curve (resilience.Backoff, ADR 0103), keyed on the delivery that failed,
+	// so a downstream that is down is asked less and less often instead of at
+	// a fixed cadence it is already failing to keep up with (ADR 0151).
+	//
+	// Zero keeps RetryDelay constant, which is what every policy did before
+	// this field existed: a policy that does not name it behaves exactly as
+	// it did. That is the zero's one reading — a ceiling nobody set is not a
+	// request for unbounded growth, which could not be recorded anyway.
+	//
+	// A negative value is refused, because it is not a ceiling and the caller
+	// who wrote it meant something; so is one above [MaxDeadlineOffset],
+	// whose deadline a durable broker could not record; so is a ceiling with
+	// no RetryDelay to grow from, which would leave every retry at zero while
+	// reading like a backoff; and so is a ceiling below RetryDelay, which
+	// would silently shorten every wait the caller asked for
+	// ([QueueMisconfigured], naming the field).
+	MaxRetryDelay time.Duration
 	// MaxDeliveries is how many times one message may be handed to a
 	// consumer before the broker gives up and dead-letters it. It is
 	// compared against [DeliveryValue.Deliveries], which counts from 1, so a
@@ -118,10 +144,10 @@ type PolicyValue struct {
 // Validate reports whether the policy is one a broker can honour, and refuses
 // it BY FIELD when it is not.
 //
-// It lives in core so that the memory broker and the file broker refuse
-// identical inputs identically — the property that makes the first usable as
-// a test double for the second. It is the same instrument core/vfs's
-// ValidatePath and ValidatePerm are, for the same reason.
+// It lives in core so that the memory, file and SQL brokers refuse identical
+// inputs identically — the property that makes the first usable as a test
+// double for the other two. It is the same instrument core/vfs's ValidatePath
+// and ValidatePerm are, for the same reason.
 func (p PolicyValue) Validate() error {
 	//: the lease lifetime, whose two zero readings are opposites — and whose
 	//: deadline, past MaxDeadlineOffset, strands the message it names.
@@ -153,8 +179,41 @@ func (p PolicyValue) Validate() error {
 			errs.String("field", "RetryDelay"),
 			errs.Int64("value_ns", int64(p.RetryDelay)))
 	}
-	//: a policy a broker can honour.
-	return nil
+	//: a policy a broker can honour, once its growth is one too.
+	return p.validateRetryGrowth()
+}
+
+// validateRetryGrowth refuses a MaxRetryDelay that is not a ceiling a retry
+// delay can grow to. Zero asks for no growth and is accepted.
+func (p PolicyValue) validateRetryGrowth() error {
+	//: no growth asked for: RetryDelay stays what it always was.
+	if p.MaxRetryDelay == 0 {
+		//: nothing to check.
+		return nil
+	}
+	var problem string
+	//: the four ways a ceiling is no ceiling, most basic first.
+	switch {
+	//: not a bound at all, and the caller who wrote it meant something.
+	case p.MaxRetryDelay < 0:
+		problem = "negative"
+	//: a retry deadline a durable broker could not write down.
+	case p.MaxRetryDelay > MaxDeadlineOffset:
+		problem = "past MaxDeadlineOffset"
+	//: growth from zero is zero forever: a knob that does nothing.
+	case p.RetryDelay <= 0:
+		problem = "no RetryDelay to grow from"
+	//: a ceiling under the first step would shorten every wait asked for.
+	case p.MaxRetryDelay < p.RetryDelay:
+		problem = "below RetryDelay"
+	default:
+		//: a curve from RetryDelay up to a representable ceiling.
+		return nil
+	}
+	//: QueueMisconfigured, naming the field and what is wrong with it.
+	return errs.Wrap(QueueMisconfigured, errs.WrapParams{},
+		errs.String("field", "MaxRetryDelay"), errs.String("problem", problem),
+		errs.Int64("value_ns", int64(p.MaxRetryDelay)))
 }
 
 // Normalized returns the policy with its clamped fields resolved, so that

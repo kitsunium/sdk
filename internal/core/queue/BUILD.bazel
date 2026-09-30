@@ -7,10 +7,12 @@ go_library(
     srcs = [
         "capability.go",
         "codes.go",
+        "deadletter.go",
         "errors.go",
         "message.go",
         "policy.go",
         "queue.go",
+        "retry.go",
         "wake.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/queue",
@@ -33,7 +35,10 @@ alias(
 go_test(
     name = "queue_test",
     size = "small",
-    srcs = ["queue_external_test.go"],
+    srcs = [
+        "queue_external_test.go",
+        "retry_external_test.go",
+    ],
     deps = [
         ":queue",
         "//internal/kernel/errs",

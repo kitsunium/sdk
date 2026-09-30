@@ -14,7 +14,7 @@ import (
 // broker has one: a connector onto a third-party system usually dead-letters
 // into a second queue that is read with the same [Broker] interface, and one
 // that dead-letters into an operator's console cannot return anything at all.
-// Both brokers in internal/service/queue implement it.
+// The three brokers in internal/service/queue implement it.
 //
 //	if reader, ok := broker.(queue.DeadLetterReader); ok {
 //		dead, err := reader.DeadLetters(ctx, 100)
@@ -22,7 +22,8 @@ import (
 type DeadLetterReader interface {
 	// DeadLetters returns up to max dead letters, oldest first. It does NOT
 	// remove them: a dead letter is evidence, and a read that consumed it
-	// would make the second investigator's job impossible.
+	// would make the second investigator's job impossible. Removing one is a
+	// decision, and [DeadLetterManager] is where it is made.
 	//
 	// max must be positive ([InvalidBatchSize]).
 	DeadLetters(ctx context.Context, max int) ([]DeadLetterValue, error)
@@ -38,7 +39,7 @@ type DeadLetterReader interface {
 //
 // It is a sibling for the same reason [DeadLetterReader] is: a broker over a
 // transport with no renewal verb cannot implement it, and the assertion is
-// how a caller finds that out. Both brokers in internal/service/queue
+// how a caller finds that out. The three brokers in internal/service/queue
 // implement it.
 type LeaseExtender interface {
 	// Extend renews the lease named by receipt for a further by, measured
@@ -81,9 +82,10 @@ type DeadLetterValue struct {
 	// FailedAt is when the last attempt failed and the message was moved.
 	FailedAt time.Time
 	// Reason is the SCREAMING_SNAKE identifier of the failure — the
-	// errs.Error Reason of the cause, or LEASE_EXPIRED when the message
-	// died by exhausting its deliveries without any consumer ever reporting
-	// anything.
+	// errs.Error Reason of the cause, NOT_RETRYABLE for a handler's
+	// [DoNotRetry] around an error that carried none, or LEASE_EXPIRED when
+	// the message died by exhausting its deliveries without any consumer ever
+	// reporting anything.
 	Reason string
 	// Cause is the wire-safe Public half of the last failure, or an empty
 	// string when the consumer reported no cause at all. It never carries
@@ -101,6 +103,7 @@ type DeadLetterValue struct {
 	Code uint32
 	// Deliveries is how many times the message was delivered before it was
 	// abandoned. It equals [PolicyValue.MaxDeliveries] for every dead letter
-	// this SDK's brokers produce.
+	// this SDK's brokers produce by running out of attempts, and is the count
+	// the message had for one a handler rejected ([Rejecter]).
 	Deliveries int
 }

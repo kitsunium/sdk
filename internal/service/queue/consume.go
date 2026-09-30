@@ -181,6 +181,13 @@ func settleBatch(
 // queued again or dead-lettered, and there is nothing it can do about that
 // except keep working. Anything else is the storage refusing, which the
 // worker must not poll its way past.
+//
+// A failure the handler marked with core/queue.DoNotRetry is rejected rather
+// than nacked when the broker is a core/queue.Rejecter: dead-lettered at once,
+// with the handler's cause, instead of retried until MaxDeliveries. A broker
+// without the sibling is nacked as before — the shortcut is lost, never the
+// message — and a panic is never the mark, because guard carries the recovered
+// value as a field of HANDLER_PANICKED and never as its origin.
 func settle(
 	ctx context.Context, broker corequeue.Broker,
 	handler corequeue.Handler, delivery corequeue.DeliveryValue,
@@ -190,6 +197,12 @@ func settle(
 	if failure == nil {
 		//: the only call in the domain that removes a message.
 		return ignoreLapsed(broker.Ack(ctx, delivery.Lease.Receipt))
+	}
+	rejecter, rejects := broker.(corequeue.Rejecter)
+	//: no retry can fix it, and the broker can say so at once.
+	if rejects && kerrs.HasCode(failure, corequeue.CodeNotRetryable) {
+		//: same rule as the acknowledgement.
+		return ignoreLapsed(rejecter.Reject(ctx, delivery.Lease.Receipt, failure))
 	}
 	//: the broker decides: retried, or abandoned with its cause.
 	_, nackErr := broker.Nack(ctx, delivery.Lease.Receipt, failure)

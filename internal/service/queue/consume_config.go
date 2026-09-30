@@ -20,7 +20,7 @@ import (
 // directory read per worker per tenth of a second. A caller who cares picks
 // their own.
 //
-// Both brokers in this package are a [corequeue.Waker], so for them it bounds
+// Every broker in this package is a [corequeue.Waker], so for them it bounds
 // only what a wake cannot see — a publication made by ANOTHER process into a
 // durable queue — and a caller that has no such producer can raise it a
 // hundredfold. It stays at 100 ms because a zero must keep meaning what it
@@ -44,8 +44,8 @@ type ConsumerConfig struct {
 	// PollInterval is how long a worker waits after finding the queue empty.
 	// Zero means [DefaultPollInterval]; negative is read as zero.
 	//
-	// When the broker is a [corequeue.Waker] — both brokers in this package
-	// are — it is an upper bound and not a cadence: a Publish or a Nack in
+	// When the broker is a [corequeue.Waker] — every broker in this package
+	// is — it is an upper bound and not a cadence: a Publish or a Nack in
 	// this process wakes the worker at once, and a retry delay ending or a
 	// lease lapsing wakes it at that instant. What is left for the poll to
 	// find is a publication another process made into a durable queue, so set

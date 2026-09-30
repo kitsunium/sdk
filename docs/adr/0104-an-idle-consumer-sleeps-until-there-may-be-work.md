@@ -4,6 +4,7 @@
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0054](0054-sdk-queue-domain.md) (`Consume` stops being a pure poll)
+- **Amended by**: [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — the table of shared wakes is keyed by queue: a directory for the file broker, a database pool and a table for the SQL one
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings)
 
 ## Context

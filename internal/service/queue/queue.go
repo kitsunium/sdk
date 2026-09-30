@@ -1,17 +1,27 @@
 // Package queue implements the asynchronous, durable message queue declared
-// in internal/core/queue (ADR 0054): two brokers — one in the heap, one on the
-// filesystem — the consumer engine that drives a [corequeue.Handler] against
-// either, and the dead-letter record they both write.
+// in internal/core/queue (ADR 0054): three brokers — one in the heap, one on
+// the filesystem, one in a table of the caller's own SQL database (ADR 0151) —
+// the consumer engine that drives a [corequeue.Handler] against any of them,
+// and the dead-letter record they all write.
 //
-// # Two brokers, one set of refusals
+// # Three brokers, one set of refusals
 //
-// [NewMemory] exists so a consumer can test its own code without a directory,
-// and that is only worth something if the two answer identically. They
-// therefore share the core policy guard (corequeue.PolicyValue.Validate), the
-// same typed sentinels, and a table-driven conformance suite that runs the
-// SAME cases against both. Where they cannot be identical — surviving a
-// restart, crossing a process boundary, what a flush costs — the difference
-// is named here rather than discovered by a reader.
+// [NewMemory] exists so a consumer can test its own code without a directory
+// or a database, and that is only worth something if the brokers answer
+// identically. They therefore share the core policy guard
+// (corequeue.PolicyValue.Validate), the retry delay (retryDelay), the same
+// typed sentinels, and a table-driven conformance suite that runs the SAME
+// cases against all three. Where they cannot be identical — surviving a
+// restart, crossing a process boundary, joining the caller's transaction, what
+// a flush costs — the difference is named rather than discovered by a reader.
+//
+// # The one thing the SQL broker does that neither other can
+//
+// [NewSQL] keeps the queue in one table of the database the application
+// already writes, and every call runs on the transaction its context carries.
+// So a message published inside the caller's transaction exists if and only if
+// that transaction commits: the transactional outbox, which no broker whose
+// publication is durable on its own can offer.
 //
 // # The one thing the file broker does that the memory broker cannot
 //
@@ -152,4 +162,13 @@ func checkSize(size, maxBytes int) error {
 	}
 	//: acceptable.
 	return nil
+}
+
+// deadLetterNotFound is core/queue.DeadLetterNotFound for broker. The
+// identifier travels as a log-only field: it is a name the broker minted, and
+// never a byte of the payload.
+func deadLetterNotFound(broker, id string) error {
+	//: which broker, and which identifier it was asked for.
+	return kerrs.Wrap(corequeue.DeadLetterNotFound, kerrs.WrapParams{},
+		kerrs.String("broker", broker), kerrs.String("id", id))
 }

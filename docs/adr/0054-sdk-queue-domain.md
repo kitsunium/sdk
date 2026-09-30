@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) — `Consume` sleeps on the `Waker` sibling; [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) — a third broker, `NewSQL`, whose publication joins the caller's transaction (the frontier's Transaction row read as the WORK's, which still runs in its own), `PolicyValue.MaxRetryDelay`, and the `Rejecter` and `DeadLetterManager` siblings
 - **Related**: [ADR 0053](0053-sdk-events-domain.md) (the frontier table, written before this domain existed), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0052](0052-sdk-lock-domain.md) (leases that expire, and the `flock(2)` measurement), [ADR 0056](0056-sdk-vfs-domain.md) (`vfs`, whose `WriteAtomic` is this domain's durable publish), [ADR 0018](0018-sdk-cross-platform-portability.md) (refuse rather than approximate), [ADR 0001](0001-sdk-go-multimodule-layout.md) / [ADR 0005](0005-sdk-error-codes-dotted-quad.md)
 
 ## Context

@@ -139,7 +139,30 @@ type nameValue struct {
 // redelivery and it is what a dead letter is joined to a log line by.
 func (n nameValue) ID() string {
 	//: the two halves that are fixed for the life of the message.
-	return pad(n.EnqueuedAt) + "-" + n.Entropy
+	return messageID(n.EnqueuedAt, n.Entropy)
+}
+
+// messageID renders the identifier the two durable brokers mint: the enqueue
+// instant, zero-padded so identifiers sort in publication order, a dash, and
+// the message's random half.
+func messageID(enqueuedAt int64, entropy string) string {
+	//: an instant and entropy, the file broker's and the SQL broker's alike.
+	return pad(enqueuedAt) + "-" + entropy
+}
+
+// parseMessageID reads an identifier back into its two halves, refusing
+// anything messageID could not have written — which is what keeps a caller's
+// string from naming a file, or matching a row, it should not.
+func parseMessageID(id string) (enqueuedAt int64, entropy string, ok bool) {
+	instant, entropy, split := strings.Cut(id, "-")
+	//: exactly one dash, between the two halves.
+	if !split || !isHexOfWidth(entropy, idEntropyBytes) {
+		//: not an identifier this package minted.
+		return 0, "", false
+	}
+	enqueuedAt, ok = parseNano(instant)
+	//: the instant at the width and spelling pad writes.
+	return enqueuedAt, entropy, ok
 }
 
 // AtTime returns [nameValue.At] as an instant, for the one boundary that
