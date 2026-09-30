@@ -828,7 +828,7 @@ func (a *App) declaredSecretNames() map[string]bool {
 		}
 		nodes, _ := svc.snapshot()
 		for _, n := range nodes {
-			if s, ok := n.(*Secret); ok {
+			if s, ok := n.(*Secret); ok && !s.kitOwn() {
 				names[s.key()] = true
 			}
 		}

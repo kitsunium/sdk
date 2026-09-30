@@ -27,7 +27,7 @@ import (
 func TestAPersonIsFoundUnderEveryIdentity(t *testing.T) {
 	app := startPrivacy(t)
 	seed(t)
-	data, dataErr := ExportAPI.Call(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
+	data, dataErr := DeskExport.Ask(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
 	if dataErr != nil {
 		t.Fatal(dataErr)
 	}
@@ -107,7 +107,7 @@ func exportJournaled(t *testing.T, priv model.Privacy, who string) {
 func TestAnErasureClearsDeletesAndHolds(t *testing.T) {
 	app := startPrivacy(t)
 	seed(t)
-	done, doneErr := EraseAPI.Call(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
+	done, doneErr := DeskErase.Dispatch(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
 	if doneErr != nil {
 		t.Fatal(doneErr)
 	}
@@ -174,11 +174,11 @@ func TestAHoldStopsErasureAndDeletion(t *testing.T) {
 	must(t, Reports.Hold(ctx, "r1", "a court case about Ann"))
 	refusedAsHeld(t, Reports.Delete(ctx, "r1"), "court")
 	refusedAsHeld(t, Reports.Erase(ctx, "r1", "asked"), "court")
-	done, err := EraseAPI.Call(ctx, Identities{IDs: []string{"ann@x.dev"}})
+	done, err := DeskErase.Dispatch(ctx, Identities{IDs: []string{"ann@x.dev"}})
 	if err != nil || len(done.Stores) != 1 || !slices.Equal(done.Stores[0].Held, []string{"r1"}) {
 		t.Fatalf("a person's erasure over a held record: %+v, %v", done, err)
 	}
-	if data, err := ExportAPI.Call(ctx, Identities{IDs: []string{"ann@x.dev"}}); err != nil || len(data.Stores) != 1 {
+	if data, err := DeskExport.Ask(ctx, Identities{IDs: []string{"ann@x.dev"}}); err != nil || len(data.Stores) != 1 {
 		t.Fatalf("a held record is exported: %+v, %v", data, err)
 	}
 	if h := privacyOf(t, app).Holds; len(h) != 1 || h[0].Store != "desk/store/reports" || h[0].Record == "r1" {
@@ -217,10 +217,10 @@ func TestHeldUntilAndAPersonsHold(t *testing.T) {
 	seed(t)
 	ctx := t.Context()
 	refusedNaming(t, Invoices.Delete(ctx, "i1"), "commercial code")
-	if _, err := HoldAPI.Call(ctx, Identities{IDs: []string{"u-ann"}}); err != nil {
+	if _, err := DeskHold.Dispatch(ctx, Identities{IDs: []string{"u-ann"}}); err != nil {
 		t.Fatal(err)
 	}
-	refusedNaming(t, Customers.Delete(ctx, "u-ann"), "desk/endpoint/HoldData")
+	refusedNaming(t, Customers.Delete(ctx, "u-ann"), "desk/command/hold")
 }
 
 // A key built from personal data cannot survive its erasure: the record is
@@ -251,7 +251,7 @@ func TestALostIndexKeyRebuildsTheIndex(t *testing.T) {
 	must(t, app.Stop(ctx))
 	t.Setenv("KIT_INDEX_KEY", "another index key, as long as it")
 	must(t, app.Start(t.Context()))
-	data, err := ExportAPI.Call(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
+	data, err := DeskExport.Ask(t.Context(), Identities{IDs: []string{"ann@x.dev", "u-ann"}})
 	if err != nil || len(data.Stores) != 3 {
 		t.Fatalf("after a new index key: %+v, %v", data, err)
 	}
@@ -271,7 +271,7 @@ func TestErasureLeavesNoTrace(t *testing.T) {
 	ctx := t.Context()
 	must(t, Reports.Insert(ctx, Report{ID: "r1", Email: "trace@x.dev", Name: "Tracy Trace", Explanation: "unforgettable words"}))
 	must(t, Reports.Put(ctx, Report{ID: "r1", Email: "trace@x.dev", Name: "Tracy Trace", Explanation: "unforgettable words, again"}))
-	if _, err := EraseAPI.Call(ctx, Identities{IDs: []string{"trace@x.dev"}}); err != nil {
+	if _, err := DeskErase.Dispatch(ctx, Identities{IDs: []string{"trace@x.dev"}}); err != nil {
 		t.Fatal(err)
 	}
 	data, dataErr := os.OpenRoot(dir)

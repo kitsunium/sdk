@@ -19,19 +19,21 @@ import (
 //     subject field, and its fields by class;
 //   - point (d), the recipients inside the product: every node the graph
 //     shows reading the store, and every mailer that carries its data out;
-//   - point (f), the time limits for erasure: its retention;
+//   - point (f), the time limits for erasure: its retention — or the
+//     product's own, in its words (RetentionByProduct);
 //   - point (g), the security measures kit takes.
 //
 // The code does not know the controller and its representatives (point
 // a) or the transfers (point e): the register marks them to complete. A
 // store with personal data but no purpose, no retention or no subject is
-// listed with its gaps. kit's own stores — the holds and the journal — are
+// listed with its gaps — a store whose product keeps its retention lacks
+// neither a retention nor a subject. kit's own stores — the holds and the journal — are
 // not the product's processing and are left out.
 
 // registerLine is the store's line in the register.
 func (s *StoreService[T]) registerLine(a *App) model.RegisterStore {
 	plan := s.plan()
-	line := model.RegisterStore{Store: s.id, Subject: plan.subjectPointer(), Security: securityOf(plan)}
+	line := model.RegisterStore{Store: s.id, Subject: plan.subjectPointer(), Security: securityOf(plan, s.sealsAtRest(a))}
 	line.Personal, line.Special, line.Secret = fieldsOf(plan)
 	if p := s.privacy; p != nil {
 		p.registerDeclared(a, &line)
@@ -42,11 +44,12 @@ func (s *StoreService[T]) registerLine(a *App) model.RegisterStore {
 	return line
 }
 
-// securityOf are the measures kit takes for a store's personal data.
-func securityOf(plan *classPlan) []string {
+// securityOf are the measures kit takes for a store's personal data: sealed
+// says the store seals it at rest.
+func securityOf(plan *classPlan, sealed bool) []string {
 	out := []string{model.MeasureRedacted, model.MeasureHolds, model.MeasureJournal}
 	if plan.sensitive() {
-		out = append(out, model.MeasureNotSealed)
+		out = append(out, measureOf(sealed))
 	}
 	return out
 }
@@ -57,6 +60,9 @@ func (p *storePrivacy[T]) registerDeclared(a *App, line *model.RegisterStore) {
 	line.Purpose = p.purpose
 	line.Erase, _ = retentionText(a, p.erase)
 	line.Delete, _ = retentionText(a, p.delete)
+	if p.byProduct != nil {
+		line.ByProduct = new(*p.byProduct)
+	}
 	if p.heldUntil == nil {
 		return
 	}
@@ -70,11 +76,15 @@ func (p *storePrivacy[T]) registerDeclared(a *App, line *model.RegisterStore) {
 	}
 }
 
-// gapsOf are what a register line lacks: a purpose, a retention, a subject.
+// gapsOf are what a register line lacks: a purpose, a retention, a subject
+// — the last two none when the product keeps the store's retention itself.
 func gapsOf(line model.RegisterStore) []string {
 	var gaps []string
 	if line.Purpose == "" {
 		gaps = append(gaps, model.GapPurpose)
+	}
+	if line.ByProduct != nil {
+		return gaps
 	}
 	if line.Erase == "" && line.Delete == "" {
 		gaps = append(gaps, model.GapRetention)
@@ -187,7 +197,8 @@ var (
 		model.MeasureRedacted:  "never shown in the Studio, the spans or the logs",
 		model.MeasureHolds:     "legal holds stop erasure and deletion",
 		model.MeasureJournal:   "every export, erasure and hold, and every deletion kit makes — retention, a person's erasure —, journaled and hash-chained",
-		model.MeasureNotSealed: "kept in clear at rest: kit's sealing is not there yet",
+		model.MeasureNotSealed: "in clear: the store is kept in memory, where nothing is at rest, or its fields are tagged plain",
+		model.MeasureSealed:    "sealed at rest, AES-256-GCM, under one data key per person that their erasure destroys",
 	}
 
 	// gapWords say a gap in English, for the command line.
@@ -225,6 +236,7 @@ func writeRegisterStore(w io.Writer, s model.RegisterStore) {
 		{"recipients (d)", strings.Join(s.Recipients, ", ")},
 		{"erased (f)", s.Erase},
 		{"deleted (f)", s.Delete},
+		{"retention (f)", byProductWords(s.ByProduct)},
 		{"held (f)", s.HeldUntil},
 	} {
 		if l[1] != "" {
@@ -241,6 +253,20 @@ func writeRegisterStore(w io.Writer, s model.RegisterStore) {
 	for _, gap := range s.Gaps {
 		fmt.Fprintf(w, "  %-16s %s\n", "GAP:", gapWords[gap])
 	}
+}
+
+// byProductWords says a retention the product keeps itself: "by the
+// product", and its own words when it gave some; nothing for a store whose
+// retention is kit's.
+func byProductWords(r *model.ProductRetention) string {
+	var words []string
+	if r != nil {
+		words = append(words, "kept by the product itself")
+		if r.Limits != "" {
+			words = append(words, r.Limits)
+		}
+	}
+	return strings.Join(words, ": ")
 }
 
 // subjectWords names a store's subjects: its subject field, and its doc.

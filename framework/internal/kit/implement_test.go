@@ -82,7 +82,7 @@ func TestAnImplementationValidatesItsRequest(t *testing.T) {
 // among the services the app mounts, else the fallback.
 func TestBindWinsOverImplementWhichWinsOverFallback(t *testing.T) {
 	pricing := kit.NewService("pricing", "Prices set by hand.")
-	fixed := pricing.Endpoint("POST /internal/fixed", fixedPrice, kit.Private())
+	fixed := pricing.Query("fixed", fixedPrice)
 	for _, c := range []struct {
 		name     string
 		services []*kit.Service

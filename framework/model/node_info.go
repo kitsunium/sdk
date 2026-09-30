@@ -11,8 +11,22 @@ import (
 const (
 	// ExposePublic endpoints are routed on the product's HTTP listener.
 	ExposePublic string = core.ExposePublic
-	// ExposePrivate endpoints are reachable only in-process, through Call.
+	// ExposePrivate endpoints have no route: the implementation of a port
+	// (Service.Implement), reached in process through its port. A graph kit
+	// made before its operations were internal by default also marks so an
+	// endpoint it kept off the listener.
 	ExposePrivate string = core.ExposePrivate
+)
+
+// How an exposure says it is open on purpose, when its operation declares
+// no permission and no rule (EndpointInfo.Access).
+const (
+	// AccessAnyone is kit.Anyone(): whoever reaches the route may run the
+	// operation.
+	AccessAnyone string = core.AccessAnyone
+	// AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the
+	// operation asks for one.
+	AccessAnyUser string = core.AccessAnyUser
 )
 
 // Authentication an endpoint asks for.
@@ -193,6 +207,12 @@ type (
 	// from an instant the record carries (After or Setting, and Since), or at an
 	// instant a function gives (At).
 	Retention = core.RetentionSpec
+)
+
+type (
+	// ProductRetention is a retention the product keeps itself, as it says
+	// it.
+	ProductRetention = core.ProductRetentionSpec
 )
 
 type (

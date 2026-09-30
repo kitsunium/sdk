@@ -54,18 +54,31 @@ func TestManualMigrationsRefuseTheStart(t *testing.T) {
 func TestMigrateStatusAndUp(t *testing.T) {
 	newApp := manualLedger(t, kit.NewFakeDB(sql.DialectPostgres))
 	code, out, errOut := migrateCommand(t, newApp, "status")
-	if code != 0 || strings.Count(out, "pending") != 2 || !strings.Contains(out, "schema_migrations") {
+	// kit's own set first — its registry, the two stores' tables —, then
+	// the product's.
+	if code != 0 || strings.Count(out, "pending") != 5 || strings.Count(out, "kit_migrations") != 3 || !strings.Contains(out, "schema_migrations") {
 		t.Fatalf("status: %d\n%s%s", code, out, errOut)
 	}
-	if code, out, errOut = migrateCommand(t, newApp, "up"); code != 0 ||
+	if code, out, errOut = migrateCommand(t, newApp, "up"); code != 0 || !strings.Contains(out, `database/kit: applied 1 "docstore kit_tables"`) ||
 		!strings.Contains(out, `database/product: applied 20260901120000 "create entries", 20260902120000 "create trail"`) {
 		t.Fatalf("up: %d\n%s%s", code, out, errOut)
 	}
-	if code, out, _ = migrateCommand(t, newApp, "up"); code != 0 || !strings.Contains(out, "database/product: up to date") {
+	if code, out, _ = migrateCommand(t, newApp, "up"); code != 0 || !strings.Contains(out, "database/kit: up to date") ||
+		!strings.Contains(out, "database/product: up to date") {
 		t.Fatalf("up again: %d\n%s", code, out)
 	}
-	if code, out, _ = migrateCommand(t, newApp, "status"); code != 0 || strings.Count(out, "applied") != 2 {
+	if code, out, _ = migrateCommand(t, newApp, "status"); code != 0 || strings.Count(out, "applied") != 5 {
 		t.Fatalf("status after up: %d\n%s", code, out)
+	}
+	run(t, newApp())
+}
+
+// kit's own set is not migrated down: its migrations drop the stores'
+// tables, and every entity in them.
+func TestKitsOwnSetIsNotMigratedDown(t *testing.T) {
+	newApp := manualLedger(t, kit.NewFakeDB(sql.DialectPostgres))
+	if code, _, errOut := migrateCommand(t, newApp, "down", "kit", "1"); code != 2 || !strings.Contains(errOut, "kit's own set is not migrated down") {
+		t.Errorf("down of kit's set: %d %s", code, errOut)
 	}
 }
 

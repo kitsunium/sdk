@@ -35,6 +35,8 @@ statements and the rotation's user, whose passwords are bound — the
 administrator's pool interpolates them (`interpolateParams`), since MySQL
 takes no parameter in a `CREATE USER` —, never written; `app_test.go` the
 `ledger` product, in production on the default database, and a proxy;
-`database_test.go` migrations, two processes migrating once, `migrate`
-status, up and down, readiness, an unreachable server, credentials that
-never leak, and a rotated password reaching the next connection.
+`database_test.go` migrations — kit's own set, and the tables it makes, first
+—, two processes migrating once, `migrate` status, up and down, readiness,
+an unreachable server, credentials that never leak, a rotated password
+reaching the next connection, and the stores' conformance suite
+(`kit/storetest`).

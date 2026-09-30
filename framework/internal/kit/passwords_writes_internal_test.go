@@ -45,6 +45,7 @@ func TestALegacyValueIsLeftAsItWas(t *testing.T) {
 	dir := t.TempDir()
 	before := NewService("locks-legacy", "")
 	plain := before.Store("accounts", func(a lockAccount) string { return a.ID })
+	pinDataKeyWithoutFileStore(t)
 	app := NewApp("legacy", before).With(DataDir(dir), Listen("127.0.0.1:0"), Env(EnvDev), Analyze(false), Logs(io.Discard))
 	must(t, app.Start(t.Context()))
 	must(t, plain.Insert(t.Context(), lockAccount{ID: "a1", Password: "legacy"}))

@@ -3,7 +3,6 @@ package kit
 
 import (
 	"context"
-	"encoding/json"
 	"errors"
 	"path/filepath"
 	"reflect"
@@ -48,25 +47,48 @@ type envelope[T any] struct {
 
 // Publish sends msg to every subscription. It returns once every
 // subscription's queue has accepted the message; delivery happens later.
+// Inside a transaction ([Transact], a command's) the message is encoded now
+// and queued once the transaction commits: a rollback drops it.
 func (t *TopicService[T]) Publish(ctx context.Context, msg T) error {
 	a := t.app()
 	if a == nil {
 		return notRunning(&t.nodeBase)
 	}
 	ctx, sp := a.begin(ctx, &spanStart{node: t.id, from: currentNode(ctx), edge: model.EdgePublishes, op: model.OpPublish, name: "Publish"})
-	err := t.publish(ctx, a, msg)
+	payload, err := t.payload(ctx, a, msg)
+	if err == nil {
+		release := func() error {
+			err := t.publish(withoutUnit(context.WithoutCancel(ctx)), a, payload)
+			t.wake()
+			return err
+		}
+		if hold(ctx, heldEffect{node: t.id, release: release}) {
+			sp.attr("held", "commit")
+		} else {
+			err = t.publish(ctx, a, payload)
+			t.wake()
+		}
+	}
 	sp.end(err)
-	t.wake()
 	return err
 }
 
-// publish sends msg, with the caller's trace, to every subscription's queue.
-func (t *TopicService[T]) publish(ctx context.Context, a *App, msg T) error {
+// payload is what a subscription's queue carries of msg: the message — its
+// members kit seals sealed (seal_message.go) — and the publish's trace.
+func (t *TopicService[T]) payload(ctx context.Context, a *App, msg T) ([]byte, error) {
 	header, _ := trace.FormatTraceParent(trace.SpanContextFromContext(ctx))
-	payload, err := json.Marshal(envelope[T]{Trace: header, Data: msg})
-	if err != nil {
-		return failure(CodeTopicEncode, "TOPIC_ENCODE", "the message cannot be encoded", err, errs.String("topic", t.id))
+	payload, err := t.encode(ctx, a, header, msg)
+	switch {
+	case errs.HasCode(err, CodeSealWrite), errs.HasCode(err, CodeSealKey):
+		return nil, err
+	case err != nil:
+		return nil, failure(CodeTopicEncode, "TOPIC_ENCODE", "the message cannot be encoded", err, errs.String("topic", t.id))
 	}
+	return payload, nil
+}
+
+// publish puts payload in every subscription's queue.
+func (t *TopicService[T]) publish(ctx context.Context, a *App, payload []byte) error {
 	t.mu.Lock()
 	subs := slices.Clone(t.subs)
 	t.mu.Unlock()
@@ -90,7 +112,7 @@ func (t *TopicService[T]) describe(a *App, out *model.Node) []model.Edge {
 	if a != nil && a.data != nil {
 		broker = "file"
 	}
-	out.Topic = &model.TopicInfo{Message: schemaOf(reflect.TypeFor[T]()), Delivery: "at-least-once", Broker: broker}
+	out.Topic = &model.TopicInfo{Message: keptSchemaOf(reflect.TypeFor[T](), a != nil && t.sealsAtRest(a)), Delivery: "at-least-once", Broker: broker}
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	edges := make([]model.Edge, 0, len(t.subs))
@@ -124,6 +146,26 @@ type SubscriptionConfigurer interface {
 
 type subscriptionOptions struct {
 	deliveryOptions
+	// ownStores lets a watch hear its own module's stores (OwnStores).
+	ownStores bool
+}
+
+// subscriptionOption is a SubscriptionConfigurer that is no DeliveryOption.
+type subscriptionOption func(o *subscriptionOptions)
+
+// subscriptionConfigure applies the option to a subscription's options.
+func (f subscriptionOption) subscriptionConfigure(o *subscriptionOptions) { f(o) }
+
+// OwnStores lets a watch ([Service.Watch]) hear the stores of its own
+// module too — the product's own, for a watch of the product's —, which a
+// watch never hears by default. Such a watch never hears the writes its own
+// handler makes, in its handler's context — a handler that writes what it
+// watches, a screening that stamps the record it screened, would otherwise
+// hear itself forever —; a write the handler only causes, later and
+// elsewhere — a queued command's handling, a topic's delivery — is heard.
+// A subscription to a topic refuses it: a topic has no stores.
+func OwnStores() SubscriptionConfigurer {
+	return subscriptionOption(func(o *subscriptionOptions) { o.ownStores = true })
 }
 
 // deliveryOptions are how a queue delivers: a subscription's, or a queued
@@ -177,7 +219,7 @@ func Parallelism(n int) DeliveryOption {
 //
 //go:noinline
 func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler func(context.Context, T) error, opts ...SubscriptionConfigurer) *SubscriptionWorker[T] {
-	o := subscriptionOptions{deliveryOptions{maxDeliveries: defaultMaxDeliveries, parallelism: 1}}
+	o := subscriptionOptions{deliveryOptions: defaultDeliveries()}
 	for _, opt := range opts {
 		opt.subscriptionConfigure(&o)
 	}
@@ -194,6 +236,8 @@ func (s *Service) Subscribe[T any](name string, topic *TopicService[T], handler 
 		s.problem(sub.decl, sub.id, "subscription.nil-handler", "name", name)
 	case o.maxDeliveries < 1 || o.parallelism < 1:
 		s.problem(sub.decl, sub.id, "subscription.limits", "name", name)
+	case o.ownStores:
+		s.problem(sub.decl, sub.id, "subscription.own-stores", "name", name)
 	default:
 		topic.mu.Lock()
 		topic.subs = append(topic.subs, sub)
@@ -245,20 +289,22 @@ func (sb *SubscriptionWorker[T]) start(_ context.Context, a *App) error {
 func (sb *SubscriptionWorker[T]) deliver(a *App, loop *loopState) queue.Handler {
 	c := consumer{a: a, loop: loop, node: sb.id, name: sb.name, wake: model.WakeTopic}
 	return func(ctx context.Context, d queue.Delivery) error {
-		var env envelope[T]
-		decodeErr := json.Unmarshal(d.Message.Payload, &env)
+		msg, tr, decodeErr, openErr := sb.topic.decode(ctx, a, d.Message.Payload)
 		if decodeErr != nil {
-			env.Trace = ""
+			tr = ""
 		}
-		return c.deliver(ctx, &d, origin{trace: env.Trace, node: sb.topic.id}, func(ctx context.Context, sp *span) error {
-			if decodeErr != nil {
+		return c.deliver(ctx, &d, origin{trace: tr, node: sb.topic.id}, func(ctx context.Context, sp *span) error {
+			switch {
+			case openErr != nil:
+				return openErr
+			case decodeErr != nil:
 				return failure(CodeUndecodable, "MESSAGE_UNDECODABLE", "the message does not decode into the topic's type", decodeErr,
 					errs.String("subscription", sb.id), errs.String("message", d.Message.ID))
 			}
 			if sp.detailed() {
-				sp.request(env.Data)
+				sp.request(msg)
 			}
-			return sb.handler(ctx, env.Data)
+			return sb.handler(ctx, msg)
 		})
 	}
 }

@@ -138,6 +138,21 @@ const (
 	OpHandle      string = core.OpHandle      // a queued command handled by its consumer, in the dispatcher's trace
 	OpConnect     string = core.OpConnect     // a connection a listener accepted, handled until it closes
 	OpCLI         string = core.OpCLI         // a short command-line command, run once
+	// OpTransaction is a unit of work (kit.Transact, a command's, a
+	// workflow's transition): its attrs say the database it belongs to —
+	// "database", and "backend" as a store says it —, its "outcome", the
+	// effects it held ("effects"), and "savepoint" for one nested in
+	// another.
+	OpTransaction string = core.OpTransaction
+)
+
+// The outcomes of a transaction, as its span's "outcome" attribute says them.
+const (
+	// OutcomeCommit is a transaction that committed: its effects left.
+	OutcomeCommit string = core.OutcomeCommit
+	// OutcomeRollback is a transaction whose writes were undone: its effects
+	// were dropped.
+	OutcomeRollback string = core.OutcomeRollback
 )
 
 // Span statuses.

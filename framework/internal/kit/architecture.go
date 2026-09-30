@@ -260,9 +260,9 @@ func dataLinks(g *model.Graph, volume, memory []string) []model.Link {
 // databaseContainers are the app's databases, a container each —
 // container:database:<name>, drawn as a cylinder — and the process's link to
 // each, "Reads and writes". A store is drawn where its data is: on its
-// database once kit keeps stores on SQL (ADR 0004, step 2); until then, and
-// in dev without the database's URL, in the data directory. The link carries
-// the database connector, and the store connector once stores live on it.
+// database (ADR 0004), or in the data directory in dev without the
+// database's URL. The link carries the database connector, and the store
+// connector once stores live on it.
 func (a *App) databaseContainers(g *model.Graph, process string) ([]model.Container, []model.Link) {
 	runs := map[string]*databaseRun{}
 	for _, r := range a.databaseRuns() {
@@ -350,13 +350,10 @@ func (a *App) databaseVariables(d *database) []string {
 
 // databaseDoc says what a database is to the product.
 func databaseDoc(name string, kept, on int, state string) string {
-	switch {
-	case state == model.DatabaseUnset:
+	if state == model.DatabaseUnset {
 		return fmt.Sprintf("Database %q has no URL in dev: the %s it keeps stay in the data directory.", name, plural(kept, "store"))
-	case kept > on:
-		return fmt.Sprintf("Database %q: its migrations and its check run on it; the %s it keeps stay in the data directory until kit keeps stores on SQL.", name, plural(kept-on, "store"))
 	}
-	return fmt.Sprintf("Database %q keeps %s.", name, plural(on, "store"))
+	return fmt.Sprintf("Database %q keeps %s.", name, plural(max(on, kept), "store"))
 }
 
 // ports are what the process listens on: kit's own listener, which answers
@@ -419,6 +416,8 @@ func (a *App) dataNodes(g *model.Graph) (volume, memory []string) {
 		n := &g.Nodes[i]
 		switch {
 		case !keepsData(n):
+		case n.Store != nil && model.IsEngine(n.Store.Backend):
+			// On its database: its container draws it.
 		case a.onDisk(n):
 			volume = append(volume, n.ID)
 		default:

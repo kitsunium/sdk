@@ -10,17 +10,16 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // The databases' declaration problems (ADR 0004), every one at once, each at
 // its kit.Database: a name out of the grammar, taken twice, or one of whose
 // derived names a setting or a secret already has; no engine; two defaults;
 // a thing two databases keep, or that the app does not mount; a store kept
-// in memory that a database keeps by name; migrations on SQLite, which the
-// SDK cannot lock yet. Then, once the environment's stores are open, each
-// URL: set nowhere outside dev, unreadable, not one its engine reads, or
-// leaving TLS to the driver outside dev.
+// in memory that a database keeps by name; two of kit's tables that would
+// take one name. Then, once the environment's stores are open, each URL:
+// set nowhere outside dev, unreadable, not one its engine reads, or leaving
+// TLS to the driver outside dev.
 
 // databaseCheck is one judgement of the declared databases: what it found,
 // and what it learns as it goes.
@@ -48,6 +47,9 @@ func (a *App) databaseProblems() []model.Diagnostic {
 		c.name(d)
 		c.engine(d)
 		c.keeps(d)
+		if twice := a.tableProblems(d); len(twice) > 0 {
+			c.add(d, say("database.table-twice", "database", d.name, "tables", strings.Join(twice, ", ")))
+		}
 	}
 	return append(c.out, a.databaseURLProblems()...)
 }
@@ -106,8 +108,7 @@ func (c *databaseCheck) derived(d *database) {
 	}
 }
 
-// engine judges d's engine and its migrations, and whether it is a second
-// default.
+// engine judges d's engine, and whether it is a second default.
 func (c *databaseCheck) engine(d *database) {
 	if d.engine == nil {
 		c.add(d, say("database.nil-engine", "name", d.name))
@@ -117,9 +118,6 @@ func (c *databaseCheck) engine(d *database) {
 		if len(c.defaults) == 2 {
 			c.add(d, say("database.two-defaults", "first", c.defaults[0], "second", d.name))
 		}
-	}
-	if len(d.opts.migrations) > 0 && d.engine != nil && d.dialect() == sql.DialectSQLite {
-		c.add(d, say("database.sqlite-migrations", "name", d.name))
 	}
 }
 
@@ -180,7 +178,7 @@ func (a *App) derivedOwners() map[string]string {
 		nodes, _ := svc.snapshot()
 		for _, n := range nodes {
 			if s, ok := n.(*Secret); ok {
-				owners[s.stored()] = s.id
+				owners[s.keptName()] = s.id
 			}
 		}
 	}
@@ -201,9 +199,8 @@ func (a *App) derivedNames() map[string]bool {
 }
 
 // databaseURLProblems judges each database's URL where the environment keeps
-// it, and says that the stores a database keeps stay in the data directory
-// in this version of kit. The URL is never quoted. With the app in memory no
-// URL is read: no database opens.
+// it. The URL is never quoted. With the app in memory no URL is read: no
+// database opens.
 func (a *App) databaseURLProblems() []model.Diagnostic {
 	if a.opts.memory {
 		return nil
@@ -213,12 +210,8 @@ func (a *App) databaseURLProblems() []model.Diagnostic {
 		if d.engine == nil {
 			continue
 		}
-		at := a.source(&d.decl)
-		if p := a.urlProblem(d, at); p != nil {
+		if p := a.urlProblem(d, a.source(&d.decl)); p != nil {
 			out = append(out, *p)
-		}
-		if n := a.storesKeptBy(d); n > 0 {
-			out = append(out, diagnosticOf("warning", "", at, say("database.stores-on-files", "database", d.name, "count", n)))
 		}
 	}
 	return out

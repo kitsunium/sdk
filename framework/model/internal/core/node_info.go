@@ -9,8 +9,22 @@ import "time"
 const (
 	// ExposePublic endpoints are routed on the product's HTTP listener.
 	ExposePublic = "public"
-	// ExposePrivate endpoints are reachable only in-process, through Call.
+	// ExposePrivate endpoints have no route: the implementation of a port
+	// (Service.Implement), reached in process through its port. A graph kit
+	// made before its operations were internal by default also marks so an
+	// endpoint it kept off the listener.
 	ExposePrivate = "private"
+)
+
+// How an exposure says it is open on purpose, when its operation declares
+// no permission and no rule (EndpointInfo.Access).
+const (
+	// AccessAnyone is kit.Anyone(): whoever reaches the route may run the
+	// operation.
+	AccessAnyone = "anyone"
+	// AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the
+	// operation asks for one.
+	AccessAnyUser = "any-user"
 )
 
 // Authentication an endpoint asks for.
@@ -163,14 +177,18 @@ type EndpointSpec struct {
 	// handler, in order.
 	Pipeline []MechanicMessage `json:"pipeline,omitempty"`
 	// Implements is the node ID of the port this endpoint implements
-	// (Service.Implement): a private endpoint with no route, reached through
-	// the port.
+	// (Service.Implement): an endpoint with no route, reached through the
+	// port.
 	Implements string `json:"implements,omitempty"`
 	// Exposes is the node ID of the command this endpoint dispatches, or of
 	// the query it asks (Command.Expose, Query.Expose): its authentication
 	// is the operation's, and the rest of its pipeline — validation, key,
 	// authorization — the operation's own.
 	Exposes string `json:"exposes,omitempty"`
+	// Access is how an exposure says its operation is open on purpose —
+	// [AccessAnyone] or [AccessAnyUser] —; empty when the operation says who
+	// may run it (a permission, a rule), and on any other endpoint.
+	Access string `json:"access,omitempty"`
 }
 
 // PortSpec describes a port: an operation a service needs and another
@@ -264,19 +282,23 @@ type PermissionMessage struct {
 type StoreSpec struct {
 	// Entity is the stored type.
 	Entity *SchemaMessage `json:"entity,omitempty"`
-	// Backend is where the store's data is: "memory" or "file" — and, once
-	// kit keeps stores on SQL (ADR 0004, step 2), the engine of the database
-	// that keeps it: "postgres", "mysql", "sqlite".
+	// Backend is where the store's data is: "memory", "file", or the engine
+	// of the database that keeps it (ADR 0004): "postgres", "mysql",
+	// "sqlite".
 	Backend string `json:"backend"`
 	// Location is where a file backend keeps its data, relative to the data
 	// directory.
 	Location string `json:"location,omitempty"`
 	// Database names the database that keeps the store, as the app declares
 	// it (kit.Database, kit.Keeps) — present even while the store's data
-	// stays in the data directory: in dev without the database's URL, and
-	// until kit keeps stores on SQL. Its container is
-	// "container:database:<name>".
+	// stays in the data directory, in dev without the database's URL. Its
+	// container is "container:database:<name>".
 	Database string `json:"database,omitempty"`
+	// Table is the table the database keeps the store's entities in —
+	// "<service>__<store>", '-' and '.' written '_', a digest past the
+	// engine's limit —, beside its index rows in "<table>___ix". Present
+	// with Database.
+	Table string `json:"table,omitempty"`
 	// Count is how many entities the store holds, on a runtime graph.
 	Count *int `json:"count,omitempty"`
 	// Indexes are the secondary indexes the store maintains, in declaration
@@ -307,6 +329,10 @@ type StorePrivacyMessage struct {
 	// removes the record.
 	Erase  *RetentionSpec `json:"erase,omitempty"`
 	Delete *RetentionSpec `json:"delete,omitempty"`
+	// ByProduct is set when the product keeps the store's retention itself
+	// (kit.RetentionByProduct): kit runs none — Erase and Delete are then
+	// absent — and asks for neither a retention nor a subject.
+	ByProduct *ProductRetentionSpec `json:"byProduct,omitempty"`
 	// HeldUntil holds each record until an instant it carries: the law's
 	// own retention (kit.HeldUntil).
 	HeldUntil *HeldUntilSpec `json:"heldUntil,omitempty"`
@@ -326,6 +352,15 @@ type StorePrivacyMessage struct {
 	// runtime graph.
 	Erased  *int `json:"erased,omitempty"`
 	Deleted *int `json:"deleted,omitempty"`
+}
+
+// ProductRetentionSpec is a retention the product keeps itself, as it says
+// it.
+type ProductRetentionSpec struct {
+	// Limits says, in the product's words, how long the records keep their
+	// personal data and how they go — the register's time limits, GDPR
+	// art. 30(1)(f); empty when it gave none.
+	Limits string `json:"limits,omitempty"`
 }
 
 // RetentionSpec is when kit erases or deletes a record: after a delay counted
@@ -386,10 +421,14 @@ type SubscriptionSpec struct {
 	// Mark is what a watch hears the writes of: "personal", "special" or
 	// "moderated", ADR 0006's marks. Empty for a subscription.
 	Mark string `json:"mark,omitempty"`
+	// OwnStores: the watch hears its own module's stores too — the
+	// product's own, for a watch of the product's (kit.OwnStores) —, never
+	// the writes its own handler makes.
+	OwnStores bool `json:"ownStores,omitempty"`
 	// Stores are the node IDs of the stores that feed a watch, sorted: those
 	// whose entity holds a field with its mark, but its own module's — the
-	// product's own, for a watch of the product's. Each draws a declared
-	// delivers edge to it.
+	// product's own, for a watch of the product's — unless OwnStores. Each
+	// draws a declared delivers edge to it.
 	Stores []string `json:"stores,omitempty"`
 	// MaxDeliveries is how many attempts a message gets before it is
 	// dead-lettered.
@@ -531,9 +570,13 @@ type SecretSpec struct {
 	RotateEvery string `json:"rotateEvery,omitempty"`
 	// Keep is how many versions a rotation leaves, the new one included.
 	Keep int `json:"keep,omitempty"`
+	// Optional: a provided secret the product can do without
+	// (kit.Optional) — found nowhere, it is absent, and the start goes on.
+	Optional bool `json:"optional,omitempty"`
 
 	// From is where the running app found it: one of the SecretFrom
-	// constants, on a runtime graph. Empty when it is found nowhere.
+	// constants, on a runtime graph. Empty when it is found nowhere — for an
+	// optional secret, absent.
 	From string `json:"from,omitempty"`
 	// Version is the number of its current version, from 1.
 	Version int `json:"version,omitempty"`
@@ -664,8 +707,10 @@ type FieldMessage struct {
 	Subject bool `json:"subject,omitempty"`
 	// Moderated marks content others see and a moderator may act on.
 	Moderated bool `json:"moderated,omitempty"`
-	// Sealed is set when kit keeps the field sealed at rest. Nothing is
-	// sealed before kit's sealing lands (ADR 0006, step 3).
+	// Sealed is set when kit keeps the field sealed at rest (ADR 0006 §4):
+	// a personal, special or secret field, or the subject, not plain, of
+	// what kit keeps on disk — a store's entity, a topic's message, a queued
+	// command's input. A store in memory seals nothing.
 	Sealed bool `json:"sealed,omitempty"`
 	// Erased marks the time kit stamps when it erases the record.
 	Erased bool `json:"erased,omitempty"`

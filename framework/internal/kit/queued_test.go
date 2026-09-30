@@ -56,19 +56,20 @@ func TestAQueuedCommandIsHandledAsItsDispatcher(t *testing.T) {
 	if got := handledBy(); got[0] != "alice" {
 		t.Errorf("the handler acted for %q, want alice", got[0])
 	}
-	if l := loopOf(t, app, "lab/command/queued consumer"); l.Kind != model.LoopConsumer || l.Runs != 1 || l.Library != "sdk/v1/queue" {
+	eventually(t, "the run counted", func() bool { return loopOf(t, app, "lab/command/queued consumer").Runs == 1 })
+	if l := loopOf(t, app, "lab/command/queued consumer"); l.Kind != model.LoopConsumer || l.Library != "sdk/v1/queue" {
 		t.Errorf("the consumer's loop: %+v", l)
 	}
 }
 
 // handledTrace is the one trace of the queued lab command, once it holds
-// the dispatch and its handling.
+// the dispatch, its handling and the handling's transaction.
 func handledTrace(t *testing.T, app *kit.App) model.Trace {
 	t.Helper()
 	var traces []model.Trace
 	eventually(t, "the handling's span", func() bool {
 		call(t, app, "GET /_kit/api/traces?node=lab/command/queued", noBody).json(t, &traces)
-		return len(traces) == 1 && len(traces[0].Spans) == 2
+		return len(traces) == 1 && len(traces[0].Spans) == 3
 	})
 	return traces[0]
 }
@@ -87,7 +88,8 @@ func spanByOp(t *testing.T, tr *model.Trace, op string) model.Span {
 
 // A queued command's handling continues the dispatcher's trace, as a
 // delivery does: under the dispatch, from the node that dispatched it, no
-// edge drawn twice, its key the span's instance.
+// edge drawn twice, its key the span's instance; its handler runs in a
+// transaction under it.
 func TestAQueuedCommandIsHandledInTheDispatchersTrace(t *testing.T) {
 	app, _ := startCounterManual(t)
 	if _, err := LabQueued.Dispatch(as(t.Context(), "alice"), LabInput{Key: "q1"}); err != nil {
@@ -96,12 +98,15 @@ func TestAQueuedCommandIsHandledInTheDispatchersTrace(t *testing.T) {
 	tr := handledTrace(t, app)
 	// The handling may be recorded before the dispatch's span closes: the
 	// spans are found by their operation, never by the order they were kept.
-	dispatched, handled := spanByOp(t, &tr, model.OpDispatch), spanByOp(t, &tr, model.OpHandle)
+	dispatched, handled, tx := spanByOp(t, &tr, model.OpDispatch), spanByOp(t, &tr, model.OpHandle), spanByOp(t, &tr, model.OpTransaction)
 	if dispatched.Op != model.OpDispatch || handled.Op != model.OpHandle || handled.ParentID != dispatched.SpanID || handled.Edge != "" {
 		t.Errorf("the dispatch %+v, then its handling %+v", dispatched, handled)
 	}
 	if handled.User != "alice" || handled.Attrs["instance"] != "q1" || handled.Attrs["delivery"] != "1" {
 		t.Errorf("the handling's user and attributes: %+v", handled)
+	}
+	if tx.Op != model.OpTransaction || tx.ParentID != handled.SpanID || tx.Attrs["outcome"] != model.OutcomeCommit {
+		t.Errorf("the handling's transaction: %+v", tx)
 	}
 }
 

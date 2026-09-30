@@ -42,9 +42,12 @@ type PasswordPolicyService[T any] struct {
 	// member is the field, nil when the declaration is refused.
 	member               *member
 	minLength, notReused int
+	// notCommon refuses the most common passwords (NotCommon).
+	notCommon bool
 }
 
-// PasswordConfigurer configures a password policy: [MinLength], [NotReused].
+// PasswordConfigurer configures a password policy: [MinLength], [NotReused],
+// [NotCommon].
 type PasswordConfigurer interface {
 	passwordConfigure(o *passwordOptions)
 }
@@ -52,6 +55,7 @@ type PasswordConfigurer interface {
 type passwordOptions struct {
 	minLength, notReused int
 	reuseSet             bool
+	notCommon            bool
 }
 
 type passwordOption func(o *passwordOptions)
@@ -83,6 +87,20 @@ func NotReused(n int) PasswordConfigurer {
 	return passwordOption(func(o *passwordOptions) { o.notReused, o.reuseSet = n, true })
 }
 
+// NotCommon refuses a password among the ten thousand most common ones —
+// the SDK's password.IsCommon, which compares them without regard to case —:
+// the blocklist NIST SP 800-63B-4 requires a verifier to check, beyond the
+// three thousand OWASP ASVS 5.0 (6.2.4) asks for. Every policy checks it (ADR
+// 0007 §2: on by default once the SDK has the list); the option says so
+// where a policy is declared. Beside NIST's fifteen characters the list has
+// little left to refuse; beside a shorter MinLength, it matters.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func NotCommon() PasswordConfigurer {
+	return passwordOption(func(o *passwordOptions) { o.notCommon = true })
+}
+
 // Passwords declares the password policy of one secret field of the store's
 // entity; field names it — kit calls it on a zero entity to find which. The
 // field then only ever holds the password's hash, a PHC string, or nothing
@@ -92,13 +110,13 @@ func NotReused(n int) PasswordConfigurer {
 //
 //go:noinline
 func (s *StoreService[T]) Passwords(field func(*T) *string, opts ...PasswordConfigurer) *PasswordPolicyService[T] {
-	o := passwordOptions{minLength: defaultMinLength}
+	o := passwordOptions{minLength: defaultMinLength, notCommon: true}
 	for _, opt := range opts {
 		if opt != nil {
 			opt.passwordConfigure(&o)
 		}
 	}
-	p := &PasswordPolicyService[T]{s: s, decl: callerPos(), minLength: o.minLength, notReused: o.notReused}
+	p := &PasswordPolicyService[T]{s: s, decl: callerPos(), minLength: o.minLength, notReused: o.notReused, notCommon: o.notCommon}
 	p.member = s.passwordField(field, p.decl)
 	p.judge(o)
 	s.passwords = append(s.passwords, p)
@@ -214,7 +232,7 @@ func (s *StoreService[T]) policyOn(pointer string) *PasswordPolicyService[T] {
 
 // info describes the policy for the model.
 func (p *PasswordPolicyService[T]) info(a *App) model.PasswordPolicy {
-	out := model.PasswordPolicy{MinLength: p.minLength, NotReused: p.notReused, Source: a.source(&p.decl)}
+	out := model.PasswordPolicy{MinLength: p.minLength, NotReused: p.notReused, NotCommon: p.notCommon, Source: a.source(&p.decl)}
 	if p.member != nil {
 		out.Field = p.member.pointer
 	}

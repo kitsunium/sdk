@@ -266,7 +266,7 @@ func TestJobRunsOnTheSchedule(t *testing.T) {
 	g := app.Graph()
 	e := g.Edge("audit/job/tally|calls|shop/endpoint/Count")
 	if e == nil || e.Observed == nil {
-		t.Fatalf("the job's call to a private endpoint is not observed: %+v", g.Edges)
+		t.Fatalf("the job's in-process call of an endpoint is not observed: %+v", g.Edges)
 	}
 	// The fire was a turn of the scheduler's own loop, which knows the next.
 	if l := loopOf(t, app, "scheduler"); l.Runs < 1 || l.NextRun == nil || l.Schedule != "earliest of 1 entry" {
@@ -305,8 +305,8 @@ func TestGraphDescribesTheProduct(t *testing.T) {
 	if !slices.Equal(kinds, []string{"decode", "validate", "ratelimit"}) {
 		t.Errorf("pipeline %v", kinds)
 	}
-	if g.Node("shop/endpoint/Count").Endpoint.Expose != model.ExposePrivate {
-		t.Error("the private endpoint is drawn public")
+	if ep := g.Node("members/endpoint/MemberPrice").Endpoint; ep == nil || ep.Expose != model.ExposePrivate || ep.Method != "" || ep.Path != "" {
+		t.Errorf("an implementation, the one endpoint without a route: %+v", ep)
 	}
 	wf := g.Node("shop/workflow/lifecycle").Workflow
 	if wf.Initial != "draft" || len(wf.Transitions) != 6 || wf.Store != "shop/store/items" {
@@ -634,27 +634,27 @@ func TestStopDoesNotWaitForTheStudio(t *testing.T) {
 	}
 }
 
-// A transition replaces the entity it read, and never writes back one that
-// was deleted meanwhile — here by its own OnEnter hook, which must not
-// deadlock either.
-func TestATransitionNeverResurrects(t *testing.T) {
+// A transition is one transaction (ADR 0004): one that fails undoes what its
+// OnEnter hooks wrote. The retire hook deletes its own entity; the
+// transition then finds it gone and never writes it back — and its failure
+// undoes the hook's deletion, so the entity is left as it was, in draft,
+// which the workflow still says.
+func TestAFailedTransitionUndoesItsHooks(t *testing.T) {
 	app := start(t)
 	it := create(t, app, "doomed", 1)
 	r := call(t, app, "POST /items/"+it.ID+"/retire", noBody)
 	if r.status != http.StatusNotFound {
 		t.Fatalf("retire answered %d %s", r.status, r.body)
 	}
-	if _, err := Items.Get(t.Context(), it.ID); err == nil {
-		t.Fatal("the deleted entity was written back")
+	got, err := Items.Get(t.Context(), it.ID)
+	if err != nil || got.State != Draft {
+		t.Fatalf("after the failed transition: %+v %v", got, err)
 	}
-	r = call(t, app, "GET /_kit/api/instances?workflow=shop/workflow/lifecycle", noBody)
 	var inst []model.Instance
-	r.json(t, &inst)
-	for _, i := range inst {
-		if i.ID == it.ID {
-			t.Fatal("the workflow still tracks the deleted entity")
-		}
-	}
+	eventually(t, "the workflow reads the entity again", func() bool {
+		call(t, app, "GET /_kit/api/instances?workflow=shop/workflow/lifecycle", noBody).json(t, &inst)
+		return slices.ContainsFunc(inst, func(i model.Instance) bool { return i.ID == it.ID && i.State == Draft.String() })
+	})
 }
 
 func TestEmbeddedParamsStayOutOfTheBody(t *testing.T) {

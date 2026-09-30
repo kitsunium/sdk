@@ -36,6 +36,8 @@ Environment:
   KIT_RETENTION      what the stores' retention does: on (default), dry-run or off
   KIT_INDEX_KEY      pins kit's index key, which references a person's records
                      (unset: made on first use and kept with the secrets)
+  KIT_DATA_KEY       pins kit's data-key, which wraps the keys personal data is sealed under
+                     at rest: 32 bytes (unset: made on first use, kept with the secrets, rotated)
 `
 
 // usageFormat is Main's usage; %[1]s is the product's name.
@@ -52,15 +54,17 @@ Usage:
   %[1]s migrate [status]              every migration of the databases: applied or pending
   %[1]s migrate up                    apply every pending migration
   %[1]s migrate down SET VERSION      reverse SET's migrations above VERSION
-  %[1]s privacy register|export|erase|holds|journal|retention
+  %[1]s privacy register|export|erase|holds|journal|retention|seal
                                       the personal data the product keeps (%[1]s privacy for more)
+  %[1]s revisions restore -store ID -key KEY -rev N [-field PATH]…
+                                      a record's version written back, as a new version
 `
 
 // Main is the whole main function of a product:
 //
 //	func main() { os.Exit(App.Main(context.Background(), os.Args[1:])) }
 //
-// It understands seven commands, so every kit binary can describe itself, be
+// It understands eight commands, so every kit binary can describe itself, be
 // probed, say its configuration, manage its secrets, migrate its databases
 // and answer for the personal data it keeps without a shell or another tool
 // in its image:
@@ -73,6 +77,7 @@ Usage:
 //	migrate      the databases' migrations: status, up, down SET VERSION
 //	privacy      the register of processing, a person's export and erasure,
 //	             the legal holds, the privacy journal, the retention
+//	revisions    a record's version restored
 //
 // A product's CLI command runs when the first argument names it. A command
 // declared with DefaultCommand runs when the first argument names no command
@@ -121,7 +126,10 @@ func (a *App) mainCommands() map[string]func(ctx context.Context, args []string)
 		},
 		"migrate": func(ctx context.Context, args []string) int { return a.migrateCommand(ctx, args, os.Stdout, os.Stderr) },
 		"privacy": func(ctx context.Context, args []string) int { return a.privacyCommand(ctx, args, os.Stdout, os.Stderr) },
-		"help":    help, "-h": help, "-help": help, "--help": help,
+		"revisions": func(ctx context.Context, args []string) int {
+			return a.revisionsCommand(ctx, args, os.Stdout, os.Stderr)
+		},
+		"help": help, "-h": help, "-help": help, "--help": help,
 	}
 }
 

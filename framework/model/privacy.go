@@ -21,7 +21,7 @@ const (
 // The gaps a register lists for a store that keeps personal data.
 const (
 	GapPurpose   string = core.GapPurpose   // no kit.Purpose
-	GapRetention string = core.GapRetention // no retention: its personal data is kept forever
+	GapRetention string = core.GapRetention // no retention, kit's or the product's: its personal data is kept forever
 	GapSubject   string = core.GapSubject   // no subject field: no person can have their records
 )
 
@@ -35,13 +35,19 @@ const (
 	// MeasureJournal: every export, erasure, deletion and hold is journaled,
 	// each entry chained to the previous one by SHA-256.
 	MeasureJournal string = core.MeasureJournal
-	// MeasureNotSealed: the store's classified members are kept in clear at
-	// rest, until kit's sealing lands (ADR 0006, step 3).
+	// MeasureNotSealed: the store's classified members are in clear: it is
+	// kept in memory, where nothing is at rest, or its members are plain.
 	MeasureNotSealed string = core.MeasureNotSealed
 	// MeasureSealed: its classified members are sealed at rest, AES-256-GCM
-	// under per-subject data keys (ADR 0006, step 3).
+	// under per-subject data keys a person's erasure destroys (ADR 0006 §4).
 	MeasureSealed string = core.MeasureSealed
 )
+
+// SealedPlaceholder is what the Studio receives in place of a value kit
+// keeps sealed at rest — a record's member in the data browser, a former
+// value —: never the value, nor its box (ADR 0006 §9). A value it opens and
+// may not show is "[redacted]".
+const SealedPlaceholder string = core.SealedPlaceholder
 
 // The operations of the privacy journal.
 const (

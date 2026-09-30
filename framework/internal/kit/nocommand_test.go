@@ -62,7 +62,7 @@ func synchronous() *kit.Service {
 	echo := func(_ context.Context, in LabInput) (LabInput, error) { return in, nil }
 	s.Command("keyed", echo).Key(func(in LabInput) string { return in.Key })
 	s.Command("ruled", echo).Authorize(func(context.Context, LabInput) error { return nil })
-	s.Query("asked", echo).Expose("POST /inline/asked")
+	s.Query("asked", echo).Expose("POST /inline/asked", kit.Anyone())
 	return s
 }
 
@@ -113,7 +113,7 @@ func benchApp(b *testing.B, services ...*kit.Service) {
 func BenchmarkAnOperationInProcess(b *testing.B) {
 	s := kit.NewService("benched", "What an in-process run costs.")
 	echo := func(_ context.Context, in LabInput) (LabInput, error) { return in, nil }
-	call := s.Endpoint("POST /benched", echo, kit.Private(), kit.Name("call"))
+	call := s.Endpoint("POST /benched", echo, kit.Name("call"))
 	dispatch := s.Command("dispatch", echo)
 	ask := s.Query("ask", echo)
 	keyed := s.Command("keyed", echo).Key(func(in LabInput) string { return in.Key })

@@ -78,14 +78,23 @@ func TestAValueIsPushedOnce(t *testing.T) {
 		}
 		return out
 	}
+	// A store that seals nothing keeps its former values as they are.
+	h := &historied[struct{}]{}
+	pushed := func(list []formerEntry, was memberValue) []formerEntry {
+		out, err := h.pushed(t.Context(), formerAt{key: "k", pointer: "/x"}, list, was, formerEntry{Until: at})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return out
+	}
 	list := []formerEntry{entry(`"b"`), entry(`"a"`)}
-	if got := values(pushed(list, memberValue{raw: json.RawMessage(`"c"`)}, at, "")); !slices.Equal(got, []string{`"c"`, `"b"`, `"a"`}) {
+	if got := values(pushed(list, memberValue{raw: json.RawMessage(`"c"`)})); !slices.Equal(got, []string{`"c"`, `"b"`, `"a"`}) {
 		t.Errorf("pushed: %v", got)
 	}
-	if got := values(pushed(list, memberValue{raw: json.RawMessage(`"b"`)}, at, "")); !slices.Equal(got, []string{`"b"`, `"a"`}) {
+	if got := values(pushed(list, memberValue{raw: json.RawMessage(`"b"`)})); !slices.Equal(got, []string{`"b"`, `"a"`}) {
 		t.Errorf("a duplicate head: %v", got)
 	}
-	if got := values(pushed(list, memberValue{raw: json.RawMessage(`""`), zero: true}, at, "")); !slices.Equal(got, []string{`"b"`, `"a"`}) {
+	if got := values(pushed(list, memberValue{raw: json.RawMessage(`""`), zero: true})); !slices.Equal(got, []string{`"b"`, `"a"`}) {
 		t.Errorf("a zero value: %v", got)
 	}
 	before := map[string]memberValue{"/a": {raw: json.RawMessage(`1`)}, "/b": {raw: json.RawMessage(`2`)}, "/c": {raw: json.RawMessage(`3`)}}

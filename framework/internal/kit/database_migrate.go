@@ -37,35 +37,84 @@ type migrationSet struct {
 	migrations []sql.Migration
 }
 
-// migrateAtStart runs a database's sets, in order, when it migrates at its
-// start; when it migrates manually, a pending migration refuses the start,
-// naming the command that runs it. It returns each set as it left it.
-func (a *App) migrateAtStart(ctx context.Context, d *database, cfg *sql.Config) ([]model.MigrationSet, error) {
+// migrateAtStart runs a database's sets, in order — kit's own first, which
+// make the tables of the stores it keeps —, when it migrates at its start;
+// when it migrates manually, a pending migration refuses the start, naming
+// the command that runs it. It returns each set as it left it, and kit's
+// registry of its tables.
+func (a *App) migrateAtStart(ctx context.Context, d *database, o *opened) ([]model.MigrationSet, *tableRegistry, error) {
 	manual := resolvedSetting(a, d.migrate) == migrateManual
 	var out []model.MigrationSet
-	for _, set := range a.migrationSets(d) {
-		m, err := sql.NewMigrator(*cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+	sets := a.migrationSets(d)
+	var registry *tableRegistry
+	if len(a.kitTables(d)) > 0 {
+		kit, g, err := a.kitSetAtStart(ctx, d, o, manual)
+		registry = g
 		if err != nil {
-			return out, a.migrationFailure(d, set, err)
+			return out, registry, a.migrationFailure(d, migrationSet{name: setKit, table: tableKit}, err)
 		}
-		if manual {
-			pending, err := m.Plan(ctx)
-			if err != nil {
-				return out, a.migrationFailure(d, set, err)
-			}
-			if len(pending) > 0 {
-				out = append(out, setStatus(set, pending))
-				return out, dbFailure(CodeDatabaseMigrate, "DATABASE_MIGRATIONS_PENDING",
-					fmt.Sprintf("database %q has %d pending migration(s) of its %s set and migrates manually: run `%s migrate up`", d.name, len(pending), set.name, a.name),
-					errs.String("database", d.name), errs.String("set", set.name))
-			}
-		} else if err := m.Up(ctx); err != nil {
-			out = append(out, readSet(ctx, set, m))
-			return out, a.migrationFailure(d, set, err)
-		}
-		out = append(out, readSet(ctx, set, m))
+		sets = append([]migrationSet{kit}, sets...)
 	}
-	return out, nil
+	for _, set := range sets {
+		left, err := a.migrateSet(ctx, d, o, set, manual)
+		if left != nil {
+			out = append(out, *left)
+		}
+		if err != nil {
+			return out, registry, err
+		}
+	}
+	return out, registry, nil
+}
+
+// migrateSet runs one of d's sets at its start — applies it, or, when d
+// migrates manually, refuses the start while it is pending — and returns it
+// as it left it, nil when it could not read it.
+func (a *App) migrateSet(ctx context.Context, d *database, o *opened, set migrationSet, manual bool) (*model.MigrationSet, error) {
+	m, err := sql.NewMigrator(o.cfg, sql.MigrateConfig{Migrations: set.migrations, VersionTable: set.table})
+	if err != nil {
+		return nil, a.migrationFailure(d, set, err)
+	}
+	if manual {
+		return a.pendingSet(ctx, d, set, m)
+	}
+	if set.name != setKit {
+		if err := m.Up(ctx); err != nil {
+			return new(readSet(ctx, set, m)), a.migrationFailure(d, set, err)
+		}
+	}
+	return new(readSet(ctx, set, m)), nil
+}
+
+// pendingSet refuses the start of d, which migrates manually, while set has
+// a pending migration, naming the command that runs it.
+func (a *App) pendingSet(ctx context.Context, d *database, set migrationSet, m sql.Migrator) (*model.MigrationSet, error) {
+	pending, err := m.Plan(ctx)
+	if err != nil {
+		return nil, a.migrationFailure(d, set, err)
+	}
+	if len(pending) > 0 {
+		return new(setStatus(set, pending)), dbFailure(CodeDatabaseMigrate, "DATABASE_MIGRATIONS_PENDING",
+			fmt.Sprintf("database %q has %d pending migration(s) of its %s set and migrates manually: run `%s migrate up`", d.name, len(pending), set.name, a.name),
+			errs.String("database", d.name), errs.String("set", set.name))
+	}
+	return new(readSet(ctx, set, m)), nil
+}
+
+// kitSetAtStart is kit's set on d at its start: applied — its registry, then
+// its tables —, or, when d migrates manually, as its registry says it, for
+// the start to judge.
+func (a *App) kitSetAtStart(ctx context.Context, d *database, o *opened, manual bool) (migrationSet, *tableRegistry, error) {
+	g, err := openRegistry(ctx, o.cfg, o.tm, !manual)
+	if err != nil {
+		return migrationSet{name: setKit, table: tableKit}, nil, err
+	}
+	if manual {
+		set, err := a.planKitSet(d, g)
+		return set, g, err
+	}
+	set, err := a.applyKitSet(ctx, d, o.cfg, g)
+	return set, g, err
 }
 
 // migrationFailure is a set that did not apply, in kit's words: the SDK's

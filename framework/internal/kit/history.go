@@ -20,10 +20,11 @@ import (
 // field set for the first time records nothing.
 //
 // The former values live beside the store, one document per record, in
-// <service>/<store>.history.json, where the store keeps its own data. Every
-// write of the store goes through historied, which writes the record's
-// history inside the record's own write — the engine's Update, under the
-// store's writers' lock —, before the record:
+// <service>/<store>.history.json, where the store keeps its own data — on a
+// database, in the table <service>__<store>__history, written in the
+// record's transaction. Every write of the store goes through historied,
+// which writes the record's history inside the record's own write — the
+// engine's Update, under the store's writers' lock —, before the record:
 //
 //   - a write that fails after its history — a crash — leaves the record's
 //     value at the head of its history, which kit reads past and the next
@@ -39,10 +40,12 @@ import (
 // of the members it clears with them (ADR 0006): an erased value is no one's
 // former value.
 //
-// Sealing at rest (ADR 0006, step 3) seals a former value as its field is
-// sealed, under the same subject's key: toHistory and fromHistory
-// (history_write.go) are the one place a value enters the history and
-// leaves it.
+// A former value is sealed at rest as its field is sealed — or the field it
+// sits in —, under the data key of the record it was part of, bound to the
+// store, the record, the field and its being a former value (ADR 0006 §4,
+// ADR 0007 §4): toHistory and fromHistory (history_write.go) are the one
+// place a value enters the history and leaves it. A former value whose key
+// is destroyed is erased: it is read as gone.
 
 // historyRecord is what kit keeps of one record's past: each field's former
 // values, newest first, by the field's JSON pointer.
@@ -57,11 +60,13 @@ func (h historyRecord) key() string { return h.Key }
 // formerEntry is one former value, as the history keeps it.
 type formerEntry struct {
 	// Value is the field's value as JSON, whatever its class: a secret's is
-	// read by kit alone.
+	// read by kit alone. At rest, a sealed field's is a box.
 	Value json.RawMessage `json:"value" kit:"personal"`
 	// Until is when it was replaced, on the app's clock; By who replaced it.
 	Until time.Time `json:"until"`
 	By    string    `json:"by,omitempty"`
+	// sealed says, once read, that the value rests sealed.
+	sealed bool
 }
 
 // historied is a store's engine with what kit adds to its writes: the former
@@ -75,6 +80,9 @@ type historied[T any] struct {
 	hist storeEngine[historyRecord]
 	// keeps is how many former values each field keeps, by JSON pointer.
 	keeps map[string]int
+	// seal is the store's sealing engine, nil when it seals nothing: former
+	// values are sealed as their fields are.
+	seal *sealedEngine[T]
 }
 
 // keeps is how many former values each field of the store keeps, by JSON
@@ -106,27 +114,52 @@ func (p *classPlan) historyFields() map[string]int {
 // own snapshot.
 func (s *StoreService[T]) historyFile() string { return s.svc.name + "/" + s.name + ".history.json" }
 
+// historyOn is where a store keeps its records' former values: beside its
+// files — in memory for a store in memory —, or on the database that keeps
+// it.
+type historyOn struct {
+	files storeFS
+	sql   *databaseRun
+}
+
 // withHistory is the engine the store runs on: eng itself when the store
 // remembers nothing and has no password policy, else eng wrapped by
 // historied, its history opened where the store keeps its data — in memory
-// for a store in memory — and reconciled with its records.
+// for a store in memory, and reconciled with its records; on its database,
+// in a table the record's transaction writes, where nothing is left to
+// reconcile.
 //
 // IFACE-PLUGIN: the store runs on any engine — documents, history, SQL — each
 // behind this port.
-func (s *StoreService[T]) withHistory(ctx context.Context, eng storeEngine[T], where storeFS) (storeEngine[T], error) {
+func (s *StoreService[T]) withHistory(ctx context.Context, eng storeEngine[T], where historyOn) (storeEngine[T], error) {
 	keeps := s.keeps()
 	if len(keeps) == 0 && len(s.passwords) == 0 {
 		return eng, nil
 	}
 	h := &historied[T]{storeEngine: eng, s: s, keeps: keeps}
+	h.seal, _ = eng.(*sealedEngine[T])
 	if len(keeps) == 0 {
 		return h, nil
 	}
-	if where.fs != nil {
-		where.path = s.historyFile()
+	if r := where.sql; r != nil {
+		ds, err := docstore.OpenSQL(docstore.SQLConfig[historyRecord]{
+			Key: historyRecord.key, Transactor: r.transactor(),
+			Dialect: r.d.dialect(), Table: s.historyTable(),
+		})
+		if err != nil {
+			return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened on its database", err,
+				errs.String("store", s.id), errs.String("database", r.d.name))
+		}
+		h.hist = &sqlEngine[historyRecord]{ds: ds, key: historyRecord.key, run: r, a: s.app(), store: s.id}
+		return h, nil
 	}
-	hist, err := openDocEngine(historyRecord.key, where, nil)
+	files := where.files
+	if files.fs != nil {
+		files.path = s.historyFile()
+	}
+	hist, err := openDocEngine(historyRecord.key, files, nil, versionsOn{})
 	if err == nil {
+		hist.name = s.id + " history"
 		h.hist = hist
 		if err = h.reconcile(ctx); err != nil {
 			err = errors.Join(err, hist.Close())
@@ -134,7 +167,7 @@ func (s *StoreService[T]) withHistory(ctx context.Context, eng storeEngine[T], w
 	}
 	if err != nil {
 		return nil, failure(CodeHistoryLoad, "HISTORY_LOAD", "the store's history cannot be opened", err,
-			errs.String("store", s.id), errs.String("file", where.path))
+			errs.String("store", s.id), errs.String("file", files.path))
 	}
 	return h, nil
 }

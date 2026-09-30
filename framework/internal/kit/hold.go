@@ -29,14 +29,15 @@ import (
 // and when; for HeldUntil, the instant and the legal ground the store
 // declares, which the register publishes —, never a placed hold's reason. A
 // hold records who placed it and when; its reason is kept for whoever runs
-// the product, tagged secret — the Studio never shows it, and sealing (step
-// 3) will seal it at rest. Holds are kept in kit's own store,
-// kit.privacy/store/holds, one per record, filed under the record's
-// reference.
+// the product, tagged secret — the Studio never shows it, and kit seals it
+// at rest. Holds are kept in kit's own store, kit.privacy/store/holds, one
+// per record, filed under the record's reference.
 //
 // Placing a hold, and checking for one before an erasure or a deletion,
 // happen one at a time per store (lockHolds): a hold placed while a record is
 // erased waits for the erasure, and an erasure that starts after it sees it.
+// A held record is sealed at rest under a data key of its own, from its hold
+// on: its person's erasure destroys their key, never it.
 // When kit cannot tell whether a record is held — the holds or the index key
 // cannot be read —, nothing is erased or deleted: the caller gets the
 // error.
@@ -142,6 +143,13 @@ func (s *StoreService[T]) holdKey(ctx context.Context, a *App, key, reason strin
 	if holds == nil {
 		return noPrivacy()
 	}
+	// The holds' writer turn before the hold lock: a write's outermost lock
+	// (transact_turn.go).
+	ctx, release, err := holds.turn(ctx)
+	defer release()
+	if err != nil {
+		return err
+	}
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	v, err := s.read(ctx, key)
@@ -160,7 +168,10 @@ func (s *StoreService[T]) holdKey(ctx context.Context, a *App, key, reason strin
 		return err
 	}
 	s.reschedule(key)
-	return a.journal(ctx, &journalLine{op: model.JournalHold, store: s.id, key: key, subject: s.subjectOf(v), reason: reason})
+	// Held, the record rests under a data key of its own from now on: its
+	// person's erasure leaves it readable (seal.go).
+	moved := s.moveOwn(ctx, a, key)
+	return errors.Join(moved, a.journal(ctx, &journalLine{op: model.JournalHold, store: s.id, key: key, subject: s.subjectOf(v), reason: reason}))
 }
 
 // release lifts the hold on the record under key.

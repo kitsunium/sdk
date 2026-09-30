@@ -144,9 +144,8 @@ func replaced[Req, Resp any](ctx context.Context, a *App, n node) func(context.C
 	}
 }
 
-// mockList is every mock in force — the Studio's, in dev, and the
-// replacements a test gave the app — by node; an empty list, never nil,
-// for the Studio's routes.
+// mockList is every replacement a test gave the app, by node — the Studio
+// shows each on its node and never edits one; nil without any.
 func (a *App) mockList() []model.Mock {
 	w := a.wired.Load()
 	if w == nil {

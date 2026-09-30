@@ -46,6 +46,9 @@ type managedSecret struct {
 // generated reports whether kit makes the secret.
 func (m *managedSecret) generated() bool { return m.decl != nil && m.decl.opts.generated }
 
+// optional reports whether the product can do without the secret.
+func (m *managedSecret) optional() bool { return m.decl != nil && m.decl.opts.optional }
+
 // secretsCommand runs `secrets list|set NAME|rotate NAME|-all`.
 func (a *App) secretsCommand(ctx context.Context, args []string, stdin io.Reader, stdout, stderr io.Writer) int {
 	sub := "list"
@@ -90,19 +93,25 @@ func (a *App) secretsSubcommand(ctx context.Context, all []managedSecret, c *sec
 }
 
 // managedSecrets lists the product's declared secrets and its databases'
-// URLs, sorted, then kit's own when the product has a mailer.
+// URLs, sorted, then kit's own: its data-key when it seals, the mail
+// connector's when the product has a mailer.
 func (a *App) managedSecrets() []managedSecret {
 	st := a.secretsNow()
 	prefix := appPrefix(a.name)
-	var out []managedSecret
+	var out, own []managedSecret
 	for _, svc := range a.services {
 		if svc == nil {
 			continue
 		}
 		nodes, _ := svc.snapshot()
 		for _, n := range nodes {
-			if s, ok := n.(*Secret); ok {
-				out = append(out, managedSecret{name: s.key(), stored: s.stored(), env: st.env, envName: s.stored(), variable: variableOf(prefix, s.key()), decl: s})
+			s, ok := n.(*Secret)
+			switch {
+			case !ok:
+			case s.kitOwn():
+				own = append(own, managedSecret{name: s.keptName(), stored: s.keptName(), env: st.kitEnv, envName: s.envName(), variable: s.variable(a), decl: s})
+			default:
+				out = append(out, managedSecret{name: s.key(), stored: s.keptName(), env: st.env, envName: s.envName(), variable: s.variable(a), decl: s})
 			}
 		}
 	}
@@ -111,14 +120,21 @@ func (a *App) managedSecrets() []managedSecret {
 		out = append(out, managedSecret{name: name, stored: name, env: st.env, envName: name, variable: secretVariable(prefix, name)})
 	}
 	slices.SortFunc(out, func(x, y managedSecret) int { return strings.Compare(x.name, y.name) })
+	out = append(out, own...)
 	if a.hasMailer() {
 		out = append(out, managedSecret{name: kitSecretPrefix + smtpSecret, stored: kitSecretPrefix + smtpSecret, env: st.kitEnv, envName: smtpSecret, variable: secretVariable("KIT", smtpSecret)})
 	}
 	return out
 }
 
-// listSecrets prints every secret: where it is found, its version, when it
-// was made and when it rotates next — never a value.
+// kitOwn reports whether kit rotates the secret with what depends on it:
+// data-key, whose rotation re-wraps the data keys, is the running product's
+// to rotate.
+func (m *managedSecret) kitOwn() bool { return m.decl != nil && m.decl.kitOwn() }
+
+// listSecrets prints every secret: who makes it — an optional one says so —,
+// where it is found — absent, for an optional one set nowhere —, its
+// version, when it was made and when it rotates next — never a value.
 func (a *App) listSecrets(ctx context.Context, all []managedSecret, stdout, stderr io.Writer) int {
 	st := a.secretsNow()
 	tw := tabwriter.NewWriter(stdout, 0, 0, 2, ' ', 0)
@@ -127,8 +143,11 @@ func (a *App) listSecrets(ctx context.Context, all []managedSecret, stdout, stde
 	for i := range all {
 		m := &all[i]
 		made := "operator"
-		if m.generated() {
+		switch {
+		case m.generated():
 			made = "kit"
+		case m.optional():
+			made = "operator, optional"
 		}
 		line, failed := st.secretLine(ctx, m)
 		if failed {
@@ -166,6 +185,8 @@ func (st *secretStores) secretLine(ctx context.Context, m *managedSecret) (line 
 		line.found, failed = "unreadable: "+errs.PublicOf(err), true
 	case m.generated() && st.kept != nil:
 		line.found = "not made yet"
+	case m.optional():
+		line.found = "absent"
 	}
 	return line, failed
 }
@@ -253,22 +274,28 @@ func (a *App) rotateSecrets(ctx context.Context, all []managedSecret, name strin
 	return status
 }
 
+// generatedTargets are every secret the product generates, for -all; none
+// says so and returns the status to exit with.
+func generatedTargets(all []managedSecret, stderr io.Writer) ([]managedSecret, int) {
+	var targets []managedSecret
+	for i := range all {
+		if all[i].generated() && !all[i].kitOwn() {
+			targets = append(targets, all[i])
+		}
+	}
+	if len(targets) == 0 {
+		fmt.Fprintln(stderr, "the product generates no secret")
+		return nil, 1
+	}
+	return targets, 0
+}
+
 // rotationTargets are the secrets name asks to rotate: every generated one
 // for -all, else the one named, when kit makes it. When there are none, it
 // says why and returns the status to exit with.
 func (a *App) rotationTargets(all []managedSecret, name string, stderr io.Writer) ([]managedSecret, int) {
 	if name == "-all" {
-		var targets []managedSecret
-		for i := range all {
-			if all[i].generated() {
-				targets = append(targets, all[i])
-			}
-		}
-		if len(targets) == 0 {
-			fmt.Fprintln(stderr, "the product generates no secret")
-			return nil, 1
-		}
-		return targets, 0
+		return generatedTargets(all, stderr)
 	}
 	m, ok := findManaged(all, name)
 	switch {
@@ -277,6 +304,9 @@ func (a *App) rotationTargets(all []managedSecret, name string, stderr io.Writer
 		return nil, 2
 	case !m.generated():
 		fmt.Fprintf(stderr, "%s is given by the operator, not made by kit: %s secrets set %s\n", name, a.name, name)
+		return nil, 2
+	case m.kitOwn():
+		fmt.Fprintf(stderr, "%s is rotated by the running product, which keeps every version a data key is wrapped under and re-wraps them after: it is not rotated here\n", name)
 		return nil, 2
 	default:
 		return []managedSecret{m}, 0

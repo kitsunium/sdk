@@ -2,12 +2,14 @@
 package kit
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
 	"io/fs"
 	"iter"
+	"slices"
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -26,7 +28,12 @@ import (
 // storePort is the engine's port over a workflow's store. A read inside a
 // transition someone fired, and every write, is a span of the store: the
 // edge the diagram draws from the workflow. The loop's own reads are not.
-type storePort[E any] struct{ s *StoreService[E] }
+// state is the JSON name of the workflow's state field, "" when kit cannot
+// name it: a transition that changes only it makes no version.
+type storePort[E any] struct {
+	s     *StoreService[E]
+	state string
+}
 
 // Key is e's key in the store.
 func (p storePort[E]) Key(e E) string { return p.s.key(e) }
@@ -48,12 +55,12 @@ func (p storePort[E]) Get(ctx context.Context, key string) (E, bool, error) {
 
 // Insert writes e unless its key is taken; false when it was.
 func (p storePort[E]) Insert(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, insertOnly)
+	return p.s.transitionWrite(ctx, e, insertOnly, "")
 }
 
 // Replace writes e over an entity of its key; false when there was none.
 func (p storePort[E]) Replace(ctx context.Context, e E) (bool, error) {
-	return p.s.transitionWrite(ctx, e, replaceOnly)
+	return p.s.transitionWrite(ctx, e, replaceOnly, p.state)
 }
 
 // All yields every entity of the store.
@@ -81,8 +88,11 @@ func (p storePort[E]) All(ctx context.Context) iter.Seq2[E, error] {
 // deleted meanwhile. A key taken, or an entity gone, is an answer — stored
 // is false —, not an error; the span still says the write was refused. One
 // of the four funnels of a store's writes: a write kit confirms is told to
-// the store's watches (watch.go), inside the write's span.
-func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMode) (stored bool, err error) {
+// the store's watches (watch.go), inside the write's span. On a store that
+// keeps revisions, a replacement that changes only the entity's state —
+// the member state names — makes no version: the workflow's journal
+// records it (ADR 0007 §3).
+func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMode, state string) (stored bool, err error) {
 	a := s.app()
 	if a == nil {
 		return false, notRunning(&s.nodeBase)
@@ -98,12 +108,36 @@ func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMo
 		sp.end(err)
 		return false, err
 	}
+	ctx, release, err := s.turn(ctx)
+	defer release()
+	if err != nil {
+		sp.end(err)
+		return false, err
+	}
+	ctx = s.outside(ctx)
 	key := s.keyOf(v)
-	raw := eng.Write(ctx, v, mode)
+	raw := s.writeTransition(ctx, eng, v, mode, state)
 	if err = s.said(raw, key, ""); err == nil {
 		s.notify(ctx, key, false)
 	}
 	sp.end(err)
+	return transitionStored(mode, raw, err)
+}
+
+// writeTransition writes a transition's entity v in mode: in place when it
+// changes only the state and the store keeps revisions, else as any write.
+func (s *StoreService[T]) writeTransition(ctx context.Context, eng storeEngine[T], v T, mode writeMode, state string) error {
+	if mode == replaceOnly && state != "" && s.revisions > 0 {
+		if err := s.stateOnly(ctx, eng, s.keyOf(v), v, state); !errors.Is(err, errNotInPlace) {
+			return err
+		}
+	}
+	return eng.Write(ctx, v, mode)
+}
+
+// transitionStored is a transition's write as the engine answers it: a key
+// taken, or an entity gone, is stored false, not an error.
+func transitionStored(mode writeMode, raw, err error) (bool, error) {
 	switch {
 	case mode == insertOnly && errors.Is(raw, docstore.DocumentExists),
 		mode == replaceOnly && errors.Is(raw, docstore.DocumentNotFound):
@@ -112,6 +146,92 @@ func (s *StoreService[T]) transitionWrite(ctx context.Context, v T, mode writeMo
 		return false, err
 	}
 	return true, nil
+}
+
+// sqlJournal keeps the engine's records on the database that keeps the
+// workflow's store, in the table <service>__<workflow>__workflow: a record
+// is written in its transition's transaction, so that the entity, what its
+// OnEnter hooks wrote and its record commit together.
+type sqlJournal[E any, S comparable] struct {
+	w   *WorkflowService[E, S]
+	eng *sqlEngine[model.Instance]
+}
+
+// Load reads every record of the workflow's journal.
+func (j *sqlJournal[E, S]) Load(ctx context.Context) ([]statemachine.Record[S], error) {
+	all, err := j.eng.List(ctx)
+	if err != nil {
+		return nil, failure(CodeWorkflowLoad, "WORKFLOW_LOAD", "the workflow's records cannot be read from its database", err,
+			errs.String("workflow", j.w.id))
+	}
+	states := j.w.statesByName()
+	out := make([]statemachine.Record[S], 0, len(all))
+	for _, inst := range all {
+		if rec, ok := recordOf(inst.ID, inst, states); ok {
+			out = append(out, rec)
+		}
+	}
+	return out, nil
+}
+
+// Save writes records, in the transaction the context carries.
+func (j *sqlJournal[E, S]) Save(ctx context.Context, records ...statemachine.Record[S]) error {
+	for _, rec := range records {
+		if err := j.eng.Write(ctx, instanceOf(rec), upsert); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// Delete removes the records of keys; a record already gone is no error.
+func (j *sqlJournal[E, S]) Delete(ctx context.Context, keys ...string) error {
+	for _, key := range keys {
+		if err := j.eng.Delete(ctx, key); err != nil && !errors.Is(err, docstore.DocumentNotFound) {
+			return err
+		}
+	}
+	return nil
+}
+
+// instanceKey is a record's key in the journal's table: its entity's.
+func instanceKey(inst model.Instance) string { return inst.ID }
+
+// journalTable is the table of the workflow's journal, on the database
+// that keeps its store.
+func (w *WorkflowService[E, S]) journalTable() string {
+	return tableName(w.svc.name, w.name, workflowSuffix)
+}
+
+// journalStore is the store the workflow runs over, nil for none.
+//
+// IFACE-OPAQUE: the store's entity type is the workflow's own; a database's
+// tables see it only as where it is placed.
+func (w *WorkflowService[E, S]) journalStore() placementSource {
+	if w.store == nil {
+		return nil
+	}
+	return w.store
+}
+
+// journaled is a workflow, whatever its types, as a database's tables see
+// it.
+type journaled interface {
+	journalStore() placementSource
+	journalTable() string
+}
+
+// openSQLJournal opens the workflow's journal on r.
+func (w *WorkflowService[E, S]) openSQLJournal(a *App, r *databaseRun) (*sqlJournal[E, S], error) {
+	ds, err := docstore.OpenSQL(docstore.SQLConfig[model.Instance]{
+		Key: instanceKey, Transactor: r.transactor(),
+		Dialect: r.d.dialect(), Table: w.journalTable(),
+	})
+	if err != nil {
+		return nil, failure(CodeWorkflowLoad, "WORKFLOW_OPEN", "the workflow's records cannot be opened on its database", err,
+			errs.String("workflow", w.id), errs.String("database", r.d.name))
+	}
+	return &sqlJournal[E, S]{w: w, eng: &sqlEngine[model.Instance]{ds: ds, key: instanceKey, run: r, a: a, store: w.id}}, nil
 }
 
 // workflowJournal keeps the engine's records in the workflow's file,
@@ -265,4 +385,49 @@ func engineTrigger(t string) statemachine.Trigger {
 		return statemachine.TriggerGuard
 	}
 	return statemachine.TriggerEvent
+}
+
+// errNotInPlace ends a transition's write in place: it changes more than the
+// state, and makes a version.
+var errNotInPlace = errors.New("kit: the transition changes more than the state")
+
+// stateOnly writes v over the record under key in place — no version — when
+// it changes nothing but the member state names, checked under the store's
+// writers' lock against the record as it is: errNotInPlace otherwise, and
+// nothing written.
+func (s *StoreService[T]) stateOnly(ctx context.Context, eng storeEngine[T], key string, v T, state string) error {
+	next, err := json.Marshal(v)
+	if err != nil {
+		return errNotInPlace // the engine says why
+	}
+	_, err = eng.Update(withInPlace(ctx), key, func(cur *T) error {
+		was, err := json.Marshal(*cur)
+		if err != nil || !sameBut(was, next, state) {
+			return errNotInPlace
+		}
+		*cur = v
+		return nil
+	})
+	return err
+}
+
+// sameBut reports whether two JSON objects hold the same members but the one
+// named but — as one encoding of one type writes them, member by member.
+func sameBut(a, b []byte, but string) bool {
+	ma, ok := objectMembers(a)
+	if !ok {
+		return false
+	}
+	mb, ok := objectMembers(b)
+	if !ok {
+		return false
+	}
+	drop := func(ms []jsonMember) []jsonMember {
+		name := []byte(but)
+		return slices.DeleteFunc(ms, func(m jsonMember) bool { return bytes.Equal(m.name, name) })
+	}
+	ma, mb = drop(ma), drop(mb)
+	return slices.EqualFunc(ma, mb, func(x, y jsonMember) bool {
+		return bytes.Equal(x.name, y.name) && bytes.Equal(x.value, y.value)
+	})
 }

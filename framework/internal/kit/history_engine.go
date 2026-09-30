@@ -22,13 +22,30 @@ import (
 // the same key.
 const writeAttempts int = 3
 
-// Write stores v as mode says. A write that may replace a record goes
+// inOne runs a write of a store on a database in one transaction — the
+// caller's, or one of its own —, so that the record and its history commit
+// together, and the history's statements run in the record's transaction
+// rather than wait for its locks on the pool. On the data directory and in
+// memory the write runs as it is.
+func (h *historied[T]) inOne(ctx context.Context, write func(context.Context) error) error {
+	if h.hist == nil || h.onDatabase() == nil || unitOf(ctx) != nil {
+		return write(ctx)
+	}
+	return transact(ctx, h.s.app(), write)
+}
+
+// Write stores v as mode says, in one transaction on a database.
+func (h *historied[T]) Write(ctx context.Context, v T, mode writeMode) error {
+	return h.inOne(ctx, func(ctx context.Context) error { return h.write(ctx, v, mode) })
+}
+
+// write stores v as mode says. A write that may replace a record goes
 // through Update, which sees the value it replaces — the field's former
 // value, the hash a policy's check compares: a Put whose key is new
 // inserts, and becomes an update again when another writer inserted it
 // meanwhile. A record the type no longer decodes is overwritten as before,
 // remembering nothing of it.
-func (h *historied[T]) Write(ctx context.Context, v T, mode writeMode) error {
+func (h *historied[T]) write(ctx context.Context, v T, mode writeMode) error {
 	key := h.s.keyOf(v)
 	if key == "" {
 		return h.storeEngine.Write(ctx, v, mode) // the engine says why
@@ -38,7 +55,7 @@ func (h *historied[T]) Write(ctx context.Context, v T, mode writeMode) error {
 	}
 	var err error
 	for range writeAttempts {
-		_, err = h.Update(ctx, key, func(cur *T) error { *cur = v; return nil })
+		_, err = h.update(ctx, key, func(cur *T) error { *cur = v; return nil })
 		switch {
 		case errors.Is(err, docstore.DocumentUndecodable):
 			return h.overwrite(ctx, v, mode)
@@ -77,11 +94,23 @@ func (h *historied[T]) overwrite(ctx context.Context, v T, mode writeMode) error
 	return h.storeEngine.Write(ctx, v, mode)
 }
 
-// Update applies fn to the record under key and stores the result, its
+// Update applies fn to the record under key and stores the result, in one
+// transaction on a database.
+func (h *historied[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
+	var v T
+	err := h.inOne(ctx, func(ctx context.Context) error {
+		var err error
+		v, err = h.update(ctx, key, fn)
+		return err
+	})
+	return v, err
+}
+
+// update applies fn to the record under key and stores the result, its
 // history first: the former values of the fields fn changed, written inside
 // the engine's update. When the engine then refuses the record, the history
-// is put back.
-func (h *historied[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
+// is put back — on a database, the transaction undoes it.
+func (h *historied[T]) update(ctx context.Context, key string, fn func(*T) error) (T, error) {
 	var w historyWrite
 	v, err := h.storeEngine.Update(ctx, key, func(v *T) error {
 		return h.updating(ctx, key, v, fn, &w)
@@ -95,10 +124,15 @@ func (h *historied[T]) Update(ctx context.Context, key string, fn func(*T) error
 	return v, err
 }
 
-// Delete removes the record under key, then its history: a crash between
-// the two leaves a history whose record is gone, which the next start
-// removes.
+// Delete removes the record under key, then its history, in one
+// transaction on a database: in files, a crash between the two leaves a
+// history whose record is gone, which the next start removes.
 func (h *historied[T]) Delete(ctx context.Context, key string) error {
+	return h.inOne(ctx, func(ctx context.Context) error { return h.delete(ctx, key) })
+}
+
+// delete removes the record under key, then its history.
+func (h *historied[T]) delete(ctx context.Context, key string) error {
 	err := h.storeEngine.Delete(ctx, key)
 	if h.hist == nil || (err != nil && !errors.Is(err, docstore.WriteUnconfirmed)) {
 		return err

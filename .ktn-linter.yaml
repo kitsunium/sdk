@@ -1523,6 +1523,13 @@ rules:
   # Value held in a non-addressable place (a map entry, a struct returned by
   # value) would be printed by reflection instead of redacted. UnmarshalJSON and
   # UnmarshalText are the only two that assign. Scoped to the two packages.
+  #
+  # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
+  # the two above: the SDK's document store encodes a sealing store's records
+  # BY VALUE — json.Marshal(v) in internal/service/docstore/write.go:123 —, so its
+  # MarshalJSON — the record as it rests — must be a value method, while its
+  # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
+  # one file.
   KTN-RECEIVER-MIXPTR:
     exclude:
       - "**/internal/core/net/**"
@@ -1535,6 +1542,8 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/secret/**"
       - "internal/core/secret/**"
+      - "**/framework/internal/kit/seal_store.go"
+      - "framework/internal/kit/seal_store.go"
   KTN-STRUCT-RECVTYPE:
     exclude:
       - "**/internal/core/net/**"

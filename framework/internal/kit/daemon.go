@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"slices"
-	"sync/atomic"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
@@ -48,8 +47,6 @@ type runtimeState struct {
 	// plog is the logger kit.Log hands to product code: the app's logger,
 	// which in dev also feeds the hub's log ring. Set by resolve.
 	plog logger.Logger
-	// profiling is set while a CPU profile is being recorded.
-	profiling atomic.Bool
 	// config is what the current run's start read; boot, the steps it took.
 	config []model.Setting
 	boot   []model.BootStep

@@ -109,10 +109,12 @@ type Identities struct {
 }
 
 var (
-	ExportAPI = Desk.Endpoint("POST /privacy/export", ExportData, kit.Private())
-	EraseAPI  = Desk.Endpoint("POST /privacy/erase", EraseData, kit.Private())
-	HoldAPI   = Desk.Endpoint("POST /privacy/hold", HoldData, kit.Private())
-	_         = Desk.Endpoint("POST /reports", FileReport)
+	// A person's rights, run in process by the desk: internal, as a
+	// command or a query nobody exposes is.
+	DeskExport = Desk.Query("export", ExportData)
+	DeskErase  = Desk.Command("erase", EraseData)
+	DeskHold   = Desk.Command("hold", HoldData)
+	_          = Desk.Endpoint("POST /reports", FileReport)
 )
 
 // ExportData gives a person their data.
@@ -146,6 +148,7 @@ func startPrivacy(t *testing.T, opts ...kit.AppConfigurer) *kit.App {
 func startPrivacyOn(t *testing.T, opts ...kit.AppConfigurer) *kit.App {
 	t.Helper()
 	t.Setenv("KIT_SMTP_URL", "")
+	pinDataKeyWithoutFileStore(t)
 	app := kit.NewApp("vigie", Desk, People).With(append([]kit.AppConfigurer{
 		kit.Listen("127.0.0.1:0"), kit.Env(kit.EnvDev), kit.Analyze(false), kit.Logs(io.Discard),
 	}, opts...)...)

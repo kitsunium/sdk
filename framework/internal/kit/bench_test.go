@@ -61,14 +61,14 @@ type BenchWhoOutput struct {
 }
 
 var (
-	_           = Bench.Endpoint("POST /signup", SignUp)
-	_           = Bench.Endpoint("GET /hello", Hello)
-	_           = Bench.Endpoint("GET /burn", Burn)
-	_           = Bench.Endpoint("POST /hoard", Hoard)
-	_           = Bench.Endpoint("GET /wait", Wait)
-	BenchWhoAPI = Bench.Endpoint("GET /internal/who", WhoCalls, kit.Private(), kit.Name("Who"))
-	_           = Bench.Loop("tick", Tick, kit.WakeEvery(time.Hour))
-	_           = Bench.Go("reaper", Reap)
+	_        = Bench.Endpoint("POST /signup", SignUp)
+	_        = Bench.Endpoint("GET /hello", Hello)
+	_        = Bench.Endpoint("GET /burn", Burn)
+	_        = Bench.Endpoint("POST /hoard", Hoard)
+	_        = Bench.Endpoint("GET /wait", Wait)
+	BenchWho = Bench.Query("who", WhoCalls)
+	_        = Bench.Loop("tick", Tick, kit.WakeEvery(time.Hour))
+	_        = Bench.Go("reaper", Reap)
 )
 
 // SignUp echoes the account, with a session token.

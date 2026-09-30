@@ -50,3 +50,14 @@ func Queued() CommandOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.
 	return ikit.Queued()
 }
+
+// NoTransaction runs a command outside a transaction of its own: its
+// writes land as its handler makes them, and its effects leave when made —
+// a failed command may have written or announced something. On the data
+// directory and in memory, where a writing command's transaction takes the
+// writer turn, it lets such commands run side by side. Dispatched inside
+// another command, it still runs in that one's transaction.
+func NoTransaction() CommandOption {
+	//: the implementation is framework/internal/kit's; this facade only forwards.
+	return ikit.NoTransaction()
+}

@@ -74,6 +74,13 @@ func (r *retentionRun[T]) retainAll(ctx context.Context, keys []string, now time
 // Under dry-run it says what it would do, and journals it. The outcome says
 // what changed, even when the journal then failed.
 func (s *StoreService[T]) retainOne(ctx context.Context, a *App, key string, now time.Time, mode string) (retained, error) {
+	// The writer turn before the hold lock: a write's outermost lock
+	// (transact_turn.go).
+	ctx, release, err := s.turn(ctx)
+	defer release()
+	if err != nil {
+		return retainNothing, err
+	}
 	unlock := a.lockHolds(s.id)
 	defer unlock()
 	v, err := s.read(ctx, key)

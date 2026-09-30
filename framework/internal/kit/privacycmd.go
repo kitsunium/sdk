@@ -30,7 +30,7 @@ const privacyUsageFormat string = `usage:
   %[1]s privacy holds                    the records a legal hold keeps
   %[1]s privacy journal [-verify]        the privacy journal, and whether its chain holds
   %[1]s privacy retention [-dry-run]     the stores' retention, run once now
-  %[1]s privacy seal STORE               sealing at rest (not yet: ADR 0006, step 3)
+  %[1]s privacy seal STORE…              what a store keeps in clear — written before its fields were sealed — sealed now
 Every sub-command but register opens the data directory: stop the product first.
 `
 
@@ -44,7 +44,7 @@ Every sub-command but register opens the data directory: stop the product first.
 //	privacy holds                      the records a legal hold keeps
 //	privacy journal [-verify]          the privacy journal, and whether its chain holds
 //	privacy retention [-dry-run]       the stores' retention, run once now
-//	privacy seal STORE                 (sealing: ADR 0006, step 3)
+//	privacy seal STORE…                what a store keeps in clear, sealed now
 //
 // A store belongs to one process: every sub-command but register opens the
 // data directory itself, and refuses while the product answers on its
@@ -82,10 +82,7 @@ func (a *App) privacyCommands(stdout, stderr io.Writer) map[string]func(ctx cont
 		},
 		"journal":   func(ctx context.Context, args []string) int { return a.journalCommand(ctx, args, stdout, stderr) },
 		"retention": func(ctx context.Context, args []string) int { return a.retentionCommand(ctx, args, stdout, stderr) },
-		"seal": func(context.Context, []string) int {
-			fmt.Fprintln(stderr, "privacy seal: nothing is sealed yet — sealing at rest lands with kit's per-subject data keys (ADR 0006, step 3)")
-			return 1
-		},
+		"seal":      func(ctx context.Context, args []string) int { return a.sealCommand(ctx, args, stdout, stderr) },
 	}
 }
 
@@ -222,6 +219,13 @@ func (a *App) withData(ctx context.Context, fn func(context.Context) error) (err
 		return failure(CodeAppConfig, "DATA_DIR_INVALID", "the data directory cannot be opened", err, errs.String("dir", a.dataDir))
 	}
 	a.data = fsys
+	// The databases first, as the start opens them: the stores they keep
+	// live there, not in the data directory (ADR 0004).
+	runs := a.newDatabaseRuns()
+	defer func() { err = errors.Join(err, closeRuns(runs)) }()
+	if err := a.openDatabases(ctx, runs); err != nil {
+		return err
+	}
 	started, err := a.startStores(ctx)
 	defer func() {
 		for _, st := range slices.Backward(started) {
@@ -232,6 +236,29 @@ func (a *App) withData(ctx context.Context, fn func(context.Context) error) (err
 		return err
 	}
 	return fn(ctx)
+}
+
+// openDatabases opens, as the start does, each database of runs an engine
+// keeps.
+func (a *App) openDatabases(ctx context.Context, runs []*databaseRun) error {
+	for _, r := range runs {
+		if r.d.engine == nil || a.opts.memory {
+			continue
+		}
+		if err := a.startDatabase(ctx, r); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+// closeRuns closes every run of runs.
+func closeRuns(runs []*databaseRun) error {
+	var err error
+	for _, r := range runs {
+		err = errors.Join(err, r.close())
+	}
+	return err
 }
 
 // dataReady refuses what the command must not open: data kept in memory, a

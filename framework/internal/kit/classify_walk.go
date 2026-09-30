@@ -299,8 +299,9 @@ func (q *Query[Q, R]) dataTypes() []reflect.Type {
 // declarations show or keep, each type once, at the first declaration that
 // uses it: what a tag gets wrong is an error the start refuses. With
 // explain, a field whose name and type read like personal data and which
-// has no class is a warning, said once per declared field — at the first
-// declaration that reaches it, however many types it is promoted into.
+// has no class — or the class secret, a credential's — is a warning, said
+// once per declared field — at the first declaration that reaches it,
+// however many types it is promoted into.
 func (a *App) classificationProblems(explain bool) []model.Diagnostic {
 	j := typeJudge{a: a, seenType: map[reflect.Type]bool{}, seenWarning: map[declaredField]bool{}}
 	for _, svc := range a.services {
@@ -357,13 +358,30 @@ func (j *typeJudge) warn(b *nodeBase, warnings []fieldWarning) {
 
 // redacted is one of the store's entities as the Studio may show it: read
 // as its type, so that its kit tags redact — personal, special and secret
-// members, and the subject — as well as the names the redactor knows.
+// members, and the subject — as well as the names the redactor knows. A
+// member sealed at rest is shown sealed: the Studio never opens it (ADR
+// 0006 §9).
 func (s *StoreService[T]) redacted(raw json.RawMessage) json.RawMessage {
-	var v T
-	if err := json.Unmarshal(raw, &v); err != nil {
-		shown, _ := redactJSON(raw, 64<<10)
-		return shown
+	var sealed []string
+	if hasBoxes(raw) {
+		walked, _, err := boxWalk(raw, nil, "", false, func(at memberAt, _ []byte) ([]byte, bool, error) {
+			sealed = append(sealed, at.pointer)
+			return nil, true, nil
+		})
+		if err != nil {
+			return nil
+		}
+		raw = walked
 	}
-	shown, _ := redactValue(v, 64<<10)
+	var v T
+	var shown json.RawMessage
+	if err := json.Unmarshal(raw, &v); err != nil {
+		shown, _ = redactJSON(raw, 64<<10)
+	} else {
+		shown, _ = redactValue(v, 64<<10)
+	}
+	for _, p := range sealed {
+		shown = setAt(shown, p, sealedShown)
+	}
 	return shown
 }

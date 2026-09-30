@@ -29,6 +29,7 @@ const (
 	dropRotationRoles  = "DROP ROLE IF EXISTS kit_rotation_first, kit_rotation_second"
 	createFirstRole    = "CREATE ROLE kit_rotation_first LOGIN PASSWORD $1"
 	createSecondRole   = "CREATE ROLE kit_rotation_second LOGIN PASSWORD $1"
+	grantRotationRoles = "GRANT ALL ON SCHEMA public TO kit_rotation_first, kit_rotation_second"
 	sessionsOfSecond   = "SELECT count(*) FROM pg_stat_activity WHERE datname = 'kit_test' AND usename = 'kit_rotation_second'"
 )
 
@@ -154,9 +155,17 @@ func rotationRoles(t *testing.T) {
 			t.Fatal(err)
 		}
 	}
+	// kit's own migrations make the store's tables as the first role: the
+	// schema of kit_test is the roles' to create in.
+	if _, err := open(t, testURL(t, nil)).ExecContext(t.Context(), grantRotationRoles); err != nil {
+		t.Fatal(err)
+	}
+	// The database first: a role that holds a grant in it cannot be dropped.
 	t.Cleanup(func() {
-		if _, err := admin.ExecContext(context.Background(), dropRotationRoles); err != nil {
-			t.Logf("cleaning up: %v", err)
+		for _, stmt := range []string{dropTestDatabase, dropRotationRoles} {
+			if _, err := admin.ExecContext(context.Background(), stmt); err != nil {
+				t.Logf("cleaning up: %v", err)
+			}
 		}
 	})
 }

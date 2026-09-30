@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/framework/model"
 
 Package model is the Product Graph: the one data shape every part of the framework agrees on. The runtime serves it, a static analyzer produces it, a CLI prints it, a Studio draws it, and an AI agent or an editor extension reads it.
 
-A graph is a projection of code, never a second source of truth. Every node says where it was declared \([Source](<#Source>)\) and every edge says how it is known: declared by construction \([Edge](<#Edge>).Declared\), found in a handler body by a static analyzer \([Edge](<#Edge>).Static\), or seen at runtime \([Edge](<#Edge>).Observed\). A diagram that cannot say why an arrow exists is a drawing; this one can.
+A graph is a projection: of the code for what runs, and — since the platform's ADR 0010 — of the design \(a product's design/ directory\) for what its structure must be. The design, not the graph, is authoritative on structure; the graph shows what the code is and where it differs from the design. Every node says where it was declared \([Source](<#Source>)\) and every edge says how it is known: declared by construction \([Edge](<#Edge>).Declared\), found in a handler body by a static analyzer \([Edge](<#Edge>).Static\), or seen at runtime \([Edge](<#Edge>).Observed\). A diagram that cannot say why an arrow exists is a drawing; this one can.
 
 ### Identity
 
@@ -47,6 +47,7 @@ The JSON shape is a contract: [Version](<#Version>) is bumped on any change an o
 - [func RoleID\(binary, role string\) string](<#RoleID>)
 - [func ServiceOf\(id string\) string](<#ServiceOf>)
 - [func SplitDoc\(text string\) \(string, map\[string\]string\)](<#SplitDoc>)
+- [func TableName\(service, node, suffix string\) string](<#TableName>)
 - [func UnderPrefix\(prefix, path string\) string](<#UnderPrefix>)
 - [func ValidContract\(s string\) bool](<#ValidContract>)
 - [func ValidName\(s string\) bool](<#ValidName>)
@@ -80,10 +81,12 @@ The JSON shape is a contract: [Version](<#Version>) is bumped on any change an o
 - [type Diagnostic](<#Diagnostic>)
 - [type Edge](<#Edge>)
 - [type EdgeKind](<#EdgeKind>)
+- [type Edit](<#Edit>)
 - [type EndpointInfo](<#EndpointInfo>)
 - [type Erasure](<#Erasure>)
 - [type Event](<#Event>)
 - [type EventType](<#EventType>)
+- [type ExportedVersions](<#ExportedVersions>)
 - [type Field](<#Field>)
 - [type File](<#File>)
 - [type FlameNode](<#FlameNode>)
@@ -134,10 +137,13 @@ The JSON shape is a contract: [Version](<#Version>) is bumped on any change an o
 - [type PresentationInfo](<#PresentationInfo>)
 - [type Privacy](<#Privacy>)
 - [type Process](<#Process>)
+- [type ProductRetention](<#ProductRetention>)
 - [type Profile](<#Profile>)
 - [type QueryInfo](<#QueryInfo>)
 - [type RecordFormer](<#RecordFormer>)
 - [type RecordHistory](<#RecordHistory>)
+- [type RecordVersion](<#RecordVersion>)
+- [type RecordVersions](<#RecordVersions>)
 - [type Register](<#Register>)
 - [type RegisterStore](<#RegisterStore>)
 - [type Retention](<#Retention>)
@@ -206,6 +212,9 @@ const (
     BlockGo     string = core.BlockGo     // a go statement: runs beside the caller
     BlockDefer  string = core.BlockDefer  // a defer statement: runs when the function returns
     BlockFunc   string = core.BlockFunc   // a function literal: runs when it is called
+    // BlockTransaction is the function a kit.Transact runs: its steps run in
+    // one transaction, and the effects they make leave at its commit.
+    BlockTransaction string = core.BlockTransaction
 )
 ```
 
@@ -296,8 +305,24 @@ const (
 const (
     // ExposePublic endpoints are routed on the product's HTTP listener.
     ExposePublic string = core.ExposePublic
-    // ExposePrivate endpoints are reachable only in-process, through Call.
+    // ExposePrivate endpoints have no route: the implementation of a port
+    // (Service.Implement), reached in process through its port. A graph kit
+    // made before its operations were internal by default also marks so an
+    // endpoint it kept off the listener.
     ExposePrivate string = core.ExposePrivate
+)
+```
+
+<a name="AccessAnyone"></a>How an exposure says it is open on purpose, when its operation declares no permission and no rule \(EndpointInfo.Access\).
+
+```go
+const (
+    // AccessAnyone is kit.Anyone(): whoever reaches the route may run the
+    // operation.
+    AccessAnyone string = core.AccessAnyone
+    // AccessAnyUser is kit.AnyUser(): any signed-in user may run it — the
+    // operation asks for one.
+    AccessAnyUser string = core.AccessAnyUser
 )
 ```
 
@@ -510,7 +535,7 @@ const (
 ```go
 const (
     GapPurpose   string = core.GapPurpose   // no kit.Purpose
-    GapRetention string = core.GapRetention // no retention: its personal data is kept forever
+    GapRetention string = core.GapRetention // no retention, kit's or the product's: its personal data is kept forever
     GapSubject   string = core.GapSubject   // no subject field: no person can have their records
 )
 ```
@@ -527,11 +552,11 @@ const (
     // MeasureJournal: every export, erasure, deletion and hold is journaled,
     // each entry chained to the previous one by SHA-256.
     MeasureJournal string = core.MeasureJournal
-    // MeasureNotSealed: the store's classified members are kept in clear at
-    // rest, until kit's sealing lands (ADR 0006, step 3).
+    // MeasureNotSealed: the store's classified members are in clear: it is
+    // kept in memory, where nothing is at rest, or its members are plain.
     MeasureNotSealed string = core.MeasureNotSealed
     // MeasureSealed: its classified members are sealed at rest, AES-256-GCM
-    // under per-subject data keys (ADR 0006, step 3).
+    // under per-subject data keys a person's erasure destroys (ADR 0006 §4).
     MeasureSealed string = core.MeasureSealed
 )
 ```
@@ -719,6 +744,24 @@ const (
     OpHandle      string = core.OpHandle      // a queued command handled by its consumer, in the dispatcher's trace
     OpConnect     string = core.OpConnect     // a connection a listener accepted, handled until it closes
     OpCLI         string = core.OpCLI         // a short command-line command, run once
+    // OpTransaction is a unit of work (kit.Transact, a command's, a
+    // workflow's transition): its attrs say the database it belongs to —
+    // "database", and "backend" as a store says it —, its "outcome", the
+    // effects it held ("effects"), and "savepoint" for one nested in
+    // another.
+    OpTransaction string = core.OpTransaction
+)
+```
+
+<a name="OutcomeCommit"></a>The outcomes of a transaction, as its span's "outcome" attribute says them.
+
+```go
+const (
+    // OutcomeCommit is a transaction that committed: its effects left.
+    OutcomeCommit string = core.OutcomeCommit
+    // OutcomeRollback is a transaction whose writes were undone: its effects
+    // were dropped.
+    OutcomeRollback string = core.OutcomeRollback
 )
 ```
 
@@ -749,6 +792,12 @@ const (
 )
 ```
 
+<a name="MaxTableLen"></a>MaxTableLen is the longest table name a store on a database takes, in bytes: the SDK's document store over SQL keeps its index rows in the table named after it with "\_\_\_ix", within PostgreSQL's 63.
+
+```go
+const MaxTableLen int = core.MaxTableLen
+```
+
 <a name="MockReplace"></a>
 
 ```go
@@ -770,6 +819,12 @@ const (
     // dev, and the product's HTTP when it declares any.
     PortOwnerKit string = core.PortOwnerKit
 )
+```
+
+<a name="SealedPlaceholder"></a>SealedPlaceholder is what the Studio receives in place of a value kit keeps sealed at rest — a record's member in the data browser, a former value —: never the value, nor its box \(ADR 0006 §9\). A value it opens and may not show is "\[redacted\]".
+
+```go
+const SealedPlaceholder string = core.SealedPlaceholder
 ```
 
 <a name="Version"></a>
@@ -951,6 +1006,15 @@ A product documents a building block once, in Go, in its default language; a par
 
 It keeps Go's convention \(the comment still starts with the name\) and go doc prints both. Each text is joined into one line. A description whose only tagged paragraph is "en" uses it as the default.
 
+<a name="TableName"></a>
+## func [TableName](<https://github.com/kitsunium/sdk/blob/main/framework/model/table.go#L23>)
+
+```go
+func TableName(service, node, suffix string) string
+```
+
+TableName is the table a database keeps a kit table in \(ADR 0004\): the service's name — qualified, for a module's —, two underscores and the node's name, then suffix, '\-' and '.' written '\_', lower case — "moderation.intake"'s store "cases" is moderation\_intake\_\_cases. A name the rule cannot keep as it is — upper case, longer than MaxTableLen, three underscores in a row, SQLite's own prefix — is cut and ends with a digest of the whole, so it stays one table's. The runtime and the analyzer name tables with it.
+
 <a name="UnderPrefix"></a>
 ## func [UnderPrefix](<https://github.com/kitsunium/sdk/blob/main/framework/model/module.go#L40>)
 
@@ -997,7 +1061,7 @@ type Adapter = core.AdapterMessage
 ```
 
 <a name="Analysis"></a>
-## type [Analysis](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L146>)
+## type [Analysis](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L150>)
 
 Analysis reports the status of static analysis. It says whether the analyzer ran, how long it took, and the error that stopped it.
 
@@ -1006,7 +1070,7 @@ type Analysis = core.AnalysisResult
 ```
 
 <a name="App"></a>
-## type [App](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L100>)
+## type [App](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L104>)
 
 App identifies the product and the machine that described it. It names the module, the environment and the build the graph was taken from.
 
@@ -1028,7 +1092,7 @@ type Architecture = core.ArchitectureMessage
 ```
 
 <a name="AuthInfo"></a>
-## type [AuthInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L261>)
+## type [AuthInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L281>)
 
 AuthInfo describes the app's authentication handler. Credentials says what it reads from a request; Endpoints are the ones behind it.
 
@@ -1046,7 +1110,7 @@ type BinaryInfo = core.BinarySpec
 ```
 
 <a name="BootStep"></a>
-## type [BootStep](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L191>)
+## type [BootStep](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L206>)
 
 BootStep is one step of the start, as it ran. It carries when it began, how long it took and, when it failed, its error.
 
@@ -1055,7 +1119,7 @@ type BootStep = core.BootStepMessage
 ```
 
 <a name="Build"></a>
-## type [Build](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L107>)
+## type [Build](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L111>)
 
 Build is what a binary was built from, at its three levels. Its three levels are the Go toolchain, the main module and the modules it depends on.
 
@@ -1073,7 +1137,7 @@ type CLIInfo = core.CLISpec
 ```
 
 <a name="Census"></a>
-## type [Census](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L261>)
+## type [Census](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L276>)
 
 Census is a workflow's population per state. It counts the instances in each state when the census was taken.
 
@@ -1082,7 +1146,7 @@ type Census = core.CensusMessage
 ```
 
 <a name="CodeBlock"></a>
-## type [CodeBlock](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L48>)
+## type [CodeBlock](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L51>)
 
 CodeBlock is a block of a function that decides whether, or how many times, the steps under it run.
 
@@ -1091,7 +1155,7 @@ type CodeBlock = core.CodeBlockMessage
 ```
 
 <a name="CodeEffect"></a>
-## type [CodeEffect](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L54>)
+## type [CodeEffect](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L57>)
 
 CodeEffect is one call on a building block, inside a function. It names the node it reaches and the edge kind that call draws.
 
@@ -1100,7 +1164,7 @@ type CodeEffect = core.CodeEffectMessage
 ```
 
 <a name="CodeFunc"></a>
-## type [CodeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L35>)
+## type [CodeFunc](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L38>)
 
 CodeFunc is one function of the module a node's code reaches. Its steps are listed in the order they run, under the blocks that guard them.
 
@@ -1109,7 +1173,7 @@ type CodeFunc = core.CodeFuncMessage
 ```
 
 <a name="CodeInfo"></a>
-## type [CodeInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L28>)
+## type [CodeInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L31>)
 
 CodeInfo is the code a node runs, as the static analysis read it: the fourth and innermost level of the C4 model. The entry is the function the node runs — an endpoint's handler, a subscription's, a loop's — and Funcs are the functions of the module it reaches, each with what it calls and what it does to other nodes.
 
@@ -1118,7 +1182,7 @@ type CodeInfo = core.CodeResult
 ```
 
 <a name="CodeStep"></a>
-## type [CodeStep](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L42>)
+## type [CodeStep](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L45>)
 
 CodeStep is one thing a function does: a call to another function of the module, a call on a building block, or a call into the SDK — under the innermost block that guards it.
 
@@ -1127,7 +1191,7 @@ type CodeStep = core.CodeStepMessage
 ```
 
 <a name="CodeUse"></a>
-## type [CodeUse](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L61>)
+## type [CodeUse](<https://github.com/kitsunium/sdk/blob/main/framework/model/code.go#L64>)
 
 CodeUse is one SDK function a node's code calls. Sites are where the node's code calls it, so a reader sees what it leans on.
 
@@ -1136,7 +1200,7 @@ type CodeUse = core.CodeUseMessage
 ```
 
 <a name="CommandInfo"></a>
-## type [CommandInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L163>)
+## type [CommandInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L177>)
 
 CommandInfo describes a command: an operation that changes something. It carries its input and result schemas, its handler, its queue and who may dispatch it.
 
@@ -1145,7 +1209,7 @@ type CommandInfo = core.CommandSpec
 ```
 
 <a name="Component"></a>
-## type [Component](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L221>)
+## type [Component](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L236>)
 
 Component is one lifecycle component: brought up in order, taken down in reverse.
 
@@ -1223,7 +1287,7 @@ type Container = core.ContainerMessage
 ```
 
 <a name="Database"></a>
-## type [Database](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L159>)
+## type [Database](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L174>)
 
 Database is one database the app declares \(kit.Database\), as the running process found it. Its URL is never shown: where it was found, the engine, the address and the TLS mode are.
 
@@ -1232,7 +1296,7 @@ type Database = core.DatabaseMessage
 ```
 
 <a name="DevBuild"></a>
-## type [DevBuild](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L197>)
+## type [DevBuild](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L212>)
 
 DevBuild is one build of \`kit dev\`: when, how long, and why. It lets the Studio say what changed and how long the reload took.
 
@@ -1241,7 +1305,7 @@ type DevBuild = core.DevBuildMessage
 ```
 
 <a name="Diagnostic"></a>
-## type [Diagnostic](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L139>)
+## type [Diagnostic](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L143>)
 
 Diagnostic is a problem found while building the graph. It names the node or the file it is about, and how serious it is.
 
@@ -1250,7 +1314,7 @@ type Diagnostic = core.DiagnosticMessage
 ```
 
 <a name="Edge"></a>
-## type [Edge](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L127>)
+## type [Edge](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L131>)
 
 Edge is one relation, with the evidence for it. Declared, Static and Observed say whether construction, the code or the runtime knows it.
 
@@ -1316,8 +1380,17 @@ const (
 )
 ```
 
+<a name="Edit"></a>
+## type [Edit](<https://github.com/kitsunium/sdk/blob/main/framework/model/history.go#L47>)
+
+Edit is one change between two versions of a record, in RFC 6902's words: an add, a remove or a replace at a JSON pointer.
+
+```go
+type Edit = core.EditMessage
+```
+
 <a name="EndpointInfo"></a>
-## type [EndpointInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L150>)
+## type [EndpointInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L164>)
 
 EndpointInfo describes an HTTP endpoint, or the implementation of a port. It carries the method and path, the request and response schemas, and its auth.
 
@@ -1326,7 +1399,7 @@ type EndpointInfo = core.EndpointSpec
 ```
 
 <a name="Erasure"></a>
-## type [Erasure](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L73>)
+## type [Erasure](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L79>)
 
 Erasure is what kit.Erase did, store by store. Stores lists, store by store, what the erasure did there.
 
@@ -1335,7 +1408,7 @@ type Erasure = core.ErasureMessage
 ```
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L234>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L249>)
 
 Event is one live event. Exactly one of the payload fields matching Type is set.
 
@@ -1378,8 +1451,17 @@ const (
 )
 ```
 
+<a name="ExportedVersions"></a>
+## type [ExportedVersions](<https://github.com/kitsunium/sdk/blob/main/framework/model/history.go#L58>)
+
+ExportedVersions are the versions of one exported record.
+
+```go
+type ExportedVersions = core.ExportedVersionsMessage
+```
+
 <a name="Field"></a>
-## type [Field](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L313>)
+## type [Field](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L333>)
 
 Field is one member of an object schema. It carries the JSON name, the schema of its value and the classes of its data.
 
@@ -1415,7 +1497,7 @@ type Former = core.FormerMessage
 ```
 
 <a name="FrontendInfo"></a>
-## type [FrontendInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L254>)
+## type [FrontendInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L274>)
 
 FrontendInfo describes static assets served by the product. It carries the path the assets are served under and where they are read from.
 
@@ -1451,7 +1533,7 @@ type Goroutines = core.GoroutinesResult
 ```
 
 <a name="Graph"></a>
-## type [Graph](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L93>)
+## type [Graph](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L97>)
 
 Graph is the whole product. It is the JSON document the runtime serves and the analyzer writes; Version names its shape.
 
@@ -1469,7 +1551,7 @@ func Merge(base, extra *Graph) *Graph
 Merge enriches a graph with what another description of the same product knows. base is authoritative on which nodes exist — a runtime graph describes what the process actually serves —, on the modules it mounts, on what each of its ports calls and on which stores feed each of its watches: the app chose them when it started, where the analysis only reads the same rules over the whole module. extra, typically the static analysis, contributes documentation, handler ranges — an authorization function's too —, transition callers and the edges it found. Nodes only extra knows about are dropped: code that is compiled but not mounted in this app is not part of this product — save a node of a module's service the base mounts, which a package the binary does not link declares: a warning says so.
 
 <a name="HTTPServer"></a>
-## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L215>)
+## type [HTTPServer](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L230>)
 
 HTTPServer is the product's HTTP server, and whose loop serves it. Its address is the one it listens on; its loop is the node that runs it.
 
@@ -1478,7 +1560,7 @@ type HTTPServer = core.HTTPServer
 ```
 
 <a name="HeldUntil"></a>
-## type [HeldUntil](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L201>)
+## type [HeldUntil](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L221>)
 
 HeldUntil is the hold a store declares on each of its records, until an instant the record carries.
 
@@ -1487,7 +1569,7 @@ type HeldUntil = core.HeldUntilSpec
 ```
 
 <a name="Hold"></a>
-## type [Hold](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L106>)
+## type [Hold](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L112>)
 
 Hold is one record a legal hold keeps. It carries references only: never the record's key, its subject's identity, or the hold's reason, which kit keeps apart.
 
@@ -1514,7 +1596,7 @@ func ParseID(s string) (ID, error)
 ParseID reads an ID. It refuses anything [IDPattern](<#IDPattern>) does not match, with [InvalidID](<#InvalidID>); the refusal never quotes the input, which may be anything a caller sent.
 
 <a name="IndexInfo"></a>
-## type [IndexInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L208>)
+## type [IndexInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L228>)
 
 IndexInfo is one secondary index of a store. Its name is unique in the store; Unique says whether two records may share a key.
 
@@ -1523,7 +1605,7 @@ type IndexInfo = core.IndexSpec
 ```
 
 <a name="Instance"></a>
-## type [Instance](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L281>)
+## type [Instance](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L296>)
 
 Instance is one entity's journey through a workflow. It carries the entity's key, its current state and the steps that brought it there.
 
@@ -1532,7 +1614,7 @@ type Instance = core.InstanceMessage
 ```
 
 <a name="JobInfo"></a>
-## type [JobInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L247>)
+## type [JobInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L267>)
 
 JobInfo describes a scheduled job. It carries the fixed interval or the cron expression that schedules it.
 
@@ -1541,7 +1623,7 @@ type JobInfo = core.JobSpec
 ```
 
 <a name="JournalCheck"></a>
-## type [JournalCheck](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L119>)
+## type [JournalCheck](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L125>)
 
 JournalCheck is what verifying the journal's chain found. A broken chain names the first entry whose hash does not follow.
 
@@ -1550,7 +1632,7 @@ type JournalCheck = core.JournalCheckMessage
 ```
 
 <a name="JournalEntry"></a>
-## type [JournalEntry](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L113>)
+## type [JournalEntry](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L119>)
 
 JournalEntry is one operation of the privacy journal: what was done, where, by whom and when, with references only — never an identity, a value or a key. Each entry is chained to the previous one by SHA\-256.
 
@@ -1586,7 +1668,7 @@ type ListenerInfo = core.ListenerSpec
 ```
 
 <a name="LogRecord"></a>
-## type [LogRecord](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L293>)
+## type [LogRecord](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L308>)
 
 LogRecord is one log record written by product code through kit.Log, kept in dev so the Studio can show a request's logs beside its spans.
 
@@ -1595,7 +1677,7 @@ type LogRecord = core.LogRecordMessage
 ```
 
 <a name="Loop"></a>
-## type [Loop](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L228>)
+## type [Loop](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L243>)
 
 Loop is one recurring piece of the daemon's internal loop: a job, a workflow's timer sweep, a subscription's consumer, the HTTP accept loop, a declared or hand\-written loop.
 
@@ -1604,7 +1686,7 @@ type Loop = core.LoopMessage
 ```
 
 <a name="LoopInfo"></a>
-## type [LoopInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L279>)
+## type [LoopInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L299>)
 
 LoopInfo describes a loop node. Style says whether it is declared \(kit owns the wait\) or hand\-written.
 
@@ -1631,7 +1713,7 @@ type MailSummary = core.MailSummary
 ```
 
 <a name="MailerInfo"></a>
-## type [MailerInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L267>)
+## type [MailerInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L287>)
 
 MailerInfo describes outbound mail. It carries the transport that empties the outbox and the outbox's counters.
 
@@ -1640,7 +1722,7 @@ type MailerInfo = core.MailerSpec
 ```
 
 <a name="Mechanic"></a>
-## type [Mechanic](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L299>)
+## type [Mechanic](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L319>)
 
 Mechanic is a generic building block, backed by an SDK package, that a node composes. The catalog lists every mechanic kit offers; an endpoint's pipeline lists the ones it uses.
 
@@ -1649,7 +1731,7 @@ type Mechanic = core.MechanicMessage
 ```
 
 <a name="Migration"></a>
-## type [Migration](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L179>)
+## type [Migration](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L194>)
 
 Migration is one versioned migration. Its Version orders it among the others; Name says what it does.
 
@@ -1658,7 +1740,7 @@ type Migration = core.MigrationMessage
 ```
 
 <a name="MigrationSet"></a>
-## type [MigrationSet](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L173>)
+## type [MigrationSet](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L188>)
 
 MigrationSet is one set of migrations on a database — kit's own, the product's \(kit.Migrations\), a module's — with its own version table, and so its own lock.
 
@@ -1667,7 +1749,7 @@ type MigrationSet = core.MigrationSetMessage
 ```
 
 <a name="Mock"></a>
-## type [Mock](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L299>)
+## type [Mock](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L314>)
 
 Mock is the replacement a test gave the app \([MockReplace](<#MockReplace>)\). It is set by a test only; the Studio shows it and never sets one \(D13\).
 
@@ -1685,7 +1767,7 @@ type Module = core.ModuleMessage
 ```
 
 <a name="ModuleVersion"></a>
-## type [ModuleVersion](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L113>)
+## type [ModuleVersion](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L117>)
 
 ModuleVersion identifies one module of a build. Local and Modified say when the code that ran is not the published version.
 
@@ -1801,7 +1883,7 @@ type PasswordPolicy = core.PasswordPolicyMessage
 ```
 
 <a name="Payload"></a>
-## type [Payload](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L248>)
+## type [Payload](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L263>)
 
 Payload is the request and the response of a span, as JSON, in dev only. Every member whose name says it is a secret — password, token, secret, authorization, cookie… — or whose Go field is tagged kit:"secret" is replaced by "\[redacted\]", and each side is cut at 8 KiB.
 
@@ -1810,7 +1892,7 @@ type Payload = core.Payload
 ```
 
 <a name="Permission"></a>
-## type [Permission](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L175>)
+## type [Permission](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L189>)
 
 Permission is what a caller needs to dispatch a command or to ask a query: that the app's policy lets it do Action to Resource \(Allow\).
 
@@ -1828,7 +1910,7 @@ type Person = core.PersonMessage
 ```
 
 <a name="PersonalData"></a>
-## type [PersonalData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L61>)
+## type [PersonalData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L67>)
 
 PersonalData is a person's data as kit.Export gives it \(GDPR art. 15 and 20\): their records, store by store, with what art. 15\(1\) asks beside them.
 
@@ -1837,7 +1919,7 @@ type PersonalData = core.PersonalDataMessage
 ```
 
 <a name="PhaseChange"></a>
-## type [PhaseChange](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L203>)
+## type [PhaseChange](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L218>)
 
 PhaseChange is one step of the daemon's life. It carries the phase entered, when it was entered, and why.
 
@@ -1846,7 +1928,7 @@ type PhaseChange = core.PhaseChangeEvent
 ```
 
 <a name="Pool"></a>
-## type [Pool](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L166>)
+## type [Pool](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L181>)
 
 Pool is a database's connection pool, as database/sql counts it. It is sampled when the runtime state is read; its counters never move a revision.
 
@@ -1864,7 +1946,7 @@ type Port = core.PortMessage
 ```
 
 <a name="PortInfo"></a>
-## type [PortInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L156>)
+## type [PortInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L170>)
 
 PortInfo describes a port: an operation a service needs and another implements.
 
@@ -1882,7 +1964,7 @@ type PresentationInfo = core.PresentationSpec
 ```
 
 <a name="Privacy"></a>
-## type [Privacy](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L87>)
+## type [Privacy](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L93>)
 
 Privacy is what a running app says of the personal data it keeps. It is the Privacy page's data: the register, the holds and the journal's state.
 
@@ -1891,12 +1973,21 @@ type Privacy = core.PrivacyMessage
 ```
 
 <a name="Process"></a>
-## type [Process](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L209>)
+## type [Process](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L224>)
 
 Process is the Go process a product runs in. It carries the runtime's figures — goroutines, heap, GC, CPU — taken at At.
 
 ```go
 type Process = core.ProcessSpec
+```
+
+<a name="ProductRetention"></a>
+## type [ProductRetention](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L215>)
+
+ProductRetention is a retention the product keeps itself, as it says it.
+
+```go
+type ProductRetention = core.ProductRetentionSpec
 ```
 
 <a name="Profile"></a>
@@ -1909,7 +2000,7 @@ type Profile = core.ProfileResult
 ```
 
 <a name="QueryInfo"></a>
-## type [QueryInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L169>)
+## type [QueryInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L183>)
 
 QueryInfo describes a query: an operation that reads and changes nothing.
 
@@ -1918,7 +2009,7 @@ type QueryInfo = core.QuerySpec
 ```
 
 <a name="RecordFormer"></a>
-## type [RecordFormer](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L126>)
+## type [RecordFormer](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L132>)
 
 RecordFormer is the former values of one exported record's fields. A personal or special field's former values are redacted, never exported in clear.
 
@@ -1935,8 +2026,26 @@ RecordHistory is what kit remembers of one record, as the Studio's data view sho
 type RecordHistory = core.RecordHistoryMessage
 ```
 
+<a name="RecordVersion"></a>
+## type [RecordVersion](<https://github.com/kitsunium/sdk/blob/main/framework/model/history.go#L41>)
+
+RecordVersion is one version of a record whose store keeps revisions \(ADR 0007 §3\): its number, when the write that made it ran, who made it and which command, and the record as it was.
+
+```go
+type RecordVersion = core.RecordVersionMessage
+```
+
+<a name="RecordVersions"></a>
+## type [RecordVersions](<https://github.com/kitsunium/sdk/blob/main/framework/model/history.go#L53>)
+
+RecordVersions is a record's versions as the Studio's data view shows them \(GET /\_kit/api/revisions\), and what changed between two.
+
+```go
+type RecordVersions = core.RecordVersionsMessage
+```
+
 <a name="Register"></a>
-## type [Register](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L93>)
+## type [Register](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L99>)
 
 Register is the record of processing of GDPR art. 30\(1\), as far as the code knows it.
 
@@ -1945,7 +2054,7 @@ type Register = core.RegisterMessage
 ```
 
 <a name="RegisterStore"></a>
-## type [RegisterStore](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L99>)
+## type [RegisterStore](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L105>)
 
 RegisterStore is one store's line in the register. It names the classes the store keeps, their purposes and their retention.
 
@@ -1954,7 +2063,7 @@ type RegisterStore = core.RegisterStoreMessage
 ```
 
 <a name="Retention"></a>
-## type [Retention](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L195>)
+## type [Retention](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L209>)
 
 Retention is when kit erases or deletes a record: after a delay counted from an instant the record carries \(After or Setting, and Since\), or at an instant a function gives \(At\).
 
@@ -1972,7 +2081,7 @@ type RoleInfo = core.RoleSpec
 ```
 
 <a name="Runtime"></a>
-## type [Runtime](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L152>)
+## type [Runtime](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L167>)
 
 Runtime is what a running process says about itself: the daemon's own state and its internal loop.
 
@@ -1981,7 +2090,7 @@ type Runtime = core.RuntimeMessage
 ```
 
 <a name="Schema"></a>
-## type [Schema](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L306>)
+## type [Schema](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L326>)
 
 Schema describes a Go type as it appears on the wire. It is a JSON\-Schema\-like shape: a kind, its fields or elements, and its Go type.
 
@@ -1990,7 +2099,7 @@ type Schema = core.SchemaMessage
 ```
 
 <a name="SecretInfo"></a>
-## type [SecretInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L273>)
+## type [SecretInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L293>)
 
 SecretInfo describes a declared secret: how it is made, where it lives, its versions — never its value.
 
@@ -1999,7 +2108,7 @@ type SecretInfo = core.SecretSpec
 ```
 
 <a name="SelectCase"></a>
-## type [SelectCase](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L292>)
+## type [SelectCase](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L312>)
 
 SelectCase is one case of a select statement in a hand\-written loop. The analyzer reads it from the loop's body; Kind says what the case waits on.
 
@@ -2008,7 +2117,7 @@ type SelectCase = core.SelectCaseMessage
 ```
 
 <a name="Setting"></a>
-## type [Setting](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L185>)
+## type [Setting](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L200>)
 
 Setting is one configuration value kit read when the product started: kit's own, or one a service of the product declares.
 
@@ -2017,7 +2126,7 @@ type Setting = core.SettingMessage
 ```
 
 <a name="Snippet"></a>
-## type [Snippet](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L274>)
+## type [Snippet](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L289>)
 
 Snippet is source code served to a reader of the graph. Focus and FocusEnd mark the lines a reader asked for, inside the lines served.
 
@@ -2026,7 +2135,7 @@ type Snippet = core.SnippetMessage
 ```
 
 <a name="Source"></a>
-## type [Source](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L120>)
+## type [Source](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L124>)
 
 Source locates code. File is relative to its module's root; Line and EndLine bound the declaration.
 
@@ -2035,7 +2144,7 @@ type Source = core.SourceMessage
 ```
 
 <a name="Span"></a>
-## type [Span](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L240>)
+## type [Span](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L255>)
 
 Span is a finished unit of work, attributed to a node. Only allow\-listed, wire\-safe fields travel: no URL, no query string, no private error text.
 
@@ -2044,7 +2153,7 @@ type Span = core.SpanMessage
 ```
 
 <a name="StateInfo"></a>
-## type [StateInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L235>)
+## type [StateInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L255>)
 
 StateInfo is one state of a workflow. Terminal marks a state an instance stays in; Count is how many instances are in it.
 
@@ -2053,7 +2162,7 @@ type StateInfo = core.StateSpec
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L133>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/framework/model/model.go#L137>)
 
 Stats are observed counters for a node or an edge. They are counters: they never move a graph's revision.
 
@@ -2062,7 +2171,7 @@ type Stats = core.StatsMessage
 ```
 
 <a name="Step"></a>
-## type [Step](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L287>)
+## type [Step](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L302>)
 
 Step is one transition in an instance's history. It carries the event, the states it went from and to, and when it fired.
 
@@ -2071,7 +2180,7 @@ type Step = core.StepEvent
 ```
 
 <a name="StoreData"></a>
-## type [StoreData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L67>)
+## type [StoreData](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L73>)
 
 StoreData is one store's records about a person. It is one part of what kit.Export gives a person about themselves.
 
@@ -2080,7 +2189,7 @@ type StoreData = core.StoreDataMessage
 ```
 
 <a name="StoreErasure"></a>
-## type [StoreErasure](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L80>)
+## type [StoreErasure](<https://github.com/kitsunium/sdk/blob/main/framework/model/privacy.go#L86>)
 
 StoreErasure is one store's part of an erasure: the keys of the records erased, deleted, and held — left in place, as a legal hold asks. A key may be personal data, which the Studio and the logs never show.
 
@@ -2098,7 +2207,7 @@ type StoreHistory = core.StoreHistoryMessage
 ```
 
 <a name="StoreInfo"></a>
-## type [StoreInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L182>)
+## type [StoreInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L196>)
 
 StoreInfo describes a store. It carries the entity's schema, its backend, its indexes, its privacy and its history.
 
@@ -2107,7 +2216,7 @@ type StoreInfo = core.StoreSpec
 ```
 
 <a name="StorePrivacy"></a>
-## type [StorePrivacy](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L188>)
+## type [StorePrivacy](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L202>)
 
 StorePrivacy is what a store keeps of people: whom each record is about, why, for how long, and — on a runtime graph — what is held and due.
 
@@ -2116,7 +2225,7 @@ type StorePrivacy = core.StorePrivacyMessage
 ```
 
 <a name="SubscriptionInfo"></a>
-## type [SubscriptionInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L221>)
+## type [SubscriptionInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L241>)
 
 SubscriptionInfo describes a subscription — or a watch \(ADR 0008\), a subscription whose deliveries come from stores instead of a topic.
 
@@ -2134,7 +2243,7 @@ type System = core.SystemMessage
 ```
 
 <a name="TopicInfo"></a>
-## type [TopicInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L215>)
+## type [TopicInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L235>)
 
 TopicInfo describes a topic. It carries the message's schema; its subscriptions are the nodes it delivers to.
 
@@ -2143,7 +2252,7 @@ type TopicInfo = core.TopicSpec
 ```
 
 <a name="Trace"></a>
-## type [Trace](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L267>)
+## type [Trace](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L282>)
 
 Trace is the spans sharing one trace ID, root first. The root span is the one with no parent in the trace; the others follow it.
 
@@ -2152,7 +2261,7 @@ type Trace = core.TraceMessage
 ```
 
 <a name="TransitionEvent"></a>
-## type [TransitionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L255>)
+## type [TransitionEvent](<https://github.com/kitsunium/sdk/blob/main/framework/model/runtime.go#L270>)
 
 TransitionEvent is one workflow instance moving between states. It names the workflow, the entity, the event and the states it went from and to.
 
@@ -2161,7 +2270,7 @@ type TransitionEvent = core.TransitionEvent
 ```
 
 <a name="TransitionInfo"></a>
-## type [TransitionInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L241>)
+## type [TransitionInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L261>)
 
 TransitionInfo is one arrow of a workflow. It names the event that fires it and the states it goes from and to.
 
@@ -2170,7 +2279,7 @@ type TransitionInfo = core.TransitionSpec
 ```
 
 <a name="WakeSource"></a>
-## type [WakeSource](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L285>)
+## type [WakeSource](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L305>)
 
 WakeSource is one thing that wakes a declared loop. Kind says whether a topic, a period \(Every\) or a function wakes the loop.
 
@@ -2179,7 +2288,7 @@ type WakeSource = core.WakeSourceMessage
 ```
 
 <a name="WorkflowInfo"></a>
-## type [WorkflowInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L228>)
+## type [WorkflowInfo](<https://github.com/kitsunium/sdk/blob/main/framework/model/node_info.go#L248>)
 
 WorkflowInfo describes a state machine bound to a store. It carries the states and the transitions between them, and the store it lives in.
 

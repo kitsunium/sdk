@@ -75,6 +75,8 @@ go_test(
     name = "sqlite_test",
     srcs = [
         "filestore_test.go",
+        "keys_test.go",
+        "revisions_test.go",
         "sqlite_internal_test.go",
         "sqlite_test.go",
         "subsystems_test.go",
@@ -83,6 +85,7 @@ go_test(
     deps = [
         "//framework/kit",
         "//framework/kit/server",
+        "//framework/kit/storetest",
         "//framework/model",
         "//pkg/v1/secret",
         "//pkg/v1/sql",

@@ -38,16 +38,18 @@ const (
 )
 
 // The HKDF labels of the index key's subkeys: one per kind of reference, so
-// that a subject's reference and a record's never meet. ADR 0004 derives its
-// database index keys from the same secret under labels of its own.
+// that a subject's reference and a record's never meet — and one for the
+// index keys a store on a database files (ADR 0004).
 const (
 	subjectLabel = "kit/v1 subject reference"
 	recordLabel  = "kit/v1 record reference"
+	indexLabel   = "kit/v1 database index key"
 )
 
-// referenceKeys are the subkeys of index-key a run references with.
+// referenceKeys are the subkeys of index-key a run references with, and
+// files index keys on a database with.
 type referenceKeys struct {
-	subject, record mac.Key
+	subject, record, index mac.Key
 }
 
 // referenceKeys derives the subkeys of index-key once per run: KIT_INDEX_KEY
@@ -87,7 +89,7 @@ func (a *App) deriveKeys(ctx context.Context) (_ *referenceKeys, made bool, _ er
 // subkeysOf derives the reference keys from the index key's bytes.
 func subkeysOf(ikm []byte) (*referenceKeys, error) {
 	k := &referenceKeys{}
-	for label, key := range map[string]*mac.Key{subjectLabel: &k.subject, recordLabel: &k.record} {
+	for label, key := range map[string]*mac.Key{subjectLabel: &k.subject, recordLabel: &k.record, indexLabel: &k.index} {
 		raw, err := kdf.Subkey(kdf.HKDFSHA256, ikm, nil, label, kdf.KeyLen)
 		if err == nil {
 			*key, err = mac.NewKey(raw)
@@ -147,6 +149,24 @@ func (k *referenceKeys) subjectRef(identity string) string {
 // recordRef is the reference of a store's record.
 func (k *referenceKeys) recordRef(store, key string) string {
 	return k.ref(k.record, store+"\x00"+key)
+}
+
+// indexKey is an index key as a store on a database files it: its keyed
+// hash, HMAC-SHA256 under the index subkey, of the index's name and the
+// key. An index is an equality lookup, which the hash keeps; the key itself
+// never reaches a table.
+func (k *referenceKeys) indexKey(index, key string) []byte {
+	tag, err := mac.Tag(mac.HMACSHA256, k.index, []byte(index+"\x00"+key))
+	if err != nil {
+		return nil // unreachable: HMAC-SHA256 is always registered
+	}
+	return tag
+}
+
+// indexKeyID names the index subkey without saying it: what a store's index
+// rows were filed with, which kit files again when it changes.
+func (k *referenceKeys) indexKeyID() string {
+	return hex.EncodeToString(k.indexKey("kit:fingerprint", "kit/v1")[:8])
 }
 
 // ref is the reference of text under key: a truncated HMAC that names it

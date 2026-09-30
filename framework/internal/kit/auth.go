@@ -404,7 +404,7 @@ func (a *App) appProblems() []model.Diagnostic {
 	a.mu.Lock()
 	settings := slices.Clone(a.settingProblems)
 	a.mu.Unlock()
-	return slices.Concat(a.authProblems(), a.principalProblems(), a.portProblems(), a.replaceProblems(), a.mailerProblems(), a.secretProblems(), a.databaseProblems(), settings, a.privacyProblems(), a.profileProblems())
+	return slices.Concat(a.authProblems(), a.principalProblems(), a.portProblems(), a.replaceProblems(), a.mailerProblems(), a.secretProblems(), a.sealingProblems(), a.databaseProblems(), settings, a.privacyProblems(), a.profileProblems())
 }
 
 // authMechanic is the first step of a guarded endpoint's pipeline: the app's

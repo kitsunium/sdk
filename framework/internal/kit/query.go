@@ -12,9 +12,10 @@ import (
 // Query reads and changes nothing: a typed input, a typed result, and one
 // handler — the one declared with it. Declare it with [Service.Query]; ask it
 // with [Query.Ask] from any building block, which draws an asks edge from
-// the caller; give it a route with [Query.Expose]. The static analysis warns
-// of a query whose code writes a store, fires a workflow, publishes, sends a
-// mail or dispatches a command.
+// the caller; give it a route with [Query.Expose]. A query is internal until
+// it is exposed: how one service reads what another keeps. The static
+// analysis warns of a query whose code writes a store, fires a workflow,
+// publishes, sends a mail or dispatches a command.
 //
 // A question runs, in this order: the caller's user when the query asks for
 // one ([Auth], implied by [Query.Allow]), the input's validate tags, the
@@ -42,7 +43,7 @@ type queryOptions struct {
 // handler, that reads and changes nothing. Its node is
 // "<service>/query/<name>".
 //
-//	var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /orders")
+//	var MyOrders = Service.Query("my-orders", myOrders, kit.Auth()).Expose("GET /orders", kit.AnyUser())
 //
 //go:noinline
 func (s *Service) Query[Q, R any](name string, handler func(context.Context, Q) (R, error), opts ...QueryConfigurer) *Query[Q, R] {
@@ -96,8 +97,14 @@ func (q *Query[Q, R]) Authorize(fn func(context.Context, Q) error) *Query[Q, R] 
 // of the pipeline the query's. It answers 200 with the result, 204 for
 // [EmptyValue].
 //
+// An exposed query says who may ask it: a permission ([Query.Allow]), a rule
+// ([Query.Authorize]), or, when it declares neither, a marker that it is
+// open on purpose — [Anyone], or [AnyUser] for any signed-in user. The
+// start refuses an exposure that says none of them. A query nobody exposes
+// is internal: the code that needs it asks it.
+//
 //go:noinline
-func (q *Query[Q, R]) Expose(route string, opts ...EndpointConfigurer) *Query[Q, R] {
+func (q *Query[Q, R]) Expose(route string, opts ...ExposeConfigurer) *Query[Q, R] {
 	expose[Q, R](q.svc, callerPos(), q, route, opts)
 	return q
 }

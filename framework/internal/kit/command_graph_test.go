@@ -41,7 +41,7 @@ func TestACommandDescribesItself(t *testing.T) {
 	if !slices.Equal(place.Permissions, []model.Permission{{Action: "place", Resource: "order"}}) {
 		t.Errorf("place-order's permissions: %+v", place.Permissions)
 	}
-	expectPipeline(t, "place-order", place.Pipeline, "auth", "validate", "authorize")
+	expectPipeline(t, "place-order", place.Pipeline, "auth", "validate", "transaction", "authorize")
 }
 
 // A command's rule points at its function, and its key is said; a queued
@@ -52,13 +52,13 @@ func TestACommandDescribesItsRuleItsKeyItsQueue(t *testing.T) {
 	if !cancel.Key || cancel.Authorize == nil || !strings.HasSuffix(cancel.Authorize.Func, ".CounterOwns") {
 		t.Errorf("cancel-order: %+v", cancel)
 	}
-	expectPipeline(t, "cancel-order", cancel.Pipeline, "auth", "validate", "key", "authorize")
+	expectPipeline(t, "cancel-order", cancel.Pipeline, "auth", "validate", "key", "transaction", "authorize")
 	queued := g.Node("lab/command/queued").Command
 	want := model.CommandInfo{Mode: model.ModeQueued, MaxDeliveries: 3, Parallelism: 2, Queue: "memory"}
 	if got := (model.CommandInfo{Mode: queued.Mode, MaxDeliveries: queued.MaxDeliveries, Parallelism: queued.Parallelism, Queue: queued.Queue}); !reflect.DeepEqual(got, want) || queued.DeadLetters == nil {
 		t.Errorf("a queued command: %+v", queued)
 	}
-	expectPipeline(t, "a queued command", queued.Pipeline, "key", "queue")
+	expectPipeline(t, "a queued command", queued.Pipeline, "key", "queue", "transaction")
 }
 
 // A query's node says the same, without mode, key or queue.
@@ -108,7 +108,7 @@ func brokenCommands() *kit.Service {
 		Key(func(in LabInput) string { return in.Note })
 	s.Command("exposed", func(context.Context, LabInput) (int, error) { return 1, nil }).
 		Expose("FETCH /x").
-		Expose("POST /x", kit.Private()).
+		Expose("POST /x", kit.Anyone(), kit.AnyUser()).
 		Expose("POST /x2", kit.Name("exposed-2"), kit.Auth()).
 		Expose("POST /x3", kit.Name("exposed-2"))
 	s.Query("nil", (func(context.Context, LabInput) (int, error))(nil))
@@ -147,7 +147,8 @@ func TestCommandDeclarationProblems(t *testing.T) {
 		"broken/command/twice is given two Authorize",
 		"command broken/command/twice is given two keys",
 		`route "FETCH /x"`,
-		"the exposure of broken/command/exposed is private",
+		"the exposure of broken/command/exposed is marked both kit.Anyone() and kit.AnyUser()",
+		"the exposure of broken/command/exposed does not say who may run it",
 		"the exposure of broken/command/exposed asks for authentication itself",
 		`already declares a endpoint named "exposed-2"`,
 		"query broken/query/nil has a nil handler",
@@ -161,11 +162,11 @@ func TestCommandDeclarationProblems(t *testing.T) {
 // A builder's problem is said where the builder was called.
 func TestABuildersProblemIsSaidWhereItIsCalled(t *testing.T) {
 	where := map[string]string{
-		"is allowed by a nil policy":                        "Allow(nil, ",
-		"is authorized by a nil function":                   "Authorize(nil)",
-		"is keyed by a nil function":                        "Key(nil)",
-		"is given two keys":                                 "Key(func(in LabInput) string { return in.Note })",
-		"the exposure of broken/command/exposed is private": `Expose("POST /x", kit.Private())`,
+		"is allowed by a nil policy":                    "Allow(nil, ",
+		"is authorized by a nil function":               "Authorize(nil)",
+		"is keyed by a nil function":                    "Key(nil)",
+		"is given two keys":                             "Key(func(in LabInput) string { return in.Note })",
+		"is marked both kit.Anyone() and kit.AnyUser()": `Expose("POST /x", kit.Anyone(), kit.AnyUser())`,
 	}
 	for _, d := range brokenProblems(t) {
 		for text, fragment := range where {
@@ -186,7 +187,7 @@ func commandSourcesPointAtTheirDeclarations(t *testing.T) {
 		"counter/endpoint/place-order": `Expose("POST /orders")`,
 		"counter/command/cancel-order": `var CounterCancel = Counter.Command("cancel-order"`,
 		"counter/query/my-orders":      `var CounterMine = Counter.Query("my-orders"`,
-		"counter/endpoint/my-orders":   `Expose("GET /orders")`,
+		"counter/endpoint/my-orders":   `Expose("GET /orders", kit.AnyUser())`,
 		"lab/command/keyed":            `LabKeyed = Lab.Command("keyed"`,
 	} {
 		n := g.Node(id)

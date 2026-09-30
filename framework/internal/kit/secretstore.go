@@ -351,23 +351,93 @@ func guardSecretsDir(dir string) error {
 
 // resolve finds where a declared secret is, for its run: its variable first,
 // then the store the environment keeps — where a generated secret kit
-// rotates lives even before its first version is made.
+// rotates lives even before its first version is made, and an optional one
+// set nowhere is looked for at every use.
 func (st *secretStores) resolve(ctx context.Context, a *App, s *Secret) (*secretRun, error) {
-	variable := variableOf(appPrefix(a.name), s.key())
-	store, from, err := st.find(ctx, st.env, s.stored(), s.stored())
+	variable := s.variable(a)
+	store, from, err := st.find(ctx, st.envOf(s), s.envName(), s.keptName())
+	if s.opts.optional && (err == nil || errors.Is(err, secret.NotFound)) {
+		// Given or not, it is looked for at every use where the start looks:
+		// it may come — `secrets set` while the product runs — and go.
+		return &secretRun{app: a, store: firstFound{env: st.envOf(s), kept: st.kept, envName: s.envName(), keptName: s.keptName()}, name: s.keptName()}, nil
+	}
 	switch {
 	case err == nil:
-		return &secretRun{app: a, store: store, name: s.stored(), from: from, pinned: s.opts.generated && from == model.SecretFromEnv}, nil
+		return s.foundRun(a, store, from), nil
 	case !errors.Is(err, secret.NotFound):
 		return nil, failure(CodeSecretRead, "SECRET_READ", "a secret could not be read", err, errs.String("secret", s.id), errs.String("variable", variable))
 	case s.opts.generated && st.kept != nil:
-		return &secretRun{app: a, store: st.kept, name: s.stored(), from: st.from}, nil
+		return &secretRun{app: a, store: st.kept, name: s.keptName(), from: st.from}, nil
 	case s.opts.generated:
 		return nil, failure(CodeSecretStore, "SECRET_NOT_KEPT", "a generated secret needs a store kit can write: KIT_SECRETS=file:<dir> or memory, or its variable to pin it", nil,
 			errs.String("secret", s.id), errs.String("variable", variable))
 	}
 	return nil, failure(CodeSecretMissing, "SECRET_MISSING", "a provided secret is not set", nil, errs.String("secret", s.id), errs.String("variable", variable))
 }
+
+// foundRun is the run of a secret found in store, from where from says: the
+// variable's name when the environment holds it, else the kept one; pinned
+// when a generated secret is given by its variable.
+func (s *Secret) foundRun(a *App, store secret.Store, from string) *secretRun {
+	name := s.keptName()
+	if from == model.SecretFromEnv {
+		name = s.envName()
+	}
+	return &secretRun{app: a, store: store, name: name, from: from, pinned: s.opts.generated && from == model.SecretFromEnv}
+}
+
+// firstFound is an optional secret's store while the app runs: every read
+// looks again where the start looks — its variable, then the store the
+// environment keeps — so a secret given after the start is found at its
+// next use, the variable first as ever. It only reads: `secrets set` writes
+// the kept store itself.
+type firstFound struct {
+	env, kept         secret.Store
+	envName, keptName string
+}
+
+// Get returns the current version: the variable's, else the kept store's.
+func (f firstFound) Get(ctx context.Context, _ string) (secret.Versioned, error) {
+	if f.env != nil {
+		if v, err := f.env.Get(ctx, f.envName); !errors.Is(err, secret.NotFound) {
+			return v, err
+		}
+	}
+	if f.kept == nil {
+		return secret.Versioned{}, secret.NotFound
+	}
+	return f.kept.Get(ctx, f.keptName)
+}
+
+// Versions returns the versions of whichever holds it, the variable first.
+func (f firstFound) Versions(ctx context.Context, _ string) ([]secret.Versioned, error) {
+	if f.env != nil {
+		if vs, err := f.env.Versions(ctx, f.envName); !errors.Is(err, secret.NotFound) {
+			return vs, err
+		}
+	}
+	if f.kept == nil {
+		return nil, secret.NotFound
+	}
+	return f.kept.Versions(ctx, f.keptName)
+}
+
+// Put is refused: the product's code never writes a provided secret.
+//
+//ktn:allow-unused-param: the secret.Store interface passes what a read-only store refuses unread
+func (firstFound) Put(_ context.Context, _ string, _ secret.Value) (secret.Versioned, error) {
+	return secret.Versioned{}, secret.ReadOnly
+}
+
+// Prune is refused: the product's code never prunes a provided secret.
+//
+//ktn:allow-unused-param: the secret.Store interface passes what a read-only store refuses unread
+func (firstFound) Prune(_ context.Context, _ string, _ int) error { return secret.ReadOnly }
+
+// Names is empty: an optional secret's store lists nothing.
+//
+//ktn:allow-unused-param: the secret.Store interface passes a context an empty listing does not take
+func (firstFound) Names(_ context.Context) ([]string, error) { return nil, nil }
 
 // find returns the store holding a secret: env under name, then the kept
 // store under keptName. It reports secret.NotFound when neither holds it,
@@ -420,14 +490,17 @@ func settingFrom(from string) string {
 	return model.SettingStore
 }
 
-// generatesSecrets reports whether the app declares a secret kit makes.
+// generatesSecrets reports whether the product declares a secret kit makes:
+// kit's own data-key is not the product's, and seals nothing without a data
+// directory.
 func (a *App) generatesSecrets() bool {
-	return a.anySecret(func(s *Secret) bool { return s.opts.generated })
+	return a.anySecret(func(s *Secret) bool { return s.opts.generated && !s.kitOwn() })
 }
 
-// declaresSecrets reports whether the app declares a secret.
+// declaresSecrets reports whether the product declares a secret — under its
+// own prefix, which kit's own does not use.
 func (a *App) declaresSecrets() bool {
-	return a.anySecret(func(*Secret) bool { return true })
+	return a.anySecret(func(s *Secret) bool { return !s.kitOwn() })
 }
 
 // anySecret reports whether one of the app's secrets satisfies ok.

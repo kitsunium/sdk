@@ -60,11 +60,20 @@ var (
 		reflect.TypeFor[netip.AddrPort](): holdsIP,
 		reflect.TypeFor[netip.Prefix]():   holdsIP,
 	}
+
+	// credentialNames are fragments of a name that say a credential, which is
+	// what secret holds: a hash, a token, a key. A secret field whose name says
+	// one is not warned of, whatever else it says — an e-mail's hash, a
+	// phone's token.
+	credentialNames = []string{"password", "passwd", "passphrase", "token", "key", "hash", "digest", "secret", "salt", "credential"}
 )
 
 // The name heuristic (ADR 0006 §1): kit warns of a field that has no class
 // and reads like personal data — its name mentions some, and its type can
-// hold what the name mentions —, once per field where it is declared.
+// hold what the name mentions —, once per field where it is declared. It
+// warns too of a field tagged secret that reads like personal data and not
+// like a credential: secret was once the only word that hid a value, and
+// means a credential since ADR 0006 — never exported, listed as one.
 
 // holding is what a value of a Go type can hold, as the name heuristic asks
 // it.
@@ -111,6 +120,20 @@ func looksPersonal(t reflect.Type, names ...string) bool {
 		}
 	}
 	return false
+}
+
+// secretLooksPersonal reports whether a field tagged secret reads like
+// personal data rather than a credential: none of its names says a
+// credential, and one of them mentions personal data its type can hold
+// (looksPersonal).
+func secretLooksPersonal(t reflect.Type, names ...string) bool {
+	for _, name := range names {
+		n := normalName(name)
+		if slices.ContainsFunc(credentialNames, func(f string) bool { return strings.Contains(n, f) }) {
+			return false
+		}
+	}
+	return looksPersonal(t, names...)
 }
 
 // normalName lower-cases a name and keeps its letters and digits:
@@ -217,6 +240,15 @@ func declaredAt(t reflect.Type, index []int) declaredField {
 func looksPersonalWarning(t reflect.Type, index []int, goName string) fieldWarning {
 	at := declaredAt(t, index)
 	return fieldWarning{field: at, said: say("classify.looks-personal", "field", fieldLabel(at.owner, goName))}
+}
+
+// secretPersonalWarning warns of the field at index in the struct t, tagged
+// secret, whose name reads like personal data: kit never exports a secret,
+// and the register lists it as a credential (ADR 0006, the migration from
+// secret to personal).
+func secretPersonalWarning(t reflect.Type, index []int, goName string) fieldWarning {
+	at := declaredAt(t, index)
+	return fieldWarning{field: at, said: say("classify.secret-personal", "field", fieldLabel(at.owner, goName))}
 }
 
 // uniqueWarnings keeps the first warning of each declared field, in order.

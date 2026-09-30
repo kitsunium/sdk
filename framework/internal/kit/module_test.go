@@ -53,9 +53,9 @@ var (
 
 // Screen decides whether a review shows: the product may say, and the
 // module's own rule answers otherwise.
-var Screen = Screening.Port[Review, Verdict]("screen", kit.Fallback(ScreenAPI))
+var Screen = Screening.Port[Review, Verdict]("screen", kit.Fallback(ByLength))
 
-var ScreenAPI = Screening.Endpoint("POST /internal/screen", ScreenByLength, kit.Private())
+var ByLength = Screening.Query("by-length", ScreenByLength)
 
 var Verdicts = Screening.Store("verdicts", func(v Verdict) string { return v.ID })
 

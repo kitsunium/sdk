@@ -44,6 +44,8 @@ var (
 	// hashPassword is the SDK's hashing with kit's algorithm: the tests
 	// count its calls.
 	hashPassword func(pw []byte) (string, error) = func(pw []byte) (string, error) { return password.Hash(password.PBKDF2SHA256, pw) }
+	// isCommon is the SDK's list of the most common passwords (NotCommon).
+	isCommon = password.IsCommon
 
 	// errPasswordMoved ends a write whose hash another write changed since it
 	// was read.
@@ -65,8 +67,9 @@ type dummyHashes struct {
 }
 
 // Set sets the password of the record under key — a reset flow, behind a
-// reset token: it checks the policy — the length, and with NotReused the
-// former passwords —, hashes the password with the SDK's password.Hash and
+// reset token: it checks the policy — the length, the most common passwords,
+// and with NotReused the former passwords —, hashes the password with the
+// SDK's password.Hash and
 // stores the hash; the hash it replaces goes to the field's history. A
 // password the policy refuses is an [Invalid] error, which says it was used
 // recently, never which one; a missing record is a [NotFound].
@@ -166,6 +169,9 @@ func (p *PasswordPolicyService[T]) set(ctx context.Context, key string, password
 	if utf8.RuneCount(password) < p.minLength {
 		return Invalid(fmt.Sprintf("a password has at least %d characters", p.minLength))
 	}
+	if p.notCommon && isCommon(password) {
+		return Invalid("this password is among the most common ones: choose another one")
+	}
 	for range setAttempts {
 		err := p.attempt(ctx, key, password, verified)
 		if !errors.Is(err, errPasswordMoved) {
@@ -233,7 +239,7 @@ func (p *PasswordPolicyService[T]) formerHashes(ctx context.Context, key string)
 	var out []string
 	for _, e := range all[p.member.pointer] {
 		var hash string
-		if json.Unmarshal(fromHistory(e.Value), &hash) == nil && hash != "" {
+		if json.Unmarshal(e.Value, &hash) == nil && hash != "" {
 			out = append(out, hash)
 		}
 		if len(out) == p.notReused {

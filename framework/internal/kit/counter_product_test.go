@@ -129,7 +129,7 @@ var CounterReindex = Counter.Command("reindex", CounterReindexAll, kit.Queued(),
 	Allow(CounterPolicy, "reindex", "order").
 	Expose("POST /reindex")
 
-var CounterMine = Counter.Query("my-orders", CounterMyOrders, kit.Auth()).Expose("GET /orders")
+var CounterMine = Counter.Query("my-orders", CounterMyOrders, kit.Auth()).Expose("GET /orders", kit.AnyUser())
 
 var CounterGet = Counter.Query("order", CounterGetOrder).Authorize(CounterOwns)
 
@@ -279,15 +279,15 @@ var (
 
 	LabSlow = Lab.Command("slow", func(ctx context.Context, _ LabInput) (kit.EmptyValue, error) {
 		return kit.EmptyValue{}, labSlow.pass(ctx)
-	}, kit.Timeout(50*time.Millisecond)).Expose("POST /lab/slow")
+	}, kit.Timeout(50*time.Millisecond)).Expose("POST /lab/slow", kit.Anyone())
 
 	LabCrowded = Lab.Query("crowded", func(ctx context.Context, _ LabInput) (kit.EmptyValue, error) {
 		return kit.EmptyValue{}, labCrowd.pass(ctx)
-	}, kit.Bulkhead(1)).Expose("POST /lab/crowded")
+	}, kit.Bulkhead(1)).Expose("POST /lab/crowded", kit.Anyone())
 
 	LabPanics = Lab.Command("panics", func(context.Context, LabInput) (int, error) {
 		panic("canary: do-not-leak-command-7f3e")
-	}).Expose("POST /lab/panics")
+	}).Expose("POST /lab/panics", kit.Anyone())
 
 	// LabHidden refuses everyone with a text of its own, which the caller
 	// never reads; LabBroken cannot tell, which is a refusal too.

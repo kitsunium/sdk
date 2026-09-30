@@ -78,9 +78,10 @@ func (w *Watch) consume(ctx context.Context, a *App, r *watchRun, loop *loopStat
 }
 
 // deliver is the queue's handler: in the write's trace, a span on the watch
-// from the store that was written — the delivers edge —, the Studio's fault
-// first, then the handler, told what the notice says and the store's marked
-// fields.
+// from the store that was written — the delivers edge —, then the
+// handler, told what the notice says and the store's marked fields, in a
+// context marked as its own (handling): what it writes there,
+// a watch that hears its own module's stores does not hear back.
 func (w *Watch) deliver(a *App, r *watchRun, loop *loopState) queue.Handler {
 	c := consumer{a: a, loop: loop, node: w.id, name: w.name, wake: model.WakeChange}
 	return func(ctx context.Context, d queue.Delivery) error {
@@ -98,7 +99,7 @@ func (w *Watch) deliver(a *App, r *watchRun, loop *loopState) queue.Handler {
 			if sp.detailed() {
 				sp.request(written)
 			}
-			return w.handler(ctx, written)
+			return w.handler(handling(ctx, w), written)
 		})
 	}
 }

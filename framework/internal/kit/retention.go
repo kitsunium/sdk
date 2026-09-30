@@ -21,6 +21,7 @@ const (
 	optionAnonymise = "anonymise"
 	optionPurpose   = "purpose"
 	optionErasure   = "delete-on-erasure"
+	optionByProduct = "by-product"
 )
 
 // Retention (ADR 0006 §5). A store says how long its records keep their
@@ -40,11 +41,14 @@ const (
 // record is due — an agenda kept from the store's writes, never a poll —
 // erases and deletes what is due, and folds the store so that what it
 // overwrote leaves its files. KIT_RETENTION sets what it does: on, dry-run
-// (it journals what it would do and changes nothing) or off.
+// (it journals what it would do and changes nothing) or off. A store whose
+// product keeps its retention itself says so (RetentionByProduct): kit runs
+// none there, and asks for none.
 
-// privacyOption is one privacy option of a store: a retention, a hold until
-// an instant, an anonymiser, a purpose. Its function is typed for the
-// store's entity; the store checks the type when it is declared.
+// privacyOption is one privacy option of a store: a retention — kit's, or
+// the product's own —, a hold until an instant, an anonymiser, a purpose.
+// Its function is typed for the store's entity; the store checks the type
+// when it is declared.
 type privacyOption struct {
 	kind string
 	// delay is a fixed delay; setting one read from a setting.
@@ -54,7 +58,8 @@ type privacyOption struct {
 	// fn is func(T) (time.Time, bool) for a retention or a hold, func(*T)
 	// for an anonymiser.
 	fn any
-	// text is a purpose, or a hold's legal ground.
+	// text is a purpose, a hold's legal ground, or the product's own time
+	// limits.
 	text string
 }
 
@@ -69,6 +74,9 @@ type storePrivacy[T any] struct {
 	anonymiseAt   *pos
 	purpose       string
 	erasureDelete bool
+	// byProduct is the retention the product keeps itself, in its own
+	// words (RetentionByProduct); nil when kit keeps it.
+	byProduct *model.ProductRetention
 
 	mu  sync.Mutex
 	run *retentionRun[T]
@@ -164,6 +172,24 @@ func DeleteOnErasure() StoreConfigurer {
 	return &privacyOption{kind: optionErasure}
 }
 
+// RetentionByProduct says the product keeps the store's retention itself:
+// its own code erases and deletes what it no longer needs — a record whose
+// life the product's own rules end, a lifecycle kit cannot read from the
+// entity. limits says, in the product's words, for how long and how, which
+// the register publishes as the store's time limits (GDPR art. 30(1)(f));
+// "" says only that the product keeps them.
+//
+// kit then runs no retention for the store, and warns of neither a missing
+// retention nor a missing subject. Its classified fields keep every other
+// promise: sealed at rest, never shown, exported with their person — when
+// the store names one — and erased by kit.Erase and Store.Erase. It goes
+// with kit.Purpose, kit.HeldUntil, kit.Anonymise and kit.DeleteOnErasure;
+// with kit.EraseAfter, kit.EraseAt, kit.DeleteAfter or kit.DeleteAt it is
+// refused: a store's retention is kit's or the product's, never both.
+func RetentionByProduct(limits string) StoreConfigurer {
+	return &privacyOption{kind: optionByProduct, text: limits}
+}
+
 // wait is the rule's delay: its setting's value in the app that runs it, or
 // the duration it was declared with.
 func (r *retentionRule[T]) wait() time.Duration {
@@ -202,16 +228,18 @@ func (s *StoreService[T]) declarePrivacy(svc *Service, opts []*privacyOption) {
 	for _, o := range opts {
 		d.take(o)
 	}
+	if d.p.byProduct != nil && d.p.hasRetention() {
+		svc.problem(s.decl, s.id, "privacy.by-product-retention", "store", s.name)
+	}
 	s.privacy = d.p
 }
 
 // take checks one option and keeps it.
 func (d *privacyDecl[T]) take(o *privacyOption) {
+	if d.takeWords(o) {
+		return
+	}
 	switch o.kind {
-	case optionPurpose:
-		d.p.purpose = strings.TrimSpace(o.text)
-	case optionErasure:
-		d.p.erasureDelete = true
 	case optionAnonymise:
 		d.anonymiser(o)
 	case optionHeld:
@@ -223,6 +251,25 @@ func (d *privacyDecl[T]) take(o *privacyOption) {
 	default:
 		// Every other kind has nothing to check or name here.
 	}
+}
+
+// takeWords keeps an option that says something of the store rather than
+// a function of its records — its purpose, its deletion on erasure, the
+// retention its product keeps — and reports whether o was one.
+func (d *privacyDecl[T]) takeWords(o *privacyOption) bool {
+	switch o.kind {
+	case optionPurpose:
+		d.p.purpose = strings.TrimSpace(o.text)
+	case optionErasure:
+		d.p.erasureDelete = true
+	case optionByProduct:
+		if !d.refused(o, true, false, d.p.byProduct != nil) {
+			d.p.byProduct = &model.ProductRetention{Limits: strings.TrimSpace(o.text)}
+		}
+	default:
+		return false
+	}
+	return true
 }
 
 // anonymiser keeps the store's Anonymise function.
@@ -321,6 +368,8 @@ func optionName(o *privacyOption) string {
 		return "kit.HeldUntil"
 	case optionAnonymise:
 		return "kit.Anonymise"
+	case optionByProduct:
+		return "kit.RetentionByProduct"
 	default:
 		// Every other kind has nothing to check or name here.
 	}

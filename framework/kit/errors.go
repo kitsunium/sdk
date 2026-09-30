@@ -151,6 +151,9 @@ const (
 	// CodeDatabaseConfig is CodeDatabaseConfig.
 	CodeDatabaseConfig errs.Code = ikit.CodeDatabaseConfig
 
+	// CodeTransactionSpan is CodeTransactionSpan.
+	CodeTransactionSpan errs.Code = ikit.CodeTransactionSpan
+
 	// Privacy (ADR 0006).
 	CodePrivacyKey errs.Code = ikit.CodePrivacyKey
 
@@ -189,6 +192,30 @@ const (
 
 	// Watches (ADR 0008).
 	CodeWatchQueue errs.Code = ikit.CodeWatchQueue
+
+	// Sealing at rest (ADR 0006, step 3).
+	CodeSealKey errs.Code = ikit.CodeSealKey
+
+	// CodeSealWrite is CodeSealWrite.
+	CodeSealWrite errs.Code = ikit.CodeSealWrite
+
+	// CodeSealOpen is CodeSealOpen.
+	CodeSealOpen errs.Code = ikit.CodeSealOpen
+
+	// CodeSealRewrap is CodeSealRewrap.
+	CodeSealRewrap errs.Code = ikit.CodeSealRewrap
+
+	// CodeSealShred is CodeSealShred.
+	CodeSealShred errs.Code = ikit.CodeSealShred
+
+	// Revisions (ADR 0007 §3).
+	CodeRevisionRead errs.Code = ikit.CodeRevisionRead
+
+	// CodeRevisionWrite is CodeRevisionWrite.
+	CodeRevisionWrite errs.Code = ikit.CodeRevisionWrite
+
+	// CodeRevisionDecode is CodeRevisionDecode.
+	CodeRevisionDecode errs.Code = ikit.CodeRevisionDecode
 
 	// The framework's own signals and refusals, typed since the move into the
 	// SDK (rule 2: no fmt.Errorf, no errors.New in production code).

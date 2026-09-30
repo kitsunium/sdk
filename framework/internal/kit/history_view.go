@@ -22,13 +22,13 @@ import (
 // data browser would show the field.
 
 // historyInfo describes what the store remembers, for the model: nil when
-// it remembers nothing and has no password policy.
+// it remembers nothing, keeps no revisions and has no password policy.
 func (s *StoreService[T]) historyInfo(a *App) *model.StoreHistory {
 	keeps := s.keeps()
-	if len(keeps) == 0 && len(s.passwords) == 0 {
+	if len(keeps) == 0 && len(s.passwords) == 0 && s.revisions == 0 {
 		return nil
 	}
-	info := &model.StoreHistory{Fields: slices.Sorted(maps.Keys(keeps))}
+	info := &model.StoreHistory{Revisions: s.revisions, Fields: slices.Sorted(maps.Keys(keeps))}
 	for _, p := range s.passwords {
 		info.Passwords = append(info.Passwords, p.info(a))
 	}
@@ -61,8 +61,12 @@ func (h *historied[T]) weigh(ctx context.Context) (kept int, size int64) {
 	return kept, size
 }
 
-// placeholder is a redacted value, as JSON.
-var placeholder = json.RawMessage(strconv.Quote(redact.Placeholder))
+// placeholder is a redacted value, as JSON; sealedShown a value sealed at
+// rest, as the Studio shows it.
+var (
+	placeholder = json.RawMessage(strconv.Quote(redact.Placeholder))
+	sealedShown = json.RawMessage(strconv.Quote(model.SealedPlaceholder))
+)
 
 // shownFormer is a former value of the field at pointer as the Studio may
 // show it: none for a secret's, the placeholder for a personal or special
@@ -117,7 +121,12 @@ func (s *StoreService[T]) formerShown(ctx context.Context, key string) (model.Re
 	plan, out := s.plan(), model.RecordHistory{Fields: map[string][]model.Former{}}
 	for p, list := range all {
 		for _, e := range list {
-			out.Fields[p] = append(out.Fields[p], Former{Value: plan.shownFormer(p, fromHistory(e.Value)), Until: e.Until, By: e.By})
+			shown := plan.shownFormer(p, e.Value)
+			if e.sealed && shown != nil {
+				// A former value sealed at rest is shown sealed (ADR 0006 §9).
+				shown = sealedShown
+			}
+			out.Fields[p] = append(out.Fields[p], Former{Value: shown, Until: e.Until, By: e.By})
 		}
 	}
 	return out, nil

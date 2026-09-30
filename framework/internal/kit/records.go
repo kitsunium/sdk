@@ -228,7 +228,13 @@ func (s *StoreService[T]) clearMembers(ctx context.Context, key string, members 
 	case err != nil:
 		return "", err
 	}
-	return subject, nil
+	// The record's versions are cleared of what it clears (ADR 0007 §4).
+	return subject, s.eraseVersions(ctx, key, func(v *T) {
+		rv := reflect.ValueOf(v).Elem()
+		for _, m := range members {
+			clearPath(rv, m.path)
+		}
+	})
 }
 
 // recordDelete deletes the record key for a module, for reason.

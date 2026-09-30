@@ -49,6 +49,50 @@ type databaseRun struct {
 	checkedAt time.Time
 	problem   string
 	sets      []model.MigrationSet
+	// tm is the database's transaction manager, which its stores and kit's
+	// transactions run on; callTimeout bounds each store call
+	// (<name>-timeout); registry is kit's record of its tables there.
+	tm          sql.Transactor
+	callTimeout time.Duration
+	registry    *tableRegistry
+}
+
+// transactor is the database's transaction manager while it is open, nil
+// otherwise.
+func (r *databaseRun) transactor() sql.Transactor {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.tm
+}
+
+// open reports whether the database is open: its stores then run on it.
+func (r *databaseRun) open() bool {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return r.state == model.DatabaseOpen && r.tm != nil
+}
+
+// said is a failure of the database's transaction manager in kit's words:
+// Unavailable, deadline_exceeded, never a driver's.
+func (r *databaseRun) said(err error) error {
+	if refusal := sqlStoreRefusal("database "+r.d.name, err); refusal != nil {
+		return refusal
+	}
+	if ke, ok := errors.AsType[*Error](err); ok && ke != nil {
+		return err
+	}
+	return Unavailable(fmt.Sprintf("database %q did not open a transaction", r.d.name)).Wrap(err)
+}
+
+// runOf is the run of database d in this run of the app, nil when it has
+// none.
+func (a *App) runOf(d *database) *databaseRun {
+	for _, r := range a.databaseRuns() {
+		if r.d == d {
+			return r
+		}
+	}
+	return nil
 }
 
 // newDatabaseRuns makes the run of each database the app declares, closed
@@ -114,6 +158,7 @@ type opened struct {
 	from string
 	pool *stdsql.DB
 	cfg  sql.Config
+	tm   sql.Transactor
 }
 
 // openDatabase reads the database's URL where the environment keeps it,
@@ -140,7 +185,12 @@ func (a *App) openDatabase(ctx context.Context, d *database) (*opened, error) {
 		_ = pool.Close()
 		return nil, err
 	}
-	return &opened{url: desc, from: from, pool: pool, cfg: cfg}, nil
+	tm, err := sql.NewTransactor(cfg)
+	if err != nil {
+		_ = pool.Close()
+		return nil, dbFailure(CodeDatabaseConfig, "DATABASE_POOL", fmt.Sprintf("the pool of database %q cannot be set up: %s", d.name, errs.PublicOf(err)), a.dbFields(d, &desc)...)
+	}
+	return &opened{url: desc, from: from, pool: pool, cfg: cfg, tm: tm}, nil
 }
 
 // dbFields are a database's error fields: its name, its URL's variable and,
@@ -224,7 +274,7 @@ func (a *App) startDatabase(ctx context.Context, r *databaseRun) error {
 			logger.String("database", r.d.name), logger.String("variable", a.urlVariable(r.d)))
 		return nil
 	}
-	r.opened(o)
+	r.opened(o, resolvedSetting(a, r.d.timeout))
 	if err := a.bringUp(ctx, r, o); err != nil {
 		r.failed(err)
 		if cerr := r.close(); cerr != nil {
@@ -239,20 +289,23 @@ func (a *App) startDatabase(ctx context.Context, r *databaseRun) error {
 	return nil
 }
 
-// bringUp runs an opened database's migrations, then its check.
+// bringUp checks an opened database — one that does not answer fails the
+// start as unavailable —, then runs its migrations, kit's own first, which
+// make its stores' tables.
 func (a *App) bringUp(ctx context.Context, r *databaseRun, o *opened) error {
-	sets, err := a.migrateAtStart(ctx, r.d, &o.cfg)
-	r.mu.Lock()
-	r.sets = sets
-	r.mu.Unlock()
-	if err != nil {
+	if err := a.checkDatabase(ctx, r); err != nil {
 		return err
 	}
-	return a.checkDatabase(ctx, r)
+	sets, registry, err := a.migrateAtStart(ctx, r.d, o)
+	r.mu.Lock()
+	r.sets, r.registry = sets, registry
+	r.mu.Unlock()
+	return err
 }
 
-// opened remembers the pool the run opened, and its checker.
-func (r *databaseRun) opened(o *opened) {
+// opened remembers the pool the run opened, its checker and its
+// transaction manager.
+func (r *databaseRun) opened(o *opened, callTimeout time.Duration) {
 	// A checker that cannot be built leaves none: every check then reports
 	// the database as not open, which is what it is to kit.
 	checker, err := sql.NewChecker(o.cfg)
@@ -260,7 +313,7 @@ func (r *databaseRun) opened(o *opened) {
 		checker = nil
 	}
 	r.mu.Lock()
-	r.url, r.urlFrom, r.pool, r.cfg, r.checker = o.url, o.from, o.pool, o.cfg, checker
+	r.url, r.urlFrom, r.pool, r.cfg, r.checker, r.tm, r.callTimeout = o.url, o.from, o.pool, o.cfg, checker, o.tm, callTimeout
 	r.mu.Unlock()
 }
 
@@ -286,7 +339,7 @@ func (r *databaseRun) failed(err error) {
 func (r *databaseRun) close() error {
 	r.mu.Lock()
 	pool := r.pool
-	r.pool, r.checker = nil, nil
+	r.pool, r.checker, r.tm, r.registry = nil, nil, nil, nil
 	if r.state == model.DatabaseOpen {
 		r.state = model.DatabaseClosed
 	}

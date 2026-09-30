@@ -5,6 +5,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/kitsunium/sdk/framework/internal/kit"
 )
 
 func TestEndpointRoundTrip(t *testing.T) {
@@ -167,15 +169,20 @@ func TestRateLimit(t *testing.T) {
 	}
 }
 
-func TestPrivateEndpointIsNotRouted(t *testing.T) {
+// An endpoint runs in process as over HTTP: Call runs the same handler, for
+// the node that calls it.
+func TestAnEndpointRunsInProcessAsOverHTTP(t *testing.T) {
 	app := start(t)
-	if r := call(t, app, "GET /internal/count", noBody); r.status != http.StatusNotFound {
-		t.Fatalf("a private endpoint answered over HTTP: %d", r.status)
-	}
 	create(t, app, "x", 1)
-	out, err := CountAPI.Call(t.Context(), struct{}{})
-	if err != nil || out.Items != 1 {
-		t.Fatalf("in-process call: %+v %v", out, err)
+	var over CountOutput
+	if r := call(t, app, "GET /count", noBody); r.status != http.StatusOK {
+		t.Fatalf("the count over HTTP: %d %s", r.status, r.body)
+	} else {
+		r.json(t, &over)
+	}
+	out, err := CountAPI.Call(t.Context(), kit.EmptyValue{})
+	if err != nil || out.Items != 1 || out != over {
+		t.Fatalf("in-process call: %+v %v, over HTTP %+v", out, err, over)
 	}
 }
 

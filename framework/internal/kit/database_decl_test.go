@@ -27,7 +27,6 @@ var declarationProblems = []string{
 	`database "` + strings.Repeat("x", 50) + `": a database's name is 1 to 49`,
 	`database "second" needs the name "second-timeout" for its URL or its tuning, but books/setting/second-timeout already has it`,
 	`database "third" needs the name "third-url" for its URL or its tuning, but audit/secret/third-url already has it`,
-	`database "lite" runs on SQLite and declares migrations`,
 	`database "none" has no engine`,
 	`the app declares database "one" twice`,
 }

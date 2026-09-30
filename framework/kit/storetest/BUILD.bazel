@@ -1,0 +1,17 @@
+load("@rules_go//go:def.bzl", "go_library")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "storetest",
+    srcs = ["storetest.go"],
+    importpath = "github.com/kitsunium/sdk/framework/kit/storetest",
+    visibility = ["//visibility:public"],
+    deps = ["//framework/kit"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":storetest",
+    visibility = ["//visibility:public"],
+)

@@ -66,8 +66,9 @@ type journalLine struct {
 	reason              string
 }
 
-// journal appends one entry to the privacy journal. An app that keeps no
-// personal data has no journal: there is nothing to say.
+// journal appends one entry to the privacy journal — inside a transaction,
+// once it commits: an entry says what stands, and a rollback drops it. An
+// app that keeps no personal data has no journal: there is nothing to say.
 func (a *App) journal(ctx context.Context, l *journalLine) error {
 	_, j := a.privacyStores()
 	if j == nil {
@@ -84,6 +85,15 @@ func (a *App) journal(ctx context.Context, l *journalLine) error {
 	if l.subject != "" {
 		e.Subject = keys.subjectRef(l.subject)
 	}
+	release := func() error { return a.appendJournal(withoutUnit(context.WithoutCancel(ctx)), j, e) }
+	if hold(ctx, heldEffect{node: j.id, release: release}) {
+		return nil
+	}
+	return a.appendJournal(ctx, j, e)
+}
+
+// appendJournal chains e after the journal's last entry and writes it.
+func (a *App) appendJournal(ctx context.Context, j *StoreService[journalRecord], e journalRecord) error {
 	a.privacy.chain.Lock()
 	defer a.privacy.chain.Unlock()
 	if err := a.loadChain(ctx, j); err != nil {

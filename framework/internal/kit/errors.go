@@ -92,6 +92,9 @@ const (
 	CodeDatabaseMigrate     errs.Code = 0x00_04_02_20 // 0.4.2.32 — a database's migrations did not apply, or wait for `migrate up`
 	CodeDatabaseUnavailable errs.Code = 0x00_04_02_21 // 0.4.2.33 — a database did not answer
 	CodeDatabaseConfig      errs.Code = 0x00_04_02_22 // 0.4.2.34 — a database's URL or tuning cannot be used
+	// A transaction wrote a store another database keeps than the one it
+	// belongs to — the data directory counting as one: refused, Invalid.
+	CodeTransactionSpan errs.Code = 0x00_04_02_42 // 0.4.2.66
 	// Privacy (ADR 0006).
 	CodePrivacyKey     errs.Code = 0x00_04_02_23 // 0.4.2.35 — kit's index key cannot be read, made or derived
 	CodePrivacyErase   errs.Code = 0x00_04_02_24 // 0.4.2.36 — an erasure failed: the store's Anonymise function panicked
@@ -109,6 +112,16 @@ const (
 	CodeCommandEncode    errs.Code = 0x00_04_02_2E // 0.4.2.46 — a queued command's input does not encode for its queue
 	// Watches (ADR 0008).
 	CodeWatchQueue errs.Code = 0x00_04_02_2F // 0.4.2.47 — a watch's queue could not be opened, or refused a notice: the write stands, its notice is lost
+	// Sealing at rest (ADR 0006, step 3).
+	CodeSealKey    errs.Code = 0x00_04_02_3D // 0.4.2.61 — kit's data keys cannot be reached: data-key, or kit's own store of data keys
+	CodeSealWrite  errs.Code = 0x00_04_02_3E // 0.4.2.62 — a member could not be sealed: the write is refused, nothing changed
+	CodeSealOpen   errs.Code = 0x00_04_02_3F // 0.4.2.63 — a sealed member does not open: altered, moved, or its data key does not unwrap
+	CodeSealRewrap errs.Code = 0x00_04_02_40 // 0.4.2.64 — data-key's rotation could not re-wrap every data key: the old version is kept
+	CodeSealShred  errs.Code = 0x00_04_02_41 // 0.4.2.65 — an erasure could not destroy a data key: the erasure's rewrite stands
+	// Revisions (ADR 0007 §3).
+	CodeRevisionRead   errs.Code = 0x00_04_02_43 // 0.4.2.67 — a record's versions cannot be read, or two of them compared
+	CodeRevisionWrite  errs.Code = 0x00_04_02_44 // 0.4.2.68 — a record's versions cannot be rewritten: an erasure's, a hold's, a rollback's
+	CodeRevisionDecode errs.Code = 0x00_04_02_45 // 0.4.2.69 — a version no longer decodes into the store's type: Revisions, Revision and Restore refuse it
 
 	// The framework's own signals and refusals, typed since the move into the
 	// SDK (rule 2: no fmt.Errorf, no errors.New in production code).

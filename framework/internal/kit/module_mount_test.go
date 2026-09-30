@@ -194,9 +194,9 @@ func TestModulesStartFirstAndStopLast(t *testing.T) {
 // kit.Bind, given to the mount, binds one of the module's ports.
 func TestAMountBindsTheModulesPorts(t *testing.T) {
 	strict := kit.NewService("strict", "The product's own screening.")
-	never := strict.Endpoint("POST /internal/never", func(_ context.Context, r Review) (Verdict, error) {
+	never := strict.Query("never", func(_ context.Context, r Review) (Verdict, error) {
 		return Verdict{ID: r.ID, By: "product"}, nil
-	}, kit.Private(), kit.Name("never"))
+	})
 	app := startApp(t, []*kit.Service{Shop, Audit, Members, strict}, kit.Mount(ReviewsModule, kit.Bind(Screen, never)))
 	r := call(t, app, "POST /reviews/reviews", Review{ID: "r1", Text: "long enough"})
 	var got Review
@@ -205,7 +205,7 @@ func TestAMountBindsTheModulesPorts(t *testing.T) {
 		t.Errorf("the product's binding did not answer: %d %+v", r.status, got)
 	}
 	expectBinding(t, app.Graph(), "reviews.screening/port/screen",
-		model.PortInfo{Fallback: "reviews.screening/endpoint/ScreenByLength", Bound: "strict/endpoint/never", Via: model.ViaBind})
+		model.PortInfo{Fallback: "reviews.screening/query/by-length", Bound: "strict/query/never", Via: model.ViaBind})
 }
 
 // startColliding starts an app whose modules collide with each other and
@@ -223,7 +223,7 @@ func startColliding(t *testing.T) *kit.DiagnosticsError {
 	product.Setting("one-limit", 2)
 	product.Setting("two", "x")
 	named := kit.NewService("one", "A service named like a module.")
-	fixed := product.Endpoint("POST /internal/fixed", fixedPrice, kit.Private())
+	fixed := product.Query("fixed", fixedPrice)
 	price := product.Port[QuoteInput, Quoted]("price", kit.Fallback(fixed))
 	var none *kit.Module
 	return startRefused(t, kit.NewApp("shop", product, named, desk).With(

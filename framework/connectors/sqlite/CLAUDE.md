@@ -20,9 +20,17 @@ Rules:
   wait for a writer; a busy timeout, so a writer waits for another; and the
   write lock taken when a transaction begins. A parameter the URL writes
   wins.
-- No migrations yet: kit refuses a SQLite database that declares some. The
-  SDK's migrator needs an advisory lock SQLite does not have, and a migrator
-  on the file's own lock is an SDK change to come.
+- Migrations run — kit's own set, which makes the tables of the stores the
+  database keeps, then the modules' and the product's — under the database
+  file's own write lock, one transaction per run (the SDK's ADR 0140). A
+  migration cannot run what SQLite refuses inside a transaction: `VACUUM`,
+  `PRAGMA journal_mode`.
+- `kit.Keeps(kit.Privacy)` on the file keeps kit's holds and journal there,
+  and kit's data keys in the data directory: a key is written apart from
+  every transaction, and the file's one writer may be held by the
+  transaction of the write that needs it — it waited the busy timeout, then
+  failed (kit's `placementOf`, ADR 0004 step 2 as built). A store the keys
+  seal lives beside kit.Privacy on the file.
 - `go.mod` requires the framework at the last release and replaces it — and
   the SDK modules below it — with this tree; the release commit pins them
   (ADR 0147 §9). It is a module of the SDK's `go.work`.
@@ -33,4 +41,14 @@ Rules:
 `sqlite_internal_test.go` holds the URL's parameters winning over the
 defaults; `sqlite_test.go` describes paths and URIs, has two pools write at
 once, runs a product in production — its file beside the data, or where the
-URL says — and holds the refusal of migrations.
+URL says —, its migrations and its store in the file, a store that seals —
+its row holds boxes, reads back after a restart, and an erasure's committed
+transaction destroys the key a backup's row was sealed under, one taken
+back destroys nothing —, and the stores' conformance suite
+(`kit/storetest`). `keys_test.go` puts `kit.Keeps(kit.Privacy)` on the file:
+the keys in the data directory, and each data key made without waiting for
+the file's writer — a hold of a sealed record and a write of it, in their
+own transactions; inside `kit.Transact` on the file a case written and
+held, a hold of kit's own, a sealed letter published and a sealed reminder
+dispatched, delivered and opened after the commit. With the keys on the
+file, each waited the 5 s busy timeout, then failed `SEAL_WRITE`.

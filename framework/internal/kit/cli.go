@@ -28,7 +28,7 @@ const cliStopTimeout time.Duration = 10 * time.Second
 // reservedCommands are Main's own: a product's CLI command may not take one.
 var reservedCommands = map[string]bool{
 	"serve": true, "graph": true, "healthcheck": true, "config": true, "secrets": true,
-	"migrate": true, "privacy": true, "help": true,
+	"migrate": true, "privacy": true, "revisions": true, "help": true,
 }
 
 // StdioValue is where a CLI command reads and writes: the process's own streams

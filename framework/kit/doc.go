@@ -17,9 +17,10 @@
 //		After("auto-archive", 2*time.Minute, Done, Archived).
 //		OnTransition(announce)
 //
-//	var _ = Service.Endpoint("POST /todos/{id}/complete", Complete)
+//	var Complete = Service.Command("complete", complete).
+//		Expose("POST /todos/{id}/complete", kit.Anyone())
 //
-//	func Complete(ctx context.Context, in ByID) (Todo, error) {
+//	func complete(ctx context.Context, in ByID) (Todo, error) {
 //		return Lifecycle.Fire(ctx, in.ID, "complete")
 //	}
 //
@@ -41,13 +42,27 @@
 //
 // # Building blocks
 //
-//   - [Service].Endpoint: a typed HTTP endpoint. The request is decoded
+//   - [Service].Command and [Service].Query: the product's operations — a
+//     command changes something and runs in one transaction, a query reads.
+//     Each is internal until it is exposed: the code that needs it runs it
+//     with [Command].Dispatch or [Query].Ask, which is how one service
+//     reaches another. [Command].Expose and [Query].Expose give it a route,
+//     which says who may run it: the operation's permission
+//     ([Command].Allow) or rule ([Command].Authorize), or a marker that it is
+//     open on purpose — [Anyone], [AnyUser]. The start refuses an exposure
+//     that says none.
+//   - [Service].Endpoint: a typed HTTP endpoint, for what HTTP itself is
+//     about — a webhook a third party calls. The request is decoded
 //     strictly — path, query and header fields by tag, the rest from a JSON
 //     body — validated from its `validate` tags, then run through the
-//     endpoint's mechanics ([RateLimit], [RateLimitPerClient], [Timeout], [Bulkhead]). [Endpoint].Call
-//     runs it in-process from another building block.
+//     endpoint's mechanics ([RateLimit], [RateLimitPerClient], [Timeout],
+//     [Bulkhead]). [Endpoint].Call runs it in-process; a port calls its
+//     implementation ([Service].Implement) so.
 //   - [Service].Store: a typed, keyed collection, persisted atomically when
-//     the app has a data directory.
+//     the app has a data directory, or in a table of the database that
+//     keeps it.
+//   - [Transact]: one transaction — what it writes commits together, what
+//     it publishes, mails or dispatches leaves at the commit.
 //   - [Service].Topic and [Service].Subscribe: asynchronous messages,
 //     delivered at least once to every subscription, retried, dead-lettered.
 //   - [Service].Workflow: a state machine over a store — event transitions
@@ -63,7 +78,8 @@
 // declares a database on an engine module the product's main imports —
 // github.com/kitsunium/sdk/framework/connectors/postgres and its siblings,
 // the only code that imports a driver — and [Keeps] which stores it keeps. A
-// service never names a database: its handle is its store.
+// service never names a database: its handle is its store, which runs on
+// the SDK's document store over SQL there, a table per store.
 //
 // Declaring never fails: a mistake is recorded with its position and
 // [App].Start reports every one at once ([DiagnosticsError]).

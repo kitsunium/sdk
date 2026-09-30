@@ -20,6 +20,7 @@ import (
 var cmdSecrets = func() *Service {
 	s := NewService("cmd-secrets", "Secrets the command manages, for the tests.")
 	s.Secret("api-token")
+	s.Secret("partner-token", Optional())
 	s.Secret("seal-key", Generated(32), RotateEvery(time.Hour))
 	s.Mailer("mail")
 	return s
@@ -43,10 +44,20 @@ func TestTheSecretsCommand(t *testing.T) {
 	}
 	dir := filepath.Join(t.TempDir(), "secrets")
 	code, out, _ := secretsCmd(t, dir, "", "list")
-	for _, want := range []string{"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "kit-smtp-url", "KIT_SMTP_URL"} {
-		if code != 0 || !strings.Contains(out, want) {
+	for _, want := range []string{
+		"api-token", "nowhere", "VAULT_API_TOKEN", "seal-key", "not made yet", "kit-smtp-url", "KIT_SMTP_URL",
+		"partner-token  operator, optional  absent  VAULT_PARTNER_TOKEN",
+	} {
+		if code != 0 || !strings.Contains(strings.Join(strings.Fields(out), " "), strings.Join(strings.Fields(want), " ")) {
 			t.Fatalf("list (%d) does not say %q:\n%s", code, want, out)
 		}
+	}
+	// Given, an optional secret is found where it is, and still optional.
+	if code, _, errOut := secretsCmd(t, dir, "partner", "set", "partner-token"); code != 0 {
+		t.Fatalf("set partner-token: %d %q", code, errOut)
+	}
+	if _, out, _ = secretsCmd(t, dir, "", "list"); !strings.Contains(strings.Join(strings.Fields(out), " "), "partner-token operator, optional file VAULT_PARTNER_TOKEN 1") {
+		t.Fatalf("list after set:\n%s", out)
 	}
 
 	code, out, errOut := secretsCmd(t, dir, "tok-from-stdin\n", "set", "api-token")

@@ -35,6 +35,9 @@ service gives: `server_test.go` holds their constant statements and the
 rotation's two roles, whose passwords are bound through pgx's simple
 protocol, never written; `app_test.go` the `ledger` product, in production on
 the default database, and a proxy a test takes away and brings back;
-`database_test.go` migrations, two processes migrating once, `migrate`
-status, up and down, readiness, an unreachable server, credentials that
-never leak, and a rotated credential reaching the next connection.
+`database_test.go` migrations — kit's own set, and the tables it makes, first
+—, two processes migrating once, `migrate` status, up and down, readiness,
+an unreachable server, credentials that never leak, a rotated credential
+reaching the next connection — the two roles may create in `kit_test`'s
+schema, where kit makes the store's table —, and the stores' conformance
+suite (`kit/storetest`).

@@ -11,7 +11,9 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/connectors/postgres"
 	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/framework/kit/storetest"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
@@ -23,7 +25,7 @@ func TestPostgresOpensMigratesAndChecks(t *testing.T) {
 	var logs syncBuffer
 	app := ledger(t, &logs, kit.Migrations(migrations...))
 	run(t, app)
-	if got := tables(t); !slices.Equal(got, []string{"entries", "schema_migrations", "trail"}) {
+	if got := tables(t); !slices.Equal(got, withKitsTables("entries", "schema_migrations", "trail")) {
 		t.Errorf("tables %v", got)
 	}
 	d := databaseOf(t, app.Graph())
@@ -37,7 +39,10 @@ func TestPostgresOpensMigratesAndChecks(t *testing.T) {
 	if d.Pool == nil || d.Pool.Open == 0 {
 		t.Errorf("pool %+v", d.Pool)
 	}
-	if len(d.Migrations) != 1 || len(d.Migrations[0].Applied) != 2 || len(d.Migrations[0].Pending) != 0 {
+	// kit's own set first — its registry, the store's table —, then the
+	// product's.
+	if len(d.Migrations) != 2 || d.Migrations[0].Name != "kit" || len(d.Migrations[0].Applied) != 2 ||
+		len(d.Migrations[1].Applied) != 2 || len(d.Migrations[1].Pending) != 0 {
 		t.Errorf("migrations %+v", d.Migrations)
 	}
 	if s := status(t, app.URL(), "/_kit/health/ready"); s != http.StatusOK {
@@ -103,12 +108,12 @@ func TestMigrateOnPostgres(t *testing.T) {
 	migrate("status")
 	migrate("up")
 	migrate("status")
-	if got := tables(t); !slices.Equal(got, []string{"entries", "schema_migrations", "trail"}) {
+	if got := tables(t); !slices.Equal(got, withKitsTables("entries", "schema_migrations", "trail")) {
 		t.Fatalf("after migrate up: %v", got)
 	}
 	run(t, ledger(t, &logs, kit.Migrations(migrations...)))
 	migrate("down", "product", "0")
-	if got := tables(t); !slices.Equal(got, []string{"schema_migrations"}) {
+	if got := tables(t); !slices.Equal(got, withKitsTables("schema_migrations")) {
 		t.Errorf("after migrate down: %v", got)
 	}
 }
@@ -207,4 +212,22 @@ func TestARotatedCredentialReachesTheNextConnection(t *testing.T) {
 	if d := databaseOf(t, app.Graph()); d.Pool == nil || d.Pool.Closed == 0 {
 		t.Errorf("no connection retired by its lifetime: %+v", d.Pool)
 	}
+}
+
+// withKitsTables are the tables of the database the tests' product runs on:
+// kit's own — its version table, its registry, the store's table and index
+// rows — and the product's.
+func withKitsTables(product ...string) []string {
+	out := append([]string{"books__entries", "books__entries___ix", "kit_migrations", "kit_tables", "kit_tables___ix"}, product...)
+	slices.Sort(out)
+	return out
+}
+
+// The stores' conformance suite, on Postgres: each case on a fresh database.
+func TestStoresConform(t *testing.T) {
+	server(t)
+	storetest.Run(t, storetest.BackendConfig{Name: "postgres", Options: func(t *testing.T, _ string) []kit.AppOption {
+		t.Setenv("STORETEST_DATABASE_URL", fresh(t))
+		return []kit.AppOption{kit.DataDir(t.TempDir()), kit.Database("database", postgres.Engine())}
+	}})
 }

@@ -45,6 +45,12 @@ const (
 type Secret struct {
 	nodeBase
 	opts secretOptions
+	// inUse and afterRotation are kit's own data-key's (seal.go): the
+	// oldest version something still needs, which a rotation does not
+	// prune, and what runs after a rotation — the data keys re-wrapped. nil
+	// for a product's secret.
+	inUse         func(ctx context.Context) (int, error)
+	afterRotation func(ctx context.Context)
 
 	mu  sync.Mutex
 	run *secretRun
@@ -78,6 +84,8 @@ type SecretConfigurer interface {
 
 type secretOptions struct {
 	generated bool
+	// optional: a provided secret the product can do without (Optional).
+	optional bool
 	// bytes is the size of a generated version.
 	bytes int
 	every time.Duration
@@ -99,6 +107,22 @@ func (f secretOption) secretConfigure(o *secretOptions) { f(o) }
 // only hands it to the declaration it configures.
 func Generated(bytes int) SecretConfigurer {
 	return secretOption(func(o *secretOptions) { o.generated, o.bytes = true, bytes })
+}
+
+// Optional makes a provided secret one the product can do without — the key
+// of a feature that stays off while nobody gives it. A start where it is set
+// nowhere goes on; [Secret.Present] says whether it is set now, and a use of
+// it while it is absent — [Secret.Value], Seal, Open, Sign or Verify —
+// answers an error errs.HasCode matches with [CodeSecretMissing]. It is read
+// where it lives at every use, as every provided secret is: given later —
+// `secrets set` in the environment's store, a new content in the file its
+// _FILE variable names —, it is found at its next use. A generated secret
+// is kit's to make and never absent: Optional with [Generated] is refused.
+//
+// IFACE-OPAQUE: the option is sealed — its method is unexported — so a caller
+// only hands it to the declaration it configures.
+func Optional() SecretConfigurer {
+	return secretOption(func(o *secretOptions) { o.optional = true })
 }
 
 // RotateEvery is how often kit makes a new version of a generated secret.
@@ -129,6 +153,9 @@ func KeepVersions(n int) SecretConfigurer {
 // with `kit secrets set`. It is read at every use, so replacing it where it
 // lives takes effect without a restart, and a start without it fails, naming
 // the variable to set.
+//
+// With [Optional], a start without it goes on: the product asks
+// [Secret.Present] before it uses the secret.
 //
 // With [Generated], kit makes it: version 1 on the first start, a new version
 // on its schedule, the previous ones kept so that what they sealed or signed
@@ -178,7 +205,16 @@ func (s *Secret) checkOptions(svc *Service) {
 		}
 		return
 	}
+	s.checkGenerated(svc)
+}
+
+// checkGenerated refuses the options of a generated secret that do not fit:
+// optional, a size, a rotation or a count out of bounds.
+func (s *Secret) checkGenerated(svc *Service) {
+	o, name := s.opts, s.name
 	switch {
+	case o.optional:
+		svc.problem(s.decl, s.id, "secret.optional-generated", "name", name)
 	case o.bytes < minSecretBytes || o.bytes > maxSecretBytes:
 		svc.problem(s.decl, s.id, "secret.bytes", "name", name, "min", minSecretBytes, "max", maxSecretBytes, "bytes", o.bytes)
 	case o.every <= 0:
@@ -200,6 +236,32 @@ func (s *Secret) Value(ctx context.Context) (secret.Value, error) {
 	err = s.failed(err)
 	sp.end(err)
 	return v.Value, err
+}
+
+// Present reports whether the secret is set now, where it lives: false, and
+// no error, when an [Optional] secret is given nowhere — which the product
+// answers by leaving off what needs it. An error says its store could not
+// be read. A secret the start required is present, unless the operator took
+// it back since.
+//
+//	if ok, err := OpenAIKey.Present(ctx); err != nil || !ok {
+//		return Verdict{}, err // no key, no automatic screening
+//	}
+func (s *Secret) Present(ctx context.Context) (bool, error) {
+	r := s.running()
+	if r == nil {
+		return false, notRunning(&s.nodeBase)
+	}
+	_, sp := r.app.begin(ctx, &spanStart{node: s.id, from: currentNode(ctx), edge: model.EdgeUses, op: model.OpSecret, name: "Present"})
+	_, err := r.store.Get(ctx, r.name)
+	if errors.Is(err, secret.NotFound) {
+		sp.attr("verdict", "absent")
+		sp.end(nil)
+		return false, nil
+	}
+	err = s.failed(err)
+	sp.end(err)
+	return err == nil, err
 }
 
 // Seal encrypts plaintext under the secret's current version, binding aad:
@@ -279,6 +341,45 @@ func (s *Secret) key() string { return qualifiedKey(s.svc, s.name) }
 // stem, its name in the kept store: "moderation-openai-key".
 func (s *Secret) stored() string { return flatKey(s.key()) }
 
+// kitOwn reports whether the secret is kit's own — data-key, on kit's own
+// service —: read from KIT_<NAME>, kept as kit-<name>, like the mail
+// connector's smtp-url.
+func (s *Secret) kitOwn() bool { return kitOwn(s.svc) }
+
+// envName is the secret's name in the environment it is read from first:
+// its variable's stem under the app's prefix, or kit's.
+func (s *Secret) envName() string {
+	if s.kitOwn() {
+		return s.name
+	}
+	return s.stored()
+}
+
+// keptName is its name in the environment's store.
+func (s *Secret) keptName() string {
+	if s.kitOwn() {
+		return kitSecretPrefix + s.name
+	}
+	return s.stored()
+}
+
+// variable is the variable that provides it, or pins it: <APP>_<NAME>, or
+// KIT_<NAME> for kit's own.
+func (s *Secret) variable(a *App) string {
+	if s.kitOwn() {
+		return secretVariable("KIT", s.name)
+	}
+	return variableOf(appPrefix(a.name), s.key())
+}
+
+// envOf is where the secret's variable is read: the app's, or kit's.
+func (st *secretStores) envOf(s *Secret) secret.Store {
+	if s.kitOwn() {
+		return st.kitEnv
+	}
+	return st.env
+}
+
 // running returns the secret's run, or nil when its app is not running.
 func (s *Secret) running() *secretRun {
 	s.mu.Lock()
@@ -289,14 +390,14 @@ func (s *Secret) running() *secretRun {
 // describe fills the graph node out with what the Secret declares, and returns
 // its edges.
 func (s *Secret) describe(a *App, out *model.Node) []model.Edge {
-	info := &model.SecretInfo{Origin: model.SecretProvided}
+	info := &model.SecretInfo{Origin: model.SecretProvided, Optional: s.opts.optional}
 	if s.opts.generated {
 		info.Origin, info.Bytes, info.RotateEvery, info.Keep = model.SecretGenerated, s.opts.bytes, s.opts.every.String(), s.opts.keep
 	}
 	if a != nil {
-		info.Variable = variableOf(appPrefix(a.name), s.key())
+		info.Variable = s.variable(a)
 		if r := s.running(); r != nil {
-			s.describeRun(r, info)
+			s.describeRun(a, r, info)
 		}
 	}
 	out.Secret = info
@@ -305,18 +406,19 @@ func (s *Secret) describe(a *App, out *model.Node) []model.Edge {
 
 // describeRun says what the secret's run knows: where it was found, its
 // versions, its next rotation, how often it rotated.
-func (s *Secret) describeRun(r *secretRun, info *model.SecretInfo) {
+func (s *Secret) describeRun(a *App, r *secretRun, info *model.SecretInfo) {
 	info.From, info.Pinned = r.from, r.pinned
 	ctx := context.Background()
-	switch versions, err := r.store.Versions(ctx, r.name); {
-	case err != nil:
-		info.Problem = "its store could not be read"
-	case len(versions) > 0:
-		info.Version, info.Versions = versions[0].Version, len(versions)
-		if created := versions[0].Created; !created.IsZero() {
-			info.Created = new(created.UTC())
+	if s.opts.optional {
+		// Where it is now: it may have come, or gone, since the start.
+		st := a.secretsNow()
+		_, from, err := st.find(ctx, st.envOf(s), s.envName(), s.keptName())
+		info.From = from
+		if err != nil && !errors.Is(err, secret.NotFound) {
+			info.Problem = "its store could not be read"
 		}
 	}
+	s.describeVersions(ctx, r, info)
 	if r.rotator != nil {
 		if due, err := r.rotator.Due(ctx); err == nil {
 			info.NextRotation = new(due.UTC())
@@ -325,6 +427,23 @@ func (s *Secret) describeRun(r *secretRun, info *model.SecretInfo) {
 	s.mu.Lock()
 	info.Rotations = r.rotations
 	s.mu.Unlock()
+}
+
+// describeVersions says the secret's versions, as its store keeps them:
+// none, and found nowhere, for an optional secret absent as it may be.
+func (s *Secret) describeVersions(ctx context.Context, r *secretRun, info *model.SecretInfo) {
+	switch versions, err := r.store.Versions(ctx, r.name); {
+	case errors.Is(err, secret.NotFound) && s.opts.optional:
+		// Absent, as it may be: found nowhere, and no problem.
+		info.From = ""
+	case err != nil:
+		info.Problem = "its store could not be read"
+	case len(versions) > 0:
+		info.Version, info.Versions = versions[0].Version, len(versions)
+		if created := versions[0].Created; !created.IsZero() {
+			info.Created = new(created.UTC())
+		}
+	}
 }
 
 // start finds the secret in the environment. A generated secret kit rotates
@@ -352,12 +471,18 @@ func (s *Secret) start(ctx context.Context, a *App) error {
 		Store: r.store, Name: r.name, Clock: a.clock,
 		Policy:   secret.Policy{Every: s.opts.every, Keep: s.opts.keep, Generate: secret.Random(s.opts.bytes)},
 		OnRotate: func(v secret.Versioned) { s.rotated(a, v) },
+		InUse:    s.inUse,
 	})
 	if err != nil {
 		return failure(CodeSecretRotate, "SECRET_ROTATOR", "a generated secret's rotation could not be set up", err, errs.String("secret", s.id))
 	}
 	if _, err := r.rotator.Ensure(ctx); err != nil {
 		return failure(CodeSecretRotate, "SECRET_CREATE", "a generated secret could not be made", err, errs.String("secret", s.id))
+	}
+	if s.kitOwn() {
+		// The configuration the start read said it was set nowhere: kit
+		// made it in the environment's store, if it was not there.
+		a.settingFoundIn(s.variable(a), model.SettingStore)
 	}
 	r.loop = a.loop(s.id+" rotation", s.id, model.LoopRotation, "every "+s.opts.every.String()+" · keeps "+strconv.Itoa(s.opts.keep))
 	loopCtx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
@@ -414,7 +539,7 @@ func (s *Secret) rotate(ctx context.Context, a *App, r *secretRun) {
 		}
 		started := a.clock.Now()
 		r.loop.begin(a, model.WakeDeadline)
-		_, _, err := r.rotator.RotateIfDue(ctx)
+		err := s.rotateOnce(ctx, r)
 		ended := a.clock.Now()
 		if ctx.Err() != nil {
 			r.loop.idle(a, time.Time{})
@@ -432,6 +557,17 @@ func (s *Secret) rotate(ctx context.Context, a *App, r *secretRun) {
 		r.loop.idle(a, next)
 		r.loop.ran(a, started, ended, err)
 	}
+}
+
+// rotateOnce makes a new version when the current one is due. Once a
+// version is kept, the data keys move to it: a prune that failed does not
+// keep them from moving.
+func (s *Secret) rotateOnce(ctx context.Context, r *secretRun) error {
+	_, rotated, err := r.rotator.RotateIfDue(ctx)
+	if rotated && s.afterRotation != nil {
+		s.afterRotation(ctx)
+	}
+	return err
 }
 
 // nextRotation is when the rotation loop looks again: when the current
@@ -490,8 +626,9 @@ func appPrefix(name string) string {
 
 // secretProblems judges the declared secrets: a name two services declare —
 // always — and, once the environment's stores are open, a provided secret
-// set nowhere or a generated one with no store to live in — errors, reported
-// together — and a generated one its variable pins — a warning.
+// set nowhere — unless it is optional — or a generated one with no store to
+// live in — errors, reported together — and a generated one its variable
+// pins — a warning.
 func (a *App) secretProblems() []model.Diagnostic {
 	secrets, out := a.distinctSecrets()
 	st := a.secrets.Load()
@@ -501,9 +638,8 @@ func (a *App) secretProblems() []model.Diagnostic {
 	for _, w := range st.warnings {
 		out = append(out, diagnosticOf("warning", "", nil, w))
 	}
-	prefix := appPrefix(a.name)
 	for _, s := range secrets {
-		if severity, said, found := st.secretProblem(s, variableOf(prefix, s.key())); found {
+		if severity, said, found := st.secretProblem(s, s.variable(a)); found {
 			out = append(out, diagnosticOf(severity, s.id, a.source(&s.decl), said))
 		}
 	}
@@ -516,14 +652,13 @@ func (a *App) distinctSecrets() ([]*Secret, []model.Diagnostic) {
 	var out []model.Diagnostic
 	var secrets []*Secret
 	owner := map[string]string{}
-	prefix := appPrefix(a.name)
 	for _, s := range a.declaredSecrets() {
-		if first, dup := owner[s.stored()]; dup {
+		if first, dup := owner[s.keptName()]; dup {
 			out = append(out, diagnosticOf("error", s.id, a.source(&s.decl),
-				say("secret.twice", "name", s.key(), "first", first, "second", s.id, "variable", variableOf(prefix, s.key()))))
+				say("secret.twice", "name", s.key(), "first", first, "second", s.id, "variable", s.variable(a))))
 			continue
 		}
-		owner[s.stored()] = s.id
+		owner[s.keptName()] = s.id
 		secrets = append(secrets, s)
 	}
 	return secrets, out
@@ -549,11 +684,13 @@ func (a *App) declaredSecrets() []*Secret {
 // secretProblem is what is wrong with where the stores find s, whose
 // variable is variable; found is false when nothing is.
 func (st *secretStores) secretProblem(s *Secret, variable string) (severity string, said phrase, found bool) {
-	_, from, err := st.find(context.Background(), st.env, s.stored(), s.stored())
+	_, from, err := st.find(context.Background(), st.envOf(s), s.envName(), s.keptName())
 	switch {
 	case err == nil && from == model.SecretFromEnv && s.opts.generated:
 		return "warning", say("secret.pinned", "secret", s.id, "variable", variable), true
-	case err == nil, s.opts.generated && st.kept != nil:
+	case err == nil, s.opts.generated && st.kept != nil, s.opts.optional && errors.Is(err, secret.NotFound):
+		// Found; or kit makes it; or absent, as an optional secret may be:
+		// the product asks Present.
 		return "", phrase{}, false
 	default:
 		return "error", st.missing(s, variable, err), true
