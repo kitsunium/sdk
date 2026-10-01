@@ -37,4 +37,3 @@
 
 - Secrets managed via environment variables
 - MCP tokens in mcp.json (git-ignored)
-- Codacy security scanning on every edit

@@ -94,16 +94,6 @@ MCPSearch(query="create pull request")
 - `create_repository`
 - `delete_file`
 
-### codacy (Code Quality)
-
-**High-frequency tools:**
-- `codacy_cli_analyze` - Local analysis
-- `codacy_list_repository_issues` - List issues
-
-**Low-frequency tools (defer):**
-- `codacy_setup_repository`
-- `codacy_list_organizations`
-
 ### playwright (Browser Automation)
 
 **High-frequency tools:**
