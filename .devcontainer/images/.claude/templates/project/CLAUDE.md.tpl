@@ -30,7 +30,6 @@
 Changes complete when:
 - Tests pass (`{{TEST_COMMAND}}`)
 - Lint passes (auto via hooks)
-- Security scan clean
 
 ## Documentation
 
