@@ -137,11 +137,6 @@ out/
 .devcontainer/.template-version
 .devcontainer/claude-assets.tar.gz
 
-# ============================================
-# Ignore vscode AI rules
-# ============================================
-.github/instructions/codacy.instructions.md
-.codacy/
 plans/
 .grepai/
 

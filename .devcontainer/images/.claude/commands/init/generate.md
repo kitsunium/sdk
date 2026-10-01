@@ -99,7 +99,7 @@ files:
 ## Phase 4.5: CodeRabbit Configuration (AI Tools 1/3)
 
 **Generate `.coderabbit.yaml` if missing, personalized from project context.**
-**See also:** Phase 4.6 (Qodo Merge) and Phase 4.7 (Codacy) for the full AI tools configuration block.
+**See also:** Phase 4.6 (Qodo Merge) for the full AI tools configuration block.
 
 ```yaml
 coderabbit_config:

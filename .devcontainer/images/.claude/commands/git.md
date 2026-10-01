@@ -197,7 +197,7 @@ Examples:
 | 1.0 | Peek | Pin commit SHA, verify PR/MR exists |
 | 2.0 | Status Parsing | Job-level (not overall), MCP-ONLY |
 | 3.0 | CI Monitoring | Exponential backoff, 10min hard timeout |
-| 3.5 | Review Triage | CodeRabbit + Qodo + Codacy + Human |
+| 3.5 | Review Triage | CodeRabbit + Qodo + Human |
 | 4.0 | Error Log | Extract actionable info on failure |
 | 5.0 | Auto-fix Loop | 3 attempts max, error categories |
 | 5.5 | PR Regen | Regenerate title/body from final state |

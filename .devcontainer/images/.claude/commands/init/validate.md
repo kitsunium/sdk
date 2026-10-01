@@ -49,7 +49,6 @@ parallel_checks:
     ✓ README.md (updated)
     ✓ .coderabbit.yaml (generated if missing)
     ✓ .pr_agent.toml (generated if missing)
-    ✓ .codacy.yaml (generated if missing)
     {{#if phase4_8_configured}}✓ Branch protection: main-protection ruleset (CI gates){{/if}}
     {conditional files}
 
