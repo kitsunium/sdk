@@ -4,7 +4,7 @@
 # dotted-quad registry (ADR 0005/0006); it MUST match what
 # scripts/gen-error-codes.sh produces from the errs.Code constants now. This
 # guard regenerates into a temp file and diffs, so a new/changed code that
-# wasn't re-exported to the YAML fails the commit (CLAUDE.md rule 11). The
+# wasn't re-exported to the YAML fails CI and `make lint` (CLAUDE.md rule 11). The
 # executable source of truth remains the AST audit
 # (internal/kernel/errs/registry_external_test.go); this only keeps the doc
 # honest.
@@ -23,7 +23,7 @@ tmp="$(mktemp)"
 # Snapshot the committed file, then ALWAYS restore it on exit — this gate is
 # read-only. The trap covers every exit path including a generator failure
 # under `set -e` (which would otherwise leave docs/error-codes.yaml modified
-# in a check-only hook).
+# in a check-only gate).
 cp "$committed" "$tmp"
 trap 'cp "$tmp" "$committed" 2>/dev/null; rm -f "$tmp"' EXIT
 

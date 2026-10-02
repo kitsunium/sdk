@@ -3,7 +3,7 @@
 
 ## Purpose
 
-GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the scans, the runtime suites, the docs and the benchmarks, each described in `workflows/CLAUDE.md` — and Dependabot. One workflow is inherited from the devcontainer-template parent repo: `docker-images.yml`, path-gated on `.devcontainer/images/**` for pushes and PRs (it also runs on a schedule). The template's `release.yml` was deleted in #260: its job ran only in `kodflow/devcontainer-template`.
+GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the scans, the runtime suites, the docs and the benchmarks, each described in `workflows/CLAUDE.md` — and Dependabot. No workflow is inherited from a template any more: the template's `release.yml` was deleted in #260, and its image build went with the devcontainer itself (ADR 0153).
 
 ## Contents
 
@@ -18,7 +18,6 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 | `workflows/e2e-vm.yml`          | Manual runs on the lab's persistent VMs |
 | `workflows/docs-deploy.yml`     | Builds and deploys the versioned docs portal |
 | `workflows/bazel-bench.yml`     | Kernel benchmarks, on demand, weekly or on a `run-bench` label |
-| `workflows/docker-images.yml`   | Template-inherited; gated on `.devcontainer/images/**`, plus a schedule |
 | `dependabot.yml`                | Weekly `github-actions` ecosystem updates, `chore:` commit prefix, `dependencies` label |
 
 ## Conventions
@@ -31,9 +30,7 @@ GitHub-side configuration for the SDK repo: the workflows — the SDK lanes, the
 ## Do NOT
 
 - Add a `go test` lane for a platform Bazel already covers. The source of truth is `bazel test --config=race //...`; `cross-build` and `test-386` run raw `go` only because Bazel here builds for the host (see `workflows/CLAUDE.md` §Do NOT).
-- Edit the template-inherited workflow here for SDK reasons — patch it upstream.
-- Remove the path-gates on the inherited workflow; that fires the template builds on every SDK PR.
-- Bring `release.yml` back from a template sync. Its job only ever ran in `kodflow/devcontainer-template`, and it listened for a workflow this repository does not have (#260).
+- Bring a template's workflows back from a sync — `release.yml` (#260) or the devcontainer image build (ADR 0153). Neither built anything this repository ships.
 
 ## Subtree
 

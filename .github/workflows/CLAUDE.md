@@ -3,7 +3,7 @@
 
 ## Purpose
 
-CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (the other required check), `sdk-release.yml` (auto-tag after the gate) and `release-size.yml` (the size a pull request would publish, asked before it merges), beside the scans, runtime suites, docs and benchmarks below; `docker-images.yml` is inherited from the devcontainer-template repo. `release.yml`, the template's other workflow, was deleted in #260: its job ran only in `kodflow/devcontainer-template`, and its `workflow_run` trigger listened for a workflow named "Build Docker Image", which does not exist here — `docker-images.yml` is "Build Docker Images".
+CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (the other required check), `sdk-release.yml` (auto-tag after the gate) and `release-size.yml` (the size a pull request would publish, asked before it merges), beside the scans, runtime suites, docs and benchmarks below. No workflow is template-inherited any more: `release.yml` was deleted in #260 (its job ran only in the template's own repository), and the devcontainer image build was deleted with the devcontainer (ADR 0153).
 
 ## Workflows
 
@@ -18,7 +18,6 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | `e2e-vm.yml` | manual `workflow_dispatch` only | The platform-sensitive suites and the conformance binary on persistent Proxmox VMs of the lab (Debian and Fedora with systemd, Alpine with OpenRC, the three BSDs, Windows 11), over SSH from the `kitsunium-runner` scale set. Needs the lab and its four secrets, so nothing triggers it automatically. Every suite binary runs with `-test.timeout=3m` and every conformance check under `harness.CheckTimeout`, so a hang prints stacks instead of eating the 25-minute job; a failed SSH wait says whether port 22 is open (sshd refuses us) or closed (no sshd) — #118. |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
 | `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel and `make sdk-bench` runs them through `go test` |
-| `docker-images.yml` | daily and weekly schedules, push and PRs on `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
 
 ## bazel-ci.yml (the SDK lane)
 
@@ -41,8 +40,9 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 7. **Exemption invariant** — `scripts/pre-commit/check-alloc-lane-coverage.sh` fails the build if any `//go:build !race` test lives in a package the step-6 list does not cover. Without it, adding such a test to a new package silently produces a test that no lane runs (root `CLAUDE.md` rule 12).
 8. **Audit-coverage invariant** — `scripts/pre-commit/check-audit-coverage.sh` fails the build when a package declaring an `errs.Define` or `errs.Code` is absent from `//:audit_sources`. The errs AST audits can only judge the files staged as their runfiles, so such a package is audited by nothing AND passes green — the worst shape a verification gap can take.
 9. **Domain-doc invariant** — `scripts/pre-commit/check-domain-docs.sh` fails the build when the root `CLAUDE.md`'s architecture tree no longer names exactly the directories under `internal/core`, when a domain is described twice in the Purpose paragraph, or when two Purpose paragraphs coexist — and, since the same class of drift reached the ADR indexes, when `docs/adr/CLAUDE.md` or the root Reference list stops naming exactly the ADRs on disk, once each. Every one of those had actually happened.
+   Then **package docs, BENCH.md presence and error-code drift** — `check-pkg-docs.sh`, `check-bench-md.sh` and `check-error-codes-drift.sh`, which only the opt-in local pre-commit hook ran until it was removed (ADR 0153).
 10. **Layer invariant** — `scripts/check-layer-deps.sh` asserts seven `bazel query` expressions empty (ADR 0068; the last three are the framework's, ADR 0147).
-11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the other five are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane, while the same command run by a credentialed account downloads the asset. `gh` and not `curl`, because the signed redirect drops the Authorization header and a `curl` 404 cannot tell "asset absent" from "not authorised". **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so. Add the secret and the target to `GATES` in the same commit. The pin is v1.45.4 — the build the tree is kept clean under, so the step judges the tree with the rules it was checked against, not with a build 34 releases older — and the install asserts the binary matches it, because 1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects. These steps are in THIS job, not in `shell-gates`, because `bazel` and `post-commit` are the only required checks on `main` and a sibling job would report without blocking.
+11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane, while the same command run by a credentialed account downloads the asset. `gh` and not `curl`, because the signed redirect drops the Authorization header and a `curl` 404 cannot tell "asset absent" from "not authorised". **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so. Add the secret and the target to `GATES` in the same commit. The pin is v1.45.4 — the build the tree is kept clean under, so the step judges the tree with the rules it was checked against, not with a build 34 releases older — and the install asserts the binary matches it, because 1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects. These steps are in THIS job, not in `shell-gates`, because `bazel` and `post-commit` are the only required checks on `main` and a sibling job would report without blocking.
 12. **Vulnerability gate** — `make vuln-install` then `make vuln-check`: `govulncheck` in source mode in every module of the census (`scripts/ci/go-modules.sh`), `GOWORK=off`, one at a time. Fails on a REACHABLE vulnerable symbol (govulncheck's exit 3) and on a scan that did not complete; an imported-but-uncalled vulnerable package is reported and passes. Blocking on purpose, and in THIS job because it is required: the SDK's requires are every consumer's floor, so a reachable vulnerability is ours to fix before anything else merges (ADR 0136, #210). The scanner version is pinned once, in the Makefile, and `vuln-check.sh` refuses any other.
 13. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-6 tests.
 
@@ -69,19 +69,14 @@ behind the 120-minute Bazel lane.
    `scripts/release/release-scripts-test.sh`, which runs `scripts/release/*.bats`.
    That suite existed from ADR 0085 and NOTHING executed it until this job
    (ADR 0088).
-4. **Git hook regression** — `make hooks-check` → `scripts/hooks-test.sh`, which
-   runs `scripts/test-commit-msg-hook.bats` against `.githooks/commit-msg`. That
-   hook is the no-AI-attribution enforcement and its `printf | grep -q` failed
-   INVERTED — it allowed what it exists to refuse, 40 times out of 40 past a few
-   hundred KB (ADR 0088).
-5. **CI script regression** — `make ci-scripts-check` → `scripts/ci-scripts-test.sh`,
+4. **CI script regression** — `make ci-scripts-check` → `scripts/ci-scripts-test.sh`,
    which runs `scripts/ci/*.bats`: the module census every module-looping lane
    reads and the govulncheck gate built on it (ADR 0136, ADR 0137). It also
    asserts that `cross-build` and `test-386` below still read the census rather
    than a list of their own — the shape of #242.
-6. **Pre-commit guard regression** — `make pre-commit-check`.
+5. **Pre-commit guard regression** — `make pre-commit-check`.
 
-These five, plus `make lint-check`, `make vuln-install`, `make vuln-check` and
+These four, plus `make lint-check`, `make vuln-install`, `make vuln-check` and
 `make lint-ktn-check` in the `bazel` job, are the only `make` invocations in
 this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
@@ -89,9 +84,9 @@ if CI goes through the target. The two lint targets are not in THIS job because
 they need a Go toolchain and a downloaded binary — the two things `shell-gates`
 exists to do without. Adding a gate means editing `GATES` **and** this
 file, plus the Makefile's `.PHONY` — all three, or the check fails. That is not
-a claim: adding `hooks-check` to `GATES` before wiring its step produced
-`UNGATED: 'make hooks-check' exists but .github/workflows/bazel-ci.yml never
-runs it`.
+a claim: adding a gate to `GATES` before wiring its step produced
+`UNGATED: 'make <target>' exists but .github/workflows/bazel-ci.yml never
+runs it` (ADR 0088).
 
 ### cross-build (the build bar) and test-386 (the runtime bar)
 
@@ -159,4 +154,3 @@ Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (N
   Bazel here builds for the host, and the alternative to raw `go` there is no
   coverage at all.
 - Drop the drift check; gazelle-generated `BUILD.bazel` files must be committed.
-- Edit the template-inherited workflows here for SDK reasons.
