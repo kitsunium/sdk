@@ -35,6 +35,7 @@ go_test(
         "codec_internal_test.go",
         "decoder_internal_test.go",
         "encoder_internal_test.go",
+        "msgpack_bench_test.go",
     ],
     embed = [":msgpack"],
     deps = [
