@@ -1,6 +1,6 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed — challenged in three rounds (the cap); the round-3 version is **rewritten-unreviewed**: no reviewer has read it (R3)
+- **Status**: Proposed — first review run stopped at its cap of three rounds; review run 2, round 1 applied; **the R4 version is not yet reviewed**
 - **Date**: 2026-10-02
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Depends on** the TLS sibling ADR of D4, which must be Accepted before this one (R3-17)
@@ -136,12 +136,13 @@ There is no `tools/` row and no `cmd/` row: the SDK has no `package main`
 `pkg/v1/consensus` alone, so a missing alias fails to compile in CI rather
 than in a consumer's build (R2-32).
 
-**The determinism analyzer is its own module (R3-28).** `consensus/detcheck`
-needs `golang.org/x/tools/go/analysis`, which the stdlib-only rule of this
-table forbids in `internal/` and `pkg/`. It ships as a separate Go module in
-the SDK repository, the way the framework's database connectors do (ADR
-0147). It exports the `Analyzer` and has no `package main` (Q4). The product
-wraps it in its own vet tool, in its own repository.
+**The determinism checker is a stdlib package (R3-28, R4-22).** The
+round-3 analyzer needed `golang.org/x/tools` and a separate module. Both are
+withdrawn. `pkg/v1/consensus/detcheck` is a stdlib-only checker built on
+`go list -deps -json`, `go/parser` and `go/types` (D3, point 5). The product
+calls it from its own tests. A query of `scripts/check-layer-deps.sh` asserts
+that no non-test package imports it, so the checker never ships inside a
+production binary (R4-29).
 
 The service-to-service edges are lateral and permitted (`internal/CLAUDE.md`).
 Nothing is added to the kernel: the step function is generic only to Raft, so
@@ -168,10 +169,12 @@ type DurableStateMachine interface { StateMachine; AppliedPosition() (LogIdentit
 type BatchingStateMachine interface { StateMachine; ApplyBatch(es []Entry, results []any) }
 type HashingStateMachine interface { // R2-18, R3-28
 	StateMachine
-	Hash() [32]byte                // incremental, O(1), at an apply point
-	FullHash() ([32]byte, error)   // full recomputation, for the self-check
-	HashVersion() uint32           // the algorithm's version, carried in check entries
+	Hash() [32]byte                         // incremental, at a check index
+	FullHash(view Snapshot) ([32]byte, error) // full recomputation over a point-in-time view (R4-17)
+	HashVersion() uint32                    // the algorithm's version, carried in check entries
 }
+// The engine builds fresh state machines for rebuilds, replays and the
+// self-test through Config.NewMachine func() StateMachine (R4-16).
 ```
 
 **`Apply` is a pure transition of state the state machine owns (R1-01).**
@@ -278,134 +281,231 @@ of discovering it.
 `Restore` cancels an in-flight `WriteTo` and waits for its `Release` before it
 replaces the state, and it is serialised with `Apply`.
 
-**State hash, decided by the log (R1-25, R2-18).** A hash check is an entry
-kind. The leader proposes one every `StateHashEvery`, or when an operation
-asks for one. Every node computes `Hash()` on its apply goroutine at that
-entry's index, so every node hashes the same state, and it proposes the
-result. The verdict is the majority's digest. A node whose digest differs
-from the majority's raises a replicated `STATE_DIVERGED` alarm: writes are
-refused until an operator acts. No node is stopped on a guess, because a
-minority hash and a majority hash cannot tell a broken node from a broken
-hasher. This is the SDK form of the first consumer's per-repository
-checksum.
+**State hash, decided by the log (R1-25, R2-18, R4-11).** A hash check is an
+entry kind. **Digests exist only at deterministic indexes (R4-11).** Every
+index where `index % K == 0` is a check index, and a batch is split there by
+force, so every node computes `Hash()` on its apply goroutine at exactly the
+same state. The leader may also propose an explicit check entry, every
+`StateHashEvery` or when an operation asks for one. That entry only starts a
+round at the next check index, and never carries a digest (R4-07). This is
+the SDK form of the first consumer's per-repository checksum.
 
-**The verdict is computed in `Apply`, and the minority is named (R3-10).**
-- Each node's digest for a check index is an entry. Its origin is the TLS
-  identity of the connection that carried it, never a field in the payload.
-  Only one digest per voter per check index counts.
-- When a majority of the voters' digests agree, `Apply` decides the verdict
-  deterministically on every node. `STATE_DIVERGED` names the nodes in the
-  minority.
-- A named node refuses reads, reports itself unready, never campaigns, and
-  transfers leadership away if it holds it, until it is restored.
-- **No majority of digests: prevented, then decided (R3-28).** The policy is
-  the subsection that follows. It aims to make the case impossible upstream,
-  and to decide it by reconstruction when it still happens.
+**Only self-proposed, signed digests count (R3-10, R4-07).**
+- At a check index, each voter proposes its OWN digest entry. Its origin is
+  the TLS identity of the connection that forwarded it, or the leader itself
+  for the leader's own. A digest written by anyone else for that voter does
+  not count.
+- Each digest is SIGNED with the node's key, over
+  `(lineage, check index, HashVersion, digest)`. `Apply` verifies the
+  signature against the certificate the membership records for that node.
+  An unsigned digest, a bad signature, or a tuple that does not match the
+  round is invalid and ignored.
+- Only one digest per voter per check index counts.
+- When a majority of the voters' valid digests agree, `Apply` decides the
+  verdict deterministically on every node. `STATE_DIVERGED` names the nodes
+  in the minority.
+- A simulator case has a malicious leader forge a proof, with its mutation
+  (D15).
+
+**What a verdict does, automatically (Q10, R4-08).** The owner's decision is
+that divergence handling stays fully automatic. Its guardrails:
+- **A named minority node is fenced, then repaired.** It refuses reads,
+  reports itself unready, never campaigns, and transfers leadership away if
+  it holds it. It repairs itself automatically (below). **Writes stay open**
+  for the majority meanwhile.
+- `ClearDivergence` only RE-ADMITS a repaired node, and only after its
+  `FullHash` matches a majority-validated digest. Issued from a node that the
+  alarm names, it needs a second origin (R4-06).
+- **An inconclusive verdict** (no majority of agreeing digests), or a verdict
+  of an `Apply` bug, refuses writes until an operator acts. No node is blamed.
+- Each row of the decision table below names the node it blames, or says
+  that it blames none.
+
+**A repair follows a fixed lifecycle (R4-08):**
+1. reconstruction in isolation, off the apply goroutine, from a verified
+   anchor and the log;
+2. replay to a FIXED boundary: a check index with a validated digest;
+3. verification: the rebuilt state's `FullHash` must equal that
+   majority-validated, self-proposed and signed digest. A node installs a
+   state ONLY when this holds;
+4. the reconstruction is run TWICE, and both runs must agree before either
+   is trusted, so a bit flip during the rebuild cannot install a bad state;
+5. atomic replacement. The original state is preserved until its replacement
+   has passed step 3;
+6. readiness restored, then re-admission through `ClearDivergence`.
+A simulator case flips a bit during the rebuild (D15).
+
+**No rebuild storm (R4-09).** A node rebuilds only on a COMMITTED verdict that
+names it, or on an inconclusive one, and at most once per check index. A
+mismatch seen in the comparison ring only triggers a `CheckStateHash`,
+rate-limited per origin. It never triggers a rebuild by itself.
+
 - **Repair stays possible under the alarm (R3-27).** As under `NO_SPACE`,
   `Remove`, `AddLearner`, `Promote`, `TransferLeadership` and
-  `ClearDivergence` are still admitted while `STATE_DIVERGED` is raised.
-  Otherwise the operation that replaces the diverged node would be refused
-  by the alarm it is meant to clear.
-- A hash-check entry ends its batch, so every node hashes exactly the state
-  after it (R3-24).
+  `ClearDivergence` are still admitted while `STATE_DIVERGED` is raised, and
+  so are hash-check, digest and trigger entries (R4-14).
 - `Hash()` must be O(1) at the apply point: an incrementally maintained
   digest, not a scan of the whole state (R3-24).
+- **The full hash is point-in-time (R4-17).** At a check index, the engine
+  captures `Snapshot()` and `Hash()` together on the apply goroutine.
+  `FullHash(view)` is then computed off the loop against that view, and
+  compared with the captured `Hash()`.
 
 **Divergence prevention (R3-28).** These measures, studied by ten agents and
 retained by the owner, make "no majority of agreeing digests" as close to
-impossible as the hardware allows, and decidable when it is not.
+impossible as the hardware allows, and decidable when it is not. Round 4
+corrected each of them (Q10).
 
-1. **A canonical, incremental hash.** `HashingStateMachine` returns a digest
-   that is canonical (it depends only on the replicated state, never on
-   anything local to the node), incremental (O(1) per `Apply`) and versioned.
-   The algorithm's version and the index travel in every hash-check entry. A
-   node that lacks that version declares itself unable to verify, which is
-   not a mismatch. A mismatch names the smallest unit the hash can name — for
-   the first consumer, the repository (D19 gives its two-level hash).
-2. **Compared at every batch.**
-   - AppendEntries and their responses carry `(applied index, root hash)`.
-     Each node keeps a ring of the last `W` pairs.
-   - At the first difference, the leader proposes a **proof entry**:
-     `{index, the digest of each voter at that index}`, each digest's origin
-     taken from the TLS identity that carried it. `Apply` computes the
-     verdict deterministically.
-   - A faulty LEADER is named by its own proof, and it transfers leadership
+1. **A canonical, incremental hash (R4-11).**
+   - The digest depends only on the replicated state. It is incremental, and
+     versioned: the algorithm's version and the configuration identity travel
+     in each comparison. A node that lacks that version declares itself
+     unable to verify, which is not a mismatch.
+   - A mismatch names the smallest unit the hash can name: for the first
+     consumer, the repository (D19).
+   - The root is maintained incrementally, as a two-level sum or a
+     maintained tree. The real complexity is stated with the implementation:
+     O(1) per leaf update for the sum, O(log n) for the root of a maintained
+     tree.
+   - The sum is computed on `[4]uint64` limbs with `math/bits` carries, in a
+     fixed limb and byte order, pinned by known-answer vectors.
+   - The weakness is stated: a sum of hashes (AdHash) resists accidental
+     divergence, not an adversary who CHOOSES its inputs. That is acceptable,
+     because the inputs come from the authenticated log, not from an
+     attacker.
+2. **Compared at every check index (R4-11).**
+   - AppendEntries and their responses carry the latest
+     `(check index, root hash)`.
+   - Each node keeps a ring of the last `W` pairs. `W` defaults to 4 096, and
+     a value below twice `MaxInflight` batches is refused.
+   - An index older than the ring is "cannot compare", never a mismatch, and
+     those skipped comparisons are counted.
+   - A mismatch triggers a hash check (R4-09). The verdict comes from the
+     signed, self-proposed digests above, not from the ring.
+   - A faulty LEADER is named by that verdict, and it transfers leadership
      away. If it cannot, the followers that see the difference stop
      acknowledging it, and CheckQuorum deposes it.
-3. **A local self-check.**
-   - Each node periodically compares its incremental hash with a full
-     recomputation, and does so after every `Restore`, on a staggered
-     background schedule.
-   - A difference is a LOCAL fault (memory, CPU or the hasher itself). The
-     node withdraws on its own with `HASHER_FAULT`, without a vote.
-   - At start and every hour, a known-answer self-test runs SHA-256, CRC-32C,
-     a witness `Apply` and the decoders against fixed vectors. A node whose
-     self-test fails refuses to start (`SELF_TEST_FAILED`).
-4. **Never three binaries.**
-   - Every member announces, in the replicated configuration, a fingerprint
-     of its `Apply` code: `debug.ReadBuildInfo` of the apply package and its
-     dependencies.
+3. **A local self-check, and what withdrawing means (R4-10).**
+   - Each node periodically compares its incremental hash with `FullHash` on
+     a point-in-time view (R4-17), and does so after every `Restore`, on a
+     staggered schedule.
+   - A difference is a local fault, `HASHER_FAULT`. At start and every hour, a
+     known-answer self-test runs SHA-256, CRC-32C, a witness `Apply` built by
+     the state-machine factory (R4-16) and the decoders. A failure at start
+     refuses to start (`SELF_TEST_FAILED`).
+   - **To withdraw** is to stop serving reads and stop applying writes,
+     while still voting and still storing the log, with `Health` unready. The
+     exits are a restart whose self-test passes, or an operator's clear.
+   - **Before withdrawing, a node counts** how many members have already
+     withdrawn for the same code. If its own withdrawal would cost the
+     majority, it raises a replicated alarm instead of withdrawing.
+   - A self-test or `FullHash` failure shared by a MAJORITY is a bug in the
+     binary, not hardware. The runbook covers it, including a downgrade while
+     the cluster version has not been raised.
+4. **Never three behaviours (R4-12).**
+   - Each member announces, in the replicated configuration, a **behavioural
+     fingerprint**. It is the SHA-256 of the outputs of every supported
+     `applyVn` on the golden vectors checked into the product, together with
+     the version table of `applyVn`. It is computed at start. It does not use
+     `debug.ReadBuildInfo`: the fingerprint is stable across releases that do
+     not change `Apply`, and it changes when one does.
+   - Only build settings checkable at run time are recorded beside it:
+     `runtime.Version()` and the default `GODEBUG`.
    - An admission that would create a THIRD distinct fingerprint is refused
-     (`APPLY_FINGERPRINT_REFUSED`).
-   - An upgrade replaces one voter at a time, with a successful hash check
-     between each.
+     (`APPLY_FINGERPRINT_REFUSED`). A node's old fingerprint is retired when
+     it re-announces.
+   - When no leader exists, so no new fingerprint can be admitted — a poison
+     entry in the middle of an upgrade — an offline, operator-signed
+     fingerprint replacement is recorded in the log, and the cluster can
+     restart.
+   - The fingerprint guards against mistakes, not attackers, and the text
+     says so.
    - The `Apply` logic is selected by the entry's version: frozen `applyVn`
      functions, with golden vectors per version checked in CI. New semantics
      start only at an index fixed by a **gate entry**, which the hash
      includes.
-   - **Replay gate:** a new binary replays the latest verified snapshot and
-     the log tail OFFLINE, and must reproduce every validated hash before it
-     votes (`BINARY_REPLAY_MISMATCH`). The first consumer exposes this as
-     `forgejo cluster inspect --replay`.
-5. **Determinism by construction.**
+   - **Replay gate:** a new binary replays the latest verified anchor and the
+     log tail OFFLINE with `Replay` (R4-16), and must reproduce every
+     validated hash before it votes (`BINARY_REPLAY_MISMATCH`).
+   - One voter at a time applies to the ROLLING upgrade path. The full-stop
+     path makes the replay gate mandatory on every node before it votes
+     (R4-20, D19).
+5. **Determinism by construction, checked with the standard library
+   (R4-22).**
    - `Apply`, `ApplyBatch` and `Hash` live in a package with an allow-list of
      imports.
-   - The SDK ships an analyzer, `consensus/detcheck` (`go/analysis`, over the
-     transitive call graph, run with `go vet -vettool`). It forbids
-     goroutines, channels, `select`, `sync`, `runtime`, `unsafe`, `reflect`,
-     `os`, `os/exec`, `time`, `math/rand`, `hash/maphash`, floating point, an
-     unsorted `range` over a map, unstable `sort.Slice`/`SortFunc`,
-     `unicode` and case folding, and writes to package variables.
-   - `Apply` sees only its entry: no configuration, no environment, no clock,
-     no limit derived from memory.
+   - The checker uses no `golang.org/x/tools` and is no separate module. It
+     is a stdlib function the PRODUCT runs from its own tests:
+     - `go list -deps -json` gives the import closure, which must stay
+       inside the allow-list;
+     - `go/parser` and `go/types` find goroutines, `select`, floating point,
+       `range` over a map, and unstable sorts in the package.
+   - The round-3 transitive call-graph analysis is replaced by that
+     import-closure rule, on the precedent of `tools/sdkguard`
+     (`tools/sdkguard/CLAUDE.md:31-37`).
+   - The forbidden list stands: goroutines, channels, `select`, `sync`,
+     `runtime`, `unsafe`, `reflect`, `os`, `os/exec`, `time`, `math/rand`,
+     `hash/maphash`, floating point, an unsorted `range` over a map, unstable
+     `sort.Slice`/`SortFunc`, `unicode` and case folding, writes to package
+     variables. Most are forbidden by the import rule, the rest by the AST
+     checks.
+   - `Apply` sees only its entry.
    - The build is pinned: the toolchain and `godebug` in `go.mod`,
-     `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, `-trimpath`. A node refuses to
-     start when `GODEBUG` is set.
-6. **A checksum chain on entries.** The proposing node computes a checksum of
-   the entry's body before `Propose`, plus the checksum of the previous
-   entry's header. Both are verified when the entry is appended and again
-   before `Apply`. A mismatch refuses the acknowledgement, and the leader
-   resends (D4).
-7. **Rebuilt from the log, and only verified anchors travel.**
-   - A snapshot is cut only at a hash-check index, and is **anchored**:
-     `SnapshotMeta` carries the state hash and the index.
-   - An anchor is **verified** when three things hold: the file passes its
-     checksum, a full recomputation equals the stored hash, and that hash
-     equals the one validated in the log.
-   - Only verified anchors are sent or installed. Compaction never goes past
-     the latest verified anchor, and two anchors are kept.
-   - At any difference, each node rebuilds the state from its anchor and log,
-     off the apply goroutine, and applies a decision table:
+     `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, `-trimpath`. A node refuses to start
+     when `GODEBUG` is set.
+6. **A checksum chain on entries, built by the leader (R4-13).**
+   - The proposer computes only the checksum of the entry's body.
+   - The LEADER computes the chain value at its serialized append point: the
+     checksum of the previous entry's header, chained. The genesis value and
+     the value at a snapshot boundary are fixed constants of the format.
+   - Both are verified when the entry is appended and again before `Apply`.
+     A mismatch at append refuses the acknowledgement, and the leader
+     resends.
+   - After N identical refusals at the same index, a follower stops answering
+     that leader's heartbeats, so CheckQuorum deposes it.
+   - A mismatch found before `Apply` re-fetches the entry from a peer, or
+     stops the node. It never skips the entry.
+7. **Bases and anchors: cut and verification are decoupled (R4-14).**
+   - Snapshots are cut every `SnapshotEvery`, as before. A cut snapshot is a
+     **base**, checksummed, and bounds compaction.
+   - A snapshot that falls due proposes its own hash check, so
+     `StateHashEvery = 0` cannot starve verification.
+   - **Anchors** are the verified subset of bases. A base becomes an anchor
+     when three things hold: its file passes its checksum, a full
+     recomputation equals its recorded hash, and that hash equals one
+     validated in the log.
+   - When no base has become an anchor for N intervals, the node keeps
+     cutting bases and raises an alarm in `Health`. The age of the latest
+     anchor is a metric.
+   - The full replay interval from the OLDEST recovery anchor still promised
+     is retained, with the evidence that verified it. Otherwise an older file
+     is not a local fallback, and the text says so.
+   - The start-up replay is bounded by the distance to the latest anchor.
+     That is about `2 × SnapshotEvery` only while anchors keep being
+     verified.
+   - **A node whose local anchors ALL fail verification starts with no
+     table.** It votes and stores the log, applies nothing, and waits for an
+     install from a peer.
+   - A simulator case reaches the log quota with no anchor.
+   - At any difference, the repair lifecycle above runs. The decision table:
 
-   | Observation | Verdict |
-   |---|---|
-   | live state ≠ rebuilt state | that node is faulty (memory or `Apply` run) |
-   | same content, different hashes | the hasher is faulty |
-   | the rebuilds agree | they are the truth; the faulty nodes are repaired |
-   | the rebuilds differ on equal entries, on stable nodes | a bug in `Apply`: writes are refused, no node is blamed |
+   | Observation | Verdict | Blames |
+   |---|---|---|
+   | live state ≠ the twice-agreeing rebuild | that node's memory or `Apply` run failed | that node |
+   | same content, different hashes | the hasher failed | the node whose hasher disagrees with the validated digest |
+   | the rebuilds agree with the validated digest | they are the truth; the others are repaired | each node not matching it |
+   | the rebuilds differ on equal entries, on stable nodes | a bug in `Apply` | none: writes refused until an operator acts |
 
-   - Repair is automatic: a `Restore` from the node's own rebuild, or from a
-     peer's verified anchor.
-8. **The Git projection stays outside the consensus hash** (D19).
+8. **The Git projection stays outside the consensus hash**, with its own
+   digest (D19, R4-25).
 9. **Tests** (D15).
 10. **Operations** (D17).
 
 **What remains, stated honestly.** With three nodes, one fault at a time is
-tolerated. Three different digests are still decidable, by the
-reconstruction of point 7. The only case with no culprit is a bug in `Apply`
-that differs between builds. Points 4 and 5 and the tests block it upstream.
-If it still happens, writes are refused and no node is blamed.
-
+tolerated. Three different digests are still decidable by the reconstruction
+of point 7. The only case with no culprit is a bug in `Apply` that differs
+between builds. Points 4 and 5 and the tests block it upstream. If it still
+happens, writes are refused and no node is blamed.
 
 The name collides on purpose with the textbook and must not be confused with
 ADR 0120's `statemachine`, which moves entities between declared states on a
@@ -433,9 +533,9 @@ type LogStore interface {
 	WriteStamp(Stamp) error                // durable on return
 	Close() error
 }
-type SnapshotSink interface { // R3-16
-	io.Writer
-	Commit(final SnapshotMeta) error // verifies the SHA-256 it computed over what was written
+type SnapshotSink interface { // R3-16, R4-21
+	io.Writer                        // receives the ENCODED chunks; checks each chunk's integrity
+	Commit(final SnapshotMeta) error // final carries the SHA-256 the ENGINE computed over the DECODED stream
 	Abort() error
 }
 type SnapshotHandle interface { // pinned until Close (R3-16)
@@ -486,7 +586,10 @@ type UnreachableReporter interface { Unreachable(func(NodeID)) } // sibling (R1-
   never starves a vote. Each queue is bounded in BYTES (64 MiB for data,
   provisional) as well as in count. Control frames also have their own small
   per-frame size cap and byte bound, far below the data limits, so an
-  oversized "control" frame is refused at its header (R3-20). When a queue is full the transport drops
+  oversized "control" frame is refused at its header (R3-20). Forwarded
+  administrative entries and hash-check trigger entries travel on the
+  control connection, and their size is held under the 64 KiB control cap
+  (R4-29). When a queue is full the transport drops
   the message and counts it, as Raft tolerates. The node's total memory
   budget, these queues included, is stated in D14. The contract that carries the safety of the whole domain
 is `Sync` and `WriteStamp`: when they return nil, what they cover survives a
@@ -543,9 +646,19 @@ and spelled out:
 - The simulator zeroes a synced header sector in the middle of a segment. It
   tests a corrupt checkpoint separately from a crash before publication.
 
-**The next segment is pre-created in the background (R3-24).** It is
-zero-filled and published through steps 1 to 3 while the current one fills,
-so a rotation never waits for 64 MiB of zeros.
+**The next segment is prepared in the background, never published early
+(R3-24, R4-01).**
+- It is zero-filled while the current one fills, as a `.tmp`, in a
+  "prepared" state distinct from every active segment. It is never a
+  published later segment, which recovery would read as later data.
+- Its checkpoint is written at ACTIVATION, with the CURRENT hard state, not
+  the hard state of the moment it was prepared.
+- An activation record seals the previous segment, with its used length and
+  the boundary it hands over.
+- Recovery keeps the highest `(term, vote)` it has seen in any checkpoint or
+  record. It ignores a segment holding only a checkpoint as "later data".
+- A simulator case crashes with a prepared segment present, and the safety
+  oracle checks vote uniqueness.
 
 **Tail repair is narrow (R1-10, R2-01).** The first draft truncated any record
 whose CRC failed at the tail. That repairs too much: a bit flip in a SYNCED
@@ -555,6 +668,13 @@ two shapes are truncated:
 - a short read, where the file ends inside a record;
 - a torn record whose damaged bytes are zeroed 4 KiB sectors, the signature
   of an interrupted write on the devices this targets.
+
+**The tear model is stated (R4-02).** The supported model is crash-only: power
+loss or a process crash, not a device that rewrites old sectors. A zeroed
+sector proves that a record was never acknowledged ONLY when it lies inside
+the last unsynced write window, which the writer records as its sync
+watermark. A zeroed sector before the watermark is damage to synced data,
+and is quarantined.
 
 Both are writes that were never acknowledged, because acknowledgement follows
 the sync. A node that truncated one of them **keeps voting and acknowledging**,
@@ -568,10 +688,15 @@ and it keeps the damaged bytes untouched. A node that finds the marker
 refuses to start (`LOG_QUARANTINED`) until an operator has inspected the
 directory and cleared it, through `Inspect` and the product's own procedure
 (D17). **`ClearQuarantine` allows exactly two exits (R3-09):**
-1. wipe the directory and rejoin as an empty learner, with a new incarnation;
-2. truncate at the damage, and stay non-voting and non-acknowledging until a
-   leader of a term at least equal to the node's own has rewritten its log
-   past the truncation point.
+1. **WipeAndRejoin (R4-03):** `Remove` the old `NodeID`, then `Init` under a
+   NEW `NodeID`, which returns that `(NodeID, Incarnation)`. A voter's
+   incarnation is never swapped in place, and a mutation that does so must
+   fail;
+2. **TruncateAndStaySilent (R4-03):** truncate at the damage, and PERSIST,
+   before returning, a silence condition: no vote and no acknowledgement
+   until a leader of a term at least equal to the node's own has rewritten
+   its log past the truncation point AND has committed an entry in its
+   current term.
 There is no third exit that keeps the damaged node voting. The simulator flips bits in synced records, not only in the unsynced
 tail. A liveness scenario cuts power on all three nodes at once, with torn
 tails, and the cluster must elect and commit again (D15).
@@ -899,7 +1024,7 @@ forwarded write after an election exceeded its wait
 (`docs/src/design/2026-09-10-point-acceptation-commit.md` §3).
 
 **Outcomes.** `Propose` answers in one of these ways:
-- success: the `Position` and the `Apply` result, once applied locally;
+- success: a lineage-scoped `Token` (its `Position` and `LogIdentity`, R4-27) and the `Apply` result, once applied locally;
 - `NOT_LEADER`: certainly not appended, with the known leader readable through
   `consensus.LeaderHint`;
 - `OVERLOADED`: refused before append;
@@ -939,9 +1064,11 @@ written.
 ### D7 — Snapshots and compaction ship in v1
 
 - **Trigger:** after `SnapshotEvery` applied entries (default 16 384) or
-  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first, at the
-  next hash-check index (R3-28): a snapshot is an anchor, and only a verified
-  anchor is sent, installed or used to bound compaction (D3, point 7).
+  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first. **Cut
+  and verification are decoupled (R4-14):** every cut is a checksummed base
+  that bounds compaction, and a base becomes an anchor when a validated
+  digest confirms it (D3, point 7). Only anchors are sent to a peer as a
+  verified state.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
   into `SnapshotStore.Create` off it, with a SHA-256 of the stream recorded in
   `SnapshotMeta` beside `Position`, `Membership`, the snapshot format version
@@ -972,6 +1099,9 @@ written.
   - the RECEIVER chooses the resume offset, from what it has durably spooled.
     `Transport.Stream` takes a function that opens the snapshot at an offset,
     so the sender can resume where the receiver says;
+  - **an installed snapshot is verified as an anchor only once the verdict
+    entries for its index have arrived (R4-29).** Until then it is a base,
+    usable for catching up, not a source of repair;
   - **freshness is checked again on the event loop, right before the install
     is accepted.** A snapshot whose index is not beyond the receiver's commit
     index is refused, even from the same leader in the same term. Then the
@@ -1368,6 +1498,7 @@ change that introduces them (ADR 0035):
 | `0.2.57.22` | `BINARY_REPLAY_MISMATCH` | a new binary's offline replay did not reproduce a validated hash; it may not vote (D3, R3-28) |
 | `0.2.57.23` | `APPLY_FINGERPRINT_REFUSED` | an admission would create a third distinct `Apply` fingerprint (D3, R3-28) |
 | `0.2.57.24` | `SELF_TEST_FAILED` | a known-answer self-test failed at start or on its hourly run; the node refuses to start or withdraws (D3, R3-28) |
+| `0.2.57.25` | `ADMIN_PRECONDITION_FAILED` | a clearing or raising operation named an alarm, version or contract that is not the current one (D17, R4-06) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
@@ -1411,6 +1542,7 @@ written before the code:
 | `consensus.failure_tolerance` | gauge: how many voters can fail now with a majority left |
 | `consensus.tls.cert_expiry_seconds` | gauge per identity |
 | `consensus.state_hash.mismatches` | counter |
+| `consensus.anchor.age`, `consensus.hash.comparisons_skipped` | gauge, counter (R4-11, R4-14) |
 | `consensus.has_leader`, `consensus.peer.last_contact`, `consensus.peer.rtt` | gauge, gauge by peer, histogram by peer (R2-28) |
 | `consensus.proposals.failed`, `consensus.proposals.pending` | counter by code, gauge (R2-28) |
 | `consensus.fs.free_bytes`, `consensus.cluster_version`, `consensus.protocol_version` | gauges (R2-28) |
@@ -1444,11 +1576,12 @@ type (
 	LogIdentity    = coreconsensus.LogIdentity // ClusterID + log epoch + lineage (R2-09, R3-01)
 	GroupID        = coreconsensus.GroupID
 	Position       = coreconsensus.Position    // struct{ Term, Index uint64 }
-	Entry          = coreconsensus.Entry       // Position, Kind, Version, Data []byte (immutable)
+	Entry          = coreconsensus.Entry       // Position, Kind, Version, BodySum, ChainSum, Data []byte (immutable) (R4-21)
+	Token          = coreconsensus.Token       // {Lineage LogIdentity, Position}: what Propose returns (R4-27)
 	EntryKind      = coreconsensus.EntryKind
 	HardState      = coreconsensus.HardState
 	Stamp          = coreconsensus.Stamp
-	Message        = coreconsensus.Message
+	Message        = coreconsensus.Message     // Version, Group, From (stamped from TLS), Term, Kind, CheckIndex, RootHash, Entries; AppendBinary/UnmarshalBinary, versioned, so a custom transport forwards opaque bytes (R4-21)
 	SnapshotMeta   = coreconsensus.SnapshotMeta
 	SnapshotSink   = coreconsensus.SnapshotSink
 	InstallRequest = coreconsensus.InstallRequest
@@ -1481,29 +1614,33 @@ type (
 	Report     = svcconsensus.Report
 	DataDir    = svcconsensus.DataDir
 	QuarantineExit = svcconsensus.QuarantineExit // WipeAndRejoin | TruncateAndStaySilent (R3-09)
-	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining (R2-25, R3-02)
+	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining, FencedAttestation (R2-25, R3-02, R4-04)
 	RestoreOptions = svcconsensus.RestoreOptions // Expected (non-zero), Confirm, Operator, MaxEncoded, MaxDecoded, Codecs (R3-15)
+	AlarmID        = coreconsensus.AlarmID       // the index that raised an alarm (R4-06)
 )
 
 // The consumer port, in core: the only algorithm-neutral interface (D1).
 type Replicated interface {
-	Propose(ctx context.Context, data []byte) (Position, any, error)
-	Barrier(ctx context.Context) (uint64, error)
-	WaitApplied(ctx context.Context, index uint64) error
+	Propose(ctx context.Context, data []byte) (Token, any, error) // lineage-scoped (R4-27)
+	Barrier(ctx context.Context) (Token, error)
+	WaitApplied(ctx context.Context, t Token) error // LINEAGE_MISMATCH for another lineage (R4-27)
 	Status() Status
 }
 
 // ProposeAs types the Apply result (R2-19). A result of another dynamic type
 // is RESULT_TYPE_MISMATCH, carrying the committed Position: the entry IS
 // committed. A nil result is the zero R.
-func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (Position, R, error)
+func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (Token, R, error)
 
 type Config struct { // svcconsensus.Config, shown for its fields; every bound is in the table below
 	Cluster             ClusterID
 	Group               GroupID
 	ID                  NodeID
 	Machine             StateMachine
-	Durability          Durability // must agree with DurableStateMachine (R2-09)
+	NewMachine          func() StateMachine // fresh instances for rebuilds, Replay and the self-test (R4-16)
+	Durability          Durability // must agree with DurableStateMachine (R2-09); kept in v1 (Q11)
+	HashCheckEvery      uint64     // K: a check index every K entries, batches split there (R4-11)
+	HashRing            int        // W: comparison pairs kept (R4-11)
 	Log                 LogStore
 	Snapshots           SnapshotStore
 	Transport           Transport
@@ -1543,13 +1680,15 @@ func Bootstrap(ctx context.Context, cfg Config, members []Member) error
 func NewRaft(cfg Config) (*Node, error)
 
 // The shipped layout (R2-33): offline functions work on it, and only on it.
+// A DataDir value wraps a pointer, so copies share one lock and one Close (R4-29).
 func OpenDataDir(dir string) (DataDir, error) // takes the directory lock first (D11)
 func (d DataDir) Log() LogStore
 func (d DataDir) Snapshots() SnapshotStore
-func (d DataDir) Close() error
+func (d DataDir) Close() error // idempotent
 
 // Offline, on a stopped node, called by the product's own commands (D17).
-func Init(d DataDir, cluster ClusterID, id NodeID) (Incarnation, error) // joining stamp (R3-02)
+func Init(d DataDir, cluster ClusterID, id NodeID) (Incarnation, error) // joining stamp; idempotent (R3-02, R4-29)
+func Replay(d DataDir, newMachine func() StateMachine) (Report, error)  // checks every validated hash (R4-16)
 func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error) // runs without a Node (R3-15)
 func Inspect(d DataDir) (Report, error) // read-only
@@ -1563,19 +1702,21 @@ func LeaderHint(err error) (NodeID, bool)
 // Every one takes the operator identity the caller vouches for, can be
 // called on ANY node (forwarded to the leader, Q8, R3-03), writes an entry,
 // and is logged at Warn (R3-14).
-func (n *Node) Propose(ctx context.Context, data []byte) (Position, any, error)
-func (n *Node) Barrier(ctx context.Context) (uint64, error)
-func (n *Node) WaitApplied(ctx context.Context, index uint64) error
+func (n *Node) Propose(ctx context.Context, data []byte) (Token, any, error)
+func (n *Node) Barrier(ctx context.Context) (Token, error)
+func (n *Node) WaitApplied(ctx context.Context, t Token) error
 func (n *Node) AddLearner(ctx context.Context, op Operator, m Member) error
 func (n *Node) Promote(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) Remove(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) UpdateAddress(ctx context.Context, op Operator, id NodeID, addr string) error
 func (n *Node) TransferLeadership(ctx context.Context, op Operator, to NodeID) error
-func (n *Node) ProposeTimingContract(ctx context.Context, op Operator, c TimingContract) error
-func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, v uint32) error
+// Each clearing or raising operation names what it acts on; Apply refuses a
+// mismatch, with ADMIN_PRECONDITION_FAILED (R4-06).
+func (n *Node) ProposeTimingContract(ctx context.Context, op Operator, expectedCurrent uint32, c TimingContract) error
+func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, expectedCurrent, v uint32) error
 func (n *Node) CheckStateHash(ctx context.Context, op Operator) (Position, error)
-func (n *Node) ClearNoSpace(ctx context.Context, op Operator) error
-func (n *Node) ClearDivergence(ctx context.Context, op Operator) error
+func (n *Node) ClearNoSpace(ctx context.Context, op Operator, alarm AlarmID) error
+func (n *Node) ClearDivergence(ctx context.Context, op Operator, alarm AlarmID, reinstated []NodeID) error
 func (n *Node) SaveSnapshot(ctx context.Context, op Operator, w io.Writer) (SnapshotMeta, error) // R3-14
 func (n *Node) Membership() Membership
 func (n *Node) Status() Status
@@ -1634,26 +1775,44 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
-- The data directory's disk budget is `MaxLogBytes + 3 × MaxSnapshotBytes +
-  LogReserveBytes`: the log, the current snapshot, the one being written, and
-  one being received. On the three VPS, each with one shared 100 GB disk, the
-  recommended values give about 4.3 GiB. They are provisional, like D16's
-  numbers.
+- **The data directory's disk budget is `MaxLogBytes + 4 × MaxSnapshotBytes +
+  LogReserveBytes` (R4-28).** The reservation is computed from the snapshots
+  that can exist AT THE SAME TIME: two anchors kept (R3-28), one being
+  written and one being received. A snapshot pinned by a transfer handle
+  (R3-16) extends one of those lifetimes, and does not add a fifth. On the
+  three VPS, each with one shared 100 GB disk, the recommended values give
+  about 5.3 GiB. They are provisional, like D16's numbers.
 - **Inside Forgejo (R3-24).** The replicator shares Forgejo's heap. The
   product sets `GOMEMLIMIT` with about 0.8 GiB of headroom for the engine, the
   ref table and the projector, so the garbage collector does not discover
-  the budget by running out.
-- **A state machine held in memory (R3-29).** When the state machine is not
-  durable, as for the first consumer (Q9), the budget adds two costs, both to
-  be measured:
-  - the RAM of the state itself, the ref table, measured on a real
-    deployment's ref count;
-  - the start-up replay. The state is rebuilt from the latest verified anchor
-    and the log after it. Since anchors are cut every `SnapshotEvery` and two
-    are kept, the replay is bounded to about `2 × SnapshotEvery` entries.
+  the budget by running out. `GOMEMLIMIT` is a SOFT limit: it makes the
+  collector work harder, it does not refuse an allocation. The budget is
+  what keeps the process inside it (R4-18).
+- **A state machine held in memory (R3-29, R4-18).** When the state machine
+  is not durable, as for the first consumer (Q9), the budget is: the engine,
+  plus TWICE the measured table, plus its tombstones, the decoding buffers,
+  and the snapshot versions retained by open views. Twice, because a rebuild
+  or a repair holds a second table beside the live one until the replacement
+  is verified (R4-08). Rebuilds are staggered across nodes, so the cluster
+  never doubles its memory everywhere at once.
+- **The start sequence is fixed (R4-18):**
+  1. self-test;
+  2. verify the latest anchor;
+  3. replay the log to the commit boundary;
+  4. vote;
+  5. serve.
+  The start-up replay is bounded by the distance to the latest VERIFIED
+  anchor. That is about `2 × SnapshotEvery` entries only while anchors keep
+  being verified (R4-14). The restart time is a D16 target, measured on the
+  real ref count.
 
 The other defaults are provisional too, and are revised from the simulator
 and the VPS measurements before the first release.
+
+| Field (R4-11) | Owner | Default | Validation |
+|---|---|---|---|
+| `HashCheckEvery` (K) | engine | none yet; to be set from measurement | refuse zero |
+| `HashRing` (W) | engine | 4 096 | refuse below twice `MaxInflight` batches |
 
 ### D15 — Testing: a deterministic simulator first, real clusters second (R1-26)
 
@@ -1749,7 +1908,14 @@ reintroduces each of these, and the suite must fail on each:
 - a stale storage completion counted (R2-02);
 - the dialer's chain verification dropped, leaving only the SAN check
   (R2-21);
-- a heartbeat commit not clamped to the follower's match (R2-06).
+- a heartbeat commit not clamped to the follower's match (R2-06);
+- a proof entry that carries digests, and a leader that forges one (R4-07);
+- a digest counted without its signature, or proposed by another node
+  (R4-07);
+- a chain value computed by the proposer instead of the leader, and an entry
+  skipped on a chain mismatch (R4-13);
+- a voter's incarnation swapped in place (R4-03);
+- each administrative precondition ignored (R4-06).
 The transport's identity, admission and size checks get the same treatment.
 
 **Named scenarios.**
@@ -1787,6 +1953,16 @@ a regression readable in review.
   `GODEBUG`, amd64 and arm64, the current Go and the next: every replay must
   produce the same hashes.
 - A real run ends with a **full diff of the tables** of every node.
+
+**Scenarios added in review run 2 (R4).**
+- a crash with a prepared segment present, under the vote-uniqueness oracle
+  (R4-01);
+- a zeroed sector before the sync watermark, which must quarantine (R4-02);
+- a bit flipped during a rebuild, which must not be installed (R4-08);
+- the log at its quota with no verified anchor (R4-14);
+- a restore of three nodes followed by a cold restart of all three (R4-15);
+- all three nodes restarted with a scheduled `gc`, under the object-closure
+  oracle (R4-19).
 
 **Fuzzing.** The frame decoder, the log record decoder, the snapshot metadata
 decoder, the tail scan and the first consumer's object-channel framing
@@ -1871,7 +2047,10 @@ recorded in `BENCH.md`:
   distribution with the chosen timeouts, not chosen first. The first draft's
   2.5 s did not account for detection, PreVote, the vote round and the
   no-op commit on a 27 ms link;
-- `Barrier` in ReadIndex mode from the leader ≈ one nearest RTT.
+- `Barrier` in ReadIndex mode from the leader ≈ one nearest RTT;
+- **restart time** — process start to `Health` ready, on the real ref count —
+  is a target to set once the table's size and the replay rate are measured
+  (R4-18).
 
 **A realistic workload, not 256-byte entries alone.** The benchmark replays a
 Git consumer's shape:
@@ -1894,9 +2073,10 @@ Go functions, and nothing that faces an operator.** No admin handler, no HTTP
 route, no CLI. The product that embeds the domain exposes them through its
 own administration, with its own accounts, roles, authorization and audit.
 For the first consumer, that is Forgejo's site administration online, and
-`forgejo cluster recover|restore|inspect` offline. Those commands are
-subcommands of the same binary, so their version is the node's by
-construction.
+these subcommands of the same `forgejo` binary, whose version is therefore
+the node's by construction (R4-29): `forgejo cluster bootstrap`, `init`,
+`recover`, `restore`, `inspect` (with `--replay`), `snapshot save` and
+`reproject`.
 
 **Online operations** (D14), each taking the `Operator` the caller vouches
 for. The SDK writes that identity into the membership or administrative entry
@@ -1905,9 +2085,18 @@ it proposes, so the product's audit and the log agree (R2-36):
   reconfiguration check of D8 (R2-27);
 - `TransferLeadership`;
 - `ProposeTimingContract` (D9) and `RaiseClusterVersion` (D18);
-- `CheckStateHash`, and `ClearDivergence` after an operator has acted on a
-  `STATE_DIVERGED` alarm (D3);
+- `CheckStateHash`, and `ClearDivergence`, which re-admits a repaired node
+  (D3);
 - `ClearNoSpace`;
+- **Every clearing or raising operation names what it acts on (R4-06).**
+  `ClearNoSpace` and `ClearDivergence` name the alarm, by the index that
+  raised it. `ClearDivergence` also names the nodes it reinstates.
+  `ProposeTimingContract` and `RaiseClusterVersion` name the contract or
+  version they expect to replace. `Apply` refuses a mismatch with
+  `ADMIN_PRECONDITION_FAILED`, so a stale click in an administration page
+  cannot clear an alarm raised since. `ClearDivergence` issued from a node
+  that the alarm names needs a second origin. Each operation has its
+  mutation test (D15);
 - `SaveSnapshot`, `Status`, `Health`, `Membership`, and the
   `LeadershipWatcher` sibling.
 Every one of them can be submitted on ANY node: the engine forwards it to
@@ -1925,6 +2114,13 @@ node, under the directory lock.
   - It writes a forced configuration and a NEW `ClusterID`, and bumps the log
     epoch (R2-09), so no node of the old cluster can talk to the recovered one
     by mistake.
+  - **The probe cannot detect a partition, and the text says so (R4-04).** A
+    seed cut off from this node still runs, and can still serve. So
+    `Recover` requires an operator attestation, recorded in
+    `RecoverOptions.FencedAttestation`, that names each old node and how it
+    is FENCED: stopped; its `wg0` peer removed; or its old-cluster
+    certificates revoked and `MaxConnectionAge` elapsed.
+  - The replacement machine is kept stopped until `Recover` has run.
   - It refuses while any seed of the old cluster still answers. A force
     option overrides that refusal, and the override is logged. **"Answers" is
     defined (R3-27):** when the old cluster's certificate still exists, a
@@ -1939,7 +2135,10 @@ node, under the directory lock.
   - It records the old `LogIdentity` and the last index it kept, as the
     lineage of the new identity (R3-01).
   - It may name nodes already stamped as joining (by `Init`), so the
-    recovered cluster can grow back to three voters at once (R3-02).
+    recovered cluster can grow back to three voters (R3-02). **They enter as
+    LEARNERS, and are promoted through the normal `Promote` catch-up, never
+    as empty voters (R4-04).** `Init` for them takes the NEW `ClusterID`,
+    chosen before `Recover` runs.
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.
@@ -1963,30 +2162,43 @@ node, under the directory lock.
     bounds, and the codecs it accepts.
   - It writes the same audit record as `Recover`, refuses with
     `RESTORE_REFUSED`, and is tested without a running `Node`.
+  - **It founds the new log with an anchor-validation record (R4-15)**,
+    identical on every node: the snapshot's state hash and the `Expected`
+    digest the operator confirmed. The restored snapshot is therefore a
+    verified anchor from the first entry, and a cold restart can verify it.
+    A test restores three nodes, then cold-restarts all three.
   - Backups are encrypted at rest; the product's backup path says how.
-  - **The product's command (R3-26).** For the first consumer,
-    `forgejo cluster snapshot save` reaches the live server through Forgejo's
-    internal manager API, never through an exposed `/api/internal` route
-    (R3-14). It writes the snapshot and its SHA-256 side by side. The
+  - **The product's command (R3-26, R4-05).** For the first consumer,
+    `forgejo cluster snapshot save` reaches the live server through the ADR
+    0148 private socket, or a Unix listener that checks `SO_PEERCRED`. It
+    never goes through `/api/internal/manager`, and no function of this
+    section is added to Forgejo's `private.Routes()`. A test asserts that
+    `/api/internal` has no cluster route. It writes the snapshot and its SHA-256 side by side. The
     making.codes backup role calls it before it backs up the repositories, as
     it already does for `consul`, `vault` and `nomad snapshot save`.
   - A restore pairs a ref snapshot with a PostgreSQL backup taken AFTER it, so
     the database never names a ref the snapshot lacks (R3-26).
-  - The local backup file is NOT counted in the data directory's 4.3 GiB
-    budget (D14). The operator guide says where it goes and how much it needs
+  - The local backup file is NOT counted in the data directory's 5.3 GiB
+    budget (D14, R4-28). The operator guide says where it goes and how much it needs
     (R3-26).
   - For the first consumer, `SaveSnapshot` is taken BEFORE the Git
     repositories are backed up. The refs then name objects the repository
     backup is sure to hold. **The snapshot's object closure stays pinned
     until the repository backup is verified**, and a backup manifest records
     which snapshot pairs with which repository backup (R3-13).
+  - **A coordinated backup boundary (R4-26).** The SQL backup, the ref
+    snapshot and the repository backup are taken at one boundary recorded in
+    the manifest. Repository creations, renames and deletions that fall
+    between the three are either paused across that boundary, or reconciled
+    by a tested restore procedure for each temporal mismatch: a repository
+    the database knows and the table does not, and the reverse.
 - **`Inspect`** reports a data directory read-only: its stamp and
   incarnation, segments, hard state, snapshot metadata, versions, quarantine
   marker (R2-01) and the first corruption found.
 
 **Disk (R2-29).**
-- The data directory's whole budget — `MaxLogBytes + 3 × MaxSnapshotBytes +
-  LogReserveBytes` (D14) — is what the product reserves.
+- The data directory's whole budget — `MaxLogBytes + 4 × MaxSnapshotBytes +
+  LogReserveBytes` (D14, R4-28) — is what the product reserves.
 - The no-space alarm is raised by the quota, and ALSO by the filesystem's
   free space (`statfs`) falling under the reserve. A full disk shared with Git
   must raise it as surely as the quota does.
@@ -2030,6 +2242,11 @@ node, under the directory lock.
   majority of the voters that would remain must hold every object the table
   references. Otherwise the change could leave committed refs whose objects
   exist on a minority only.
+- **Withdrawn nodes (R4-10).** The runbook covers a node withdrawn for
+  `HASHER_FAULT` or `SELF_TEST_FAILED`: restart it, and if its self-test
+  passes it returns; otherwise replace its hardware or its binary. When a
+  majority fails the same way, the binary is at fault, and the runbook
+  downgrades it while the cluster version has not been raised.
 
 ### D18 — Versioning (R1-22)
 
@@ -2135,10 +2352,37 @@ being used soundly.
     an ABA. The projector tracks native publications in flight, waits for
     them to complete, and reconciles them before it certifies a repository's
     watermark.
+  - **How native publications are tracked (R4-24).**
+    - *Registration atomic with certification.* The hook registers its
+      transaction in the replicator's registry before it answers `prepared`.
+      The projector certifies a watermark under the same lock that guards the
+      registry, so certification and registration cannot interleave.
+    - *Transaction identity.* Each hook invocation draws a nonce, carried in
+      its proposal and its registration, so two transactions on one ref are
+      never confused.
+    - *Self-rejection cleanup.* When git reports `aborted`, the hook
+      deregisters its transaction.
+    - *Process-death detection.* The hook holds its socket connection open
+      until git reports `committed` or `aborted`. A connection closed
+      without either means the git process died. That registration is
+      reconciled from the table's state.
+    - *Restart fencing.* After the replicator restarts, its registry is
+      empty. No watermark is certified until every repository has been
+      reconciled against the table once.
+    - *Reconciliation.* The ref is set to the table's value (R2-35).
+    - The mechanism is tested: an integration test kills git between
+      `prepared` and `committed`, and one restarts the replicator with
+      publications in flight.
   - The projector's own git writes bypass the replication hook, so it never
     proposes what it is projecting.
   - After log compaction, the projector rebuilds from the table, never from
     the log. A node far behind therefore needs only the table.
+  - **Paused during the start-up replay (R4-19).** The projector and git's
+    garbage collection stay paused until the table has replayed to the larger
+    of each repository's cursor and the commit index persisted at shutdown. A
+    repository whose cursor is AHEAD of the table waits; the projector never
+    "reconciles" it backwards. A simulator case restarts all three nodes with
+    a scheduled `gc`, under an oracle that checks the object closure.
 - **The hook proposes in `prepared`.** The `preparing` reservation of the
   design document is removed (A10): nothing is ordered before the entry
   itself.
@@ -2149,8 +2393,14 @@ being used soundly.
   grows. A proposal states the expected SHA and the expected revision. After
   `OUTCOME_UNKNOWN`, the replicator reads the table and never retries blindly.
 - **The Git projection stays outside the consensus hash (R3-28, point 8).**
-  - A local checker hashes `for-each-ref` and `HEAD` with the same leaf
-    function, under the projector's lock, and compares them with the table.
+  - **The projection has its own digest (R4-25).** It hashes the observable
+    Git state: the refs listed by `for-each-ref` and `HEAD`. A deleted ref is
+    its absence, never a tombstone. `HEAD` and every symbolic ref are
+    represented by their target name, with a defined encoding. It is
+    compared with a projection of the table's digest computed under the SAME
+    rules — tombstones dropped, symbolic refs as names — never with the
+    consensus digest directly.
+  - A local checker computes it under the projector's lock.
   - A difference triggers an automatic reprojection. An operator can force
     one with `forgejo cluster reproject <repo>`.
   - Missing objects are fetched from a peer, then checked with
@@ -2162,6 +2412,11 @@ being used soundly.
     A disk restored from backup carries a stale stamp, which forces a
     reprojection.
 - **Objects before refs (R1-05, R2-35).**
+  - **Object coverage is bound to a configuration (R4-23).** A durability
+    receipt for a push names the configuration under which its ref was
+    admitted. A reconfiguration is serialised with pending pushes. A push
+    still pending when a reconfiguration is proposed has its object closure
+    revalidated on the prospective membership before that change commits.
   - The objects a ref update needs are written and `fsync`ed on a majority
     before the ref entry is proposed.
   - **A pending push is retained durably (R3-13).** Its objects are recorded
@@ -2181,8 +2436,6 @@ being used soundly.
   - Reads of a repository are gated on object readiness: a node restored from
     a snapshot, or behind on objects, does not serve a repository until every
     object its table refs name is present and verified.
-  - The object channel uses the same transport identity, with a byte quota per
-    push.
 - **Input validation (R1-06, R2-35).**
   - `Apply` refuses, deterministically, a repository path that escapes the
     repository root. Paths are normalised lexically only, never by asking the
@@ -2212,18 +2465,29 @@ being used soundly.
   `common_container_denied_mesh_ports`. This is the only place the ADR names a
   making.codes setting.
 - **Memory (R3-24).** Forgejo runs with `GOMEMLIMIT` leaving about 0.8 GiB for
-  the replicator (D14).
+  the replicator (D14). `GOMEMLIMIT` is soft (R4-18).
+- **Ready means ready (R4-18).** Forgejo's health endpoint reports ready only
+  when `Health` is ready: the table is rebuilt, the projector has caught up
+  and the objects are present. The load balancer routes nothing to a node
+  before that.
+- **Outbox identities change across a lineage (R4-29).** After a `Recover` or
+  a `RestoreSnapshot`, webhook and CI outbox identities belong to the new
+  lineage (R3-22). The guide tells receivers to expect that change.
 - **Two upgrade procedures (R3-25).**
   - A Forgejo release WITHOUT a schema migration is rolled: one node at a
     time, leadership transferred away first.
   - A release WITH a schema migration stops all three nodes, upgrades them,
-    and restarts them. The consensus survives a full stop, because it is
-    durable.
+    and restarts them. The consensus survives a full stop, because its LOG is
+    durable. The table is rebuilt from the log (R4-29).
+  - **On the full-stop path, the replay gate is mandatory on every node before
+    it votes (R4-20).** The runbook runs `forgejo cluster inspect --replay`
+    on each node first. "One voter at a time" belongs to the rolling path
+    only.
   - In both cases `RaiseClusterVersion` is called only once all three nodes
     run the new release (D18).
-- **Snapshot backup (R3-26).** `forgejo cluster snapshot save` writes the
-  ref snapshot and its SHA-256 side by side, through the internal manager
-  API. The Ansible backup role runs it before the repository backup, and a
+- **Snapshot backup (R3-26, R4-05).** `forgejo cluster snapshot save` writes
+  the ref snapshot and its SHA-256 side by side, through the ADR 0148 socket,
+  never `/api/internal/manager`. The Ansible backup role runs it before the repository backup, and a
   restore pairs it with a PostgreSQL backup taken after it (D17).
 
 ## Consequences / Semantics
@@ -2252,10 +2516,10 @@ being used soundly.
   before this one, because `TransportConfig.Identity` is its type (R3-17).
 - **Administration is any-node (Q8, R3-03).** No product has to find the
   leader to administer the cluster.
-- **This version is rewritten-unreviewed.** The challenge stopped at its cap
-  of three rounds. Blocking objections were open before the round-3 rewrite,
-  and no reviewer has read the result. The next step is a review of this
-  version, not its implementation.
+- **This version is not yet reviewed.** The first review run stopped at its
+  cap of three rounds. A second run reviewed the R3 version, and its round-1
+  objections are applied here as R4. No reviewer has read the R4 version yet.
+  The next step is that review, not the implementation.
 - The root `CLAUDE.md` domain list, the error-code mirror and
   `codeRangeOwners` change in the implementing change set, not in this one.
 
