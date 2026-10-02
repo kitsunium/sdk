@@ -384,7 +384,7 @@ const (
     PEM Format = "pem"
     // YAML denotes the gopkg.in/yaml.v3 wire format.
     YAML Format = "yaml"
-    // TOML denotes the pelletier/go-toml/v2 wire format.
+    // TOML denotes TOML v1.0.0, read and written by the SDK's stdlib-only codec.
     TOML Format = "toml"
     // CBOR denotes the fxamacker/cbor/v2 wire format (RFC 8949).
     CBOR Format = "cbor"

@@ -1,6 +1,6 @@
 // Package toml_test — a program that imports this package and no other
 // codec: it reads TOML through the registry, is refused every other format,
-// and links none of their libraries.
+// and links no module outside the SDK — the TOML codec is the SDK's own.
 package toml_test
 
 import (
@@ -56,6 +56,48 @@ func TestItRegistersItsFormatAlone(t *testing.T) {
 	}
 }
 
+// TestItLinksNoModuleOutsideTheSDK reads the modules this test binary was
+// linked from: the SDK's own and nothing else, since the TOML codec is written
+// with the standard library alone. Bazel builds without module information.
+func TestItLinksNoModuleOutsideTheSDK(t *testing.T) {
+	t.Parallel()
+	info, ok := debug.ReadBuildInfo()
+	//: no module information: built by Bazel.
+	if !ok || len(info.Deps) == 0 {
+		t.Skip("built without module information (Bazel's rules_go); TestGoListDepsNamesNoOtherCodec pins the graph under go test")
+	}
+	//: every module linked.
+	for _, dependency := range info.Deps {
+		//: a module outside the SDK.
+		if !strings.HasPrefix(dependency.Path, "github.com/kitsunium/sdk") {
+			t.Errorf("the program links %s", dependency.Path)
+		}
+	}
+}
+
+// TestLocalTypesAreTheDecodedOnes decodes the three local kinds through the
+// registry, as config and i18n do, and finds this package's types.
+func TestLocalTypesAreTheDecodedOnes(t *testing.T) {
+	t.Parallel()
+	c, ok := corecodec.Lookup(toml.Format)
+	//: the format this package registers.
+	if !ok {
+		t.Fatal("toml is not registered")
+	}
+	var got map[string]any
+	//: one of each kind.
+	if err := c.Unmarshal([]byte("d = 1979-05-27\nt = 07:32:00\ndt = 1979-05-27T07:32:00\n"), &got); err != nil {
+		t.Fatal(err)
+	}
+	_, isDate := got["d"].(toml.LocalDate)
+	_, isTime := got["t"].(toml.LocalTime)
+	_, isDateTime := got["dt"].(toml.LocalDateTime)
+	//: each is the facade's type.
+	if !isDate || !isTime || !isDateTime {
+		t.Errorf("decoded %#v", got)
+	}
+}
+
 // TestItLinksNoOtherFormatsLibrary reads the modules this test binary was
 // linked from. Bazel builds without module information, which only
 // `go test` records; the registry test above holds under both.
@@ -99,6 +141,11 @@ func TestGoListDepsNamesNoOtherCodec(t *testing.T) {
 		if (strings.HasPrefix(line, "github.com/kitsunium/sdk/internal/service/codec/") && line != "github.com/kitsunium/sdk/internal/service/codec/toml") ||
 			slices.ContainsFunc(foreignModules, func(foreign string) bool { return strings.HasPrefix(line, foreign) }) {
 			t.Errorf("go list -deps names %s", line)
+		}
+		root, _, _ := strings.Cut(line, "/")
+		//: a package outside the standard library — its first element has a dot — and outside the SDK.
+		if strings.Contains(root, ".") && !strings.HasPrefix(line, "github.com/kitsunium/sdk/") {
+			t.Errorf("go list -deps names %s, a package outside the standard library and the SDK", line)
 		}
 	}
 }
