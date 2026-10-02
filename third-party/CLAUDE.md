@@ -38,7 +38,7 @@ the release chain leaves untagged.
   `replace` and pins the requires at the version being cut.
 - **Each module is in `go.work`**, so Bazel's `go_deps` resolves its vendor and
   the release chain tags it; git tracks its `go.mod`, so every census lane
-  (ADR 0137) builds, vets and tests it on every platform cell. Its root
+  (ADR 0137) builds, vets, tests and scans it like any other module. Its root
   directory carries a `BUILD.bazel` with its `gazelle:prefix` —
   `third-party/aws` and `third-party/x-crypto` hold no package, and their
   `BUILD.bazel` exists only so `//third-party/aws:go.mod` and
@@ -48,8 +48,9 @@ the release chain leaves untagged.
   `pkg/vX.Y.Z`. `compute-bumps.sh` emits the token `third-party` for a change
   here; any token cuts the whole chain once.
 - **The layer rule is unchanged:** `third-party/` sits above `internal/` and
-  `pkg/`, below nothing but the framework, and nothing in `internal/`, `pkg/` or
-  `framework/` imports it (`scripts/check-layer-deps.sh`, ADR 0068).
+  `pkg/` and beside the framework — nothing in `internal/`, `pkg/` or
+  `framework/` imports it, and it imports nothing of the framework
+  (`scripts/check-layer-deps.sh`, ADR 0068, ADR 0147).
 
 ## Test
 
