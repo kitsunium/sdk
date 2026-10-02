@@ -23,6 +23,7 @@ filegroup(
         "//framework/connectors/postgres:audit_srcs",
         "//framework/connectors/sqlite:audit_srcs",
         "//framework/internal/kit:audit_srcs",
+        "//framework/kit/storetest:audit_srcs",
         "//framework/model:audit_srcs",
         "//framework/model/internal/core:audit_srcs",
         "//framework/telemetry:audit_srcs",

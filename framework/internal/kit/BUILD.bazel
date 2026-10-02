@@ -293,6 +293,7 @@ go_test(
         "secret_test.go",
         "secretcmd_internal_test.go",
         "setting_test.go",
+        "signals_internal_test.go",
         "startup_bench_test.go",
         "static_test.go",
         "store_sql_internal_test.go",

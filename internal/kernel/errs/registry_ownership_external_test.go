@@ -149,6 +149,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework module
 	0x00_04_02_00: "framework/internal/kit",
 	0x00_04_03_00: "framework/telemetry", // ADR 0149
+	0x00_04_04_00: "framework/kit/storetest",
 	0x00_04_10_00: "framework/connectors/postgres",
 	0x00_04_11_00: "framework/connectors/mysql",
 	0x00_04_12_00: "framework/connectors/sqlite",

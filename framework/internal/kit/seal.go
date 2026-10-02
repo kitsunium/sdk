@@ -90,9 +90,11 @@ const (
 // or — a message sealed under data-key itself — the version that sealed it
 // was pruned. kit reads the value as its zero value.
 var (
-	errErased = errors.New("kit: a sealed value's key is destroyed")
+	errErased = errs.New(CodeSealErased, "SEAL_ERASED", "a sealed value's key is destroyed",
+		"kit: a sealed value's data key is destroyed, or the data-key version that sealed it was pruned")
 	// errNotCurrent ends a replacement of a key that changed meanwhile.
-	errNotCurrent = errors.New("kit: the wrapped key changed")
+	errNotCurrent = errs.New(CodeSealKeyMoved, "SEAL_KEY_MOVED", "the wrapped key changed meanwhile",
+		"kit: a data key's replacement found the wrapped key changed by another write")
 )
 
 // sealer seals and opens the members of an app's data at rest, in one run:

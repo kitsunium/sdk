@@ -2790,6 +2790,30 @@ codes:
     const: CodeRevisionDecode
     hex: "0x00_04_02_45"
     package: framework/internal/kit
+  - code: "0.4.2.70"
+    const: CodeSealErased
+    hex: "0x00_04_02_46"
+    package: framework/internal/kit
+  - code: "0.4.2.71"
+    const: CodeSealKeyMoved
+    hex: "0x00_04_02_47"
+    package: framework/internal/kit
+  - code: "0.4.2.72"
+    const: CodeResealInPlace
+    hex: "0x00_04_02_48"
+    package: framework/internal/kit
+  - code: "0.4.2.73"
+    const: CodeResealMoved
+    hex: "0x00_04_02_49"
+    package: framework/internal/kit
+  - code: "0.4.2.74"
+    const: CodeWorkflowNotInPlace
+    hex: "0x00_04_02_4A"
+    package: framework/internal/kit
+  - code: "0.4.2.75"
+    const: CodeTransactionPanic
+    hex: "0x00_04_02_4B"
+    package: framework/internal/kit
   - code: "0.4.3.1"
     const: CodeMisconfigured
     hex: "0x00_04_03_01"
@@ -2798,6 +2822,10 @@ codes:
     const: CodeRunning
     hex: "0x00_04_03_02"
     package: framework/telemetry
+  - code: "0.4.4.1"
+    const: CodeRolledBack
+    hex: "0x00_04_04_01"
+    package: framework/kit/storetest
   - code: "0.4.16.1"
     const: CodeURLMalformed
     hex: "0x00_04_10_01"
