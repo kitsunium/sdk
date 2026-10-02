@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications: the mechanisms a service is built from — typed errors, observability, codecs, cryptography, storage, networking, process supervision and the application mechanisms above them — implemented against the standard library and published as one stable surface, `pkg/v1`. The kernel's generic primitives build `internal/core`'s ports, values and error codes, the core builds `internal/service`'s engines, a complete service is exported through `pkg/v1`, and the framework (ADR 0147) sits above `pkg/v1`. Every domain follows the principles of the charter (ADR 0154); the tree is grouped by the families of ADR 0155. One line per domain below; what each ADR decided is digested in `docs/adr/CLAUDE.md`, and every package documents itself in its own `CLAUDE.md`.
+Go SDK providing a normed, performant toolbox for downstream applications: the mechanisms a service is made of — typed errors, observability, codecs, cryptography, storage, networking, process supervision and the application mechanisms above them — built on the standard library (ADR 0156) and published as one stable surface, `pkg/v1`. The kernel's generic primitives build `internal/core`'s ports, values and error codes, the core builds `internal/service`'s engines, a complete service is exported through `pkg/v1`, and the framework (ADR 0147) sits above `pkg/v1`. Every domain follows the principles of the charter (ADR 0154), and ADR 0155 groups the tree into the families the table names. One line per domain below; what each ADR decided is digested in `docs/adr/CLAUDE.md`, and every package documents itself in its own `CLAUDE.md`.
 
 | Domain | Family (ADR 0155) | What it is | ADRs |
 |---|---|---|---|
