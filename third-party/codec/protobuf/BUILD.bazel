@@ -1,5 +1,11 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:prefix github.com/kitsunium/sdk/third-party/codec/protobuf
+
+# third-party/codec/protobuf is a Go module of its own (ADR 0157): the Protocol
+# Buffers codec and its one vendor, google.golang.org/protobuf. One vendor per
+# module, so a consumer's graph carries the vendor it imports and no other.
+
 package(default_visibility = ["//visibility:public"])
 
 go_library(

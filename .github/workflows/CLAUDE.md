@@ -108,7 +108,8 @@ none does today.
 
 `test-386` RUNS every module's tests on linux/386 — the four workspace modules
 it always ran, plus the root module's `third-party/` tests, `e2e` and both tools,
-all measured passing on linux/386 before they were added. Compiling and
+all measured passing on linux/386 before they were added; those `third-party/`
+tests now live in one module per vendor (ADR 0157), each in the census. Compiling and
 behaving are different questions, and the gap between them is where a 64-bit
 assumption survives: `int(0xffffffff)` is `-1` where `int` is 32 bits and passes
 every `> cap` check, which is exactly the bound `internal/service/session`'s

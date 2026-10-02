@@ -8,8 +8,9 @@ protocol**. Importing the package self-registers the factory (no `init()`), so
 `writer.Open("clickhouse", writer.ClickHouseConfig{…})` resolves.
 
 Dep-light: the `github.com/ClickHouse/clickhouse-go/v2` import is confined to
-`client.go` and lives in the **root** module only, so `pkg/v1` consumers never
-pull the driver into their graph. The package uses the driver's `database/sql`
+`client.go`, in the **`third-party/db/writer/clickhouse` module** (ADR 0157), so
+`pkg/v1` consumers never pull the driver into their graph and a consumer of this
+writer pulls no other vendor. The package uses the driver's `database/sql`
 surface (`clickhouse.OpenDB`, lazy) so the code mirrors the mysql writer exactly.
 
 ## Contents
@@ -81,5 +82,5 @@ stays green either way. Per rule 12 this is a *declared* exemption, not an
 oversight — run it before shipping a change to the factory or the batching chain:
 
 ```sh
-GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/clickhouse/...
+cd third-party/db/writer/clickhouse && GOWORK=off go test -tags integration -timeout 180s ./...
 ```

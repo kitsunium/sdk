@@ -1,0 +1,9 @@
+# gazelle:prefix github.com/kitsunium/sdk/third-party/x-crypto
+
+# third-party/x-crypto is a Go module of its own (ADR 0157): argon2id and
+# XChaCha20-Poly1305 and their one vendor, golang.org/x/crypto, which both
+# share. This directory holds no package; the file marks the module root as a
+# Bazel package so gazelle's go_deps extension can load
+# //third-party/x-crypto:go.mod, as pkg/BUILD.bazel does for the public module.
+
+package(default_visibility = ["//visibility:public"])

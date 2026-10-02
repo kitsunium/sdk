@@ -3,8 +3,9 @@
 // (local-protocol). Importing the package self-registers the factory (no
 // init()), so writer.Open("redis", writer.RedisStreamConfig{…}) resolves. It is a
 // dep-light third-party integration: the github.com/redis/go-redis/v9 import is
-// confined to client.go and lives in the ROOT module only, so pkg/v1 consumers
-// never pull the driver into their graph.
+// confined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers
+// never pull the driver into their graph and a consumer of this writer pulls no
+// other vendor.
 //
 // Credentials: RedisStreamConfig.Credentials is OPTIONAL (a socket-local Redis
 // may have no AUTH) and, when set, supplied programmatically — like the AWS

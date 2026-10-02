@@ -8,9 +8,10 @@ batches records into multi-row INSERTs over a MySQL **Unix-domain socket**
 (local-protocol). Importing the package self-registers the factory (no `init()`),
 so `writer.Open("mysql", writer.MySQLConfig{…})` resolves.
 
-Dep-light: the `github.com/go-sql-driver/mysql` import is confined to `client.go`
-and lives in the **root** module only, so `pkg/v1` consumers never pull a DB
-driver into their graph (`GOWORK=off go list -deps ./v1/...` in `pkg/` names no
+Dep-light: the `github.com/go-sql-driver/mysql` import is confined to `client.go`,
+in the **`third-party/db/writer/mysql` module** (ADR 0157), so `pkg/v1` consumers
+never pull a DB driver into their graph and a consumer of this writer pulls no
+other vendor (`GOWORK=off go list -deps ./v1/...` in `pkg/` names no
 driver; no CI lane asserts it).
 
 ## Contents
@@ -79,7 +80,7 @@ round-trip. It self-skips when Docker is unavailable, so the default lane stays
 green.
 
 ```sh
-GOWORK=off go test -tags integration ./third-party/db/writer/mysql/...
+cd third-party/db/writer/mysql && GOWORK=off go test -tags integration ./...
 ```
 
 ## Do NOT

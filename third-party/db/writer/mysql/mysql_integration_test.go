@@ -14,7 +14,7 @@
 //
 // Run (Docker required):
 //
-//	GOWORK=off go test -tags integration ./third-party/db/writer/mysql/...
+//	cd third-party/db/writer/mysql && GOWORK=off go test -tags integration ./...
 //
 // Without Docker the container Run fails and the test self-skips, so a default
 // CI lane stays green.

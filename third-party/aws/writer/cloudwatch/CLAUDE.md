@@ -6,9 +6,10 @@ Registers the **"cloudwatch"** logger writer (ADR 0012). A consumer blank-import
 this package — `import _ "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch"` —
 to make `logger.NewMulti(..., WriterSpec{Name: "cloudwatch", Config:
 logger.CloudWatchConfig{…}})` resolve. Like the s3 writer, this is one of the
-only two places the AWS SDK enters a build — declared in the **root umbrella
-`go.mod`** that hosts `third-party/*`, which no other module requires (so
-`pkg/v1` consumers keep a zero-AWS module graph).
+only two places the AWS SDK enters a build — declared in the `go.mod` of the
+**`third-party/aws` module** the two writers share (ADR 0157), which nothing in
+the SDK requires: `pkg/v1` consumers keep a zero-AWS module graph, and a
+consumer of this writer gets the AWS SDK and `internal/*` — no other vendor.
 
 ## Contents
 
@@ -73,5 +74,6 @@ deviations.
 ## Verification
 
 ```sh
-GOWORK=off go test -race -cover ./third-party/aws/writer/cloudwatch/...
+# from the module root, as a consumer builds it (ADR 0157)
+cd third-party/aws && GOWORK=off go test -race -cover ./writer/cloudwatch/...
 ```
