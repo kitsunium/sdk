@@ -935,34 +935,57 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
 
 The owner's earlier Raft was read in full before this ADR was amended:
 the README, `raft.js`, `storage.js`, `shard.js`, `host.js`, `transport.js`,
-`wire.js`, `secure.js`, and the storage, resilience and TCP cluster suites.
-Each decision above that it changed says **from raft-sql-poc**. The table
-covers every decision, including those it confirmed or that this ADR keeps
-against it.
+`wire.js`, `secure.js`, `sqlstore.js`, `network.js`, and the storage,
+resilience and TCP cluster suites. What it does well and this ADR takes
+is listed apart from what it does badly, riskily or incompletely, which
+this ADR must not take. Every item carries its proof: a measurement from
+its README or a `file:line`. Each decision above that it changed says
+**from raft-sql-poc**.
 
-| Decision | raft-sql-poc | Verdict here |
-|---|---|---|
-| D1 name | `RaftNode`, `ShardedCluster`: the algorithm in the type name | unchanged — the SDK names the capability and puts the algorithm in the constructor |
-| D2 placement | one dependency-free tree, by design | unchanged — the same stance as stdlib-only |
-| D3 state machine | a thrown error is deterministic output (`raft.js:1109-1117`), even "replica state diverged" (`sqlstore.js:83`) | kept stricter: a failure that is not a refusal stops the node |
-| D4 log | one WAL per machine, CRC per record, a torn tail cut and a mid-log fault refused (`storage.js:755-771`), the hard state as a record, a checkpoint at the head of each segment, prefix-only GC | **amended**: the hard state goes in the log, with checkpoints and prefix GC |
-| D4 fsync failure | no retry, but the node never syncs again and acknowledges nothing, silently (`storage.js:489-495`) | kept: the node stops with `STORAGE_FAILED` |
-| D4 transport | its own SIGMA handshake, a per-machine certificate, revocation on removal, one connection per direction, one sealed batch per tick, a bounded queue (`transport.js`, `secure.js`) | **amended**: admission follows the membership, writes are batched, the queue is bounded, three size and time limits. TLS 1.3 is kept over a hand-written handshake, given the POC's bugs 5 and 6 |
-| D4 wire | RWP v2: a fixed 48-byte header, a closed schema of eleven types, a version byte, `f64` indexes because JavaScript has no cheap `u64` (`wire.js:1-40`) | unchanged — a fixed layout written by hand. Go has `uint64`, so the `f64` choice does not transfer |
-| D5 elections | PreVote paired with CheckQuorum (`raft.js:502-560`, `raft.js:693-705`), a live-leader check in PreVote only, a restarted node silent for one timeout (`raft.js:205-213`) | **amended**: silent on restart, and the check applies to `RequestVote` too |
-| D6 replication | batching per tick without a timer, optimistic pipelining with no bound, the leader's write in parallel counted at `persistedIndex` (`raft.js:1073-1093`), replies held back until durable (`raft.js:50-57`, `raft.js:1549-1561`), empty AppendEntries suppressed | **confirmed**, with three safety rules and the context case added; `MaxInflight` kept |
-| D7 snapshots | zstd once per snapshot, SHA-256, 256 KiB chunks with one in flight and resume by offset, cut synchronously and held whole in memory | **amended**: snapshot compression. The copy-on-write cut and the stream are kept |
-| D8 membership | single-server changes effective on append, refused before the leader commits in its term (`raft.js:403-465`), catch-up checked by the orchestrator, transfer waits for the commit | **amended**: transfer waits for the commit, refuses proposals and removes the leader last. Catch-up is enforced in the engine |
-| D9 reads | three levels (`strong` = ReadIndex, `leader`, `stale`), shared read rounds, a lease on `Date.now()` and kept during a transfer | **amended** with the shared-round measurement and the lease's preconditions. Two lease gaps closed. The `leader` level is refused |
-| D10 fencing | a write resolves with `{index, term}` (`raft.js:1129-1134`) and nothing builds on it | unchanged |
-| D11 groups | multi-Raft per shard, rendezvous placement, coalesced heartbeats ÷32 to ÷34, one WAL per machine, leadership balanced to within one | v1 unchanged. The POC's design and numbers become the v2 specification |
-| D12 errors | `NOT_LEADER` (with a leader hint), `UNKNOWN_OUTCOME`, `COMMIT_TIMEOUT`, `TRANSFER_FAILED`, `RETRY` | **amended**: a context that ends after the append is `OUTCOME_UNKNOWN` |
-| D13 observability | events built only when someone listens (280 k objects saved) | unchanged — the SDK's metrics already cost nothing when unread |
-| D14 API | `propose`, `readIndex`, `transferLeadership`, `proposeConfChange` | unchanged in shape |
-| D15 tests | 169 assertions over chosen scenarios on real timers; power loss on every machine; mutation controls | **amended**: mutation controls, and the POC's three safety bugs as regression switches. The deterministic simulator and the linearizability checker are what the POC says it lacks |
-| D16 performance | 7 000 to 9 400 durable writes/s, 5 300 to 5 700 over AES-256-GCM to disk, a 45 µs loopback round trip | a floor that confirms the targets, not a target |
+### What it does well, and this ADR takes
 
-### Replicate effects, not statements: the POC's hardest lesson
+| # | Practice | Proof | Where here |
+|---|---|---|---|
+| G1 | An acknowledgement waits for the `fsync`. Votes, AppendEntries acknowledgements and the final snapshot reply are held back until the batch holding them is durable, and nothing else waits | `raft.js:50-57`, `raft.js:1549-1561`. With power cut on every machine at once: 300/300 acknowledged writes back in simulation and 622/622 over encrypted TCP. With the negative control `unsafeAckBeforeSync`, 50 to 139 of 300 were lost | D6, D15 |
+| G2 | Group commit with no linger timer: what arrived during one turn of the loop becomes one write and one `fsync` | `raft.js:870-874`, `storage.js:447-505`. 101 to 143 writes per `fsync` under load. 7 000 to 9 400 durable writes/s, against 184 to 216/s with one `fsync` per write | D6 |
+| G3 | The leader writes in parallel with replication and counts itself only at its persisted index. It never commits an entry of an older term by counting replicas (Figure 8) | `raft.js:1073-1093`, test at `raft.js:1086` | D6 |
+| G4 | The hard state is a log record. A checkpoint opens every segment, and only a prefix of segments is ever deleted | `storage.js:24-37`, `storage.js:361-370`, `storage.js:507-591` | D4 |
+| G5 | A torn tail is truncated, even under 8 bytes. A fault before the last segment is refused | `storage.js:755-771`, README bug 4, 19 storage tests | D4 |
+| G6 | PreVote is always paired with CheckQuorum, and a restarted node behaves as if it had just heard from a leader | `raft.js:502-560`, `raft.js:693-705`, `raft.js:205-213`. Two bugs found and fixed: a minority inflating its term, and `propose` blocked forever without quorum | D5 |
+| G7 | Single-server changes take effect on append. They are refused before the leader commits in its term, and only one is in flight. A learner never runs an election timer | `raft.js:403-465`, `raft.js:344-356` | D8 |
+| G8 | A transfer refuses new proposals and sends `TimeoutNow` only once everything proposed is committed | `raft.js:789-809`, `raft.js:841-846`. 10 ms instead of an election timeout. README bug 7 was a write applied twice | D8 |
+| G9 | `NOT_LEADER` (nothing appended, retryable) is kept apart from `UNKNOWN_OUTCOME` (appended, may commit) | `raft.js:723-737`, `raft.js:835-846` | D6 |
+| G10 | Concurrent ReadIndex barriers share one quorum round. A lease is used only once the leader has applied its commit index and that index is past its no-op | `raft.js:1418-1531`. 2 000 concurrent reads cost 3 rounds. Strictly sequential reads cost −13 %, and the README says so | D9 |
+| G11 | Snapshots are verified by SHA-256, inflated no further than the announced size, compressed once for every follower, and resumed by offset | `raft.js:1176-1343`. zstd gives ÷10.8. Adding a machine costs 42 KB instead of 204 KB | D7 |
+| G12 | The transport sends one batch per peer per turn and keeps a bounded queue that drops when full. It refuses an announced length before allocating, bounds the handshake in time, and cuts a removed machine | `transport.js:1-22`, `transport.js:110-120`, `transport.js:294-296`, `shard.js:796-803`. 20 attacks, all failing | D4 |
+| G13 | An empty AppendEntries is sent only as a heartbeat or when it carries a new commit index | `raft.js:918-924`. RPCs per entry went from 198 to 8.1 | D6 |
+| G14 | A test that cannot fail proves nothing. Each defence is removed in turn, and the suite must turn red | `tools/security-mutations.js` (10/10 detected), `tools/balance-mutation.js`, `raft.js:77-80` | D15 |
+| G15 | A fixed-layout frame with a closed schema and a version byte. The control path reads its fields without allocating | `wire.js:1-40`. Header reads at 0 B/op, measured under `--expose-gc`. ×18 to ×1 486 against JSON | D4 |
+| G16 | Multi-Raft at the machine level: one heartbeat frame per pair of machines, delta-encoded, and one WAL per machine. Shards are placed by rendezvous hashing, and leadership is balanced to within one | `host.js:1-27`, `raft.js:1351-1368`. Idle messages ÷32 to ÷34 at 256 shards. Placement study on 100 000 keys | D11 (v2) |
+| G17 | Replicate the effect, not the statement | `sqlstore.js:65-70`, and the measurements below | Context, D3 |
+
+### What it does badly, riskily or incompletely, and this ADR must not take
+
+| # | Defect | Proof | Risk | Answer here |
+|---|---|---|---|---|
+| B1 | Every exception from `apply` counts as deterministic output, including a divergence the replica detected itself | `raft.js:1109-1117`, `sqlstore.js:83` ("changeset conflict on apply: replica state diverged") | a fork reported to the client as an SQL error while the replica keeps applying | D3: a failure that is not a refusal stops the node |
+| B2 | A failed `fsync` records the error and never syncs again. The node stays up | `storage.js:489-495` | safe but silent: every acknowledgement waits forever and nothing says why | D4: `STORAGE_FAILED`, the node stops |
+| B3 | The lease runs on `Date.now()` | `raft.js:1495-1506`, among 28 `Date.now()` calls in `raft.js` | a step of the wall clock lengthens a lease that the rate argument does not cover | D9: monotonic `Since` of the injected clock |
+| B4 | The lease survives the start of a transfer, and the transfer's `RequestVote` skips the live-leader check, which lives in PreVote only | `raft.js:756-787` does not clear `leaseUntil`. `raft.js:524-531` against `raft.js:588-620`, with `raft.js:563` and `raft.js:827` | a stale lease read if the vote request to the old leader is delayed or lost | D5 and D9(c) |
+| B5 | Bootstrap is implicit: an empty log given `peerIds` writes a founding configuration | `raft.js:168-179` | a wiped node restarted with its peers founds a second cluster under the same name | D8: an explicit, one-time `Bootstrap`, and an ID is never reused |
+| B6 | The pipeline is optimistic with no bound on what is in flight | `raft.js:937-939` | on a 27 ms link, one slow follower means megabytes resent, capped only by the transport's 64 MiB | D6: `MaxInflight` |
+| B7 | `COMMIT_TIMEOUT` names what is really an unknown outcome | `raft.js:850-858` | a caller reads "failed" and retries an entry that may commit | D6 and D12: `OUTCOME_UNKNOWN`, with the context as its cause |
+| B8 | A snapshot is cut synchronously on the apply path, held whole in memory, and written with blocking `fsyncSync` | `raft.js:1151-1159`, `storage.js:397-431` | apply, and so every write, pauses for as long as the state takes to serialise | D3 and D7: copy-on-write cut, streamed write |
+| B9 | A snapshot that fails its hash is ignored without being reported | `storage.js:823-837`, storage test 11 | a corrupt disk goes unnoticed until "log base lost" | D7: `SNAPSHOT_CORRUPT` |
+| B10 | Catch-up before promotion is checked only by the orchestrator. The engine promotes a lagging learner | `shard.js:662-676` against `raft.js:422-426` | a caller that skips the wait makes the group unavailable | D8: `Promote` refuses it |
+| B11 | Its own handshake and record protection. Two cryptographic bugs found so far. No certificate expiry or rotation, a revocation list kept in memory and not replicated, nothing encrypted at rest, no rate limit on handshakes | `secure.js`, README bugs 5 and 6, README §"Ce que la sécurité ne couvre pas encore" | the next bug in hand-written crypto is found in production | D4: TLS 1.3 through `tlsid`, admission by membership |
+| B12 | Tests are chosen scenarios on real timers, with unseeded randomness and sleeps. There is no deterministic simulation and no linearizability checker | `network.js:94`, `network.js:112`, the `sleep` calls in `resilience-tests.js`, README §"Limites assumées" | an interleaving nobody chose is never run, and a failing run cannot be replayed | D15 |
+| B13 | One process and one event loop for every "machine". The figures come from macOS with `F_FULLFSYNC` | README §"Limites assumées" and §"Ce que mesure le banc" ("the throughput column is noise here") | CPU scaling and Linux `fdatasync` costs are not shown | D16: a floor, not a target, measured again on the VPS |
+| B14 | Choices made for JavaScript: `f64` indexes because `u64` would mean `BigInt`, `u32` terms, an HMAC assembled by hand to dodge `createHmac`'s ~10 µs setup, and allocation claims about JavaScript strings | `wire.js:14-19`, README §"Deux découvertes de mesure" | none in Go, where `uint64` is native and the stdlib has no such setup cost | not carried over |
+| B15 | A `leader` read level that reads locally on the leader with no confirmation | README §"Les trois niveaux de cohérence" | it is exactly the read a deposed leader serves stale | D9: not offered |
+| B16 | Retries are not idempotent: `UNKNOWN_OUTCOME` goes back to the client, with no request identifiers | README §"Limites assumées" | a blind retry applies twice | Deferred, client sessions. The first consumer's compare-and-swap makes a duplicate fail identically everywhere |
+
+### G17 in detail: replicate effects, not statements
 
 The POC replicated SQL statements first, and its replicas diverged within
 milliseconds. `CURRENT_TIMESTAMP` is evaluated by each replica as it
@@ -994,8 +1017,8 @@ database.
 
 ### Still to confront: IWFS
 
-IWFS, the owner's Raft at Halys, remains to be confronted if access to it
-is obtained.
+IWFS, the owner's Raft in Go at Halys, is the next prior art. It will be
+confronted the same way, in two lists, when its code is available.
 
 ## References
 
