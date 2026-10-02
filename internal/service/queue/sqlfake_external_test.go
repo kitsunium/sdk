@@ -17,7 +17,7 @@
 // What it does NOT verify is that an engine accepts the SQL, nor SKIP LOCKED:
 // transactions are serialised — one writer from BEGIN to its end, as SQLite
 // runs them — so no row is ever locked by another. The statement texts are
-// pinned separately, and third-party/db/sql runs the same broker on the three
+// pinned separately, and e2e/integration/sql runs the same broker on the three
 // real engines, concurrency included, behind the integration tag.
 package queue_test
 

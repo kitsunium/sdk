@@ -15,7 +15,7 @@
 // demand.
 //
 // What it does NOT verify is that an engine accepts the SQL. The statement
-// texts are pinned separately, and third-party/db/sql runs the same store on
+// texts are pinned separately, and e2e/integration/sql runs the same store on
 // the three real engines, behind the integration tag.
 //
 // Transactions are serialised — one writer from BEGIN to its end, as SQLite

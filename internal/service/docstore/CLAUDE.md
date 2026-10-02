@@ -222,5 +222,5 @@ statement. The versions have their own files: `version_external_test.go` and
 `version_persist_external_test.go` (memory and file engines, the interrupted
 fold, the versions file) and `sql_version_external_test.go` (every dialect).
 The same contract runs on SQLite, PostgreSQL 17 and MySQL 8.4 through real
-drivers in `third-party/db/sql`, under `-tags integration` — see its
+drivers in `e2e/integration/sql`, under `-tags integration` — see its
 CLAUDE.md.

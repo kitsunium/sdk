@@ -67,14 +67,22 @@ reaches only the root module's package (entitlement), and with `GOWORK=off`
 longer contains it. Loop over `bash scripts/ci/go-modules.sh` to reach every
 module (ADR 0137).
 
-The opt-in suites behind a build tag — `localstack` for the AWS writers,
-`integration` for the database writers — keep the run procedure their package
-`CLAUDE.md` gives (rule 12), run from the module's directory.
+The opt-in suites behind a build tag keep the run procedure their package
+`CLAUDE.md` gives (rule 12). The AWS writers' `localstack` suites stay in
+`third-party/aws`: they need nothing beyond the AWS SDK. The database writers'
+`integration` suites start their servers with testcontainers, so they live in
+the auxiliary `e2e` module, `e2e/integration/writer/<engine>` — kept here, each
+would put testcontainers in its module's `go.mod`, and so in the graph of every
+consumer of that writer (ADR 0157). The SQL mechanisms' suite on real engines,
+`third-party/db/sql` until then, is `e2e/integration/sql`.
 
 ## Do NOT
 
 - Add a vendor to a module that already has one. A new vendor is a new module:
   a `go.mod`, a `go.work` line, a module-root `BUILD.bazel` with its prefix.
 - Import a `third-party/` package from `internal/`, `pkg/` or `framework/`.
+- Add a test that imports testcontainers, moby or a driver the module does not
+  ship to a module here: tests count in a module's `go.mod`. It goes to
+  `e2e/integration/`.
 - Write a `third-party/<path>/v…` tag by hand: the release chain cuts every
   module of `go.work` at one version (`scripts/release/cut-tags.sh`).

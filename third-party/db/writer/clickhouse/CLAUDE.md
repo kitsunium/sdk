@@ -72,9 +72,11 @@ go test -race ./third-party/db/writer/clickhouse/...
 
 ### Opt-in integration test (no CI lane — run it by hand)
 
-`clickhouse_integration_test.go` carries `//go:build integration`, so **no CI
-lane runs it**: it needs a Docker-compatible runtime to spin up
-`clickhouse/clickhouse-server:24-alpine` via testcontainers-go.
+`e2e/integration/writer/clickhouse/clickhouse_integration_test.go` carries
+`//go:build integration`, so **no CI lane runs it**: it needs a Docker-compatible
+runtime to spin up `clickhouse/clickhouse-server:24-alpine` via testcontainers-go.
+It lives in the auxiliary `e2e` module, not here, so testcontainers stays out of
+this module's `go.mod` and out of every consumer's graph (ADR 0157).
 `TestIntegration_clickhouseFactory_roundtrip` drives the real registered factory
 (`writer.Open("clickhouse", …)`) through Open → Write N → Flush → Close and reads
 the rows back. It self-skips when no runtime is reachable, so the default lane
@@ -82,5 +84,5 @@ stays green either way. Per rule 12 this is a *declared* exemption, not an
 oversight — run it before shipping a change to the factory or the batching chain:
 
 ```sh
-cd third-party/db/writer/clickhouse && GOWORK=off go test -tags integration -timeout 180s ./...
+cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/clickhouse/
 ```

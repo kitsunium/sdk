@@ -65,14 +65,16 @@ go test -race ./third-party/db/writer/redis/...
 
 ### Opt-in integration test (no CI lane — run it by hand)
 
-`redis_integration_test.go` carries `//go:build integration`, so **no CI lane
-runs it**: `Test_Integration_RedisWriter` needs a Docker-compatible runtime to
-spin up a real Redis via testcontainers-go. Per rule 12 this is a *declared*
+`e2e/integration/writer/redis/redis_integration_test.go` carries
+`//go:build integration`, so **no CI lane runs it**: `Test_Integration_RedisWriter`
+needs a Docker-compatible runtime to spin up a real Redis via testcontainers-go.
+It lives in the auxiliary `e2e` module, not here, so testcontainers stays out of
+this module's `go.mod` and out of every consumer's graph (ADR 0157). Per rule 12 this is a *declared*
 exemption, not an oversight — run it before shipping a change to the factory or
 the batching chain:
 
 ```sh
-cd third-party/db/writer/redis && GOWORK=off go test -tags integration -timeout 180s ./...
+cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/redis/
 ```
 
 ## Accepted audit findings

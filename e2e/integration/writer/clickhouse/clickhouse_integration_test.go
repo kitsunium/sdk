@@ -5,8 +5,7 @@
 // runtime). When no runtime is reachable the test self-skips so default CI stays
 // green. Run with:
 //
-//	cd third-party/db/writer/clickhouse && \
-//	    GOWORK=off go test -tags integration -timeout 180s ./...
+//	cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/clickhouse/
 //
 // It spins up clickhouse/clickhouse-server:24-alpine via the testcontainers-go
 // clickhouse module, creates the documented three-column table, then drives the
