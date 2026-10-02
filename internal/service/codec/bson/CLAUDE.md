@@ -4,7 +4,7 @@
 
 BSON codec — wraps `go.mongodb.org/mongo-driver/bson` behind the universal
 `core/codec.Codec` dispatch. BSON is MongoDB's binary document format. Like
-the other library-backed codecs (cbor/msgpack/toml/yaml) the third-party
+the other library-backed codecs (cbor/msgpack/yaml) the third-party
 dependency lives in `internal/service/go.mod`; blank-importing this package
 self-registers the `"bson"` Format (no `init()`). ADR 0021.
 

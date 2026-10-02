@@ -19,7 +19,6 @@ require (
 	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
 	github.com/kitsunium/sdk/internal/kernel v0.1.16 // indirect
 	github.com/kitsunium/sdk/internal/service v0.1.16 // indirect
-	github.com/pelletier/go-toml/v2 v2.4.3 // indirect
 	github.com/vmihailenco/msgpack/v5 v5.4.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
 	github.com/x448/float16 v0.8.4 // indirect
