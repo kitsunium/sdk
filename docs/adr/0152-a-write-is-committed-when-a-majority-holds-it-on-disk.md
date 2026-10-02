@@ -136,6 +136,13 @@ There is no `tools/` row and no `cmd/` row: the SDK has no `package main`
 `pkg/v1/consensus` alone, so a missing alias fails to compile in CI rather
 than in a consumer's build (R2-32).
 
+**The determinism analyzer is its own module (R3-28).** `consensus/detcheck`
+needs `golang.org/x/tools/go/analysis`, which the stdlib-only rule of this
+table forbids in `internal/` and `pkg/`. It ships as a separate Go module in
+the SDK repository, the way the framework's database connectors do (ADR
+0147). It exports the `Analyzer` and has no `package main` (Q4). The product
+wraps it in its own vet tool, in its own repository.
+
 The service-to-service edges are lateral and permitted (`internal/CLAUDE.md`).
 Nothing is added to the kernel: the step function is generic only to Raft, so
 it fails rule 1's second half. Stdlib only — no `go.etcd.io`, no
@@ -159,7 +166,12 @@ type Snapshot interface {
 // Frozen siblings, discovered by assertion (ADR 0039).
 type DurableStateMachine interface { StateMachine; AppliedPosition() (LogIdentity, Position, error) }
 type BatchingStateMachine interface { StateMachine; ApplyBatch(es []Entry, results []any) }
-type HashingStateMachine interface { StateMachine; Hash() [32]byte } // called at an apply point (R2-18)
+type HashingStateMachine interface { // R2-18, R3-28
+	StateMachine
+	Hash() [32]byte                // incremental, O(1), at an apply point
+	FullHash() ([32]byte, error)   // full recomputation, for the self-check
+	HashVersion() uint32           // the algorithm's version, carried in check entries
+}
 ```
 
 **`Apply` is a pure transition of state the state machine owns (R1-01).**
@@ -286,9 +298,9 @@ checksum.
   minority.
 - A named node refuses reads, reports itself unready, never campaigns, and
   transfers leadership away if it holds it, until it is restored.
-- **Policy when no majority of digests agrees: see R3-28 (to come).** It is
-  left open on purpose, pending measures that aim to make the case
-  impossible upstream.
+- **No majority of digests: prevented, then decided (R3-28).** The policy is
+  the subsection that follows. It aims to make the case impossible upstream,
+  and to decide it by reconstruction when it still happens.
 - **Repair stays possible under the alarm (R3-27).** As under `NO_SPACE`,
   `Remove`, `AddLearner`, `Promote`, `TransferLeadership` and
   `ClearDivergence` are still admitted while `STATE_DIVERGED` is raised.
@@ -298,6 +310,102 @@ checksum.
   after it (R3-24).
 - `Hash()` must be O(1) at the apply point: an incrementally maintained
   digest, not a scan of the whole state (R3-24).
+
+**Divergence prevention (R3-28).** These measures, studied by ten agents and
+retained by the owner, make "no majority of agreeing digests" as close to
+impossible as the hardware allows, and decidable when it is not.
+
+1. **A canonical, incremental hash.** `HashingStateMachine` returns a digest
+   that is canonical (it depends only on the replicated state, never on
+   anything local to the node), incremental (O(1) per `Apply`) and versioned.
+   The algorithm's version and the index travel in every hash-check entry. A
+   node that lacks that version declares itself unable to verify, which is
+   not a mismatch. A mismatch names the smallest unit the hash can name — for
+   the first consumer, the repository (D19 gives its two-level hash).
+2. **Compared at every batch.**
+   - AppendEntries and their responses carry `(applied index, root hash)`.
+     Each node keeps a ring of the last `W` pairs.
+   - At the first difference, the leader proposes a **proof entry**:
+     `{index, the digest of each voter at that index}`, each digest's origin
+     taken from the TLS identity that carried it. `Apply` computes the
+     verdict deterministically.
+   - A faulty LEADER is named by its own proof, and it transfers leadership
+     away. If it cannot, the followers that see the difference stop
+     acknowledging it, and CheckQuorum deposes it.
+3. **A local self-check.**
+   - Each node periodically compares its incremental hash with a full
+     recomputation, and does so after every `Restore`, on a staggered
+     background schedule.
+   - A difference is a LOCAL fault (memory, CPU or the hasher itself). The
+     node withdraws on its own with `HASHER_FAULT`, without a vote.
+   - At start and every hour, a known-answer self-test runs SHA-256, CRC-32C,
+     a witness `Apply` and the decoders against fixed vectors. A node whose
+     self-test fails refuses to start (`SELF_TEST_FAILED`).
+4. **Never three binaries.**
+   - Every member announces, in the replicated configuration, a fingerprint
+     of its `Apply` code: `debug.ReadBuildInfo` of the apply package and its
+     dependencies.
+   - An admission that would create a THIRD distinct fingerprint is refused
+     (`APPLY_FINGERPRINT_REFUSED`).
+   - An upgrade replaces one voter at a time, with a successful hash check
+     between each.
+   - The `Apply` logic is selected by the entry's version: frozen `applyVn`
+     functions, with golden vectors per version checked in CI. New semantics
+     start only at an index fixed by a **gate entry**, which the hash
+     includes.
+   - **Replay gate:** a new binary replays the latest verified snapshot and
+     the log tail OFFLINE, and must reproduce every validated hash before it
+     votes (`BINARY_REPLAY_MISMATCH`). The first consumer exposes this as
+     `forgejo cluster inspect --replay`.
+5. **Determinism by construction.**
+   - `Apply`, `ApplyBatch` and `Hash` live in a package with an allow-list of
+     imports.
+   - The SDK ships an analyzer, `consensus/detcheck` (`go/analysis`, over the
+     transitive call graph, run with `go vet -vettool`). It forbids
+     goroutines, channels, `select`, `sync`, `runtime`, `unsafe`, `reflect`,
+     `os`, `os/exec`, `time`, `math/rand`, `hash/maphash`, floating point, an
+     unsorted `range` over a map, unstable `sort.Slice`/`SortFunc`,
+     `unicode` and case folding, and writes to package variables.
+   - `Apply` sees only its entry: no configuration, no environment, no clock,
+     no limit derived from memory.
+   - The build is pinned: the toolchain and `godebug` in `go.mod`,
+     `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, `-trimpath`. A node refuses to
+     start when `GODEBUG` is set.
+6. **A checksum chain on entries.** The proposing node computes a checksum of
+   the entry's body before `Propose`, plus the checksum of the previous
+   entry's header. Both are verified when the entry is appended and again
+   before `Apply`. A mismatch refuses the acknowledgement, and the leader
+   resends (D4).
+7. **Rebuilt from the log, and only verified anchors travel.**
+   - A snapshot is cut only at a hash-check index, and is **anchored**:
+     `SnapshotMeta` carries the state hash and the index.
+   - An anchor is **verified** when three things hold: the file passes its
+     checksum, a full recomputation equals the stored hash, and that hash
+     equals the one validated in the log.
+   - Only verified anchors are sent or installed. Compaction never goes past
+     the latest verified anchor, and two anchors are kept.
+   - At any difference, each node rebuilds the state from its anchor and log,
+     off the apply goroutine, and applies a decision table:
+
+   | Observation | Verdict |
+   |---|---|
+   | live state ≠ rebuilt state | that node is faulty (memory or `Apply` run) |
+   | same content, different hashes | the hasher is faulty |
+   | the rebuilds agree | they are the truth; the faulty nodes are repaired |
+   | the rebuilds differ on equal entries, on stable nodes | a bug in `Apply`: writes are refused, no node is blamed |
+
+   - Repair is automatic: a `Restore` from the node's own rebuild, or from a
+     peer's verified anchor.
+8. **The Git projection stays outside the consensus hash** (D19).
+9. **Tests** (D15).
+10. **Operations** (D17).
+
+**What remains, stated honestly.** With three nodes, one fault at a time is
+tolerated. Three different digests are still decidable, by the
+reconstruction of point 7. The only case with no culprit is a bug in `Apply`
+that differs between builds. Points 4 and 5 and the tests block it upstream.
+If it still happens, writes are refused and no node is blamed.
+
 
 The name collides on purpose with the textbook and must not be confused with
 ADR 0120's `statemachine`, which moves entities between declared states on a
@@ -385,7 +493,9 @@ is `Sync` and `WriteStamp`: when they return nil, what they cover survives a
 power loss.
 
 **The shipped log** is a directory of segment files, each record
-`length | CRC-32C | version | term | index | kind | payload`, little-endian,
+`length | CRC-32C | version | term | index | kind | body checksum | previous
+header checksum | payload`, little-endian (the two entry checksums are R3-28's
+chain, point 6),
 written with `write(2)` into the current segment and made durable once per
 batch. **The hard state is a record of the log, from raft-sql-poc.** The
 first draft kept term and vote in a separate file published by rename, which
@@ -829,7 +939,9 @@ written.
 ### D7 — Snapshots and compaction ship in v1
 
 - **Trigger:** after `SnapshotEvery` applied entries (default 16 384) or
-  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first.
+  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first, at the
+  next hash-check index (R3-28): a snapshot is an anchor, and only a verified
+  anchor is sent, installed or used to bound compaction (D3, point 7).
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
   into `SnapshotStore.Create` off it, with a SHA-256 of the stream recorded in
   `SnapshotMeta` beside `Position`, `Membership`, the snapshot format version
@@ -1245,13 +1357,17 @@ change that introduces them (ADR 0035):
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
 | `0.2.57.12` | `ENTRY_SUPERSEDED` | the term at the proposal's index is observable and differs: certainly not committed (D6, from IWFS) |
 | `0.2.57.13` | `OVERLOADED` | refused before append: pending bytes or apply lag over their bound (D6) |
-| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes; writes are refused until an operator acts, while membership changes, transfer and `ClearDivergence` stay admitted (D3, R2-18, R3-10, R3-27); the no-majority case is R3-28, to come |
+| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes; writes are refused until an operator acts, while membership changes, transfer and `ClearDivergence` stay admitted (D3, R2-18, R3-10, R3-27); with no majority of digests, the reconstruction of D3 decides (R3-28) |
 | `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
 | `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
 | `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing and membership changes are still admitted (D17, R2-29) |
 | `0.2.57.18` | `RESULT_TYPE_MISMATCH` | `ProposeAs` got an `Apply` result of another type; the entry IS committed, and the error carries its `Position` (D14, R2-19) |
 | `0.2.57.19` | `PAYLOAD_VERSION_REFUSED` | a proposal's payload version is above what some member announced; refused before append, retryable after the upgrade (D18, R2-16) |
 | `0.2.57.20` | `LINEAGE_MISMATCH` | a position, outbox identity or fence from another `LogIdentity` lineage (D10, R3-22) |
+| `0.2.57.21` | `HASHER_FAULT` | the incremental hash differs from a full recomputation: a local fault; the node withdraws on its own, without a vote (D3, R3-28) |
+| `0.2.57.22` | `BINARY_REPLAY_MISMATCH` | a new binary's offline replay did not reproduce a validated hash; it may not vote (D3, R3-28) |
+| `0.2.57.23` | `APPLY_FINGERPRINT_REFUSED` | an admission would create a third distinct `Apply` fingerprint (D3, R3-28) |
+| `0.2.57.24` | `SELF_TEST_FAILED` | a known-answer self-test failed at start or on its hourly run; the node refuses to start or withdraws (D3, R3-28) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
@@ -1527,6 +1643,14 @@ transport. The cross-field rules are checked after defaults are applied
   product sets `GOMEMLIMIT` with about 0.8 GiB of headroom for the engine, the
   ref table and the projector, so the garbage collector does not discover
   the budget by running out.
+- **A state machine held in memory (R3-29).** When the state machine is not
+  durable, as for the first consumer (Q9), the budget adds two costs, both to
+  be measured:
+  - the RAM of the state itself, the ref table, measured on a real
+    deployment's ref count;
+  - the start-up replay. The state is rebuilt from the latest verified anchor
+    and the log after it. Since anchors are cut every `SnapshotEvery` and two
+    are kept, the replay is bounded to about `2 × SnapshotEvery` entries.
 
 The other defaults are provisional too, and are revised from the simulator
 and the VPS measurements before the first release.
@@ -1643,6 +1767,26 @@ The transport's identity, admission and size checks get the same treatment.
 Step-function behaviour is also pinned by **datadriven scripts**: text files
 of inputs and expected outputs, in the style of etcd's raft tests, which make
 a regression readable in review.
+
+**Divergence tests (R3-28).**
+- A **state-hash oracle** runs after every `Apply` in the simulator: every
+  node's hash at a common index must agree.
+- A **non-determinism mutation lane** injects, one at a time:
+  - an unsorted `range` over a map;
+  - a read of the clock;
+  - a field left out of the hash;
+  - a `Restore` that drops tombstones;
+  - a skipped entry;
+  - a wrong incremental hash.
+  Each must be caught, and the verdict must name the right node and index.
+- `Apply` is **fuzzed** against a reference model, and two instances against
+  each other.
+- **Bits are flipped** in the state, in snapshots and in the hasher's input,
+  including on two nodes within the same window.
+- **Differential replay across processes**, varying `GOMAXPROCS`, `-race`,
+  `GODEBUG`, amd64 and arm64, the current Go and the next: every replay must
+  produce the same hashes.
+- A real run ends with a **full diff of the tables** of every node.
 
 **Fuzzing.** The frame decoder, the log record decoder, the snapshot metadata
 decoder, the tail scan and the first consumer's object-channel framing
@@ -1855,6 +1999,11 @@ node, under the directory lock.
   the leader.
 
 **Other operations.**
+- **Hardware evidence (R3-28).** Each node exports its EDAC/MCE memory and
+  machine-check counters when the platform exposes them, and logs its CPU
+  model and microcode at start. Whether OVH's hosts use ECC memory is a
+  question to ask OVH. A hash fault on a node without ECC is read in that
+  light.
 - **Poison entry.** A committed entry that crashes every `Apply` stops every
   node, by D3. The runbook: `Inspect` the entry, fix the state machine, deploy,
   restart. The log is never edited.
@@ -1920,7 +2069,10 @@ The rules:
   `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
 - **Apply version gate.** An entry whose `Version` is above what the local
   state machine supports stops the node the same way, before `Apply` is
-  called.
+  called. The entry's version SELECTS the frozen `applyVn` that applies it,
+  and new semantics begin only at the index of a gate entry, included in the
+  hash. The `Apply` fingerprint, the third-fingerprint refusal and the replay
+  gate are in D3 (R3-28).
 - **Downgrade.** A node may run an older binary only while the committed
   cluster version is within its range. Raising the cluster version is the
   point of no return, and the operator guide says so.
@@ -1938,11 +2090,28 @@ being used soundly.
 - **A replicated ref table (Q1, R1-01).** The state machine is a ref table:
   `(repository, ref) → (SHA, revision)`, with tombstones for deleted refs.
   `Apply` is pure: it validates and updates the table, nothing else.
-- **The table lives in the node's own data directory (R3-05)**, in a
-  node-local store, never in Forgejo's shared SQL database. A shared database
-  would give three replicas one copy, and its own failover would decide what
-  the log already decided. The store is declared `Durability` durable (D3),
-  and serves a point-in-time read for snapshots.
+- **The table is held in memory (Q9, R3-05, R3-29).** It is never in
+  Forgejo's shared SQL database: a shared database would give three replicas
+  one copy, and its own failover would decide what the log already decided.
+  And it has no mutable store on disk at all. At start it is rebuilt from the
+  latest verified anchor (D3, R3-28 point 7) and the log after it. On disk
+  there are only the log and the snapshots, both immutable and checksummed.
+  - The first consumer declares `Durability = false`. The durable applied
+    position (R1-02, R2-09) and the lineage of applied positions (R3-01) are
+    therefore not used by it. They stay in the SDK for consumers whose state
+    is durable.
+  - The table serves a point-in-time read for snapshots, as D3 requires.
+  - Its RAM and the start-up replay count in D14's budget, and are to be
+    measured.
+- **The table's hash (R3-28, point 1).**
+  - A **leaf** is the SHA-256 of a fixed, length-prefixed, big-endian
+    encoding of: the hash algorithm's version, the repository, the ref, the
+    object format, the binary SHA, the revision and the tombstone flag.
+    Nothing local to the node enters it.
+  - A **repository's hash** is the sum of its leaves modulo 2^256, so an
+    update costs one subtraction and one addition.
+  - The **root** hashes the sorted list of repository hashes.
+  - A mismatch names the repository.
 - **The projector is the ONLY authority over Git (R2-35).**
   - Each node runs a projector that makes the local repositories match the
     table.
@@ -1979,6 +2148,19 @@ being used soundly.
 - **Revisions against ABA (R1-04).** Each ref carries a revision that only
   grows. A proposal states the expected SHA and the expected revision. After
   `OUTCOME_UNKNOWN`, the replicator reads the table and never retries blindly.
+- **The Git projection stays outside the consensus hash (R3-28, point 8).**
+  - A local checker hashes `for-each-ref` and `HEAD` with the same leaf
+    function, under the projector's lock, and compares them with the table.
+  - A difference triggers an automatic reprojection. An operator can force
+    one with `forgejo cluster reproject <repo>`.
+  - Missing objects are fetched from a peer, then checked with
+    `git index-pack --strict`.
+  - The projector owns garbage collection: `gc.auto=0`,
+    `maintenance.auto=false` and `receive.autogc=false`, so no git process
+    prunes behind its back.
+  - Each repository keeps a projection stamp (lineage, watermark, checksum).
+    A disk restored from backup carries a stale stamp, which forces a
+    reprojection.
 - **Objects before refs (R1-05, R2-35).**
   - The objects a ref update needs are written and `fsync`ed on a majority
     before the ref entry is proposed.
