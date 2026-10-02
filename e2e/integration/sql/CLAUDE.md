@@ -52,9 +52,10 @@ GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchme
 ```
 
 They are a named, manual lane, as the database writers' suites beside them
-are (`e2e/integration/CLAUDE.md`): CI's runners do not start the containers. Run them on any change to
-`internal/service/sql`, `internal/core/sql`, the SQL engine of
-`internal/service/docstore`, or the SQL broker of `internal/service/queue`.
+are (`e2e/integration/CLAUDE.md`): CI's runners do not start the containers.
+Run them on any change to `internal/service/sql`, `internal/core/sql`, the SQL
+engine of `internal/service/docstore`, or the SQL broker of
+`internal/service/queue`.
 
 ## Do NOT
 
