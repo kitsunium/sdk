@@ -4,8 +4,9 @@
 // an explicit Flush / Close.
 //
 // The primitive is stdlib-only and domain-neutral (ADR 0014). It owns its own
-// time.Ticker directly and does not depend on any other kernel lifecycle
-// primitive. The deliver closure carries every domain-specific concern: a
+// ticker — built on Config.Clock, the wall clock by default — and does not
+// depend on any other kernel lifecycle primitive. The deliver closure carries
+// every domain-specific concern: a
 // pre-delivery reorder, a per-batch key, or a byte-vs-count weight all live in
 // the caller's Sink and WeightOf, never in the batcher.
 //
@@ -30,6 +31,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -69,14 +71,18 @@ type Batcher[T any] struct {
 }
 
 // NewBatcher builds a Batcher over deliver with cfg. When cfg.FlushEvery > 0 it
-// spawns a ticker goroutine that flushes on the interval; the goroutine is
-// joined by Close. A nil cfg.OnError is degraded to a no-op so the flush paths
-// stay branch-free.
+// spawns a ticker goroutine that flushes on the interval, ticking on cfg.Clock
+// (the wall clock when nil); the goroutine is joined by Close. A nil
+// cfg.OnError is degraded to a no-op so the flush paths stay branch-free.
 func NewBatcher[T any](deliver Sink[T], cfg Config[T]) *Batcher[T] {
 	//: degrade a nil error hook to a no-op so background flush stays branch-free.
 	if cfg.OnError == nil {
 		//: discard ticker-flush errors when the caller wired no observer.
 		cfg.OnError = func(error) {}
+	}
+	//: no clock named: the wall clock, the only non-arbitrary default.
+	if cfg.Clock == nil {
+		cfg.Clock = clock.System
 	}
 	b := &Batcher[T]{
 		deliver: deliver,
@@ -213,14 +219,17 @@ func (b *Batcher[T]) deliverBatch(ctx context.Context, batch []T) error {
 func (b *Batcher[T]) loop(every time.Duration) {
 	//: signal Close that the goroutine has fully exited (guarded for safety).
 	defer b.doneOnce.Do(func() { close(b.done) })
-	//: periodic flusher bounds how long a partial batch waits.
-	t := time.NewTicker(every)
+	//: periodic flusher bounds how long a partial batch waits, on the
+	//: configured clock so a test advances it instead of sleeping.
+	t := b.cfg.Clock.NewTicker(every)
 	defer t.Stop()
+	//: bound once: the ticker's channel is never closed (clock.Ticker).
+	ticks := t.C()
 	//: drain on every tick; exit promptly on stop.
 	for {
 		select {
 		//: interval elapsed — flush whatever has accumulated.
-		case <-t.C:
+		case <-ticks:
 			//: route a tick-flush failure to the observer.
 			if ferr := b.flushOnce(context.Background()); ferr != nil {
 				//: surface the background failure via the configured hook.

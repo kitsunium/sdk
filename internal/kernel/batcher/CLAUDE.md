@@ -22,6 +22,7 @@ type Config[T any] struct {
     MaxWeight  int64               // eager-flush at this summed weight (needs WeightOf)
     WeightOf   func(T) int64       // nil => count-only (each item weighs 1, MaxWeight ignored)
     FlushEvery time.Duration       // >0 spawns a ticker joined by Close
+    Clock      clock.Waiter        // the ticker's clock; nil => clock.System (a ManualClock in tests)
     OnError    func(error)         // observes background ticker deliver failures (nil => no-op)
 }
 
@@ -37,9 +38,11 @@ var BatcherDeliverFailed *errs.Error // 0.1.5.2 BATCHER_DELIVER_FAILED
 
 ## Conventions
 
-- **Owns its own ticker.** `Batcher` drives a plain `time.Ticker` directly — it
-  does NOT depend on any other kernel lifecycle primitive (ADR 0014 §D6:
-  coupling two new primitives in one commit is needless risk).
+- **Owns its own ticker.** `Batcher` drives a `clock.Ticker` built on
+  `Config.Clock` — the wall clock when nil — and does NOT depend on any other
+  kernel lifecycle primitive (ADR 0014 §D6: coupling two new primitives in one
+  commit is needless risk). The clock is what lets a consumer's test flush by
+  advancing a `ManualClock` past `FlushEvery` instead of sleeping through it.
 - **Swap-under-lock, deliver-outside-lock.** The pending batch is swapped out
   under `mu` and the `Sink` runs outside it, so a slow delivery never blocks a
   producer. `Add` / `Flush` / `Close` are all safe under concurrent callers.
@@ -70,7 +73,7 @@ Match with `errs.HasCode(err, batcher.CodeBatcherDeliverFailed)` or
 ## Do NOT
 
 - Reach into `core/*` or `service/*` — kernel is stdlib + sibling-kernel only
-  (`batcher` imports just `context`, `sync`, `time`, and `internal/kernel/errs`).
+  (`batcher` imports just `context`, `sync`, `time`, and `internal/kernel/{clock,errs}`).
 - Move a sink-specific reorder / key / weight into the batcher — keep it in the
   deliver closure or `WeightOf`, or the dedup that justifies this package is lost.
 - Add a blocking / unbounded variant without an ADR.
@@ -86,7 +89,8 @@ cd internal/kernel && GOWORK=off go test -race -cover ./batcher
 Tests: `batcher_external_test.go` (public contract: coalescing Flush, eager
 MaxItems / MaxWeight flush, wrapped deliver error, Close + final flush +
 Closed-after-Close + idempotent second Close, background ticker),
-`batcher_internal_test.go` (`weigh` count-only fallback, concurrent
+`batcher_internal_test.go` (`weigh` count-only fallback, the ticker flushing
+when an injected `ManualClock` passes `FlushEvery`, concurrent
 producers + flusher race, serial `Sink` invocation (V6), every `Add` accepted
 while `Close` runs is delivered, deliver-closure-controls-order proof),
 `batcher_bench_test.go` (cap-flush `Add`, uncontended and contended, and the

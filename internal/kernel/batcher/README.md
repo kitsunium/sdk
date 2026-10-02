@@ -17,6 +17,10 @@ _ = b.Flush(ctx)    // deliver the pending batch now
 _ = b.Close(ctx)    // stop the ticker + final flush
 ```
 
+The `FlushEvery` ticker runs on `Config.Clock` — the wall clock when nil — so a
+test hands it a `clock.ManualClock` and flushes by advancing time instead of
+sleeping.
+
 The deliver closure carries every sink-specific concern: a pre-delivery
 reorder, a per-batch key, or a byte-vs-count weight. A nil `WeightOf` means
 count-only batching (each item weighs 1, `MaxWeight` is ignored).

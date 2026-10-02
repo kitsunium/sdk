@@ -20,7 +20,10 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 | `NewLoopDaemon` | `NewLoopDaemon(loop Loop) *LoopDaemon` | `New`-prefixed alias of `Start` (lint) |
 | `LoopDaemon.Stop` | `Stop()` | idempotent: `close(stop)` once, then `<-done` |
 | `LoopDaemon.Done` | `Done() <-chan struct{}` | closed when the loop has returned |
-| `Every` | `Every(interval time.Duration, tick func()) *LoopDaemon` | ticker loop; `Stop` joins |
+| `Every` | `Every(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon` | ticker loop; `Stop` joins |
+| `EveryOption` | `func(*everyConfig)` | tunes `Every`; applied in order, a nil one skipped |
+| `WithClock` | `WithClock(w clock.Waiter) EveryOption` | tick on `w` instead of the wall clock — a `ManualClock` in a test; nil is the wall clock |
+| `WithDone` | `WithDone(done <-chan struct{}) EveryOption` | also end the loop when `done` closes — the owner's own end, without waiting for `Stop` |
 
 > Naming note: ADR 0014 §D6 names the type `Daemon`, but `KTN-STRUCT-ROLE`
 > requires a recognized role *suffix* (a bare role noun is rejected), so the
@@ -46,8 +49,17 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 - **The Loop MUST NOT panic.** It runs in a bare goroutine — a panic crashes the
   process. `worker` adds NO `recover()` by deliberate choice (keep it minimal);
   callers running risky work recover inside their own `Loop`.
-- **`Every` owns its `time.Ticker`** and stops it when the loop exits, so `Stop`
-  both ends the ticking and joins the goroutine.
+- **`Every` owns its ticker** and stops it when the loop exits, so `Stop` both
+  ends the ticking and joins the goroutine. The ticker is a `clock.Ticker` built
+  on `clock.System` unless `WithClock` names another clock, so a consumer's
+  cadence is testable by advancing a `ManualClock` instead of sleeping; the
+  loop arms it on its own goroutine, so a test calls `BlockUntil` before its
+  first `Advance`. A tick that comes due while the previous one still runs is
+  dropped, never queued — the `clock.Ticker` contract, which is `time.Ticker`'s.
+- **`WithDone` is an early end, not a replacement for `Stop`.** An owner whose
+  work can finish on its own — a stream the peer closed, a connection a tick
+  found dead — hands its end channel over, so the ticking stops at that end;
+  `Stop` remains the join and returns at once on a loop that already left.
 
 ## Consumers it collapses
 
@@ -75,6 +87,8 @@ it: they are built on `kernel/batcher`, which drives its own `time.Ticker`
   `LoopDaemon` lives in `worker.go`; `Every` is a func and shares `every.go`.
 - **Emits NO codes.** Pure goroutine control, like `recycler` / `snapshot`. No
   `codes.go` / `errors.go`, no `audit_srcs` filegroup.
+- **Imports only `kernel/clock`** besides the stdlib — the time port the ticker
+  is built on.
 
 ## Do NOT
 
