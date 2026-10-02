@@ -55,8 +55,8 @@ Stdlib plus `core/statemachine`, `kernel/{clock,errs,heap}` and
   writer still waits for the lock. `land` is keyed by the flight's pointer, so
   a late landing never ends a later holder's flight.
 - **The journal is ordered per key, not under `book.mu`.** `step`,
-  `reconcile` and `forget` take the key's gate (`book.gates`, a `keyLocks`
-  held with `hold`, which no context abandons) BEFORE `book.mu`, change the
+  `reconcile` and `forget` take the key's gate (`book.gates`, `journalGates` plain
+  `sync.Mutex`es picked by the key's hash, which no context abandons) BEFORE `book.mu`, change the
   record under `book.mu`, release it, and call the journal holding the gate
   alone. Two writes of one key reach the journal in the book's order; a slow
   journal holds back one entity; a journal may read the census

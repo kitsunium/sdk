@@ -204,7 +204,7 @@ every other codec.
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | Release dry-run | `make release-dry-run` (computes patch bumps locally without pushing tags — see ADR 0007) |
-| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 66 today — and of every `framework` package declaring one, from its package doc comment; see ADR 0008) |
+| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 66 today — and of every package of the `framework` module declaring one (not the `framework/connectors/*` modules, which that `go generate` does not reach), from its package doc comment; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.
 

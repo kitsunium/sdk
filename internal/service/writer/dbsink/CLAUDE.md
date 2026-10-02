@@ -3,15 +3,14 @@
 
 ## Purpose
 
-The **driver-agnostic database sink shell** (ADR 0015, gated). It is the DB
+The **driver-agnostic database sink shell** (ADR 0015, Accepted). It is the DB
 analogue of the S3 batching sink (`third-party/aws/writer/s3`): it coalesces
 records into batches via the generic kernel batcher and hands each batch to a
 single deliver seam — `execBatch` — when the row cap is reached, on the optional
 flush ticker, or on `Flush` / `Close`. It imports **no database driver, no
 vendor SDK, and no new core sibling**, so it stays stdlib-only and dep-light.
 
-The concrete driver adapters (`third-party/db/writer/{mysql,clickhouse,redis}`,
-ADR-gated) wrap `Compose` with their own `execBatch` closure and self-register
+The concrete driver adapters (`third-party/db/writer/{mysql,clickhouse,redis}`) wrap `Compose` with their own `execBatch` closure and self-register
 as `core/writer` factories. This shell owns the batching / back-pressure /
 level-floor composition once, so every DB writer inherits identical wiring.
 
