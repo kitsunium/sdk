@@ -1,9 +1,9 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed
+- **Status**: Proposed — challenged in three rounds (the cap); the round-3 version is **rewritten-unreviewed**: no reviewer has read it (R3)
 - **Date**: 2026-10-02
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19)
+- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Depends on** the TLS sibling ADR of D4, which must be Accepted before this one (R3-17)
 
 ## Context
 
@@ -224,6 +224,25 @@ position by one must be caught (D15).
 - `Restore` persists the snapshot's position and log identity atomically with
   the restored state.
 
+**Lineage across a recovery (R3-01).** A `LogIdentity` carries a lineage: the
+chain of `(ClusterID, log epoch)` it descends from. `Recover` records the old
+identity and the last index it kept. The engine accepts an applied position
+of the PREDECESSOR identity when its index is at or below that bound and its
+term matches the kept log's term at that index. Otherwise the state machine
+must be restored. When the recovered node has a snapshot, `Recover` re-labels
+that snapshot with the new identity. When it has none, `Recover` writes the
+new identity and the bound in one durable record before anything else, so a
+crash leaves either the old directory or the fully re-labelled one. A
+simulator case runs `Recover` under a durable state machine and crashes it at
+each step.
+
+**Engine state has its own recovery pass (R3-21).** The engine's own
+replicated state — timing contract, cluster version, alarms, retired IDs —
+is rebuilt on restart by a pass over the committed log up to the commit
+boundary. That pass runs even when the state machine's applied position lets
+the engine skip application commands, so a durable state machine ahead of
+the snapshot cannot make the engine forget an alarm or a retired ID.
+
 **Batching apply.** A state machine that implements `BatchingStateMachine`
 receives committed entries in batches, with one result slot per entry, so a
 durable state machine can make a batch durable in one write (R1-28).
@@ -258,6 +277,22 @@ minority hash and a majority hash cannot tell a broken node from a broken
 hasher. This is the SDK form of the first consumer's per-repository
 checksum.
 
+**The verdict is computed in `Apply`, and the minority is named (R3-10).**
+- Each node's digest for a check index is an entry. Its origin is the TLS
+  identity of the connection that carried it, never a field in the payload.
+  Only one digest per voter per check index counts.
+- When a majority of the voters' digests agree, `Apply` decides the verdict
+  deterministically on every node. `STATE_DIVERGED` names the nodes in the
+  minority.
+- A named node refuses reads, reports itself unready, never campaigns, and
+  transfers leadership away if it holds it, until it is restored.
+- With no majority of agreeing digests, the alarm is **inconclusive**. It
+  refuses writes and declares no node correct.
+- A hash-check entry ends its batch, so every node hashes exactly the state
+  after it (R3-24).
+- `Hash()` must be O(1) at the apply point: an incrementally maintained
+  digest, not a scan of the whole state (R3-24).
+
 The name collides on purpose with the textbook and must not be confused with
 ADR 0120's `statemachine`, which moves entities between declared states on a
 timer. That domain decides WHAT state an entity is in; this port is HOW a
@@ -284,14 +319,25 @@ type LogStore interface {
 	WriteStamp(Stamp) error                // durable on return
 	Close() error
 }
+type SnapshotSink interface { // R3-16
+	io.Writer
+	Commit(final SnapshotMeta) error // verifies the SHA-256 it computed over what was written
+	Abort() error
+}
+type SnapshotHandle interface { // pinned until Close (R3-16)
+	io.ReaderAt
+	Meta() SnapshotMeta
+	Close() error
+}
 type SnapshotStore interface {
-	Create(meta SnapshotMeta) (SnapshotSink, error) // Write, Commit, Abort
-	Latest() (SnapshotMeta, io.ReadCloser, error)
+	Create(id string, meta SnapshotMeta) (SnapshotSink, error) // a spool is bound to its snapshot id
+	Latest() (SnapshotHandle, error)
 }
 type Transport interface {
 	Send(to NodeID, m *Message) // never blocks; may drop
 	// Stream sends a snapshot; the RECEIVER chooses the offset to resume from (R2-10).
-	Stream(ctx context.Context, to NodeID, meta SnapshotMeta, open func(offset int64) (io.Reader, error)) error
+	// open returns an io.ReadCloser at an ENCODED offset on a chunk boundary; Stream closes it (R3-16).
+	Stream(ctx context.Context, to NodeID, meta SnapshotMeta, open func(offset int64) (io.ReadCloser, error)) error
 	Bind(group GroupID, deliver func(*Message), install func(InstallRequest) error) error
 	SetMembership(group GroupID, admitted []Member) // per group; the transport computes the union (R2-31)
 }
@@ -324,7 +370,9 @@ type UnreachableReporter interface { Unreachable(func(NodeID)) } // sibling (R1-
 - `deliver` must not block (R2-08). Inbound messages go into two bounded
   queues, one for control frames and one for data, so a flood of entries
   never starves a vote. Each queue is bounded in BYTES (64 MiB for data,
-  provisional) as well as in count. When a queue is full the transport drops
+  provisional) as well as in count. Control frames also have their own small
+  per-frame size cap and byte bound, far below the data limits, so an
+  oversized "control" frame is refused at its header (R3-20). When a queue is full the transport drops
   the message and counts it, as Raft tolerates. The node's total memory
   budget, these queues included, is stated in D14. The contract that carries the safety of the whole domain
 is `Sync` and `WriteStamp`: when they return nil, what they cover survives a
@@ -364,10 +412,24 @@ and spelled out:
 6. delete only a prefix of segments, after the checkpoint that replaces them
    is durable, and `fsync` the directory after the unlinks.
 
-A recovery that finds a `.tmp` deletes it. A segment with no valid checkpoint
-at its head can only be an interrupted rotation. It is deleted, not treated
-as corruption (R2-05). A recovery that finds a gap in the segment sequence
-refuses with `LOG_CORRUPT`.
+**What a recovery may delete, and what it must refuse (R2-05, R3-08).**
+- Only an INCOMPLETE `.tmp` is deleted: a file that never reached step 3.
+- A published segment whose checkpoint is invalid is corruption, not an
+  interrupted rotation. It is quarantined. Round 2's reading, "no valid
+  checkpoint means an interrupted rotation", was only true before the rename,
+  and the rename is now after the checkpoint's sync.
+- **A zero record header ends the data of a segment only if everything after
+  it in that segment is zeros AND no later segment exists.** Otherwise a
+  zeroed sector in the middle of synced data would be read as the end of the
+  log. That is `LOG_CORRUPT` and quarantine.
+- Indexes are continuous across segments. A gap or an overlap between one
+  segment's last index and the next one's first is `LOG_CORRUPT`.
+- The simulator zeroes a synced header sector in the middle of a segment. It
+  tests a corrupt checkpoint separately from a crash before publication.
+
+**The next segment is pre-created in the background (R3-24).** It is
+zero-filled and published through steps 1 to 3 while the current one fills,
+so a rotation never waits for 64 MiB of zeros.
 
 **Tail repair is narrow (R1-10, R2-01).** The first draft truncated any record
 whose CRC failed at the tail. That repairs too much: a bit flip in a SYNCED
@@ -389,7 +451,12 @@ Before anything is truncated or moved, the node writes and syncs a
 and it keeps the damaged bytes untouched. A node that finds the marker
 refuses to start (`LOG_QUARANTINED`) until an operator has inspected the
 directory and cleared it, through `Inspect` and the product's own procedure
-(D17). The simulator flips bits in synced records, not only in the unsynced
+(D17). **`ClearQuarantine` allows exactly two exits (R3-09):**
+1. wipe the directory and rejoin as an empty learner, with a new incarnation;
+2. truncate at the damage, and stay non-voting and non-acknowledging until a
+   leader of a term at least equal to the node's own has rewritten its log
+   past the truncation point.
+There is no third exit that keeps the damaged node voting. The simulator flips bits in synced records, not only in the unsynced
 tail. A liveness scenario cuts power on all three nodes at once, with torn
 tails, and the cluster must elect and commit again (D15).
 
@@ -444,7 +511,8 @@ R2-21).**
   `kitsunium-consensus://<cluster>/<node>`. The dialer checks the listener's
   SAN, and the listener checks the dialer's. A wrong cluster or node is
   `PEER_REJECTED`. The transport takes its own cluster and node from its own
-  certificate's SAN, never from a separate setting (R2-40).
+  certificate's SAN, never from a separate setting (R2-40). `NewRaft` refuses
+  a `Config.Cluster` or `Config.ID` that differs from that SAN (R3-24).
 - The sender of every frame is stamped from the connection's TLS identity, not
   read from the frame. A frame that claims another sender is dropped and
   counted.
@@ -489,8 +557,7 @@ reused (D8), and a retired ID is refused even with a valid certificate.
 - **Exposure is the consumer's (R2-37).** The SDK has no allow-list setting.
   The listener binds to the address it is given, and nothing else. The
   consumer guide says that a deployment binds it to a private interface
-  only. On making.codes that is `wg0`, with the consensus and object ports
-  listed in the existing `common_container_denied_mesh_ports`.
+  only. The first consumer's binding is in D19 (R3-24).
 All of these are `Config` fields with an owner, a default and a validation
 (D14, R1-29).
 
@@ -800,6 +867,22 @@ written.
   - the log suffix after the snapshot's index is kept only if the entry at
     the boundary has the snapshot's term and index. Otherwise the whole log is
     replaced.
+  - **Resumption, exactly (R3-16).**
+    - The leader streams from a `SnapshotHandle` that `Latest` pins, with
+      random access, until the transfer completes, so compaction cannot delete
+      the snapshot mid-transfer.
+    - The offset is a count of ENCODED bytes and must fall on a chunk
+      boundary. Any other offset is refused.
+    - On resume, the receiver rebuilds its running SHA-256: from a saved hash
+      state (`encoding.BinaryMarshaler`), or by re-hashing the decoded prefix
+      it has spooled.
+    - A spool is bound to its snapshot id, so a resume never appends to
+      another snapshot's spool.
+    - An install of a snapshot the receiver already holds gets an idempotent
+      success, and the leader moves that peer back to `probe`.
+    - Decompression is bounded per chunk BEFORE the output is allocated. A
+      codec that cannot bound its output before decoding is refused as a
+      snapshot codec.
   SHA-256 here is integrity, not authentication: the authentication is the
   TLS identity of the sender.
 - **The leader knows each peer's limit (R2-30).** Each peer announces its
@@ -856,11 +939,22 @@ implemented in v1:
   that results has no majority acknowledging the leader NOW. This is etcd's
   strict reconfiguration check: a change that would leave the cluster unable
   to commit its own reversal is never proposed.
-- **Membership changes come from the leader only (R2-36).** A follower never
-  forwards one. It answers `NOT_LEADER` with the leader's hint, and the caller
-  — the product's administration — retries against the leader. Each change
-  entry carries the operator identity the caller provides, for the product's
-  audit (D17).
+- **An administrative operation can be submitted on ANY node (Q8, R3-03).**
+  A leader is an engine detail, not the cluster's administrator. A membership
+  change, a transfer, a contract change or any other operation of D17 is a
+  proposal like any other.
+  - Submitted on a follower, the engine forwards it to the leader over the
+    authenticated CONTROL connection, with its `Operator`.
+  - The leader re-validates it against its own state: strict reconfiguration,
+    one change at a time, the term's no-op.
+  - Its outcome follows D6: a submission id, and `OUTCOME_UNKNOWN` if the
+    reply is lost.
+  - The ORIGIN recorded in the entry is the TLS identity of the forwarding
+    connection, never a field the forwarder wrote.
+  - `TransferLeadership` is forwarded the same way.
+  The round-2 rule "never forwarded, `NOT_LEADER`" is withdrawn. Each entry
+  carries the operator identity the caller provides, for the product's audit
+  (D17).
 
 **The configuration is a function of the log (R1-16).**
 - Every membership entry records its index. A configuration takes effect on
@@ -939,6 +1033,14 @@ one term — once before the loss, once after — and elect two leaders.
   A node opening an empty directory does NOT form a cluster on its own: "a
   wiped node bootstraps itself" is how a second cluster with the same name is
   born.
+- **Bootstrap is resumable and safe to run in parallel (R3-02).** An identical,
+  already completed founding operation is accepted as success. A conflicting
+  history is refused. The simulator crashes each founder after each phase.
+  `NewRaft` never bootstraps: a running server only opens what an offline tool
+  has founded or initialised.
+- **`Init` prepares a joining node offline (R3-02).** `Init(dataDir, cluster,
+  nodeID)` writes a joining stamp and returns the incarnation, which the
+  operator gives to `AddLearner` (D17).
 
 **Leadership transfer.** `TransferLeadership(ctx, to)` stops accepting
 proposals, brings `to` up to date, and sends it `TimeoutNow`; `to` campaigns
@@ -962,7 +1064,7 @@ and RBX, 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
 `Barrier(ctx)` returns once the local state machine reflects every write
 committed before the call, and returns the applied index:
 
-- **ReadIndex** (default; thesis §6.4).
+- **ReadIndex** (default, and it stays the default (R3-24); thesis §6.4).
   - The leader records its commit index and confirms that it is still leader
     with a heartbeat round acknowledged by a majority.
   - **Each read is confirmed by a round started after the read arrived.**
@@ -998,8 +1100,11 @@ committed before the call, and returns the applied index:
       `MaxClockDrift` form the timing contract. The committed contract entry
       is its ONLY authority. A node's own configuration is merely the
       initial proposal, used at `Bootstrap`.
-    - The handshake compares the VERSION of the committed contract each side
-      has applied. It does not compare local settings.
+    - **A different applied contract version is never grounds for refusal
+      (R3-06).** It is normal during a contract change, and it feeds the
+      lease minimum below. The handshake refuses only a contract it cannot
+      parse, with `VERSION_UNSUPPORTED`. A simulator case partitions a
+      follower during a contract change.
     - Changing the contract is an explicit operation, `ProposeTimingContract`,
       that proposes a new contract entry (D17).
     - From the moment a new contract is proposed, the lease is dropped until
@@ -1008,8 +1113,13 @@ committed before the call, and returns the applied index:
     - Heartbeat acknowledgements carry the contract version the follower has
       applied. The lease is computed from the minimum over the acknowledging
       majority, never from the leader's newer view.
-    - The vote-refusal windows of D5 are taken from the committed contract
-      too.
+    - **The vote-refusal and restart windows are the LONGEST that could
+      apply (R3-07):** the maximum `ElectionTimeoutMin` over every contract
+      present in the snapshot or the log, committed or not, and never below
+      the one the node last reported. A shorter window could let a node vote
+      while a leader under the longer contract still holds its lease. A
+      mutation that takes the window from the committed contract alone must
+      fail.
     - Validation: `0 < MaxClockDrift < 1` and finite, and the cross-field rules
       of D14 are checked after defaults are applied.
 
@@ -1065,6 +1175,15 @@ dispatches pending rows, and each row carries its command identity. The
 receiver deduplicates on that identity. A deposed leader that dispatches a
 row late produces a duplicate the receiver drops, never a second effect.
 
+**Positions are scoped by lineage (R3-22).** A `Position` alone is not unique
+across a `Recover` or a `RestoreSnapshot`: the new log restarts its own
+history. Client positions (the read-after-write cookie), outbox identities and
+fences are therefore scoped by the `LogIdentity` they come from. A token of
+another lineage is refused with `LINEAGE_MISMATCH`. At a disaster recovery,
+the fence transition is defined: a resource that accepted fences of the old
+lineage accepts the new one only after the operator records the change, and
+from then on refuses the old lineage.
+
 This is the answer to ADR 0052 D11. A lock over this domain is a state
 machine whose acquire entry's `Index` is the lease's `Fence()`; it needs no
 third-party system, so it belongs in the SDK, and it inherits D11's sentence
@@ -1076,11 +1195,15 @@ unweakened. The `lock.Locker` adapter itself is deferred.
   `1`. A v2 that multiplexes groups on one `Transport` changes no wire format.
 - `Transport.Bind` is keyed by group, and one transport serves a process.
 - `Node` is per group; nothing is process-global except the transport.
-- **`OpenLog` owns the data-directory lock (R1-21).** It takes the lock
-  through `lock.NewFileLocker` (ADR 0052) BEFORE it reads, scans, repairs or
-  truncates anything, and `LogStore.Close` releases it. A second process
+- **`OpenDataDir` owns the data-directory lock (R1-21, R3-24).** It takes the
+  lock through `lock.NewFileLocker` (ADR 0052) BEFORE it reads, scans, repairs
+  or truncates anything, and `DataDir.Close` releases it. A second process
   opening the same directory fails at once with `DATA_DIR_LOCKED`, before
   either can touch the tail.
+- **Who closes what (R3-18).** A `Node` never closes what it was handed: the
+  `DataDir`, its stores and the transport belong to the caller. `DataDir.Close`
+  is idempotent, and refuses while a `Node` built on it is open. `Recover` and
+  `Inspect` refuse a `DataDir` that a live `Node` holds.
 
 Heartbeat coalescing and quiescing idle groups — the two things a
 group-per-repository design needs and Gitaly never built — are NOT in v1,
@@ -1116,12 +1239,13 @@ change that introduces them (ADR 0035):
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
 | `0.2.57.12` | `ENTRY_SUPERSEDED` | the term at the proposal's index is observable and differs: certainly not committed (D6, from IWFS) |
 | `0.2.57.13` | `OVERLOADED` | refused before append: pending bytes or apply lag over their bound (D6) |
-| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm is raised: a node's hash differed from the majority's at the same index; writes are refused until an operator acts (D3, R2-18) |
+| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes, or is inconclusive when no majority agrees; writes are refused until an operator acts (D3, R2-18, R3-10) |
 | `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
 | `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
 | `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing and membership changes are still admitted (D17, R2-29) |
 | `0.2.57.18` | `RESULT_TYPE_MISMATCH` | `ProposeAs` got an `Apply` result of another type; the entry IS committed, and the error carries its `Position` (D14, R2-19) |
 | `0.2.57.19` | `PAYLOAD_VERSION_REFUSED` | a proposal's payload version is above what some member announced; refused before append, retryable after the upgrade (D18, R2-16) |
+| `0.2.57.20` | `LINEAGE_MISMATCH` | a position, outbox identity or fence from another `LogIdentity` lineage (D10, R3-22) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
@@ -1141,7 +1265,8 @@ Service `0.3.92.*` (`0x00_03_5C_*`):
 | `0.3.92.12` | `TRANSPORT_MISCONFIGURED` | an identity with nil `RootCAs`, a listener without client-certificate verification, or a limit out of range (D4) |
 | `0.3.92.13` | `RECOVER_REFUSED` | `Recover` on a directory that is not stopped and locked, without a new `ClusterID`, without the typed confirmation, or while an old seed answers and no force is given (D17, R2-25) |
 | `0.3.92.14` | `LOG_QUARANTINED` | the data directory carries a quarantine marker from a `LOG_CORRUPT`; the node refuses to start until it is cleared (D4, R2-01) |
-| `0.3.92.15` | `RESTORE_REFUSED` | `RestoreSnapshot` into a non-empty directory, without an expected digest, or with a digest or bound that does not match (D17, R2-26) |
+| `0.3.92.15` | `RESTORE_REFUSED` | `RestoreSnapshot` into a non-empty directory, with a zero expected digest, without the typed confirmation, or with a digest or bound that does not match (D17, R2-26, R3-15) |
+| `0.3.92.16` | `DATA_DIR_IN_USE` | `DataDir.Close`, `Recover` or `Inspect` while a live `Node` holds the directory (D11, R3-18) |
 
 ### D13 — Observability (R1-25)
 
@@ -1174,7 +1299,10 @@ leader known, quorum reachable, apply lag over its bound, no-space and
 divergence alarms, certificate expiry under its threshold, the smallest peer
 snapshot limit approached (R2-30), and **`Stopped` with its `StopReason`**
 when the node has stopped itself (R2-28). A `LeadershipWatcher` sibling
-notifies leadership changes, so the product does not poll for them. Through `trace` (ADR 0051): one span
+notifies leadership changes, so the product does not poll for them. Its
+channel has capacity one and holds the latest value: the loop replaces an
+unread value without blocking, and the channel is closed on `Close`
+(R3-19). Through `trace` (ADR 0051): one span
 per `Propose` from submission to local apply, with events at append, commit
 and apply; the trace context travels in the forwarding frame only — never in
 the log, which must not grow with telemetry. Through `logger`: role and term
@@ -1191,7 +1319,7 @@ type (
 	NodeID         = coreconsensus.NodeID      // uint64, never 0, never reused
 	Incarnation    = coreconsensus.Incarnation // [16]byte, drawn at first stamp; not a secret
 	ClusterID      = coreconsensus.ClusterID
-	LogIdentity    = coreconsensus.LogIdentity // ClusterID + log epoch (R2-09)
+	LogIdentity    = coreconsensus.LogIdentity // ClusterID + log epoch + lineage (R2-09, R3-01)
 	GroupID        = coreconsensus.GroupID
 	Position       = coreconsensus.Position    // struct{ Term, Index uint64 }
 	Entry          = coreconsensus.Entry       // Position, Kind, Version, Data []byte (immutable)
@@ -1206,7 +1334,8 @@ type (
 	Versions       = coreconsensus.Versions
 	Member         = coreconsensus.Member     // ID, Incarnation, Address, Voter, Joining
 	Membership     = coreconsensus.Membership // the members at a Position, the retired IDs
-	Operator       = coreconsensus.Operator   // the caller's operator identity, recorded in entries (R2-36)
+	Operator       = coreconsensus.Operator   // opaque id, bounded length, no personal data (R2-36, R3-24)
+	SnapshotHandle = coreconsensus.SnapshotHandle // R3-16
 	Status         = coreconsensus.Status     // Role, Term, Leader, Commit, Applied, versions (R2-32)
 
 	Replicated           = coreconsensus.Replicated // the consumer port (R1-28)
@@ -1229,7 +1358,9 @@ type (
 	Node       = svcconsensus.Node
 	Report     = svcconsensus.Report
 	DataDir    = svcconsensus.DataDir
-	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator (R2-25)
+	QuarantineExit = svcconsensus.QuarantineExit // WipeAndRejoin | TruncateAndStaySilent (R3-09)
+	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining (R2-25, R3-02)
+	RestoreOptions = svcconsensus.RestoreOptions // Expected (non-zero), Confirm, Operator, MaxEncoded, MaxDecoded, Codecs (R3-15)
 )
 
 // The consumer port, in core: the only algorithm-neutral interface (D1).
@@ -1271,7 +1402,7 @@ type Config struct { // svcconsensus.Config, shown for its fields; every bound i
 }
 
 type TransportConfig struct {
-	Identity                tlsid.Identity // reloadable; cluster and node read from its URI SAN (R2-40)
+	Identity                tlsid.ReloadableIdentity // the TLS sibling ADR's source; cluster and node from its URI SAN (R2-40, R3-17)
 	ListenAddress           string         // bound as given, e.g. a private interface (R2-37)
 	Seeds                   map[NodeID]string
 	MaxFrameBytes           int
@@ -1281,6 +1412,8 @@ type TransportConfig struct {
 	PeerQueueBytes          int64
 	InboundDataBytes        int64 // R2-08
 	InboundControlMessages  int
+	MaxControlFrameBytes    int   // R3-20
+	InboundControlBytes     int64 // R3-20
 	MaxConnectionAge        time.Duration // R2-20
 }
 
@@ -1294,16 +1427,20 @@ func (d DataDir) Snapshots() SnapshotStore
 func (d DataDir) Close() error
 
 // Offline, on a stopped node, called by the product's own commands (D17).
+func Init(d DataDir, cluster ClusterID, id NodeID) (Incarnation, error) // joining stamp (R3-02)
 func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error
-func RestoreSnapshot(d DataDir, r io.Reader, expected [32]byte, newCluster ClusterID, members []Member) (SnapshotMeta, error)
+func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error) // runs without a Node (R3-15)
 func Inspect(d DataDir) (Report, error) // read-only
+func ClearQuarantine(d DataDir, exit QuarantineExit, op Operator) error // wipe-and-rejoin, or truncate-and-stay-silent (R3-09)
 
 func NewTCPTransport(cfg TransportConfig) (Transport, error)
 func NewMemoryLog() LogStore // tests
 func LeaderHint(err error) (NodeID, bool)
 
 // Online operations, called by the product's administration (D17, R2-36).
-// Every one takes the operator identity the caller vouches for.
+// Every one takes the operator identity the caller vouches for, can be
+// called on ANY node (forwarded to the leader, Q8, R3-03), writes an entry,
+// and is logged at Warn (R3-14).
 func (n *Node) Propose(ctx context.Context, data []byte) (Position, any, error)
 func (n *Node) Barrier(ctx context.Context) (uint64, error)
 func (n *Node) WaitApplied(ctx context.Context, index uint64) error
@@ -1317,7 +1454,7 @@ func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, v uint32) e
 func (n *Node) CheckStateHash(ctx context.Context, op Operator) (Position, error)
 func (n *Node) ClearNoSpace(ctx context.Context, op Operator) error
 func (n *Node) ClearDivergence(ctx context.Context, op Operator) error
-func (n *Node) SaveSnapshot(ctx context.Context, w io.Writer) (SnapshotMeta, error)
+func (n *Node) SaveSnapshot(ctx context.Context, op Operator, w io.Writer) (SnapshotMeta, error) // R3-14
 func (n *Node) Membership() Membership
 func (n *Node) Status() Status
 func (n *Node) Health() Health
@@ -1367,6 +1504,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `PeerQueueBytes` | transport | 64 MiB | clamp |
 | `InboundDataBytes`, `InboundControlMessages` | transport | 64 MiB, 4 096 | clamp (R2-08) |
 | `MaxConnectionAge` | transport | 24 h | clamp (R2-20) |
+| `MaxControlFrameBytes`, `InboundControlBytes` | transport | 64 KiB, 1 MiB | clamp; refuse a control cap ≥ the data cap (R3-20) |
 
 **Memory and disk budgets (R2-08, R2-29).**
 - The node's memory budget is the sum of these bounds: `MaxPendingBytes`,
@@ -1379,6 +1517,10 @@ transport. The cross-field rules are checked after defaults are applied
   one being received. On the three VPS, each with one shared 100 GB disk, the
   recommended values give about 4.3 GiB. They are provisional, like D16's
   numbers.
+- **Inside Forgejo (R3-24).** The replicator shares Forgejo's heap. The
+  product sets `GOMEMLIMIT` with about 0.8 GiB of headroom for the engine, the
+  ref table and the projector, so the garbage collector does not discover
+  the budget by running out.
 
 The other defaults are provisional too, and are revised from the simulator
 and the VPS measurements before the first release.
@@ -1389,8 +1531,10 @@ The engine is split so that it can be tested by simulation: a **step
 function** with no goroutine, no I/O and no clock — `Tick()`, `Step(*Message)`,
 `Propose(...)`, storage-completion events (D5b), and a `Ready()` that returns
 what to persist, what to send and what to apply — and a **driver** that
-performs those effects. Everything that decides safety is in the step
-function.
+performs those effects. Every DECISION is in the step function. Safety also
+rests on the driver keeping its obligations — the ordering table of D5b, the
+storage contract of D4 — and those are tested on their own, under `synctest`
+and over the fault-injecting filesystem (R3-24).
 
 **The simulator** (test-only, under the service package) runs N step functions
 on ONE goroutine against a virtual clock (`clock.ManualClock`) and an event
@@ -1427,8 +1571,12 @@ after every event and never tolerates a violation, even briefly. It checks:
 - Leader Completeness;
 - **agreement at common indexes:** wherever two nodes have both applied index
   i, they applied the same entry;
-- **preservation of the acknowledged:** every `Propose` that returned success
-  is in every applied sequence from then on;
+- **preservation of the acknowledged (R3-23):** every `Propose` that returned
+  success stays in the COMMITTED history from then on, and every replica that
+  reaches its index applied exactly that entry. A replica that lags is not a
+  violation: lagging is judged only by the liveness oracle, under its
+  preconditions. A follower partitioned away for the whole run is a valid
+  history, and the corpus includes it;
 - applied positions never go backwards across a restart.
 
 The liveness oracle is separate, and checks progress only in the windows
@@ -1491,7 +1639,8 @@ of inputs and expected outputs, in the style of etcd's raft tests, which make
 a regression readable in review.
 
 **Fuzzing.** The frame decoder, the log record decoder, the snapshot metadata
-decoder and the tail scan are fuzz targets. A crash or a hang is a failure,
+decoder, the tail scan and the first consumer's object-channel framing
+(R3-13) are fuzz targets. A crash or a hang is a failure,
 and the corpus is checked in.
 
 **A real store under faults.** Besides the disk model, a lane runs the real
@@ -1611,9 +1760,13 @@ it proposes, so the product's audit and the log agree (R2-36):
 - `ClearNoSpace`;
 - `SaveSnapshot`, `Status`, `Health`, `Membership`, and the
   `LeadershipWatcher` sibling.
-An administrative write reaching a follower is NOT forwarded. It returns
-`NOT_LEADER` with the leader's hint, and the product retries on the leader
-(R2-36).
+Every one of them can be submitted on ANY node: the engine forwards it to
+the leader over the control connection, and its outcome follows D6 (Q8,
+R3-03). Every call is logged at `Warn` with its `Operator` (R3-14).
+`TransferLeadership` writes an entry, and `SaveSnapshot` takes an `Operator`
+(R3-14). An `Operator` is an opaque identifier of bounded length, not a
+name or an email address: the log is replicated and kept, and it must not
+hold personal data (R3-24).
 
 **Offline operations**, public functions over `DataDir` (R2-33), on a stopped
 node, under the directory lock.
@@ -1628,26 +1781,39 @@ node, under the directory lock.
     the new cluster id.
   - It writes an audit record into the data directory: who, when, from which
     position, and the new membership.
+  - It records the old `LogIdentity` and the last index it kept, as the
+    lineage of the new identity (R3-01).
+  - It may name nodes already stamped as joining (by `Init`), so the
+    recovered cluster can grow back to three voters at once (R3-02).
   - **Which node:** the one with the highest `(lastLogTerm, lastLogIndex)`,
     compared in that order, not "the highest committed index", which no
     surviving node can know for certain.
   - **What it costs, stated:** the chosen node's whole log tail becomes
     committed, entries no majority ever held included. Writes acknowledged
     by the old majority and held only on the lost nodes are lost.
-  - **Runbook order:** restore Vault, then reissue the certificates, then
-    `Recover`. Certificates for new node IDs need Vault, and a recovered
-    cluster without them cannot form.
-- **`RestoreSnapshot` from a backup (R2-26).**
+  - **Runbook order (R3-04):** Vault, then the certificates, then PostgreSQL
+    and Patroni, then LDAP, then `Recover`, then Forgejo, then the site
+    administration. Each step needs the ones before it: certificates for new
+    node IDs need Vault, and Forgejo's administration needs its database and
+    its directory. When LDAP or the database is not back yet, a break-glass
+    local administrator (`forgejo admin user create`) gets the operator into
+    the site administration.
+- **`RestoreSnapshot` from a backup (R2-26, R3-15).**
   - It is run on EVERY node of the new cluster, with the identical snapshot,
     the same new `ClusterID` and the same member list. Every node gets a new
     `NodeID` and incarnation.
-  - It requires the expected SHA-256 of the backup, or a signature. It
-    applies the same size and decompression bounds as a live install
-    (`MaxSnapshotBytes`, D7).
+  - It takes `RestoreOptions`. The expected SHA-256 is required and a zero
+    digest is refused. The round-2 "or a signature" is removed. It also takes
+    the typed confirmation, the `Operator`, the encoded and decoded size
+    bounds, and the codecs it accepts.
+  - It writes the same audit record as `Recover`, refuses with
+    `RESTORE_REFUSED`, and is tested without a running `Node`.
   - Backups are encrypted at rest; the product's backup path says how.
   - For the first consumer, `SaveSnapshot` is taken BEFORE the Git
     repositories are backed up. The refs then name objects the repository
-    backup is sure to hold.
+    backup is sure to hold. **The snapshot's object closure stays pinned
+    until the repository backup is verified**, and a backup manifest records
+    which snapshot pairs with which repository backup (R3-13).
 - **`Inspect`** reports a data directory read-only: its stamp and
   incarnation, segments, hard state, snapshot metadata, versions, quarantine
   marker (R2-01) and the first corruption found.
@@ -1662,6 +1828,9 @@ node, under the directory lock.
   `NO_SPACE`, and keeps admitting the alarm itself, `ClearNoSpace` and
   membership changes, so the cluster can still be repaired. Snapshots and
   compaction keep running.
+- A FOLLOWER that enters its reserve forwards the alarm proposal to the leader,
+  like any other proposal (R3-24). The node with the full disk is often not
+  the leader.
 
 **Other operations.**
 - **Poison entry.** A committed entry that crashes every `Apply` stops every
@@ -1680,7 +1849,11 @@ node, under the directory lock.
   - A LIVE node: add the new one as a learner, catch up, promote, transfer
     leadership away from the old one if it leads, remove the old one.
   `consensus.failure_tolerance` tells the operator, before each step, how many
-  voters can still fail.
+  voters can still fail. **Before `Promote` and before `Remove`, the procedure
+  verifies durable OBJECT coverage on the prospective membership (R3-13):** a
+  majority of the voters that would remain must hold every object the table
+  references. Otherwise the change could leave committed refs whose objects
+  exist on a minority only.
 
 ### D18 — Versioning (R1-22)
 
@@ -1694,9 +1867,17 @@ Every persisted or transmitted structure carries a version (R1-22, R2-16):
 The rules:
 - **Handshake.** Each side announces the protocol range it speaks. The
   connection uses the highest common version, or is refused.
-- **Payload versions are announced (R2-16).** Every member — voters, learners
-  and joining nodes — announces the range of payload versions its state
-  machine supports. The leader refuses a proposal whose version is above the
+- **Payload versions are announced and replicated (R2-16, R3-11).** Every
+  member — voters, learners and joining nodes — announces the range of payload
+  versions its state machine supports, and the snapshot codecs it can read.
+  The ranges are stored in the replicated membership, so a leader elected
+  later knows them without asking. A member whose range is unknown counts as
+  supporting only the lowest version. The proposal envelope is versioned and
+  has a public input path, so a product can set the version it proposes. A
+  node exposes its local capabilities through `Status`. Compatibility of
+  persisted data — log records and snapshots written by older versions — is
+  tracked with the protocol floor, and decoders of every version still at or
+  above that floor are retained. The leader refuses a proposal whose version is above the
   minimum announced, with `PAYLOAD_VERSION_REFUSED`, before anything is
   appended, so the refusal is retryable once every member is upgraded.
 - **Cluster version.** A committed cluster-version entry records the protocol
@@ -1730,6 +1911,11 @@ being used soundly.
 - **A replicated ref table (Q1, R1-01).** The state machine is a ref table:
   `(repository, ref) → (SHA, revision)`, with tombstones for deleted refs.
   `Apply` is pure: it validates and updates the table, nothing else.
+- **The table lives in the node's own data directory (R3-05)**, in a
+  node-local store, never in Forgejo's shared SQL database. A shared database
+  would give three replicas one copy, and its own failover would decide what
+  the log already decided. The store is declared `Durability` durable (D3),
+  and serves a point-in-time read for snapshots.
 - **The projector is the ONLY authority over Git (R2-35).**
   - Each node runs a projector that makes the local repositories match the
     table.
@@ -1747,6 +1933,12 @@ being used soundly.
     repository, its watermark advances to the applied index. A
     read-after-write waits on this watermark, not on `WaitApplied`.
   - The projector retries when another git process holds a ref lock.
+  - **Certifying a watermark is serialised with git's own transactions
+    (R3-12).** A native git transaction can publish a ref after the projector
+    has read it, including on the path where the ref already matched, which is
+    an ABA. The projector tracks native publications in flight, waits for
+    them to complete, and reconciles them before it certifies a repository's
+    watermark.
   - The projector's own git writes bypass the replication hook, so it never
     proposes what it is projecting.
   - After log compaction, the projector rebuilds from the table, never from
@@ -1762,8 +1954,18 @@ being used soundly.
   `OUTCOME_UNKNOWN`, the replicator reads the table and never retries blindly.
 - **Objects before refs (R1-05, R2-35).**
   - The objects a ref update needs are written and `fsync`ed on a majority
-    before the ref entry is proposed. A receiving node checks them with
-    `git index-pack --strict`.
+    before the ref entry is proposed.
+  - **A pending push is retained durably (R3-13).** Its objects are recorded
+    as retained BEFORE receipt is acknowledged. They stay retained through an
+    `OUTCOME_UNKNOWN`, and are released only on a definite rejection or once
+    authoritative retention covers them.
+  - **The object channel is admitted like the log (R3-13).** It uses the same
+    admission and retired-ID checks, and the sender stamped from TLS. It
+    checks the repository path lexically, and refuses a repository unknown to
+    Forgejo's database BEFORE touching the disk. It receives into a
+    quarantine directory, runs `git index-pack --strict`, and only then
+    migrates the objects. Its per-peer byte budget counts against the
+    `NO_SPACE` reserve, and its framing is a fuzz target (D15).
   - Retention: `git gc` must keep the reachable closure of the
     AUTHORITATIVE refs — the table's, not the repository's — plus every
     object that committed-but-unprojected work needs.
@@ -1785,11 +1987,23 @@ being used soundly.
 - **`DISABLE_GIT_HOOKS = true` is mandatory and checked at start (R2-35).** A
   user-supplied server-side hook would let a repository owner run code inside
   the replication path. The node refuses to start the replicator without it.
-- **Administration is Forgejo's (Q5, Q7).** The site administration calls the
-  online functions of D17 with the administrator as `Operator`. The offline
-  ones are `forgejo cluster recover|restore|inspect`.
-- **Exposure (R2-37).** The consensus and object listeners bind to `wg0`. The
-  making.codes deployment lists both ports in `common_container_denied_mesh_ports`.
+- **Administration is Forgejo's (Q5, Q7, Q8).** The site administration calls
+  the online functions of D17 with the administrator as `Operator`, on
+  whichever node the load balancer chose (R3-03). The offline ones are
+  `forgejo cluster bootstrap --members`, `forgejo cluster init --cluster
+  --node-id` (which prints the incarnation), `recover`, `restore` and
+  `inspect` (R3-02). The Forgejo server never calls `Bootstrap`.
+- **No internal route reaches the engine (R3-14).** `Propose` and every
+  function of D17 are never exposed under Forgejo's `/api/internal`. The hook
+  reaches the replicator only through the ADR 0148 socket. Traefik denies
+  `/api/internal` at the edge. A destructive operation in the site
+  administration requires a site administrator who has just re-authenticated.
+- **Exposure (R2-37, R3-24).** The consensus and object listeners bind to
+  `wg0`. The making.codes deployment lists both ports in
+  `common_container_denied_mesh_ports`. This is the only place the ADR names a
+  making.codes setting.
+- **Memory (R3-24).** Forgejo runs with `GOMEMLIMIT` leaving about 0.8 GiB for
+  the replicator (D14).
 
 ## Consequences / Semantics
 
@@ -1813,7 +2027,14 @@ being used soundly.
   no HTTP route and no CLI: the product embedding the domain owns them. The
   milestones are adjusted accordingly.
 - **One declared sibling outside this domain (R2-20):** the three-part TLS
-  sibling of D4, in `net`/`tlsid`, with its own ADR.
+  sibling of D4, in `net`/`tlsid`, with its own ADR. That ADR must be Accepted
+  before this one, because `TransportConfig.Identity` is its type (R3-17).
+- **Administration is any-node (Q8, R3-03).** No product has to find the
+  leader to administer the cluster.
+- **This version is rewritten-unreviewed.** The challenge stopped at its cap
+  of three rounds. Blocking objections were open before the round-3 rewrite,
+  and no reviewer has read the result. The next step is a review of this
+  version, not its implementation.
 - The root `CLAUDE.md` domain list, the error-code mirror and
   `codeRangeOwners` change in the implementing change set, not in this one.
 
@@ -1979,18 +2200,20 @@ slower and 4 222 times larger in the log (144 KB against about 35 bytes).
 And only one capture can be in flight against a given state, so the
 non-deterministic writes serialise.
 
-The first consumer's design is already where that path ends. It
-replicates `{repository, ref, old SHA, new SHA}`, never the HTTP request or
-the git command that produced it. That is a value together with the value
-it was read against. Every replica checks it with the same predicate, the
-compare-and-swap of `Apply`, just as the POC's engine detects a conflict at
-apply time with a predicate every replica computes identically. The POC's
-size problem does not arise here, because the bulk travels outside the log:
-Git objects are pushed to the peers before the entry is proposed, and the
-log carries only the ref update. The serialisation lesson maps onto the
-hook too. In `reference-transaction` `prepared`, the replicator reads the
-old SHA under git's ref lock: one capture in flight per ref, not per
-database.
+The first consumer's design ends where that path ends, and goes one step
+further (R3-24). It replicates a ref transaction —
+`{repository, [(ref, expected SHA, expected revision, new SHA)]}` — never the
+HTTP request or the git command that produced it. `Apply` checks it against a
+ref TABLE that the log alone orders (D19). It never checks it against each
+node's Git repository, which the log does not order. Every replica evaluates
+the same predicate on the same table, just as the POC's engine detects a
+conflict at apply time with a predicate every replica computes identically.
+Git is a projection of the table, written after the fact, from state.
+The POC's size problem does not arise, because the bulk travels outside the
+log: Git objects are written to a majority before the entry is proposed, and
+the log carries only the ref transaction. The serialisation lesson remains,
+moved: the expected revision does for a ref what the POC's single capture in
+flight did for a database.
 
 ## IWFS (owner's Go Raft at Halys)
 
