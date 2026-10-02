@@ -206,7 +206,9 @@ func appendFraction(b []byte, nanosecond, precision int) []byte {
 		return b
 	}
 	var digits [nanoDigits]byte
-	n := nanosecond
+	// A negative nanosecond is no time of day; it is written as zero rather
+	// than as the characters its negative digits would make.
+	n := max(nanosecond, 0)
 	//: the nine digits, least significant last.
 	for i := nanoDigits - 1; i >= 0; i-- {
 		digits[i] = '0' + byte(n%int(decimalBase))

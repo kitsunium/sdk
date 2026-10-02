@@ -63,6 +63,10 @@ func TestLocalTimeText(t *testing.T) {
 			t.Errorf("UnmarshalText(%q) = %+v, %v", tc.text, back, err)
 		}
 	}
+	//: a malformed nanosecond is written as zero, never as other characters.
+	if got := (toml.LocalTime{Hour: 1, Nanosecond: -5, Precision: 3}).String(); got != "01:00:00.000" {
+		t.Errorf("negative nanosecond: String = %q", got)
+	}
 	var back toml.LocalTime
 	//: a time with an offset is not a local time.
 	if err := back.UnmarshalText([]byte("07:32:00Z")); !errs.HasReason(err, "UNMARSHAL_FAILED") {
