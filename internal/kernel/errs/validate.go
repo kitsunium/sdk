@@ -5,7 +5,6 @@
 package errs
 
 import (
-	"errors"
 	"fmt"
 	"unicode/utf8"
 )
@@ -24,6 +23,12 @@ const maxInt32Positive uint32 = 0x7FFFFFFF
 
 // Package-level mutable state — all package `var` declarations live in one
 // grouped block to keep the static surface easy to audit.
+//
+// A structural failure is reported as an *Error built by newValidationError,
+// a struct literal: the validator cannot mint its errors through Define, which
+// would recurse into it, and it needs no stdlib error either. So this package
+// obeys rule 2 like every other one — make guard holds it to SDK002 with no
+// exemption.
 var (
 	// metaCodeAllowed is the whitelist — only these Codes may have Layer == 0.
 	// Anything else with Layer==0 is rejected by validateCode as structurally
@@ -36,19 +41,6 @@ var (
 		CodeInvalidCodeString: {},
 		CodeInvalidWrapParams: {},
 	}
-	// errInvalidCode — code violates the dotted-quad rules. errInvalid*
-	// sentinels are kept alive (via the trailing `_` slice below) so that
-	// any external caller that imports them still compiles, even though the
-	// validateDefineArgs refactor now returns *Error values instead.
-	errInvalidCode = errors.New("errs.Define: invalid code")
-	// errInvalidReason — Reason does not match SCREAMING_SNAKE.
-	errInvalidReason = errors.New("errs.Define: invalid reason")
-	// errInvalidPublic — Public is empty, too long, or contains a newline.
-	errInvalidPublic = errors.New("errs.Define: invalid public message")
-	// errInvalidPrivate — Private is empty.
-	errInvalidPrivate = errors.New("errs.Define: invalid private message")
-	// _ pins the four sentinels against the unused-variable check.
-	_ = []error{errInvalidCode, errInvalidReason, errInvalidPublic, errInvalidPrivate}
 )
 
 // validateDefineArgs applies Define's structural rules.
