@@ -28,7 +28,7 @@ directories in both.
 
 **Mechanism lives in the core.** `internal/core/net` holds the WebSocket frame
 codec (`ParseWSFrameHeader`, `ApplyWSMask`, `AppendWSFrame`) and the SSE
-encoder — 2 600 lines; `internal/core/trace` parses `traceparent` and
+encoder — 1 156 of its 2 627 production lines; `internal/core/trace` parses `traceparent` and
 `tracestate`; `internal/core/i18n` parses language tags and compiles message
 patterns; `internal/core/mail` validates addresses and headers. Each is a
 parser or an encoder of a wire format: what one implementation does, not what

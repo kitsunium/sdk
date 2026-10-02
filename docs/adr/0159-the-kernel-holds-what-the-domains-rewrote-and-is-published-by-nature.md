@@ -27,11 +27,12 @@ most of them, and the reasons are the kernel's:
   the resilience engine for that curve alone. Six registries in the core
   (`codec`, `crypto`, `id`, `transform`, `view`, `writer`) are near-copies of
   one another, and `crypto` already has a private generic one. `lock` and
-  `session` each implement the same non-blocking `flock` and `LockFileEx`.
+  `session` each implement the same non-blocking `flock`, and `lock` alone its
+  `LockFileEx` twin.
   `golang.org/x/mod` stands in for a version comparison (ADR 0156).
 - **The framework rewrites the rest.** It may import `pkg/v1` and
-  `kernel/errs` only (ADR 0147), and `pkg/v1` publishes two kernel packages,
-  `clock` and `cache`. So `framework/` holds 17 hand-written copy-on-write
+  `kernel/errs` only (ADR 0147), and `pkg/v1` publishes three kernel packages,
+  `errs`, `clock` and `cache`. So `framework/` holds 17 hand-written copy-on-write
   `atomic.Pointer` values, a subscriber set, a `sync.WaitGroup` fan-out and a
   lock-free multi-producer ring of its own.
 

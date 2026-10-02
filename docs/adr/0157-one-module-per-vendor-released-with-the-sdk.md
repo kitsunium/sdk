@@ -54,8 +54,8 @@ that vendor's requirements and nobody else's.
 
 ### 2. A vendor module sits where `third-party/` always sat
 
-It requires `pkg` and the `internal/` modules it reaches, and nothing in the
-SDK requires it. The layer firewall is unchanged: `third-party/` is above
+It requires the SDK modules it imports — the `internal/` ones, and `pkg` where
+it imports a facade — and nothing in the SDK requires it. The layer firewall is unchanged: `third-party/` is above
 everything but the framework (ADR 0068, 0147). The quarantine reasons of
 ADR 0022/0034, 0023 and 0066 stand; only the module each one lives in changes.
 
@@ -68,14 +68,17 @@ edited. It is in the module census (ADR 0137) because git tracks its `go.mod`,
 so every lane that loops over modules builds, vets, tests on 32 bits and scans
 it.
 
-### 4. Integration-only code lives in `e2e`
+### 4. Suites against real engines live in `e2e`
 
-A package that holds only suites run against real engines —
-`third-party/db/sql` — moves to the `e2e` module, the auxiliary module outside
-`go.work` where the SDK is already exercised against real kernels. A vendor
-module's own integration tests may stay beside its code behind the
-`integration` tag; their requirements are then that module's and nobody
-else's.
+A module's tests count in its `go.mod`: a writer module whose integration test
+starts a container would put testcontainers, `moby` and their graph in the
+module graph of every consumer of that writer. So the suites that run against
+real engines — `third-party/db/sql`, which holds nothing else, and the database
+writers' Docker-backed tests — move to the `e2e` module, the auxiliary module
+outside `go.work` that nothing requires and where the SDK is already exercised
+against real kernels. They keep their `integration` tag, so the lanes that
+build and test `e2e` on every platform compile none of them, and a vendor
+module requires its vendor and the SDK alone.
 
 ### 5. The root module carries no vendor
 
@@ -87,8 +90,8 @@ what it was before ADR 0012: the workspace's anchor beside `go.work`,
 ## Consequences / Semantics
 
 - **Implemented by the reorganisation series**: the nine modules, their
-  `go.work` entries and Bazel wiring, the move of `third-party/db/sql` to
-  `e2e`, and the release automation that tags them. This record changes no
+  `go.work` entries and Bazel wiring, the move of the suites against real
+  engines to `e2e`, and the release automation that tags them. This record changes no
   code.
 - A consumer of the S3 writer requires `github.com/kitsunium/sdk/third-party/aws`
   at a release tag, and its module graph gains the AWS SDK and the SDK's own

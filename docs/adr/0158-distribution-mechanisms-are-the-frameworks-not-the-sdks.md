@@ -24,8 +24,9 @@ policy around both — assembled from the SDK's mechanisms, which is what ADR
 0147 calls a framework.
 
 And they do not use the SDK's mechanisms. `entitlement` verifies ed25519
-signatures with `crypto/ed25519` directly, carries a second RS256 verifier and
-a second JWKS parser beside `token` and `crypto/jwk`, detects duplicate JSON
+signatures with `crypto/ed25519` directly, carries a JWT verifier and a JWKS
+parser of its own beside `token` and `crypto/jwk` — for RS256, an algorithm the
+crypto domain deliberately ships no scheme for — detects duplicate JSON
 members with its own walker beside `codec/strictjson`, builds bare
 `http.Client` values beside the guarded `net/client`, and reads the wall clock
 where every SDK wait takes an injected one; `selfupdate` repeats the
@@ -46,7 +47,8 @@ them through the SDK's own domains, so nothing did.
    guarded client, a version through `semver` (ADR 0159), a lock through
    `pkg/v1`'s `lock`, a wait through `clock`. A mechanism they need that
    `pkg/v1` does not publish is published there first, in its domain, under
-   its own ADR — which is how a second RS256 verifier stops being possible.
+   its own ADR. The first such question is the CI seat's RS256 token: it is
+   answered in the crypto domain, by an ADR, or not at all.
 3. **The ssh identity becomes a connector module of the framework**, one
    vendor dependency (`x/crypto/ssh`, and the `x/sys` it brings) in one
    module, the shape ADR 0147 §7 gives the database drivers. ADR 0079's split
@@ -68,9 +70,9 @@ them through the SDK's own domains, so nothing did.
   the four packages and the connector in the framework, their rewrite onto
   `pkg/v1`, the codes re-pointed, the facades removed. This record changes no
   code.
-- `pkg` loses four facades and about 11 000 production lines it carried for
-  one kind of product; the SDK's families have no distribution group
-  (ADR 0155).
+- The SDK sheds four domains it carried for one kind of product — about
+  13 000 production lines across core, service and facades, 14 000 with the
+  ssh identity — and its families have no distribution group (ADR 0155).
 - The ADRs these domains were decided in stay their records. What they
   decided — a signature checked before a digest, no key and no install, a
   value that degrades rather than answers empty — holds in the framework

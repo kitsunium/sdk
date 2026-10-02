@@ -8,18 +8,19 @@
 
 ## Context
 
-Before this record the SDK had 128 ADRs. Read end to end, about thirty of them state a principle
-that every later domain followed — a zero value is never inert, a published
-port grows by siblings, a message never names the value — and each principle is
-written once, inside the ADR of the domain that first needed it. A contributor
+Before this record the SDK had 128 ADRs. Read end to end, about thirty of them
+state a principle that every later domain followed — a zero value is never
+inert, a published port grows by siblings, a message never names the value —
+and each principle is written once, inside the ADR of the domain that first
+needed it. A contributor
 who wants the rules reads the domains; a contributor who reads one domain finds
 one rule and not the twenty-seven others. The root `CLAUDE.md` tried to be the
 digest and became a 36 000-character Purpose paragraph that repeated the ADR
 index, which is the drift its own rule 11 forbids.
 
-At the same time about seventeen ADRs are not, or not only, decisions about the
-SDK's shape. They are incident reports: a defect found, reproduced on the shipped code,
-fixed, and the rule that would have prevented it. Their rule is sound and
+At the same time about seventeen ADRs are not, or not only, decisions about
+the SDK's shape. They are incident reports: a defect found, reproduced on the
+shipped code, fixed, and the rule that would have prevented it. Their rule is sound and
 durable; their *place* is wrong. The rule belongs to the package it protects —
 `lock`'s refusal of a planted link, `health`'s bound on a supervisor that stops
 reading — and a reader of that package's `CLAUDE.md` does not look in
@@ -29,8 +30,8 @@ records whose live content is somewhere else, or nowhere.
 A tree audit of 2026-10-02 (twenty read-only reports over `main`) extracted
 sixteen cross-cutting principles from ADRs 0001–0065 and twelve from
 0066–0151, and named the incident write-ups. This record consolidates the
-first and relocates the second, without rewriting history: no ADR's text
-changes, only statuses and indexes.
+first and relocates the second, without rewriting history: no ADR's body
+changes, only its `Status` line and the indexes.
 
 ## Decision
 
@@ -113,6 +114,9 @@ disagree, the ADR's own text is the decision and this list is corrected.
     its caller's context.** (ADR 0050, 0060, 0072, 0073)
 24. **A standard is implemented from its document, with no vendor SDK.**
     (ADR 0044, 0047, 0048, 0051, 0063, 0064, 0156)
+
+**Platforms**
+
 25. **Every platform answers on its own terms.** A platform the code does not
     serve gets `UNSUPPORTED_PLATFORM`, chosen by file suffix; a platform it does
     serve is measured on its own kernel rather than assumed to be Linux.
@@ -176,8 +180,8 @@ departs from a principle says so in its own text, citing the number.
 ## Consequences / Semantics
 
 - **Implemented by this change**, which is documentation only: this record, the
-  fourteen `Status` lines, the fourteen **Rules from ADR NNNN** sections, and
-  the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, the root
+  fourteen `Status` lines, their **Rules from ADR NNNN** sections (fifteen —
+  ADR 0083's rule lives in two documents), and the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, the root
   `CLAUDE.md` Reference list), which keep every superseded ADR listed.
 - **Implemented by the reorganisation series** (ADR 0155 to 0161): the
   principles those records introduce or tighten — 3, 4, 5, 6, 7 and 26 in the
@@ -203,8 +207,9 @@ None. No code, no published shape, no behaviour.
   the rule stays where the reader of the package does not look, and the next
   incident in the same package is argued without it.
 - **Put the principles in the root `CLAUDE.md`.** Rejected: that file is loaded
-  into every session and was already over its budget with a digest; a charter
-  is a decision with a history, which is what `docs/adr/` is for.
+  into every session, so its size is paid by every session, and a digest there
+  is what had already grown to 36 000 characters; a charter is a decision with a
+  history, which is what `docs/adr/` is for.
 
 ## Deferred
 

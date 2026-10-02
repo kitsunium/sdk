@@ -94,7 +94,9 @@ a type's wire shape, the difference of two documents (`strictjson`,
 codec tree). A draft that gave the JSON tools a `data/json` family of their own
 is not taken: it splits the tree a reader searches for "decode this".
 `transform` is not a codec — it transforms bytes, it does not map values — and
-stays a sibling of `codec` in `data`.
+stays a sibling of `codec` in `data`. A wire format that exists to serve one
+domain — WebSocket frames, `traceparent`, a language tag — is not a codec
+either: it stays with that domain, in its service (ADR 0160).
 
 ### 4. An import path may move while v0 — ADR 0040, extended
 
@@ -143,16 +145,18 @@ is on disk, never on a number someone maintains.
   (`check-layer-deps.sh` is keyed on layers, not on directories), every error
   code value (ADR 0160), the module boundaries, and the standard-library-only
   status of the kernel and the core.
-- Every `pkg/v1` import path but `errs` and `clock` changes once. A consumer
-  updates its imports once, mechanically, at the minor release that moves them.
+- Every `pkg/v1` import path changes once, except the four already at their
+  family's path — `errs`, `clock`, and `crypto` and `proc`, which become family
+  roots. A consumer updates its imports once, mechanically, at the minor
+  release that moves them.
 - ADRs keep the paths they were written with: they are records, and a path in
   an ADR is the path of its time. Only enforcement artefacts and `CLAUDE.md`
   files move with the code.
 
 ## Breaking changes
 
-Every import path under `pkg/v1` except `errs` and `clock`, once per family,
-with no alias left behind — permitted only because the module is v0, under §4.
+Every import path under `pkg/v1` except `errs`, `clock`, `crypto` and `proc`,
+once per family, with no alias left behind — permitted only because the module is v0, under §4.
 No shape, no behaviour and no error code changes.
 
 ## Alternatives considered
