@@ -29,6 +29,20 @@ rather than in a PostgreSQL table or an existing library, was taken by the
 owner on 2026-10-02; this ADR proposes where that code lives and what it
 must do before anyone depends on it.
 
+The owner has written a Raft before. **raft-sql-poc** is a laboratory in
+Node.js with no dependency: about 11 800 lines, a Raft core (`src/raft.js`,
+1 640 lines) with PreVote, CheckQuorum, ReadIndex, leases, snapshots,
+single-server membership changes and leadership transfer, a shared
+segmented WAL with group commit (`src/storage.js`), a multi-Raft layer with
+one group per shard (`src/shard.js`, `src/host.js`), a fixed-layout binary
+wire format (`src/wire.js`) over TCP with a per-machine identity
+(`src/transport.js`, `src/secure.js`), 169 assertions and a README of
+measurements and of the bugs it found in itself. It was read in full for
+this ADR. Where it measured a better answer than this ADR's first draft,
+the decision below is amended and says so with the measurement, marked
+**from raft-sql-poc**. Where this ADR keeps its own answer, the section
+*raft-sql-poc (owner's prior Raft)* says why, with the file and line.
+
 The cautionary precedent is recent. GitLab built Raft into Gitaly on
 `etcd/raft`, one group per partition, and abandoned it in 2026: the design
 document was marked rejected on 2026-09-09 and the `raftmgr` package was
@@ -125,6 +139,13 @@ is not a refusal; the state machine must stop the process, because a node that
 skips an entry has silently forked. `StateMachine` panicking is treated the
 same: the node stops with `STATE_MACHINE_FAILED` and does not apply further.
 
+raft-sql-poc is the counter-example this rule exists for. Its core treats
+every exception `apply` throws as deterministic and part of the output
+(`raft.js:1109-1117`), and its SQLite state machine throws
+"changeset conflict on apply: replica state diverged" (`sqlstore.js:83`).
+A divergence the replica has DETECTED therefore reaches the proposer as an
+ordinary `SQL_ERROR` while the replica keeps applying on a forked state.
+
 `Snapshot` is called on the apply goroutine and must be CHEAP: it captures a
 view at the current applied position (the kernel's copy-on-write snapshot,
 ADR 0011, is the intended tool) and returns. `WriteTo` then runs on another
@@ -173,15 +194,28 @@ is a write the process died inside, never acknowledged because acknowledgement
 follows `Sync`, and it is truncated and counted. A CRC failure BEFORE the tail
 is corruption and is refused, never repaired (`LOG_CORRUPT`) — the same choice
 as ADR 0052's `LOCK_FENCE_CORRUPT`: a log repaired by guessing has lost the
-property that made it a log. The hard state is a small separate file published
-by rename, written only on a term change or a vote, which happen per election
-and not per write.
+property that made it a log. **The hard state is a record of the log, from raft-sql-poc.** The first
+draft kept term and vote in a separate file published by rename, which costs
+two device round trips per vote (ADR 0056's measurement). The POC writes a
+hard-state record into the current batch instead, made durable by the same
+`fdatasync` as the entries, and writes the commit index lazily so that a
+heartbeat which only advances it never makes an acknowledgement wait for a
+sync (`storage.js:361-370`). Every segment opens with a checkpoint record
+holding the hard state, and segments are deleted only as a prefix: together
+the two rules let compaction delete old segments without losing a vote or
+resurrecting an entry a later record truncated (`storage.js:35-37`,
+`storage.js:507-591`). Adopted. It was not measured head to head, and the
+reason is structural: a vote then costs nothing beyond the sync the batch
+pays anyway.
 
 A failing `fsync` stops the node (`STORAGE_FAILED`) and is never retried. The
 PostgreSQL "fsyncgate" of 2018 established that a retried `fsync` can return
 success after the kernel has dropped the dirty pages the first one failed to
 write; a node that continues after one is a node whose acknowledged entries
-may not exist.
+may not exist. raft-sql-poc does not retry either, but it does not stop: after a failed
+`fsync` it records the error and never syncs again (`storage.js:489-495`),
+so every later acknowledgement waits forever. That is safe and silent. Here
+the node stops and says so.
 
 **Not on `vfs`.** The `vfs` write half is frozen at whole-file verbs plus
 `WriteAtomic(name, data []byte)` (ADR 0056); it has no append, no handle and
@@ -200,7 +234,40 @@ dials with the same `tlsid.Identity`'s `ClientConfig()` (the HTTP client of
 `pkg/v1/client` is not a stream dialer). mTLS is mandatory and the peer's
 certificate must name the `NodeID` the configuration gives for that address
 (`PEER_REJECTED`); the first frame on a connection names the cluster and
-group, and a mismatch closes it (`CLUSTER_MISMATCH`). Two connections per
+group, and a mismatch closes it (`CLUSTER_MISMATCH`).
+
+**Admission follows the membership, from raft-sql-poc.** The transport
+admits only the `NodeID`s of the current membership, learners included. A
+`Remove` that commits cuts that node's connections and refuses its
+handshakes from then on. The POC learned that draining a machine is not
+removing it: with a credential every machine shared, a removed machine
+could come back (README bug 8). Its fix revokes the removed machine's key
+on every peer (`shard.js:796-803`, `transport.js:110-120`). Here a `NodeID`
+is never reused (D8), so a certificate whose node is no longer a member is
+refused without a revocation list.
+
+**Three limits TLS does not set, from raft-sql-poc.** A frame's announced
+length is checked against `MaxFrameBytes` before anything is allocated. A
+snapshot is inflated no further than the size its metadata announces,
+before its hash is checked (`raft.js:1272-1289`). A connection that has not
+finished its handshake within `HandshakeTimeout` is closed. These are three
+of the twenty attacks the POC's transport suite runs. TLS 1.3 already stops
+the others: a forged identity, a downgrade, a replay, reordering, a
+substituted ephemeral key.
+
+**Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
+during one turn of the loop leaves in one write (`transport.js:1-8`). The
+per-peer queue is bounded and drops when full, because Raft retransmits
+what matters and an unbounded queue turns an outage into memory
+exhaustion (`transport.js:294-296`, 64 MiB in the POC).
+
+**Why TLS and not the POC's handshake.** The POC wrote a SIGMA handshake of
+its own over Ed25519, X25519 and AES-256-GCM (`secure.js:1-60`). Its README
+lists two cryptographic bugs it found in its own earlier versions: a
+`SHA256(key ‖ msg)` MAC open to length extension, and a static key whose
+nonce counter restarted at zero (bugs 5 and 6). TLS 1.3 gives the same
+properties from the standard library: a signed transcript, ephemeral keys,
+record sequence numbers. The SDK does not write a handshake. Two connections per
 peer and direction: one for messages, one for snapshot streams, so a
 multi-megabyte snapshot never sits in front of a heartbeat. Frames are
 `length | type | group | body`, hand-encoded; TLS gives the integrity, so the
@@ -231,6 +298,16 @@ encodes its command however it likes — through `codec` if it wants — and han
 Neither is a configuration option. Both exist to prevent failures that only
 appear under partition, which is where nobody tests a disabled flag.
 
+**A node that starts refuses votes for one election timeout, from
+raft-sql-poc.** It behaves as if it had just heard from a leader
+(`raft.js:205-213`). Otherwise a node restarted inside a lease window votes
+at once, and a second leader can be elected while the first still serves
+lease reads. The vote refusal also applies to `RequestVote`, not only to
+`PreVote`. The POC checks for a live leader in PreVote only
+(`raft.js:524-531` against `raft.js:588-620`). That holds until an election
+skips PreVote, and a leadership transfer does (`raft.js:563`,
+`raft.js:827`).
+
 **Timings, defaults for this RTT matrix:** heartbeat every 100 ms; election
 timeout randomized in [1 s, 2 s). A zero is clamped to the default (ADR 0031,
 clamp half: there is one sensible order of magnitude); a heartbeat not below
@@ -252,7 +329,14 @@ PreVote round adds one RTT.
   Proposals arriving during that `Sync` form the next batch. The batch grows
   with load and shrinks to one entry at rest, so latency at low load is not
   inflated by a linger delay — the reason `internal/kernel/batcher`'s
-  `FlushEvery` shape is not used.
+  `FlushEvery` shape is not used. **Confirmed by raft-sql-poc:**
+  batching per turn of the event loop with no timer (`raft.js:870-874`,
+  `storage.js:447-454`) gave 101 to 143 writes per `fsync` under load, and
+  7 000 to 9 400 durable writes/s against 184 to 216/s with one `fsync` per
+  write (macOS, `F_FULLFSYNC` at 4.6 to 5.4 ms).
+- **An empty `AppendEntries` is sent only as a heartbeat or when it carries
+  a new commit index** (`raft.js:918-924`). With proposal coalescing, this
+  took the POC from 198 to 8.1 RPCs per log entry.
 - **The leader's own write runs in parallel with the sends** (thesis §10.2.1):
   an entry is committed when a majority has it durably, and the leader is
   counted only once its own `Sync` returns. With three nodes the commit is the
@@ -269,6 +353,17 @@ PreVote round adds one RTT.
   the commit.
 - **A new leader commits a no-op entry of its term** before it serves a read
   or accepts a membership change (thesis §6.4, §4.1).
+- **Three rules the POC learned as safety bugs** are stated here rather than
+  left to the implementation. All three are silent on the happy path and end
+  in divergence (README bugs 1 to 3). A follower advances its commit index to
+  at most `min(leaderCommit, prevLogIndex + len(entries))`, the prefix this
+  message verified, never the end of its log. Its acknowledgement reports
+  that verified prefix, never `lastIndex` (`raft.js:1020-1032`). A node that
+  steps down within the same term keeps its vote (`raft.js:711-718`).
+- **The pipeline stays bounded.** The POC pipelines optimistically with no
+  bound on what is in flight (`raft.js:937-939`), relying on the transport
+  queue's cap. This ADR keeps `MaxInflight`: on a 27 ms link an unbounded
+  window turns one slow follower into megabytes of retransmission.
 
 **Outcome reporting is three-valued.** `Propose` returns the `Position` and
 the `Apply` result once applied locally; `NOT_LEADER` when the entry was
@@ -280,6 +375,13 @@ that loses no data only if its state machine converges anyway; the first
 consumer's does, because every node applies the log and the
 compare-and-swap of a duplicate fails identically everywhere. The
 `pkg/v1` doc comment says this in so many words.
+
+**A context that ends after the append is `OUTCOME_UNKNOWN` too, from
+raft-sql-poc.** Its cause is `ctx.Err()`, but the code is not
+`ctx.Err()` alone. The POC's `COMMIT_TIMEOUT` (`raft.js:850-858`) is this
+case under another name, and a caller that reads it as "failed" retries an
+entry that may still commit. A context that ends before the append returns
+`ctx.Err()`, as everywhere in the SDK.
 
 ### D7 — Snapshots and compaction ship in v1
 
@@ -299,6 +401,23 @@ compare-and-swap of a duplicate fails identically everywhere. The
   the log from there.
 - **Retention:** the previous snapshot is kept until the new one is durable,
   so a crash during publication leaves one valid snapshot.
+- **Compression, from raft-sql-poc.** The snapshot stream passes through a
+  `transform` codec chosen at construction: flate from
+  `internal/service/transform` by default, or zstd from
+  `third-party/transform` when the caller supplies it, since `pkg` may not
+  import `third-party` (ADR 0068). The POC measured ÷10.8 with zstd level 3
+  on a realistic state. Adding a machine cost 41 to 43 KB of snapshot
+  instead of 204 to 205 KB of replayed log. The POC also compresses once per
+  snapshot and sends every lagging follower the same bytes
+  (`raft.js:1176-1194`). Messages are not compressed: under encryption,
+  compressing attacker-influenced data with other data leaks through the
+  ciphertext's length (CRIME/BREACH), which is why the POC turns compression
+  off in its `aead` mode.
+
+The POC cuts a snapshot synchronously on the apply path and holds it whole
+in memory (`raft.js:1151-1159`, `storage.js:397-431`). This ADR keeps the
+copy-on-write cut and the streamed write: the first consumer's state grows
+with `refs/pull/*`, and a pause in apply is a pause in every write.
 
 For the first consumer the snapshot is the ref table and the per-repository
 checksums, not Git objects — those travel outside the log. A node restoring a
@@ -329,7 +448,12 @@ until the learner is within `PromoteLag` entries (default 1 024) of the
 leader's commit index — a voter added while it is behind can make the cluster
 unavailable, because the majority now needs a node that cannot yet
 acknowledge. Replacing a node is therefore: learner, catch up, promote (four
-voters, majority three), remove the old node. During that window a majority of
+voters, majority three), remove the old node. The POC checks
+catch-up in its orchestrator, outside the engine (`shard.js:662-676`). Here
+`Promote` refuses a lagging learner itself, so no caller can forget. As in
+the POC (`shard.js:707-716`), removing the current leader first transfers
+leadership, and a learner never runs an election timer
+(`raft.js:344-356`). During that window a majority of
 four spans at least two sites; the operator guide says so.
 
 **A node ID is never reused.** A node whose disk was lost and that rejoined
@@ -345,7 +469,16 @@ with the same name is born.
 proposals, brings `to` up to date, and sends it `TimeoutNow`; `to` campaigns
 at once, its vote requests flagged so D5's vote refusal does not apply. It
 fails with `TRANSFER_FAILED` after one election timeout and the old leader
-resumes. `PreferredLeaders` in the configuration names the nodes a leader
+resumes.
+
+**A transfer loses nothing in flight, from raft-sql-poc.** From the moment
+it starts, `TransferLeadership` refuses new proposals with `NOT_LEADER`,
+which is retryable since nothing was appended. It sends `TimeoutNow` only
+once every entry already proposed is COMMITTED (`raft.js:789-809`,
+`raft.js:841-846`). The POC's first version stepped down with entries in
+flight and answered them "outcome unknown", and a retrying client applied
+them twice (README bug 7). The POC measured 10 ms for a transfer, against at
+least one election timeout for an election. `PreferredLeaders` in the configuration names the nodes a leader
 transfers to after an election when it is not one of them — here FRA and RBX,
 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
 
@@ -356,7 +489,10 @@ committed before the call, and returns the applied index:
 
 - **ReadIndex** (default; thesis §6.4). The leader records its commit index,
   confirms it is still leader with one heartbeat round acknowledged by a
-  majority (concurrent barriers share the round), waits until applied reaches
+  majority (concurrent barriers share the round), which the POC
+  measured at 3 quorum rounds for 2 000 concurrent linearizable reads,
+  at the price of −13 % for strictly sequential ones, each of which then
+  pays its own round, waits until applied reaches
   the recorded index, and answers; a follower asks the leader for the index
   and waits locally. Cost: one round trip to the nearest peer from the leader.
 - **Lease** (`Reads: ReadLease`, opt-in). The leader serves without the
@@ -368,7 +504,9 @@ committed before the call, and returns the applied index:
   agreement is not needed; (b) the vote refusal of D5 holds, which it always
   does here; (c) no transfer is in progress — the lease is dropped the moment
   `TransferLeadership` starts, because a transfer elects a new leader without
-  waiting for the timeout the lease relies on. `MaxClockDrift` has no default:
+  waiting for the timeout the lease relies on. The lease is also used
+  only when the leader has applied its commit index and that index is past
+  the no-op of its term, as in the POC (`raft.js:1427-1432`). `MaxClockDrift` has no default:
   `ReadLease` with a zero drift is refused at construction (ADR 0031, refuse
   half — zero reads as "clocks are perfect", which no clock is).
 
@@ -376,6 +514,20 @@ committed before the call, and returns the applied index:
   it for fences: a leader process paused AFTER its lease check and BEFORE its
   answer (a GC pause, a VM steal, `SIGSTOP`) serves a read that may be stale.
   ReadIndex has no such window, which is why it is the default.
+
+  **Two gaps in the POC's lease, which this ADR closes.** It measures the
+  lease on `Date.now()` (`raft.js:1495-1506`), a wall clock that NTP can
+  step, where this ADR uses the monotonic `Since` of the injected clock. It
+  also keeps the lease while a transfer runs (`raft.js:756-787` does not
+  clear it), and the transfer's `RequestVote` skips the live-leader check.
+  So if the vote request to the old leader is delayed or lost, the old
+  leader can serve a lease read after the new leader has committed a write.
+  That is condition (c) above, and it is a case the simulator's
+  linearizability checker must find.
+
+  The POC also offers a `leader` read: a local read on the leader, with no
+  confirmation. This ADR does not: it is exactly the read a deposed leader
+  serves stale. Its `stale` read is any local read, which needs no API.
 
 - **`WaitApplied(ctx, index)`** is the read-after-write cookie of the first
   consumer: wait until the local node has applied `index`. It gives
@@ -412,7 +564,21 @@ without conversion.
 
 Heartbeat coalescing and quiescing idle groups — the two things a
 group-per-repository design needs and Gitaly never built — are NOT in v1,
-because one group has nothing to coalesce.
+because one group has nothing to coalesce. raft-sql-poc built both and
+measured them, and they are the v2 specification. ONE heartbeat frame per
+pair of machines carries every quiescent group, delta-encoded: 4 bytes for a
+group whose term and commit the receiver already confirmed, and a 52-byte
+"all clear" acknowledgement (`host.js:1-27`, `raft.js:1351-1368`). At 256
+shards on 6 machines that took idle traffic from 10 240 to 300 to 320
+messages/s (÷32 to ÷34). ONE WAL per machine is shared by all its groups,
+so a tick costs one `fsync` however many groups wrote: in the POC, 1 000
+entries over 4 shards made 1 fsync. The `LogStore` port does not forbid it:
+a shared store hands out per-group views whose `Sync` is the same call. The
+POC also measured rendezvous hashing for placement and balanced leadership
+to within one. And it measured the cost: with 8 shards at replication 3 on
+6 machines, losing 2 machines left 4 of 8 shards unavailable. A sharded
+cluster's availability is no longer a boolean, which is one more reason v1
+has one group.
 
 ### D12 — Errors
 
@@ -423,7 +589,7 @@ change that introduces them (ADR 0035):
 |---|---|---|
 | `0.2.57.1` | `CONSENSUS_MISCONFIGURED` | refused at construction (D5, D9, missing ID, empty membership) |
 | `0.2.57.2` | `NOT_LEADER` | certainly not appended; the known leader in `Fields`, read with `LeaderHint` |
-| `0.2.57.3` | `OUTCOME_UNKNOWN` | appended, leadership lost before commit — may still commit |
+| `0.2.57.3` | `OUTCOME_UNKNOWN` | appended, then leadership lost or the context ended before commit — may still commit; a context's end is its cause |
 | `0.2.57.4` | `LEADERSHIP_UNCONFIRMED` | a barrier's round did not reach a majority in time |
 | `0.2.57.5` | `MEMBERSHIP_CHANGE_PENDING` | one change at a time |
 | `0.2.57.6` | `MEMBERSHIP_INVALID` | unknown node, last voter, promotion of a lagging learner |
@@ -447,7 +613,9 @@ Service `0.3.92.*` (`0x00_03_5C_*`):
 | `0.3.92.8` | `CLUSTER_MISMATCH` | a peer's handshake names another cluster or group |
 | `0.3.92.9` | `FRAME_INVALID` | a frame that does not parse; the connection closes |
 
-A cancelled context returns `ctx.Err()`, as everywhere in the SDK.
+A context that ends before anything is appended returns `ctx.Err()`, as
+everywhere in the SDK. One that ends after the append is `OUTCOME_UNKNOWN`
+with `ctx.Err()` as its cause (D6).
 
 ### D13 — Observability
 
@@ -590,6 +758,29 @@ repository, not the SDK's.
 **No test sleeps.** Every timer is on the injected clock, with ADR 0052's
 wall-clock AST audit copied over and its own detecting negative test.
 
+**Confirmed by raft-sql-poc, in its own words.** Its tests are chosen
+scenarios on real timers. It uses `Date.now`, `setTimeout`, and
+`Math.random` for loss and jitter (`network.js:94`, `network.js:112`), with
+no seed to replay. Its README lists "no deterministic simulation test nor
+linearizability checker" among what still separates it from a product.
+What it did prove is the shape of the power-loss test: cut power on every
+machine at once, right after the last acknowledgement, and count. It got
+300 of 300 acknowledged writes back in simulation, and 622 of 622 over
+encrypted TCP to disk. Its disk model keeps only the bytes covered by the
+last completed `fsync` (`storage.js:601-615`). The simulator here keeps
+that, and adds a torn record and a flipped bit.
+
+**Mutation controls, from raft-sql-poc.** The POC removes each of its 10
+transport defenses one at a time and requires each removal to be detected
+(`tools/security-mutations.js`). It also reinstates its old leadership
+balancer to prove the test fails (`tools/balance-mutation.js`). The
+simulator gets the same discipline. Behind test-only switches it
+reintroduces each of the POC's three core safety bugs (D6) and an
+acknowledgement sent before the sync, and the suite must fail on each. In
+the POC that last switch, `unsafeAckBeforeSync` (`raft.js:77-80`), lost 50
+to 139 of 300 acknowledged writes. The transport's identity, admission and
+size checks get the same treatment.
+
 **Benchmarks** ship with `BENCH.md` (rule 9) and allocation gates in the
 race-off lane (`tools/alloc-lane-targets.txt`, rule 12):
 
@@ -627,6 +818,15 @@ one is a finding, not a renegotiation:
 
 The first consumer needs a few hundred writes per second at most; the targets
 are set an order of magnitude above it so the SDK does not ship a ceiling.
+
+**A floor, from raft-sql-poc.** The POC ran in one Node.js process on macOS
+with a real `F_FULLFSYNC` of 4.6 to 5.4 ms. It measured 7 000 to 9 400
+durable writes/s, replicated 3 times on 4 shards. Over TCP with AES-256-GCM
+and to disk, on 8 shards across 4 machines, it measured 5 300 to 5 700
+durable writes/s. A loopback round trip took 45 µs at p50 under AEAD. A Go
+implementation on NVMe with a 1 to 3 ms `fdatasync` should not be below
+those numbers. They are evidence that the 10 000 entries/s target is
+reachable, not a target themselves.
 
 ## Consequences / Semantics
 
@@ -731,36 +931,71 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   and preallocation differ; refused with `proc.UnsupportedPlatform` until
   measured, as ADR 0052 D8 did for `LockFileEx`.
 
-## Points to confront with IWFS
+## raft-sql-poc (owner's prior Raft)
 
-The owner wrote a Raft before ("IWFS", at Halys). Before implementation
-starts, each of these is answered from that code or that experience, and any
-divergence is either adopted here or recorded as rejected with its reason:
+The owner's earlier Raft was read in full before this ADR was amended:
+the README, `raft.js`, `storage.js`, `shard.js`, `host.js`, `transport.js`,
+`wire.js`, `secure.js`, and the storage, resilience and TCP cluster suites.
+Each decision above that it changed says **from raft-sql-poc**. The table
+covers every decision, including those it confirmed or that this ADR keeps
+against it.
 
-1. **Durability order.** Did IWFS acknowledge after `fsync`, on the leader and
-   on followers? Was the leader's write parallel to replication? What did a
-   failed `fsync` do?
-2. **Hard state.** How were term and vote persisted, and was the vote durable
-   before the reply left?
-3. **Log format and recovery.** Record layout, checksum, torn-tail handling,
-   and what a mid-log corruption did — repair or refuse.
-4. **Batching and pipelining.** Was there a linger timer? What batch sizes
-   did production see? Was there flow control per follower?
-5. **Elections.** Timeouts used across which RTTs; PreVote, CheckQuorum, vote
-   refusal under a live leader — present or found missing the hard way?
-6. **Snapshots.** How was a consistent view cut without stopping apply? How
-   was a snapshot transferred, verified, and retained during publication?
-7. **Membership.** Single-server or joint? Learners? Was the 2015
-   single-server defect known and closed? Was a node ID ever reused?
-8. **Reads.** ReadIndex, lease, or local? If a lease, under which clock
-   assumption, and was it ever wrong?
-9. **Client semantics.** How was "appended but leadership lost" reported?
-   Were there client sessions?
-10. **Testing.** What found the real bugs — simulation, fault injection,
-    production? Which bug would the simulator of D15 not have found?
-11. **Operations.** How was a node replaced, a disk lost, a cluster
-    restored from backup? What metrics did on-call actually use?
-12. **What IWFS would do differently** — the single most useful answer.
+| Decision | raft-sql-poc | Verdict here |
+|---|---|---|
+| D1 name | `RaftNode`, `ShardedCluster`: the algorithm in the type name | unchanged — the SDK names the capability and puts the algorithm in the constructor |
+| D2 placement | one dependency-free tree, by design | unchanged — the same stance as stdlib-only |
+| D3 state machine | a thrown error is deterministic output (`raft.js:1109-1117`), even "replica state diverged" (`sqlstore.js:83`) | kept stricter: a failure that is not a refusal stops the node |
+| D4 log | one WAL per machine, CRC per record, a torn tail cut and a mid-log fault refused (`storage.js:755-771`), the hard state as a record, a checkpoint at the head of each segment, prefix-only GC | **amended**: the hard state goes in the log, with checkpoints and prefix GC |
+| D4 fsync failure | no retry, but the node never syncs again and acknowledges nothing, silently (`storage.js:489-495`) | kept: the node stops with `STORAGE_FAILED` |
+| D4 transport | its own SIGMA handshake, a per-machine certificate, revocation on removal, one connection per direction, one sealed batch per tick, a bounded queue (`transport.js`, `secure.js`) | **amended**: admission follows the membership, writes are batched, the queue is bounded, three size and time limits. TLS 1.3 is kept over a hand-written handshake, given the POC's bugs 5 and 6 |
+| D4 wire | RWP v2: a fixed 48-byte header, a closed schema of eleven types, a version byte, `f64` indexes because JavaScript has no cheap `u64` (`wire.js:1-40`) | unchanged — a fixed layout written by hand. Go has `uint64`, so the `f64` choice does not transfer |
+| D5 elections | PreVote paired with CheckQuorum (`raft.js:502-560`, `raft.js:693-705`), a live-leader check in PreVote only, a restarted node silent for one timeout (`raft.js:205-213`) | **amended**: silent on restart, and the check applies to `RequestVote` too |
+| D6 replication | batching per tick without a timer, optimistic pipelining with no bound, the leader's write in parallel counted at `persistedIndex` (`raft.js:1073-1093`), replies held back until durable (`raft.js:50-57`, `raft.js:1549-1561`), empty AppendEntries suppressed | **confirmed**, with three safety rules and the context case added; `MaxInflight` kept |
+| D7 snapshots | zstd once per snapshot, SHA-256, 256 KiB chunks with one in flight and resume by offset, cut synchronously and held whole in memory | **amended**: snapshot compression. The copy-on-write cut and the stream are kept |
+| D8 membership | single-server changes effective on append, refused before the leader commits in its term (`raft.js:403-465`), catch-up checked by the orchestrator, transfer waits for the commit | **amended**: transfer waits for the commit, refuses proposals and removes the leader last. Catch-up is enforced in the engine |
+| D9 reads | three levels (`strong` = ReadIndex, `leader`, `stale`), shared read rounds, a lease on `Date.now()` and kept during a transfer | **amended** with the shared-round measurement and the lease's preconditions. Two lease gaps closed. The `leader` level is refused |
+| D10 fencing | a write resolves with `{index, term}` (`raft.js:1129-1134`) and nothing builds on it | unchanged |
+| D11 groups | multi-Raft per shard, rendezvous placement, coalesced heartbeats ÷32 to ÷34, one WAL per machine, leadership balanced to within one | v1 unchanged. The POC's design and numbers become the v2 specification |
+| D12 errors | `NOT_LEADER` (with a leader hint), `UNKNOWN_OUTCOME`, `COMMIT_TIMEOUT`, `TRANSFER_FAILED`, `RETRY` | **amended**: a context that ends after the append is `OUTCOME_UNKNOWN` |
+| D13 observability | events built only when someone listens (280 k objects saved) | unchanged — the SDK's metrics already cost nothing when unread |
+| D14 API | `propose`, `readIndex`, `transferLeadership`, `proposeConfChange` | unchanged in shape |
+| D15 tests | 169 assertions over chosen scenarios on real timers; power loss on every machine; mutation controls | **amended**: mutation controls, and the POC's three safety bugs as regression switches. The deterministic simulator and the linearizability checker are what the POC says it lacks |
+| D16 performance | 7 000 to 9 400 durable writes/s, 5 300 to 5 700 over AES-256-GCM to disk, a 45 µs loopback round trip | a floor that confirms the targets, not a target |
+
+### Replicate effects, not statements: the POC's hardest lesson
+
+The POC replicated SQL statements first, and its replicas diverged within
+milliseconds. `CURRENT_TIMESTAMP` is evaluated by each replica as it
+applies. After that was frozen on the leader, `uuid7()` gave three values on
+three nodes, measured, and `LIMIT` without a total `ORDER BY` lets SQLite
+pick different rows. Freezing known functions, in its README's words, is "a
+whitelist applied to a blacklist problem". The POC fixed it in two steps.
+First it executed on the leader inside a transaction that is always rolled
+back, captured the row changeset and replicated that (`sqlstore.js:65-70`).
+Then it built a storage engine whose mutation IS `{key, value, version}`,
+where "the problem is not solved, it ceases to exist". It measured the
+costs. On an UPDATE of 5 000 rows, row-based replication was 7.5 times
+slower and 4 222 times larger in the log (144 KB against about 35 bytes).
+And only one capture can be in flight against a given state, so the
+non-deterministic writes serialise.
+
+The first consumer's design is already where that path ends. It
+replicates `{repository, ref, old SHA, new SHA}`, never the HTTP request or
+the git command that produced it. That is a value together with the value
+it was read against. Every replica checks it with the same predicate, the
+compare-and-swap of `Apply`, just as the POC's engine detects a conflict at
+apply time with a predicate every replica computes identically. The POC's
+size problem does not arise here, because the bulk travels outside the log:
+Git objects are pushed to the peers before the entry is proposed, and the
+log carries only the ref update. The serialisation lesson maps onto the
+hook too. In `reference-transaction` `prepared`, the replicator reads the
+old SHA under git's ref lock: one capture in flight per ref, not per
+database.
+
+### Still to confront: IWFS
+
+IWFS, the owner's Raft at Halys, remains to be confronted if access to it
+is obtained.
 
 ## References
 
@@ -777,6 +1012,12 @@ divergence is either adopted here or recorded as rejected with its reason:
   "Testing for linearizability", 2017 — the checker of D15.
 - PostgreSQL "fsyncgate", pgsql-hackers, 2018 — why a failed `fsync` is not
   retried.
+- raft-sql-poc, the owner's prior Raft (Node.js, no dependency):
+  `src/raft.js`, `src/storage.js`, `src/host.js`, `src/shard.js`,
+  `src/transport.js`, `src/secure.js`, `src/wire.js`, `src/sqlstore.js`,
+  `src/network.js`, `src/resilience-tests.js`, `src/storage-tests.js`,
+  `tools/security-mutations.js` and its README. It is not published, and the
+  paths are relative to its root.
 - GitLab Gitaly, `internal/gitaly/storage/raftmgr` and
   `internal/gitaly/config` before their deletion in 2026 — the gaps listed in
   Context.
