@@ -158,7 +158,7 @@ or the line above it, matching how `//nolint` is already written.
 | File | Role |
 |---|---|
 | `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-version-check`, `-list`), exit codes |
-| `analyze.go` | walking, parsing, import-alias resolution, suppression directives |
+| `analyze.go` | walking, parsing, import-alias resolution, shadowed names (`shadowedNames`, which skips a type's members — `memberFields`), suppression directives |
 | `file_ctx.go` | `fileCtx` — what every rule reads about one parsed file: its path, the local name of each import, the lines carrying an exemption |
 | `rules.go` | the rule table and the five checks |
 | `pipeline_call.go` | the `log/slog` entry points SDK001 watches, in reporting order |
@@ -188,7 +188,11 @@ resolved, and a selector only matches when the file actually imports the package
   whose local name the file also declares stops matching there. Silent, and
   deliberately so — `logger` is a name consumers bind constantly, and a rule
   that fires on correct code is the kind people switch off. The cost is a
-  missed finding where a file both shadows the name and violates the rule.
+  missed finding where a file both shadows the name and violates the rule. A
+  struct field or an interface method is NOT such a declaration
+  (`memberFields`): it is reached through a selector, never bare. Counting one
+  used to silence every rule in any file with a field named `logger` or
+  `errors` — and let an `errors.New` past the SDK's own gate.
 
 That is the honest trade for staying dependency-free, and it is the right one:
 the rules exist to catch the accidental second pipeline, not to defeat someone

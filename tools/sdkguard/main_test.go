@@ -213,6 +213,15 @@ func Test_checkUntypedErrors(t *testing.T) {
 		{"both in one file", "package p\nimport (\"errors\"; \"fmt\")\n" +
 			"var _ = errors.New(\"a\")\nvar _ = fmt.Errorf(\"b\")\n", 2},
 		{"neither imported", "package p\nvar x = 1\n", 0},
+		// A field is reached through a selector, never bare, so a struct
+		// field named errors leaves errors.New a call to the package. It used
+		// to count as a shadow and silence the rule for the whole file.
+		{"beside a struct field named errors", "package p\nimport \"errors\"\n" +
+			"type r struct{ errors []error }\nvar _ = errors.New(\"boom\")\n", 1},
+		// A local of that name still shadows it: the call below may be a
+		// method on the local, and AST alone cannot tell.
+		{"beside a local named errors", "package p\nimport \"errors\"\n" +
+			"func f() { errors := g(); _ = errors.New(\"boom\") }\n", 0},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -669,7 +678,13 @@ func Test_shadowedNames(t *testing.T) {
 		{"a type declaration", head + "type logger int\n", "logger"},
 		{"a func declaration", head + "func logger() {}\n", "logger"},
 		{"a var block", head + "var logger int\n", "logger"},
+		{"a receiver", head + "type t int\nfunc (logger t) f() {}\n", "logger"},
 		{"nothing shadows it", head + "var v = logger.LevelInfo\n", ""},
+		// A member lives in its type's namespace and is never written bare.
+		{"a struct field", head + "type s struct{ logger int }\n", ""},
+		{"an interface method", head + "type i interface{ logger() }\n", ""},
+		{"a struct declared in a function", head + "func f() { _ = struct{ logger int }{} }\n", ""},
+		{"a func-typed field's parameter", head + "type s struct{ f func(logger int) }\n", "logger"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
