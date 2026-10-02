@@ -25,6 +25,9 @@
 
 # Per-codec allocation-budget regression tests.        (original)
 //internal/service/codec/...
+# The full yaml.v3 codec kept opt-in beside the native subset: same budget test,
+# re-pinned on the library it wraps.
+//third-party/codec/yaml:yaml_test
 # Kernel zero-alloc invariant gate (buffer/clock/errs/ring). (original)
 //internal/kernel:kernel_test
 # Recycler zero-alloc invariant (ADR 0010) — Pool/CappedPool Get+Put.
