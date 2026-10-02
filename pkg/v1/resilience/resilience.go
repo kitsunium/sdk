@@ -144,6 +144,7 @@ import (
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
@@ -175,7 +176,7 @@ type KeyedRateLimiterConfig = svcres.KeyedRateLimiterConfig
 
 // Backoff is the public alias for the exponential backoff curve NewRetry waits
 // between attempts, for a loop that backs off on its own terms.
-type Backoff = svcres.BackoffValue
+type Backoff = kbackoff.Value
 
 var (
 	// RetryExhausted is returned when the retry budget is spent.

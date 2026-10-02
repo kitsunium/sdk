@@ -19,7 +19,7 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | File | Holds |
 |---|---|
 | `queue.go` | package doc, the dead-letter `causeValue` reduction, `randomHex`, the two shared guards (`checkBatch`, `checkSize`), `deadLetterNotFound` |
-| `retry.go` | `retryDelay`: RetryDelay, or `resilience.Backoff` from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
+| `retry.go` | `retryDelay`: RetryDelay, or the `kernel/backoff` curve from it to `MaxRetryDelay` — one function the three brokers call (ADR 0151) |
 | `memory.go` | `NewMemory` and the in-heap broker: the heap-ordered lease expiry, the ready list ordered at insertion; `Reject`, `ReplayDeadLetter`, `DeleteDeadLetter` |
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |

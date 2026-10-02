@@ -16,6 +16,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `clock/` | time port, split in two: `Clock` (`Now` + `Since`) and `Waiter` (`After`/`NewTimer`/`NewTicker`/`Sleep`), joined by `Timed`; `System` delegates to package `time`, `ManualClock` is the deterministic test double | `0.1.2.*` (reserved — none emitted, none planned: bad input panics) |
 | `ring/` | SPSC lock-free bounded queue (ADR 0006) | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 | `batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014) | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
+| `backoff/` | `Value{BaseDelay, MaxDelay, Multiplier, Jitter}.Delay(attempt)` — the SDK's one exponential backoff curve, never negative (ADR 0103), plus its two halves `Grow` (pure) and `Widen` (jitter); `pkg/v1/resilience.Backoff` and `service/resilience.BackoffValue` alias it (ADR 0074) | (none — every input is normalised, nothing is refused) |
 | `worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`) | (none — emits no codes) |
 | `cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
 | `singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
@@ -49,6 +50,14 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
 - `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/cache` and `internal/service/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
 - `plugin` admitted by ADR 0071 — `Unusable(v any) (why string)` names no domain and knows no port; what it judges is the VALUE, and the two shapes it refuses are properties of Go's interfaces, not of any registry. It has **fifteen** in-tree consumers on day one, in eight core packages, which is unusual here and is the consolidation argument ADR 0010 made for `recycler`: the guard existed fifteen times as `if x == nil` and was wrong in the same way fifteen times.
+- `backoff` admitted on rule 1 — stdlib-only, and its signatures name a
+  duration, a factor, a ceiling and a jitter, nothing else — and moved here
+  from `service/resilience`, where ADR 0103 had published it. It is the
+  consolidation argument again: five service domains (`lifecycle`, `queue`,
+  `statemachine`, `mail/spool`, `net/server`) imported the whole `resilience`
+  package for this one type, which made a reliability-policy package the hub
+  of the service graph. They import the kernel now, and the two aliases that
+  keep the published names point at it (ADR 0074).
 - `pathchain` admitted on rule 1: stdlib-only, and its signatures name a path
   and its components — no lock, no directory role, no policy. It ships with one
   in-tree consumer, `internal/service/lock`, and that is stated rather than
@@ -107,6 +116,7 @@ GOWORK=off go test -race -cover ./...
 - `clock/` — see `internal/kernel/clock/CLAUDE.md`
 - `ring/` — see `internal/kernel/ring/CLAUDE.md`
 - `batcher/` — see `internal/kernel/batcher/CLAUDE.md`
+- `backoff/` — see `internal/kernel/backoff/CLAUDE.md` (the one backoff curve — why it is two halves, and the float-to-duration conversion it refuses to make first, ADR 0103)
 - `worker/` — see `internal/kernel/worker/CLAUDE.md`
 - `cache/` — see `internal/kernel/cache/CLAUDE.md`
 - `singleflight/` — see `internal/kernel/singleflight/CLAUDE.md` (call deduplication, ADR 0049 — and the ~2 µs threshold below which it costs more than it saves)

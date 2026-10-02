@@ -54,13 +54,13 @@ go_library(
     deps = [
         "//internal/core/net",
         "//internal/core/proc",
+        "//internal/kernel/backoff",
         "//internal/kernel/buffer",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/recycler",
         "//internal/kernel/worker",
         "//internal/service/proc/sdlisten",
-        "//internal/service/resilience",
     ],
 )
 

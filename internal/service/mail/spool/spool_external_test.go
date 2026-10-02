@@ -11,10 +11,10 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/mail"
 	"github.com/kitsunium/sdk/internal/service/mail/spool"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // TestAMailIsQueuedThenDelivered pins the ordinary path: Send stamps the
@@ -99,7 +99,7 @@ func TestACurveWithoutABaseNeverRetriesAtOnce(t *testing.T) {
 	s, _, rec := newSpool(t, spool.Config{
 		Transport: &scripted{fail: relayDown},
 		From:      coremail.AddressValue{Addr: "members@example.com"},
-		Backoff:   svcres.BackoffValue{MaxDelay: time.Hour, Multiplier: 3},
+		Backoff:   kbackoff.Value{MaxDelay: time.Hour, Multiplier: 3},
 	})
 	if _, err := s.Send(context.Background(), message("Hi")); err != nil {
 		t.Fatalf("Send() = %v", err)

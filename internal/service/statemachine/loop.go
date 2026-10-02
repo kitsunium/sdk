@@ -484,7 +484,7 @@ func (m *StateMachine[E, S]) outcome(ctx context.Context, key string, now time.T
 // failure counts a failure of key and schedules its retry; the step reports
 // it once the entity's lock is released.
 func (m *StateMachine[E, S]) failure(key string, now time.Time, err error) error {
-	m.agenda.failed(key, now, m.cfg.backoff)
+	m.agenda.failed(key, now, m.cfg.backoff.Delay)
 	//: joined into the run's error, and reported.
 	return err
 }

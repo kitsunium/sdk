@@ -106,7 +106,7 @@ type PolicyValue struct {
 	// MaxRetryDelay makes the retry delay GROW, and is where the growth
 	// stops. When it is positive, a message nacked on its n-th delivery waits
 	// RetryDelay × 2^(n−1), held at MaxRetryDelay — the SDK's one backoff
-	// curve (resilience.Backoff, ADR 0103), keyed on the delivery that failed,
+	// curve (kernel/backoff, ADR 0103), keyed on the delivery that failed,
 	// so a downstream that is down is asked less and less often instead of at
 	// a fixed cadence it is already failing to keep up with (ADR 0151).
 	//

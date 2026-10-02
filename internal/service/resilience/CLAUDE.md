@@ -6,7 +6,7 @@
 Concrete reliability policies implementing `core/resilience.Runner`: retry,
 circuit-breaker, rate-limit, bulkhead, timeout, fallback, hedging. Each
 constructor returns a Runner; policies compose by nesting. Stdlib + kernel
-`clock` and `errs` + the `core/resilience` port only — **no vendor deps**,
+`backoff`, `clock` and `errs` + the `core/resilience` port only — **no vendor deps**,
 cross-OS portable. Wraps outcomes in the `core/resilience` sentinels.
 ADR 0026.
 
@@ -15,7 +15,7 @@ ADR 0026.
 | File | Policy | Notes |
 |---|---|---|
 | `retry.go` / `retry_config.go` | retry | capped exponential backoff (the `BackoffValue` curve), ctx-aware sleep on the injected `Clock`, `RetryExhausted` |
-| `backoff.go` | — | `BackoffValue` + `Delay(attempt)` — the public curve (ADR 0103): `grow` (pure, bounded, never negative) and `widen` (jitter); `retryRunner.backoff`/`jittered` delegate to them |
+| `backoff.go` | — | `BackoffValue` — an alias of `kernel/backoff.Value`, the layer that owns the curve (ADR 0074, ADR 0103); `retryRunner.backoff`/`jittered` delegate to its two halves, `kernel/backoff.Grow` (pure, bounded, never negative) and `Widen` (jitter) |
 | `keyed_ratelimit.go` / `keyed_ratelimit_config.go` | keyed rate-limit | one `tokenBucket` per `Key(ctx)`, at most `MaxKeys` (LRU), forgotten after `IdleTimeout` (sliding), no sweeper; `Rate`/`Key`/`MaxKeys`/`IdleTimeout` refused at zero (ADR 0031, ADR 0103) |
 | `breaker.go` / `breaker_config.go` / `breaker_state.go` | circuit-breaker | Closed→Open→HalfOpen (injectable clock), `CircuitOpen` |
 | `ratelimit.go` / `ratelimit_config.go` | rate-limit | token bucket (reject mode), `RateLimited`; non-positive `Rate` refused (ADR 0031); `usableRate`/`bucketSize`/`newTokenBucket` shared with the keyed limiter |
@@ -50,25 +50,37 @@ ADR 0026.
 - **Reject mode** for bulkhead/ratelimit in v1 (no queuing/waiting — deferred).
 - Cross-OS: 100 % portable (context/time/sync, no syscall).
 
-## Backoff — one curve, published
+## Backoff — one curve, published, owned by the kernel
 
 `BackoffValue.Delay(n)` (`resilience.Backoff` in the facade) is the curve `NewRetry` has always waited: `BaseDelay ×
 Multiplier^(n−1)`, held at `MaxDelay`, widened by `Jitter`. It is public
 because the loops that back off on their own terms — a supervised goroutine, an
 outbox, a failed state transition — each wrote their own copy of it, three in
 one downstream framework alone. `RetryConfig` keeps its four fields; the runner
-builds the curve from them, so the two cannot drift.
+builds its waits from the curve's two halves, `kernel/backoff.Grow` and
+`Widen`, so the two cannot drift.
+
+The curve itself lives in `internal/kernel/backoff`, and `BackoffValue` is an
+alias of `backoff.Value`. It moved there because five domains — `lifecycle`,
+`queue`, `statemachine`, `mail/spool` and `net/server` — imported this whole
+package for that one stdlib-only type, which made `resilience` the hub of the
+service graph for a reason that had nothing to do with its policies. They now
+import the kernel, and the facade's `Backoff` aliases the kernel type directly:
+a public alias points at the layer that OWNS the type (ADR 0074).
 
 Publishing it closed a defect in the copy that was here. The growth was a
 `float64` converted to a `time.Duration` unchecked; past 2^63 ns that
 conversion is implementation-defined and on amd64 yields `math.MinInt64`, a
 negative wait a timer fires at once — so attempt 35 of a one-second retry
 stopped backing off, and a `MaxDelay` did not help because a negative duration
-is below every ceiling. `grow` compares against the bound in the float domain
-BEFORE converting, and stops multiplying as soon as the bound is reached, so
-`Delay(math.MaxInt)` costs a few dozen multiplications. The multiplier's NaN,
-which slipped past `<= 1`, now doubles like every other non-growing value.
-`TestBackoffNeverWrapsNegative` pins both on every architecture.
+is below every ceiling. The kernel's `grow` compares against the bound in the
+float domain BEFORE converting, and stops multiplying as soon as the bound is
+reached, so `Delay(math.MaxInt)` costs a few dozen multiplications. The
+multiplier's NaN, which slipped past `<= 1`, now doubles like every other
+non-growing value. `TestValueDelayNeverWrapsNegative` (in
+`internal/kernel/backoff`) pins both on every architecture, and
+`Test_retryRunner_backoffOverflow` here pins that the retry inherits the fix
+rather than keeping a copy.
 
 ## Keyed rate limit — a bucket per caller, bounded
 
@@ -215,7 +227,7 @@ copies. `Test_hedge_RunReRaisesAPanicWithItsOriginalValue` and
   would let the cause hijack the policy code; use `wrapAs`.
 - Add wait-mode without an ADR note (a still-deferred item of ADR 0026; the
   retryable-error classifier and retry jitter are the two that have landed).
-- Make `RetryConfig.Jitter` apply by default, or move it inside `backoff`. Its
+- Make `RetryConfig.Jitter` apply by default, or move it inside `retryRunner.backoff`. Its
   zero value being "deterministic" is what made it safe to land on a shipped
   policy — every existing caller's timing is unchanged — and keeping `backoff`
   pure is what lets the suite assert the growth curve separately from the

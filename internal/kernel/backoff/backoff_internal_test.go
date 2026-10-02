@@ -1,5 +1,5 @@
-// Package resilience — the backoff curve's internals.
-package resilience
+// Package backoff — the curve's internals.
+package backoff
 
 import (
 	"testing"
@@ -43,19 +43,34 @@ func Test_grow(t *testing.T) {
 	}
 }
 
-// Test_retryRunner_backoffOverflow pins that the retry policy inherits the
-// overflow fix through the shared curve rather than keeping its own copy: a
-// runner built WITHOUT NewRetry, with a NaN multiplier NewRetry would have
-// normalised, still gets a finite, non-negative wait.
-func Test_retryRunner_backoffOverflow(t *testing.T) {
+// Test_widen pins that the private half trusts its caller's clamp and still
+// never hands back a value past the end of the type.
+func Test_widen(t *testing.T) {
 	t.Parallel()
-	r := &retryRunner{cfg: RetryConfig{BaseDelay: time.Second, MaxDelay: time.Hour}}
-	//: attempt 80 is past 2^63 nanoseconds at ×2 from one second.
-	if got := r.backoff(80); got != time.Hour {
-		t.Errorf("backoff(80) = %v, want the one-hour ceiling", got)
+	type tc struct {
+		name   string
+		delay  time.Duration
+		jitter float64
+		lo, hi time.Duration
 	}
-	unbounded := &retryRunner{cfg: RetryConfig{BaseDelay: time.Second}}
-	if got := unbounded.backoff(80); got != maxDuration {
-		t.Errorf("backoff(80) without a ceiling = %v, want %v", got, maxDuration)
+	tests := []tc{
+		{"no jitter is the delay", time.Second, noJitter, time.Second, time.Second},
+		{"the widest jitter at most doubles", time.Second, maxJitter, time.Second, 2 * time.Second},
+		{"the top of the type has no headroom", maxDuration, maxJitter, maxDuration, maxDuration},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: many draws, because the randomness is what could escape.
+		for range 200 {
+			if got := widen(c.delay, c.jitter); got < c.lo || got > c.hi {
+				t.Fatalf("widen(%v, %v) = %v, want within [%v, %v]", c.delay, c.jitter, got, c.lo, c.hi)
+			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

@@ -7,9 +7,9 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // The defaults a zero field clamps to (ADR 0031: each zero has one reading —
@@ -76,7 +76,7 @@ type Config struct {
 	// value is the DefaultRetryBase–DefaultRetryMax curve, and a curve without
 	// a positive BaseDelay starts from DefaultRetryBase under its own ceiling:
 	// a failed mail is never retried at once.
-	Backoff svcres.BackoffValue
+	Backoff kbackoff.Value
 	// MaxAttempts is how many deliveries a mail gets before it is
 	// dead-lettered with its last failure. It is REQUIRED: zero reads as
 	// "unlimited" or as "none", two opposites, and neither is a mail spool.

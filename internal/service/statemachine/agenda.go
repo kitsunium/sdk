@@ -10,7 +10,6 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/heap"
-	"github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // compactSlack is how many stale entries the heap may hold beyond its live
@@ -185,8 +184,10 @@ func (a *agenda) restart(key string) {
 }
 
 // failed counts one more failure of key and schedules its retry at now plus
-// the backoff for that many failures.
-func (a *agenda) failed(key string, now time.Time, backoff resilience.BackoffValue) {
+// the backoff for that many failures. delay is the curve — the machine's
+// configured kernel/backoff.Value, handed over as its Delay method so the
+// agenda depends on "the wait after n failures" and on no curve type.
+func (a *agenda) failed(key string, now time.Time, delay func(failures int) time.Duration) {
 	a.mu.Lock()
 	defer a.mu.Unlock()
 	p := a.plans[key]
@@ -196,7 +197,7 @@ func (a *agenda) failed(key string, now time.Time, backoff resilience.BackoffVal
 		a.plans[key] = p
 	}
 	p.failures++
-	p.notBefore = now.Add(backoff.Delay(p.failures))
+	p.notBefore = now.Add(delay(p.failures))
 	a.scheduleLocked(key, p.notBefore)
 }
 

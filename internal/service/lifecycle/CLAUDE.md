@@ -72,7 +72,9 @@ spend everyone else's budget, and it is stated rather than discovered.
   as fields). A run that ends because the supervision is stopping and returns
   its context's error is the way out: reported with a nil error and
   `Stopping`, never restarted.
-- **The backoff is `resilience.BackoffValue`**, the one curve the SDK computes;
+- **The backoff is `kernel/backoff.Value`** (`resilience.Backoff` in the
+  facade), the one curve the SDK computes, imported from the kernel so the
+  supervisor depends on no other service domain;
   its zero clamps to 1s → 1m, because a zero curve is a hot loop. A run that
   lasted `HealthyAfter` resets the consecutive-failure count.
 - **`Start`'s context gives values, `Stop` gives the end.** Runs derive from

@@ -155,16 +155,16 @@ var (
 ```
 
 <a name="Backoff"></a>
-## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L178>)
+## type [Backoff](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L179>)
 
 Backoff is the public alias for the exponential backoff curve NewRetry waits between attempts, for a loop that backs off on its own terms.
 
 ```go
-type Backoff = svcres.BackoffValue
+type Backoff = kbackoff.Value
 ```
 
 <a name="BreakerConfig"></a>
-## type [BreakerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L160>)
+## type [BreakerConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L161>)
 
 BreakerConfig is the public alias for the circuit\-breaker configuration.
 
@@ -173,7 +173,7 @@ type BreakerConfig = svcres.BreakerConfig
 ```
 
 <a name="FallbackConfig"></a>
-## type [FallbackConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L166>)
+## type [FallbackConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L167>)
 
 FallbackConfig is the public alias for the fallback policy configuration.
 
@@ -182,7 +182,7 @@ type FallbackConfig = svcres.FallbackConfig
 ```
 
 <a name="HedgeConfig"></a>
-## type [HedgeConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L169>)
+## type [HedgeConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L170>)
 
 HedgeConfig is the public alias for the hedging policy configuration.
 
@@ -191,7 +191,7 @@ type HedgeConfig = svcres.HedgeConfig
 ```
 
 <a name="KeyedRateLimiterConfig"></a>
-## type [KeyedRateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L174>)
+## type [KeyedRateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L175>)
 
 KeyedRateLimiterConfig is the public alias for the keyed rate\-limiter configuration: a token bucket per key, bounded in number and forgotten when idle.
 
@@ -200,7 +200,7 @@ type KeyedRateLimiterConfig = svcres.KeyedRateLimiterConfig
 ```
 
 <a name="Operation"></a>
-## type [Operation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L151>)
+## type [Operation](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L152>)
 
 Operation is the public alias for the ctx\-aware unit of guarded work.
 
@@ -209,7 +209,7 @@ type Operation = coreres.Operation
 ```
 
 <a name="RateLimiterConfig"></a>
-## type [RateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L163>)
+## type [RateLimiterConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L164>)
 
 RateLimiterConfig is the public alias for the rate\-limiter configuration.
 
@@ -218,7 +218,7 @@ type RateLimiterConfig = svcres.RateLimiterConfig
 ```
 
 <a name="RetryConfig"></a>
-## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L157>)
+## type [RetryConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L158>)
 
 RetryConfig is the public alias for the retry policy configuration.
 
@@ -227,7 +227,7 @@ type RetryConfig = svcres.RetryConfig
 ```
 
 <a name="Runner"></a>
-## type [Runner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L154>)
+## type [Runner](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L155>)
 
 Runner is the public alias for the composable policy\-executor contract.
 
@@ -236,7 +236,7 @@ type Runner = coreres.Runner
 ```
 
 <a name="NewBulkhead"></a>
-### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L248>)
+### func [NewBulkhead](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L249>)
 
 ```go
 func NewBulkhead(maxConcurrent int) Runner
@@ -245,7 +245,7 @@ func NewBulkhead(maxConcurrent int) Runner
 NewBulkhead returns a bounded\-concurrency Runner \(reject mode\).
 
 <a name="NewCircuitBreaker"></a>
-### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L221>)
+### func [NewCircuitBreaker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L222>)
 
 ```go
 func NewCircuitBreaker(cfg BreakerConfig) Runner
@@ -254,7 +254,7 @@ func NewCircuitBreaker(cfg BreakerConfig) Runner
 NewCircuitBreaker returns a circuit\-breaker Runner. An error rejected by cfg.Retryable is returned verbatim and left out of the state machine.
 
 <a name="NewFallback"></a>
-### func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L265>)
+### func [NewFallback](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L266>)
 
 ```go
 func NewFallback(cfg FallbackConfig) Runner
@@ -263,7 +263,7 @@ func NewFallback(cfg FallbackConfig) Runner
 NewFallback returns a Runner that runs cfg.Fallback when the guarded Operation fails, reporting success when it works. When both fail the result is FallbackFailed, carrying both messages — unless the context was cancelled, which is reported as ctx.Err\(\). A nil cfg.Fallback is refused.
 
 <a name="NewHedge"></a>
-### func [NewHedge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L280>)
+### func [NewHedge](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L281>)
 
 ```go
 func NewHedge(cfg HedgeConfig) Runner
@@ -274,7 +274,7 @@ NewHedge returns a tail\-latency Runner that DUPLICATES an Operation still outst
 Each copy runs on a goroutine of its own, so a panic in one is recovered there and re\-raised by Run on the caller's goroutine with the ORIGINAL value — a recover comparing against http.ErrAbortHandler still matches — but with the stack of the re\-raise site; the copy's own stack is the price of not ending the process. A losing copy's late panic is recovered and dropped.
 
 <a name="NewKeyedRateLimiter"></a>
-### func [NewKeyedRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L242>)
+### func [NewKeyedRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L243>)
 
 ```go
 func NewKeyedRateLimiter(cfg KeyedRateLimiterConfig) Runner
@@ -283,7 +283,7 @@ func NewKeyedRateLimiter(cfg KeyedRateLimiterConfig) Runner
 NewKeyedRateLimiter returns a Runner holding one token bucket per key — the key cfg.Key names for each call's context — so a caller who empties its bucket is refused while every other caller is not. At most cfg.MaxKeys keys are held, the least recently used forgotten first, and a key unused for cfg.IdleTimeout is forgotten too; a forgotten key starts over with a full bucket. A non\-finite or non\-positive cfg.Rate, a nil cfg.Key and a non\-positive cfg.MaxKeys or cfg.IdleTimeout are each refused: every call returns PolicyMisconfigured, naming the field.
 
 <a name="NewRateLimiter"></a>
-### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L229>)
+### func [NewRateLimiter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L230>)
 
 ```go
 func NewRateLimiter(cfg RateLimiterConfig) Runner
@@ -292,7 +292,7 @@ func NewRateLimiter(cfg RateLimiterConfig) Runner
 NewRateLimiter returns a token\-bucket rate\-limiter Runner. A non\-positive cfg.Rate is refused: every call returns PolicyMisconfigured without running the operation, because any rate chosen for the caller would be a guess.
 
 <a name="NewRetry"></a>
-### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L214>)
+### func [NewRetry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L215>)
 
 ```go
 func NewRetry(cfg RetryConfig) Runner
@@ -301,7 +301,7 @@ func NewRetry(cfg RetryConfig) Runner
 NewRetry returns a retry\-with\-backoff Runner. An error rejected by cfg.Retryable ends the loop at once and is returned verbatim.
 
 <a name="NewTimeout"></a>
-### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L256>)
+### func [NewTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/resilience/resilience.go#L257>)
 
 ```go
 func NewTimeout(d time.Duration) Runner
