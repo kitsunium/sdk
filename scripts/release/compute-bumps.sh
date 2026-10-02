@@ -57,8 +57,9 @@ falls back to the root commit. Shallow-clone safe.
 
 --explain writes the verdict and the reason for it to stderr. stdout stays
 the stable contract ("pkg", "framework", "third-party", in that order, each
-only when due), so a caller that parses it is unaffected. It is opt-in rather than always-on because the BATS suite
-merges the two streams into one assertion.
+only when due), so a caller that parses it is unaffected. It is opt-in
+rather than always-on because the BATS suite merges the two streams into one
+assertion.
 
 --require-bazel refuses, instead of skipping rule 2, when bazel is absent
 and internal/ module dirs changed. The release lane passes it; a developer
