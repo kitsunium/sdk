@@ -12,6 +12,7 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
@@ -27,6 +28,13 @@ const exitOSErr int = 71
 type unixReaper struct {
 	// onReap mirrors config.onReap: an optional post-sweep observer.
 	onReap func(int)
+	// clk is what the timer sweep ticks on: clock.System from New, a
+	// ManualClock in a white-box test. Set before Start and never after.
+	clk clock.Waiter
+	// sweepEvery is the timer sweep's period: timerSweepEvery from New, so
+	// zero — no ticker at all — wherever every child's exit posts SIGCHLD. A
+	// white-box test sets it to drive the illumos/Solaris path on any Unix.
+	sweepEvery time.Duration
 	// mu guards running/sigCh/done/closeDone/lastErr across Start/Stop and the
 	// concurrent LastError read so repeated Start/Stop cycles neither
 	// double-install a handler nor leak a goroutine. The collection itself is
@@ -66,8 +74,9 @@ type unixReaper struct {
 func New(opts ...Option) coreproc.Reaper {
 	//: fold the options so the reaper carries only resolved values.
 	cfg := resolve(opts)
-	//: hand back an idle reaper; channels are created lazily in Start.
-	return &unixReaper{onReap: cfg.onReap}
+	//: hand back an idle reaper; channels are created lazily in Start. The
+	//: timer sweep runs on the wall clock, at this platform's period.
+	return &unixReaper{onReap: cfg.onReap, clk: clock.System, sweepEvery: timerSweepEvery}
 }
 
 // Start begins the background SIGCHLD loop. It is idempotent: a second Start
@@ -117,12 +126,13 @@ func (r *unixReaper) loop(sigCh chan os.Signal, done, stopped chan struct{}) {
 	//: where a child's exit posts no SIGCHLD (illumos, Solaris), a ticker stands
 	//: in for the signal; elsewhere tick stays nil and its case never fires.
 	var tick <-chan time.Time
-	//: timerSweepEvery is a per-platform constant: zero where SIGCHLD suffices.
-	if timerSweepEvery > 0 {
-		ticker := time.NewTicker(timerSweepEvery)
+	//: sweepEvery comes from a per-platform constant: zero where SIGCHLD
+	//: suffices. The ticker is the reaper's clock's, so a test advances it.
+	if r.sweepEvery > 0 {
+		ticker := r.clk.NewTicker(r.sweepEvery)
 		//: stop the ticker with the loop so a Start/Stop cycle leaks nothing.
 		defer ticker.Stop()
-		tick = ticker.C
+		tick = ticker.C()
 	}
 	//: react to signals until shutdown is requested.
 	for {

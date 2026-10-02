@@ -14,6 +14,7 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -487,6 +488,75 @@ func Test_handle_awaitExit(t *testing.T) {
 		}
 		if err != nil {
 			t.Errorf("awaitExit = %v, want nil", err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_handle_graceOnInjectedClock pins that Stop's grace window is measured on
+// the handle's clock: an hour of grace closes when a manual clock is advanced
+// an hour, and not a nanosecond before — so a supervisor's stop path is tested
+// without sleeping through its grace.
+//
+// Goroutine lifecycle: one goroutine runs the call under test and reports on a
+// buffered channel; the test always receives from it, and startChild's cleanup
+// kills and reaps whatever the escalation left.
+func Test_handle_graceOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	const grace time.Duration = time.Hour
+	type tc struct {
+		name string
+		//: the call whose grace window is under test.
+		call func(ctx context.Context, h *handle) error
+	}
+	tests := []tc{
+		{
+			name: "awaitExit reports the window closed, not settled",
+			call: func(ctx context.Context, h *handle) error {
+				settled, err := h.awaitExit(ctx, grace)
+				//: only an elapsed window is "not settled".
+				if settled {
+					return errs.Wrap(coreproc.StopFailed, errs.WrapParams{}, errs.String("why", "settled before the grace closed"))
+				}
+				return err
+			},
+		},
+		{
+			name: "Stop escalates a child that ignores SIGTERM once the window closes",
+			call: func(ctx context.Context, h *handle) error {
+				return h.Stop(ctx, grace, coreproc.Signal(syscall.SIGTERM))
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: a child that ignores SIGTERM: only the escalation can stop it.
+		h := startChild(t, true, "trap '' TERM; sleep 30")
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		h.clk = manual
+		done := make(chan error, 1)
+		go func() { done <- c.call(t.Context(), h) }()
+		//: the grace timer is armed on the manual clock.
+		manual.BlockUntil(1)
+		manual.Advance(grace - time.Nanosecond)
+		select {
+		case err := <-done:
+			t.Fatalf("the call returned (%v) before the grace window closed", err)
+		default:
+		}
+		manual.Advance(time.Nanosecond)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("the call = %v, want nil", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("advancing the clock past the grace did not end the call")
 		}
 	}
 	for _, c := range tests {
