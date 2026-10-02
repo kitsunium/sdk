@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check hooks-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
+.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -109,6 +109,12 @@ lint:
 	# merges silently left it describing a tree that no longer existed. Both
 	# invariants key on what is ON DISK, never on a maintained number.
 	bash scripts/pre-commit/check-domain-docs.sh
+	# Package documentation, BENCH.md presence and the error-code YAML mirror.
+	# Only the in-repo pre-commit hook ran these until it was removed (ADR 0153);
+	# CI runs them now, as the same three direct steps.
+	bash scripts/pre-commit/check-pkg-docs.sh
+	bash scripts/pre-commit/check-bench-md.sh
+	bash scripts/pre-commit/check-error-codes-drift.sh
 	# Gazelle gives every internal/ package //:__subpackages__ visibility, which
 	# admits the whole repository, so the layer direction is asserted on the
 	# build graph instead of assumed from visibility (ADR 0068).
@@ -120,7 +126,7 @@ lint:
 # the toolchain either.
 #
 # They exist as named targets because of #236. Five of the eight checks `lint`
-# performs were already invoked by bazel-ci.yml as direct `bash …` steps
+# performed then were already invoked by bazel-ci.yml as direct `bash …` steps
 # (gazelle drift, alloc-lane, audit-coverage, domain-docs, layer-deps); the
 # three here — gofumpt, sdkguard and ktn-linter — had no server-side control
 # point at all, and `ktn-linter` in particular ran nowhere except a developer's
@@ -142,7 +148,7 @@ lint:
 # cannot.
 #
 # `lint` delegates to both instead of repeating either recipe, so the set CI
-# enforces and the set the pre-commit hook enforces cannot drift apart by
+# enforces and the set `make lint` enforces locally cannot drift apart by
 # editing one.
 lint-check:
 	@drift=$$(gofumpt -l internal pkg third-party framework); if [ -n "$$drift" ]; then \
@@ -232,17 +238,10 @@ vuln-install:
 vuln-check:
 	GOVULNCHECK_VERSION=$(GOVULNCHECK_VERSION) bash scripts/ci/vuln-check.sh
 
-# `hooks-check` runs scripts/test-commit-msg-hook.bats against .githooks/. The
-# commit-msg hook is the no-AI-attribution enforcement, and it shipped with a
-# `printf | grep -q` whose failure mode is INVERTED — it allowed what it exists
-# to refuse, 40 times out of 40 past a few hundred KB (ADR 0088).
-hooks-check:
-	bash scripts/hooks-test.sh
-
 # `pre-commit-check` runs scripts/pre-commit/*.bats against the commit gates in
 # scripts/pre-commit/. ADR 0088 recorded its own sweep as INCOMPLETE: two of
-# those gates pipe into an early-exiting reader the same way .githooks/commit-msg
-# did, and they fail in opposite directions — check-ktn-phases-1-7.sh reports a
+# those gates pipe into an early-exiting reader the same way the former commit-msg
+# hook did, and they fail in opposite directions — check-ktn-phases-1-7.sh reports a
 # clean linter run as a failed one, and check-audit-coverage.sh lets an
 # uncovered package through, which is the gap that guard exists to close.
 pre-commit-check:
@@ -373,8 +372,8 @@ release-dry-run:
 
 # `docs-readme` regenerates pkg/v1/<service>/README.md from each
 # package's Go doc comment via the `gomarkdoc` binary (ADR 0008).
-# The binary is installed by the devcontainer Go feature
-# (.devcontainer/features/languages/go/install.sh) so it lives on
+# The binary is installed with `go install
+# github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0` so it lives on
 # $PATH without polluting pkg/go.mod with ~50 indirect deps.
 #
 # The package list is NOT enumerated here. It was, and it went stale: the
@@ -384,7 +383,7 @@ release-dry-run:
 # new pkg/v1 package is covered the moment it declares one.
 docs-readme:
 	@command -v gomarkdoc >/dev/null 2>&1 \
-	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0 (or rebuild devcontainer)"; exit 1; }
+	  || { echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0"; exit 1; }
 	cd pkg/v1 && go generate ./...
 	cd framework && go generate ./...
 	@echo "→ every pkg/v1 and framework package declaring //go:generate gomarkdoc regenerated"
@@ -393,7 +392,7 @@ docs-readme:
 # the dotted-quad error-code registry (ADR 0005/0006), extracted from every
 # errs.Code constant in the tree. The executable source of truth stays the AST
 # audit (internal/kernel/errs:errs_test); this YAML is for humans. The
-# check-error-codes-drift pre-commit guard fails the commit when it is stale.
+# check-error-codes-drift guard fails CI and `make lint` when it is stale.
 error-codes:
 	bash scripts/gen-error-codes.sh
 

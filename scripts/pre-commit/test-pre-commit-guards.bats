@@ -2,7 +2,7 @@
 # BATS tests for the pre-commit guards that pipe into an early-exiting reader.
 #
 # Both cases below were found by finishing the sweep ADR 0088 opened and
-# recorded as INCOMPLETE: `.githooks/commit-msg` was measured and fixed there,
+# recorded as INCOMPLETE: the former commit-msg hook was measured and fixed there,
 # but two `scripts/pre-commit/` checks pipe into `grep -q` the same way and had
 # not been. They fail in OPPOSITE directions, which is why both are covered:
 #
@@ -120,30 +120,26 @@ mkroot() {
 
 # --- portability (#260) -----------------------------------------------------
 
-# Everything a commit runs must work with the tools a Mac ships: /bin/bash 3.2
-# and the BSD find in /usr/bin. CI runs bash 5 and GNU find, where none of the
-# constructs below fails, so no run there can notice one coming back; reading
-# the sources can. The pattern names what broke the hooks before #260 —
-# readarray / mapfile and associative arrays (bash 4), the case-changing
-# expansions (bash 4) and `find -printf` (GNU) — which is a narrower claim than
-# "portable", and the portability itself was proven by running the hooks on
-# both. A match on a comment line is ignored: the guards say what they avoid.
-#
-# The template script the hook chains to (.devcontainer/, template-owned) is
-# out of scope on purpose: it declares an associative array, and the hook skips
-# it under a bash older than 4 rather than fail.
+# Every guard must work with the tools a Mac ships: /bin/bash 3.2 and the BSD
+# find in /usr/bin, because `make lint` runs them on a developer's machine as
+# well as in CI. CI runs bash 5 and GNU find, where none of the constructs below
+# fails, so no run there can notice one coming back; reading the sources can.
+# The pattern names what broke the guards before #260 — readarray / mapfile and
+# associative arrays (bash 4), the case-changing expansions (bash 4) and
+# `find -printf` (GNU) — which is a narrower claim than "portable", and the
+# portability itself was proven by running the guards on both. A match on a
+# comment line is ignored: the guards say what they avoid.
 #
 # Confirmed RED against the pre-fix scripts: it named
 # check-domain-docs.sh:38 (-printf) and check-readme-drift.sh:35 (readarray).
-@test "portability: nothing a commit runs needs bash 4 or GNU find's -printf" {
+@test "portability: no guard needs bash 4 or GNU find's -printf" {
   root="$(cd "$SCRIPTS/../.." && pwd)"
   pattern='readarray|mapfile|(declare|local|typeset) -[a-zA-Z]*A|\$\{[A-Za-z_][A-Za-z0-9_]*(,,?|\^\^?)[^}]*\}|-printf'
   hits="$(grep -nE "$pattern" \
-      "$root/.githooks/pre-commit" "$root/.githooks/commit-msg" \
       "$SCRIPTS"/*.sh "$root/scripts/gen-error-codes.sh" \
     | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' || true)"
   if [ -n "$hits" ]; then
-    printf 'bash-4 or GNU-only construct in a commit gate:\n%s\n' "$hits"
+    printf 'bash-4 or GNU-only construct in a guard:\n%s\n' "$hits"
     return 1
   fi
 }

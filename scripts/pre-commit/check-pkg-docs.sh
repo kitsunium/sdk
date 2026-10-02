@@ -15,7 +15,7 @@
 #   - The two roles do not collapse; private packages can ship just CLAUDE.md
 #     because they have no external consumer.
 #
-# This check runs as part of the project-local pre-commit chain. It walks the
+# This check runs in CI (bazel-ci.yml) and in `make lint`. It walks the
 # working tree under internal/ and pkg/ with find, so a package directory not
 # yet committed, or not even staged, is judged like a committed one.
 #
@@ -25,7 +25,7 @@
 
 set -euo pipefail
 
-WORKSPACE="${1:-${CLAUDE_PROJECT_DIR:-/workspace}}"
+WORKSPACE="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$WORKSPACE"
 
 missing_any=0

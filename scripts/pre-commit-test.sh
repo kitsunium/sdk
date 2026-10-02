@@ -2,7 +2,7 @@
 #
 # pre-commit-test.sh — run the BATS suites that guard scripts/pre-commit/.
 #
-# ADR 0088 measured and fixed the `… | grep -q` shape in .githooks/commit-msg
+# ADR 0088 measured and fixed the `… | grep -q` shape in the commit-msg hook
 # and in the two release scripts, and recorded the sweep as INCOMPLETE in as
 # many words: two scripts/pre-commit/ checks pipe into an early-exiting reader
 # the same way and had not been measured. They have been now, and they fail in
@@ -30,17 +30,10 @@
 # threshold, which stayed green in both passes; that is what pins the cause to
 # grep's early exit rather than to the volume of input.
 #
-# This runner lives in scripts/, NOT in scripts/pre-commit/, and that placement
-# is load-bearing. .githooks/pre-commit:33 dispatches EVERY executable *.sh
-# under scripts/pre-commit/ as a commit gate:
-#
-#     find "$LOCAL_DIR" -maxdepth 1 -type f -name '*.sh' -perm -u+x -print0
-#
-# so a runner sitting there would run bats on every commit and, on a clone
-# without bats, exit 127 and block the commit outright — a test harness turned
-# into a hard gate by its directory. scripts/hooks-test.sh is outside .githooks/
-# for the same reason. The *.bats suite stays next to the scripts it covers,
-# where it is not a *.sh and the hook never picks it up.
+# This runner lives in scripts/, NOT in scripts/pre-commit/: every *.sh there is
+# a guard (check-*.sh), run by CI and `make lint`, and a test harness sitting
+# among them would read as one more gate. The *.bats suite stays next to the
+# scripts it covers, where it is not a *.sh.
 #
 # Run: scripts/pre-commit-test.sh
 #      make pre-commit-check

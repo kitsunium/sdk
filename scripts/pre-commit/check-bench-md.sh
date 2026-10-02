@@ -20,7 +20,7 @@
 
 set -euo pipefail
 
-WORKSPACE="${1:-${CLAUDE_PROJECT_DIR:-/workspace}}"
+WORKSPACE="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$WORKSPACE"
 
 missing=0

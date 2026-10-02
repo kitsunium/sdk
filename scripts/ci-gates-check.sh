@@ -36,8 +36,7 @@ cd "$(dirname "$0")/.."
 
 # The SDK lane is bazel-ci.yml, not ci.yml: .github/workflows/CLAUDE.md makes it
 # the single source of truth for gating (ADR 0004), and the other workflows are
-# either release-triggered or inherited from the devcontainer template and
-# path-gated on .devcontainer/**.
+# release-triggered, scheduled or path-gated scans and suites that gate nothing.
 WORKFLOW=".github/workflows/bazel-ci.yml"
 MAKEFILE="Makefile"
 
@@ -48,7 +47,6 @@ GATES=(
   ci-gates-check
   test-framework
   release-scripts-check
-  hooks-check
   pre-commit-check
   # `gofumpt -l` + sdkguard: two of the three checks of `make lint` that no
   # lane ran until #236. The other five are invoked by the workflow as direct
