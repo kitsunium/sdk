@@ -133,11 +133,13 @@
 // or below doubles, and the growth stops at the ceiling — or at the longest
 // time.Duration — instead of wrapping negative, however large n is.
 //
-// # Driving the retry with a test clock
+// # Driving the retry and the hedge with a test clock
 //
-// [RetryConfig].Clock is the time source the retry backs off on. Leave it nil
-// in production; in a test, hand it a ManualClock from pkg/v1/clock and move
-// it past each backoff instead of sleeping through it.
+// [RetryConfig].Clock is the time source the retry backs off on, and
+// [HedgeConfig].Clock the one the hedge measures its delay on. Leave them nil
+// in production; in a test, hand them a ManualClock from pkg/v1/clock and move
+// it past each backoff, or past the hedge delay, instead of sleeping through
+// it.
 package resilience
 
 import (

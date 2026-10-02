@@ -59,6 +59,7 @@ go_test(
         "bulkhead_internal_test.go",
         "fallback_external_test.go",
         "fallback_internal_test.go",
+        "hedge_clock_external_test.go",
         "hedge_external_test.go",
         "hedge_internal_test.go",
         "keyed_ratelimit_external_test.go",

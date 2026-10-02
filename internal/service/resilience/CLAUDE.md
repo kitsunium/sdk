@@ -31,9 +31,11 @@ ADR 0026.
 
 - **No `errs.Define` here** — service emits the `core/resilience` sentinels via
   `wrapAs` (origin-wins keeps the policy code even when the cause is an *errs.Error).
-- **Injectable clock** (breaker/ratelimit/keyed ratelimit read it; retry WAITS
-  on it — `RetryConfig.Clock` is a `clock.Timed`, so a test drives every backoff
-  with a `ManualClock` instead of sleeping).
+- **Injectable clock** (breaker/ratelimit/keyed ratelimit read it; retry and
+  hedge WAIT on it — `RetryConfig.Clock` and `HedgeConfig.Clock` are
+  `clock.Timed`, so a test drives every backoff and every hedge delay with a
+  `ManualClock` instead of sleeping; `TestRetryWaitsOnItsClock` and
+  `TestHedgeWaitsOnItsClock` pin each to the nanosecond).
 - **No constructor returns an inert policy** (ADR 0031). A non-positive knob is
   either clamped to a working floor — `MaxAttempts`→1, `Multiplier`→2,
   `FailureThreshold`→5, `OpenDuration`→30s, `Burst`→1, bulkhead limit→1 — or,
@@ -189,7 +191,7 @@ panic on every call and a large budget allocated a channel per call that could
 never fill. `Test_hedge_RunWithAnUnboundedDuplicateBudget` pins it.
 
 Mechanics: one goroutine per attempt (including the first, so `Run` stays free
-to watch the delay elapse) and one ticker per call — **this is the only policy
+to watch the delay elapse) and one ticker per call, on `HedgeConfig.Clock` — **this is the only policy
 in the package that is not allocation-trivial**, which is the price of racing.
 Losers are cancelled through a shared derived context, and every attempt hands
 its outcome to `Run` over an **unbuffered** channel or, once that context is
