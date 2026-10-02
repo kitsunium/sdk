@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/v1/clock/
 
 ## Purpose
@@ -24,7 +24,7 @@ alias to its internal type rather than by reading: `scheduler.Config`,
 `queue.ConsumerConfig`, then `health.AskConfig`, `lifecycle.SupervisorConfig`,
 `resilience.RetryConfig`, `secret.FileConfig`, `secret.RotatorConfig`,
 `statemachine.Config` and `mail.SpoolConfig` — none of them deterministically
-testable by a downstream consumer without this package. Eighteen more carry a
+testable by a downstream consumer without this package. Twenty-one more carry a
 `clock.Clock`, which a two-method double can always satisfy structurally; what
 those lack without this package is a NAME for the type and any way to reach
 `System`.

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T22:03:47Z -->
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/v1/queue/
 
 ## Purpose
@@ -40,9 +40,10 @@ and the consumer engine.
   double-charges a card, and no amount of stating it once has ever been enough.
 
 - **`PollInterval` is a bound, not a cadence, over a `Waker`** (ADR 0104).
-  Both brokers wake an idle `Consume` on a Publish or a Nack in this process
-  and at the instant a retry or a lapsed lease becomes due; the poll is left
-  with another process's publication. The package doc shows a five-second
+  Every broker wakes an idle `Consume` on a Publish or a Nack in this process
+  (the SQL broker once that transaction commits — ADR 0151) and at the
+  instant a retry or a lapsed lease becomes due; the poll is left with another
+  process's publication. The package doc shows a five-second
   poll for that reason, and the constant keeps its 100 ms so a zero means what
   it always meant for a broker that cannot wake anyone.
 

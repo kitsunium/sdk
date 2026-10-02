@@ -1,11 +1,11 @@
-<!-- updated: 2026-09-02T00:00:00Z -->
+<!-- updated: 2026-10-02T19:57:47Z -->
 # internal/service/net/tlsid/
 
 ## Purpose
 
 The filesystem half of the network domain's TLS surface (ADR 0029). This package
 does **I/O and nothing else**: it reads PEM files and hands the bytes to
-`internal/core/net.NewIdentity`, which owns every validation rule. That split is
+`internal/core/net.NewIdentityValue`, which owns every validation rule. That split is
 deliberate — it is what guarantees that material loaded from disk and material
 supplied in memory are held to *exactly* the same standard, so neither path can
 accept what the other refuses.

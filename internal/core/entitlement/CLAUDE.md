@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:54:12Z -->
 # internal/core/entitlement/
 
 ## Purpose
@@ -145,5 +145,6 @@ Code range `0.2.35.*` (`0x00_02_23_*`), owned solely by this package.
 ## Verification
 
 ```sh
+bazel test --config=race //internal/core/entitlement:entitlement_test
 bazel test --config=race //internal/service/entitlement:entitlement_test
 ```

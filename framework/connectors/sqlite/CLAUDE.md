@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/connectors/sqlite — kit's SQLite engine
 
 The module `github.com/kitsunium/sdk/framework/connectors/sqlite`: the one a
@@ -29,7 +30,7 @@ Rules:
   and kit's data keys in the data directory: a key is written apart from
   every transaction, and the file's one writer may be held by the
   transaction of the write that needs it — it waited the busy timeout, then
-  failed (kit's `placementOf`, ADR 0004 step 2 as built). A store the keys
+  failed (kit's `placementOf`, the platform's ADR 0004 step 2 as built). A store the keys
   seal lives beside kit.Privacy on the file.
 - `go.mod` requires the framework at the last release and replaces it — and
   the SDK modules below it — with this tree; the release commit pins them
@@ -37,7 +38,10 @@ Rules:
 
 ## Test
 
-`go test -race ./...` here — no server, so every test runs.
+`go test -race ./...` here — no server, so every test runs
+(`filestore_test.go`'s `needsFileStore` skips an app with a data directory
+on Windows and Plan 9, where `vfs.NewOS` refuses; `subsystems_test.go`
+imports `framework/kit/server`, since the suite's apps are servers).
 `sqlite_internal_test.go` holds the URL's parameters winning over the
 defaults; `sqlite_test.go` describes paths and URIs, has two pools write at
 once, runs a product in production — its file beside the data, or where the

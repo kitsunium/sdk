@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:53:04Z -->
 # internal/core/queue/
 
 ## Purpose
@@ -133,7 +134,7 @@ construction; a change to `events` that moves it right is wrong the same way.
   direct consequence of the frontier, not a weaker choice.
 - **No payload in any error.** Every sentinel's Public says what went wrong and
   names sizes, fields and operations — never bytes. Pinned by
-  `TestAnOversizedPayloadIsRefusedAtTheProducer`, which publishes a recognisable
+  `service/queue`'s `TestAnOversizedPayloadIsRefusedAtTheProducer`, which publishes a recognisable
   secret and greps the rendered error for it.
 
 ## Do NOT

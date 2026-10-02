@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/v1/signal
 
 Public, stable facade for the typed **signal toolbox**: parse, subscribe, and
@@ -27,9 +28,10 @@ cd pkg/v1/signal && gomarkdoc --output README.md \
   --repository.default-branch main --repository.path /pkg/v1/signal .
 ```
 
-`make lint` blocks any commit where the file on disk drifts from what gomarkdoc
-would emit. Maintainer rationale stays here; consumer prose belongs in the
-package doc comment.
+(or `make docs-readme`). `scripts/pre-commit/check-readme-drift.sh` — run by
+the pre-commit hook and CI's `bazel` job — blocks any commit where the file on
+disk drifts from what gomarkdoc would emit. Maintainer rationale stays here;
+consumer prose belongs in the package doc comment.
 
 ## Platform
 

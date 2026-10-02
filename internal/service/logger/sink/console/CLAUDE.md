@@ -1,12 +1,13 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:58:06Z -->
 # internal/service/logger/sink/console/
 
 ## Purpose
 
 Terminal `Sink` that writes formatted bytes onto an `io.Writer` (typically
 `os.Stderr` or `os.Stdout`) under a `sync.Mutex` so concurrent producers
-emit atomic lines. This is the default sink used by
-`pkg/v1/logger.Default`.
+emit atomic lines. It backs `pkg/v1/logger`'s `ConsoleStderr` /
+`ConsoleStdout` and `NewWriterSink`; `pkg/v1/logger.Default` uses the fused
+`TextHandler` instead, not this sink.
 
 ## Contents
 

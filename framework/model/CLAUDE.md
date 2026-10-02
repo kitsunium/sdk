@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/model — the Product Graph
 
 ## Purpose
@@ -34,6 +35,7 @@ Two packages, one API:
 | `Retention`, `HeldUntil`, `Process` | `…Spec` |
 | `Hold`, `JournalEntry`, `PhaseChange`, `Step` | `…Event` |
 | every other struct (`Graph`, `Edge`, `App`, `Source`, …) | `…Message` |
+| `GoroutineGroup`, `Pool`, `HTTPServer`, `Payload` | the same name, no role suffix |
 | `MailSummary` | `MailSummaryMessage`, and the alias `MailSummary` that `MailMessage` embeds so its field keeps its name |
 
 ## Contents (`internal/core`; the public file of the same name aliases it)

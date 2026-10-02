@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:55Z -->
 # internal/service/writer/dbsink/
 
 ## Purpose
@@ -20,7 +21,9 @@ level-floor composition once, so every DB writer inherits identical wiring.
 |---|---|
 | `dbsink.go` | unexported `dbSink` (batching terminal sink), the `execBatch` seam type, `Write`/`Flush`/`Close`, the batcher `deliver` relay |
 | `dbsink_config.go` | exported `Config` value type + `Compose` (the only exported constructor — builds `levelgate(async(dbSink))`) |
-| `dbsink_bench_test.go` | `BenchmarkWrite_*` + table-driven functional tests (delivery, eager flush on `MaxRows`, `Close` final-batch drain, `MinLevel` gate, faithful record delivery, `OnError` routing) |
+| `dbsink_bench_test.go` | `BenchmarkWrite_NoAttrs` / `BenchmarkWrite_WithAttrs` |
+| `dbsink_config_external_test.go` | black-box `Compose` tests (delivery lifecycle, default row cap, flush ticker, `MinLevel` gate, faithful record delivery, `OnError` / `OnDrop` routing, write after `Close`) |
+| `dbsink_internal_test.go` | white-box `dbSink` tests (`deliver`, `Write`, `Flush`, `Close`, serialised `OnError`) |
 | `BENCH.md` | Write-path benchmark + the honest zero-alloc caveat |
 
 No `codes.go` / `errors.go`: this shell defines **no** error codes. A deliver
@@ -58,10 +61,10 @@ is the producer's `Build().Send()` path (ADR 0014), never a batching sink. See
 
 ## ADR-gate status
 
-ADR 0015 is **gated** (merge blocked on WI-8 / ADR approval). This shell is
-stdlib-only and adds no dependency, so it compiles and tests green today; it
-becomes *reachable* only once a concrete `third-party/db/writer/*` adapter wraps
-`Compose` and registers a factory — which lands behind the same gate.
+ADR 0015 is **Accepted**. This shell is stdlib-only and adds no dependency; it
+is *reachable* through the concrete `third-party/db/writer/{mysql,clickhouse,redis}`
+adapters, each of which wraps `Compose` and registers its own `core/writer`
+factory.
 
 ## Do NOT
 

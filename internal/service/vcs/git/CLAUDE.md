@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:00:30Z -->
 # internal/service/vcs/git/
 
 ## Purpose
@@ -12,9 +13,10 @@ Implements the `core/vcs` contract by shelling out to the **git binary** (ADR
 |---|---|
 | `exec.go` | the hardened runner — `runGitOutput`, `runGitBlob`, `gitProbe`, `hardenedGitConfig`, `extDiffGuard` |
 | `resolve.go` | `Resolve`, the four diff sources it folds together, `shallowState`, `spelledTopLevel` |
-| `diff_parse.go` | unified-diff and `--name-status -z` parsing, and `IncludeFunc` |
-| `changed_set.go` | `ChangedSetValue`, the concrete `core/vcs.ChangedSet`, and its `key` rewrite |
-| `config.go` | `Config` — where the repository is, and the caller's file filter |
+| `diff_parse.go` | unified-diff and `--name-status -z` parsing, each path filtered through `IncludeFunc` |
+| `changed_set.go` | `ChangedSetValue`, the concrete `core/vcs.ChangedSet`, and its `spelledAs` rewrite |
+| `changed_set_compliance.go` | the compile-time proof that `ChangedSetValue` satisfies `core/vcs.ChangedSet` |
+| `config.go` | `Config` — where the repository is, and the caller's file filter (`IncludeFunc`) |
 | `gitdir.go` | `GitDir`, memoized per root and re-validated on every call |
 | `show.go` | `ShowFile` — a blob at a commit, or the two refusals |
 | `head.go` | `Head` + `HeadValue` — HEAD's commit, its committer date, tracked changes; `committerTime` reads the raw commit object (ADR 0100) |

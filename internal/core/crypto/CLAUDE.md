@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:54:12Z -->
 # internal/core/crypto/
 
 ## Purpose
@@ -14,7 +14,7 @@ No algorithm bodies and no vendor types live here. Concrete schemes live under
 AES-256-GCM) and `third-party/x-crypto/*` (`xchacha`, the XChaCha20-Poly1305
 AEAD, and `argon2id`), self-registering via a package-level `var` at import —
 no `init()`. `pkg/v1/crypto` blank-imports the
-stdlib scheme and re-exports `Seal` / `Open` against this package.
+stdlib AEAD and streaming schemes (`aesgcm`, `streamaead`) and re-exports `Seal` / `Open` against this package.
 
 Code range: `0.2.4.*` (ADR 0013).
 

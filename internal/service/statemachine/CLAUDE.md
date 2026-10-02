@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:00:30Z -->
 # internal/service/statemachine/
 
 ## Purpose
@@ -27,7 +28,7 @@ Stdlib plus `core/statemachine`, `kernel/{clock,errs,heap}` and
 | `book.go` | records, census and flights under one mutex, never held across the journal; the journal writes under a gate per key |
 | `agenda.go` | the heap with lazy deletion and its rebuild bound, the dirty set, the per-key backoff, the wake token |
 | `loop.go` | `Run`, `Step`, `Wake`, `LoopEvent`; `run`/`wait`/`sleep`/`retarget`, `step`/`guarded`/`process`/`look`/`inspect`/`fire`/`outcome` |
-| `locks.go` | the per-key lock table (a one-token channel each, abandonable by `acquire`, or `hold` for the journal gates), the reentrancy mark |
+| `locks.go` | the per-key lock table (a one-token channel each, abandonable by `acquire`), the reentrancy mark (`within` / `inside`) |
 | `codes.go` / `errors.go` | `0.3.88.*`, twenty-one codes |
 
 ## Why-this-shape

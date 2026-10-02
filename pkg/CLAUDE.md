@@ -1,9 +1,9 @@
-<!-- updated: 2026-05-18T14:30:00Z -->
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/
 
 ## Purpose
 
-The SDK's public API surface. It is a **single Go module** — the bare `github.com/kitsunium/sdk/pkg` (`go.mod` at `pkg/go.mod`); Go forbids a `/v1` module-path suffix, so the module cannot be `…/pkg/v1` (ADR 0017). Consumer packages live under the `v1/` directory and are imported as `pkg/v1/*`; the `v1/` is a directory, not a separate module. `internal/*` is blocked by Go's `internal/` rule AND by Bazel layer visibility (ADR 0004).
+The SDK's public API surface. It is a **single Go module** — the bare `github.com/kitsunium/sdk/pkg` (`go.mod` at `pkg/go.mod`); Go forbids a `/v1` module-path suffix, so the module cannot be `…/pkg/v1` (ADR 0017). Consumer packages live under the `v1/` directory and are imported as `pkg/v1/*`; the `v1/` is a directory, not a separate module. `internal/*` is blocked by Go's `internal/` rule, which is also what keeps consumers out under Bazel; the layer order inside the repository is checked on the build graph by `scripts/check-layer-deps.sh`, not by visibility (ADR 0068, amending ADR 0004).
 
 The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change becomes a real second module `…/pkg/v2` (legal `/v2` suffix, `go.mod` at `pkg/v2/`), coexisting with this one.
 

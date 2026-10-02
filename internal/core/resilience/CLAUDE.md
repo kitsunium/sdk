@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:53:04Z -->
 # internal/core/resilience/
 
 ## Purpose
@@ -55,5 +55,6 @@ Code range: `0.2.8.*` (ADR 0026).
 ## Verification
 
 ```
-bazel test --config=race //internal/core/resilience:resilience_test
+bazel build //internal/core/resilience:resilience   # no test target here
+bazel test --config=race //internal/service/resilience:resilience_test
 ```

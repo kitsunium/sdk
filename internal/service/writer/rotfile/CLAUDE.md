@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T19:57:55Z -->
 # internal/service/writer/rotfile/
 
 ## Purpose
@@ -24,6 +24,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 | `rotate_interval.go` | `tickRotate` — the `worker.Every` daemon tick body |
 | `decode.go` | `rotFileFactory.Decode` (`core/writer.Decoder`) + key-coercion helpers |
 | `rotate.go` | `maybeRotate` / `rotate` / `shiftBackups` (threshold + cycle) |
+| `rotate_manual.go` | `Rotate` — the on-demand rotation (SIGHUP / logrotate), under the same mutex as `Write` |
 | `backups.go` | backup-name arithmetic + per-slot move/gzip helpers |
 | `prune.go` | `pruneByAge` calendar pruning (MaxAgeDays) |
 | `open_flags_unix.go` | `openFlags = O_APPEND \| O_CREATE \| O_WRONLY \| O_NOFOLLOW` — every `unix` GOOS |

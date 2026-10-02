@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:59:27Z -->
 # internal/service/writer/levelgate/
 
 ## Purpose
@@ -5,7 +6,8 @@
 A `core/logger.Sink` decorator that enforces a per-writer severity floor:
 records with `Level >= min` reach the wrapped sink; the rest are **silently
 dropped** as a successful `(len(p), nil)` no-op. Used by every writer factory
-(console, file, s3, cloudwatch) to realise the optional `MinLevel` config field
+(console, file, rotfile, journald, nettransport, the `dbsink` shell, and the
+third-party s3 and cloudwatch writers) to realise the optional `MinLevel` config field
 (ADR 0012) without the `route` middleware's `NoMatch` error — a dropped record
 must never surface as a fan-out failure.
 

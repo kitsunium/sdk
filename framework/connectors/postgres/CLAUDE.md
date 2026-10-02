@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/connectors/postgres — kit's PostgreSQL engine
 
 The module `github.com/kitsunium/sdk/framework/connectors/postgres`: the one a
@@ -26,7 +27,8 @@ Rules:
 
 ## Test
 
-`go test -race ./...` here. `postgres_test.go` always runs: `Describe` over
+`go test -race ./...` here (`subsystems_test.go` imports
+`framework/kit/server`: the suite's apps are servers). `postgres_test.go` always runs: `Describe` over
 URLs, `key=value` pairs and a socket, a malformed URL that leaks nothing, a
 pool that opens with no server. The end-to-end tests skip unless
 `KIT_TEST_POSTGRES_URL` names a server where they may create and drop the

@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:54:25Z -->
 # internal/kernel/recycler/
 
 ## Purpose
@@ -42,6 +43,7 @@ mechanism lives here, the capacity thresholds stay with the consumers
 
 ```sh
 bazel test --config=race //internal/kernel/recycler:recycler_test
-# zero-alloc gate runs HORS race (race instrumentation perturbs allocs):
-bazel test --config=pure //internal/kernel/recycler:recycler_test
+# zero-alloc gate runs HORS race (race instrumentation perturbs allocs) — the
+# alloc lane (`make test-alloc`, target listed in tools/alloc-lane-targets.txt):
+bazel test --config=alloc //internal/kernel/recycler:recycler_test
 ```

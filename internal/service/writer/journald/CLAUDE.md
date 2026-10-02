@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:55Z -->
 # internal/service/writer/journald/
 
 ## Purpose
@@ -67,12 +68,14 @@ timestamp, no variable-size `make`. Two `memmove`s separate the encoder from the
 kernel, one of them inherited from `async`. There is nothing here whose cost is
 this package's own.
 
-A second reason: five of the six test functions hand you `net.Pipe()`, which is
-an unbuffered in-memory **stream** with no file descriptor and no syscall. A
-benchmark written on that harness measures a goroutine rendezvous and two
-context switches — micro-seconds — in place of a write into a socket buffer.
-`journald_external_test.go` is the only harness that opens a real `unixgram`
-socket, and it does so once, at one 14-byte payload.
+A second reason: six of the package's test functions hand you `net.Pipe()`,
+which is an unbuffered in-memory **stream** with no file descriptor and no
+syscall. A benchmark written on that harness measures a goroutine rendezvous
+and two context switches — micro-seconds — in place of a write into a socket
+buffer. Only two tests bind a real `unixgram` socket:
+`Test_journaldFactory_Open_defaultDialer` connects and writes nothing, and
+`Test_journaldSink_UnixgramRoundtrip` (`journald_external_test.go`) writes once,
+at one 14-byte payload.
 
 A third: nothing reachable can call this. `pkg/v1/logger/writer` blank-imports
 `console`, `file` and `rotfile` only, no in-tree file imports this package

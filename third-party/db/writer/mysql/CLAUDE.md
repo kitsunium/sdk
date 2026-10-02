@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:55:21Z -->
 # third-party/db/writer/mysql/
 
 ## Purpose
@@ -9,7 +10,8 @@ so `writer.Open("mysql", writer.MySQLConfig{…})` resolves.
 
 Dep-light: the `github.com/go-sql-driver/mysql` import is confined to `client.go`
 and lives in the **root** module only, so `pkg/v1` consumers never pull a DB
-driver into their graph (CI asserts `go list -deps ./pkg/v1/...` is driver-free).
+driver into their graph (`GOWORK=off go list -deps ./v1/...` in `pkg/` names no
+driver; no CI lane asserts it).
 
 ## Contents
 

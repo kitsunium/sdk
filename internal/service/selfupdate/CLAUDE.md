@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T20:00:30Z -->
 # internal/service/selfupdate/
 
 ## Purpose
@@ -22,6 +22,7 @@ module.
 | `checksum.go` | integrity: SHA-256 against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
+| `consent_product.go` | ADR 0150: `Service.WithAutomaticConsent` (the product's consent; an explicit `<PREFIX>_AUTO_UPGRADE=0` still refuses) `Service.WithoutElevation` (never escalate), and `Service.AuthoriseUnattendedUpgrade` (the environment's answer, then the product's, then the source's prompt) |
 | `elevation.go` | the second, separate opt-in for a non-writable install directory |
 | `replace_platform.go` | `canReplace` — the Windows refusal of the replacement step, before anything is downloaded |
 | `candidate.go` | the release-candidate channel |

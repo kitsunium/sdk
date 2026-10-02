@@ -1,9 +1,9 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:53:06Z -->
 # internal/
 
 ## Purpose
 
-The SDK's private layer. Everything here is blocked from external import by Go's `internal/` rule AND by Bazel `package_group` + `visibility` (ADR 0004). Three sublayers model the SDK's dependency discipline:
+The SDK's private layer. Everything here is blocked from external import by Go's `internal/` rule, which Bazel mirrors (ADR 0004; the firewall *between* the sublayers is a checked graph, not visibility — ADR 0068, below). Three sublayers model the SDK's dependency discipline:
 
 ```
 kernel/    stdlib-only, generic primitives (no domain vocabulary)
@@ -13,7 +13,7 @@ service/   concrete implementations of core contracts
 
 ## Dependency direction
 
-Strictly top-down — enforced at `bazel build` time, not by lint:
+Strictly top-down — enforced on the build graph by `scripts/check-layer-deps.sh` (`make lint` and CI — ADR 0068), not by `bazel build`:
 
 ```
 kernel ──┐
@@ -106,7 +106,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
   group: unrelated declarations sharing a file is `KTN-STRUCT-COHESION`, and
   it still fires.
 - **Doc comments follow Effective Go.** Lead with the identifier name and name the parameters and return values inline (`Foo returns the X computed from y and z.`). No Javadoc-style `Params:` / `Returns:` sections — they were removed project-wide in PR #26. Every control block still takes a `//:` intent comment; every `case` label has its own intent comment.
-- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 1 135** test files define one, while **523** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
+- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 927** test files under `internal/` define one, while **437** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
 - **Interface assertions live in `*_compliance.go`**: a compile-time `var _ Port = (*impl)(nil)` sits in a `<name>_compliance.go` file (or a test file), never beside the implementation — `KTN-IFACE-ASSERT-PLACEMENT` (17 occurrences).
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
   group and may share a file — `failed.go`, `match.go`, `unknown.go` — or stay

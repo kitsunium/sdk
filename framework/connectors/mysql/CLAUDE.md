@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/connectors/mysql — kit's MySQL and MariaDB engine
 
 The module `github.com/kitsunium/sdk/framework/connectors/mysql`: the one a
@@ -26,7 +27,8 @@ Rules:
 
 ## Test
 
-`go test -race ./...` here. `mysql_test.go` always runs: `Describe` over
+`go test -race ./...` here (`subsystems_test.go` imports
+`framework/kit/server`: the suite's apps are servers). `mysql_test.go` always runs: `Describe` over
 URLs, a DSN and a socket, and malformed ones that leak nothing. The
 end-to-end tests skip unless `KIT_TEST_MYSQL_URL` names a server where they
 may create and drop the database `kit_test` and a user — an administrator's
