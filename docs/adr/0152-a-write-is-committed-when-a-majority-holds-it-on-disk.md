@@ -286,8 +286,14 @@ checksum.
   minority.
 - A named node refuses reads, reports itself unready, never campaigns, and
   transfers leadership away if it holds it, until it is restored.
-- With no majority of agreeing digests, the alarm is **inconclusive**. It
-  refuses writes and declares no node correct.
+- **Policy when no majority of digests agrees: see R3-28 (to come).** It is
+  left open on purpose, pending measures that aim to make the case
+  impossible upstream.
+- **Repair stays possible under the alarm (R3-27).** As under `NO_SPACE`,
+  `Remove`, `AddLearner`, `Promote`, `TransferLeadership` and
+  `ClearDivergence` are still admitted while `STATE_DIVERGED` is raised.
+  Otherwise the operation that replaces the diverged node would be refused
+  by the alarm it is meant to clear.
 - A hash-check entry ends its batch, so every node hashes exactly the state
   after it (R3-24).
 - `Hash()` must be O(1) at the apply point: an incrementally maintained
@@ -1239,7 +1245,7 @@ change that introduces them (ADR 0035):
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
 | `0.2.57.12` | `ENTRY_SUPERSEDED` | the term at the proposal's index is observable and differs: certainly not committed (D6, from IWFS) |
 | `0.2.57.13` | `OVERLOADED` | refused before append: pending bytes or apply lag over their bound (D6) |
-| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes, or is inconclusive when no majority agrees; writes are refused until an operator acts (D3, R2-18, R3-10) |
+| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes; writes are refused until an operator acts, while membership changes, transfer and `ClearDivergence` stay admitted (D3, R2-18, R3-10, R3-27); the no-majority case is R3-28, to come |
 | `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
 | `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
 | `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing and membership changes are still admitted (D17, R2-29) |
@@ -1504,7 +1510,7 @@ transport. The cross-field rules are checked after defaults are applied
 | `PeerQueueBytes` | transport | 64 MiB | clamp |
 | `InboundDataBytes`, `InboundControlMessages` | transport | 64 MiB, 4 096 | clamp (R2-08) |
 | `MaxConnectionAge` | transport | 24 h | clamp (R2-20) |
-| `MaxControlFrameBytes`, `InboundControlBytes` | transport | 64 KiB, 1 MiB | clamp; refuse a control cap ≥ the data cap (R3-20) |
+| `MaxControlFrameBytes`, `InboundControlBytes` | transport | 64 KiB, 1 MiB | clamp; refuse a control cap ≥ the data cap; control frames are bounded in size and bytes as well as in count (R3-20, R3-27) |
 
 **Memory and disk budgets (R2-08, R2-29).**
 - The node's memory budget is the sum of these bounds: `MaxPendingBytes`,
@@ -1776,7 +1782,12 @@ node, under the directory lock.
     epoch (R2-09), so no node of the old cluster can talk to the recovered one
     by mistake.
   - It refuses while any seed of the old cluster still answers. A force
-    option overrides that refusal, and the override is logged.
+    option overrides that refusal, and the override is logged. **"Answers" is
+    defined (R3-27):** when the old cluster's certificate still exists, a
+    seed answers if a TLS handshake with it succeeds under the old cluster
+    identity. When that certificate no longer exists, a seed answers if a TCP
+    connection to its consensus port succeeds. The second test is coarser,
+    and errs toward refusing, and the report says which test was used.
   - It requires a typed confirmation: the product asks the operator to type
     the new cluster id.
   - It writes an audit record into the data directory: who, when, from which
@@ -1809,6 +1820,17 @@ node, under the directory lock.
   - It writes the same audit record as `Recover`, refuses with
     `RESTORE_REFUSED`, and is tested without a running `Node`.
   - Backups are encrypted at rest; the product's backup path says how.
+  - **The product's command (R3-26).** For the first consumer,
+    `forgejo cluster snapshot save` reaches the live server through Forgejo's
+    internal manager API, never through an exposed `/api/internal` route
+    (R3-14). It writes the snapshot and its SHA-256 side by side. The
+    making.codes backup role calls it before it backs up the repositories, as
+    it already does for `consul`, `vault` and `nomad snapshot save`.
+  - A restore pairs a ref snapshot with a PostgreSQL backup taken AFTER it, so
+    the database never names a ref the snapshot lacks (R3-26).
+  - The local backup file is NOT counted in the data directory's 4.3 GiB
+    budget (D14). The operator guide says where it goes and how much it needs
+    (R3-26).
   - For the first consumer, `SaveSnapshot` is taken BEFORE the Git
     repositories are backed up. The refs then name objects the repository
     backup is sure to hold. **The snapshot's object closure stays pinned
@@ -1838,7 +1860,12 @@ node, under the directory lock.
   restart. The log is never edited.
 - **Certificates.** The transport reloads its identity through the TLS
   sibling of D4 (R2-20). The expiry and reload-failure metrics of D13 make an
-  expiring certificate visible before it bites.
+  expiring certificate visible before it bites. **Lifetime and alerting
+  (R3-27):** node certificates are issued for at least 30 days, and an alert
+  fires when any has less than 7 days left. Renewal depends on Vault: a Vault
+  outage longer than the remaining lifetime stops the transport, and with it
+  the cluster. The operator guide states that coupling, and Vault's
+  availability is part of the consensus's availability budget.
 - **Key compromise (R2-36).** `Remove` the compromised node, then add the
   machine back under a NEW `NodeID` with a new certificate. A retired ID is
   refused forever (D8). The incarnation is an identifier, not a secret, and
@@ -2004,6 +2031,18 @@ being used soundly.
   making.codes setting.
 - **Memory (R3-24).** Forgejo runs with `GOMEMLIMIT` leaving about 0.8 GiB for
   the replicator (D14).
+- **Two upgrade procedures (R3-25).**
+  - A Forgejo release WITHOUT a schema migration is rolled: one node at a
+    time, leadership transferred away first.
+  - A release WITH a schema migration stops all three nodes, upgrades them,
+    and restarts them. The consensus survives a full stop, because it is
+    durable.
+  - In both cases `RaiseClusterVersion` is called only once all three nodes
+    run the new release (D18).
+- **Snapshot backup (R3-26).** `forgejo cluster snapshot save` writes the
+  ref snapshot and its SHA-256 side by side, through the internal manager
+  API. The Ansible backup role runs it before the repository backup, and a
+  restore pairs it with a PostgreSQL backup taken after it (D17).
 
 ## Consequences / Semantics
 
