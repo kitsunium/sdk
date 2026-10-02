@@ -1,6 +1,6 @@
 # ADR 0148 — a private socket is gated by its directory, and the kernel names the peer where it can
 
-- **Status**: Proposed
+- **Status**: Accepted (proposed 2026-09-28; accepted 2026-10-03, once the code it decides had shipped)
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — `ipc` gains a core, with the ports a test double needs

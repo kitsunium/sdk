@@ -1,6 +1,6 @@
 # ADR 0150 — a release names its tag, its keys rotate, and a replacement answers before it stands
 
-- **Status**: Proposed
+- **Status**: Accepted (proposed 2026-09-28; accepted 2026-10-03, once the code it decides had shipped)
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework

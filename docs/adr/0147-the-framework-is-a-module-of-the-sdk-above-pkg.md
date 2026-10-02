@@ -1,6 +1,6 @@
 # ADR 0147 — the framework is a module of the SDK, above `pkg`, and a product imports nothing else
 
-- **Status**: Proposed
+- **Status**: Accepted (proposed 2026-09-28; accepted 2026-10-03, once the code it decides had shipped)
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — §9: the vendor modules join the release chain; [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the framework holds the distribution mechanisms, and the ssh identity as a connector
