@@ -366,7 +366,7 @@ type goldenLine struct {
 }
 
 // readGolden parses the golden file into name → line.
-func readGolden(t *testing.T) map[string]goldenLine {
+func readGolden(t testing.TB) map[string]goldenLine {
 	t.Helper()
 	f, err := os.Open(goldenPath)
 	if err != nil {
