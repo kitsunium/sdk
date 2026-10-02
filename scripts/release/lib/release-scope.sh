@@ -86,10 +86,17 @@ function rs_maintainer_only(p,   n) {
 
 # 1 when <p> could cut a release at all: inside a released module, and not
 # maintainer-only. `pkg/` is the public module; `internal/` reaches it through
-# the rdeps rule and is tagged in the same lockstep chain (ADR 0009).
+# the rdeps rule and is tagged in the same lockstep chain (ADR 0009);
+# `framework/` and `third-party/` cut that chain through their own tokens in
+# compute-bumps.sh — rules 1b and 1c (ADR 0147, ADR 0157). A path that can cut
+# a release can size it (ADR 0089): before both were listed here, range_size in
+# cut-tags.sh walked past a framework-only merge, so a release:minor label on it
+# shipped as a patch and an unlabelled Release-bump request on it was never
+# refused. (No apostrophe in this comment: it sits inside a single-quoted
+# string.)
 function rs_releasable(p) {
   if (rs_maintainer_only(p)) return 0
-  return (p ~ /^pkg\//) || (p ~ /^internal\//)
+  return (p ~ /^pkg\//) || (p ~ /^internal\//) || (p ~ /^framework\//) || (p ~ /^third-party\//)
 }
 '
 
