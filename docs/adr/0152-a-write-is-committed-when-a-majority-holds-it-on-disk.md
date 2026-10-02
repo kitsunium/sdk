@@ -43,6 +43,13 @@ the decision below is amended and says so with the measurement, marked
 **from raft-sql-poc**. Where this ADR keeps its own answer, the section
 *raft-sql-poc (owner's prior Raft)* says why, with the file and line.
 
+The owner's Go system at Halys, **IWFS**, was read next, at `origin/master`
+`aec79ab`. Its consensus is Raft-like but kept in memory, with no local
+WAL. It was read for ideas only, and none of its code is copied. Its
+amendments are marked **from IWFS**. The section *IWFS (owner's Go Raft at
+Halys)* lists what is taken, what is not, and a three-column comparison
+that says, wherever the two prior arts disagree, which one is right.
+
 The cautionary precedent is recent. GitLab built Raft into Gitaly on
 `etcd/raft`, one group per partition, and abandoned it in 2026: the design
 document was marked rejected on 2026-09-09 and the `raftmgr` package was
@@ -259,7 +266,15 @@ substituted ephemeral key.
 during one turn of the loop leaves in one write (`transport.js:1-8`). The
 per-peer queue is bounded and drops when full, because Raft retransmits
 what matters and an unbounded queue turns an outage into memory
-exhaustion (`transport.js:294-296`, 64 MiB in the POC).
+exhaustion (`transport.js:294-296`, 64 MiB in the POC). **From IWFS:**
+control frames (votes, PreVotes, heartbeats and their replies,
+`TimeoutNow`) are never queued behind entries. Each peer queue has a small
+lane that is drained first. Under CPU starvation, IWFS's PreVote fan-out
+saturated the shared mesh client, and elections never settled (its
+"death-spiral leaderless",
+`docs/src/cii-src/07-innovations/01-shared-log-single-writer.md` §7.1). IWFS
+answered by backing elections off up to 30 s. This ADR removes the cause
+instead and keeps elections fast.
 
 **Why TLS and not the POC's handshake.** The POC wrote a SIGMA handshake of
 its own over Ed25519, X25519 and AES-256-GCM (`secure.js:1-60`). Its README
@@ -350,7 +365,11 @@ PreVote round adds one RTT.
   NOTHING before ordering: the compare-and-swap is part of `Apply`, evaluated
   against the state at the entry's position on every node alike. The cost of
   a write proposed on WAW is therefore one round trip to the leader on top of
-  the commit.
+  the commit. **From IWFS:** a follower dials the leader the moment it
+  learns of it and opens the forwarding stream before the first proposal
+  (`src/internal/cluster/election.go:805-807`). Without that, IWFS's first
+  forwarded write after an election exceeded its wait
+  (`docs/src/design/2026-09-10-point-acceptation-commit.md` §3).
 - **A new leader commits a no-op entry of its term** before it serves a read
   or accepts a membership change (thesis §6.4, §4.1).
 - **Three rules the POC learned as safety bugs** are stated here rather than
@@ -382,6 +401,22 @@ raft-sql-poc.** Its cause is `ctx.Err()`, but the code is not
 case under another name, and a caller that reads it as "failed" retries an
 entry that may still commit. A context that ends before the append returns
 `ctx.Err()`, as everywhere in the SDK.
+
+**A replaced entry is a definite failure, from IWFS.** `Propose` waits on
+its entry's index AND term. If a new leader truncated that position and
+reused it, the wait ends with `ENTRY_SUPERSEDED`: the entry certainly did
+not commit, and a retry is safe. That is better than `OUTCOME_UNKNOWN`, and
+it must not be read as success because something committed at that index.
+IWFS waits this way (`WaitForCommit` on index and term, "entry replaced")
+and tests both halves (`TestWaitForCommit_ReplacedEntry`,
+`TestAcceptance_ReplacedEntryIsNotAccepted`).
+
+**Refused before anything is appended, from IWFS.** When the leader's
+pending proposals exceed `MaxPendingBytes`, `Propose` answers `OVERLOADED`
+and appends nothing, so a retry is safe. IWFS refuses a full queue before
+acceptance (`0x0032`), never after, so a write is never half-accepted. The
+SDK does not take IWFS's admission on host CPU and memory thresholds (its
+J14): the leader's own pending bytes are the only signal.
 
 ### D7 — Snapshots and compaction ship in v1
 
@@ -598,6 +633,8 @@ change that introduces them (ADR 0035):
 | `0.2.57.9` | `COMPACTED` | an index below the first retained one |
 | `0.2.57.10` | `STATE_MACHINE_FAILED` | `Apply` panicked; the node stopped applying |
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
+| `0.2.57.12` | `ENTRY_SUPERSEDED` | the proposal's position was truncated and reused: certainly not committed (D6, from IWFS) |
+| `0.2.57.13` | `OVERLOADED` | refused before append, the leader's pending bytes over `MaxPendingBytes` (D6, from IWFS) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
@@ -781,6 +818,22 @@ the POC that last switch, `unsafeAckBeforeSync` (`raft.js:77-80`), lost 50
 to 139 of 300 acknowledged writes. The transport's identity, admission and
 size checks get the same treatment.
 
+**Scenarios from IWFS's defects.** IWFS documents four defects that its
+8-hour nominal run could not expose. They were found later, under injected
+partitions, CPU starvation and simultaneous starts
+(`01-shared-log-single-writer.md` §7.1). Each one is a named simulator
+scenario here:
+- every node starts at the same instant, and a split vote must not replay
+  in the same term;
+- a partition heals, and a follower that missed committed entries must
+  converge through the leader's log repair alone, with no separate
+  catch-up path;
+- control traffic is starved, and elections must still settle;
+- concurrent acquisitions, and a fence must not advance on a lost one.
+IWFS's Kubernetes chaos suite with real network-policy partitions, which
+asserts "at most one writer" throughout (`tests/e2e/chaos_invariants_test.go`),
+is the model for the first consumer's `tc netem` lane.
+
 **Benchmarks** ship with `BENCH.md` (rule 9) and allocation gates in the
 race-off lane (`tools/alloc-lane-targets.txt`, rule 12):
 
@@ -921,7 +974,12 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   the SDK.
 - **Client sessions for exactly-once commands** (thesis §6.3): a client ID and
   sequence number in the entry so that a proposal retried after
-  `OUTCOME_UNKNOWN` applies once. The first consumer's compare-and-swap makes a
+  `OUTCOME_UNKNOWN` applies once. **Specified from IWFS:** the session also
+  keeps a digest of the command. The same identifier with the same digest
+  joins the pending proposal or returns the known answer. The same
+  identifier with a different digest is refused, never applied (IWFS: same
+  identifier and FNV-64a content give the same answer, different content
+  gives `0x0031`). The first consumer's compare-and-swap makes a
   duplicate harmless; a consumer without that property needs this.
 - **A streaming publication sibling in `vfs`** (D4), with the snapshot store
   as its second consumer.
@@ -1015,10 +1073,105 @@ hook too. In `reference-transaction` `prepared`, the replicator reads the
 old SHA under git's ref lock: one capture in flight per ref, not per
 database.
 
-### Still to confront: IWFS
+## IWFS (owner's Go Raft at Halys)
 
-IWFS, the owner's Raft in Go at Halys, is the next prior art. It will be
-confronted the same way, in two lists, when its code is available.
+IWFS is the owner's SMS routing platform at Halys, written in Go. It was read
+at `origin/master` `aec79ab` (2026-09-29): the consensus core in
+`src/internal/cluster` (139 files, about 41 300 lines with tests), the
+messages in `src/internal/domain/raft`, the gRPC mesh in
+`src/internal/adapters/grpc/mesh`, the acceptance point in
+`src/internal/adapters/grpc/peer`, and its documentation of design,
+validation and defects. It is Halys code. This ADR takes ideas from it and
+copies none of it. Paths below are relative to its root, and line numbers
+are at that commit.
+
+**What IWFS is.** It is not a durable Raft. In its own words it is "Shared Log
+on Shared Store": a Raft-like election with PreVote, terms, a single vote
+per term and a log-completeness check, all **in memory**, with no per-node
+WAL. The live log is an in-memory ring buffer replicated over the mesh.
+Valkey is an optional durability layer and the external arbiter of write
+authority, through a lease with an epoch fence
+(`docs/src/cii-src/07-innovations/01-shared-log-single-writer.md` §4–§5,
+`docs/src/implementation/architecture/cluster.md`). The local-WAL Raft of
+its Phase 2 was dropped at "~200 ops/s"
+(`01-shared-log-single-writer.md` §3.1, §6.1). Phase 7 then ran
+7 980 SMS/s for 8 h with 0 failures on 229 833 637 SMS and term 1 throughout
+(§7). That run acknowledged a write from the leader's memory, before
+replication (§5.4, §8 point 5), with Valkey's AOF and RDB both disabled
+(§5.5). Since 2026-09-10, majority-commit acknowledgement exists behind a
+policy switch (`docs/src/design/2026-09-10-point-acceptation-commit.md`,
+`src/internal/adapters/grpc/peer/acceptance.go:70-83`).
+
+The two prior arts contradict each other on the central question, and the
+measurements settle it. IWFS gave up local durability because a local-WAL
+Raft reached about 200 ops/s. raft-sql-poc measured exactly that ceiling,
+184 to 216 durable writes/s, when every write paid its own `fsync`. With
+group commit it measured 7 000 to 9 400 durable writes/s on a laptop SSD
+with a 5 ms `F_FULLFSYNC` (G2 above). The ceiling that pushed IWFS off disk
+was the missing group commit, not the disk. **raft-sql-poc is right, and
+this ADR keeps a majority on disk.**
+
+### What IWFS does well, and this ADR takes
+
+| # | Practice | Proof | Where here |
+|---|---|---|---|
+| I1 | A vote is refused while a leader heard within the lease window is alive, in RequestVote as well as in PreVote. This is the check raft-sql-poc puts in PreVote only (its B4) | `src/internal/cluster/election.go:552-560`, `election.go:603-609`, `election.go:650-660` | D5 — confirmed. Here IWFS is right and the POC is not |
+| I2 | The proposer waits on the INDEX and the TERM of its entry. If the position was truncated and reused, the wait ends with "entry replaced", and the request is never reported as accepted | `2026-09-10-point-acceptation-commit.md` §2. Tests `TestWaitForCommit_ReplacedEntry` and `TestAcceptance_ReplacedEntryIsNotAccepted` (`docs/src/testing/validation-2026-09-10/README.md:79`) | **D6, D12 amended**: `ENTRY_SUPERSEDED` |
+| I3 | A wait that runs out is "unknown outcome", never "cancelled", and a retry joins the pending submission | `validation-2026-09-10/README.md:73`, `TestWaitForCommit_TimeoutIsUnknown` | D6 — confirms the amendment taken from raft-sql-poc's B7 |
+| I4 | Client idempotence: the same identifier with the same content (FNV-64a) gets the same answer, and the same identifier with different content is refused | `2026-09-10-point-acceptation-commit.md` §2 (codes `0x0031`, `0x0020`) | **Deferred amended**: the client-session design, with a content digest |
+| I5 | Refusal BEFORE acceptance when a queue is full, so nothing is half-accepted (`0x0032`). The `noeviction` and ring-full backpressure reach the admission gate, not a drop | `2026-09-10-point-acceptation-commit.md` §2, `01-shared-log-single-writer.md` §5.5 | **D6, D12 amended**: `OVERLOADED` |
+| I6 | A commit advance is pushed to the followers at once (coalesced), and a follower's apply callbacks fire on a commit advance that brings no new entry. When commit waited for the 1 s heartbeat ack, 0 of 3 integration tests passed | `election.go:2396-2400`, `election.go:964-975`, `2026-09-10-point-acceptation-commit.md` §1 and §3 | D6 — confirms the POC's rule that an empty AppendEntries carries a new commit |
+| I7 | A follower dials the leader as soon as it learns of it, and opens its forwarding stream before the first entry. Without that, the first forwarded write after an election exceeded its wait | `election.go:805-807`, `2026-09-10-point-acceptation-commit.md` §2–§3, `TestLeaderForwarder_WarmsUpStreamBeforeAnyForward` | **D6 amended** |
+| I8 | Commit counts only an entry of the current term (Figure 8) and aborts if the term changed during the computation | `election.go:2426-2446`, `election.go:2455-2461` | D6 — confirmed |
+| I9 | A fence advances only on a SUCCESSFUL acquisition. An epoch bumped by a losing contender fenced the legitimate leader | `01-shared-log-single-writer.md` §5.2 and §7.1, Valkey Lua script cited there | D10 — confirmed: the fence is the committed entry's index, which only a success produces |
+| I10 | Defects found under adversity, each named with the regime that exposes it: a split vote replayed in the same term forever on simultaneous start, a follower never re-requesting committed entries it missed during a partition, a PreVote fan-out saturating the shared mesh client under CPU starvation, and the fence above | `01-shared-log-single-writer.md` §7.1 | **D15 amended**: each becomes a simulator scenario. **D4 amended**: control frames never wait behind entries |
+| I11 | A chaos E2E on kind with Calico network policies for real partitions, with invariants asserted throughout ("at most one writer") | `tests/e2e/chaos_invariants_test.go`, `tests/e2e/scenarios_degraded_lease_test.go`, `tests/e2e/scenarios_consensus_inv_test.go` | D15 — the model for the first consumer's `tc netem` lane, not for the SDK suite |
+| I12 | Documentation that dates its claims, states its evidence level and revises itself when the code disagrees ("Révision assumée"), with a validation record pinned to a SHA and to binary digests | `01-shared-log-single-writer.md` §9, `validation-2026-09-10/README.md` | the practice `BENCH.md` and this ADR follow |
+
+### What IWFS does badly, riskily or incompletely, and this ADR must not take
+
+| # | Defect | Proof | Risk | Answer here |
+|---|---|---|---|---|
+| J1 | **The quorum is a majority of the members the health check currently sees as ACTIVE**, not of a configured voter set | `election.go:1305`, `election.go:1538-1539`, `src/internal/cluster/election_coverage.go:113-129`, `src/internal/cluster/membership.go:567-585`. Members turn Suspect after 5 s and Dead after 10 s (`cluster.md`, Membership) | in a partition {A} / {B, C}, A sees B and C dead, its majority of one elects itself, and two leaders write. Only the Valkey lease, when it is enabled, stands in between | D8: the membership is log entries; a majority is computed over the configured voters and never over who answers |
+| J2 | **Term and vote are not persisted** ("StableStore non câblé") | `2026-09-10-point-acceptation-commit.md` §1 and §4 | a node that restarts within a term can vote twice in it, which allows two leaders in one term | D4: the hard state is durable before any reply |
+| J3 | **No local durability at all.** The log is in memory, and Valkey's AOF and RDB are off in the labs. A power loss on every node loses everything | `01-shared-log-single-writer.md` §5.1, §5.5 | "zero data loss" holds only while at least one replica's memory survives | the title of this ADR |
+| J4 | The legacy acknowledgement point is still available: the client is answered from the leader's memory before replication | `acceptance.go:70-83` (`ackAfterCommit=false` keeps it), `01-shared-log-single-writer.md` §8 point 5 | an acknowledged write is lost with the leader | Consequences: no asynchronous mode |
+| J5 | **Degraded leadership**: on loss of the majority, a survivor takes write authority through the external lease, without a quorum and without advancing the term | `01-shared-log-single-writer.md` §5.2.1, `election.go:1167-1190` | at most one writer, but its writes exist on one node: availability bought with durability | not taken — a minority is read-only (Consequences) |
+| J6 | **The follower acknowledges its whole log, and commits up to it.** An empty heartbeat reports `GetLatestIndex()`, and so does an append. The follower commits `min(leaderCommit, lastLogIndex)` | `election.go:845-857`, `election.go:867`, `election.go:743-745`, `election.go:836-837`, then `election.go:2028-2030` on the leader | raft-sql-poc's bugs 2 and 3, still present: a stale suffix from an old term can be counted in a majority, or applied | D6: the verified prefix, never `lastIndex`. The POC is right and IWFS is not |
+| J7 | The mesh is plaintext gRPC (`insecure.NewCredentials()`), with no peer identity | `src/internal/adapters/grpc/mesh/client.go:74` | anyone who reaches `:8081` can forge a heartbeat with a higher term and take the cluster, as the POC's README warns | D4: mandatory mTLS, admission by membership |
+| J8 | Members are identified by name or address strings. In static mode the same node appears twice (`iwfs1` and `iwfs1:8081`) | `2026-09-10-point-acceptation-commit.md` §1 and §4 | "the majority stays correct (each follower counts twice, symmetrically)" is an accident of symmetry, not a property | D8: a numeric `NodeID` bound to its certificate and never reused |
+| J9 | Discovery drives membership (Kubernetes DNS or a static list), and the Raft settings, election timeouts included, are hot-reloaded through the journal | `src/internal/cluster/discovery.go`, `cluster.md` (Hot Reload) | a timing change while a lease is held breaks the lease's arithmetic, and the operator's DNS becomes part of the quorum | not taken: membership by explicit change, timings at construction |
+| J10 | Elections time out at 3 to 5 s with a 1 s heartbeat, and the anti-spin backoff reaches 30 s (`2^min(n,3)`) | `cluster.md` (Election), `election.go:90-98` | failover slower than Gitaly's 4 s, and up to 30 s under a storm | D5 keeps 1 to 2 s. D4 removes the storm's cause, election traffic queued behind data, instead of slowing elections down |
+| J11 | Every timer is `time.Now()` / `time.Since`. They are monotonic in Go, but they cannot be injected | `election.go:267-268`, `election.go:606-609`, `election.go:809` | no reproducible schedule: the defects of I10 were found by E2E, not by a test that can replay them | D15: injected clock, deterministic simulator |
+| J12 | Tests: 5 191 unit functions and 6 integration tests that assert delivery, "not the order between majority commit and acknowledgement". The chaos E2E is skipped in CI without `IWFS_E2E_FLOOR_ENABLED`. There is no deterministic simulation and no linearizability checker | `validation-2026-09-10/README.md` (results and limits), `01-shared-log-single-writer.md` §5.2.1, `tests/` tree | the safety properties rest on unit tests of components, not on histories | D15 |
+| J13 | `Sharded.LoadFromStore`, the recovery from total memory loss, has no caller in production. The Valkey epoch restarts at 1 after a reset | `01-shared-log-single-writer.md` §5.3, `2026-09-10-point-acceptation-commit.md` §1 | the last-resort recovery has never run, and a fence that restarts reissues numbers a resource has already accepted | D7: recovery from snapshot plus log is the normal path. D10: the fence lives in the log |
+| J14 | CPU and memory thresholds put followers in a "security mode" that refuses writes | `src/internal/cluster/security_mode.go:233-244`, `src/internal/cluster/election_config.go:8-54` | a heuristic on host load decides admission, across nodes that do not share the load | D6 takes the admission refusal (I5) only from the leader's own pending bytes |
+
+### Three columns: ADR 0152, raft-sql-poc, IWFS
+
+`>` marks where the two prior arts disagree and names the one that is right.
+
+| Decision | ADR 0152 | raft-sql-poc | IWFS |
+|---|---|---|---|
+| D1 name | `consensus`, `NewRaft` | `RaftNode` | `Election`, "Shared Log" |
+| D2 placement | stdlib-only, three layers | no dependency | gRPC, Valkey, Kubernetes |
+| D3 state machine | deterministic `Apply`; a non-refusal failure stops the node | every throw is deterministic (B1) | apply on commit through `commitApplyQueue`, in order |
+| D4 log | segmented WAL, CRC-32C, the hard state as a record, `fdatasync` per batch | the same, JavaScript | **none: in memory**, Valkey optional (J3). `>` POC right |
+| D4 hard state | durable before reply | durable before reply | **not persisted** (J2). `>` POC right |
+| D4 transport | mTLS, admission by membership, batches, a priority lane for control frames | its own SIGMA handshake, revocation | **plaintext gRPC** (J7). `>` POC right on the need, TLS on the means |
+| D5 elections | PreVote, CheckQuorum, refusal in both votes, 1–2 s | refusal in PreVote only (B4) | refusal in both votes (I1), 3–5 s, 30 s backoff. `>` IWFS right on the refusal |
+| D6 replication | majority on disk, verified prefix, bounded pipeline | verified prefix, unbounded pipeline | **acknowledges `lastIndex`, commits `min(leaderCommit, lastIndex)`** (J6). `>` POC right |
+| D6 outcome | three answers plus `ENTRY_SUPERSEDED` and `OVERLOADED` | `NOT_LEADER` / `UNKNOWN_OUTCOME` / `COMMIT_TIMEOUT` | accepted / unknown / refused / replaced / full (I2–I5). `>` IWFS more complete |
+| D7 snapshots | copy-on-write cut, streamed, compressed, verified | synchronous, zstd, SHA-256 | none: catch-up over the mesh, gzip snapshots in Valkey |
+| D8 membership | log entries, one at a time, learners, IDs never reused | the same, with its catch-up in the orchestrator (B10) | **a majority of the members the health check sees as active** (J1). `>` POC right |
+| D9 reads | ReadIndex, lease opt-in on a monotonic clock | strong / leader / stale | local reads from the in-memory store (RouteStore) |
+| D10 fencing | the committed index | `{index, term}`, unused | a Valkey epoch advanced only on success (I9), reset with Valkey (J13) |
+| D11 groups | one group, `GroupID` on the wire | one group per shard, heartbeats coalesced | one leader, a journal sharded for CPU parallelism only. `>` both are right for what they do: the POC's shards are independent groups, IWFS's are lanes of one log |
+| D12 errors | dotted-quad codes | string codes | SMPP statuses `0x0020`–`0x0032` |
+| D13 observability | `metrics`, `trace`, `logger` | events on demand | Prometheus, a `/debug/raft` view with `write_authority` and `write_refusal_reason` |
+| D14 API | `Propose`, `Barrier`, `WaitApplied` | `propose`, `readIndex` | `WaitForCommit(index, term)` |
+| D15 tests | deterministic simulator, linearizability, mutations | scenarios, mutations | unit tests and Kubernetes chaos E2E, outside CI (J12) |
+| D16 performance | ≥ 10 000 entries/s on disk | 7 000–9 400 durable/s | 7 980 SMS/s acknowledged from memory, not comparable (J4) |
 
 ## References
 
@@ -1041,6 +1194,16 @@ confronted the same way, in two lists, when its code is available.
   `src/network.js`, `src/resilience-tests.js`, `src/storage-tests.js`,
   `tools/security-mutations.js` and its README. It is not published, and the
   paths are relative to its root.
+- IWFS (Halys), `origin/master` `aec79ab`, read only:
+  `src/internal/cluster/election.go`, `election_coverage.go`,
+  `membership.go`, `security_mode.go`, `discovery.go`,
+  `src/internal/adapters/grpc/mesh/client.go`,
+  `src/internal/adapters/grpc/peer/acceptance.go`,
+  `docs/src/cii-src/07-innovations/01-shared-log-single-writer.md`,
+  `docs/src/design/2026-09-10-point-acceptation-commit.md`,
+  `docs/src/testing/validation-2026-09-10/README.md`,
+  `docs/src/implementation/architecture/cluster.md`, `tests/e2e/`. Not
+  published.
 - GitLab Gitaly, `internal/gitaly/storage/raftmgr` and
   `internal/gitaly/config` before their deletion in 2026 — the gaps listed in
   Context.
