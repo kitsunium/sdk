@@ -36,7 +36,7 @@ func RegisterHasher(h Hasher) Hasher {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := hashers.publish(h.Algorithm(), h); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the hasher lets callers bind it to a typed singleton var.
 	return h

@@ -33,7 +33,7 @@ func RegisterStreamSealer(s StreamSealer) StreamSealer {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := streamSealers.publish(s.Algorithm(), s); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the sealer lets callers bind it to a typed singleton var.
 	return s

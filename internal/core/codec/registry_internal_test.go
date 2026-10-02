@@ -1,9 +1,11 @@
 package codec
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -91,3 +93,38 @@ func ResetForTest() {
 	//: extension alias index back to empty.
 	extIndex.Store(nil)
 }
+
+// Test_publish_conflictIsTyped proves both conflicts the registry can meet are
+// SDK errors with the duplicate-registration code (rule 2): an operator, a
+// test or a later registry that returns them instead of panicking can match
+// them with errs.HasCode rather than by parsing text.
+func Test_publish_conflictIsTyped(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	first := &stubCodec{name: "typed-a"}
+	if err := publishCodec("typed-a", first); err != nil {
+		t.Fatalf("the first publish = %v, want nil", err)
+	}
+	var aliases snapshot.Value[map[string]Format]
+	if err := publishAlias(&aliases, "m/typed", "typed-a", "MIME", "m/typed"); err != nil {
+		t.Fatalf("the first alias = %v, want nil", err)
+	}
+	conflicts := map[string]error{
+		"a taken Name":  publishCodec("typed-a", &stubCodec{name: "typed-a"}),
+		"a taken alias": publishAlias(&aliases, "m/typed", "typed-b", "MIME", "m/typed"),
+	}
+	for name, err := range conflicts {
+		if !errs.HasCode(err, CodeDuplicateRegistration) || !errors.Is(err, DuplicateRegistration) {
+			t.Errorf("%s: conflict = %v, want the typed DuplicateRegistration", name, err)
+		}
+	}
+}
+
+// stubCodec is the smallest Codec the white-box registry tests publish.
+type stubCodec struct{ name string }
+
+func (s *stubCodec) Name() string                    { return s.name }
+func (s *stubCodec) MIMETypes() []string             { return nil }
+func (s *stubCodec) Extensions() []string            { return nil }
+func (s *stubCodec) Marshal(any) ([]byte, error)     { return nil, nil }
+func (s *stubCodec) Unmarshal(_ []byte, _ any) error { return nil }

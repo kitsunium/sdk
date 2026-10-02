@@ -34,7 +34,7 @@ func RegisterDeriver(d Deriver) Deriver {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := derivers.publish(d.Algorithm(), d); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the deriver lets callers bind it to a typed singleton var.
 	return d

@@ -82,7 +82,7 @@ func Test_macs(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a distinct value under %q published without conflict", clash)
 	}
-	if !strings.Contains(err.Error(), "RegisterMAC") {
-		t.Errorf("the conflict on %q reads %q, want it to name RegisterMAC", clash, err.Error())
+	if !strings.Contains(conflictText(err), "RegisterMAC") {
+		t.Errorf("the conflict on %q reads %q, want it to name RegisterMAC", clash, conflictText(err))
 	}
 }

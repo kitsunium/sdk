@@ -1,9 +1,12 @@
 package writer
 
 import (
+	"errors"
+	"strings"
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // ResetForTest clears the process-wide writer registry back to the empty
@@ -60,5 +63,27 @@ func Test_cloneFactoryMap(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_publishFactory_conflictIsTyped proves a refused publish is an SDK error
+// with the duplicate-registration code (rule 2) — matchable with errs.HasCode
+// rather than by parsing text — and that the panic text Register renders from
+// it still names the Name that collided.
+func Test_publishFactory_conflictIsTyped(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	if err := publishFactory("typed", &stubFactory{id: "typed"}); err != nil {
+		t.Fatalf("the first publish = %v, want nil", err)
+	}
+	err := publishFactory("typed", &stubFactory{id: "typed"})
+	if !errs.HasCode(err, CodeDuplicateRegistration) || !errors.Is(err, DuplicateRegistration) {
+		t.Fatalf("the conflict = %v, want the typed DuplicateRegistration", err)
+	}
+	text := conflictText(err)
+	for _, want := range []string{"[0.2.3.1 DUPLICATE_REGISTRATION]", `registrar="writer.Register"`, `name="typed"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("conflictText = %q, want it to say %s", text, want)
+		}
 	}
 }

@@ -33,8 +33,8 @@ Code range: `0.2.3.*` (ADR 0012).
 | `config_s3.go` / `config_cloudwatch.go` | `S3Config` / `CloudWatchConfig` — the AWS writers' configs, plain data carrying no AWS type |
 | `config_mysql.go` / `config_clickhouse.go` / `config_redis.go` | `MySQLConfig` / `ClickHouseConfig` / `RedisStreamConfig` — the DB writers' configs, plain data carrying no driver type |
 | `credentials.go` | `CredentialProvider` port + the redacting `CredentialValue` (`NewCredentialValue`, accessors, `String` / `GoString`) the network writers share |
-| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) — `.1`, `.4` and `.5` label `Register`'s boot-time panics and have no `errs.Define` sentinel |
-| `errors.go`   | `WriterUnknownName` + the shared `WriterConfigInvalid` sentinel (the latter returned by every factory on a wrong-type `Config`) |
+| `codes.go`    | `CodeDuplicateRegistration` (0.2.3.1), `CodeWriterUnknownName` (0.2.3.2), `CodeWriterConfigInvalid` (0.2.3.3), `CodeWriterNil` (0.2.3.4), `CodeWriterNameEmpty` (0.2.3.5) — `.1`, `.4` and `.5` label `Register`'s boot-time panics; `.4` and `.5` have no `errs.Define` sentinel and spell their reason in the message |
+| `errors.go`   | `WriterUnknownName` + the shared `WriterConfigInvalid` sentinel (the latter returned by every factory on a wrong-type `Config`) + `DuplicateRegistration` (0.2.3.1, never returned: `Register` panics with `conflictText` of it — header, Public, then the `registrar` and colliding `name` fields, since `Error()` renders none) |
 
 ## `Decoder` optional extension (ADR 0014 §D5)
 

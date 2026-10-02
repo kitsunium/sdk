@@ -31,7 +31,7 @@ func RegisterMAC(m MAC) MAC {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := macs.publish(m.Algorithm(), m); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the MAC lets callers bind it to a typed singleton var.
 	return m

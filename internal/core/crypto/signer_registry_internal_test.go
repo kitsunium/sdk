@@ -75,7 +75,7 @@ func Test_signers(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a distinct value under %q published without conflict", clash)
 	}
-	if !strings.Contains(err.Error(), "RegisterSigner") {
-		t.Errorf("the conflict on %q reads %q, want it to name RegisterSigner", clash, err.Error())
+	if !strings.Contains(conflictText(err), "RegisterSigner") {
+		t.Errorf("the conflict on %q reads %q, want it to name RegisterSigner", clash, conflictText(err))
 	}
 }

@@ -5,8 +5,12 @@
 package crypto
 
 import (
+	"errors"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // stubScheme is a comparable value for white-box schemeRegistry tests. It does
@@ -211,5 +215,27 @@ func Test_schemeRegistry_available(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_schemeRegistry_conflictIsTyped proves a refused publish is an SDK error
+// with the duplicate-registration code (rule 2) — matchable with errs.HasCode
+// rather than by parsing text — and that the panic text every registrar
+// renders from it still names the registrar and the algorithm.
+func Test_schemeRegistry_conflictIsTyped(t *testing.T) {
+	t.Parallel()
+	r := schemeRegistry[stubScheme]{verb: "RegisterStub"}
+	if err := r.publish("typed", stubScheme{"typed"}); err != nil {
+		t.Fatalf("the first publish = %v, want nil", err)
+	}
+	err := r.publish("typed", stubScheme{"OTHER"})
+	if !errs.HasCode(err, CodeDuplicateRegistration) || !errors.Is(err, DuplicateRegistration) {
+		t.Fatalf("the conflict = %v, want the typed DuplicateRegistration", err)
+	}
+	text := conflictText(err)
+	for _, want := range []string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.RegisterStub"`, `algorithm="typed"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("conflictText = %q, want it to say %s", text, want)
+		}
 	}
 }
