@@ -3,7 +3,6 @@ bazel-out
 bazel-sdk
 bazel-testlogs
 .claude
-.devcontainer
 docs
 e2e
 node_modules

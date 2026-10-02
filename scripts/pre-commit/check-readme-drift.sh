@@ -1,7 +1,6 @@
 #!/usr/bin/env bash
 # scripts/pre-commit/check-readme-drift.sh — canonical README drift gate.
-# Invoked from `make lint`, the pre-commit hook chain, and the
-# `.github/workflows/bazel-ci.yml` workflow. Single source of truth for
+# Invoked from the `.github/workflows/bazel-ci.yml` workflow. Single source of truth for
 # what "drift" means: a committed pkg/v1/<service>/README.md must match
 # what `go tool gomarkdoc` would produce now from the package's doc
 # comments. See ADR 0008 §Decision.
@@ -12,14 +11,13 @@ set -euo pipefail
 
 cd "$(dirname "$0")/../.."
 
-# gomarkdoc must be on PATH — shipped by the devcontainer Go feature
-# (.devcontainer/features/languages/go/install.sh). Avoiding the
+# gomarkdoc must be on PATH — installed with `go install`, pinned to the
+# same v1.1.0 as the Makefile and bazel-ci.yml. Avoiding the
 # `tool` directive in pkg/go.mod keeps the consumer dep graph
 # clean (was 54 indirect deps, now 9).
 if ! command -v gomarkdoc >/dev/null 2>&1; then
     echo "✗ gomarkdoc not on PATH. Install via:" >&2
     echo "    go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0" >&2
-    echo "  (or rebuild the devcontainer to pick up the Go feature update)." >&2
     exit 1
 fi
 
@@ -37,7 +35,7 @@ fi
 # (ADR 0147). Each package is recorded as "<root> <dir>", so the check runs from
 # the root its go:generate line is relative to.
 #
-# A read loop, not `readarray`: readarray is bash 4, and the hook runs under
+# A read loop, not `readarray`: readarray is bash 4, and the guard runs under
 # macOS's /bin/bash 3.2 as well (#260).
 roots=(pkg/v1 framework)
 packages=()
@@ -70,7 +68,7 @@ fi
 # so the source-link rendering is identical between local + CI. Without
 # these, gomarkdoc auto-detects from the working tree's git state (current
 # branch, remote URL, default branch via `git symbolic-ref refs/remotes/origin/HEAD`)
-# — which varies between a devcontainer checkout and the CI runner and
+# — which varies between a local checkout and the CI runner and
 # produces a phantom drift in the link shape that this gate then flags.
 drifted=()
 for entry in "${packages[@]}"; do

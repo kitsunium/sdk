@@ -1601,7 +1601,7 @@ rules:
   #   • exitNoPerm            (proc/sdnotify/…)        ← listen_linux.go
   #
   # Without this block `make lint` cannot pass on macOS at all, on a pristine
-  # tree, so the repo is only developable from the Linux devcontainer. Moving
+  # tree, so the repo is only developable from Linux. Moving
   # the helpers under //go:build linux would silence the rules but is the wrong
   # shape: parsePayload is pure string parsing with a portable test, and a
   # tagged copy would drop that coverage everywhere but Linux.

@@ -6,11 +6,12 @@
 #   commit lands. Phase 8 (tests) is opt-in and intentionally outside this
 #   gate — its rules drive coverage uplift on a separate cadence.
 #
-# Why this hook (and not the PostToolUse daemon hook):
+# Why this guard (and not the PostToolUse daemon hook):
 #   The ktn-linter daemon's PostToolUse blocking is hard-coded to severity
 #   `error|critical` only; warnings and infos pass through silently. That
 #   surfaces problems in real time but does NOT prevent them from being
-#   committed. This pre-commit hook is the hard-gate.
+#   committed. This guard is the hard-gate to run before committing; CI
+#   enforces the same phases through `make lint-ktn-check`.
 #
 # Exit codes:
 #   0 — clean (0 issues in active phases 1-7)
@@ -18,7 +19,7 @@
 
 set -euo pipefail
 
-WORKSPACE="${1:-${CLAUDE_PROJECT_DIR:-/workspace}}"
+WORKSPACE="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
 cd "$WORKSPACE"
 
 if ! command -v ktn-linter >/dev/null 2>&1; then

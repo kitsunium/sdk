@@ -13,7 +13,7 @@ set -euo pipefail
 cd "$(dirname "$0")/../.."
 
 if ! command -v gomarkdoc >/dev/null 2>&1; then
-    echo "✗ gomarkdoc not on PATH (shipped via the devcontainer Go feature)" >&2
+    echo "✗ gomarkdoc not on PATH. Install: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0" >&2
     exit 1
 fi
 

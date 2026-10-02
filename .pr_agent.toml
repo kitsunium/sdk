@@ -1,4 +1,4 @@
-# Qodo Merge (PR-Agent) Configuration — devcontainer-template (strict, high-signal)
+# Qodo Merge (PR-Agent) Configuration — kitsunium/sdk (strict, high-signal)
 # Official file name: .pr_agent.toml (not .qodo-merge.toml)
 # Docs: https://qodo-merge-docs.qodo.ai/usage-guide/configuration_options/
 # Canonical defaults: https://github.com/qodo-ai/pr-agent/blob/main/pr_agent/settings/configuration.toml
@@ -35,7 +35,6 @@ CONVENTIONS (MUST ENFORCE)
   rules, not a background document: a diff that follows one is compliant even
   where a generic guideline would say otherwise, and a diff that silently
   breaks one is a finding worth raising on its own.
-- Also enforce rules in: .devcontainer/features/languages/<lang>/RULES.md
 - Do NOT provide generic advice. Every comment must reference a concrete file/symbol and a specific fix.
 
 TRIAGE (SEVERITY)

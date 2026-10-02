@@ -7,7 +7,7 @@ on:
 
 # Cancel in-progress runs when a newer commit on the same ref arrives so
 # rapid re-pushes do not spawn parallel builds that corrupt bazel caches
-# or upload duplicate artifacts. Matches docker-images.yml policy.
+# or upload duplicate artifacts.
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
   cancel-in-progress: true
@@ -67,11 +67,10 @@ jobs:
             exit 1
           fi
 
-      # gomarkdoc is the SOT for the README drift gate (ADR 0008). The
-      # devcontainer ships it pre-installed, but a fresh CI runner does
-      # not — install it here so the drift + determinism steps below both
-      # see the same binary the local pre-commit hook uses. Pinned to
-      # v1.1.0, matching .devcontainer/features/languages/go/install.sh.
+      # gomarkdoc is the SOT for the README drift gate (ADR 0008). A fresh
+      # CI runner does not ship it — install it here so the drift +
+      # determinism steps below see the same binary `make docs-readme`
+      # expects locally. Pinned to v1.1.0, matching the Makefile.
       - name: install gomarkdoc
         run: go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0
 
@@ -139,6 +138,19 @@ jobs:
       # checks key on the directories on disk rather than on a count.
       - name: domain-doc invariant — the root CLAUDE.md still describes the tree
         run: bash scripts/pre-commit/check-domain-docs.sh
+
+      # Three guards the in-repo pre-commit hook used to be the only runner of
+      # (ADR 0153): every Go package carries its CLAUDE.md / README.md, every
+      # package with a *_bench_test.go commits a BENCH.md, and
+      # docs/error-codes.yaml matches what scripts/gen-error-codes.sh produces.
+      - name: package-doc invariant — every Go package is documented
+        run: bash scripts/pre-commit/check-pkg-docs.sh
+
+      - name: bench-doc invariant — every bench package commits a BENCH.md
+        run: bash scripts/pre-commit/check-bench-md.sh
+
+      - name: error-code registry drift — docs/error-codes.yaml is current
+        run: bash scripts/pre-commit/check-error-codes-drift.sh
 
       # Guards the layer direction kernel → core → service → pkg/v1. ADR 0004
       # put it on Bazel visibility, but Gazelle gives every package under an
@@ -331,17 +343,6 @@ jobs:
         # review. See ADR 0088.
         run: make release-scripts-check
 
-      - name: git hook regression
-        # .githooks/commit-msg is this repository's no-AI-attribution
-        # enforcement, and it shipped with the same `printf | grep -q` — but
-        # with a worse failure mode, because the pipeline is the condition of an
-        # `if`. grep exits on its first match, the writer takes SIGPIPE,
-        # pipefail reports 141, 141 is false, and the hook ALLOWS the
-        # attribution it exists to refuse. Measured before the fix with the
-        # pattern near the top and a 400 KB body: 40 bypasses out of 40 runs.
-        # After: 0 out of 40. See ADR 0088.
-        run: make hooks-check
-
       - name: CI script regression
         # scripts/ci/ holds the module census every module-looping lane reads
         # and the govulncheck gate built on it (ADR 0136, ADR 0137). The census
@@ -353,7 +354,7 @@ jobs:
       - name: pre-commit guard regression
         # scripts/pre-commit/ holds the commit gates themselves, and ADR 0088
         # recorded its own sweep as INCOMPLETE: two of them pipe into an
-        # early-exiting reader exactly as .githooks/commit-msg did. They fail in
+        # early-exiting reader exactly as the former commit-msg hook did. They fail in
         # OPPOSITE directions, which is why reading did not catch either.
         # check-ktn-phases-1-7.sh:69 fails CLOSED — a clean linter run is
         # reported as "the linter did not complete" (measured, marker first:

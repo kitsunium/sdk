@@ -5,7 +5,7 @@
 # audit in internal/kernel/errs/registry_external_test.go (ADR 0005/0006).
 #
 # Run via `make error-codes`. The pre-commit guard
-# scripts/pre-commit/check-error-codes-drift.sh fails the commit when the
+# scripts/pre-commit/check-error-codes-drift.sh fails CI and `make lint` when the
 # committed YAML no longer matches what this script would produce, so the
 # registry never silently drifts from the code (CLAUDE.md rule 11).
 set -euo pipefail

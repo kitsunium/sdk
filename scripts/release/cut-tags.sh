@@ -401,7 +401,7 @@ publish_chain() {
       done
       echo "DRY-RUN: would tag chain: ${tags[*]}"
     else
-      # `core.hooksPath=` (empty) rather than the project's hooks: this commit
+      # `core.hooksPath=` (empty) rather than any hooks the clone sets: this commit
       # is the ONE tree in the repository that the pre-commit gates cannot pass,
       # by construction. They run `make build` / `make test`, and the rewrite
       # above has just dropped every intra-repo `replace` — so Go and Bazel can
@@ -411,11 +411,12 @@ publish_chain() {
       # commit never happens.
       #
       # This never fired in CI, which checks out without `core.hooksPath` and so
-      # runs no project hook at all — the defect only exists for a maintainer who
-      # ran `scripts/install-hooks.sh`, which the root CLAUDE.md tells every
-      # clone to do. What the gates would have checked is already checked: this
-      # commit changes nothing but four go.mod files, and `assert_publishable`
-      # verifies each of them above.
+      # runs no project hook at all — the defect existed for a maintainer whose
+      # clone pointed `core.hooksPath` at the in-repo hooks, which every clone
+      # was told to do until ADR 0153 removed them; a clone may still carry a
+      # hooks path of its own. What the gates would have checked is already
+      # checked: this commit changes nothing but four go.mod files, and
+      # `assert_publishable` verifies each of them above.
       local before
       before="$(git rev-parse HEAD)"
       git -c core.hooksPath= commit --quiet -am "release $sem — publishable module graph (no replace)"
