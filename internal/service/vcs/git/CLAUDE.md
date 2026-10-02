@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:00:30Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/vcs/git/
 
 ## Purpose
@@ -217,6 +217,27 @@ its time, whether the tree is modified — in three hardened invocations:
   `status`, seven times during a `diff`. That is the same exposure `Resolve`'s
   diff already has; closing it needs the driver names before the invocation and
   belongs to the shared runner (ADR 0100 §Deferred).
+
+## Rules from ADR 0087
+
+Superseded by ADR 0154 (the charter); ADR 0087 stays as the incident's record, and its rules live here.
+
+- **The caller's spelling of the root and git's canonical one both answer**,
+  recorded at build time so a query stays one map lookup — the root only, never
+  another link in a queried path.
+- **A probe that did not answer degrades** (`shallowState` reports whether it
+  KNOWS); it is never folded into a guess.
+- **`origin/HEAD` is verified in the invocation that reads it**: `rev-parse
+  --verify --quiet --abbrev-ref refs/remotes/origin/HEAD`, the full ref path, so
+  a planted `refs/origin/HEAD` cannot steer it.
+- **The diff prefixes are pinned** (`diff.srcPrefix`, `dstPrefix`,
+  `mnemonicPrefix`, `noprefix`): keys that execute nothing and still misfile
+  every line range.
+- **`ShowFile` classifies on the failure path**, the commit probed before the
+  path; the `GitDir` memo is re-validated by two `os.Lstat` and `os.SameFile`.
+- *Lesson*: a repository reached through a link resolved, was neither degraded
+  nor empty, and answered false for every edited file — under-reporting is the
+  one direction this domain must never move in.
 
 ## Do NOT
 

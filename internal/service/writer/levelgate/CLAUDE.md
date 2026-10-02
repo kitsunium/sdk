@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:59:27Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/writer/levelgate/
 
 ## Purpose
@@ -83,6 +83,19 @@ does a severity floor cost the records it discards".
   against 6.89 ns serially — linear to within 9 %, i.e. no shared mutable state
   at all. A `Leveler`-based
   dynamic floor was measured and refused — see the Do NOT below.
+
+## Rules from ADR 0132
+
+Superseded by ADR 0154 (the charter); ADR 0132 stays as the incident's record, and its rules live here.
+
+- **A floor a caller names is the floor applied**: `Floor(inner, min)` gates at
+  `min`, `Info` included; `New` keeps the writer configuration's reading of a
+  zero `MinLevel` as "inherit", which existing configurations depend on.
+- **A drop is a successful no-op** — every byte reported accepted, no error —
+  so a fan-out never counts it as a failed write; `Flush` and `Close` reach the
+  sink; a nil sink yields nil.
+- *Lesson*: a branch gated at `Info` through `New` received every Debug record,
+  because the constructor read the most common floor as "no floor".
 
 ## Do NOT
 

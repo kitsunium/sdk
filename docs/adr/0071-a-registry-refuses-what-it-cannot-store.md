@@ -1,6 +1,6 @@
 # ADR 0071 — a registry refuses a plug-in it cannot store, at the call that publishes it
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/kernel/plugin/CLAUDE.md` §Rules from ADR 0071. Before that: Accepted
 - **Date**: 2026-09-11
 - **Deciders**: SDK maintainers
 - **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) — §Why not, "a generic registry primitive in the kernel", is reversed: `plugin.Registry[K, V]`, each registry keeping its codes

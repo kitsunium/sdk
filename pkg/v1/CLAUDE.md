@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # pkg/v1/
 
 ## Purpose
@@ -104,6 +104,21 @@ Single Go module `github.com/kitsunium/sdk/pkg` — one `go.mod` (at `pkg/go.mod
 - `import _ "github.com/kitsunium/sdk/pkg/v1/codec"` is enough to activate all 16 service codecs (24 Format names incl. base-N family) — registry side-effects driven by blank imports.
 - Every emitted log record carries `framework_version` via the ldflags-injected `logger.Version`. Injection recipe is in `pkg/v1/logger/README.md`; under Bazel `--stamp` + `x_defs` + `tools/workspace_status.sh` (`STABLE_VERSION`) supply the same value.
 - `logger.NewText(Config{Writer: nil})` returns `(nil, WriterRequired)`. `logger.NewWithSink(SinkConfig{Sink: nil})` returns `(nil, SinkConfigRequired)`. Use `logger.Default()` for the stderr one-liner.
+
+## Rules from ADR 0138
+
+Superseded by ADR 0154 (the charter); ADR 0138 stays as the incident's record, and its rules live here.
+
+- **A same-package doc link resolves or it is not written**, judged on every
+  platform that compiles its file; `make doclinks` (`tools/genindex
+  -check-doclinks`, run by `make lint-check`) fails at the line.
+- **A facade links the alias and names the member after it: `[Type].Member`.**
+  `go/doc` does not collect the methods and fields of an alias, so
+  `[Type.Member]` over one renders as literal brackets; and a link never
+  qualifies into `internal/` (`[corequeue.Broker.Publish]`) in the one surface
+  written for consumers.
+- *Lesson*: 152 doc links named no symbol and rendered as bracketed text on
+  pkg.go.dev and in the generated READMEs, with nothing failing.
 
 ## Do NOT
 

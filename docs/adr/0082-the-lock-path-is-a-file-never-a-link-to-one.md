@@ -1,6 +1,6 @@
 # ADR 0082 — the lock path is a file, never a link to one
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/lock/CLAUDE.md` §Rules from ADR 0082. Before that: Accepted
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0052](0052-sdk-lock-domain.md) §D6 (the lock directory's permission rule was the whole of the file locker's answer to substitution; it is not), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) §Deferred (the reparse-point item, deferred there on an explicit "both sides or not at all", is closed here on both sides)

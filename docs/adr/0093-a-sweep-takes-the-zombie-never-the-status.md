@@ -1,6 +1,6 @@
 # ADR 0093 — a sweep takes the zombie, never the status
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/proc/childwait/CLAUDE.md` §Rules from ADR 0093. Before that: Accepted
 - **Date**: 2026-09-24
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the `proc` domain, whose `Process` and `Reaper` ports this reconciles), [ADR 0018](0018-sdk-cross-platform-portability.md) (why the mechanism must be stdlib `syscall` on every Unix)

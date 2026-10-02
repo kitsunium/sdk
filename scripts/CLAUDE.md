@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:53:12Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # scripts/
 
 ## Purpose
@@ -40,6 +40,39 @@ empty is not expanded under `set -u`, which bash 3.2 reports as unbound; and a
 has bash 5 and GNU find, so `test-pre-commit-guards.bats` reads the sources for
 the constructs that broke the guards before, rather than trusting a run there.
 `gen-error-codes.sh` is held to the same rule, because a guard runs it.
+
+## Rules from ADR 0088
+
+Superseded by ADR 0154 (the charter); ADR 0088 stays as the incident's record, and its rules live here.
+
+- **A suite counts only when a gate CI names runs it.**
+  `release/release-scripts-test.sh` runs every `release/*.bats` by glob, never a
+  list; a new runner needs a `make` target, `.PHONY`, invoked by `bazel-ci.yml`.
+  `ci-gates-check.sh` holds that manifest, matches the workflow's executable
+  `run:` commands rather than its text, and lists itself.
+- **`bats` is a prerequisite on `PATH`, never fetched** (exit 127 naming the
+  install routes); gates needing neither Bazel nor Go run in `shell-gates`.
+- **A fixture's git commands disable hooks at command-line precedence**, so a
+  host's `core.hooksPath` never reaches a test; every test is seen red against
+  the defect it guards before it is accepted.
+- *Lesson*: the 32 BATS tests guarding release sizing ran in no lane, and each
+  defect they cover produced a plausible version rather than an error. (Its
+  hook gate went with ADR 0153.)
+
+## Rules from ADR 0137
+
+Superseded by ADR 0154 (the charter); ADR 0137 stays as the incident's record, and its rules live here.
+
+- **The modules are a census, not a list**: `ci/go-modules.sh` prints every
+  module whose `go.mod` git tracks (`testdata` excluded; an empty or unreadable
+  census is an error), and every lane that loops over modules reads it.
+- **A lane that must skip a module names it where it loops**, with the lane
+  that covers it instead (rule 12); none does today.
+- **The census and its use are tested**: `ci/test-ci-scripts.bats`
+  (`make ci-scripts-check`) pins it and asserts `cross-build` and `test-386`
+  read it.
+- *Lesson*: four hand-written module lists had drifted apart, and
+  `tools/genindex` and `tools/sdkguard` — 477 tests — never ran on 32 bits.
 
 ## Do NOT
 
