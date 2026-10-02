@@ -408,5 +408,13 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0150 — a release names its tag, its keys rotate, and a replacement answers before it stands — `docs/adr/0150-a-release-names-its-tag-keys-rotate-and-a-replacement-answers-before-it-stands.md`
 - ADR 0151 — a message published in a transaction exists if and only if it commits — `docs/adr/0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md`
 - ADR 0153 — the repository carries no devcontainer and no git hooks, and its guards run in CI — `docs/adr/0153-the-repository-carries-no-devcontainer-and-no-git-hooks.md`
+- ADR 0154 — the SDK's principles are one charter, and an incident's rule lives with the code it hit — `docs/adr/0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md`
+- ADR 0155 — every layer groups its packages by family, at the depth the families need, and an import path may move while v0 — `docs/adr/0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md`
+- ADR 0156 — the public module links the standard library and nothing else — `docs/adr/0156-the-public-module-links-the-standard-library-and-nothing-else.md`
+- ADR 0157 — one module per vendor, released with the SDK — `docs/adr/0157-one-module-per-vendor-released-with-the-sdk.md`
+- ADR 0158 — distribution mechanisms are the framework's, not the SDK's — `docs/adr/0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md`
+- ADR 0159 — the kernel holds what the domains were rewriting, and is published by nature — `docs/adr/0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md`
+- ADR 0160 — every service has a core, and a code keeps its value when its declaration moves — `docs/adr/0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md`
+- ADR 0161 — an untyped error fails the build — `docs/adr/0161-an-untyped-error-fails-the-build.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

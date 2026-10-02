@@ -3,6 +3,7 @@
 **Status**: Accepted (M1+M2+M3+M4 shipped)
 **Date**: 2026-04-19
 **Deciders**: @kodflow
+**Amended by**: [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) — §M2–§M4: YAML, TOML, CBOR and MessagePack are written natively; the Format `yaml` is a named subset and the full grammar is the opt-in `yaml-full`
 **Supersedes**: none
 **Related**: ADR 0001 (multi-module layout), ADR 0002 (`errs` package + code registry), plan `sdk-universal-codec`
 

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-05-30
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the scheme facades become children of `crypto` in a tree grouped by family
 - **Related**: ADR 0001 (multi-module layout), ADR 0003 (codec registry — the pattern mirrored), ADR 0005 (dotted-quad codes), ADR 0010 (recycler), ADR 0011 (snapshot.Value), ADR 0012 (writer registry), ADR 0013 (crypto domain — the ports extended here)
 - **Amends**:
   - the `internal/core` purpose statement — admits a **fifth** sibling, `transform`, beside `codec` / `writer` / `crypto` / `logger`;

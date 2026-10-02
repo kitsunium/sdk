@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — `third-party/transform` becomes a module of its own
 - **Related**: [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) §Deferred (the `core/transform` port and the deferred vendor compressors), [ADR 0012](0012-logger-writer-registry.md) (the `third-party/` quarantine policy), [ADR 0022](0022-sdk-codec-hcl.md) + [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (quarantine, and its mechanism corrected), [ADR 0023](0023-sdk-schema-codecs.md) (opt-in codecs under `third-party/`), [ADR 0018](0018-sdk-cross-platform-portability.md) (the build bar and the `x/sys` ban), [ADR 0030](0030-stdout-is-a-protocol-channel.md) + [ADR 0048](0048-sdk-metrics-otlp-json.md) (what an import may and may not arm), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse)
 - **Closes**: ADR 0014 §Deferred "zstd / snappy / s2 compressors — DEFER"
 

@@ -4,7 +4,7 @@
   origin rule can see of the scheme; "frames" means frames the handler has
   read). The original text of both is preserved; each amendment follows it.
 - **Amended by**: [ADR 0069](0069-websocket-origin-behind-a-proxy.md) — the
-  default origin rule refuses behind a proxy that announces the scheme
+  default origin rule refuses behind a proxy that announces the scheme; [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — the wire format moves from `internal/core/net` to the service
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
 - **Extends**: [ADR 0029](0029-sdk-net-domain.md) — the network domain gains a

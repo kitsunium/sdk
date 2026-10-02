@@ -3,6 +3,7 @@
 **Status**: Superseded (§Registry only — all other sections remain authoritative)
 **Date**: 2026-04-19 (updated 2026-04-23 on ADR 0005 acceptance)
 **Deciders**: @kodflow
+**Amended by**: [ADR 0161](0161-an-untyped-error-fails-the-build.md) — the ban on `fmt.Errorf` / `errors.New` is checked at build time
 **Supersedes**: none
 **Superseded by**: ADR 0005 (§Registry — dotted-quad codes replace the flat 1xxx-4xxx scheme)
 **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad error codes), plan `sdk-errs-package-migration`

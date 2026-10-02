@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework, and the ssh identity to a framework connector module
 - **Supersedes**: the Decision of [ADR 0078](0078-entitlement-is-quarantined-because-ssh-brings-x-sys.md) (its Context and its three inner decisions stand)
 - **Related**: [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (measure what a dependency introduces), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (what a public alias may point at), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a refusal is not a degradation), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range), [ADR 0035](0035-pp-range-ownership-enforcement.md) (range ownership)
 

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) — the curve moves to `kernel/backoff`, re-exported by `resilience` under the same names
 - **Amends**: [ADR 0026](0026-sdk-resilience-domain.md) (two policies' worth of surface: a keyed limiter and a public backoff)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the public clock)
 

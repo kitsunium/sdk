@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-02
 - **Deciders**: @kodflow
+- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/net`
 - **Related**: ADR 0016 (proc — the one-sibling/many-facades precedent), ADR 0018
   (portability — the build-bar/runtime-bar contract and the `x/sys` ban),
   ADR 0026 (resilience — bulkhead/timeout policies reused here), ADR 0027

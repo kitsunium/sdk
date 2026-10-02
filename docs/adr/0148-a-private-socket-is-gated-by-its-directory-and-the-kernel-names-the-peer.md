@@ -3,6 +3,7 @@
 - **Status**: Proposed
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — `ipc` gains a core, with the ports a test double needs
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework's daemon profile and listeners are its first consumer), [ADR 0052](0052-sdk-lock-domain.md) / [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) (a directory another account can write to is refused), [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) / [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md) (Windows entry points bound with `syscall.NewLazyDLL`, no `x/sys`), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no core package), [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the 104-byte `sun_path`)
 
 ## Context
