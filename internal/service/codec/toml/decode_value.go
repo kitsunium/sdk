@@ -10,13 +10,11 @@ import (
 
 // value decodes node n into v.
 func (d *decoder) value(n int32, v reflect.Value) error {
-	//: pointers are followed, and allocated when nil.
-	for v.Kind() == reflect.Pointer {
-		//: a nil pointer gets a fresh value.
-		if v.IsNil() {
-			v.Set(reflect.New(v.Type().Elem()))
-		}
-		v = v.Elem()
+	v, ok := allocPointers(v)
+	//: a pointer type that points to itself never reaches a value.
+	if !ok {
+		//: refused.
+		return d.fail(n, problemPointerLoop, v.Type())
 	}
 	//: an interface takes the untyped value.
 	if v.Kind() == reflect.Interface {
@@ -34,6 +32,27 @@ func (d *decoder) value(n int32, v reflect.Value) error {
 	default:
 		return d.scalar(n, v)
 	}
+}
+
+// allocPointers follows the pointers of v, allocating the nil ones, and
+// reports false past maxDepth of them: only a type that points to itself —
+// type P *P — has a chain that long, and it never ends.
+func allocPointers(v reflect.Value) (reflect.Value, bool) {
+	//: each pointer, until a value that is not one.
+	for hops := int32(0); v.Kind() == reflect.Pointer; hops++ {
+		//: a chain no real type has.
+		if hops == maxDepth {
+			//: refused by the caller.
+			return v, false
+		}
+		//: a nil pointer gets a fresh value.
+		if v.IsNil() {
+			v.Set(reflect.New(v.Type().Elem()))
+		}
+		v = v.Elem()
+	}
+	//: the value at the end.
+	return v, true
 }
 
 // intoInterface stores node n into the interface v: the untyped value, merged

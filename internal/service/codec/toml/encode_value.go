@@ -68,8 +68,18 @@ func (e *encoder) appendValue(b []byte, v reflect.Value, opts fieldOptions) ([]b
 
 // appendIndirect writes what a pointer or an interface holds: a nil pointer
 // as its type's zero value, as the previous library wrote it; a nil interface
-// is refused, having no type to take a zero value from.
+// is refused, having no type to take a zero value from. Each level goes back
+// through appendValue, which may find a TextMarshaler there, and the levels
+// are counted, so a pointer that refers to itself is refused rather than
+// followed until the stack runs out.
 func (e *encoder) appendIndirect(b []byte, v reflect.Value, opts fieldOptions) ([]byte, error) {
+	//: a chain no real type has: a pointer that refers to itself.
+	if e.hops >= maxDepth {
+		//: refused.
+		return b, encodeFail(problemPointerLoop, v.Type())
+	}
+	e.hops++
+	defer func() { e.hops-- }()
 	//: a non-nil pointer or interface.
 	if !v.IsNil() {
 		//: what it holds.

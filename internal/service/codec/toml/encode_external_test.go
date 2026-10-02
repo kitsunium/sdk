@@ -323,6 +323,44 @@ func TestMarshalRefusals(t *testing.T) {
 	}
 }
 
+// selfPointer is a pointer type that points to itself.
+type selfPointer *selfPointer
+
+// TestPointerLoops refuses a pointer that refers to itself, in either
+// direction, instead of following it forever.
+func TestPointerLoops(t *testing.T) {
+	t.Parallel()
+	var loop selfPointer
+	loop = &loop
+	var nilLoop selfPointer
+	//: a value that refers to itself, the type alone, and a loop at the root.
+	for name, value := range map[string]any{
+		"value in a map":  map[string]any{"p": loop},
+		"nil of the type": map[string]any{"p": nilLoop},
+		"root":            loop,
+	} {
+		_, err := toml.New().Marshal(value)
+		//: refused, naming the loop.
+		if !errs.HasReason(err, "MARSHAL_FAILED") || fieldOf(err, "problem") != "a pointer refers to itself" {
+			t.Errorf("Marshal %s: %v %v", name, err, errs.FieldsOf(err))
+		}
+	}
+	var target selfPointer
+	err := toml.New().Unmarshal([]byte("a = 1\n"), &target)
+	//: and decoding into the type is refused the same way.
+	if !errs.HasReason(err, "UNMARSHAL_FAILED") || fieldOf(err, "problem") != "a pointer refers to itself" {
+		t.Errorf("Unmarshal: %v %v", err, errs.FieldsOf(err))
+	}
+	var holder struct {
+		P selfPointer `toml:"p"`
+	}
+	err = toml.New().Unmarshal([]byte("p = 1\n"), &holder)
+	//: as a field too.
+	if fieldOf(err, "problem") != "a pointer refers to itself" || fieldOf(err, "key") != "p" {
+		t.Errorf("Unmarshal into a field: %v %v", err, errs.FieldsOf(err))
+	}
+}
+
 // TestMarshalTextCauseKept pins that a MarshalText error stays reachable
 // under the codec's refusal.
 func TestMarshalTextCauseKept(t *testing.T) {

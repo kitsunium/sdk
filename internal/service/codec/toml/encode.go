@@ -39,6 +39,9 @@ const (
 	problemNotUTF8 string = "a string is not valid UTF-8"
 	// problemMarshalText: a TextMarshaler that failed.
 	problemMarshalText string = "a MarshalText method returned an error"
+	// problemPointerLoop: a pointer type that points to itself, type P *P,
+	// or a value that does.
+	problemPointerLoop string = "a pointer refers to itself"
 )
 
 // maxRetainedEncoderEntries is the entry capacity above which an encoder is
@@ -68,6 +71,9 @@ type encoder struct {
 	free [][]entry
 	// depth is how many tables and arrays enclose the value being written.
 	depth int32
+	// hops is how many pointers and interfaces enclose the value being
+	// written.
+	hops int32
 	// lastWasHeader says the last line written was a table header.
 	lastWasHeader bool
 }
@@ -85,6 +91,7 @@ func (e *encoder) reset() {
 	e.buf = nil
 	e.keys = e.keys[:0]
 	e.depth = 0
+	e.hops = 0
 	e.lastWasHeader = false
 	//: the entries hold reflect.Values: cleared so they pin no caller memory.
 	for i := range e.free {
@@ -109,10 +116,10 @@ func encodeDocument(dst []byte, v any) ([]byte, error) {
 	defer encoderPool.Put(e)
 	e.buf = dst
 	root, ok := resolve(reflect.ValueOf(v))
-	//: nil, or a pointer to nothing.
+	//: nil, a pointer to nothing, or a pointer that refers to itself.
 	if !ok {
-		//: refused.
-		return dst, encodeFail(problemNil, reflect.TypeOf(v))
+		//: refused, naming which.
+		return dst, encodeFail(nilOrLoop(root), reflect.TypeOf(v))
 	}
 	//: only a table is a document.
 	if infoOf(root.Type()).is(typeValue) {
@@ -132,9 +139,9 @@ func encodeDocument(dst []byte, v any) ([]byte, error) {
 // false when one of them is nil.
 func resolve(v reflect.Value) (reflect.Value, bool) {
 	//: until a value that is neither.
-	for v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) {
-		//: nil ends the chain.
-		if v.IsNil() {
+	for hops := int32(0); v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface); hops++ {
+		//: nil ends the chain; so does a pointer that refers to itself.
+		if v.IsNil() || hops == maxDepth {
 			//: nothing.
 			return v, false
 		}
@@ -142,6 +149,19 @@ func resolve(v reflect.Value) (reflect.Value, bool) {
 	}
 	//: the value, or invalid for an untyped nil.
 	return v, v.IsValid()
+}
+
+// nilOrLoop names why a value resolve gave up on has no representation: the
+// chain ended in nil, or it was still a non-nil pointer when resolve stopped
+// following it.
+func nilOrLoop(v reflect.Value) string {
+	//: a pointer or an interface still holding something: a loop.
+	if v.IsValid() && (v.Kind() == reflect.Pointer || v.Kind() == reflect.Interface) && !v.IsNil() {
+		//: a pointer that refers to itself.
+		return problemPointerLoop
+	}
+	//: nil.
+	return problemNil
 }
 
 // encodeFail returns MARSHAL_FAILED naming problem and the Go type concerned.
