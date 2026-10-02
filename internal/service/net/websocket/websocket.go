@@ -102,6 +102,10 @@ type Conn struct {
 	// The heartbeat reads it to tell a live peer from a silent one; the value
 	// is meaningless, only its movement matters.
 	rx atomic.Uint64
+	// hb is what the heartbeat remembers from one tick to the next. It belongs
+	// to the heartbeat: set before its goroutine starts and touched by no
+	// other afterwards, which is why it needs no lock.
+	hb heartbeatState
 	// peerCode is the close code the peer sent, or zero when it sent none.
 	peerCode atomic.Uint32
 
@@ -757,42 +761,40 @@ func (c *Conn) startHeartbeat() {
 		//: nothing to start.
 		return
 	}
-	c.pinger = worker.Start(func(stop <-chan struct{}) {
-		//: the loop owns the ticker so it stops exactly when the loop returns.
-		ticker := time.NewTicker(c.cfg.pingInterval)
-		//: release the ticker once the loop returns.
-		defer ticker.Stop()
-		seen := c.rx.Load()
-		probed := false
-		//: probe until the connection ends or Close joins us.
-		for {
-			select {
-			//: Close is joining us.
-			case <-stop:
-				//: nothing more to send.
-				return
-			//: the connection ended; the socket is no longer ours to write to.
-			case <-c.done:
-				//: nothing more to send.
-				return
-			case <-ticker.C:
-				//: a peer that has not produced a single frame since we asked
-				//: is not slow, it is gone: our Ping obliges it to answer.
-				current := c.rx.Load()
-				//: probed one full interval ago and not one frame since: a
-				//: live peer is obliged to answer a Ping, so this silence is
-				//: an ending rather than a lull.
-				if probed && current == seen {
-					c.terminate()
-					//: the connection is over.
-					return
-				}
-				seen = current
-				//: a failed Ping has already terminated the connection.
-				probed = c.Ping(nil) == nil
-			}
-		}
-	})
+	//: the silence the first tick compares against is the count right now.
+	c.hb.seen = c.rx.Load()
+	//: the loop ends on Close's Stop, or on the connection's own end — a
+	//: terminated connection closes done, so the ticking cannot outlive it.
+	c.pinger = worker.Every(c.cfg.pingInterval, c.heartbeat,
+		worker.WithClock(c.cfg.clock), worker.WithDone(c.done))
+}
+
+// heartbeatState is what the heartbeat remembers between two ticks: the frame
+// count the previous tick saw, and whether that tick's Ping went out.
+type heartbeatState struct {
+	// seen is rx as the previous tick read it.
+	seen uint64
+	// probed reports that the previous tick's Ping was sent.
+	probed bool
+}
+
+// heartbeat is one heartbeat tick, run on the pinger's goroutine and only there.
+//
+// A peer that has not produced a single frame since the previous tick asked is
+// not slow, it is gone: a live peer is obliged to answer a Ping, so a full
+// interval of silence after a probe is an ending rather than a lull.
+func (c *Conn) heartbeat() {
+	current := c.rx.Load()
+	//: probed one full interval ago and not one frame since.
+	if c.hb.probed && current == c.hb.seen {
+		//: ends the connection, which closes done and ends the ticking.
+		c.terminate()
+		//: the connection is over.
+		return
+	}
+	c.hb.seen = current
+	//: a failed Ping has already terminated the connection.
+	c.hb.probed = c.Ping(nil) == nil
 }
 
 // closeCodeFor picks the status a malformed Close payload deserves.

@@ -33,11 +33,22 @@ Setting one up and tearing it down, medians of three:
 
 | | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
-| `New` + `Close`, with keep-alive | 9 235 | 2 481 | **29** |
-| `New` + `Close`, `WithoutKeepAlive()` | 4 988 | 1 888 | **21** |
+| `New` + `Close`, with keep-alive | 9 235 | 2 513 ¹ | **30** ¹ |
+| `New` + `Close`, `WithoutKeepAlive()` | 4 988 | 1 904 ¹ | **21** |
 
-Twenty-nine allocations, not the fifteen a reading of the code suggests, and
-2 481 B allocated against 2 427 B still live afterwards — so essentially nothing
+¹ Re-measured 2026-10, when the keep-alive moved onto `worker.Every` and its
+clock became injectable: one allocation and 32 B more per stream with
+keep-alive — the tick is now a closure of its own beside the daemon's loop — and
+16 B more without, because the option set carries the keep-alive's clock. The
+deltas were measured on darwin/arm64 (Apple M1 Pro, go1.27.1), where the
+previous code reproduces the published 2 482 / 1 889 B to the byte (29 / 21
+allocations) and this code reads 2 514 / 1 905 B (30 / 21); the published rows
+carry the same deltas. ns/op and the footprint figures below were not
+re-measured.
+
+Thirty allocations, not the fifteen a reading of the code suggests, and
+2 481 B allocated against 2 427 B still live afterwards (before the change
+above) — so essentially nothing
 about opening a stream is transient. The ns/op is bounded below by two scheduler
 round trips, because `Close` JOINS both goroutines; it is not a measurement of
 this package's code so much as of the runtime's hand-off.
@@ -45,8 +56,9 @@ this package's code so much as of the runtime's hand-off.
 ### The second goroutine, and why it is still there
 
 The delta between the two rows is exactly one `worker.LoopDaemon`, its two
-channels and a `time.Ticker`: **8 allocations, 594 B of heap, 2 687 B of stack
-and 4 247 ns**. Merging the watcher into the keep-alive would recover all of it
+channels, its ticker and the tick closure: **9 allocations, about 610 B of heap
+(8 and 594 B before the keep-alive ran on `worker.Every`), 2 687 B of stack and
+4 247 ns**. Merging the watcher into the keep-alive would recover all of it
 and take 10 000 streams from 81.2 MB to 47.1 MB.
 
 It is **refused**, and the reason is a failure mode rather than a preference.
@@ -332,8 +344,8 @@ goarch: amd64
 pkg: github.com/kitsunium/sdk/internal/service/net/sse
 cpu: AMD EPYC 7351P 16-Core Processor
                                           BEFORE         AFTER
-BenchmarkNewClose/with_keepalive               —      9235 ns/op   2481 B/op   29 allocs/op
-BenchmarkNewClose/without_keepalive            —      4988 ns/op   1888 B/op   21 allocs/op
+BenchmarkNewClose/with_keepalive               —      9235 ns/op   2513 B/op   30 allocs/op   (B/op, allocs re-measured 2026-10, see ¹)
+BenchmarkNewClose/without_keepalive            —      4988 ns/op   1904 B/op   21 allocs/op   (B/op re-measured 2026-10, see ¹)
 BenchmarkSend/no_deadlines/0000064      157.7 ns/op   80.10 ns/op      0 B/op    0 allocs/op
 BenchmarkSend/no_deadlines/0000256      236.2 ns/op   99.12 ns/op      0 B/op    0 allocs/op
 BenchmarkSend/no_deadlines/0001024      593.4 ns/op   173.1 ns/op      0 B/op    0 allocs/op

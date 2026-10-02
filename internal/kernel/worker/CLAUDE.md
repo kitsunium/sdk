@@ -21,7 +21,7 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 | `LoopDaemon.Stop` | `Stop()` | idempotent: `close(stop)` once, then `<-done` |
 | `LoopDaemon.Done` | `Done() <-chan struct{}` | closed when the loop has returned |
 | `Every` | `Every(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon` | ticker loop; `Stop` joins |
-| `EveryOption` | `func(*everyConfig)` | tunes `Every`; applied in order, a nil one skipped |
+| `EveryOption` | `func(everyConfig) everyConfig` | tunes `Every`; applied in order, a nil one skipped; by value, so the option set never escapes to the heap |
 | `WithClock` | `WithClock(w clock.Waiter) EveryOption` | tick on `w` instead of the wall clock — a `ManualClock` in a test; nil is the wall clock |
 | `WithDone` | `WithDone(done <-chan struct{}) EveryOption` | also end the loop when `done` closes — the owner's own end, without waiting for `Stop` |
 
@@ -35,7 +35,7 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 
 - **The Loop MUST return promptly on `stop`.** A `Loop` that ignores its `stop`
   channel deadlocks `Stop`, which blocks on the join. Loops `select` on `stop`
-  (see the `net/sse` and `net/websocket` watchers and pingers) and exit their
+  (see the `net/sse` and `net/websocket` watchers) and exit their
   work loop when it is closed. A loop that ends by other means must be ended
   before `Stop`, or joined through `Done`: the async drainer exits on its
   sink's own stop channel, which `Close` closes before it calls `Stop`, and
@@ -70,7 +70,9 @@ three real consumers each hand-rolled (ADR 0014 §D6).
   in the same commit that introduced this package, as the proving consumer).
 - `internal/service/net/server` — the goroutine running `http.Server.Serve`.
 - `internal/service/net/sse` and `internal/service/net/websocket` — each
-  stream's or connection's drain watcher and keep-alive pinger.
+  stream's or connection's drain watcher (`Start`) and its keep-alive /
+  heartbeat (`Every`, on the stream's or connection's clock, ended early by
+  `WithDone` on the stream's own end).
 - `internal/service/writer/rotfile` — interval rotation, through `Every`.
 
 The s3 / cloudwatch batching sinks under `third-party/aws/writer/*` do not use

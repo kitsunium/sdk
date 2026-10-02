@@ -11,7 +11,12 @@ import (
 
 // EveryOption tunes [Every]. Options apply in order, so a later one wins; a nil
 // option is skipped.
-type EveryOption func(*everyConfig)
+//
+// An option takes the option set by value and returns the amended copy rather
+// than writing through a pointer: handing an unknown function a pointer to the
+// set would move the set to the heap on every Every call, and Every is built
+// once per stream or connection by the network domains.
+type EveryOption func(everyConfig) everyConfig
 
 // everyConfig is the resolved option set. It is unexported because each zero
 // field has one meaning — the wall clock, no early end — decided in
@@ -29,8 +34,10 @@ type everyConfig struct {
 // sleeping and hoping. A nil w is the wall clock.
 func WithClock(w clock.Waiter) EveryOption {
 	//: applied in order by Every, so a later option deliberately wins.
-	return func(c *everyConfig) {
+	return func(c everyConfig) everyConfig {
 		c.waiter = w
+		//: the amended copy.
+		return c
 	}
 }
 
@@ -42,8 +49,10 @@ func WithClock(w clock.Waiter) EveryOption {
 // on a loop that has already left. A nil done never fires.
 func WithDone(done <-chan struct{}) EveryOption {
 	//: applied in order by Every, so a later option deliberately wins.
-	return func(c *everyConfig) {
+	return func(c everyConfig) everyConfig {
 		c.done = done
+		//: the amended copy.
+		return c
 	}
 }
 
@@ -109,7 +118,7 @@ func resolveEvery(opts []EveryOption) everyConfig {
 			//: nothing to apply.
 			continue
 		}
-		opt(&cfg)
+		cfg = opt(cfg)
 	}
 	//: no clock named, or a nil one: the wall clock, the only non-arbitrary default.
 	if cfg.waiter == nil {

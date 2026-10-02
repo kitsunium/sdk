@@ -103,29 +103,41 @@ BenchmarkSend/text/4096-8                          396.5 ns/op  10329.8 MB/s    
 BenchmarkSend/text/65536-8                        4391   ns/op  14926.3 MB/s      0 B/op   0 allocs/op
 
 BenchmarkFirstFrame/baseline-8                     119.9 ns/op                   160 B/op   2 allocs/op
-BenchmarkFirstFrame/accept_binary/64-8             600.2 ns/op                   640 B/op   4 allocs/op
-BenchmarkFirstFrame/accept_binary/4096-8          4885   ns/op                  4672 B/op   4 allocs/op
-BenchmarkFirstFrame/accept_text/4096-8            5051   ns/op                  4672 B/op   4 allocs/op
-BenchmarkFirstFrame/accept_bounded/4096-8         4860   ns/op                  4672 B/op   4 allocs/op
-BenchmarkConnLifecycle-8                          2307   ns/op                  1408 B/op   9 allocs/op
+BenchmarkFirstFrame/accept_binary/64-8             600.2 ns/op                   672 B/op   4 allocs/op
+BenchmarkFirstFrame/accept_binary/4096-8          4885   ns/op                  4704 B/op   4 allocs/op
+BenchmarkFirstFrame/accept_text/4096-8            5051   ns/op                  4704 B/op   4 allocs/op
+BenchmarkFirstFrame/accept_bounded/4096-8         4860   ns/op                  4704 B/op   4 allocs/op
+BenchmarkConnLifecycle-8                          2307   ns/op                  1440 B/op   9 allocs/op
 
-BenchmarkRefusal/unmasked_client_frame-8           896.4 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/reserved_bit-8                    880.7 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/reserved_opcode-8                 881.5 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/oversized_control_frame-8         958.7 ns/op                   912 B/op   5 allocs/op
-BenchmarkRefusal/fragmented_control_frame-8        900.1 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/non_minimal_length_16-8           906.8 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/non_minimal_length_64-8           901.2 ns/op                   848 B/op   5 allocs/op
-BenchmarkRefusal/orphan_continuation-8             931.6 ns/op                   784 B/op   5 allocs/op
-BenchmarkRefusal/interrupted_fragmentation-8      1121   ns/op                   856 B/op   6 allocs/op
-BenchmarkRefusal/frame_ceiling-8                   959.0 ns/op                   912 B/op   5 allocs/op
-BenchmarkRefusal/message_ceiling-8                5705   ns/op                  5008 B/op   6 allocs/op
-BenchmarkRefusal/invalid_utf8/4096-8              5656   ns/op                  4944 B/op   6 allocs/op
+BenchmarkRefusal/unmasked_client_frame-8           896.4 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/reserved_bit-8                    880.7 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/reserved_opcode-8                 881.5 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/oversized_control_frame-8         958.7 ns/op                   944 B/op   5 allocs/op
+BenchmarkRefusal/fragmented_control_frame-8        900.1 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/non_minimal_length_16-8           906.8 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/non_minimal_length_64-8           901.2 ns/op                   880 B/op   5 allocs/op
+BenchmarkRefusal/orphan_continuation-8             931.6 ns/op                   816 B/op   5 allocs/op
+BenchmarkRefusal/interrupted_fragmentation-8      1121   ns/op                   888 B/op   6 allocs/op
+BenchmarkRefusal/frame_ceiling-8                   959.0 ns/op                   944 B/op   5 allocs/op
+BenchmarkRefusal/message_ceiling-8                5705   ns/op                  5040 B/op   6 allocs/op
+BenchmarkRefusal/invalid_utf8/4096-8              5656   ns/op                  4976 B/op   6 allocs/op
 
 BenchmarkLoopback/64-8                           16698   ns/op      3.8 MB/s      80 B/op   3 allocs/op
 BenchmarkLoopback/4096-8                         27012   ns/op    151.6 MB/s    4112 B/op   3 allocs/op
 BenchmarkLoopbackUpgrade-8                      262653   ns/op                 20167 B/op 112 allocs/op
 ```
+
+> **B/op re-measured 2026-10.** Every row that builds a `Conn` —
+> `FirstFrame/accept_*`, `ConnLifecycle` and every `Refusal` — carries **32 B
+> more** than when this report was generated, because a connection now holds
+> the clock its heartbeat ticks on and the heartbeat's two-field state (so a
+> test drives the heartbeat with a `ManualClock`). The figures above are the
+> published ones plus those 32 B, re-measured on darwin/arm64 (Apple M1 Pro,
+> go1.27.1), where the previous code reproduces every published B/op exactly.
+> The allocation COUNTS are unchanged, and so is every steady-state row: the
+> reader and the writer allocate nothing either way. ns/op were not re-measured;
+> `LoopbackUpgrade` runs a real TCP handshake through net/http, whose share is
+> operating-system specific, so its row is left as measured.
 
 ### Every run behind every median
 
@@ -314,7 +326,7 @@ Nine refusals, detected at nine different depths — the first inside
 been parsed and validated — spanning **8.9 %** end to end, against per-row
 spreads of 0.9–2.3 %. Where the check sits is not what the number is made of.
 What the number is made of is the two things every refusal shares: building the
-typed `errs` error (one allocation more than an acceptance, 848 B against 640 B)
+typed `errs` error (one allocation more than an acceptance, 880 B against 672 B)
 and putting the §7.1.7 courtesy Close frame on the wire.
 
 Which means the Close frame — the thing that turns "the server hung up" into a
@@ -381,7 +393,7 @@ carries the number the test printed rather than the number that was predicted.
 
 The first-frame rows are the other half of the picture and do not contradict it:
 `accept_binary/4096` costs 4 885 ns against the steady state's 3 274 ns, and
-4 672 B against 640 B. The 1 611 ns and 4 032 B difference is the reassembly
+4 704 B against 672 B. The 1 611 ns and 4 032 B difference is the reassembly
 buffer being allocated for the first time. A connection pays that once.
 
 ## 4. An extra frame costs ~115 ns — and the row that says 270 ns is `bufio`

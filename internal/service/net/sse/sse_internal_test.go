@@ -9,6 +9,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -249,3 +250,81 @@ func (w *retentionWriter) WriteHeader(int) {}
 
 // Flush implements http.Flusher, which is the streaming contract.
 func (w *retentionWriter) Flush() {}
+
+// Test_Stream_keepAliveOnInjectedClock pins the keep-alive on the clock it is
+// given: one comment each time the clock passes the interval, none in
+// between, and none once the stream has ended — an hour of manual time and
+// none of the wall clock.
+func Test_Stream_keepAliveOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		interval time.Duration
+	}
+	tests := []tc{
+		{"an hourly keep-alive", time.Hour},
+		{"the default keep-alive", DefaultKeepAlive},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		w := &commentWriter{header: make(http.Header), frames: make(chan string, 4)}
+		stream, err := New(w, httptest.NewRequest(http.MethodGet, "/events", nil),
+			KeepAlive(c.interval), func(cf *config) { cf.clock = manual })
+		if err != nil {
+			t.Fatalf("New() = %v, want a stream", err)
+		}
+		//: the pinger armed its ticker on the manual clock.
+		manual.BlockUntil(1)
+		for tick := range 2 {
+			manual.Advance(c.interval)
+			select {
+			case frame := <-w.frames:
+				if !strings.HasPrefix(frame, ":") {
+					t.Fatalf("tick %d wrote %q, want a comment", tick, frame)
+				}
+			case <-time.After(5 * time.Second):
+				t.Fatalf("tick %d: one interval on the injected clock wrote nothing", tick)
+			}
+		}
+		if cerr := stream.Close(); cerr != nil {
+			t.Errorf("Close() = %v, want nil", cerr)
+		}
+		//: the pinger was joined with the stream, so its ticker is released.
+		if pending := manual.Pending(); pending != 0 {
+			t.Errorf("after Close the clock holds %d armed waits, want 0", pending)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// commentWriter is a flushing response that hands every write to the test.
+type commentWriter struct {
+	header http.Header
+	// frames receives each write as it happens.
+	frames chan string
+}
+
+// Header implements http.ResponseWriter.
+func (w *commentWriter) Header() http.Header {
+	//: the map itself, so a caller's Set is visible here.
+	return w.header
+}
+
+// Write implements http.ResponseWriter by handing the bytes to the test.
+func (w *commentWriter) Write(p []byte) (int, error) {
+	w.frames <- string(p)
+	//: every byte accepted.
+	return len(p), nil
+}
+
+// WriteHeader implements http.ResponseWriter.
+func (w *commentWriter) WriteHeader(int) {}
+
+// Flush implements http.Flusher, which is the streaming contract.
+func (w *commentWriter) Flush() {}
