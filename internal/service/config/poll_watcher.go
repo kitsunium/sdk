@@ -3,20 +3,19 @@ package config
 
 import (
 	"context"
-	"errors"
 	"os"
 	"time"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
 )
 
-// errNonPositiveInterval / errNilOnChange are the local causes carried into
-// CONFIG_WATCH_FAILED by Watch's input guards. They are plain stdlib errors on
-// purpose: wrapAs only reads cause.Error() into a field, so these never become
-// an error origin and cannot collide with the SDK code registry.
-var (
-	errNonPositiveInterval = errors.New("poll interval must be > 0")
-	errNilOnChange         = errors.New("onChange callback must not be nil")
+// causeNonPositiveInterval / causeNilOnChange are what Watch's input guards
+// say in CONFIG_WATCH_FAILED's cause field. They are sentences, not errors:
+// the field holds text, so withCause carries them as text and never mints the
+// stdlib error rule 2 bans.
+const (
+	causeNonPositiveInterval = "poll interval must be > 0"
+	causeNilOnChange         = "onChange callback must not be nil"
 )
 
 // pollWatcher detects file changes by polling its mtime+size on an interval —
@@ -99,12 +98,12 @@ func (w pollWatcher) validateInputs(onChange func()) error {
 	//: a non-positive poll interval can never produce a tick.
 	if w.interval <= 0 {
 		//: surface the documented watch sentinel.
-		return wrapAs(coreconfig.ConfigWatchFailed, errNonPositiveInterval)
+		return withCause(coreconfig.ConfigWatchFailed, causeNonPositiveInterval)
 	}
 	//: a nil callback would panic on the first detected change.
 	if onChange == nil {
 		//: refuse rather than deferring the panic.
-		return wrapAs(coreconfig.ConfigWatchFailed, errNilOnChange)
+		return withCause(coreconfig.ConfigWatchFailed, causeNilOnChange)
 	}
 	//: inputs are usable.
 	return nil
