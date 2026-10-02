@@ -3,8 +3,6 @@ package msgpack
 import (
 	"bytes"
 	"testing"
-
-	gomsgpack "github.com/vmihailenco/msgpack/v5"
 )
 
 // Test_msgpackDecoder_Decode covers both a success path and a malformed-input
@@ -22,7 +20,7 @@ func Test_msgpackDecoder_Decode(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &msgpackDecoder{inner: gomsgpack.NewDecoder(bytes.NewReader(tc.data))}
+		dec := newDecoder(bytes.NewReader(tc.data))
 		var out map[string]any
 		err := dec.Decode(&out)
 		//: treat EOF on the empty case as non-error.
@@ -48,7 +46,7 @@ func Test_msgpackDecoder_More(t *testing.T) {
 	tests := []tc{{"idempotent before any Decode"}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &msgpackDecoder{inner: gomsgpack.NewDecoder(bytes.NewReader(nil))}
+		dec := newDecoder(bytes.NewReader(nil))
 		first := dec.More()
 		second := dec.More()
 		if first != second {

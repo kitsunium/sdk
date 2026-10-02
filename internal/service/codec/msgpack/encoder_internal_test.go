@@ -3,8 +3,6 @@ package msgpack
 import (
 	"bytes"
 	"testing"
-
-	gomsgpack "github.com/vmihailenco/msgpack/v5"
 )
 
 // Test_msgpackEncoder_Encode exercises the Encode wrapper against both happy-path
@@ -22,7 +20,7 @@ func Test_msgpackEncoder_Encode(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		enc := &msgpackEncoder{inner: gomsgpack.NewEncoder(&bytes.Buffer{})}
+		enc := newEncoder(&bytes.Buffer{})
 		err := enc.Encode(tc.value)
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: Encode err=%v wantErr=%v", tc.name, err, tc.wantErr)
@@ -48,7 +46,7 @@ func Test_msgpackEncoder_Close(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		enc := &msgpackEncoder{inner: gomsgpack.NewEncoder(&bytes.Buffer{})}
+		enc := newEncoder(&bytes.Buffer{})
 		if err := enc.Encode(struct{ A int }{A: 1}); err != nil {
 			t.Fatalf("%s: Encode setup err=%v", tc.name, err)
 		}

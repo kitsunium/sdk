@@ -1,30 +1,29 @@
-// Package msgpack wraps github.com/vmihailenco/msgpack/v5 as a codec.Codec
-// implementation. The library exposes an Encoder/Decoder pair so this codec
-// also implements StreamingCodec.
+// Package msgpack is the MessagePack codec — a native implementation of the
+// specification (github.com/msgpack/msgpack/blob/master/spec.md) on the
+// standard library alone, registered as the "msgpack" Format. It replaced
+// github.com/vmihailenco/msgpack/v5 and writes the bytes that library wrote:
+// testdata/vendor-golden.txt holds the vendor's output for every value family
+// and the suite holds the native encoder to it byte for byte.
+//
+// The codec also implements StreamingCodec (one value per Encode, read back
+// one per Decode) and Appender (encode straight onto a caller's buffer).
+// Decoding is held to the bounds wire.go names: 10 MiB of input per Unmarshal
+// and per stream, 1000 levels of nesting, and no allocation sized by a length
+// the input declares before the input has proved it holds that many bytes.
 package msgpack
 
 import (
+	"bytes"
 	"io"
 	"slices"
-
-	gomsgpack "github.com/vmihailenco/msgpack/v5"
 
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// maxMsgPackBytes caps the Unmarshal input size for untrusted payloads.
-// vmihailenco/msgpack v5 does not expose per-decoder caps for array /
-// map / nesting depth; a MessagePack value with a huge declared length
-// field can pre-allocate that many slots before any consistency check,
-// so size-limiting the buffer is the primary defence against memory-
-// exhaustion DoS (CWE-400 / CWE-1284). 10 MiB comfortably covers every
-// realistic configuration or event-stream document.
-const maxMsgPackBytes int = 10 << 20
-
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// Package-level state: the codec singleton plus the hoisted MIME / extension
+// tables.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&msgpackCodec{})
@@ -63,144 +62,82 @@ func (*msgpackCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as MessagePack bytes. Uses gomsgpack's exposed
-// Encoder pool (GetEncoder/PutEncoder) plus a local *bytes.Buffer pool
-// — gomsgpack.Marshal already pools the encoder but allocates a fresh
-// bytes.Buffer per call; pooling the buffer eliminates that allocation.
+// Marshal serialises v as MessagePack bytes. The value is encoded into a
+// pooled scratch buffer and the result is one exact-size copy, so a call
+// costs one allocation plus whatever v's own marshal methods allocate.
 func (*msgpackCodec) Marshal(v any) (encoded []byte, err error) {
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
-	//: rent the encoder from the library's exposed pool.
-	enc := gomsgpack.GetEncoder()
-	//: re-point the encoder at our pooled buffer.
-	enc.Reset(buf)
-	//: UseCompactInts shrinks wire size on int-heavy payloads by
-	//: emitting positive fixint / int8 / int16 / int32 instead of the
-	//: lib default int64 for every int. Wire-compatible on the read
-	//: side (any conforming MessagePack decoder accepts narrower int
-	//: forms). Audit M3.
-	enc.UseCompactInts(true)
-	//: encode the value.
-	merr := enc.Encode(v)
-	//: return the encoder to the pool unconditionally — Encode failure
-	//: leaves the encoder in a reusable state (Reset is the contract).
-	gomsgpack.PutEncoder(enc)
-	//: failure path — surface the typed sentinel.
-	if merr != nil {
-		//: drop the buffer back to the pool only if it's not oversized.
-		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeMsgPackMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "MessagePack encoding failed",
-			Private: "service/codec/msgpack.Marshal: vmihailenco/msgpack/v5 returned an error",
-		})
+	b, merr := appendAny(buf.AvailableBuffer(), v, 0)
+	//: success copies out before the buffer goes back.
+	if merr == nil {
+		encoded = slices.Clone(b)
 	}
-	//: detach: slices.Clone so the returned slice doesn't alias the
-	//: pooled buffer (next caller would overwrite it).
-	out := slices.Clone(buf.Bytes())
-	//: cap-discard release.
+	//: keep a grown array in the pool (subject to its cap-discard).
+	retain(buf, b)
 	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
-	return out, nil
+	//: failure path — the typed MARSHAL_FAILED from the encoder.
+	if merr != nil {
+		//: nothing to hand back.
+		return nil, merr
+	}
+	//: the caller owns the copy.
+	return encoded, nil
 }
 
-// Unmarshal parses data as MessagePack into v. Uses gomsgpack's exposed
-// Decoder pool (GetDecoder/PutDecoder) plus a local *bytes.Reader pool
-// — gomsgpack.Unmarshal builds a fresh bytes.Reader per call that
-// escapes to heap; pooling it removes that allocation.
+// Unmarshal parses data — exactly one MessagePack value, at most
+// maxMsgPackBytes long — into the value v points at.
 func (*msgpackCodec) Unmarshal(data []byte, v any) error {
-	//: cap input size so attacker-controlled payloads cannot exhaust RAM
-	//: during pre-allocation from huge declared length fields.
+	//: cap input size so a hostile payload cannot make the decoder hold more
+	//: than the bound, whatever lengths it declares.
 	if len(data) > maxMsgPackBytes {
 		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
 		return errs.Wrap(nil, errs.WrapParams{
 			Code:    CodeMsgPackUnmarshalFailed,
-			Reason:  "UNMARSHAL_FAILED",
+			Reason:  reasonUnmarshal,
 			Public:  "MessagePack input exceeds size limit",
 			Private: "service/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",
 		}, errs.Int("len", len(data)), errs.Int("cap", maxMsgPackBytes))
 	}
-	//: rent a *bytes.Reader from the shared pool, positioned at data.
-	r := scratch.AcquireReader(data)
-	//: rent the decoder from the library's exposed pool.
-	dec := gomsgpack.GetDecoder()
-	dec.Reset(r)
-	//: decode into the caller's target.
-	uerr := dec.Decode(v)
-	//: return the decoder + reader to their pools unconditionally —
-	//: both are reusable post-Reset.
-	gomsgpack.PutDecoder(dec)
-	scratch.ReleaseReader(r)
-	//: success fast-path.
-	if uerr == nil {
-		//: nothing to wrap.
-		return nil
-	}
-	//: wrap the library error.
-	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeMsgPackUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "MessagePack decoding failed",
-		Private: "service/codec/msgpack.Unmarshal: vmihailenco/msgpack/v5 returned an error",
-	})
+	//: one value, nothing after it.
+	return unmarshalInto(data, v)
 }
 
-// Append encodes v as MessagePack and appends the bytes to dst. Reuses
-// the same pooled encoder + buffer as Marshal — the encode result is
-// then appended onto the caller's buffer instead of returned as a
-// fresh slice. Saves the slices.Clone Marshal pays.
+// Append encodes v as MessagePack and appends the bytes to dst, encoding
+// straight onto it: no intermediate buffer and no copy. On failure dst is
+// returned with its original length.
 func (*msgpackCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent an already-Reset buffer from the shared codec pool.
-	buf := scratch.AcquireBuffer()
-	//: rent the encoder from the library's exposed pool.
-	enc := gomsgpack.GetEncoder()
-	//: re-point the encoder at our pooled buffer.
-	enc.Reset(buf)
-	//: UseCompactInts — same wire-compatible flag as Marshal.
-	enc.UseCompactInts(true)
-	//: encode the value.
-	merr := enc.Encode(v)
-	//: return the encoder to the lib pool unconditionally.
-	gomsgpack.PutEncoder(enc)
-	//: failure path — surface the typed sentinel, leave dst pristine.
-	if merr != nil {
-		//: drop the buffer back to the pool if not oversized.
-		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return dst, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeMsgPackMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "MessagePack encoding failed",
-			Private: "service/codec/msgpack.Append: vmihailenco/msgpack/v5 returned an error",
-		})
+	out, aerr := appendAny(dst, v, 0)
+	//: failure path — the caller's slice keeps its length.
+	if aerr != nil {
+		//: dst as it came in.
+		return dst, aerr
 	}
-	//: append into the caller's buffer (1 copy total — no slices.Clone).
-	dst = append(dst, buf.Bytes()...)
-	//: cap-discard release.
-	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
-	return dst, nil
+	//: dst plus the encoding.
+	return out, nil
 }
 
-// NewEncoder wraps w in a streaming codec.Encoder.
+// NewEncoder wraps w in a streaming codec.Encoder: each Encode writes one
+// complete value with a single Write, and a value that fails to encode writes
+// nothing.
 func (*msgpackCodec) NewEncoder(w io.Writer) codec.Encoder {
-	//: wrap the vmihailenco encoder.
-	return &msgpackEncoder{inner: gomsgpack.NewEncoder(w)}
+	//: the encoder owns no buffer between calls.
+	return newEncoder(w)
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder. The reader is funnelled
-// through io.LimitReader(r, maxMsgPackBytes+1) so the streaming path inherits
-// the same untrusted-input cap Unmarshal enforces — a value with a huge
-// declared array / map / bin length truncates at the limit and surfaces as
-// UNMARSHAL_FAILED via Decode's wrap branch instead of pre-allocating those
-// slots (CWE-400 / CWE-1284). The +1 keeps payloads of exactly maxMsgPackBytes
-// decodable while still bounding allocation. Mirrors CBOR's hardened DecMode
-// streaming fix.
+// NewDecoder wraps r in a streaming codec.Decoder. The whole stream is held to
+// one byte past maxMsgPackBytes — the bound Unmarshal enforces on one input —
+// and a declared length beyond what the stream can still deliver is refused
+// before anything is read or reserved for it (CWE-400 / CWE-1284).
 func (*msgpackCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: cap the stream so a single oversized value cannot exhaust RAM.
-	limited := io.LimitReader(r, int64(maxMsgPackBytes)+1)
-	//: wrap the vmihailenco decoder over the bounded reader.
-	return &msgpackDecoder{inner: gomsgpack.NewDecoder(limited)}
+	//: the decoder buffers reads; values are framed one at a time.
+	return newDecoder(r)
+}
+
+// retain hands b's backing array to buf, so a buffer that grew while encoding
+// returns to the pool at its new size — scratch discards it past
+// MaxRetainedBufBytes.
+func retain(buf *bytes.Buffer, b []byte) {
+	//: adopt the array without copying; the next user starts empty.
+	*buf = *bytes.NewBuffer(b[:0])
 }

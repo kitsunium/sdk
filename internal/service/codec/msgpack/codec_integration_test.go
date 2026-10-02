@@ -29,16 +29,20 @@ func TestAllocBudget(t *testing.T) {
 		ceil float64
 		fn   func()
 	}
-	//: ceilings captured on the race-off lane at the scratch-migration commit.
+	//: ceilings of the native implementation, measured on the race-off lane:
+	//: marshal is the result copy, append nothing at all, unmarshal the
+	//: decode cursor plus the map and its first group — and every closure
+	//: pays one more for boxing its result into allocSink. The vendor-backed
+	//: codec stood at 8 / 9 / 7.
 	tests := []tc{
-		{"marshal", 8, func() {
+		{"marshal", 2, func() {
 			out, merr := c.Marshal(payload)
 			if merr != nil {
 				t.Fatalf("Marshal: %v", merr)
 			}
 			allocSink = out
 		}},
-		{"unmarshal", 9, func() {
+		{"unmarshal", 4, func() {
 			var dst map[string]int
 			if uerr := c.Unmarshal(seed, &dst); uerr != nil {
 				t.Fatalf("Unmarshal: %v", uerr)
@@ -49,7 +53,7 @@ func TestAllocBudget(t *testing.T) {
 	//: Append is optional — measure it only when the codec implements it.
 	if appender, ok := c.(corecodec.Appender); ok {
 		dst := make([]byte, 0, 256)
-		tests = append(tests, tc{"append", 7, func() {
+		tests = append(tests, tc{"append", 1, func() {
 			out, aerr := appender.Append(dst[:0], payload)
 			if aerr != nil {
 				t.Fatalf("Append: %v", aerr)
