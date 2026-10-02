@@ -8,8 +8,10 @@ import (
 	"net/url"
 	"strings"
 	"testing"
+	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -363,5 +365,80 @@ func Test_guard_handsThePolicyTheEscapedPath(t *testing.T) {
 	//: and the record must carry the same string, not the decoded one.
 	if observed[0].Path != want {
 		t.Errorf("the record carries path %q, want %q", observed[0].Path, want)
+	}
+}
+
+// clockedTransport moves a manual clock by took while the call is in flight,
+// standing in for a peer that takes that long to answer — or to fail.
+type clockedTransport struct {
+	// clk is the clock the guard times the call on.
+	clk *clock.ManualClock
+	// took is how long the call lasts on that clock.
+	took time.Duration
+	// err, when set, is the transport failure the call ends with.
+	err error
+}
+
+// RoundTrip implements http.RoundTripper.
+func (c clockedTransport) RoundTrip(*http.Request) (*http.Response, error) {
+	//: the call's whole duration, on the guard's clock and on no other.
+	c.clk.Advance(c.took)
+	//: an unreachable peer is timed like any other call.
+	if c.err != nil {
+		//: nothing came back.
+		return nil, c.err
+	}
+	//: a minimal answer; the guard reads the status and bounds the body.
+	return &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader("ok"))}, nil
+}
+
+// Test_guard_timesTheCallOnItsClock pins that the Duration the observation hook
+// receives is measured on the guard's clock: exactly what a manual clock was
+// advanced while the call was in flight, for an answered call and for an
+// unreachable peer alike — no wall-clock tolerance in either.
+func Test_guard_timesTheCallOnItsClock(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		took time.Duration
+		err  error
+	}
+	tests := []tc{
+		{name: "an answered call", took: 250 * time.Millisecond},
+		{name: "an unreachable peer", took: time.Minute, err: errors.New("connection refused")},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		var calls []corenet.CallValue
+		g := &guard{
+			next:     clockedTransport{clk: manual, took: c.took, err: c.err},
+			policy:   corenet.PolicyFunc(func(corenet.RequestValue) error { return nil }),
+			maxBytes: defaultMaxResponseSize,
+			hook:     func(call corenet.CallValue) { calls = append(calls, call) },
+			clk:      manual,
+		}
+		resp, err := g.RoundTrip(newGuardRequest(t, http.MethodGet, "https://api.example.test/v1/items"))
+		//: an answered call reports itself once its body has been consumed.
+		if err == nil {
+			if _, rerr := io.ReadAll(resp.Body); rerr != nil {
+				t.Fatalf("reading the body: %v", rerr)
+			}
+			if cerr := resp.Body.Close(); cerr != nil {
+				t.Fatalf("closing the body: %v", cerr)
+			}
+		}
+		if len(calls) != 1 {
+			t.Fatalf("the hook saw %d calls, want 1", len(calls))
+		}
+		if calls[0].Duration != c.took {
+			t.Errorf("the hook saw Duration %v, want exactly %v", calls[0].Duration, c.took)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }

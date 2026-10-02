@@ -102,6 +102,11 @@ Public façade: `pkg/v1/client`.
   — two heap allocations per request for an observer that does not exist, while
   a comment two lines away claimed a nil hook cost one comparison. The ceiling
   (`cappedBody`) is still installed unconditionally and must be.
+- **A call is timed on the guard's clock.** `CallValue.Duration` is read through
+  `kernel/clock` — `clock.System` for every guard `New` builds, an interface
+  call on a zero-size value that allocates nothing — and a white-box test sets a
+  `ManualClock`, so `Test_guard_timesTheCallOnItsClock` asserts the exact
+  duration a transport spent rather than a wall-clock tolerance.
 - **The peer's `Content-Length` is a hint, bounded at `maxPresizedRead`.**
   `io.ReadAll` starts at 512 bytes and grows by append, so it allocates roughly
   twice a large body. The obvious repair is worse than the defect: sizing from

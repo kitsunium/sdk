@@ -3,9 +3,9 @@ package client
 
 import (
 	"net/http"
-	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -27,6 +27,10 @@ type guard struct {
 	maxBytes int64
 	// hook observes each call; may be nil.
 	hook corenet.CallHook
+	// clk times each call for the observation record. Nil — every guard New
+	// builds — is clock.System; a white-box test sets a ManualClock so the
+	// reported Duration is exactly what the test advanced.
+	clk clock.Clock
 }
 
 // RoundTrip implements http.RoundTripper.
@@ -50,9 +54,12 @@ func (g *guard) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 		//: return the policy's own refusal unchanged.
 		return nil, derr
 	}
-	started := time.Now()
+	//: timed on the guard's clock — an interface call on a zero-size value in
+	//: production, so it allocates nothing on the request path.
+	clk := g.clockOrSystem()
+	started := clk.Now()
 	resp, err = g.next.RoundTrip(req)
-	elapsed := time.Since(started)
+	elapsed := clk.Since(started)
 	//: an unreachable peer is reported as a domain failure, and the transport
 	//: message is not echoed — it can carry the internal address.
 	if err != nil {
@@ -104,6 +111,18 @@ func (g *guard) RoundTrip(req *http.Request) (resp *http.Response, err error) {
 	resp.Body = capped
 	//: the response is handed back with its body already bounded.
 	return resp, nil
+}
+
+// clockOrSystem returns the clock calls are timed on: the injected one, or the
+// wall clock when none was set.
+func (g *guard) clockOrSystem() clock.Clock {
+	//: New sets none; only a white-box test does.
+	if g.clk == nil {
+		//: production times calls on real time.
+		return clock.System
+	}
+	//: the test's ManualClock.
+	return g.clk
 }
 
 // observe hands the completed call to the hook when one is configured.
