@@ -229,6 +229,10 @@ func (b *layoutBuilder) inline(field *structField, forced bool) bool {
 		//: keep it as one field.
 		return false
 	}
+	//: a type refused on its own is refused once inlined, too.
+	if sub.dupName != "" {
+		b.fail(sub.dupName)
+	}
 	//: graft each embedded field under the embedding's index.
 	for _, sf := range sub.fields {
 		//: a forced inline drops the names already taken.

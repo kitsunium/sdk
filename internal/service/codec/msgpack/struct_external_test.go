@@ -31,6 +31,11 @@ type (
 		X int `msgpack:"x"`
 		Y int `msgpack:"x"`
 	}
+	// embedsDuplicate inlines a type that is refused on its own.
+	embedsDuplicate struct {
+		duplicateKey
+		Z int `msgpack:"z"`
+	}
 	// selfEmbed embeds a pointer to itself.
 	selfEmbed struct {
 		*selfEmbed
@@ -177,6 +182,9 @@ func TestStructRefusals(t *testing.T) {
 	var dup duplicateKey
 	if err := c.Unmarshal([]byte{0x80}, &dup); !errs.HasReason(err, "UNMARSHAL_FAILED") {
 		t.Fatalf("decode into a duplicate key: %v", err)
+	}
+	if _, err := c.Marshal(embedsDuplicate{}); !errs.HasReason(err, "MARSHAL_FAILED") {
+		t.Fatalf("encode of an inlined duplicate key: %v", err)
 	}
 	var hid withHidden
 	if err := c.Unmarshal(mustMarshal(t, map[string]int{"H": 1}), &hid); !errs.HasReason(err, "UNMARSHAL_FAILED") {
