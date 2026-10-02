@@ -3,7 +3,7 @@
 - **Status**: Proposed
 - **Date**: 2026-10-02
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (the copy-on-write view a snapshot can be cut from), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3)
+- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19)
 
 ## Context
 
@@ -16,14 +16,17 @@ writes has nothing to import.
 The first consumer has that problem exactly. A replicator makes a Forgejo
 deployment active on three nodes — Warsaw (WAW), Frankfurt (FRA), Roubaix
 (RBX), measured round trips WAW–FRA 22.8 ms, WAW–RBX 27.3 ms, FRA–RBX 9.6 ms.
-It replicates the EFFECTS of Git writes rather than the requests: the objects
-are pushed to the peers from the `pre-receive` hook, and the reference update
-`{repository, ref, old SHA, new SHA}` is proposed to a replicated log from the
-`reference-transaction` hook (`preparing` to order it, `prepared` to have it
-committed). Every node applies the log in order, with a compare-and-swap on
-the old SHA and a per-repository XOR checksum of `(ref, SHA)` pairs to detect
-divergence. A request that follows a write carries the log position the write
-committed at, and the node serving it waits until it has applied that far.
+It replicates the EFFECTS of Git writes rather than the requests. The objects
+are written to a majority from the `pre-receive` hook. The reference
+transaction `{repository, [(ref, expected SHA, expected revision, new SHA)]}`
+is proposed to a replicated log from the `reference-transaction` hook, in its
+`prepared` phase. Every node applies the log in order to a replicated **ref
+table**, a pure state the log orders, with a per-repository checksum to detect
+divergence. **Git is an asynchronous projection of that table** on each node,
+with its own durable cursor. A request that follows a write carries the log
+position the write committed at, and the node serving it waits until its
+projection of that repository has reached it. This is the owner's decision
+Q1 of the challenge, recorded in D3 and D19 (R1-01).
 The decision to keep this log in a consensus group written from scratch,
 rather than in a PostgreSQL table or an existing library, was taken by the
 owner on 2026-10-02; this ADR proposes where that code lives and what it
@@ -83,7 +86,8 @@ textbook covers first.
 
 Add **`consensus`** as a new domain in the three-layer shape of ADR 0001:
 `internal/core/consensus` (`0.2.57.*`), `internal/service/consensus`
-(`0.3.92.*`), `pkg/v1/consensus`. One algorithm ships — Raft — and **no
+(`0.3.92.*`), `pkg/v1/consensus`, plus an operator CLI in
+`tools/consensusctl` (D17). One algorithm ships — Raft — and **no
 registry**.
 
 ### D1 — The name says the capability, the constructor says the algorithm
@@ -93,14 +97,20 @@ the algorithm that produces it, the way `lock` is not called `flock` and
 `token` is not called `jwt`. The algorithm is named once, where it is chosen:
 `consensus.NewRaft`. Rejected names:
 
-- **`raft`** names an implementation. The ports (D3, D4) speak terms, indexes,
-  entries and memberships, which Multi-Paxos or Viewstamped Replication would
-  speak as well; a second engine would otherwise live in a package named after
-  the first.
+- **`raft`** names an implementation.
 - **`replica`** names a participant, not the capability, and reads as a
   database read replica — the asynchronous copy this domain exists NOT to be.
 - **`agree`** is taken by key agreement (ADR 0014), and a reader meeting
   `agree.Propose` beside `agree.SharedKey` would be right to be confused.
+
+**What is and is not algorithm-neutral (R1-28).** The first draft claimed
+that every port spoke terms and indexes that Multi-Paxos would speak as
+well. That overstated it. Only the CONSUMER port, `Replicated` (D14), is
+neutral: `Propose`, `Barrier`, `WaitApplied`, `Status`. The storage and
+transport ports — `LogStore`, `SnapshotStore`, `Transport` — and their
+values are Raft's: a hard state of term, vote and commit, a log with Raft's
+truncation rules, Raft's messages. A second engine would bring its own,
+and the package says so instead of pretending otherwise.
 
 No registry, for ADR 0052 D10's reason sharpened: an engine resolved from a
 configuration string is a place where a typo selects different safety
@@ -110,17 +120,19 @@ properties with no failure at the moment of the swap.
 
 | Layer | Package | Holds | May import |
 |---|---|---|---|
-| core | `internal/core/consensus` | every type a port speaks (ADR 0074): `NodeID`, `GroupID`, `Position`, `Entry`, `EntryKind`, `HardState`, `Membership`, `Message`, `SnapshotMeta`; the ports `StateMachine`, `Snapshot`, `LogStore`, `SnapshotStore`, `Transport`; the `0.2.57.*` sentinels | kernel only (`errs`, `clock`) |
-| service | `internal/service/consensus` | the Raft engine (a pure step function and its driver), the segmented file log, the snapshot store, the mTLS stream transport, the in-memory log/transport doubles, the deterministic simulator's fault models (test-only) | kernel; core `consensus`, `net`, `lock`, `metrics`, `trace`, `logger`; service `lock` (the data-directory lock, D11), `net/server` (the inbound stream group) |
-| pkg | `pkg/v1/consensus` | type aliases, `NewRaft`, `Bootstrap`, the adapters' constructors, the sentinels | its own lower layers, sibling `pkg/v1/*` |
+| core | `internal/core/consensus` | every type a port speaks (ADR 0074): `NodeID`, `Incarnation`, `ClusterID`, `GroupID`, `Position`, `Entry`, `EntryKind`, `HardState`, `Member`, `Membership`, `Message`, `SnapshotMeta`, `Versions`; the ports `Replicated`, `StateMachine`, `Snapshot`, `LogStore`, `LogReader`, `SnapshotStore`, `Transport`; the frozen siblings `DurableStateMachine`, `BatchingStateMachine`, `HashingStateMachine`, `UnreachableReporter`; the `0.2.57.*` sentinels | kernel only (`errs`, `clock`) |
+| service | `internal/service/consensus` | the Raft engine (a pure step function, its event loop and its storage actor), the segmented file log with its `_linux.go` I/O, the snapshot store, the mTLS transport, the admin handler, the in-memory log and transport doubles, the simulator's fault models (test-only) | kernel; core `consensus`, `net`, `lock`, `metrics`, `trace`, `logger`, `transform`; service `lock` (the data-directory lock, D11), `net/server` (the inbound stream groups), `transform` (flate) |
+| pkg | `pkg/v1/consensus` | type aliases, `NewRaft`, `Bootstrap`, `Recover`, the adapters' constructors, `AdminHandler`, the sentinels | its own lower layers, sibling `pkg/v1/*` |
+| tools | `tools/consensusctl` | the operator CLI (D17), a client of `AdminHandler` | `pkg/v1/*` only |
 
 The service-to-service edges are lateral and permitted (`internal/CLAUDE.md`).
 Nothing is added to the kernel: the step function is generic only to Raft, so
 it fails rule 1's second half. Stdlib only — no `go.etcd.io`, no
 `hashicorp/raft`, no `golang.org/x/*` — so `pkg/v1/consensus` stays as
-dep-light as `lock`.
+dep-light as `lock`. The one new SDK surface outside this domain is the TLS
+sibling of D4 (R1-23).
 
-### D3 — The caller's state machine is a frozen three-method port
+### D3 — The caller's state machine: a pure transition, a frozen port, durable siblings
 
 ```go
 type StateMachine interface {
@@ -132,19 +144,37 @@ type Snapshot interface {
 	WriteTo(w io.Writer) (int64, error)
 	Release()
 }
+// Frozen siblings, discovered by assertion (ADR 0039).
+type DurableStateMachine interface { StateMachine; AppliedPosition() (Position, error) }
+type BatchingStateMachine interface { StateMachine; ApplyBatch(es []Entry, results []any) }
+type HashingStateMachine interface { StateMachine; Hash() (Position, [32]byte, error) }
 ```
+
+**`Apply` is a pure transition of state the state machine owns (R1-01).**
+It changes nothing outside that state: no `git update-ref`, no file, no
+network call, no webhook. And it depends on no precondition that can differ
+between nodes: not the content of a local Git repository, not the time, not
+the presence of an object on disk. The first draft let the first consumer's
+`Apply` run the compare-and-swap against each node's Git refs, which made
+the outcome depend on local state the log does not order. That is the
+Gitaly lesson of Context turned on this ADR's own consumer. Per the owner's
+decision (Q1), the first consumer replicates a **ref table** it owns, and Git
+becomes an asynchronous projection of that table (D19).
 
 `Apply` is called for every committed `EntryKind` `Command`, in log order, on
 ONE goroutine, exactly once per entry per incarnation of the state, and must
 be **deterministic**: the same entries in the same order produce the same
 state on every node. It returns a value, delivered only to the `Propose` that
-created the entry on the node that created it. It returns no error, and that
-is the design: a command a state machine refuses (the old SHA did not match)
-is an ANSWER, carried in the result, and it must be the same answer on every
-node. An apply that cannot complete — a disk failure under `git update-ref` —
-is not a refusal; the state machine must stop the process, because a node that
-skips an entry has silently forked. `StateMachine` panicking is treated the
-same: the node stops with `STATE_MACHINE_FAILED` and does not apply further.
+created the entry on the node that created it (`Propose` returns it typed,
+D14). It returns no error, and that is the design: a command a state machine
+refuses — an expected value that does not match — is an ANSWER, carried in
+the result, and it is the same answer on every node because it is computed
+on the same table. An apply that cannot complete is not a refusal; the state
+machine must stop, because a node that skips an entry has silently forked.
+`Apply` panicking is treated the same: the node stops with
+`STATE_MACHINE_FAILED` and does not apply further. **That entry IS committed
+(R1-13):** `STATE_MACHINE_FAILED` never means "not written", and the doc
+comment says so.
 
 raft-sql-poc is the counter-example this rule exists for. Its core treats
 every exception `apply` throws as deterministic and part of the output
@@ -153,11 +183,44 @@ every exception `apply` throws as deterministic and part of the output
 A divergence the replica has DETECTED therefore reaches the proposer as an
 ordinary `SQL_ERROR` while the replica keeps applying on a forked state.
 
-`Snapshot` is called on the apply goroutine and must be CHEAP: it captures a
-view at the current applied position (the kernel's copy-on-write snapshot,
-ADR 0011, is the intended tool) and returns. `WriteTo` then runs on another
-goroutine while `Apply` continues, and `Release` frees the view. `Restore`
-replaces the whole state.
+**The applied position is durable with the effects (R1-02).** A state machine
+that keeps its state on disk implements `DurableStateMachine`. It persists the
+`Position` of the last applied entry ATOMICALLY with the state that entry
+produced — in the same transaction or the same published file — and returns
+it from `AppliedPosition`. On open, the engine resumes applying after that
+position. It skips `Restore` when the state machine is already at or past the
+snapshot's position, because restoring an older snapshot over newer applied
+state rolls the state back. A state machine that does not implement the
+sibling is treated as empty at every start, and the engine restores the
+latest snapshot and replays the log. The simulator crashes between an effect
+and its position, in both orders, and a mutation that shifts the persisted
+position by one must be caught (D15).
+
+**Batching apply.** A state machine that implements `BatchingStateMachine`
+receives committed entries in batches, with one result slot per entry, so a
+durable state machine can make a batch durable in one write (R1-28).
+
+**Snapshots need a point-in-time read store (R1-14).** `Snapshot` is called on
+the apply goroutine and must be cheap: it captures a view of the state at the
+current applied position and returns. `WriteTo` then runs on the snapshot
+goroutine while `Apply` continues, and `Release` frees the view. That
+requires a state machine whose store can serve a consistent read of an older
+version while it takes newer writes: a copy-on-write structure, an MVCC
+store, or a database read transaction. The first draft named ADR 0011's
+`Value[T]` as "the intended tool". That reference is withdrawn: a
+copy-on-write `Value` that copies the whole state on write makes every
+`Apply` cost O(state). The cost model is in the package `CLAUDE.md`. A view
+costs at most O(changes since the cut) in memory while `WriteTo` runs, and
+`Snapshot` itself is O(1). A state machine that cannot meet it must say so,
+and the engine then cuts snapshots with apply paused, as raft-sql-poc does.
+`Restore` cancels an in-flight `WriteTo` and waits for its `Release` before it
+replaces the state, and it is serialised with `Apply`.
+
+**State hash (R1-25).** A state machine that implements `HashingStateMachine`
+returns a digest of its state at a position. The leader asks every replica
+for it at a configured interval and at the same applied position. A mismatch
+stops the diverging node with `STATE_DIVERGED`. This is the SDK form of the
+first consumer's per-repository XOR checksum.
 
 The name collides on purpose with the textbook and must not be confused with
 ADR 0120's `statemachine`, which moves entities between declared states on a
@@ -167,16 +230,23 @@ deterministic program is replicated. Both package comments say so.
 ### D4 — The other ports: log, snapshots, transport, all frozen (ADR 0039)
 
 ```go
-type LogStore interface {
-	Append(entries []Entry) error          // buffered, not durable
-	Sync() error                           // durable up to the last Append
+type LogReader interface {
 	Entries(lo, hi uint64, maxBytes int, dst []Entry) ([]Entry, error)
 	Term(index uint64) (uint64, error)
 	Bounds() (first, last uint64)
+}
+type LogStore interface {
+	LogReader
+	// Append buffers entries and, when hs is not nil, a hard state, in ONE
+	// record batch. Sync makes everything appended so far durable.
+	Append(entries []Entry, hs *HardState) error
+	Sync() error
 	TruncateSuffix(from uint64) error      // drop a conflicting tail
 	CompactPrefix(through uint64) error    // drop what a snapshot covers
-	HardState() (HardState, error)         // term, vote, commit
-	SetHardState(HardState) error          // durable on return
+	HardState() (HardState, error)
+	Stamp() (Stamp, error)                 // ClusterID, NodeID, Incarnation (D8)
+	WriteStamp(Stamp) error                // durable on return
+	Close() error
 }
 type SnapshotStore interface {
 	Create(meta SnapshotMeta) (SnapshotSink, error) // Write, Commit, Abort
@@ -186,43 +256,84 @@ type Transport interface {
 	Send(to NodeID, m *Message)                       // never blocks; may drop
 	Stream(ctx context.Context, to NodeID, meta SnapshotMeta, r io.Reader) error
 	Bind(group GroupID, deliver func(*Message), install func(SnapshotMeta, io.Reader) error) error
+	SetMembership(m Membership)                       // admission and addresses (D8)
 }
+type UnreachableReporter interface { Unreachable(func(NodeID)) } // sibling (R1-11)
 ```
 
-`Append` and `Sync` are separate so that one `Sync` covers a batch (D6). The
-contract that carries the safety of the whole domain is `Sync` and
-`SetHardState`: when they return nil, what they cover survives a power loss.
+**The LogStore contract (R1-08).** Term, vote and entries travel in one
+`Append` and become durable under one `Sync`. A commit-only change of the
+hard state is written lazily and never makes a reply wait for a sync. The
+step function sees the log only through `LogReader`, a read-only view. The
+store allows concurrent readers and exactly one writer, the storage actor of
+D5b. `Entry.Data` is immutable once appended: the store and the engine never
+write into it, and a caller that hands bytes to `Propose` gives up ownership
+of them. **Any read error stops the node.** A log that cannot be read cannot
+be trusted to agree with itself. `deliver` must not block: inbound messages go
+into a bounded queue, and when that queue is full the transport drops them,
+as Raft tolerates. The contract that carries the safety of the whole domain
+is `Sync` and `WriteStamp`: when they return nil, what they cover survives a
+power loss.
 
-**The shipped log** is a directory of preallocated segment files, each record
-`length | CRC-32C | term | index | kind | payload`, little-endian, written with
-`write(2)` into the current segment and made durable with `fdatasync(2)` once
-per batch. On open the tail is scanned: a record whose CRC fails AT THE TAIL
-is a write the process died inside, never acknowledged because acknowledgement
-follows `Sync`, and it is truncated and counted. A CRC failure BEFORE the tail
-is corruption and is refused, never repaired (`LOG_CORRUPT`) — the same choice
-as ADR 0052's `LOCK_FENCE_CORRUPT`: a log repaired by guessing has lost the
-property that made it a log. **The hard state is a record of the log, from raft-sql-poc.** The first
-draft kept term and vote in a separate file published by rename, which costs
-two device round trips per vote (ADR 0056's measurement). The POC writes a
-hard-state record into the current batch instead, made durable by the same
-`fdatasync` as the entries, and writes the commit index lazily so that a
-heartbeat which only advances it never makes an acknowledgement wait for a
-sync (`storage.js:361-370`). Every segment opens with a checkpoint record
-holding the hard state, and segments are deleted only as a prefix: together
-the two rules let compaction delete old segments without losing a vote or
-resurrecting an entry a later record truncated (`storage.js:35-37`,
-`storage.js:507-591`). Adopted. It was not measured head to head, and the
-reason is structural: a vote then costs nothing beyond the sync the batch
-pays anyway.
+**The shipped log** is a directory of segment files, each record
+`length | CRC-32C | version | term | index | kind | payload`, little-endian,
+written with `write(2)` into the current segment and made durable once per
+batch. **The hard state is a record of the log, from raft-sql-poc.** The
+first draft kept term and vote in a separate file published by rename, which
+costs two device round trips per vote (ADR 0056's measurement). The POC
+writes a hard-state record into the current batch instead, made durable by
+the same `fdatasync` as the entries, and writes the commit index lazily so
+that a heartbeat which only advances it never makes an acknowledgement wait
+for a sync (`storage.js:361-370`). Every segment opens with a checkpoint
+record holding the hard state, and segments are deleted only as a prefix:
+together the two rules let compaction delete old segments without losing a
+vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
+`storage.js:507-591`). Adopted.
+
+**Durability, as the kernel gives it (R1-09).** On Linux, `segment_linux.go`
+calls `fdatasync(2)` and `fallocate(2)`. Elsewhere, `os.File.Sync` is the
+fallback, and it is stated as the weaker or slower path it is on each
+platform. A segment has a fixed size, preallocated at creation, so a
+`fdatasync` never has a file size to publish. The lifecycle is crash-consistent
+and spelled out:
+
+1. create `seg-N.tmp`, preallocate it, `fsync` it;
+2. rename it to `seg-N`, `fsync` the directory;
+3. write the checkpoint record first, then records, with `fdatasync` per
+   batch;
+4. on rotation, the next segment goes through 1 and 2 before the current one
+   is sealed;
+5. delete only a prefix of segments, after the checkpoint that replaces them
+   is durable, and `fsync` the directory after the unlinks.
+
+A recovery that finds a `.tmp` deletes it. A recovery that finds a gap in the
+segment sequence refuses with `LOG_CORRUPT`.
+
+**Tail repair is narrow (R1-10).** The first draft truncated any record whose
+CRC failed at the tail. That repairs too much: a bit flip in a SYNCED record
+at the tail is corruption of acknowledged data, not a torn write. Only two
+shapes are truncated:
+
+- a short read, where the file ends inside a record;
+- a torn record whose damaged bytes are zeroed 4 KiB sectors, the signature
+  of an interrupted write on the devices this targets.
+
+Any other CRC failure, at the tail or not, is `LOG_CORRUPT`. The node fails
+closed and keeps the damaged WAL for inspection (D17). A node that truncated
+anything does not vote and does not acknowledge until a leader of a term at
+least equal to its own has rewritten its log past the truncation point. Its
+truncated tail may have held entries it had acknowledged before a lost
+`fdatasync`. The simulator flips bits in synced records, not only in the
+unsynced tail (D15).
 
 A failing `fsync` stops the node (`STORAGE_FAILED`) and is never retried. The
 PostgreSQL "fsyncgate" of 2018 established that a retried `fsync` can return
 success after the kernel has dropped the dirty pages the first one failed to
 write; a node that continues after one is a node whose acknowledged entries
-may not exist. raft-sql-poc does not retry either, but it does not stop: after a failed
-`fsync` it records the error and never syncs again (`storage.js:489-495`),
-so every later acknowledgement waits forever. That is safe and silent. Here
-the node stops and says so.
+may not exist. raft-sql-poc does not retry either, but it does not stop: after
+a failed `fsync` it records the error and never syncs again
+(`storage.js:489-495`), so every later acknowledgement waits forever. That is
+safe and silent. Here the node stops and says so.
 
 **Not on `vfs`.** The `vfs` write half is frozen at whole-file verbs plus
 `WriteAtomic(name, data []byte)` (ADR 0056); it has no append, no handle and
@@ -235,46 +346,81 @@ a whole snapshot in memory. It is the second consumer that would justify a
 streaming publication sibling in `vfs`; that sibling is deferred to its own
 ADR rather than decided here.
 
-**The shipped transport** rides ADR 0029. Inbound is a stream group on
-`pkg/v1/server` with `server.TLS(identity)` and a `ConnHandler`; outbound
+**The shipped transport** rides ADR 0029. Inbound is stream groups on
+`pkg/v1/server` with `server.TLS(identity)` and a `ConnHandler`. Outbound
 dials with the same `tlsid.Identity`'s `ClientConfig()` (the HTTP client of
-`pkg/v1/client` is not a stream dialer). mTLS is mandatory and the peer's
-certificate must name the `NodeID` the configuration gives for that address
-(`PEER_REJECTED`); the first frame on a connection names the cluster and
-group, and a mismatch closes it (`CLUSTER_MISMATCH`).
+`pkg/v1/client` is not a stream dialer).
 
-**Admission follows the membership, from raft-sql-poc.** The transport
-admits only the `NodeID`s of the current membership, learners included. A
-`Remove` that commits cuts that node's connections and refuses its
+**Identity is checked in both directions, from the certificate (R1-23).**
+- `server.TLS` and `tlsid` expose neither the peer's certificate nor a
+  verification hook today. The SDK gains a sibling (ADR 0039) that hands a
+  connection's TLS `ConnectionState` to the handler, or accepts a
+  `VerifyConnection` function. This is the one change outside this domain.
+- A node's certificate carries the URI SAN
+  `kitsunium-consensus://<cluster>/<node>`. The dialer checks the listener's
+  SAN, and the listener checks the dialer's. A wrong cluster or node is
+  `PEER_REJECTED`.
+- The sender of every frame is stamped from the connection's TLS identity, not
+  read from the frame. A frame that claims another sender is dropped and
+  counted.
+- `TimeoutNow` is accepted only from the leader of the receiver's current
+  term.
+- The cluster and group in the first frame are a guard against
+  misconfiguration, not an authentication: the certificate already decided.
+- An identity with nil `RootCAs`, or a listener without
+  `RequireAndVerifyClientCert`, is refused at construction. TLS session
+  tickets are disabled, so a resumed session never skips the certificate
+  check.
+
+**Admission follows the membership, from raft-sql-poc, fed by the engine
+(R1-16).** The transport admits only the `NodeID`s and incarnations of the
+admission set: the union of the latest appended membership and the latest
+committed one, rebuilt when a truncation removes a membership entry. The
+engine pushes that set and the members' addresses through `SetMembership`.
+The static map given at construction is only a seed for the first contact.
+A `Remove` that commits cuts that node's connections and refuses its
 handshakes from then on. The POC learned that draining a machine is not
-removing it: with a credential every machine shared, a removed machine
-could come back (README bug 8). Its fix revokes the removed machine's key
-on every peer (`shard.js:796-803`, `transport.js:110-120`). Here a `NodeID`
-is never reused (D8), so a certificate whose node is no longer a member is
-refused without a revocation list.
+removing it: with a credential every machine shared, a removed machine could
+come back (README bug 8). Its fix revokes the removed machine's key on every
+peer (`shard.js:796-803`, `transport.js:110-120`). Here a `NodeID` is never
+reused (D8), and a retired ID is refused even with a valid certificate.
 
-**Three limits TLS does not set, from raft-sql-poc.** A frame's announced
-length is checked against `MaxFrameBytes` before anything is allocated. A
-snapshot is inflated no further than the size its metadata announces,
-before its hash is checked (`raft.js:1272-1289`). A connection that has not
-finished its handshake within `HandshakeTimeout` is closed. These are three
-of the twenty attacks the POC's transport suite runs. TLS 1.3 already stops
-the others: a forged identity, a downgrade, a replay, reordering, a
-substituted ephemeral key.
+**Limits TLS does not set (R1-24, from raft-sql-poc).**
+- A frame's announced length is checked against `MaxFrameBytes` before
+  anything is allocated.
+- A snapshot is inflated no further than `MaxSnapshotBytes` and the size its
+  metadata announces, whichever is smaller (R1-15), before its hash is checked
+  (`raft.js:1272-1289`).
+- A connection that has not finished its handshake within `HandshakeTimeout`
+  is closed. The default is 1 s, and a larger value is refused.
+- Unauthenticated connections are capped per source address, and a few slots
+  are reserved for members, so a flood of handshakes cannot lock members out.
+- The consensus port is meant to be reachable from the members' addresses
+  only. The operator guide says so, and the network allow-list is part of the
+  deployment (`consensus.network_allowlist` in the first consumer's Ansible),
+  not an assumption.
+All of these are `Config` fields with an owner, a default and a validation
+(D14, R1-29).
+
+**Three connections per peer and direction (R1-12).** One is for control:
+votes, PreVotes, heartbeats, their replies and `TimeoutNow`. One is for data:
+entries and their acknowledgements. One is for snapshot streams. The first
+draft's priority lane inside one connection was not enough: a frame already
+written into a TCP send buffer is behind every byte queued before it, and no
+lane in user space reorders the kernel's buffer. **From IWFS:** under CPU
+starvation, IWFS's PreVote fan-out saturated the shared mesh client, and
+elections never settled (`01-shared-log-single-writer.md` §7.1). IWFS
+answered by backing elections off up to 30 s. This ADR removes the cause
+instead. Data writes are bounded by a write deadline and a per-peer byte cap.
+The event loop never waits on storage or on a socket (D5b). A test measures
+heartbeat latency while the data pipe is saturated and the disk is slow
+(D15).
 
 **Batching on the wire, from raft-sql-poc.** Every frame queued for a peer
-during one turn of the loop leaves in one write (`transport.js:1-8`). The
-per-peer queue is bounded and drops when full, because Raft retransmits
-what matters and an unbounded queue turns an outage into memory
-exhaustion (`transport.js:294-296`, 64 MiB in the POC). **From IWFS:**
-control frames (votes, PreVotes, heartbeats and their replies,
-`TimeoutNow`) are never queued behind entries. Each peer queue has a small
-lane that is drained first. Under CPU starvation, IWFS's PreVote fan-out
-saturated the shared mesh client, and elections never settled (its
-"death-spiral leaderless",
-`docs/src/cii-src/07-innovations/01-shared-log-single-writer.md` §7.1). IWFS
-answered by backing elections off up to 30 s. This ADR removes the cause
-instead and keeps elections fast.
+on one connection during one turn of its sender leaves in one write
+(`transport.js:1-8`). Each per-peer queue is bounded and drops when full,
+because Raft retransmits what matters and an unbounded queue turns an outage
+into memory exhaustion (`transport.js:294-296`, 64 MiB in the POC).
 
 **Why TLS and not the POC's handshake.** The POC wrote a SIGMA handshake of
 its own over Ed25519, X25519 and AES-256-GCM (`secure.js:1-60`). Its README
@@ -282,11 +428,9 @@ lists two cryptographic bugs it found in its own earlier versions: a
 `SHA256(key ‖ msg)` MAC open to length extension, and a static key whose
 nonce counter restarted at zero (bugs 5 and 6). TLS 1.3 gives the same
 properties from the standard library: a signed transcript, ephemeral keys,
-record sequence numbers. The SDK does not write a handshake. Two connections per
-peer and direction: one for messages, one for snapshot streams, so a
-multi-megabyte snapshot never sits in front of a heartbeat. Frames are
-`length | type | group | body`, hand-encoded; TLS gives the integrity, so the
-wire carries no checksum of its own.
+record sequence numbers. The SDK does not write a handshake. Frames are
+`length | version | type | group | body`, hand-encoded; TLS gives the
+integrity, so the wire carries no checksum of its own.
 
 **Entries are bytes.** The log record, the frames and `Entry` are
 hand-written fixed layouts, not `codec` formats: the codec is selected by a
@@ -306,9 +450,9 @@ encodes its command however it likes — through `codec` if it wants — and han
   its clients keeps accepting proposals that will never commit, and the lease
   read of D9 is unsound.
 - **A follower that heard from a live leader within the minimum election
-  timeout refuses votes** (thesis §4.2.3), unless the request carries the
-  leadership-transfer flag (D8). This is the vote-side half of CheckQuorum and
-  what makes leases safe.
+  timeout refuses votes** (thesis §4.2.3), in RequestVote as in PreVote,
+  unless the request carries the leadership-transfer flag (D8). This is the
+  vote-side half of CheckQuorum and what makes leases safe.
 
 Neither is a configuration option. Both exist to prevent failures that only
 appear under partition, which is where nobody tests a disabled flag.
@@ -317,19 +461,66 @@ appear under partition, which is where nobody tests a disabled flag.
 raft-sql-poc.** It behaves as if it had just heard from a leader
 (`raft.js:205-213`). Otherwise a node restarted inside a lease window votes
 at once, and a second leader can be elected while the first still serves
-lease reads. The vote refusal also applies to `RequestVote`, not only to
-`PreVote`. The POC checks for a live leader in PreVote only
+lease reads. The POC checks for a live leader in PreVote only
 (`raft.js:524-531` against `raft.js:588-620`). That holds until an election
 skips PreVote, and a leadership transfer does (`raft.js:563`,
 `raft.js:827`).
+
+**A refusal never moves a term, and a stuck node is answered (R1-18).**
+- A RequestVote refused under the live-leader rule does not raise the
+  refuser's term. Raising it would depose the live leader the refusal exists
+  to protect.
+- A node stuck at a higher term — partitioned, it campaigned and was refused
+  PreVotes, or it raised its term before PreVote existed in its version —
+  receives AppendEntries of a lower term. It answers them with its own term so
+  that the leader learns of it, instead of ignoring them in silence. The leader
+  then steps down, and a PreVote round decides. This is etcd's rule
+  (`raft.go:1133-1154`).
+- The scenario "PreVote granted, RequestVote refused, partition heals" is a
+  named simulator case (D15).
 
 **Timings, defaults for this RTT matrix:** heartbeat every 100 ms; election
 timeout randomized in [1 s, 2 s). A zero is clamped to the default (ADR 0031,
 clamp half: there is one sensible order of magnitude); a heartbeat not below
 a fifth of the minimum election timeout is refused (`CONSENSUS_MISCONFIGURED`),
 because that is the configuration in which a single delayed heartbeat starts
-an election. Failover is therefore about 1–2 s, against Gitaly's 4 s, and the
-PreVote round adds one RTT.
+an election. These timings are part of the cluster-wide timing contract of
+D9 and must be identical on every member.
+
+### D5b — The event loop, the storage actor, and what waits for what (R1-07)
+
+The engine is one event loop that owns the step function. Nothing else
+touches the step function's state. Storage is not a call the step function
+makes. It is a message to a **local storage actor**, modelled inside the step
+function the way etcd models `MsgStorageAppend` and `MsgStorageApply`. The
+actor's completions come back as input events: "appended through index i at
+term t", "synced through index i", "hard state durable". The step function
+acts on durability only when such an event arrives.
+
+| Effect | Waits for |
+|---|---|
+| reply to RequestVote (granted) or PreVote at a new term | the term and vote durable |
+| counting the leader's own vote for itself | its term and self-vote durable |
+| reply to AppendEntries (success) | the entries and any term change durable |
+| the leader counting its own match index | its own sync-done event for that index |
+| reply to InstallSnapshot (done) | the snapshot and its stamp durable |
+| sending a request at a new term | the term durable |
+| `Apply` of an entry | its commit known; its own durability on this node |
+| reporting `Propose` success | the entry applied locally |
+
+The leader's write and the sends still run in parallel (thesis §10.2.1). The
+table says what each side may count, not what it must wait for before
+sending.
+
+Goroutines, each with a bounded queue:
+- the event loop;
+- the storage actor;
+- the apply goroutine;
+- one sender per peer and per connection (D4);
+- the snapshot goroutine.
+
+`Status` is published through an `atomic.Pointer` after each turn, so reading
+it never takes a lock the loop holds.
 
 ### D6 — Replication: pipelined, batched with no linger timer, leader writes in parallel
 
@@ -338,6 +529,16 @@ PreVote round adds one RTT.
   `AppendEntries` without waiting for the previous answer, up to
   `MaxInflight` messages (default 64) or `MaxInflightBytes`; a rejection drops
   the follower back to `probe`.
+- **The window always recovers (R1-11).**
+  - `match` only grows.
+  - A rejection carries the index it rejects, and a rejection that does not
+    correlate with the current `next` is ignored as stale.
+  - When the window is full, the heartbeat carries an empty AppendEntries at
+    `next`, so a lost acknowledgement cannot stall the follower forever.
+  - The transport reports an unreachable peer through `UnreachableReporter`,
+    and the leader moves that progress to `probe`.
+  - `MaxInflightBytes` below `MaxBatchBytes` is refused at construction,
+    because one batch could then never be sent.
 - **Batching without a timer.** The leader loop takes EVERY proposal waiting
   when it wakes, appends them as one batch, issues one `Sync`, and sends one
   `AppendEntries` per follower, bounded by `MaxBatchBytes` (default 1 MiB).
@@ -354,69 +555,84 @@ PreVote round adds one RTT.
   took the POC from 198 to 8.1 RPCs per log entry.
 - **The leader's own write runs in parallel with the sends** (thesis §10.2.1):
   an entry is committed when a majority has it durably, and the leader is
-  counted only once its own `Sync` returns. With three nodes the commit is the
-  later of the leader's `fsync` and the nearest follower's round trip plus its
-  `fsync`.
-- **Followers acknowledge after `Sync`**, never before. A follower that
-  answered first would be counted in a majority it may not be part of after a
-  crash.
-- **A follower forwards proposals to the leader** over the same connection.
-  This is safe here where it was not for Gitaly, because the domain validates
-  NOTHING before ordering: the compare-and-swap is part of `Apply`, evaluated
-  against the state at the entry's position on every node alike. The cost of
-  a write proposed on WAW is therefore one round trip to the leader on top of
-  the commit. **From IWFS:** a follower dials the leader the moment it
-  learns of it and opens the forwarding stream before the first proposal
-  (`src/internal/cluster/election.go:805-807`). Without that, IWFS's first
-  forwarded write after an election exceeded its wait
-  (`docs/src/design/2026-09-10-point-acceptation-commit.md` §3).
+  counted only once its own sync-done event arrives (D5b).
+- **Followers acknowledge after their sync**, never before (D5b).
 - **A new leader commits a no-op entry of its term** before it serves a read
   or accepts a membership change (thesis §6.4, §4.1).
 - **Three rules the POC learned as safety bugs** are stated here rather than
   left to the implementation. All three are silent on the happy path and end
-  in divergence (README bugs 1 to 3). A follower advances its commit index to
-  at most `min(leaderCommit, prevLogIndex + len(entries))`, the prefix this
-  message verified, never the end of its log. Its acknowledgement reports
-  that verified prefix, never `lastIndex` (`raft.js:1020-1032`). A node that
-  steps down within the same term keeps its vote (`raft.js:711-718`).
+  in divergence (README bugs 1 to 3).
+  - A follower advances its commit index to at most
+    `min(leaderCommit, prevLogIndex + len(entries))`, the prefix this message
+    verified, never the end of its log.
+  - Its acknowledgement reports that verified prefix, never `lastIndex`
+    (`raft.js:1020-1032`).
+  - A node that steps down within the same term keeps its vote
+    (`raft.js:711-718`).
 - **The pipeline stays bounded.** The POC pipelines optimistically with no
   bound on what is in flight (`raft.js:937-939`), relying on the transport
   queue's cap. This ADR keeps `MaxInflight`: on a 27 ms link an unbounded
   window turns one slow follower into megabytes of retransmission.
 
-**Outcome reporting is three-valued.** `Propose` returns the `Position` and
-the `Apply` result once applied locally; `NOT_LEADER` when the entry was
-certainly not appended (the error names the known leader, readable with
-`consensus.LeaderHint`); and `OUTCOME_UNKNOWN` when the entry was appended but
-leadership was lost before it committed — it may still commit under the next
-leader. A caller that maps `OUTCOME_UNKNOWN` to "failed" is wrong in a way
-that loses no data only if its state machine converges anyway; the first
-consumer's does, because every node applies the log and the
-compare-and-swap of a duplicate fails identically everywhere. The
-`pkg/v1` doc comment says this in so many words.
+**Forwarded proposals have a submission identity (R1-13).** A follower
+forwards a proposal to the leader over the data connection, with a
+submission id made of the follower's `NodeID`, its incarnation and a
+sequence number. The follower tracks each submission through four states:
+
+1. **unsent** — not written to the connection;
+2. **possibly accepted** — written, no answer yet;
+3. **appended** — the leader answered with the `Position` it appended at;
+4. **committed** — that position committed with that term.
+
+A submission that fails while unsent is `NOT_LEADER` and is safe to retry.
+Once it is possibly accepted, any failure is `OUTCOME_UNKNOWN`. The only
+exception is a rejection from the leader that correlates with the submission
+id and says nothing was appended. The forward acknowledgement carries the
+`Position`. `ENTRY_SUPERSEDED` is answered only when the term at that index is
+OBSERVABLE and differs: a committed or retained entry at that position with
+another term. When the position is compacted or unknown, the answer is
+`OUTCOME_UNKNOWN`. **From IWFS:** a follower dials the leader the moment it
+learns of it and opens the forwarding connection before the first proposal
+(`src/internal/cluster/election.go:805-807`). Without that, IWFS's first
+forwarded write after an election exceeded its wait
+(`docs/src/design/2026-09-10-point-acceptation-commit.md` §3).
+
+**Outcomes.** `Propose` answers in one of these ways:
+- success: the `Position` and the `Apply` result, once applied locally;
+- `NOT_LEADER`: certainly not appended, with the known leader readable through
+  `consensus.LeaderHint`;
+- `OVERLOADED`: refused before append;
+- `ENTRY_SUPERSEDED`: certainly not committed, under the conditions above;
+- `OUTCOME_UNKNOWN`: appended, or possibly delivered, and the answer was lost
+  to a leadership change, a context's end or a broken connection. The entry
+  may still commit.
+
+**Never retry blindly after `OUTCOME_UNKNOWN` (R1-04).** The first draft said a
+compare-and-swap makes a duplicate harmless. That is false under ABA: a ref
+moved A→B, then back B→A by another writer, accepts a replayed A→B a second
+time. The `pkg/v1` doc comment says: after `OUTCOME_UNKNOWN`, read the state
+(through `Barrier`) and decide, or use client sessions (Deferred). The first
+consumer's ref table carries a per-ref revision that defeats ABA (D19).
 
 **A context that ends after the append is `OUTCOME_UNKNOWN` too, from
 raft-sql-poc.** Its cause is `ctx.Err()`, but the code is not
 `ctx.Err()` alone. The POC's `COMMIT_TIMEOUT` (`raft.js:850-858`) is this
-case under another name, and a caller that reads it as "failed" retries an
-entry that may still commit. A context that ends before the append returns
+case under another name. A context that ends before the append returns
 `ctx.Err()`, as everywhere in the SDK.
 
-**A replaced entry is a definite failure, from IWFS.** `Propose` waits on
-its entry's index AND term. If a new leader truncated that position and
-reused it, the wait ends with `ENTRY_SUPERSEDED`: the entry certainly did
-not commit, and a retry is safe. That is better than `OUTCOME_UNKNOWN`, and
-it must not be read as success because something committed at that index.
-IWFS waits this way (`WaitForCommit` on index and term, "entry replaced")
-and tests both halves (`TestWaitForCommit_ReplacedEntry`,
-`TestAcceptance_ReplacedEntryIsNotAccepted`).
+**Refused before anything is appended, from IWFS.** When the leader's pending
+proposals exceed `MaxPendingBytes`, `Propose` answers `OVERLOADED` and
+appends nothing, so a retry is safe. IWFS refuses a full queue before
+acceptance (`0x0032`), never after. The SDK does not take IWFS's admission on
+host CPU and memory thresholds: the leader's own pending bytes are the only
+signal.
 
-**Refused before anything is appended, from IWFS.** When the leader's
-pending proposals exceed `MaxPendingBytes`, `Propose` answers `OVERLOADED`
-and appends nothing, so a retry is safe. IWFS refuses a full queue before
-acceptance (`0x0032`), never after, so a write is never half-accepted. The
-SDK does not take IWFS's admission on host CPU and memory thresholds (its
-J14): the leader's own pending bytes are the only signal.
+**Apply backpressure (R1-14).** The gap between commit and applied is bounded
+by `MaxApplyLagBytes`. When it is reached, the leader stops admitting
+proposals with `OVERLOADED` until apply catches up, and a follower stops
+reading new entries from its log into memory. The engine keeps a window of
+recent entries in memory, so the apply goroutine and slow followers do not
+read the disk for what was just written.
 
 ### D7 — Snapshots and compaction ship in v1
 
@@ -424,45 +640,57 @@ J14): the leader's own pending bytes are the only signal.
   `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
   into `SnapshotStore.Create` off it, with a SHA-256 of the stream recorded in
-  `SnapshotMeta` beside `Position` and `Membership`. Only one snapshot is in
-  flight; a trigger during one is coalesced.
-- **Compaction:** after the snapshot is committed to disk, `CompactPrefix`
-  drops the log through `snapshot.Index − SnapshotTrailing` (default 4 096):
-  a follower slightly behind catches up from the log rather than receiving a
-  whole snapshot.
-- **Install:** a follower whose `next` is below the leader's first index
-  receives the latest snapshot on the snapshot connection, in chunks, verified
-  against its SHA-256 before `Restore` (`SNAPSHOT_CORRUPT` otherwise), then
-  the log from there.
+  `SnapshotMeta` beside `Position`, `Membership`, the snapshot format version
+  and the compression id (R1-22). Only one snapshot is in flight; a trigger
+  during one is coalesced.
+- **Compaction bound (R1-14):** after the snapshot is committed to disk,
+  `CompactPrefix` drops the log through
+  `min(snapshot.Index, applied) − SnapshotTrailing` (default 4 096), computed
+  with saturating arithmetic so a small log never underflows. The term of the
+  last compacted entry is kept, so the consistency check on the first
+  retained entry still has a `prevLogTerm`. A follower whose `next` falls
+  below the first retained index gets `COMPACTED` internally, and the leader
+  switches it to the snapshot path.
+- **Install (R1-15):**
+  - only from the leader of the receiver's current term;
+  - the receiver bounds the announced size by its own `MaxSnapshotBytes`
+    before it spools a byte, and spools to a temporary in the snapshot
+    directory;
+  - the RECEIVER chooses the resume offset, from what it has durably spooled;
+  - at the end the receiver checks again that the sender is still the leader
+    of its current term, then the SHA-256, then the size;
+  - `Restore` is serialised with `Apply`;
+  - the install is crash-recoverable as a sequence: spool, `fsync`, publish,
+    write the stamp and the hard state that move the log base, then `Restore`.
+    A crash at any step leaves either the old base or the new one, never a mix.
+  SHA-256 here is integrity, not authentication: the authentication is the
+  TLS identity of the sender.
 - **Retention:** the previous snapshot is kept until the new one is durable,
   so a crash during publication leaves one valid snapshot.
 - **Compression, from raft-sql-poc.** The snapshot stream passes through a
   `transform` codec chosen at construction: flate from
   `internal/service/transform` by default, or zstd from
   `third-party/transform` when the caller supplies it, since `pkg` may not
-  import `third-party` (ADR 0068). The POC measured ÷10.8 with zstd level 3
-  on a realistic state. Adding a machine cost 41 to 43 KB of snapshot
-  instead of 204 to 205 KB of replayed log. The POC also compresses once per
-  snapshot and sends every lagging follower the same bytes
-  (`raft.js:1176-1194`). Messages are not compressed: under encryption,
-  compressing attacker-influenced data with other data leaks through the
-  ciphertext's length (CRIME/BREACH), which is why the POC turns compression
-  off in its `aead` mode.
+  import `third-party` (ADR 0068). The compression id is recorded in
+  `SnapshotMeta`. The POC measured ÷10.8 with zstd level 3 on a realistic
+  state. Adding a machine cost 41 to 43 KB of snapshot instead of 204 to 205 KB
+  of replayed log. The POC also compresses once per snapshot and sends every
+  lagging follower the same bytes (`raft.js:1176-1194`). Messages are not
+  compressed: under encryption, compressing attacker-influenced data with
+  other data leaks through the ciphertext's length (CRIME/BREACH).
 
-The POC cuts a snapshot synchronously on the apply path and holds it whole
-in memory (`raft.js:1151-1159`, `storage.js:397-431`). This ADR keeps the
-copy-on-write cut and the streamed write: the first consumer's state grows
-with `refs/pull/*`, and a pause in apply is a pause in every write.
+The POC cuts a snapshot synchronously on the apply path and holds it whole in
+memory (`raft.js:1151-1159`, `storage.js:397-431`). This ADR keeps the
+point-in-time cut and the streamed write (D3): the first consumer's state
+grows with `refs/pull/*`, and a pause in apply is a pause in every write.
 
-For the first consumer the snapshot is the ref table and the per-repository
-checksums, not Git objects — those travel outside the log. A node restoring a
-snapshot must still fetch the objects its refs name; that is the replicator's
-duty and the reason `Restore` receives the `Position` it restores to.
+For the first consumer the snapshot is the ref table, with its revisions and
+the per-repository checksums, not Git objects. A node restoring it does not
+serve reads until the objects its refs name are present and verified (D19).
 
 ### D8 — Membership: one server at a time, through learners
 
-Single-server changes (thesis §4.1), each a log entry that takes effect on a
-node when APPENDED, not when committed. Joint consensus (§4.3) is not
+Single-server changes (thesis §4.1). Joint consensus (§4.3) is not
 implemented in v1:
 
 - With three voters, every change a deployment needs — add, remove, replace —
@@ -471,121 +699,181 @@ implemented in v1:
   tested path in every implementation that has both.
 - The known defect of single-server changes (Ongaro, raft-dev, 2015: a
   change proposed by a leader that has not yet committed an entry of its own
-  term can produce two majorities) is closed by the rule of D6's last bullet:
-  no membership entry before the no-op of the term is committed.
+  term can produce two majorities) is closed by the rule of D6: no membership
+  entry before the no-op of the term is committed.
 - One change at a time: a second proposal while one is uncommitted is
   `MEMBERSHIP_CHANGE_PENDING`. Removing the last voter, or a node not in the
   membership, is `MEMBERSHIP_INVALID`.
 
-**Learners.** `AddLearner` adds a non-voting member that receives the log and
-snapshots but counts in no majority. `Promote` makes it a voter and is refused
-until the learner is within `PromoteLag` entries (default 1 024) of the
-leader's commit index — a voter added while it is behind can make the cluster
-unavailable, because the majority now needs a node that cannot yet
-acknowledge. Replacing a node is therefore: learner, catch up, promote (four
-voters, majority three), remove the old node. The POC checks
-catch-up in its orchestrator, outside the engine (`shard.js:662-676`). Here
-`Promote` refuses a lagging learner itself, so no caller can forget. As in
-the POC (`shard.js:707-716`), removing the current leader first transfers
-leadership, and a learner never runs an election timer
-(`raft.js:344-356`). During that window a majority of
-four spans at least two sites; the operator guide says so.
+**The configuration is a function of the log (R1-16).**
+- Every membership entry records its index. A configuration takes effect on
+  a node when it is APPENDED, not when it commits.
+- A truncation that removes a membership entry rolls the active
+  configuration back to the latest one still in the log.
+- On restart, the configuration is rebuilt from the snapshot's membership
+  and the membership entries after it.
+- A snapshot always records the configuration valid at its boundary index,
+  never a later appended one.
+- The transport's admission set is the union of the latest appended
+  configuration and the latest committed one, pushed by the engine (D4).
+- An **address change** is its own operation, `UpdateAddress`, a membership
+  entry that changes no vote. Addresses come from the committed membership.
+  The static address map of the configuration is a seed only.
 
-**A node ID is never reused.** A node whose disk was lost and that rejoined
-under its old ID could vote twice in one term — once before the loss, once
-after — and elect two leaders. The data directory is stamped with
-`(ClusterID, NodeID)` at bootstrap; a rejoining machine with an empty disk
-needs a new `NodeID` and joins as a learner. Bootstrap is an explicit, one-time
-`Bootstrap` call: a node opening an empty directory does NOT form a cluster
-on its own, because "a wiped node bootstraps itself" is how a second cluster
-with the same name is born.
+**Learners (R1-16).**
+- `AddLearner` adds a non-voting member that receives the log and snapshots
+  but counts in no majority.
+- A learner never campaigns. It DOES answer votes as a voter would, because
+  the moment it is promoted, through an entry it may already have appended,
+  it is one, and it must not then be a node that never learned to refuse
+ .
+- An empty learner — a new machine with no log — is admitted in a
+  **joining** state. It is authenticated by its certificate and its
+  incarnation, but it is not yet counted anywhere.
+- `Promote` makes a learner a voter. It is refused until two things hold:
+  the learner has shown recent DURABLE progress, acknowledged entries within
+  `PromoteLag` (default 1 024) of the commit index within the last election
+  timeout; and the prospective configuration still has a reachable majority
+  among the nodes that are acknowledging now. A voter added while it is
+  behind, or into a cluster that could not then form a majority, makes the
+  cluster unavailable.
+
+Replacing a node is therefore: learner, catch up, promote (four voters,
+majority three), remove the old node. The POC checks catch-up in its
+orchestrator, outside the engine (`shard.js:662-676`). Here `Promote` refuses
+a lagging learner itself, so no caller can forget. As in the POC
+(`shard.js:707-716`), removing the current leader first transfers leadership.
+During that window a majority of four spans at least two sites; the operator
+guide says so. The two runbooks — a DEAD node and a LIVE node to replace —
+are part of D17.
+
+**A node ID is never reused, and the engine enforces it (R1-17).** A node
+whose disk was lost and that rejoined under its old ID could vote twice in
+one term — once before the loss, once after — and elect two leaders.
+- The engine writes the stamp `(ClusterID, NodeID, Incarnation)` through
+  `LogStore.WriteStamp` and verifies it in `NewRaft`. A mismatch is
+  `DATA_DIR_MISMATCH`.
+- The incarnation is a random 128-bit value drawn when the stamp is first
+  written. It travels in `Member` and in the transport handshake, so a
+  wiped machine that kept its certificate and its `NodeID` is still a
+  different incarnation, and it is refused.
+- A data directory with no stamp does not vote and does not acknowledge. It
+  can only join as an empty learner.
+- The set of removed IDs is replicated, part of the membership. `AddLearner`
+  and `Promote` refuse a retired ID with `NODE_ID_RETIRED`, and so does the
+  transport.
+- **Bootstrap** is an explicit, one-time call. It contacts every listed peer
+  and refuses with `BOOTSTRAP_REFUSED` if any of them is already stamped, or
+  if their member lists are not identical. A node opening an empty directory
+  does NOT form a cluster on its own: "a wiped node bootstraps itself" is how
+  a second cluster with the same name is born.
 
 **Leadership transfer.** `TransferLeadership(ctx, to)` stops accepting
 proposals, brings `to` up to date, and sends it `TimeoutNow`; `to` campaigns
 at once, its vote requests flagged so D5's vote refusal does not apply. It
 fails with `TRANSFER_FAILED` after one election timeout and the old leader
-resumes.
+resumes — **without its lease for the rest of the term** (R1-19, D9).
 
-**A transfer loses nothing in flight, from raft-sql-poc.** From the moment
-it starts, `TransferLeadership` refuses new proposals with `NOT_LEADER`,
-which is retryable since nothing was appended. It sends `TimeoutNow` only
-once every entry already proposed is COMMITTED (`raft.js:789-809`,
-`raft.js:841-846`). The POC's first version stepped down with entries in
-flight and answered them "outcome unknown", and a retrying client applied
-them twice (README bug 7). The POC measured 10 ms for a transfer, against at
-least one election timeout for an election. `PreferredLeaders` in the configuration names the nodes a leader
-transfers to after an election when it is not one of them — here FRA and RBX,
-9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
+**A transfer loses nothing in flight, from raft-sql-poc.** From the moment it
+starts, `TransferLeadership` refuses new proposals with `NOT_LEADER`, which is
+retryable since nothing was appended. It sends `TimeoutNow` only once every
+entry already proposed is COMMITTED (`raft.js:789-809`, `raft.js:841-846`).
+The POC's first version stepped down with entries in flight and answered them
+"outcome unknown", and a retrying client applied them twice (README bug 7).
+The POC measured 10 ms for a transfer, against at least one election timeout
+for an election. `PreferredLeaders` in the configuration names the nodes a
+leader transfers to after an election when it is not one of them — here FRA
+and RBX, 9.6 ms apart, so a commit costs ~10 ms of network instead of ~23.
 
-### D9 — Reads: ReadIndex by default, a lease only on a stated clock bound
+### D9 — Reads: ReadIndex by default, a lease kept with every correction (Q2, R1-19)
 
 `Barrier(ctx)` returns once the local state machine reflects every write
 committed before the call, and returns the applied index:
 
-- **ReadIndex** (default; thesis §6.4). The leader records its commit index,
-  confirms it is still leader with one heartbeat round acknowledged by a
-  majority (concurrent barriers share the round), which the POC
-  measured at 3 quorum rounds for 2 000 concurrent linearizable reads,
-  at the price of −13 % for strictly sequential ones, each of which then
-  pays its own round, waits until applied reaches
-  the recorded index, and answers; a follower asks the leader for the index
-  and waits locally. Cost: one round trip to the nearest peer from the leader.
-- **Lease** (`Reads: ReadLease`, opt-in). The leader serves without the
-  round while its lease holds: the lease starts at the SEND instant of a
-  heartbeat round a majority acknowledged and lasts
-  `ElectionTimeoutMin × (1 − MaxClockDrift)`, measured on the injected
-  `clock.Clock`'s monotonic `Since`. It is sound only if (a) no node's clock
-  RATE differs from another's by more than `MaxClockDrift` — absolute
-  agreement is not needed; (b) the vote refusal of D5 holds, which it always
-  does here; (c) no transfer is in progress — the lease is dropped the moment
-  `TransferLeadership` starts, because a transfer elects a new leader without
-  waiting for the timeout the lease relies on. The lease is also used
-  only when the leader has applied its commit index and that index is past
-  the no-op of its term, as in the POC (`raft.js:1427-1432`). `MaxClockDrift` has no default:
-  `ReadLease` with a zero drift is refused at construction (ADR 0031, refuse
-  half — zero reads as "clocks are perfect", which no clock is).
+- **ReadIndex** (default; thesis §6.4).
+  - The leader records its commit index and confirms that it is still leader
+    with a heartbeat round acknowledged by a majority.
+  - **Each read is confirmed by a round started after the read arrived.**
+    Concurrent reads share such a round. A read never rides a round that was
+    already in flight when it arrived: acknowledgements to heartbeats sent
+    before the read prove nothing about leadership at the read's start.
+  - The leader then waits until applied reaches the recorded index and
+    answers. A follower asks the leader for the index and waits locally.
+  - raft-sql-poc measured 3 quorum rounds for 2 000 concurrent linearizable
+    reads, at the price of −13 % for strictly sequential reads, each of which
+    then pays its own round.
+  - Cost: one round trip to the nearest peer, from the leader.
+- **Lease** (`Reads: ReadLease`, opt-in; kept in v1 by the owner's decision,
+  Q2). The leader serves without the round while its lease holds. The lease
+  starts at the SEND instant of a heartbeat round a majority acknowledged, and
+  it lasts `ElectionTimeoutMin × (1 − MaxClockDrift)`, measured on the injected
+  `clock.Clock`'s monotonic `Since`. It is sound only under four conditions:
+  - (a) no node's clock RATE differs from another's by more than
+    `MaxClockDrift`. Absolute agreement is not needed.
+  - (b) the vote refusal of D5 holds on every member, in RequestVote as in
+    PreVote, and a restarted node keeps its refusal window.
+  - (c) **after any transfer ATTEMPT, the lease is dropped for the rest of the
+    term**, whether or not the transfer succeeds. A transfer elects without
+    waiting for the timeout the lease relies on, and a `TimeoutNow` already in
+    flight cannot be recalled. The first draft dropped the lease only while
+    the transfer ran.
+  - (d) **the timing contract is the same cluster-wide.** `HeartbeatInterval`,
+    `ElectionTimeoutMin`, `ElectionTimeoutMax` and `MaxClockDrift` are carried
+    in the transport handshake and in the committed cluster-version entry
+    (D18). A member whose contract differs is refused admission. A node's
+    lease is computed from the contract, not from its own configuration.
 
-  What a lease does NOT guarantee is stated as loudly as ADR 0052 D5 states
-  it for fences: a leader process paused AFTER its lease check and BEFORE its
+  The lease is used only when the leader has applied its commit index and
+  that index is past the no-op of its term (`raft.js:1427-1432`).
+  `MaxClockDrift` has no default: `ReadLease` with a zero drift is refused at
+  construction (ADR 0031, refuse half). Each condition has its mutation test
+  (D15).
+
+  What a lease does NOT guarantee is stated as loudly as ADR 0052 D5 states it
+  for fences: a leader process paused AFTER its lease check and BEFORE its
   answer (a GC pause, a VM steal, `SIGSTOP`) serves a read that may be stale.
-  ReadIndex has no such window, which is why it is the default.
+  ReadIndex has no such window, which is why it stays the default.
 
-  **Two gaps in the POC's lease, which this ADR closes.** It measures the
+  **Two gaps in raft-sql-poc's lease, which this ADR closes.** It measures the
   lease on `Date.now()` (`raft.js:1495-1506`), a wall clock that NTP can
-  step, where this ADR uses the monotonic `Since` of the injected clock. It
-  also keeps the lease while a transfer runs (`raft.js:756-787` does not
-  clear it), and the transfer's `RequestVote` skips the live-leader check.
-  So if the vote request to the old leader is delayed or lost, the old
-  leader can serve a lease read after the new leader has committed a write.
-  That is condition (c) above, and it is a case the simulator's
-  linearizability checker must find.
+  step. It also keeps the lease while a transfer runs (`raft.js:756-787` does
+  not clear it), and the transfer's `RequestVote` skips the live-leader check.
+  The POC also offers a `leader` read with no confirmation. This ADR does not:
+  it is exactly the read a deposed leader serves stale.
 
-  The POC also offers a `leader` read: a local read on the leader, with no
-  confirmation. This ADR does not: it is exactly the read a deposed leader
-  serves stale. Its `stale` read is any local read, which needs no API.
+- **`WaitApplied(ctx, index)`** waits until the local node has applied
+  `index`. It gives read-your-writes and monotonic reads to a client that
+  carries its index; it is NOT a linearizable read for a client that does not.
+  For the first consumer, applied is not enough: a Git read waits on the
+  projection watermark of its repository (D19).
 
-- **`WaitApplied(ctx, index)`** is the read-after-write cookie of the first
-  consumer: wait until the local node has applied `index`. It gives
-  read-your-writes and monotonic reads to a client that carries its index; it
-  is NOT a linearizable read for a client that does not, and the doc comment
-  says so.
+### D10 — Fencing: an entry's position identifies a command, not an authority (R1-20)
 
-### D10 — Fencing: every applied entry carries `(term, index)`
-
-`Entry.Position{Term, Index}` is handed to `Apply`. `Index` alone is a fencing
+`Entry.Position{Term, Index}` is handed to `Apply`. `Index` is a fencing
 token in ADR 0052 D5's sense: unique, strictly increasing over the whole
-group's life, across terms, and identical on every node. `Term` is the
-leadership epoch: a side effect performed by a leader (a webhook, a CI
-trigger) and tagged with its term can be refused by a receiver that has seen
-a higher one.
+group's life, across terms, and identical on every node.
+
+**The term of an entry is not current authority.** The first draft said a
+side effect "tagged with its term can be refused by a receiver that has seen
+a higher one". That conflates two identities:
+- the **command identity**, which is the entry's `Position`. It is the same
+  on every node and forever, and it says WHICH command a side effect belongs
+  to.
+- the **dispatch authority**, which says WHO may perform the side effect now.
+  That belongs to the dispatcher's own current leadership. It is not the
+  term written in a committed entry, which a deposed leader and the new one
+  both read.
+
+A side effect — a webhook, a CI trigger — is therefore written as a row of an
+**outbox** in the replicated state by `Apply`. The current leader alone
+dispatches pending rows, and each row carries its command identity. The
+receiver deduplicates on that identity. A deposed leader that dispatches a
+row late produces a duplicate the receiver drops, never a second effect.
 
 This is the answer to ADR 0052 D11. A lock over this domain is a state
 machine whose acquire entry's `Index` is the lease's `Fence()`; it needs no
 third-party system, so it belongs in the SDK, and it inherits D11's sentence
-unweakened: without a resource that compares the fence, mutual exclusion
-against a stalled holder is not guaranteed. The `lock.Locker` adapter itself
-is deferred (see Deferred); `Position` is shaped so it fits `Fence() uint64`
-without conversion.
+unweakened. The `lock.Locker` adapter itself is deferred.
 
 ### D11 — One group in v1, an API that does not forbid more
 
@@ -593,9 +881,11 @@ without conversion.
   `1`. A v2 that multiplexes groups on one `Transport` changes no wire format.
 - `Transport.Bind` is keyed by group, and one transport serves a process.
 - `Node` is per group; nothing is process-global except the transport.
-- The data directory is held for the node's life through `lock.NewFileLocker`
-  (ADR 0052), so a second process opening the same log fails at once
-  (`DATA_DIR_LOCKED`) instead of interleaving appends.
+- **`OpenLog` owns the data-directory lock (R1-21).** It takes the lock
+  through `lock.NewFileLocker` (ADR 0052) BEFORE it reads, scans, repairs or
+  truncates anything, and `LogStore.Close` releases it. A second process
+  opening the same directory fails at once with `DATA_DIR_LOCKED`, before
+  either can touch the tail.
 
 Heartbeat coalescing and quiescing idle groups — the two things a
 group-per-repository design needs and Gitaly never built — are NOT in v1,
@@ -605,15 +895,11 @@ pair of machines carries every quiescent group, delta-encoded: 4 bytes for a
 group whose term and commit the receiver already confirmed, and a 52-byte
 "all clear" acknowledgement (`host.js:1-27`, `raft.js:1351-1368`). At 256
 shards on 6 machines that took idle traffic from 10 240 to 300 to 320
-messages/s (÷32 to ÷34). ONE WAL per machine is shared by all its groups,
-so a tick costs one `fsync` however many groups wrote: in the POC, 1 000
-entries over 4 shards made 1 fsync. The `LogStore` port does not forbid it:
-a shared store hands out per-group views whose `Sync` is the same call. The
-POC also measured rendezvous hashing for placement and balanced leadership
-to within one. And it measured the cost: with 8 shards at replication 3 on
-6 machines, losing 2 machines left 4 of 8 shards unavailable. A sharded
-cluster's availability is no longer a boolean, which is one more reason v1
-has one group.
+messages/s (÷32 to ÷34). ONE WAL per machine is shared by all its groups.
+The `LogStore` port does not forbid it: a shared store hands out per-group
+views whose `Sync` is the same call. The POC also measured the cost: with 8
+shards at replication 3 on 6 machines, losing 2 machines left 4 of 8 shards
+unavailable.
 
 ### D12 — Errors
 
@@ -622,50 +908,73 @@ change that introduces them (ADR 0035):
 
 | Code | Reason | Meaning |
 |---|---|---|
-| `0.2.57.1` | `CONSENSUS_MISCONFIGURED` | refused at construction (D5, D9, missing ID, empty membership) |
+| `0.2.57.1` | `CONSENSUS_MISCONFIGURED` | refused at construction: a bound missing or out of range (D14), a timing rule (D5), a lease without drift (D9) |
 | `0.2.57.2` | `NOT_LEADER` | certainly not appended; the known leader in `Fields`, read with `LeaderHint` |
-| `0.2.57.3` | `OUTCOME_UNKNOWN` | appended, then leadership lost or the context ended before commit — may still commit; a context's end is its cause |
+| `0.2.57.3` | `OUTCOME_UNKNOWN` | appended or possibly delivered, then the answer was lost — may still commit; a context's end is its cause (D6) |
 | `0.2.57.4` | `LEADERSHIP_UNCONFIRMED` | a barrier's round did not reach a majority in time |
 | `0.2.57.5` | `MEMBERSHIP_CHANGE_PENDING` | one change at a time |
-| `0.2.57.6` | `MEMBERSHIP_INVALID` | unknown node, last voter, promotion of a lagging learner |
+| `0.2.57.6` | `MEMBERSHIP_INVALID` | unknown node, last voter, promotion without durable progress or a prospective majority |
 | `0.2.57.7` | `TRANSFER_FAILED` | the target did not win within one election timeout |
 | `0.2.57.8` | `ENTRY_TOO_LARGE` | a command above `MaxEntryBytes` |
-| `0.2.57.9` | `COMPACTED` | an index below the first retained one |
-| `0.2.57.10` | `STATE_MACHINE_FAILED` | `Apply` panicked; the node stopped applying |
+| `0.2.57.9` | `COMPACTED` | an index below the first retained one; internally, the switch to the snapshot path |
+| `0.2.57.10` | `STATE_MACHINE_FAILED` | `Apply` panicked; the entry IS committed, and the node stopped applying |
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
-| `0.2.57.12` | `ENTRY_SUPERSEDED` | the proposal's position was truncated and reused: certainly not committed (D6, from IWFS) |
-| `0.2.57.13` | `OVERLOADED` | refused before append, the leader's pending bytes over `MaxPendingBytes` (D6, from IWFS) |
+| `0.2.57.12` | `ENTRY_SUPERSEDED` | the term at the proposal's index is observable and differs: certainly not committed (D6, from IWFS) |
+| `0.2.57.13` | `OVERLOADED` | refused before append: pending bytes or apply lag over their bound (D6) |
+| `0.2.57.14` | `STATE_DIVERGED` | a replica's state hash differs at the same applied position; that node stops (D3, R1-25) |
+| `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
+| `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
+| `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared (D17, R1-25) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
 | Code | Reason | Meaning |
 |---|---|---|
-| `0.3.92.1` | `LOG_CORRUPT` | a CRC failure before the tail; never repaired |
-| `0.3.92.2` | `HARD_STATE_CORRUPT` | the term/vote file is unreadable; never defaulted |
-| `0.3.92.3` | `SNAPSHOT_CORRUPT` | a snapshot's SHA-256 does not match its metadata |
-| `0.3.92.4` | `STORAGE_FAILED` | a write or `fsync` failed; the node stops, no retry |
+| `0.3.92.1` | `LOG_CORRUPT` | a CRC failure that is not a short read or a zeroed-sector tear, or a gap in the segments; never repaired (D4) |
+| `0.3.92.2` | `HARD_STATE_CORRUPT` | the hard-state record or the checkpoint holding it is unreadable; never defaulted (R1-30) |
+| `0.3.92.3` | `SNAPSHOT_CORRUPT` | a snapshot's SHA-256 or size does not match its metadata |
+| `0.3.92.4` | `STORAGE_FAILED` | a write, `fsync` or read failed; the node stops, no retry |
 | `0.3.92.5` | `DATA_DIR_LOCKED` | another process holds the data directory |
-| `0.3.92.6` | `DATA_DIR_MISMATCH` | the directory is stamped with another cluster or node |
-| `0.3.92.7` | `PEER_REJECTED` | the certificate does not name the expected node |
-| `0.3.92.8` | `CLUSTER_MISMATCH` | a peer's handshake names another cluster or group |
-| `0.3.92.9` | `FRAME_INVALID` | a frame that does not parse; the connection closes |
+| `0.3.92.6` | `DATA_DIR_MISMATCH` | the stamp names another cluster, node or incarnation |
+| `0.3.92.7` | `PEER_REJECTED` | the certificate's URI SAN does not name the expected cluster and node, or the incarnation is not admitted |
+| `0.3.92.8` | `CLUSTER_MISMATCH` | a peer's first frame names another cluster or group (a misconfiguration guard) |
+| `0.3.92.9` | `FRAME_INVALID` | a frame that does not parse or exceeds `MaxFrameBytes`; the connection closes |
+| `0.3.92.10` | `SNAPSHOT_TOO_LARGE` | an announced snapshot above the local `MaxSnapshotBytes`; refused before spooling (D7) |
+| `0.3.92.11` | `BOOTSTRAP_REFUSED` | a listed peer is already stamped, or the member lists differ (D8) |
+| `0.3.92.12` | `TRANSPORT_MISCONFIGURED` | an identity with nil `RootCAs`, a listener without client-certificate verification, or a limit out of range (D4) |
+| `0.3.92.13` | `ADMIN_DENIED` | an admin request whose client certificate is not an operator identity (D17) |
+| `0.3.92.14` | `RECOVER_REFUSED` | `Recover` on a directory that is not stopped and locked, or without a new `ClusterID` (D17) |
 
-A context that ends before anything is appended returns `ctx.Err()`, as
-everywhere in the SDK. One that ends after the append is `OUTCOME_UNKNOWN`
-with `ctx.Err()` as its cause (D6).
+### D13 — Observability (R1-25)
 
-### D13 — Observability
+Through `metrics` (ADR 0044), attributed by `group`. The names are part of
+the contract and are listed here so that dashboards and alerts can be
+written before the code:
 
-Through `metrics` (ADR 0044), every name prefixed `consensus.` and attributed
-by `group`: commit latency and `fsync` latency histograms, batch size in
-entries and bytes, apply lag (`commit − applied`), per-peer match lag and
-inflight, term and role gauges, leader changes, elections started and
-PreVotes lost, snapshot duration and bytes, torn tails truncated, barrier
-latency by mode. Through `trace` (ADR 0051): one span per `Propose` from
-submission to local apply, with events at append, commit and apply; the trace
-context travels in the forwarding frame only — never in the log, which must
-not grow with telemetry. Through `logger`: role and term changes, membership
-changes, snapshots and truncations at `Info`; nothing per entry.
+| Metric | Kind |
+|---|---|
+| `consensus.role`, `consensus.term`, `consensus.leader_changes` | gauge, gauge, counter |
+| `consensus.commit.latency`, `consensus.apply.latency` | histograms |
+| `consensus.fsync.latency`, `consensus.batch.entries`, `consensus.batch.bytes` | histograms |
+| `consensus.apply.lag_bytes`, `consensus.apply.lag_entries` | gauges |
+| `consensus.peer.match_lag`, `consensus.peer.inflight`, `consensus.peer.unreachable` | gauges by peer |
+| `consensus.elections.started`, `consensus.prevotes.lost` | counters |
+| `consensus.snapshot.duration`, `consensus.snapshot.bytes`, `consensus.snapshot.installs` | histogram, histogram, counter |
+| `consensus.log.bytes`, `consensus.log.quota_bytes`, `consensus.nospace` | gauges |
+| `consensus.tail.truncated`, `consensus.frames.dropped` | counters by reason |
+| `consensus.barrier.latency` | histogram by mode |
+| `consensus.failure_tolerance` | gauge: how many voters can fail now with a majority left |
+| `consensus.tls.cert_expiry_seconds` | gauge per identity |
+| `consensus.state_hash.mismatches` | counter |
+
+`Node.Health()` returns a structured verdict an orchestrator can poll: role,
+leader known, quorum reachable, apply lag over its bound, no-space alarm,
+certificate expiry under its threshold. Through `trace` (ADR 0051): one span
+per `Propose` from submission to local apply, with events at append, commit
+and apply; the trace context travels in the forwarding frame only — never in
+the log, which must not grow with telemetry. Through `logger`: role and term
+changes, membership changes, snapshots and truncations at `Info`; nothing per
+entry.
 
 ### D14 — Public surface (sketch, signatures only)
 
@@ -673,27 +982,46 @@ changes, snapshots and truncations at `Info`; nothing per entry.
 package consensus // pkg/v1/consensus
 
 type (
-	NodeID   = coreconsensus.NodeID   // uint64, never 0, never reused
-	GroupID  = coreconsensus.GroupID
-	Position = coreconsensus.Position // struct{ Term, Index uint64 }
-	Entry    = coreconsensus.Entry    // Position, Kind, Data []byte
+	NodeID      = coreconsensus.NodeID      // uint64, never 0, never reused
+	Incarnation = coreconsensus.Incarnation // [16]byte, drawn at first stamp
+	ClusterID   = coreconsensus.ClusterID
+	GroupID     = coreconsensus.GroupID
+	Position    = coreconsensus.Position    // struct{ Term, Index uint64 }
+	Entry       = coreconsensus.Entry       // Position, Kind, Version, Data []byte (immutable)
 
-	StateMachine  = coreconsensus.StateMachine
-	Snapshot      = coreconsensus.Snapshot
-	LogStore      = coreconsensus.LogStore
-	SnapshotStore = coreconsensus.SnapshotStore
-	Transport     = coreconsensus.Transport
+	Replicated           = coreconsensus.Replicated // the consumer port (R1-28)
+	StateMachine         = coreconsensus.StateMachine
+	DurableStateMachine  = coreconsensus.DurableStateMachine
+	BatchingStateMachine = coreconsensus.BatchingStateMachine
+	HashingStateMachine  = coreconsensus.HashingStateMachine
+	Snapshot             = coreconsensus.Snapshot
+	LogStore             = coreconsensus.LogStore
+	SnapshotStore        = coreconsensus.SnapshotStore
+	Transport            = coreconsensus.Transport
 
-	Member     = coreconsensus.Member     // ID, Address, Voter bool
-	Membership = coreconsensus.Membership // the members at a Position
-	Status     = svcconsensus.Status      // Role, Term, Leader, Commit, Applied
+	Member     = coreconsensus.Member     // ID, Incarnation, Address, Voter, Joining
+	Membership = coreconsensus.Membership // the members at a Position, the retired IDs
+	Status     = svcconsensus.Status      // Role, Term, Leader, Commit, Applied, versions
+	Health     = svcconsensus.Health
 	ReadMode   = svcconsensus.ReadMode    // ReadIndex (zero value) | ReadLease
 	Config     = svcconsensus.Config
 	Node       = svcconsensus.Node
 )
 
-type Config struct { // svcconsensus.Config, shown for its fields
-	Cluster          string
+// The consumer port, in core: the only algorithm-neutral interface (D1).
+type Replicated interface {
+	Propose(ctx context.Context, data []byte) (Position, any, error)
+	Barrier(ctx context.Context) (uint64, error)
+	WaitApplied(ctx context.Context, index uint64) error
+	Status() Status
+}
+
+// ProposeAs types the Apply result. A result of another dynamic type is a
+// programming error and panics with the expected and actual types.
+func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (Position, R, error)
+
+type Config struct { // svcconsensus.Config, shown for its fields; every bound is in D14's table
+	Cluster          ClusterID
 	Group            GroupID
 	ID               NodeID
 	Machine          StateMachine
@@ -702,8 +1030,12 @@ type Config struct { // svcconsensus.Config, shown for its fields
 	Transport        Transport
 	Clock            clock.Timed
 	HeartbeatInterval, ElectionTimeoutMin, ElectionTimeoutMax time.Duration
-	MaxBatchBytes, MaxInflight, MaxEntryBytes                  int
-	SnapshotEvery, SnapshotTrailing, PromoteLag                uint64
+	MaxBatchBytes, MaxInflight, MaxInflightBytes, MaxEntryBytes  int
+	MaxPendingBytes, MaxApplyLagBytes                            int64
+	SnapshotEvery, SnapshotTrailing, PromoteLag                  uint64
+	SnapshotEveryBytes, MaxSnapshotBytes, MaxLogBytes, LogReserveBytes int64
+	SnapshotCodec    transform.Compressor // core/transform port; flate by default; id recorded in SnapshotMeta
+	StateHashEvery   time.Duration   // 0: no cross-replica hash check
 	Reads            ReadMode
 	MaxClockDrift    float64 // required with ReadLease
 	PreferredLeaders []NodeID
@@ -712,14 +1044,31 @@ type Config struct { // svcconsensus.Config, shown for its fields
 	Logger           logger.Logger
 }
 
+type TransportConfig struct {
+	Identity                tlsid.Identity // URI SAN kitsunium-consensus://<cluster>/<node>
+	Self                    NodeID
+	Seeds                   map[NodeID]string // first contact only (D8)
+	MaxFrameBytes           int
+	HandshakeTimeout        time.Duration // ≤ 1 s
+	MaxUnauthenticatedPerIP int
+	ReservedMemberSlots     int
+	PeerQueueBytes          int64
+}
+
 func Bootstrap(ctx context.Context, cfg Config, members []Member) error
 func NewRaft(cfg Config) (*Node, error)
+func Recover(dir string, newCluster ClusterID, members []Member) error // offline, D17
 
-func OpenLog(dir string) (LogStore, error)                 // segmented, fdatasync per batch
+func OpenLog(dir string) (LogStore, error) // takes the directory lock first (D11)
 func OpenSnapshots(dir string) (SnapshotStore, error)
-func NewTCPTransport(id tlsid.Identity, self NodeID, peers map[NodeID]string) (Transport, error)
-func NewMemoryLog() LogStore                               // tests
+func NewTCPTransport(cfg TransportConfig) (Transport, error)
+func NewMemoryLog() LogStore // tests
 func LeaderHint(err error) (NodeID, bool)
+
+func SaveSnapshot(ctx context.Context, n *Node, w io.Writer) (SnapshotMeta, error)
+func RestoreSnapshot(dir string, r io.Reader) (SnapshotMeta, error) // offline
+func Inspect(dir string) (Report, error)                           // offline, read-only
+func AdminHandler(n *Node, operators tlsid.Identity) http.Handler // served over mTLS only (D17)
 
 func (n *Node) Propose(ctx context.Context, data []byte) (Position, any, error)
 func (n *Node) Barrier(ctx context.Context) (uint64, error)
@@ -727,24 +1076,61 @@ func (n *Node) WaitApplied(ctx context.Context, index uint64) error
 func (n *Node) AddLearner(ctx context.Context, m Member) error
 func (n *Node) Promote(ctx context.Context, id NodeID) error
 func (n *Node) Remove(ctx context.Context, id NodeID) error
+func (n *Node) UpdateAddress(ctx context.Context, id NodeID, addr string) error
 func (n *Node) TransferLeadership(ctx context.Context, to NodeID) error
+func (n *Node) ClearNoSpace(ctx context.Context) error
 func (n *Node) Membership() Membership
 func (n *Node) Status() Status
-func (n *Node) Close(ctx context.Context) error
+func (n *Node) Health() Health
+func (n *Node) Close(ctx context.Context) error // transfers leadership first
+func (n *Node) HardClose() error                // stops now, no transfer
 ```
 
-`Config` and `Node` belong to the engine and are aliased from service; every
-type a port speaks lives in core (ADR 0074). The frozen ports are the five
-interfaces; every later capability is a sibling discovered by assertion
-(ADR 0039) — a `LogStore` that can report its on-disk size, for example.
+`Config`, `Node`, `Status` and `Health` belong to the engine and are aliased
+from service; every type a port speaks lives in core (ADR 0074). The frozen
+ports are the interfaces above; every later capability is a sibling
+discovered by assertion (ADR 0039). `ProposeAs` is the "Apply result typing"
+of R1-28: the state machine and its caller agree on the result type, and a
+mismatch is a programming error, as a failed type assertion is.
 
-### D15 — Testing: a deterministic simulator first, real clusters second
+**Every bound has an owner, a default and a validation (R1-29).** "Clamp" is
+ADR 0031's clamp half: a zero becomes the default. "Refuse" is its refuse
+half: `CONSENSUS_MISCONFIGURED`, or `TRANSPORT_MISCONFIGURED` for the
+transport.
+
+| Field | Owner | Default | Validation |
+|---|---|---|---|
+| `HeartbeatInterval` | engine | 100 ms | clamp; refuse if not < `ElectionTimeoutMin`/5 |
+| `ElectionTimeoutMin`, `ElectionTimeoutMax` | engine | 1 s, 2 s | clamp; refuse if Max ≤ Min |
+| `MaxBatchBytes` | engine | 1 MiB | clamp; refuse if > `MaxFrameBytes` |
+| `MaxInflight`, `MaxInflightBytes` | engine | 64, 8 MiB | clamp; refuse if `MaxInflightBytes` < `MaxBatchBytes` |
+| `MaxEntryBytes` | engine | 1 MiB | clamp; refuse if > `MaxBatchBytes` |
+| `MaxPendingBytes` | engine | 64 MiB | clamp |
+| `MaxApplyLagBytes` | engine | 256 MiB | clamp |
+| `SnapshotEvery`, `SnapshotEveryBytes` | engine | 16 384, 64 MiB | clamp |
+| `SnapshotTrailing` | engine | 4 096 | clamp |
+| `MaxSnapshotBytes` | engine, enforced by receiver | 4 GiB | clamp; refuse if < `SnapshotEveryBytes` |
+| `MaxLogBytes`, `LogReserveBytes` | log | 8 GiB, 512 MiB | refuse zero (no sensible universal size); refuse reserve ≥ quota |
+| `SnapshotCodec` | engine | flate | recorded in `SnapshotMeta` |
+| `PromoteLag` | engine | 1 024 | clamp |
+| `MaxClockDrift` | engine | none | refuse zero with `ReadLease` |
+| `MaxFrameBytes` | transport | 16 MiB | clamp; refuse if < `MaxBatchBytes` + header |
+| `HandshakeTimeout` | transport | 1 s | clamp; refuse > 1 s |
+| `MaxUnauthenticatedPerIP`, `ReservedMemberSlots` | transport | 4, 8 | clamp |
+| `PeerQueueBytes` | transport | 64 MiB | clamp |
+| inbound queue (`deliver`) | transport | 4 096 messages | fixed, drops counted |
+
+The defaults are provisional, like D16's numbers, and are revised from the
+simulator and the VPS measurements before the first release.
+
+### D15 — Testing: a deterministic simulator first, real clusters second (R1-26)
 
 The engine is split so that it can be tested by simulation: a **step
 function** with no goroutine, no I/O and no clock — `Tick()`, `Step(*Message)`,
-`Propose(...)`, and a `Ready()` that returns what to persist, what to send and
-what to apply — and a **driver** that performs those effects. Everything that
-decides safety is in the step function.
+`Propose(...)`, storage-completion events (D5b), and a `Ready()` that returns
+what to persist, what to send and what to apply — and a **driver** that
+performs those effects. Everything that decides safety is in the step
+function.
 
 **The simulator** (test-only, under the service package) runs N step functions
 on ONE goroutine against a virtual clock (`clock.ManualClock`) and an event
@@ -756,83 +1142,112 @@ queue, so a run is a pure function of its seed:
   (A hears B, B does not hear A), and the "bridge" where one node sees both
   halves;
 - a disk model that distinguishes WRITTEN bytes from SYNCED bytes: a crash
-  drops everything written since the last `Sync`, and optionally tears the
-  last unsynced record at a 512-byte boundary or flips a bit in it — the
-  "crash in the middle of an fsync" case, and the one that proves the tail
-  scan of D4 truncates what it must and refuses what it must;
+  drops everything written since the last `Sync`, tears the last unsynced
+  record at a **4 KiB** sector boundary (R1-30), and flips bits in SYNCED
+  records too, at the tail and before it (R1-10);
 - crash and restart at any event, including between a follower's `Sync` and
-  its acknowledgement, and between a leader's append and its `Sync`;
+  its acknowledgement, between a leader's append and its `Sync`, and between
+  a state machine's effect and its applied position (R1-02);
 - clock-rate skew per node, inside and outside `MaxClockDrift`.
 
-**Checked after every event:** at most one leader per term; Log Matching;
-Leader Completeness; State Machine Safety (every node's applied sequence is a
-prefix of the longest); every `Propose` that returned success is in every
-applied sequence from then on; terms and commit indexes never go backwards on
-disk across a restart.
+**Constructed schedules, not seed sweeps alone.** Every bug this ADR cites is
+a named, hand-built schedule that reaches its state in a few dozen events.
+Random seeds then explore around them. A seed sweep that never builds the
+schedule finds the rare bug by luck.
+
+**Safety and liveness oracles are separate.** The safety oracle runs after
+every event and never tolerates a violation, even briefly. It checks:
+- at most one leader per term;
+- Log Matching on CONTENT, not on `(lastIndex, lastTerm)` summaries (IWFS's
+  J20);
+- Leader Completeness;
+- State Machine Safety: every applied sequence is a prefix of the longest;
+- every `Propose` that returned success is in every applied sequence from
+  then on;
+- terms, votes, commit indexes and applied positions never go backwards on
+  disk across a restart.
+
+The liveness oracle checks progress only in the windows where the schedule
+allows it: after a partition heals, within so many election timeouts.
 
 **Linearizability.** Clients of a key-value state machine record
 `invoke` / `return` pairs with virtual timestamps, through `Propose`,
-`Barrier` + local read, and lease reads; the history is checked with the
-Wing & Gong search with Lowe's memoization, partitioned per key (the
-algorithm Porcupine and Knossos implement). It is written in the test tree —
-about three hundred lines, stdlib — rather than imported: the SDK has
-implemented a specification before importing a library twice already (the
-metrics data model, OTLP/JSON), and a checker the tests depend on is worth
-owning. **A negative control is mandatory**: a run with lease reads and clock
-skew beyond `MaxClockDrift` must produce a history the checker REJECTS, as
-`TestWallClockAuditDetectsAViolation` proves ADR 0052's audit fires. A checker
+`Barrier` + local read, and lease reads. The history is checked with the Wing
+& Gong search with Lowe's memoization, partitioned per key (the algorithm
+Porcupine and Knossos implement). It is written in the test tree — about
+three hundred lines, stdlib — rather than imported: the SDK has implemented a
+specification before importing a library twice already (the metrics data
+model, OTLP/JSON). **The checker is validated on known histories first:** a
+corpus of small histories hand-labelled linearizable or not, including the
+classic stale-read and lost-update shapes, must be classified correctly.
+**A negative control is mandatory:** a run with lease reads and clock skew
+beyond `MaxClockDrift` must produce a history the checker REJECTS. A checker
 never seen failing is not a checker.
 
-**Lanes (rule 12).** A short simulation (a few hundred seeds) runs in
-`bazel test //...`. A long one (`make test-consensus-soak`, tens of thousands
-of seeds) is a named lane, declared in the package `CLAUDE.md` and run on a
-schedule in CI; a failure prints the seed, and `CONSENSUS_SIM_SEED=<n>`
-replays it bit for bit. A real three-process test over loopback mTLS with
-injected latency runs in the normal suite; the `tc netem` reproduction of the
-three-site matrix on three containers belongs to the first consumer's
-repository, not the SDK's.
+**One mutation per cited bug.** Behind test-only switches, the simulator
+reintroduces each of these, and the suite must fail on each:
+- an acknowledgement sent before its sync (raft-sql-poc's
+  `unsafeAckBeforeSync`, `raft.js:77-80`, lost 50 to 139 of 300 acknowledged
+  writes);
+- the three core bugs of D6: same-term vote clearing, commit beyond the
+  verified prefix, acknowledging `lastIndex`;
+- a lease kept after a transfer;
+- the live-leader refusal in PreVote only;
+- a membership change before the term's no-op;
+- committing an older term's entry by count (Figure 8);
+- no vote refusal after a restart;
+- a learner that does not answer votes;
+- a stuck higher-term node ignored (R1-18);
+- the applied position persisted off by one (R1-02).
+The transport's identity, admission and size checks get the same treatment.
+
+**Named scenarios.**
+- From IWFS's defects (`01-shared-log-single-writer.md` §7.1):
+  - every node starts at the same instant, and a split vote must not replay
+    in the same term;
+  - a partition heals, and a follower that missed committed entries must
+    converge through the leader's log repair alone;
+  - control traffic is starved, and elections must still settle;
+  - concurrent acquisitions, and a fence must not advance on a lost one.
+- From R1-18: PreVote granted, RequestVote refused, partition heals.
+
+**The driver is tested too.** The goroutines of D5b run under
+`testing/synctest`, so their timers are virtual, and under `-race`.
+Step-function behaviour is also pinned by **datadriven scripts**: text files
+of inputs and expected outputs, in the style of etcd's raft tests, which make
+a regression readable in review.
+
+**Fuzzing.** The frame decoder, the log record decoder, the snapshot metadata
+decoder and the tail scan are fuzz targets. A crash or a hang is a failure,
+and the corpus is checked in.
+
+**A real store under faults.** Besides the disk model, a lane runs the real
+segmented `LogStore` over a fault-injecting filesystem shim. The shim fails
+`write`, `fdatasync`, `rename` and directory `fsync` at chosen points and
+tears files at 4 KiB boundaries. The lane checks recovery against the same
+oracles.
+
+**Lanes (rule 12).** A short simulation (the constructed schedules and a
+few hundred seeds) runs in `bazel test //...`. A long one
+(`make test-consensus-soak`, tens of thousands of seeds) is a named lane,
+declared in the package `CLAUDE.md` and run on a schedule in CI. A failure
+prints the seed, and `CONSENSUS_SIM_SEED=<n>` replays it bit for bit. A real
+three-process test over loopback mTLS with injected latency runs in the
+normal suite. The heartbeat-latency test of D4 runs with a saturated data
+pipe and a slowed disk. The `tc netem` reproduction of the three-site matrix
+on three containers belongs to the first consumer's repository; IWFS's
+chaos suite is its shape, with these oracles rather than IWFS's.
 
 **No test sleeps.** Every timer is on the injected clock, with ADR 0052's
 wall-clock AST audit copied over and its own detecting negative test.
 
 **Confirmed by raft-sql-poc, in its own words.** Its tests are chosen
-scenarios on real timers. It uses `Date.now`, `setTimeout`, and
-`Math.random` for loss and jitter (`network.js:94`, `network.js:112`), with
-no seed to replay. Its README lists "no deterministic simulation test nor
-linearizability checker" among what still separates it from a product.
-What it did prove is the shape of the power-loss test: cut power on every
-machine at once, right after the last acknowledgement, and count. It got
-300 of 300 acknowledged writes back in simulation, and 622 of 622 over
-encrypted TCP to disk. Its disk model keeps only the bytes covered by the
-last completed `fsync` (`storage.js:601-615`). The simulator here keeps
-that, and adds a torn record and a flipped bit.
-
-**Mutation controls, from raft-sql-poc.** The POC removes each of its 10
-transport defenses one at a time and requires each removal to be detected
-(`tools/security-mutations.js`). It also reinstates its old leadership
-balancer to prove the test fails (`tools/balance-mutation.js`). The
-simulator gets the same discipline. Behind test-only switches it
-reintroduces each of the POC's three core safety bugs (D6) and an
-acknowledgement sent before the sync, and the suite must fail on each. In
-the POC that last switch, `unsafeAckBeforeSync` (`raft.js:77-80`), lost 50
-to 139 of 300 acknowledged writes. The transport's identity, admission and
-size checks get the same treatment.
-
-**Scenarios from IWFS's defects.** IWFS documents four defects that its
-8-hour nominal run could not expose. They were found later, under injected
-partitions, CPU starvation and simultaneous starts
-(`01-shared-log-single-writer.md` §7.1). Each one is a named simulator
-scenario here:
-- every node starts at the same instant, and a split vote must not replay
-  in the same term;
-- a partition heals, and a follower that missed committed entries must
-  converge through the leader's log repair alone, with no separate
-  catch-up path;
-- control traffic is starved, and elections must still settle;
-- concurrent acquisitions, and a fence must not advance on a lost one.
-IWFS's Kubernetes chaos suite with real network-policy partitions, which
-asserts "at most one writer" throughout (`tests/e2e/chaos_invariants_test.go`),
-is the model for the first consumer's `tc netem` lane.
+scenarios on real timers, with no seed to replay, and its README lists "no
+deterministic simulation test nor linearizability checker" among what still
+separates it from a product. What it did prove is the shape of the power-loss
+test: cut power on every machine at once, right after the last
+acknowledgement, and count. It got 300 of 300 acknowledged writes back in
+simulation, and 622 of 622 over encrypted TCP to disk (`storage.js:601-615`).
 
 **Benchmarks** ship with `BENCH.md` (rule 9) and allocation gates in the
 race-off lane (`tools/alloc-lane-targets.txt`, rule 12):
@@ -845,41 +1260,180 @@ race-off lane (`tools/alloc-lane-targets.txt`, rule 12):
 | `Propose` → applied, 3 in-process nodes, memory log and transport | ≤ 4 allocs/op |
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
 
-### D16 — Performance targets, from the RTT matrix
+### D16 — Performance targets: provisional, derived, then measured (R1-27)
+
+Every number in this section is **provisional**. None is kept until two
+measurements exist:
+- the simulator's distributions for failover and commit latency, run with the
+  RTT matrix;
+- `fdatasync` p50 and p99 on each of the three VPS, measured under their real
+  background load: Consul, Nomad and Vault running. An idle VPS measures a
+  disk nobody will use.
+
+The first draft assumed 1–3 ms. That assumption is withdrawn until measured.
 
 Commit latency from a leader is `max(fsync_leader, RTT_nearest + fsync_peer)`
-plus processing. The VPS's `fdatasync` latency has NOT been measured; it is
-the first number the prototype records, and the table assumes 1–3 ms.
+plus processing:
 
-| Leader | Proposal from | Expected commit + local apply |
+| Leader | Proposal from | Expected quorum commit |
 |---|---|---|
-| FRA or RBX | the leader's node | ≈ 9.6 ms + fsync ≈ 11–13 ms |
-| FRA or RBX | the other of the pair | + 9.6 ms forward ≈ 21–23 ms |
-| FRA or RBX | WAW | + ~23–27 ms forward ≈ 33–40 ms |
+| FRA or RBX | the leader's node | ≈ 9.6 ms + fsync |
+| FRA or RBX | the other of the pair | + 9.6 ms forward |
+| FRA or RBX | WAW | + ~23–27 ms forward |
 | WAW (avoided by D8) | anywhere | ≈ 22.8 ms + fsync, + forward |
 
-Targets, to be verified on the three VPS and recorded in `BENCH.md` — missing
-one is a finding, not a renegotiation:
+**Three latencies are reported separately, never summed into one:**
+- quorum commit: the proposer learns its entry committed;
+- local apply: the ref table on the proposing node reflects it;
+- projection: Git on a given node reflects it (D19).
+A read-after-write on the first consumer waits on the third.
 
-- p99 commit latency from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
+Provisional targets, to be confirmed or revised from the two measurements and
+recorded in `BENCH.md`:
+
+- p99 quorum commit from an FRA or RBX leader ≤ 2 × the nearest RTT + 2 ×
   the measured fsync p99, at 1 000 proposals/s;
-- sustained ≥ 10 000 entries/s of 256 B committed with one `fsync` per batch,
-  p99 under 50 ms;
-- failover — leader killed to first commit under the new one — p99 ≤ 2.5 s;
-- `Barrier` in ReadIndex mode from the leader ≈ one nearest RTT; from WAW ≈
-  one RTT to the leader plus that.
+- sustained ≥ 10 000 entries/s of 256 B committed with one `fsync` per batch;
+- failover (leader killed, then first commit under the new leader): **p99 ≤
+  3.5 s, provisional**. The final number is derived from the simulator's
+  distribution with the chosen timeouts, not chosen first. The first draft's
+  2.5 s did not account for detection, PreVote, the vote round and the
+  no-op commit on a 27 ms link;
+- `Barrier` in ReadIndex mode from the leader ≈ one nearest RTT.
 
-The first consumer needs a few hundred writes per second at most; the targets
-are set an order of magnitude above it so the SDK does not ship a ceiling.
+**A realistic workload, not 256-byte entries alone.** The benchmark replays a
+Git consumer's shape:
+- ref transactions of 1 to N refs;
+- bursts of `refs/pull/*` updates;
+- a few large pushes among many small ones;
+- the projection running behind.
 
 **A floor, from raft-sql-poc.** The POC ran in one Node.js process on macOS
-with a real `F_FULLFSYNC` of 4.6 to 5.4 ms. It measured 7 000 to 9 400
-durable writes/s, replicated 3 times on 4 shards. Over TCP with AES-256-GCM
-and to disk, on 8 shards across 4 machines, it measured 5 300 to 5 700
-durable writes/s. A loopback round trip took 45 µs at p50 under AEAD. A Go
-implementation on NVMe with a 1 to 3 ms `fdatasync` should not be below
-those numbers. They are evidence that the 10 000 entries/s target is
-reachable, not a target themselves.
+with a real `F_FULLFSYNC` of 4.6 to 5.4 ms. It measured 7 000 to 9 400 durable
+writes/s, replicated 3 times on 4 shards, and 5 300 to 5 700 over TCP with
+AES-256-GCM to disk on 8 shards across 4 machines. That is evidence the
+throughput target is reachable, not a target.
+
+### D17 — Operations ship in v1 (Q3, R1-25)
+
+By the owner's decision (Q3), the operating tools are part of v1, not of a
+later release. Gitaly's history is a project that shipped consensus without
+them.
+
+- **Offline recovery from a lost majority.** `Recover(dir, newCluster,
+  members)` runs on a stopped node, under the directory lock. It writes a
+  forced configuration and a NEW `ClusterID`, so that no node of the old
+  cluster can ever talk to the recovered one by mistake. It is refused
+  (`RECOVER_REFUSED`) without a new `ClusterID`. The runbook says which node
+  to choose: the highest committed index.
+- **Snapshots as backups.** `SaveSnapshot` streams a consistent snapshot from
+  a live node. `RestoreSnapshot` installs one into an empty, stopped data
+  directory, offline. `Inspect` reports a data directory read-only: its stamp,
+  segments, hard state, snapshot metadata, versions and the first corruption
+  found.
+- **Disk quota and a replicated no-space alarm.** The log has a quota,
+  `MaxLogBytes`, and a reserve, `LogReserveBytes`. A node that enters its
+  reserve proposes a no-space alarm entry. While the alarm is committed, the
+  leader refuses proposals with `NO_SPACE`, and snapshots and compaction keep
+  running so the cluster can recover. `ClearNoSpace` lifts the alarm. The data
+  directory lives on a dedicated filesystem or under a quota, so that Git's
+  repositories filling their disk cannot stop consensus. The operator guide
+  says so.
+- **Poison entry.** A committed entry that crashes every `Apply` stops every
+  node, by D3. The runbook covers it:
+  1. `Inspect` the entry;
+  2. fix the state machine and deploy it;
+  3. restart the nodes.
+  The fixed version applies the entry. The log is never edited.
+- **Certificates.** The transport reloads its identity when the files change,
+  without dropping members. `consensus.tls.cert_expiry_seconds` exposes the
+  expiry of each identity, and `Health` reports one under its threshold.
+- **Stopping.** `Close` transfers leadership first when the node leads, then
+  stops. `HardClose` stops at once and is what a crash test uses.
+- **Admin over mTLS.** `AdminHandler` serves status, health, membership
+  changes, transfer, snapshot save, no-space clearing and state-hash checks
+  over HTTPS. It requires a client certificate that names an operator
+  identity, distinct from the node identities. Anything else is
+  `ADMIN_DENIED`.
+- **A CLI in the SDK.** `tools/consensusctl` is a client of `AdminHandler`.
+  It also runs `Inspect`, `Recover` and `RestoreSnapshot` locally on a
+  stopped node.
+- **Two replacement runbooks.**
+  - A DEAD node: remove it first (four voters never exist), then add a new
+    `NodeID` as a learner, catch up, promote.
+  - A LIVE node: add the new one as a learner, catch up, promote, transfer
+    leadership away from the old one if it leads, remove the old one.
+  `consensus.failure_tolerance` tells the operator, before each step, how
+  many voters can still fail.
+- **Cross-replica state check.** With `HashingStateMachine` and
+  `StateHashEvery`, divergence is found by the cluster, not by a user
+  (`STATE_DIVERGED`).
+
+### D18 — Versioning (R1-22)
+
+Every persisted or transmitted structure carries a version:
+- each frame;
+- each log record;
+- `SnapshotMeta` and the snapshot format;
+- the state machine's payload, through `Entry.Version`, set by the proposer.
+
+The rules:
+- **Handshake.** Each side announces the protocol range it speaks. The
+  connection uses the highest common version, or is refused.
+- **Cluster version.** A committed cluster-version entry records the version
+  every member must speak, and the timing contract of D9. The leader raises it
+  only once every voter announces support.
+- **Unknown means stop.** An entry kind, record version, frame version or
+  snapshot version a node does not know stops that node with
+  `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
+- **Apply version gate.** An entry whose `Version` is above what the local
+  state machine supports stops the node the same way, before `Apply` is
+  called.
+- **Downgrade.** A node may run an older binary only while the committed
+  cluster version is within its range. Raising the cluster version is the
+  point of no return, and the operator guide says so.
+- **Compression.** The snapshot codec id is recorded, so a snapshot written
+  with zstd is refused cleanly by a node built without it.
+
+### D19 — The first consumer's contract (outside the SDK, recorded here)
+
+The SDK does not implement the replicator. These rules bind it, because they
+came out of the challenge of this ADR, and they decide whether the SDK is
+being used soundly.
+
+- **A replicated ref table, Git as a projection (Q1, R1-01).**
+  - The state machine is a ref table: `(repository, ref) → (SHA, revision)`.
+    `Apply` is pure: it validates and updates the table, nothing else.
+  - Git is updated asynchronously, per repository, by a projector. The
+    projector applies the table's changes to the local repository and keeps a
+    durable cursor: the last log position projected for that repository.
+  - A read-after-write waits on the projection watermark of its repository,
+    not on `WaitApplied`.
+  - The `reference-transaction` hook proposes in `prepared`. The `preparing`
+    reservation of the design document is removed (A10): nothing is ordered
+    before the entry itself.
+- **A whole Git transaction is one entry (R1-03).** A ref transaction
+  touching several refs is ONE entry. `Apply` validates every expected value
+  before it changes any. A partial ref transaction never exists in the table.
+- **Revisions against ABA (R1-04).** Each ref carries a revision that only
+  grows. A proposal states the expected SHA and the expected revision. After
+  `OUTCOME_UNKNOWN`, the replicator reads the table and never retries blindly.
+  The design document's "a compare-and-swap makes duplicates harmless" is
+  withdrawn.
+- **Objects before refs (R1-05).**
+  - The objects a ref update needs are written and `fsync`ed on a majority
+    before the ref entry is proposed.
+  - Objects referenced by a pending entry or by a retained snapshot are
+    pinned against `git gc`.
+  - A node restored from a snapshot does not serve reads until every object
+    its refs name is present and verified.
+  - The object channel uses the same transport identity and a byte quota per
+    push.
+- **Input validation (R1-06).**
+  - `Apply` refuses, deterministically, a repository path outside the
+    repository root, and a ref name that fails `git check-ref-format`.
+  - The proposal endpoint is a `0600` Unix socket owned by the Git user
+    (ADR 0148).
 
 ## Consequences / Semantics
 
@@ -891,11 +1445,16 @@ reachable, not a target themselves.
 - **A minority is read-only and says so.** A node cut off from the majority
   fails `Propose` with `NOT_LEADER` or `OUTCOME_UNKNOWN`, fails `Barrier` with
   `LEADERSHIP_UNCONFIRMED`, and can still answer `WaitApplied` for what it has.
-- **The ports are frozen on first release.** Five interfaces aliased by
+- **The ports are frozen on first release.** The interfaces aliased by
   `pkg/v1`; growth is by siblings (ADR 0039), each frozen by a named
   compile-time test as ADR 0052 does.
-- **Stopping is the answer to storage failure.** A node does not limp on after
-  a failed `fsync` or a corrupt record; operators restore it from a peer.
+- **Stopping is the answer to storage failure, corruption, divergence and an
+  unknown version.** A node does not limp on; operators restore it with the
+  tools of D17.
+- **v1 is larger than the first draft (Q3).** Operations, versioning and the
+  admin surface are in it. The milestones are adjusted accordingly, and the SDK
+  gains one sibling outside this domain, the TLS connection-state access of
+  D4.
 - The root `CLAUDE.md` domain list, the error-code mirror and
   `codeRangeOwners` change in the implementing change set, not in this one.
 
@@ -979,8 +1538,9 @@ write rate that is not a bottleneck, and D11 keeps the wire and API open.
   joins the pending proposal or returns the known answer. The same
   identifier with a different digest is refused, never applied (IWFS: same
   identifier and FNV-64a content give the same answer, different content
-  gives `0x0031`). The first consumer's compare-and-swap makes a
-  duplicate harmless; a consumer without that property needs this.
+  gives `0x0031`). Until then, a caller never retries blindly after
+  `OUTCOME_UNKNOWN` (D6, R1-04): a compare-and-swap does not make a duplicate
+  harmless under ABA.
 - **A streaming publication sibling in `vfs`** (D4), with the snapshot store
   as its second consumer.
 - **Witness / non-data voters**, which would let two data nodes and a cheap
@@ -1041,7 +1601,7 @@ its README or a `file:line`. Each decision above that it changed says
 | B13 | One process and one event loop for every "machine". The figures come from macOS with `F_FULLFSYNC` | README §"Limites assumées" and §"Ce que mesure le banc" ("the throughput column is noise here") | CPU scaling and Linux `fdatasync` costs are not shown | D16: a floor, not a target, measured again on the VPS |
 | B14 | Choices made for JavaScript: `f64` indexes because `u64` would mean `BigInt`, `u32` terms, an HMAC assembled by hand to dodge `createHmac`'s ~10 µs setup, and allocation claims about JavaScript strings | `wire.js:14-19`, README §"Deux découvertes de mesure" | none in Go, where `uint64` is native and the stdlib has no such setup cost | not carried over |
 | B15 | A `leader` read level that reads locally on the leader with no confirmation | README §"Les trois niveaux de cohérence" | it is exactly the read a deposed leader serves stale | D9: not offered |
-| B16 | Retries are not idempotent: `UNKNOWN_OUTCOME` goes back to the client, with no request identifiers | README §"Limites assumées" | a blind retry applies twice | Deferred, client sessions. The first consumer's compare-and-swap makes a duplicate fail identically everywhere |
+| B16 | Retries are not idempotent: `UNKNOWN_OUTCOME` goes back to the client, with no request identifiers | README §"Limites assumées" | a blind retry applies twice | D6: never retry blindly after `OUTCOME_UNKNOWN`; D19: per-ref revisions against ABA (R1-04); Deferred: client sessions |
 
 ### G17 in detail: replicate effects, not statements
 
@@ -1165,7 +1725,7 @@ this ADR keeps a majority on disk.**
 | D3 state machine | deterministic `Apply`; a non-refusal failure stops the node | every throw is deterministic (B1) | apply on commit through `commitApplyQueue`, in order |
 | D4 log | segmented WAL, CRC-32C, the hard state as a record, `fdatasync` per batch | the same, JavaScript | **none: in memory**, Valkey optional (J3). `>` POC right |
 | D4 hard state | durable before reply | durable before reply | **not persisted** (J2). `>` POC right |
-| D4 transport | mTLS, admission by membership, batches, a priority lane for control frames | its own SIGMA handshake, revocation | **plaintext gRPC** (J7). `>` POC right on the need, TLS on the means |
+| D4 transport | mTLS checked both ways, admission by membership, batches, a separate control connection (R1-12) | its own SIGMA handshake, revocation | **plaintext gRPC** (J7). `>` POC right on the need, TLS on the means |
 | D5 elections | PreVote, CheckQuorum, refusal in both votes, 1–2 s | PreVote and CheckQuorum, refusal in PreVote only (B4) | PreVote, refusal in both votes (I1), **no CheckQuorum** (J15), a term that can go back (J16), 3–5 s, 30 s backoff. `>` IWFS right on the refusal, POC right on CheckQuorum and on the term |
 | D6 replication | majority on disk, verified prefix, bounded pipeline, no-op per term | verified prefix, unbounded pipeline, no-op per term | **no log matching in production**, gaps accepted, an acknowledged write losable (J6), no no-op (J17). `>` POC right |
 | D6 outcome | three answers plus `ENTRY_SUPERSEDED` and `OVERLOADED` | `NOT_LEADER` / `UNKNOWN_OUTCOME` / `COMMIT_TIMEOUT` | accepted / unknown / refused / replaced / full (I2–I5). `>` IWFS more complete |
@@ -1216,4 +1776,4 @@ this ADR keeps a majority on disk.**
   Context.
 - ADR 0052 (fences and D11), ADR 0056 (publication and the deferred streaming
   writer), ADR 0029 (stream connections and `tlsid`), ADR 0090 (`clock`),
-  ADR 0011 (copy-on-write snapshot), ADR 0039, ADR 0031, ADR 0074, ADR 0068.
+  ADR 0011 (withdrawn as the snapshot tool), ADR 0039, ADR 0031, ADR 0074, ADR 0068.
