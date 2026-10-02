@@ -6,8 +6,6 @@ import (
 	"fmt"
 	"io"
 	"testing"
-
-	gotoml "github.com/pelletier/go-toml/v2"
 )
 
 // Test_tomlDecoder_Decode covers both a success path and a malformed-input
@@ -25,7 +23,7 @@ func Test_tomlDecoder_Decode(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &tomlDecoder{inner: gotoml.NewDecoder(bytes.NewReader(tc.data))}
+		dec := &tomlDecoder{r: bytes.NewReader(tc.data)}
 		var out map[string]any
 		err := dec.Decode(&out)
 		//: treat EOF on the empty case as non-error.
@@ -42,12 +40,11 @@ func Test_tomlDecoder_Decode(t *testing.T) {
 }
 
 // eofWrapReader returns an error that WRAPS io.EOF (but is not the bare
-// sentinel) on its first Read. io.ReadAll — which pelletier's Decoder.Decode
-// calls — only swallows the exact io.EOF sentinel, so a wrapped EOF is
-// surfaced verbatim, then pelletier re-wraps it as "toml: …". This lets the
-// decoder's `errors.Is(derr, io.EOF)` arm fire through the real library path,
-// which neither empty nor garbage input can reach (pelletier maps both to a
-// nil-error empty document or a parse error, never io.EOF).
+// sentinel) on its first Read. io.ReadAll — which Decode calls — only swallows
+// the exact io.EOF sentinel, so a wrapped EOF is surfaced verbatim. This lets
+// the decoder's `errors.Is(err, io.EOF)` arm fire through the real read path,
+// which neither empty nor garbage input can reach (both are a document: an
+// empty one, or a parse error — never io.EOF).
 type eofWrapReader struct{}
 
 // Read reports a wrapped-EOF failure so io.ReadAll propagates it.
@@ -56,8 +53,8 @@ func (eofWrapReader) Read(_ []byte) (n int, err error) {
 	return 0, fmt.Errorf("midstream truncation: %w", io.EOF)
 }
 
-// Test_tomlDecoder_Decode_DoneLatch asserts the sticky done latch: pelletier
-// consumes the entire input on the first Decode, so the codec marks the
+// Test_tomlDecoder_Decode_DoneLatch asserts the sticky done latch: Decode
+// consumes the entire input on its first call, so the codec marks the
 // stream drained and every subsequent Decode short-circuits to io.EOF via
 // `if d.done { return io.EOF }` — the arm single-call tests never reach.
 func Test_tomlDecoder_Decode_DoneLatch(t *testing.T) {
@@ -74,7 +71,7 @@ func Test_tomlDecoder_Decode_DoneLatch(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &tomlDecoder{inner: gotoml.NewDecoder(bytes.NewReader(tc.data))}
+		dec := &tomlDecoder{r: bytes.NewReader(tc.data)}
 		var out map[string]any
 		//: first Decode drains the single-document stream and sets done.
 		if err := dec.Decode(&out); err != nil {
@@ -97,12 +94,11 @@ func Test_tomlDecoder_Decode_DoneLatch(t *testing.T) {
 	}
 }
 
-// Test_tomlDecoder_Decode_EOFFromLibrary covers the `errors.Is(derr, io.EOF)`
+// Test_tomlDecoder_Decode_EOFFromLibrary covers the `errors.Is(err, io.EOF)`
 // arm of Decode using a reader whose Read surfaces a wrapped io.EOF. This is
-// the only way pelletier's Decode returns an io.EOF-matching error: it calls
-// io.ReadAll, which swallows the bare sentinel but propagates a wrapped one,
-// then re-wraps it as "toml: …". The arm must return io.EOF untouched and
-// set the done latch.
+// the only way the read returns an io.EOF-matching error: io.ReadAll swallows
+// the bare sentinel but propagates a wrapped one. The arm must return io.EOF
+// untouched and set the done latch.
 func Test_tomlDecoder_Decode_EOFFromLibrary(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -111,9 +107,9 @@ func Test_tomlDecoder_Decode_EOFFromLibrary(t *testing.T) {
 	tests := []tc{{"wrapped EOF from reader maps to io.EOF"}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &tomlDecoder{inner: gotoml.NewDecoder(eofWrapReader{})}
+		dec := &tomlDecoder{r: eofWrapReader{}}
 		var out map[string]any
-		//: the library error wraps io.EOF, so Decode MUST surface io.EOF
+		//: the read error wraps io.EOF, so Decode MUST surface io.EOF
 		//: untouched (not the UNMARSHAL_FAILED wrap) and latch done.
 		if got := dec.Decode(&out); !errors.Is(got, io.EOF) {
 			t.Errorf("%s: Decode=%v want io.EOF", tc.name, got)
@@ -141,7 +137,7 @@ func Test_tomlDecoder_More(t *testing.T) {
 	tests := []tc{{"idempotent before any Decode"}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &tomlDecoder{inner: gotoml.NewDecoder(bytes.NewReader(nil))}
+		dec := &tomlDecoder{r: bytes.NewReader(nil)}
 		first := dec.More()
 		second := dec.More()
 		if first != second {

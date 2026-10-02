@@ -22,7 +22,7 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 | `ndjson/`      | Newline-delimited JSON                        | `0.3.11.*` | no  | yes |
 | `pem/`         | PEM block (RFC 7468) — encoding/pem           | `0.3.10.*` | no  | yes |
 | `tlv/`         | Self-describing TLV (reflection-driven binary)| `0.3.22.*` | yes | yes |
-| `toml/`        | TOML — pelletier/go-toml/v2                   | `0.3.5.*`  | yes | yes |
+| `toml/`        | TOML v1.0.0 — native, standard library only   | `0.3.5.*`  | yes | yes |
 | `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | yes |
 | `yaml/`        | YAML — gopkg.in/yaml.v3                       | `0.3.4.*`  | yes | yes |
 
@@ -80,7 +80,7 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 - **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic, and ktn-linter's `KTN-FUNC-NOINIT` reports any `init()` — active everywhere, with no exclusion in `.ktn-linter.yaml`.
 - **Stateless singletons**: `New()` returns the same `Codec` singleton; the two opt-in modes — `csv.NewWithEscape(bool)` and `multipart.NewWithLimits(LimitsConfig)` — each return a fresh instance not added to the registry.
 - **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns a slice the caller owns — `slices.Clone(table)`, or a fresh literal in `asn1`, `csv` and `json` — so callers cannot mutate a package-level slice.
-- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `form.maxFormPairs`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
+- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`, `toml.maxDocumentBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `form.maxFormPairs`, `toml.maxDepth`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
 - **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go` (`failed.go` in `asn1`, `msgpack` and `yaml`). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 

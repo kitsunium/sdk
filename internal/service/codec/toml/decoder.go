@@ -1,57 +1,52 @@
-// Package toml — adapts pelletier's *Decoder to codec.Decoder.
+// Package toml — the streaming codec.Decoder: the reader is one TOML
+// document, read whole on the first Decode, within maxDocumentBytes.
 package toml
 
 import (
 	"errors"
 	"io"
 
-	gotoml "github.com/pelletier/go-toml/v2"
-
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// tomlDecoder wraps *gotoml.Decoder so it satisfies codec.Decoder.
-// pelletier's Decoder reads the entire input on the first Decode call —
-// subsequent calls return io.EOF. We reflect that semantics via the
-// sticky `done` latch.
+// tomlDecoder reads its reader as one document. TOML has no separator between
+// documents, so the first Decode consumes the stream and every later one
+// returns io.EOF; the sticky done latch makes More report false from then on.
 type tomlDecoder struct {
-	inner *gotoml.Decoder
-	//: sticky EOF flag so More() returns false after the one Decode succeeds.
+	// r is the document.
+	r io.Reader
+	// done is set by the first Decode, whatever it returned.
 	done bool
 }
 
-// Decode reads the entire TOML document into v.
+// Decode reads the whole document into v.
 func (d *tomlDecoder) Decode(v any) error {
-	//: drained latch short-circuits the stdlib-style stream contract.
+	//: the stream was consumed by an earlier call.
 	if d.done {
 		//: stream already consumed.
 		return io.EOF
 	}
-	//: delegate to the library.
-	derr := d.inner.Decode(v)
-	//: EOF semantics preserved.
-	if errors.Is(derr, io.EOF) {
-		//: mark drained for subsequent More() calls.
-		d.done = true
+	d.done = true
+	// One byte past the cap is enough to tell a document at the cap from one
+	// over it, without reading the rest of an endless stream.
+	data, err := io.ReadAll(io.LimitReader(d.r, int64(maxDocumentBytes)+1))
+	//: a reader that reports an end of input, even wrapped, ends the stream.
+	if errors.Is(err, io.EOF) {
 		//: return io.EOF untouched.
 		return io.EOF
 	}
-	//: success fast-path.
-	if derr == nil {
-		//: single-document stream — mark drained after success.
-		d.done = true
-		//: nothing to wrap.
-		return nil
+	//: any other read failure.
+	if err != nil {
+		//: UNMARSHAL_FAILED over the reader's error.
+		return errs.Wrap(err, errs.WrapParams{
+			Code:    CodeTOMLUnmarshalFailed,
+			Reason:  UnmarshalFailed.Reason(),
+			Public:  UnmarshalFailed.Public(),
+			Private: privateReadFailed,
+		})
 	}
-	//: mark drained so More() stops a dec.More()/Decode() loop on error.
-	d.done = true
-	//: wrap the library error for reason-based matching.
-	return errs.Wrap(derr, errs.WrapParams{
-		Code:    CodeTOMLUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "TOML decoding failed",
-		Private: "service/codec/toml.Decoder.Decode: pelletier/go-toml/v2 returned an error",
-	})
+	//: parse and decode; a document past the cap is refused there.
+	return unmarshal(data, v)
 }
 
 // More reports whether a Decode call would produce another document.
