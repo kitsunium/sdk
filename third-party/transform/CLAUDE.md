@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-10T00:00:00Z -->
+<!-- updated: 2026-10-02T19:56:52Z -->
 # third-party/transform/
 
 ## Purpose
@@ -26,7 +26,7 @@ Go 1.27.1:
 | transitive module requires | **none** — `klauspost/compress`'s `go.mod` declares `module`, `go`, and a `retract` block, nothing else |
 | pulls `golang.org/x/sys` (banned SDK-wide) | **no** |
 | pure Go / cgo | pure Go; `go list -deps -json` reports zero `CgoFiles` |
-| cross-compiles on the ADR 0018 matrix | **10 of 10** cells, `CGO_ENABLED=0` |
+| cross-compiles on the `cross-build` matrix | **12 of 12** cells, `CGO_ENABLED=0` (illumos and solaris added with ADR 0144) |
 
 So the criterion that quarantines HCL — *introducing* a banned module into a
 module that forbids it (ADR 0034 §Decision.2) — **does not apply here**. The

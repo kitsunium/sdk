@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:00:30Z -->
 # internal/service/token/
 
 ## Purpose
@@ -59,7 +60,8 @@ exactly as trustworthy as the key itself.
 | `jwt.go` | the six JWT constructors |
 | `keys.go` + `hs256_binding.go` / `es256.go` / `ed25519.go` | the algorithm-bound key contracts and their five implementations (each curve's signing and verifying halves share one file) |
 | `paseto.go` / `paseto_issuer.go` / `paseto_verifier.go` | PASETO v4.public |
-| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `boundKeyValue` + `indexByKid` (the set is bound ONCE, at construction — see §Cost) + `selectable` (a set no token could verify against is refused `POLICY_MISCONFIGURED`) |
+| `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `indexByKid` (the set is bound ONCE, at construction — see §Cost) + `selectable` (a set no token could verify against is refused `POLICY_MISCONFIGURED`) |
+| `bound_key_value.go` | `boundKeyValue` — one JWK Set member with its verifying binding already derived, and whether that derivation succeeded |
 | `token_compliance.go` | the compile-time contract assertions |
 | `codes.go` / `errors.go` | `Code*` + `HeaderUnsupported` (.1), `KeyNotFound` (.2), `KeyIDMissing` (.3), `KeyIDAmbiguous` (.4), `FooterMismatch` (.5), `SchemeUnsupported` (.6), `DuplicateMember` (.7) |
 
@@ -346,7 +348,7 @@ sides).
 
 ## Linter exemptions
 
-Three scoped entries in `.ktn-linter.yaml`, all justified there and all the
+Two scoped entries in `.ktn-linter.yaml`, both justified there and both the
 same class already granted to `service/crypto/jwk` and `core/net`:
 
 - `KTN-VAR-BIGSTRUCT` — `ClaimsValue` (152 B) and the four config structs are

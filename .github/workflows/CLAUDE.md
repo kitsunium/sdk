@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T19:52:43Z -->
 # .github/workflows/
 
 ## Purpose
@@ -10,15 +10,15 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | File | Trigger | Description |
 |---|---|---|
 | `bazel-ci.yml` | push to `main`, PRs | Primary SDK CI — drift check + build + test + coverage via Bazel 9 |
-| `post-commit.yml` | PRs (opened, synchronised, reopened, ready for review), push to `main`, manual `workflow_dispatch` | The mandatory merge gate: `kodflow/post-commit@main` checks the whole history — no AI attribution, conventional commit subjects, no credentials added. The job must stay named `post-commit`, the status the branch ruleset requires; a failed run puts the pull request back into draft, and marking it ready asks for another verdict |
+| `post-commit.yml` | PRs (opened, synchronised, reopened, ready for review), push to `main` or `master`, manual `workflow_dispatch` | The mandatory merge gate: `kodflow/post-commit@main` checks the whole history — no AI attribution, conventional commit subjects, no credentials added. The job must stay named `post-commit`, the status the branch ruleset requires; a failed run puts the pull request back into draft, and marking it ready asks for another verdict |
 | `sdk-release.yml` | `workflow_run` after `SDK CI (Bazel)` success on `main`, plus manual `workflow_dispatch` | Impact-driven tags `pkg/vX.Y.Z` (ADR 0007; the `pkg/<major>/` prefix went away with the bare module path — ADR 0017). WHETHER comes from `scripts/release/compute-bumps.sh`; HOW BIG is the largest `release:*` label on the merged pull requests of the range, read by `scripts/release/cut-tags.sh` over the whole range since the last release, not from the checked-out HEAD (ADR 0085, ADR 0135). A `Release-bump:` line in a message only asks: unlabelled above a patch, it is refused — settled by labelling the named pull request and re-running, or by dispatching with the `bump` input. First release is held unless dispatched manually (`--allow-bootstrap`, ADR 0009). |
 | `vuln-scan.yml` | daily schedule (06:17 UTC), manual `workflow_dispatch` | `make vuln-install && make vuln-check` — the same govulncheck gate the `bazel` job runs, on a clock, so a vulnerability published against a dependency surfaces within a day rather than on the next unrelated pull request (ADR 0136). An alarm; the gate is the `bazel` job. |
 | `release-size.yml` | pull request opened, reopened, synchronised, labelled or unlabelled | `scripts/release/check-pr-size.sh`: the question `cut-tags.sh` asks a merge, asked of the pull request before it — fails when a branch commit asks for more than a patch and no `release:*` label decides it, naming the label that settles it (ADR 0135). Read-only token, no secret, `pull_request` never `pull_request_target`. Not required: requiring it is a repository setting. |
 | `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows, the three BSDs, and — in the `solarish` job, one OmniOS r151054 and one Oracle Solaris 11.4 guest booted by `vmactions`, with `pkg`'s `./v1/proc` beside them (ADR 0144) — illumos and Solaris, then — on macOS and Windows — every package (`go test -short ./...` per module, ADR 0094). Both runs gate: Windows was an inventory (`continue-on-error`) under ADR 0094 until its first clean run, and ADR 0095 records how its 19 failing packages were resolved and made it a gate. |
 | `e2e-vm.yml` | manual `workflow_dispatch` only | The platform-sensitive suites and the conformance binary on persistent Proxmox VMs of the lab (Debian and Fedora with systemd, Alpine with OpenRC, the three BSDs, Windows 11), over SSH from the `kitsunium-runner` scale set. Needs the lab and its four secrets, so nothing triggers it automatically. Every suite binary runs with `-test.timeout=3m` and every conformance check under `harness.CheckTimeout`, so a hang prints stacks instead of eating the 25-minute job; a failed SSH wait says whether port 22 is open (sshd refuses us) or closed (no sshd) — #118. |
 | `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
-| `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel and `make sdk-bench` runs them through `go test` |
-| `docker-images.yml` | daily and weekly schedules, push and PRs on `.devcontainer/images/**` | Template-inherited; two-tier base+main image build |
+| `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel, so the job runs `go test -bench` in `internal/kernel` directly, as `make sdk-bench` does locally |
+| `docker-images.yml` | daily and weekly schedules, push and PRs on `.devcontainer/images/**`, manual `workflow_dispatch`, `repository_dispatch` (`ktn-linter-release`) | Template-inherited; two-tier base+main image build |
 
 ## bazel-ci.yml (the SDK lane)
 
@@ -81,8 +81,8 @@ behind the 120-minute Bazel lane.
    than a list of their own — the shape of #242.
 6. **Pre-commit guard regression** — `make pre-commit-check`.
 
-These five, plus `make lint-check`, `make vuln-install`, `make vuln-check` and
-`make lint-ktn-check` in the `bazel` job, are the only `make` invocations in
+These five, plus `make test-framework`, `make lint-check`, `make vuln-install`,
+`make vuln-check` and `make lint-ktn-check` in the `bazel` job, are the only `make` invocations in
 this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because

@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/v1/logger/slogbridge/
 
 ## Purpose
@@ -45,7 +46,7 @@ package needs them (ADR 0033). `slogbridge.New` itself carries a documented
 |---|---|
 | `slogbridge.go` | package doc + `NewHandler` / `New` |
 | `handler.go` | the `slog.Handler` implementation (`Enabled` / `Handle` / `WithAttrs` / `WithGroup`) |
-| `convert.go` | `toLevel`, `qualify`, `appendAttr` / `appendGroup`, `convert` |
+| `convert.go` | `toLevel`, `qualifyKey` / `qualifyGroup`, `appendAttr` / `appendGroup`, `convert` |
 | `logger.go` | `CodeLoggerRequired` (range `1.1.1.*`) + the `LoggerRequired` sentinel |
 
 `README.md` is generated from the package doc comment via `make docs-readme`

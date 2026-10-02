@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:59:08Z -->
 # internal/service/metrics/
 
 ## Purpose
@@ -141,14 +141,13 @@ otherwise deadlock behind its own collection.
 - **Registrations accumulate**, as the OTel API specifies: a second callback
   under one name adds to the first rather than replacing it, so two packages can
   contribute to one instrument.
-- **A nil callback is dropped at registration**, not stored: calling it during a
-  scrape would panic far from the wiring that caused it. The NAME is still
-  bound, so a later synchronous fetch of it still conflicts.
-- **The cardinality bound applies**, and it bites harder here: a loop inside a
-  callback can mint a thousand series in one collection. Past the bound every
-  further attribute set lands in ONE overflow series, and because an observable
-  **overwrites** rather than adds, that series shows the last set reported and
-  not their total. An observable's attribute set should be small and fixed.
+- **A nil callback is dropped at registration** (it would panic during a scrape,
+  far from its wiring); the NAME is still bound, so a later synchronous fetch
+  still conflicts.
+- **The cardinality bound applies**, harder: past it every further attribute set
+  lands in ONE overflow series, which — an observable **overwrites** — shows the
+  last set reported, not their total. Keep an observable's attribute set small
+  and fixed.
 - A callback runs inline, so a slow one is a slow scrape for every instrument,
   and it must not call `Collect` on its own meter.
 
@@ -174,18 +173,14 @@ cannot starve `db_queries_total` of the series it needs. Default
 settled on for the same problem).
 
 **Non-positive clamps to the default.** It does not mean unbounded, and there is
-no setting that does (ADR 0031). A caller who leaves the knob at zero has not
-decided that memory is free; they have not yet learned the question exists.
-A caller who genuinely wants a huge bound types a huge number, where a reviewer
-can see it.
+no setting that does (ADR 0031); a caller who wants a huge bound types a huge
+number, where a reviewer can see it.
 
 **Past the bound, a new attribute set is FOLDED, not rejected and not dropped.**
 It goes into one aggregated series per name carrying
-`sdk_metric_overflow=true` — a **bool** attribute now that the model has types;
-before, it had to be the string `"true"` because a value was a string everywhere
-the snapshot was going, and that reason expired. The Prometheus rendering is
-byte-identical either way. The series sits outside the bound as one extra slot.
-What that buys and what it costs:
+`sdk_metric_overflow=true` — a **bool** attribute (the Prometheus rendering is
+the same as the string `"true"`). The series sits outside the bound as one extra
+slot. What that buys and what it costs:
 
 | | |
 |---|---|
@@ -197,17 +192,14 @@ What that buys and what it costs:
 | The condition is visible | the overflow series shows up in every snapshot from then on, so an operator reading a dashboard learns their attributes blew up |
 | Overflow is allocation-free | see BENCH.md — otherwise the bound would trade a leak for GC pressure with the same cause |
 
-Rejected alternatives: a **typed error** cannot be delivered from an accessor
-whose signature hands back a Counter without changing every call site (the same
-shape problem ADR 0031 solved for the resilience constructors, but here there is
-no `Run` to fail later); **dropping** the observation is exactly the inert
-behaviour ADR 0031 bans; **evicting** an admitted series would make the visible
-set flap with traffic and lose the evicted totals outright.
+Rejected alternatives: a **typed error** (an accessor handing back a Counter has
+no `Run` to fail later), **dropping** the observation (the inert behaviour
+ADR 0031 bans), **evicting** an admitted series (the visible set flaps with
+traffic and the evicted totals are lost).
 
-`OverflowAttrKey` is reserved by convention, not enforced. A caller who passes
-it explicitly as a bool writes into the overflow series. Enforcing it would cost
-a comparison per attribute on the lookup path to prevent a collision nobody
-reaches by accident.
+`OverflowAttrKey` is reserved by convention, not enforced: a caller passing it
+as a bool writes into the overflow series, and enforcing it would cost a
+comparison per attribute on the lookup path.
 
 ## The text exporter
 
@@ -229,23 +221,17 @@ One `# metric` header per instrument name, then that name's series — one pass
 over the snapshot, because the snapshot is keyed by name. A gauge's header
 carries neither temporality nor monotonicity, because a gauge has neither.
 
-`description="…"` goes **last** so that the qualifier positions every existing
-grep depends on do not move, and is omitted entirely when there is none — the
-same call `# scope`'s optional `version` already makes. This exporter RENDERS it
-because rendering the whole model is what the file is for: an exporter that
-dropped the description would answer "did my `Describe` call reach the
-snapshot?" with silence, which is the one question a diagnostic exists to
-settle. It is QUOTED here, so unlike the Prometheus docstring it escapes the
-double quote too — the two exporters follow the two grammars they are writing,
-which is not an inconsistency. A
-string attribute value is quoted and escaped; a bool, integer or double is
-printed **bare**, so the attribute's TYPE is visible rather than flattened the
-way a wire format flattens it. Attribute keys and instrument names go through
-the same escape, unquoted: they are normally literals, but one line per series
-is the format's only framing, and a newline in a key or a name forged exactly
-the line the value escaping exists to prevent. A histogram renders its observation count only —
-the bucket layout is reachable through the Snapshot API, and this is a
-diagnostic, not a wire format.
+`description="…"` goes **last**, so the qualifier positions existing greps
+depend on do not move, and is omitted when there is none (as `# scope`'s
+optional `version` is). It is rendered because a diagnostic that dropped it
+could not answer "did my `Describe` reach the snapshot?". It is QUOTED here, so
+unlike the Prometheus docstring it escapes the double quote too — each exporter
+follows the grammar it writes. A string attribute value is quoted and escaped; a
+bool, integer or double is printed **bare**, so the attribute's TYPE stays
+visible. Attribute keys and instrument names go through the same escape,
+unquoted: one line per series is the format's only framing, and a newline in a
+key or a name would forge a line. A histogram renders its observation count
+only — the bucket layout is reachable through the Snapshot API.
 
 ## The Prometheus text exposition connector
 
@@ -269,18 +255,13 @@ counter treats every decrease as a process restart and re-extrapolates from
 zero, so an UpDownCounter exposed as a counter would report a fabricated spike
 each time its value fell.
 
-**`# HELP`, since ADR 0067.** That day arrived: the `Meter` grew a `Describer`
-sibling, and the OTel-to-Prometheus interoperability specification says outright
-that "OTLP metric point descriptions become HELP metadata". The line lands
-exactly where the old comment promised — above `# TYPE`, inside the same
-header-per-name step, so the format's own rule ("only one HELP line may exist
-for any given metric name") holds for free.
-
-An **absent** description still emits nothing at all. HELP is optional in the
-format, and `# HELP name ` with nothing after it is the placeholder this
-exporter refused to invent for as long as there was nothing real to print
-(rule 5). The undescribed document is byte-for-byte what it was before ADR 0067,
-which is pinned.
+**`# HELP` (ADR 0067).** The OTel-to-Prometheus interoperability specification
+says "OTLP metric point descriptions become HELP metadata". The line sits above
+`# TYPE`, inside the same header-per-name step, so the format's rule ("only one
+HELP line may exist for any given metric name") holds for free. An **absent**
+description emits nothing — HELP is optional, and an empty `# HELP name ` is a
+placeholder (rule 5); the undescribed document is byte-for-byte the pre-ADR 0067
+one, which is pinned.
 
 **The docstring is escaped with the format's OWN two escapes** — a backslash
 doubles, a line feed becomes `\n` — and a double quote is deliberately left
@@ -307,12 +288,10 @@ purpose. A non-finite declared bound is **skipped** (its count still rides the
 running total): `+Inf` is already the mandatory last line, so emitting it again
 would forge a duplicate series, and `NaN` is not an ordering.
 
-**Values.** `strconv.FormatFloat(v, 'g', -1, 64)`. The format defines a value as
-"a float represented as required by Go's `ParseFloat()`" and names `NaN`,
-`+Inf`, `-Inf` — which is precisely what that call emits, including the
-exponent-notation threshold that produced the specification's own published
-`1.7560473e+07`. Shortest-round-trip is also what keeps two distinct bucket
-bounds from ever spelling the same `le`, i.e. from forging a duplicate series.
+**Values.** `strconv.FormatFloat(v, 'g', -1, 64)` — the format's "float
+represented as required by Go's `ParseFloat()`", `NaN`/`+Inf`/`-Inf` included
+(the specification's own `1.7560473e+07`). Shortest-round-trip also keeps two
+distinct bucket bounds from spelling the same `le` (a duplicate series).
 
 **Names are REFUSED, never rewritten.** A metric name must match
 `[a-zA-Z_:][a-zA-Z0-9_:]*` and a label name `[a-zA-Z_][a-zA-Z0-9_]*` — the
@@ -350,9 +329,8 @@ underscores for this reason), so the folded series reaches the wire and an
 operator can alert on `{sdk_metric_overflow="true"}`. Hiding it would restore
 the silent failure the cardinality policy exists to avoid.
 
-**Validation runs per scrape.** It is O(bytes of names + attribute keys), which
-is noise next to the formatting, and this is the only layer that can do it: the
-meter does not know which exporter its snapshot is going to.
+**Validation runs per scrape** — O(bytes of names + keys), and the only layer
+that knows which exporter a snapshot is going to.
 
 ## What the Prometheus connector loses
 
@@ -369,11 +347,10 @@ Each row below has an executable test.
 | **`Resource`** | dropped entirely; no `target_info` metric is emitted | `service.name` cannot even be SPELLED — a Prometheus label name is `[a-zA-Z_][a-zA-Z0-9_]*` and the dot is outside it. The interoperability spec answers this by mangling the key; this connector refuses non-injective name rewriting everywhere else in this very file, and consistency with our own rule beats consistency with theirs. Whatever producer identity a Prometheus deployment has comes from the scrape target's own labels (`job`, `instance`), which the server attaches |
 | **`InstrumentationScope`** | dropped entirely | same wall: the format has no place for a second identity, and `otel_scope_name` would be an invented label the caller never wrote |
 | **OTel-conventional attribute KEYS** | `http.request.method` is **REFUSED** by name (`INVALID_LABEL_NAME`) | the sharpest consequence of adopting the model: the dotted spelling is what the semantic conventions specify, and this wire cannot carry it. The refusal is loud and deterministic — a key is a literal at the call site — which is the whole reason refusing beats mangling |
-| **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred): no tracing domain, so no span id to attach |
+| **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred); the trace domain (ADR 0051) now gives one a trace id to hold, and they remain unimplemented |
 
-The description is the one thing on that list's opposite side: it is the only
-part of the OTel Metric this connector gained rather than lost, because the
-exposition format has had a place for it since before OTel existed.
+The description is the one part of the OTel Metric this connector carries
+(`# HELP`).
 
 ## The OTLP/JSON encoder
 
@@ -473,23 +450,19 @@ gauge is whatever was sampled, so a NaN reading must not fail an entire export.
 Finite values render shortest-round-trip (`'g'`, `-1`), every form of which is a
 valid JSON number — including the exponent notation `1e+21`.
 
-**HTML escaping is OFF.** `encoding/json` escapes `<`, `>` and `&` into their
-`\u00xx` forms by default, a defence for JSON embedded in a `<script>` element.
-An OTLP body never is, and OTel-conventional attributes carry URLs (`url.full`,
-`http.route`) whose query separator is exactly `&`. `json.Encoder` is the only
-way to turn it off, and it appends a newline a single-document body must not
-carry — hence `marshalOTLPJSON`.
+**HTML escaping is OFF.** `encoding/json` escapes `<`, `>` and `&` by default (a
+defence for JSON inside `<script>`); an OTLP body never is, and URL attributes
+(`url.full`, `http.route`) carry `&`. Only `json.Encoder` can turn it off, and it
+appends a newline a single-document body must not carry — hence
+`marshalOTLPJSON`.
 
-**An unset `time.Time` encodes as 0**, and the guard is load-bearing rather than
-defensive noise: `UnixNano`'s result is documented as *undefined* out of range,
-and the zero `Time` returns `-6795364578871345152`, which cast to a `uint64`
-nanosecond timestamp reads as the year 2339. Zero is what the schema means by an
-unknown timestamp; a plausible wrong date is what no dashboard can detect. A
-test asserts the garbage value never appears.
+**An unset `time.Time` encodes as 0.** `UnixNano` is *undefined* out of range:
+the zero `Time` returns `-6795364578871345152`, which as a `uint64` timestamp
+reads as the year 2339. Zero is the schema's unknown timestamp; a plausible wrong
+date is undetectable. A test asserts the garbage value never appears.
 
-**The writer-bound exporter terminates each document with a newline**, so a
-stream of exports is NDJSON. `EncodeOTLPJSON` does not — an HTTP body is one
-document.
+**The writer-bound exporter ends each document with a newline** (a stream of
+exports is NDJSON); `EncodeOTLPJSON` does not — an HTTP body is one document.
 
 ## The OTLP/HTTP emitter
 
@@ -523,46 +496,39 @@ value, so the constructor returns `(Exporter, error)`.
 | A caller-supplied `http.Client` | used **as-is**, deadline, redirect policy and `Transport` included. It is the seam for a proxy, an mTLS identity or an SSRF allowlist, and second-guessing it would defeat the seam — so one riding `http.DefaultTransport` keeps the exposure below, and giving it a `Transport` of its own is how the caller removes it |
 | The default client's pool | its OWN: a clone of `http.DefaultTransport`, proxy environment included, sharing none of its connections — see below |
 
-**The default client owns its connection pool, because a shared one gave wrong
-verdicts.** It used to ride `http.DefaultTransport`, and net/http puts a
-BODILESS response's connection back in the idle pool *before* handing the
-response to the waiting round trip; a `CloseIdleConnections` on that pool
-landing in between closes the connection under it, and the round trip reports
-`HTTP/1.x transport connection broken: http: CloseIdleConnections called` for an
-answer that had already arrived. Every `httptest.Server.Close` and every
-`http.DefaultClient.CloseIdleConnections` in the process is such a call. The
-verdict was then `OTLP_EXPORT_UNAVAILABLE` whatever the collector said: a 200
-became retryable — the caller's retry replays accepted data, which double-counts
-a delta point — a 429 lost its `Retry-After`, and a 413 became retryable. CI saw
-it as a `TestOTLPHTTPSurfacesRetryAfter` flake; with the OS threads
-oversubscribed it failed 4 times in 800 runs of this file, and 0 in 600 since.
+**The default client owns its connection pool, because a shared one gives wrong
+verdicts.** net/http puts a BODILESS response's connection back in the idle pool
+*before* handing the response to the waiting round trip, so a
+`CloseIdleConnections` on a shared pool (every `httptest.Server.Close`, every
+`http.DefaultClient.CloseIdleConnections` in the process) can break a round trip
+whose answer already arrived — and the verdict becomes `OTLP_EXPORT_UNAVAILABLE`
+whatever the collector said: a 200 turns retryable (a retry replays accepted
+data, double-counting a delta point), a 429 loses its `Retry-After`, a 413 turns
+retryable. Measured as a `TestOTLPHTTPSurfacesRetryAfter` flake, 4 in 800 runs
+on `http.DefaultTransport`, 0 in 600 since.
 `TestOTLPHTTPDefaultClientOwnsItsConnectionPool` proves the isolation
 deterministically — the emptying call between exports, and the connection must
 survive it.
 
-The clone is a snapshot taken at construction. Where `http.DefaultTransport` has
-been replaced by something other than an `*http.Transport`, a fresh transport
-with `Proxy: http.ProxyFromEnvironment` and net/http's 90 s idle timeout stands
-in. `TestOTLPHTTPDefaultClientHonoursTheProxyEnvironment` drives both branches
-through a real `HTTP_PROXY` — in a CHILD process, because net/http reads the
-proxy environment once per process and never proxies loopback.
-`TestOTLPHTTPProxyChild` is that child: it self-skips unless its parent set
-`KTN_OTLP_METRICS_PROXY_CHILD`, so it is discovered and run like any test and
-needs no tag, no `manual` target and no compensating lane (CLAUDE.md rule 12).
+The clone is a snapshot taken at construction; where `http.DefaultTransport` is
+not an `*http.Transport`, a fresh one with `Proxy: http.ProxyFromEnvironment`
+and net/http's 90 s idle timeout stands in.
+`TestOTLPHTTPDefaultClientHonoursTheProxyEnvironment` drives both branches
+through a real `HTTP_PROXY` in a CHILD process (net/http reads the proxy
+environment once per process and never proxies loopback);
+`TestOTLPHTTPProxyChild` is that child and self-skips unless its parent set
+`KTN_OTLP_METRICS_PROXY_CHILD`, so it needs no tag, no `manual` target and no
+compensating lane (CLAUDE.md rule 12).
 
-**Each exporter therefore owns a pool, and nothing closes it.** The `Exporter`
-port has no lifecycle method and none was invented for this; idle connections
-are reaped by the transport's idle timeout. One exporter per collector, built
-once, is the intended shape — building one per export holds a pool per call
-until that timeout.
+**Each exporter owns a pool, and nothing closes it**: the `Exporter` port has no
+lifecycle method, and idle connections are reaped by the idle timeout. Build one
+exporter per collector, once — one per export holds a pool per call.
 
 **It does not retry, and that is a decision.** The specification asks a client to
-honour `Retry-After` and otherwise back off exponentially;
-`internal/service/resilience` already ships that policy, and a backoff hidden
-inside `Export` would be a second one a caller cannot see, tune or cancel — with
-no `context` to cancel it with. What this exporter supplies instead is the
-**classification** a retry policy needs, in exactly the shape
-`resilience.RetryConfig.Retryable` wants:
+honour `Retry-After` and otherwise back off exponentially; `resilience` already
+ships that policy, and a backoff hidden inside `Export` would be one a caller
+cannot see, tune or cancel. The exporter supplies the **classification** instead,
+in exactly the shape `resilience.RetryConfig.Retryable` wants:
 
 ```go
 resilience.NewRetry(resilience.RetryConfig{
@@ -598,21 +564,17 @@ request will fail the same way. Both halves have a test.
   differ. A decoder that read one form would silently read every partial success
   as a full one against the other kind.
 
-**Nothing untrusted is echoed.** The collector's `errorMessage` is decoded into
-the response shape and deliberately **not** attached to the error: it is
-unbounded remote-controlled text and an `errs` Field goes straight into
-structured logs. The rejected COUNT is what an operator alerts on. `Retry-After`
-is surfaced only in its **delta-seconds** form — converting an HTTP-date means
-comparing the collector's clock to ours, which is the sort of quiet assumption
-that surfaces months later as a retry storm. The endpoint never reaches a
-rendered message: a transport cause is wrapped (so it stays reachable through
-`errors.Unwrap`), and `errs` renders the Public string only, so the `*url.Error`
-does not leak into a log line.
+**Nothing untrusted is echoed.** The collector's `errorMessage` is decoded but
+**not** attached to the error (unbounded remote text; a Field goes straight into
+structured logs) — the rejected COUNT is what an operator alerts on.
+`Retry-After` is surfaced only in its **delta-seconds** form, since an HTTP-date
+would compare the collector's clock to ours. The endpoint never reaches a
+rendered message: a transport cause is wrapped (reachable through
+`errors.Unwrap`) and `errs` renders the Public string only.
 
-**Headers are set before `Content-Type`**, so the specification's
-`application/json` always wins and a caller cannot mislabel the body by
-accident. Header values are secrets: written, never read back, never echoed. The
-map is cloned at construction so a later caller mutation cannot change the wire.
+**Headers are set before `Content-Type`**, so `application/json` always wins.
+Header values are secrets — written, never read back or echoed — and the map is
+cloned at construction so a later caller mutation cannot change the wire.
 
 ## Conventions
 
@@ -639,48 +601,38 @@ map is cloned at construction so a later caller mutation cannot change the wire.
   an entry — two allocations per observation. Measured.
 - **The stores are keyed flat** by the whole series key, not nested by name: one
   map read resolves an attributed fetch where a nesting would cost two.
-- **A description belongs to the NAME too, but NOT to `nameState`** — it lives
-  in its own `descriptions map[string]string`, nil until the first `Describe`.
-  A `nameState` carries an instrument KIND and a description is non-identifying
-  and implies none, so storing it there would force a caller to mint the
-  instrument before documenting it. The nil map READS as the empty one, so an
-  undescribed meter allocates nothing and `Collect` still finds `""` without a
-  branch. Nothing on the fetch path reads it; gated by
-  `TestDescribedMeterLookupIsAllocationFree` and priced in BENCH.md §ADR 0067
-  (~25 ns per described NAME per scrape, zero per observation).
+- **A description belongs to the NAME too, but NOT to `nameState`** (which
+  carries a KIND a description does not imply — storing it there would force
+  minting the instrument before documenting it). It lives in its own
+  `descriptions map[string]string`, nil until the first `Describe`; the nil map
+  reads as empty, so an undescribed meter allocates nothing. Nothing on the fetch
+  path reads it; gated by `TestDescribedMeterLookupIsAllocationFree` and priced
+  in BENCH.md §ADR 0067 (~25 ns per described NAME per scrape, zero per
+  observation).
 - **Kind and bound belong to the NAME**, not the series (`nameState`) —
   attributes vary within one metric, its kind and its quota do not. Four
   instrument kinds map to one output GROUP, because a Counter and an
   UpDownCounter produce one point shape.
-- **`Collect` carves one arena per group** into exactly-sized per-name windows,
-  using the meter's own series tally, and yields them through a
-  range-over-func so each collector wraps its window in its own metric type.
-  Letting each name's slice grow on its own costs an allocation per name plus a
-  doubling copy per many-series name — both scaling with cardinality, on the
-  path a scraper walks every few seconds.
+- **`Collect` carves one arena per group** into exactly-sized per-name windows
+  (the meter's own series tally), yielded through a range-over-func; growing
+  each name's slice instead costs an allocation per name plus doubling copies,
+  scaling with cardinality on every scrape.
 - **`Collect` is serialised against itself** by `collectMu`: it is a mutation
   under delta temporality and a mutation under any temporality once an
   observable is registered.
 - **Registration via `var Text = metrics.RegisterExporter(...)`** (and
   `var Prometheus = …`, `var OTLPJSON = …`) — no `init()`.
 - **An OTLP surface never touches the observation path.** `EncodeOTLPJSON`
-  builds a message tree and hands it to `encoding/json`; that is fine because an
-  export is a SCRAPE-rate operation, while the allocation budget this package
-  defends is per OBSERVATION. Do not "optimise" the encoder by hand-appending
-  bytes — the escaping `encoding/json` gets right for free is a correctness
-  property (an attribute value is data), and there is no measurement asking for
-  the trade.
+  hands a message tree to `encoding/json` at SCRAPE rate; the allocation budget
+  is per OBSERVATION. Do not hand-append bytes: `encoding/json`'s escaping is a
+  correctness property, and no measurement asks for the trade.
 - **All three registered defaults write to `os.Stderr`** (ADR 0030). Importing a
   package must not arm a writer on a stream the process may be using as a
-  protocol channel; stdout is reachable only by asking for it explicitly with
-  `NewTextExporter(name, os.Stdout)`. The temptation is stronger for the
-  Prometheus exporter — an exposition document *looks* like something a caller
-  wants on stdout — but a scrape endpoint hands the exporter its
-  `http.ResponseWriter` and never touches the registered default, so nothing is
-  gained by making the import dangerous. One regression test per surface. The
-  OTLP/HTTP emitter goes one step further and is **not registered at all**: an
-  import that arms a network client is worse than one that arms a writer,
-  because there is no endpoint that could be a correct default.
+  protocol channel; stdout is reachable only explicitly, e.g.
+  `NewTextExporter(name, os.Stdout)`. That holds for the Prometheus exporter too:
+  a scrape endpoint hands it its `http.ResponseWriter` and never touches the
+  registered default. One regression test per surface. The OTLP/HTTP emitter is
+  **not registered at all** (§The OTLP/HTTP emitter).
 - **The two TEXT exporters escape STRING attribute values** (`\\`, `\"`, `\n`)
   through the shared `appendEscapedValue`; the OTLP encoder does not need it,
   because `encoding/json` owns JSON string escaping and doing it twice would
@@ -695,52 +647,38 @@ map is cloned at construction so a later caller mutation cannot change the wire.
 - Add an `init()`.
 - Point a *registered* exporter at `os.Stdout`. The import is invisible at the
   call site, so the default must be the stream nobody parses.
-- Transliterate a metric or attribute key in the Prometheus connector. Mapping
-  the offending bytes to `_` merges distinct instruments silently — see §The
-  Prometheus text exposition connector.
-- Emit a `target_info` metric to smuggle the Resource through. It needs the same
-  non-injective mangling, on the one key (`service.name`) that most matters.
+- Transliterate a metric or attribute key in the Prometheus connector (`_`
+  merges distinct instruments), or emit a `target_info` metric to smuggle the
+  Resource through (the same mangling, on `service.name`).
 - Let a delta snapshot reach the Prometheus wire, or an unresolved one pass as
   cumulative. Both are refused, on purpose.
-- Invent a fourth escape sequence. The 0.0.4 parser rejects anything but
-  `\\`, `\"` and `\n`, so a `\r` would cost the whole scrape.
-- Emit a placeholder `# HELP`, or one for an empty description. The format makes
-  it optional precisely because there is not always a docstring to write.
-- Escape a double quote inside a Prometheus `# HELP` docstring. It is not a
-  quoted token; the format names `\\` and `\n` and nothing else, and a third
-  escape would put a literal backslash into the help text.
-- Put a description on a data POINT, or in the series key. It is non-identifying
-  in the OTel data model — two streams differing only by their description are
-  one stream.
-- Thread a description through `Counter`/`Gauge`/`Histogram`. It would put a
-  second string on the one variadic call the compiler has to prove
-  non-escaping, and it would let two call sites disagree about the
-  documentation of one metric while both look correct.
+- Invent a fourth escape sequence (the 0.0.4 parser rejects anything but `\\`,
+  `\"` and `\n`, so a `\r` costs the whole scrape), or escape a double quote in a
+  `# HELP` docstring (not a quoted token).
+- Emit a placeholder `# HELP`, or one for an empty description.
+- Put a description on a data POINT or in the series key (it is
+  non-identifying), or thread it through `Counter`/`Gauge`/`Histogram` (a second
+  string on the variadic call the compiler must prove non-escaping, and two call
+  sites could disagree about one metric's documentation).
 - Convert a series key to a `string` before a map read. `m[string(b)]` does not
   allocate; `k := string(b); m[k]` does, once per observation.
 - Clone a series' attribute set inside `Collect`. It is shared with the snapshot
   on purpose (see `internal/core/metrics/CLAUDE.md` §The snapshot shape).
 - Swap an OBSERVED series to zero during a delta collection. Its callback
   already stored the window.
-- Grow `NewMeter` / `NewMeterWithConfig` past the inlining budget. See
-  §Conventions.
-- Add an "unbounded" cardinality setting.
-- Register the OTLP/**HTTP** emitter, or give it a default endpoint. See
-  §The OTLP/HTTP emitter.
-- Build the default client without its own `Transport`. A nil one is
-  `http.DefaultTransport`, which any code in the process can empty — see
-  §The OTLP/HTTP emitter. And do not replace, wrap or clone the `Transport` of
-  a caller-SUPPLIED client: that choice is the caller's.
+- Grow `NewMeter` / `NewMeterWithConfig` past the inlining budget (§Conventions),
+  or add an "unbounded" cardinality setting.
+- Register the OTLP/**HTTP** emitter, or give it a default endpoint.
+- Build the default client without its own `Transport` (a nil one is
+  `http.DefaultTransport`, which any code in the process can empty), or
+  replace, wrap or clone the `Transport` of a caller-SUPPLIED client.
 - Drain a response without a bound, or bound the drain by the configured
   `MaxResponseBytes`: that knob caps what is read into memory, and a caller
   who lowered it must not lose connection reuse on a conforming response.
 - Retry inside `Export`. `resilience` owns backoff; this package classifies
-  (`OTLPRetryable`). A hidden loop cannot be tuned or cancelled by the caller
-  who owns the scrape, and `Export` has no `context` to cancel it with.
-- Emit `AGGREGATION_TEMPORALITY_UNSPECIFIED` (0). The schema says it MUST NOT be
-  used; the encoder refuses instead.
-- Emit an enum by NAME, or a 64-bit integer as a JSON number. OTLP/JSON forbids
-  the first outright, and the second loses the low bits of anything past 2⁵³.
+  (`OTLPRetryable`), and `Export` has no `context` to cancel a hidden loop with.
+- Emit `AGGREGATION_TEMPORALITY_UNSPECIFIED` (0), an enum by NAME, or a 64-bit
+  integer as a JSON number (it loses the low bits past 2⁵³).
 - Omit `asInt`/`asDouble`, the histogram `sum`, or `isMonotonic` when they hold
   their zero. Presence is the meaning — see §The OTLP/JSON encoder.
 - Skip a non-finite histogram bound the way the Prometheus connector does. It

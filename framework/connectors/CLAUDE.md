@@ -1,6 +1,7 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/connectors — the engines a database runs on
 
-ADR 0004: a store is the port, a database's engine the adapter the app plugs
+The platform's ADR 0004: a store is the port, a database's engine the adapter the app plugs
 in. Each engine is its own Go module, requiring kit and one driver, and the
 only code of a product that imports that driver: a product's `main` imports
 one to call `kit.Database(name, <engine>.Engine())`. kit's module imports no
@@ -54,7 +55,7 @@ KIT_TEST_MYSQL_URL='mysql://root@127.0.0.1:3306/mysql?tls=false' go test -race .
 ```
 
 SQLite needs no server: its tests — the conformance suite among them —
-always run. The suite runs a record's revisions too (ADR 0007 §3: kept,
+always run. The suite runs a record's revisions too (the platform's ADR 0007 §3: kept,
 pruned, restored, rolled back) on every engine, and
 `sqlite/revisions_test.go` runs them end to end on a file: versions sealed in
 `<table>___vs`, a hold on the same file read in the write's transaction, an

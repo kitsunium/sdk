@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:54:25Z -->
 # internal/kernel/snapshot/
 
 ## Purpose
@@ -42,6 +42,7 @@ lives here, the domain clone logic stays with the consumer (ADR 0011).
 
 ```sh
 bazel test --config=race //internal/kernel/snapshot:snapshot_test
-# zero-alloc gate runs HORS race (race instrumentation perturbs allocs):
-bazel test --config=pure //internal/kernel/snapshot:snapshot_test
+# zero-alloc gate runs HORS race (race instrumentation perturbs allocs) — the
+# alloc lane (`make test-alloc`, target listed in tools/alloc-lane-targets.txt):
+bazel test --config=alloc //internal/kernel/snapshot:snapshot_test
 ```

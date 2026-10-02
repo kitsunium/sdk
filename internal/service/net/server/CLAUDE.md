@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:59:04Z -->
 # internal/service/net/server/
 
 ## Purpose
@@ -15,7 +15,7 @@ Public façade: `pkg/v1/server`.
 |---|---|
 | `server.go` | `Server`, `New`, `Group`, `State` |
 | `lifecycle.go` | `Start`, `Serve`, `Shutdown`, `Close`, the accept loop and its backoff (`acceptDelay`, `backOff`), the drain |
-| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `Use` |
+| `stream_group.go` | `StreamGroup` — `Handle`, `HandleFunc`, `HandleHTTP`, `Use` |
 | `listen.go` | listener construction; TLS/mTLS wrapping; family validation |
 | `conn.go` | the pooled `corenet.Conn` implementation, and the `hijacked` hand-over flag |
 | `pool.go` | per-connection recycling + the live-socket registry |

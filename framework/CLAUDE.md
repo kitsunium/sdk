@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/ — the SDK's framework module
 
 ## Purpose
@@ -13,6 +14,7 @@ the analyzer, the generator, `kit check`.
 |---|---|---|
 | `model/` | the graph types and the ID grammar (`Version` 5) | V-0 |
 | `kit/` | the runtime a product imports — the platform's kit moved whole (V-A to V-D: declarations, stores and CQRS, workflows and history, privacy, modules, watches), minus the Studio's pages and every route that acts (D13), plus the process profiles, listeners, binaries and roles | moved |
+| `internal/kit/` | the implementation behind `kit/`, under role-suffixed names (`StoreService` for `Store`…), and the opt-in subsystems' hooks (`plug/`, `serverkit/`, `studiokit/`) | moved |
 | `telemetry/` | the telemetry port and its exporter (ADR 0149) | new |
 | `connectors/<engine>/` | `postgres`, `mysql`, `sqlite`: one driver each, a Go module each, in `go.work` | moved |
 

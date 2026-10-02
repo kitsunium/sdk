@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T20:00:30Z -->
 # internal/service/validation/
 
 ## Purpose
@@ -36,6 +37,7 @@ refusal.
 | `reject.go` | the refusal helpers (`rejectConstraint` / `rejectRule` / `rejectTarget`) |
 | `violate.go` | `one` — the single place a `ViolationValue` is minted |
 | `rule_names.go` | the closed set of reported rule names |
+| `codes.go` / `errors.go` | `0.3.47.1`–`0.3.47.5`, the built-in rules' identities; `InvalidRule` (`0.3.47.6`) and `UnsupportedTarget` (`0.3.47.7`, a `Struct[T]` whose `T` is not a struct) |
 | `BENCH.md` | the measured cost of the two front ends and of the plan cache |
 
 ## The constraint set is a decision, not a list

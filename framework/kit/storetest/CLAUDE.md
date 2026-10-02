@@ -1,7 +1,7 @@
-<!-- updated: 2026-09-30T00:00:00Z -->
+<!-- updated: 2026-10-02T19:57:17Z -->
 # framework/kit/storetest — the conformance suite of kit's stores
 
-What a store does on every backend (ADR 0004): run by
+What a store does on every backend (the platform's ADR 0004): run by
 `framework/internal/kit`'s tests on memory, files and the fake database
 (`storetest_test.go`), and by each engine module's tests on its engine
 (`connectors/{sqlite,postgres,mysql}`). It keeps the test double honest: a

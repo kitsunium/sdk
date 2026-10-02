@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:56:22Z -->
 # third-party/x-crypto/argon2id/
 
 ## Purpose
@@ -7,8 +8,8 @@ OWASP-first-choice password hash. It depends on `golang.org/x/crypto/argon2`, so
 it lives under `third-party/x-crypto` as an **opt-in** scheme (same precedent as
 xchacha vs the stdlib aesgcm default): `pkg/v1/password` does NOT blank-import it,
 keeping that facade dep-light. Consumers who can take the x/crypto dependency
-blank-import this package, then `crypto.HashPassword("argon2id", …)` resolves and
-`crypto.VerifyPassword` routes any stored hash back to its scheme by PHC id.
+blank-import this package, then `password.Hash("argon2id", …)` resolves and
+`password.Verify` routes any stored hash back to its scheme by PHC id.
 
 Lives in the **root** module (which hosts the x/crypto dep) and legitimately
 imports `internal/core/crypto` + `internal/kernel/errs` (third-party packages may
@@ -102,4 +103,4 @@ bazel test --config=race //third-party/x-crypto/argon2id:argon2id_test
 
 ## Accepted audit findings
 
-- Deferred/accepted low+info audit findings (V90, V91) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
+- Deferred/accepted low+info audit findings (V90, V91) were accepted at the 2026-06-03 audit close-out. Their record, `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml`, was a local workflow file and is not tracked in the repository. Each is a deliberate decision or deferred change, not an open bug.

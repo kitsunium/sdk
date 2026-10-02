@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T19:53:59Z -->
 # e2e/
 
 ## Purpose
@@ -57,8 +57,8 @@ e2e/
   and produces a row the runner can tally — and leave "does the host conform?" to
   the conformance lane, so a laptop without cgroup delegation stays green.
 - Imports may reach `internal/*` for the sentinel **codes only** (the e2e binary
-  is internal tooling, not a consumer) — this is why it is excluded from the
-  Bazel visibility firewall (`.bazelignore`).
+  is internal tooling, not a consumer) — this is why it sits outside the Bazel
+  graph the layer firewall queries (`.bazelignore`; ADR 0068).
 
 ## Build system
 

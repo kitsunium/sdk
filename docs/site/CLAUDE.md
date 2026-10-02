@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T19:57:44Z -->
 # docs/site/
 
 ## Purpose
@@ -21,6 +21,16 @@ drift from the code.
 | `test` | `node --test scripts/lib/*.test.mjs` | tag-format and feature-catalog unit tests |
 
 Run `make docs` / `make serve` from the repo root (they call the above); `make docs-dev` runs `npm run dev`, the same sync then `astro dev`.
+
+## Layout
+
+| Path | Holds |
+|---|---|
+| `scripts/` | the build scripts of the table above |
+| `scripts/lib/` | shared modules — `base.mjs` (`withBase`), `tag-format.mjs`, `features.mjs` (the curated-feature logic), `page-catalog.mjs` (the page taxonomy `Sidebar.astro` and `Search.astro` share) — and their `*.test.mjs` |
+| `src/data/` | `features.mjs`, the curated feature catalogue; the generated JSON lands beside it |
+| `src/pages/` | `index.astro`, `404.astro`, `rss.xml.js`, and `[release]/index.astro` + `[release]/[major]/[...slug].astro` rendering the synced content |
+| `src/components/`, `src/layouts/`, `src/styles/` | the Astro components, `Default.astro`, `global.css` |
 
 ## Deployment + base path
 

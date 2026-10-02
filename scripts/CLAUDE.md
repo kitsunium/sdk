@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T19:53:12Z -->
 # scripts/
 
 ## Purpose
@@ -13,9 +13,9 @@ here is a Go package.
 | Path | What it is |
 |---|---|
 | `pre-commit/` | the guards `.githooks/pre-commit` runs in lexical order, each an executable `check-*.sh` taking the workspace path; `test-pre-commit-guards.bats` pins them, and keeps them runnable on a Mac as shipped |
-| `release/` | `compute-bumps.sh` (WHETHER to release), `cut-tags.sh` (HOW BIG, from `release:*` labels — ADR 0135), `check-pr-size.sh`, their BATS suites and `lib/` |
+| `release/` | `compute-bumps.sh` (WHETHER to release), `cut-tags.sh` (HOW BIG, from `release:*` labels — ADR 0135), `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
 | `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137), and `vuln-check.sh`, the govulncheck gate over it (ADR 0136) |
-| `check-layer-deps.sh` | the layer firewall on the build graph: four `bazel query` expressions that must be empty (ADR 0068) |
+| `check-layer-deps.sh` | the layer firewall on the build graph: seven `bazel query` expressions that must be empty (ADR 0068; the last three are the framework's, ADR 0147) |
 | `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` (ADR 0088) |
 | `ci-scripts-test.sh`, `pre-commit-test.sh`, `hooks-test.sh` | run the BATS suites of `ci/`, `pre-commit/` and `.githooks/` |
 | `cross-platform-audit.sh` | the local twin of `bazel-ci.yml`'s `cross-build`: every module of the census built and vetted (tests included) for every GOOS/GOARCH cell, printed as a matrix; needs bash 4 |

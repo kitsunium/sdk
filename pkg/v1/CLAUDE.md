@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T22:13:02Z -->
+<!-- updated: 2026-10-02T20:02:20Z -->
 # pkg/v1/
 
 ## Purpose
@@ -187,6 +187,8 @@ GOWORK=off go test -race -cover ./v1/...
 - `selfupdate/` — see `pkg/v1/selfupdate/CLAUDE.md`
 - `entitlement/` — see `pkg/v1/entitlement/CLAUDE.md`
 - `gate/` — see `pkg/v1/gate/CLAUDE.md`
+- `health/` — see `pkg/v1/health/CLAUDE.md`
+- `lock/` — see `pkg/v1/lock/CLAUDE.md`
 
 ## Before v1 — the shapes this layer publishes
 

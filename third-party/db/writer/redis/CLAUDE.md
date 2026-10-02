@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-02T19:55:03Z -->
 # third-party/db/writer/redis/
 
 ## Purpose
@@ -75,4 +76,4 @@ GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/redis
 
 ## Accepted audit findings
 
-- Deferred/accepted low+info audit findings (V89) are recorded in `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml` (2026-06-03 close-out). Each is a deliberate decision or deferred change, not an open bug.
+- Deferred/accepted low+info audit findings (V89) were accepted at the 2026-06-03 audit close-out. Their record, `.claude/contexts/sdk-audit-2026-06-03-accepted.yaml`, was a local workflow file and is not tracked in the repository. Each is a deliberate decision or deferred change, not an open bug.
