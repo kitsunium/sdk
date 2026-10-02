@@ -14,17 +14,20 @@
 #
 #   1. the `core/` list in the architecture tree names EXACTLY the directories
 #      under internal/core, no more and no fewer;
-#   2. no domain is bolded twice in the Purpose paragraph — a duplicate there is
-#      the union-merge signature;
-#   3. the two ADR indexes (docs/adr/CLAUDE.md and this file's Reference list)
-#      name exactly the ADRs on disk, once each. A duplicated index row is what
-#      a re-run of a half-failed insertion script leaves behind, and it happened
-#      here: the queue row was written twice and neither copy was wrong, so
-#      nothing looked broken.
+#   2. no domain is described twice in the Purpose section — a duplicate there
+#      is the union-merge signature. Since ADR 0154 the domains are a TABLE
+#      under a short Purpose paragraph, one row each, so the check is a
+#      repeated row; the paragraph is still checked for a domain bolded twice,
+#      should prose ever grow back into it;
+#   3. the three ADR indexes (docs/adr/CLAUDE.md, docs/CLAUDE.md and this
+#      file's Reference list) name exactly the ADRs on disk, once each. A
+#      duplicated index row is what a re-run of a half-failed insertion script
+#      leaves behind, and it happened here: the queue row was written twice and
+#      neither copy was wrong, so nothing looked broken.
 #
-# It deliberately does NOT require every core package to appear in the Purpose
-# prose: `writer` and `logger/level` are parts of a domain rather than domains,
-# and inventing a rule about which is which is how a guard starts lying.
+# It deliberately does NOT require every core package to have a row:
+# `writer` and `logger/level` are parts of a domain rather than domains, and
+# inventing a rule about which is which is how a guard starts lying.
 set -euo pipefail
 
 root="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -71,7 +74,7 @@ if [ -n "$missing" ] || [ -n "$extra" ]; then
 	exit 1
 fi
 
-# --- 2. no domain bolded twice in the Purpose paragraph ---------------------
+# --- 2. no domain described twice in the Purpose section --------------------
 
 purpose="$(sed -n '/^Go SDK providing/p' "$doc")"
 if [ -z "$purpose" ]; then
@@ -105,6 +108,32 @@ if [ -n "$dupes" ]; then
 	echo >&2
 	echo "  Merge the clauses into one and delete the stale copy; do not leave" >&2
 	echo "  both, because they will disagree." >&2
+	exit 1
+fi
+
+# The domains themselves are a table in the Purpose section (ADR 0154): one row
+# per domain, its name in backticks in the first cell. The prose rule above
+# cannot see a row, so the union-merge signature is looked for where the
+# domains now are — the same domain on two rows, the second one stale.
+domains="$(awk '
+	/^## Purpose/   { grab = 1; next }
+	grab && /^## /  { exit }
+	grab && /^\| `/ { print }
+' "$doc" | sed -E 's/^\| `([^`]+)`.*/\1/')"
+if [ -z "$domains" ]; then
+	echo "✗ $doc: the Purpose section has no domain table — one row per domain," >&2
+	echo "  its name in backticks in the first cell (ADR 0154). If the section was" >&2
+	echo "  reshaped, update this guard in the same change (rule 11)." >&2
+	exit 1
+fi
+dupes="$(printf '%s\n' "$domains" | sort | uniq -d)"
+if [ -n "$dupes" ]; then
+	echo "✗ $doc: these domains have more than one row in the Purpose table —" >&2
+	echo "  the signature of a union merge:" >&2
+	printf '%s\n' "$dupes" | sed 's/^/    /' >&2
+	echo >&2
+	echo "  Keep one row per domain and delete the stale one; do not leave both," >&2
+	echo "  because they will disagree." >&2
 	exit 1
 fi
 
