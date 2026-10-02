@@ -36,7 +36,7 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/sql` migration the caller numbers |
 | `sql_withheld.go` | `withheld`: the driver's error for `errors.Is`/`errors.As`, its text out of every rendering |
-| `consume.go` | `Consume`, the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `consume.go` | `Consume` (its workers in a `kernel/group` joined group), the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
 | `codes.go` / `errors.go` | the five `0.3.53.*` codes and their sentinels |
@@ -282,6 +282,15 @@ a codebase where somebody promised it.
 
 `Parallelism`, `BatchSize` and `PollInterval` are all CLAMPED, because each has
 one sensible reading at zero and none of them is dangerous.
+
+The `Parallelism` workers run in a `kernel/group` JOINED group
+(`group.NewJoined`): the first worker the storage refuses cancels the others —
+they all poll the same broken medium — and `Consume` returns once every worker
+has, with each worker's own failure joined in worker order (a sibling that was
+merely cancelled reports nothing). A worker's panic outside the handler — the
+handler's own is recovered into a nack — is re-raised in `Consume`'s goroutine
+after its siblings have stopped. `TestAStorageFailureStopsEveryWorkerAndIsReturned`
+pins the report.
 
 ## Waking an idle consumer (ADR 0104)
 

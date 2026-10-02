@@ -14,7 +14,7 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 | `health.go`, `entry.go` | the registry and one registered check |
 | `inflight.go` | one execution of a check, shared by every probe waiting on it |
 | `runner.go` | runs a check under its timeout, recovers a panic; a caller whose own context ends stops waiting WITHOUT cancelling the shared run (`departed`), while the run's own budget (`boundRun`) cancels it whether or not anyone is still waiting |
-| `probe.go` | answers a probe: startup gating, drain latch, aggregation |
+| `probe.go` | answers a probe: startup gating, drain latch, aggregation; a probe's checks run in parallel through `kernel/group.Collect`, so results come back in registration order and a fault in the evaluation path is re-raised on the probing goroutine rather than crashing the process |
 | `handler.go` | the HTTP surface; renders only the `errs` Public half |
 | `handler_config.go` | `HandlerConfig` — the one knob the three handlers take |
 | `body.go` | the wire shape of a probe response, and of one check inside it |

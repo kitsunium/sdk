@@ -46,6 +46,25 @@ func BenchmarkGoWait_EightTasks_Unlimited(b *testing.B) {
 	}
 }
 
+// BenchmarkGoWait_EightTasks_Joined is the unlimited fan-out from NewJoined.
+// The gap against BenchmarkGoWait_EightTasks_Unlimited is what keeping a
+// failure slot per submission costs when nothing fails: the slice grows by
+// append under the group's lock, once per Go.
+func BenchmarkGoWait_EightTasks_Joined(b *testing.B) {
+	ctx := b.Context()
+	b.ReportAllocs()
+	b.ResetTimer()
+	for range b.N {
+		g, _ := group.NewJoined(ctx, group.Unlimited)
+		for range 8 {
+			g.Go(noop)
+		}
+		if err := g.Wait(); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
 // BenchmarkGoWait_EightTasks_Limit2 is the same fan-out through a semaphore
 // that actually refuses. The gap against the unlimited case is what a bound
 // costs when it binds — the submitting goroutine parks waiting for a slot.

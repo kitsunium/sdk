@@ -18,6 +18,16 @@ if err := tasks.Wait(); err != nil { // the FIRST failure; the rest were cancell
 }
 ```
 
+`NewJoined` is the same group reporting EVERY failure instead of the first —
+joined with `errors.Join`, in submission order — for tasks whose failures are
+independent facts rather than echoes of one cancellation:
+
+```go
+workers, _ := group.NewJoined(ctx, n)
+// ... workers.Go(...) ...
+return workers.Wait() // nil, or every worker's own failure
+```
+
 `Collect` is the typed form — results in submission order, whatever order the
 tasks finished in:
 

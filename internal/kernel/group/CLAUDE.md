@@ -4,8 +4,9 @@
 ## Purpose
 
 Generic **structured concurrency**: `Group` runs N tasks, waits for all of them
-at one point, reports the first error — and delivers a panic raised in a child
-goroutine to the waiter instead of letting it kill the process. A kernel
+at one point, reports the first error — or, from `NewJoined`, every error,
+joined in submission order — and delivers a panic raised in a child goroutine
+to the waiter instead of letting it kill the process. A kernel
 primitive (stdlib-only AND generic — `Group` / `Go` / `Wait` / `Collect`, with
 no `Job`, `Task` or `Worker` in a signature). Admitted on **SDK rule 1**, the
 only admission criterion there is: stdlib-only AND domain-neutral. The
@@ -19,7 +20,7 @@ failure of its own except a programming fault, which panics.
 
 | File | Surface |
 |---|---|
-| `group.go` | `Group` + `New` / `Go` / `Wait`, `Unlimited`, and the run/fail/capture path |
+| `group.go` | `Group` + `New` / `NewJoined` / `Go` / `Wait`, `Unlimited`, and the run/fail/capture path (plus `reserve`/`runJoined`/`record`, the joined group's failure slots) |
 | `panic.go` | `PanicValue` — the panic carried off a task's goroutine into the waiter |
 | `collect.go` | `Collect[T]` — the typed fan-out, results in submission order |
 
@@ -81,6 +82,15 @@ Go has no way to abandon a goroutine.
 - **The first error wins, and cancels the rest.** Later errors are dropped:
   almost every one is a consequence of the cancellation the first caused, and
   reporting the cascade would bury the cause.
+- **Unless the failures are independent facts — then `NewJoined`.** A joined
+  group claims one failure slot per task AT SUBMISSION, so `Wait` returns
+  `errors.Join` of every failure in submission order, whatever order they
+  happened in, and a genuine nil when none did. It still cancels the siblings on
+  the first failure, that failure is still the context's `Cause`, and a panic
+  still outranks every error. The parts stay matchable: `errors.Is`/`As` and
+  `errs.HasCode` all walk `Unwrap() []error`. The mode is one pointer on the
+  `Group`, nil in a first-error group, so the common shape pays one word and
+  nothing per task (`BENCH.md` §"What `NewJoined` adds").
 - **The first error is the context's `Cause`.** The group cancels with
   `context.WithCancelCause`, so a sibling reading `context.Cause(ctx)` can tell
   "another task failed, with this" from "the parent went away". It is the
@@ -99,8 +109,23 @@ Go has no way to abandon a goroutine.
 - `Collect` is a function, not a method, because Go's methods take no type
   parameters of their own: a `Group[T]` would force `Group[struct{}]` on every
   caller who only wants to wait.
-- Cross-OS: 100 % portable (`context`, `sync`, `math`, `runtime/debug`,
-  `strings`).
+- Cross-OS: 100 % portable (`context`, `errors`, `sync`, `math`,
+  `runtime/debug`, `strings`).
+
+## Consumers
+
+- `internal/service/health` — `evaluateAll` runs a probe's checks through
+  `Collect`, so the results come back in REGISTRATION order and a fault in the
+  evaluation path is re-raised in the probing goroutine, after every sibling
+  check has returned, instead of crashing the process from a goroutine nobody
+  can recover.
+- `internal/service/queue` — `Consume` runs its workers in a `NewJoined` group:
+  each worker that hits the storage reports its OWN failure, the first one
+  stops the others, and `Consume` returns them joined.
+- `internal/service/scheduler` was considered and does not use it: a job's
+  error is published to the observer, never returned, and must not cancel the
+  other entries — the two things a group exists to do. Its `sync.WaitGroup`
+  says exactly what it needs, a join point.
 
 ## Do NOT
 

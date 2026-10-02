@@ -32,6 +32,8 @@ go_test(
         "group_bench_test.go",
         "group_external_test.go",
         "group_internal_test.go",
+        "joined_external_test.go",
     ],
     embed = [":group"],
+    deps = ["//internal/kernel/errs"],
 )
