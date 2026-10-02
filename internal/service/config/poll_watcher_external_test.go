@@ -99,7 +99,7 @@ func TestPollWatcher(t *testing.T) {
 }
 
 // TestPollWatcherRejectsBadInput pins the two arguments that would otherwise
-// crash the process: time.NewTicker PANICS on a non-positive interval, and
+// crash the process: the ticker PANICS on a non-positive interval, and
 // onChange is invoked unchecked on the first detected change. Both are reachable
 // from caller input, so both have to be refused rather than deferred.
 func TestPollWatcherRejectsBadInput(t *testing.T) {

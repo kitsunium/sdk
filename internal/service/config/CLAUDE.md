@@ -26,7 +26,7 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 | `schema_presence.go` | the LOAD-time key pass: missing required keys + unknown keys, over the merged map |
 | `schema_reject.go` | how a refusal is spelled — keys and rules, never a value |
 | `schema_source.go` | the default layer seen as an ordinary `Source` — a fresh deep copy on every `Load`, arrays and the tables inside them included, so a caller's edit never reaches the compiled schema; `Describe` answers `"default"` |
-| `poll_watcher.go` | `PollWatcher(path, interval)` — mtime+size poll (cross-OS) |
+| `poll_watcher.go` | `PollWatcher(path, interval)` — mtime+size poll (cross-OS), ticking on `kernel/clock` (the wall clock; a white-box test sets a `ManualClock`, so a poll happens when the test advances it) |
 | `wrap.go` | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause field |
 | `BENCH.md` | the numbers, and one optimisation profiled, recorded and refused |
 

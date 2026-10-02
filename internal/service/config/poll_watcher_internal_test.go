@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -19,7 +20,7 @@ import (
 const tick time.Duration = 10 * time.Millisecond
 
 // Test_pollWatcher_validateInputs pins the two guards that stand between caller
-// input and a process crash: time.NewTicker panics on a non-positive interval,
+// input and a process crash: the ticker panics on a non-positive interval,
 // and onChange is invoked unchecked on the first detected change.
 func Test_pollWatcher_validateInputs(t *testing.T) {
 	t.Parallel()
@@ -207,6 +208,68 @@ func Test_pollWatcher_poll(t *testing.T) {
 				t.Error("the callback fired for an untouched file")
 			default:
 			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_pollWatcher_pollOnInjectedClock pins that the watch polls on its clock
+// and on nothing else: a changed file is not even looked at until the clock
+// passes the interval, and is reported the moment it does — an hour of manual
+// time and none of the wall clock.
+//
+// Goroutine lifecycle: one goroutine runs poll and reports on a buffered
+// channel; the test cancels the context and receives, so it always joins.
+func Test_pollWatcher_pollOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		interval time.Duration
+	}
+	tests := []tc{
+		{"an hourly poll", time.Hour},
+		{"a poll every nanosecond is still one Advance away", time.Nanosecond},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		path := filepath.Join(t.TempDir(), "conf")
+		rewrite(t, path, "initial")
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		w := pollWatcher{path: path, interval: c.interval, clk: manual}
+		mod, size, err := w.stat()
+		if err != nil {
+			t.Fatalf("taking the baseline: %v", err)
+		}
+		fired := make(chan struct{}, 1)
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
+		done := make(chan error, 1)
+		go func() {
+			done <- w.poll(ctx, func() { fired <- struct{}{} }, mod, size)
+		}()
+		//: the loop armed its ticker on the manual clock.
+		manual.BlockUntil(1)
+		rewrite(t, path, "changed and longer")
+		//: no tick yet, so nothing has looked at the file again: nothing can have fired.
+		select {
+		case <-fired:
+			t.Fatal("the callback fired before the clock passed the interval")
+		default:
+		}
+		manual.Advance(c.interval)
+		select {
+		case <-fired:
+		case <-time.After(5 * time.Second):
+			t.Fatal("advancing the clock past the interval did not report the change")
+		}
+		cancel()
+		if perr := <-done; perr != nil {
+			t.Errorf("poll after cancellation = %v, want nil", perr)
 		}
 	}
 	for _, c := range tests {
