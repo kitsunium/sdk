@@ -243,6 +243,11 @@ func (f *framer) copyPayload(n uint64) error {
 
 // read appends exactly n bytes from the stream to out.
 func (f *framer) read(n uint64) error {
+	//: bytes the read-ahead already holds are copied straight out of it.
+	if n <= uint64(f.r.Buffered()) {
+		//: one copy, no read call.
+		return f.readBuffered(int(n))
+	}
 	start := len(f.out)
 	f.out = slices.Grow(f.out, int(n))[:start+int(n)]
 	//: all n bytes, or a failure.
@@ -252,6 +257,26 @@ func (f *framer) read(n uint64) error {
 		return f.readFailure(err, false)
 	}
 	//: read.
+	return nil
+}
+
+// readBuffered appends n bytes the read-ahead is known to hold — the common
+// case for the headers and short payloads of a document — without the read
+// loop io.ReadFull runs.
+func (f *framer) readBuffered(n int) error {
+	p, err := f.r.Peek(n)
+	//: unreachable while n ≤ Buffered(), kept so a change cannot hide it.
+	if err != nil {
+		//: classified like any read failure.
+		return f.readFailure(err, false)
+	}
+	f.out = append(f.out, p...)
+	//: consume what was copied.
+	if _, derr := f.r.Discard(n); derr != nil {
+		//: classified like any read failure.
+		return f.readFailure(derr, false)
+	}
+	//: copied.
 	return nil
 }
 
