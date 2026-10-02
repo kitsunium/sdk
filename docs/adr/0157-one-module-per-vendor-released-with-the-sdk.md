@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
-- **Amends**: [ADR 0012](0012-logger-writer-registry.md) (the AWS writers in the root module; its rejected alternative, "a dedicated new module", is the one taken), [ADR 0022](0022-sdk-codec-hcl.md) and [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (HCL quarantined in the root module — the quarantine stands, its module changes), [ADR 0023](0023-sdk-schema-codecs.md) (the schema codecs in the root module), [ADR 0066](0066-third-party-compressors.md) (`third-party/transform` in the root module), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) §9 (the release chain gains the vendor modules)
+- **Amends**: [ADR 0012](0012-logger-writer-registry.md) (the AWS writers in the root module; its rejected alternative, "a dedicated new module", is the one taken), [ADR 0015](0015-sdk-logger-writer-taxonomy-and-rotation.md) §D2 (the `vendor-root` tier, a writer whose vendor lives in the root module, has no placement left), [ADR 0022](0022-sdk-codec-hcl.md) and [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (HCL quarantined in the root module — the quarantine stands, its module changes), [ADR 0023](0023-sdk-schema-codecs.md) (the schema codecs in the root module), [ADR 0066](0066-third-party-compressors.md) (`third-party/transform` in the root module), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) §9 (the release chain gains the vendor modules)
 - **Related**: [ADR 0007](0007-sdk-release-and-versioning.md) (lockstep tags), [ADR 0079](0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md) (a dependency split along the package it enters through), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) (the module census), [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) / [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) / [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) (the SQL integration suites), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (principle 5), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (`yaml-full`), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (the ssh identity leaves for the framework)
 
 ## Context
@@ -100,6 +100,9 @@ what it was before ADR 0012: the workspace's anchor beside `go.work`,
   of their time; the suites they name live in `e2e`.
 - More modules mean more `go.sum` files and longer module-looping lanes; the
   census makes that automatic rather than a list to keep.
+- ADR 0015's `vendor-root` tier — a writer whose vendor already lives in the
+  root `go.mod` — has no placement left: every vendor writer is `third-party`,
+  in a module of its own.
 
 ## Breaking changes
 
