@@ -22,7 +22,11 @@ only this signal may claim, and `OverflowAttrKey`, which only a meter writes. A 
 `internal/service/observe/metrics`; exporters self-register via the registry
 (writer-registry model, ADR 0012).
 
-Code range: `0.2.9.*` (ADR 0027, extended by ADR 0044 and ADR 0067).
+Code ranges: `0.2.9.*` (ADR 0027, extended by ADR 0044 and ADR 0067), and
+`0.3.45.*` — the range ADR 0005 allocated to the engine,
+`internal/service/observe/metrics`, for what a wire format refuses, declared here
+since ADR 0160 §2 with its value unchanged. The engine returns those sentinels
+and declares none; `codeRangeOwners` maps both keys to this directory.
 
 **OTel is a specification here, not a dependency.** Nothing in this package
 imports `go.opentelemetry.io/*`, and nothing ever should: the model is a shape,
@@ -53,7 +57,7 @@ may hold.
 | `sum_value.go` / `gauge_value.go` / `histogram_value.go` | the three per-series point types |
 | `snapshot_value.go` | `SumMetricValue`/`GaugeMetricValue`/`HistogramMetricValue` + `SnapshotValue` |
 | `exporter.go` | `Exporter` + `ExporterName` + registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) over `internal/kernel/plugin.Registry` — the table `core/observe/trace`'s exporter registry runs on too |
-| `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) |
+| `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) and the engine's `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS — ADR 0160) |
 
 `pkg/v1/observe/metrics` publishes these under shorter names — `Snapshot`,
 `SumPoint`/`SumMetric`, … — and aliases `Attr`, `Resource` and `Scope` to

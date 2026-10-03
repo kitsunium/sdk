@@ -1749,43 +1749,43 @@ codes:
   - code: "0.3.45.1"
     const: CodeInvalidMetricName
     hex: "0x00_03_2D_01"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.2"
     const: CodeInvalidLabelName
     hex: "0x00_03_2D_02"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.3"
     const: CodeReservedLabelName
     hex: "0x00_03_2D_03"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.4"
     const: CodeUnsupportedTemporality
     hex: "0x00_03_2D_04"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.5"
     const: CodeOTLPUnresolvedTemporality
     hex: "0x00_03_2D_05"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.6"
     const: CodeOTLPInvalidBucketLayout
     hex: "0x00_03_2D_06"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.7"
     const: CodeOTLPEndpointInvalid
     hex: "0x00_03_2D_07"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.8"
     const: CodeOTLPExportRejected
     hex: "0x00_03_2D_08"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.9"
     const: CodeOTLPExportUnavailable
     hex: "0x00_03_2D_09"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.45.10"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_2D_0A"
-    package: internal/service/observe/metrics
+    package: internal/core/observe/metrics
   - code: "0.3.46.1"
     const: CodeRecordCorrupt
     hex: "0x00_03_2E_01"

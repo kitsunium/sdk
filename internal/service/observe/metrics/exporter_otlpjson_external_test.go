@@ -267,13 +267,13 @@ func TestEncodeOTLPJSONRefusesAnUnresolvedTemporality(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			doc, err := svcmetrics.EncodeOTLPJSON(test.snap)
-			if !errors.Is(err, svcmetrics.OTLPUnresolvedTemporality) {
+			if !errors.Is(err, coremetrics.OTLPUnresolvedTemporality) {
 				t.Fatalf("want OTLPUnresolvedTemporality, got %v", err)
 			}
 			if doc != nil {
 				t.Errorf("a refusal must produce no bytes, got: %s", doc)
 			}
-			if !kerrs.HasCode(err, svcmetrics.CodeOTLPUnresolvedTemporality) {
+			if !kerrs.HasCode(err, coremetrics.CodeOTLPUnresolvedTemporality) {
 				t.Errorf("want code 0.3.45.5 on the trail, got %v", err)
 			}
 		})
@@ -305,7 +305,7 @@ func TestEncodeOTLPJSONRefusesABucketLayoutOTLPCannotExpress(t *testing.T) {
 				"h": {Temporality: coremetrics.TemporalityCumulative, Points: []coremetrics.HistogramValue{test.point}},
 			}}
 			doc, err := svcmetrics.EncodeOTLPJSON(snap)
-			if !errors.Is(err, svcmetrics.OTLPInvalidBucketLayout) {
+			if !errors.Is(err, coremetrics.OTLPInvalidBucketLayout) {
 				t.Fatalf("want OTLPInvalidBucketLayout, got %v", err)
 			}
 			if doc != nil {
@@ -443,7 +443,7 @@ func TestNewOTLPJSONExporterRefusesBeforeWriting(t *testing.T) {
 	snap := coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
 		"s": {Temporality: coremetrics.TemporalityUnspecified, Points: []coremetrics.SumValue{{Value: 1}}},
 	}}
-	if err := exporter.Export(snap); !errors.Is(err, svcmetrics.OTLPUnresolvedTemporality) {
+	if err := exporter.Export(snap); !errors.Is(err, coremetrics.OTLPUnresolvedTemporality) {
 		t.Fatalf("want OTLPUnresolvedTemporality, got %v", err)
 	}
 	if sink.Len() != 0 {

@@ -267,39 +267,39 @@ var (
     DescriptionConflict = coremetrics.DescriptionConflict
     // InvalidMetricName is returned by the Prometheus connector when an
     // instrument name is not a valid Prometheus metric name.
-    InvalidMetricName = svcmetrics.InvalidMetricName
+    InvalidMetricName = coremetrics.InvalidMetricName
     // InvalidLabelName is returned by the Prometheus connector when an
     // attribute key is not a valid Prometheus label name.
-    InvalidLabelName = svcmetrics.InvalidLabelName
+    InvalidLabelName = coremetrics.InvalidLabelName
     // ReservedLabelName is returned by the Prometheus connector when an
     // attribute key is legal but reserved — a "__" prefix, or "le" on a
     // histogram.
-    ReservedLabelName = svcmetrics.ReservedLabelName
+    ReservedLabelName = coremetrics.ReservedLabelName
     // UnsupportedTemporality is returned by the Prometheus connector when the
     // snapshot is not cumulative — a delta one, which the exposition format
     // cannot express, or a hand-built one whose temporality is unresolved.
-    UnsupportedTemporality = svcmetrics.UnsupportedTemporality
+    UnsupportedTemporality = coremetrics.UnsupportedTemporality
     // OTLPUnresolvedTemporality is returned by the OTLP/JSON encoder when a
     // metric's temporality is neither delta nor cumulative. The schema's
     // UNSPECIFIED value is documented as one that MUST NOT be used.
-    OTLPUnresolvedTemporality = svcmetrics.OTLPUnresolvedTemporality
+    OTLPUnresolvedTemporality = coremetrics.OTLPUnresolvedTemporality
     // OTLPInvalidBucketLayout is returned by the OTLP/JSON encoder when a
     // histogram's buckets are not one count more than strictly-increasing
     // finite bounds.
-    OTLPInvalidBucketLayout = svcmetrics.OTLPInvalidBucketLayout
+    OTLPInvalidBucketLayout = coremetrics.OTLPInvalidBucketLayout
     // OTLPEndpointInvalid is returned by NewOTLPHTTPExporter when the endpoint
     // is not an absolute http(s) URL carrying the signal path.
-    OTLPEndpointInvalid = svcmetrics.OTLPEndpointInvalid
+    OTLPEndpointInvalid = coremetrics.OTLPEndpointInvalid
     // OTLPExportRejected is returned when a collector refuses the payload with
     // a status the specification marks non-retryable.
-    OTLPExportRejected = svcmetrics.OTLPExportRejected
+    OTLPExportRejected = coremetrics.OTLPExportRejected
     // OTLPExportUnavailable is returned when an OTLP/HTTP export fails
     // transiently — a transport fault, or HTTP 429/502/503/504. It is the one
     // OTLPRetryable reports true for.
-    OTLPExportUnavailable = svcmetrics.OTLPExportUnavailable
+    OTLPExportUnavailable = coremetrics.OTLPExportUnavailable
     // OTLPPartialSuccess is returned when a collector accepts the request but
     // rejects some of its data points. The specification forbids retrying it.
-    OTLPPartialSuccess = svcmetrics.OTLPPartialSuccess
+    OTLPPartialSuccess = coremetrics.OTLPPartialSuccess
 )
 ```
 

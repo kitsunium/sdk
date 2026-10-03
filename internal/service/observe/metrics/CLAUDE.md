@@ -11,8 +11,10 @@ diagnostic that renders the whole OTel model, a **Prometheus** text-exposition
 model was adopted for, which loses nothing. All three are registered to
 **stderr** on import (ADR 0030); the OTLP/**HTTP** emitter is constructed
 explicitly and never registered. Stdlib-only, cross-OS. ADR 0027 / ADR 0044 /
-ADR 0048 / ADR 0067. Emits core sentinels `0.2.9.*` and owns block `0.3.45.*` for what a
-wire format refuses.
+ADR 0048 / ADR 0067. Emits core sentinels `0.2.9.*` and the block `0.3.45.*` it was
+allocated for what a wire format refuses — both declared in
+`internal/core/observe/metrics` since ADR 0160 §2; this package declares none and
+names them `coremetrics.X`.
 
 Instruments are keyed by name **and typed attribute set** — one name plus one
 attribute set is one **series** — with a per-name cardinality bound that folds
@@ -41,7 +43,7 @@ the excess into a single aggregated overflow series.
 | `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` (endpoint, client, headers, timeout, response cap — documented there once) |
 | `otlp_export_response.go` | `ExportMetricsPartialSuccess` reduced to `rejectedDataPoints` + `decodeRejected`, the one member of the answer that is this signal's own |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
-| `codes.go` / `errors.go` | `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |
+| `internal/core/observe/metrics` | its sentinels — `0.3.45.*`, declared in the core since ADR 0160 (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |
 
 ## Series identity
 

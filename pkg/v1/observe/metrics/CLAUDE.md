@@ -21,6 +21,11 @@ dep-light; cross-OS.
 **Zero OTel imports.** The model is a published specification; the code is this
 SDK's. See `internal/core/observe/metrics/CLAUDE.md` §Purpose and ADR 0044 §Decision 1.
 
+Every sentinel aliases `internal/core/observe/metrics`, the engine's wire
+refusals (`0.3.45.*`) included: they are declared there since ADR 0160 §2, and an
+alias points at the layer that owns its symbol (ADR 0074). The constructors and
+exporters still delegate to `internal/service/observe/metrics`.
+
 Instruments are identified by name **and typed attribute set** (one pair = one
 series), with a per-instrument cardinality bound whose excess folds into a
 visible aggregated overflow series.

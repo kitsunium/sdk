@@ -132,7 +132,6 @@ filegroup(
         "//internal/service/net/sse:audit_srcs",
         "//internal/service/net/tlsid:audit_srcs",
         "//internal/service/net/websocket:audit_srcs",
-        "//internal/service/observe/metrics:audit_srcs",
         "//internal/service/observe/profiling:audit_srcs",
         "//internal/service/observe/trace:audit_srcs",
         "//internal/service/proc/ipc:audit_srcs",
