@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/proc/childwait/
 
 ## Purpose
@@ -108,7 +108,7 @@ Children spawned OUTSIDE the SDK — `os/exec`, `syscall.ForkExec`, a C library 
 are never claimed. A running reaper collects them too, and their own `Wait` then
 fails with ECHILD (`os/exec` reports `waitid: no child processes`). The SDK
 cannot route another package's wait: a program that runs the reaper must spawn
-what it waits for through `pkg/v1/process`.
+what it waits for through `pkg/v1/proc/process`.
 
 Off pidfd (everything but Linux ≥ 5.4) a window remains between reading an empty
 claim and the handle's own `wait4(pid)`: hitting it needs a sweep to take the
@@ -127,6 +127,23 @@ reports errno whatever the call returned, so `reapAny` reads every result as
 POSIX states it, on every Unix: `int32(pid) == -1` is a failure with its
 errno, anything else carries no error — a no-op where the wrapper was right. `wait4(pid)` — the owner's own wait —
 means the same on every Unix.
+
+## Rules from ADR 0093
+
+Superseded by ADR 0154 (the charter); ADR 0093 stays as the incident's record, and its rules live here.
+
+- **One ledger, one `wait4(-1)`**: every child the SDK spawns is claimed at the
+  fork (`Spawn`, under a gate held shared until the pid is claimed); `ReapAny`
+  is the only "any child" wait, and stores a claimed child's status on its claim
+  before it returns; an unclaimed pid's status is dropped, never kept for a pid
+  that may be recycled.
+- **The owner keeps its own targeted wait**: a filled claim wins, an `ECHILD`
+  reads the claim under the sweep's lock (`Reclaim`), and `WAIT_FAILED` means
+  only "collected by code outside the SDK".
+- **Lock order `sweeping` → `spawning` → `mu`**, and nothing waits for a
+  process while holding one.
+- *Lesson*: the reaper's `wait4(-1)` took the status a `Process` was waiting for
+  and discarded it, so a clean exit came back as `WAIT_FAILED`.
 
 ## Do NOT
 

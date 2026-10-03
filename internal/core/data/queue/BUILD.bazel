@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "queue",
+    srcs = [
+        "capability.go",
+        "codes.go",
+        "deadletter.go",
+        "errors.go",
+        "message.go",
+        "policy.go",
+        "queue.go",
+        "retry.go",
+        "wake.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/data/queue",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":queue",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "queue_test",
+    size = "small",
+    srcs = [
+        "queue_external_test.go",
+        "retry_external_test.go",
+        "service_range_external_test.go",
+    ],
+    deps = [
+        ":queue",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -1,71 +1,42 @@
-// Package crypto — white-box tests for the shared capability registry. Every
-// scheme registry (Hasher, Signer, MAC, Deriver, Agreement, PasswordHasher,
-// StreamSealer) delegates its publish / clone / lookup / available logic here,
-// so a bug in this file is a bug in all seven at once.
+// Package crypto — white-box tests for the shared registrar. Every scheme
+// registry (AEAD, Hasher, Signer, MAC, Deriver, Agreement, PasswordHasher,
+// StreamSealer) refuses through it, so a bug in this file is a bug in all eight
+// at once. The table under it is the kernel's and is tested there
+// (internal/kernel/plugin): what is pinned here is the crypto domain's half —
+// the three outcomes a registrar collapses into one panic, the code those
+// panics carry, and the verb that names the registrar in them.
 package crypto
 
 import (
+	"errors"
+	"fmt"
 	"slices"
+	"strings"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// stubScheme is a comparable value for white-box schemeRegistry tests. It does
-// not implement any capability port — the generic only constrains V to
-// comparable, so a bare struct exercises the publish/clone/lookup paths.
-type stubScheme struct{ id Algorithm }
+// stubScheme is a comparable value for white-box schemeRegistry tests. It
+// implements no capability port — the registrar only needs a comparable value
+// that names its Algorithm, so a bare struct exercises the publish paths.
+type stubScheme struct {
+	id  Algorithm
+	tag int
+}
 
-// Test_cloneSchemeMap proves the clone copies the source rather than mutating
-// it. The registry hands snapshots to lock-free readers, so a writer editing
-// the live map in place would let a reader observe a half-built one.
-func Test_cloneSchemeMap(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name    string
-		src     map[Algorithm]stubScheme
-		insert  Algorithm
-		wantLen int
-	}
-	tests := []tc{
-		{"a nil source yields a singleton map", nil, "a", 1},
-		{"an empty source yields a singleton map", map[Algorithm]stubScheme{}, "a", 1},
-		{"a populated source is copied plus one", map[Algorithm]stubScheme{"x": {"x"}}, "y", 2},
-		{"inserting a present key does not grow it", map[Algorithm]stubScheme{"x": {"x"}}, "x", 1},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: a nil source must stay a nil pointer; a populated one is addressed.
-		var srcPtr *map[Algorithm]stubScheme
-		if c.src != nil {
-			srcPtr = &c.src
-		}
-		before := len(c.src)
+// Algorithm keys the stub in the registry.
+func (s stubScheme) Algorithm() Algorithm { return s.id }
 
-		got := cloneSchemeMap(srcPtr, c.insert, stubScheme{c.insert})
+// : the uncomparable double must satisfy the port its registry stores, exactly
+// : as the stub hasher does.
+var _ Hasher = uncomparableHasher{}
 
-		//: the clone carries every source entry plus the inserted one.
-		if len(got) != c.wantLen {
-			t.Fatalf("clone has %d entries, want %d", len(got), c.wantLen)
-		}
-		if got[c.insert] != (stubScheme{c.insert}) {
-			t.Errorf("clone[%q] = %v, want the inserted value", c.insert, got[c.insert])
-		}
-		//: the source must be untouched — a reader may be walking it.
-		if len(c.src) != before {
-			t.Errorf("the source grew to %d entries, want %d", len(c.src), before)
-		}
-		for k, v := range c.src {
-			//: every pre-existing entry survives, except the one overwritten.
-			if k != c.insert && got[k] != v {
-				t.Errorf("clone lost the entry %q", k)
-			}
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
+// uncomparableHasher is a Hasher that holds a slice, so == on it panics — the
+// shape the registrar must refuse before its duplicate check compares it.
+type uncomparableHasher struct {
+	stubHasher
+	tags []string
 }
 
 // Test_schemeRegistry_publish proves the three outcomes every Register* verb
@@ -85,9 +56,9 @@ func Test_schemeRegistry_publish(t *testing.T) {
 		wantErr bool
 	}
 	tests := []tc{
-		{"a free name", stubScheme{"free"}, stubScheme{}, 1, false},
-		{"the same value twice", stubScheme{"same"}, stubScheme{"same"}, 2, false},
-		{"a distinct value under a taken name", stubScheme{"taken"}, stubScheme{"OTHER"}, 2, true},
+		{"a free name", stubScheme{id: "free"}, stubScheme{}, 1, false},
+		{"the same value twice", stubScheme{id: "same"}, stubScheme{id: "same"}, 2, false},
+		{"a distinct value under a taken name", stubScheme{id: "taken"}, stubScheme{id: "taken", tag: 1}, 2, true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -107,57 +78,15 @@ func Test_schemeRegistry_publish(t *testing.T) {
 
 		//: whatever happened, the first registration still resolves — a refused
 		//: publish may not disturb what was already there.
-		got, ok := r.lookup(name)
+		got, ok := r.table.Lookup(name)
 		if !ok {
-			t.Fatalf("lookup(%q) missed after publishing", name)
+			t.Fatalf("Lookup(%q) missed after publishing", name)
 		}
 		if got != c.first {
-			t.Errorf("lookup(%q) = %v, want the first-published %v", name, got, c.first)
+			t.Errorf("Lookup(%q) = %v, want the first-published %v", name, got, c.first)
 		}
-		if avail := r.available(); !slices.Contains(avail, name) {
-			t.Errorf("available() = %v, missing %q", avail, name)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-// Test_schemeRegistry_lookup pins the empty-registry path: before the first
-// publish the snapshot pointer is nil, and both readers must answer from that
-// rather than dereference it.
-func Test_schemeRegistry_lookup(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name    string
-		prefill Algorithm
-		query   Algorithm
-		wantOK  bool
-	}
-	tests := []tc{
-		{"an empty registry", "", "anything", false},
-		{"a populated registry, wrong key", "present", "absent", false},
-		{"a populated registry, right key", "present", "present", true},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		r := schemeRegistry[stubScheme]{verb: "RegisterStub"}
-		if c.prefill != "" {
-			if err := r.publish(c.prefill, stubScheme{c.prefill}); err != nil {
-				t.Fatalf("publish(%q) = %v, want nil", c.prefill, err)
-			}
-		}
-
-		got, ok := r.lookup(c.query)
-		if ok != c.wantOK {
-			t.Fatalf("lookup(%q) ok = %v, want %v", c.query, ok, c.wantOK)
-		}
-		//: a miss must hand back the zero value, never a stale one.
-		if !ok && got != (stubScheme{}) {
-			t.Errorf("lookup(%q) missed but returned %v", c.query, got)
+		if names := r.table.Names(); !slices.Contains(names, name) {
+			t.Errorf("Names() = %v, missing %q", names, name)
 		}
 	}
 	for _, c := range tests {
@@ -168,48 +97,78 @@ func Test_schemeRegistry_lookup(t *testing.T) {
 	}
 }
 
-// Test_schemeRegistry_available pins that the listing is sorted and complete.
-// It reaches operators through Available* help text, so an unstable order is
-// churn they have to read past every time.
-func Test_schemeRegistry_available(t *testing.T) {
+// Test_schemeRegistry_conflictIsTyped proves a refused publish is an SDK error
+// with the duplicate-registration code (rule 2) — matchable with errs.HasCode
+// rather than by parsing text — and that the panic text every registrar
+// renders from it still names the registrar and the algorithm.
+func Test_schemeRegistry_conflictIsTyped(t *testing.T) {
 	t.Parallel()
-	type tc struct {
-		name    string
-		publish []Algorithm
-		wantLen int
+	r := schemeRegistry[stubScheme]{verb: "RegisterStub"}
+	if err := r.publish("typed", stubScheme{id: "typed"}); err != nil {
+		t.Fatalf("the first publish = %v, want nil", err)
 	}
-	tests := []tc{
-		{"nothing published", nil, 0},
-		{"one algorithm", []Algorithm{"only"}, 1},
-		{"several, published out of order", []Algorithm{"c", "a", "b"}, 3},
+	err := r.publish("typed", stubScheme{id: "typed", tag: 1})
+	if !errs.HasCode(err, CodeDuplicateRegistration) || !errors.Is(err, DuplicateRegistration) {
+		t.Fatalf("the conflict = %v, want the typed DuplicateRegistration", err)
 	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		r := schemeRegistry[stubScheme]{verb: "RegisterStub"}
-		for _, alg := range c.publish {
-			if err := r.publish(alg, stubScheme{alg}); err != nil {
-				t.Fatalf("publish(%q) = %v, want nil", alg, err)
-			}
+	text := conflictText(err)
+	for _, want := range []string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.RegisterStub"`, `algorithm="typed"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("conflictText = %q, want it to say %s", text, want)
 		}
+	}
+}
 
-		got := r.available()
-		if len(got) != c.wantLen {
-			t.Fatalf("available() = %v, want %d entries", got, c.wantLen)
-		}
-		//: ascending order regardless of publish order.
-		if !slices.IsSorted(got) {
-			t.Errorf("available() = %v, want it sorted", got)
-		}
-		for _, alg := range c.publish {
-			if !slices.Contains(got, alg) {
-				t.Errorf("available() = %v, missing %q", got, alg)
-			}
-		}
+// Test_schemeRegistry_register pins the registrar every public Register* is
+// now one line of: it hands the value back for a singleton binding, refuses an
+// unusable value BEFORE asking its Algorithm, and refuses a conflict — both
+// with a panic naming the registrar through its verb and carrying the code.
+// Eight registrars used to spell these two messages each; a verb typed into
+// the wrong one is the copy-paste error this test exists to keep out.
+func Test_schemeRegistry_register(t *testing.T) {
+	t.Parallel()
+	//: a registry of the Hasher port, as hashers is, under a verb of its own.
+	r := schemeRegistry[Hasher]{verb: "RegisterStub"}
+	kept := stubHasher{id: "kept"}
+	if got := r.register(kept); got != Hasher(kept) {
+		t.Fatalf("register returned %v, want the value it was given", got)
+	}
+	//: the identical value again is the idempotent no-op, not a panic.
+	if got := r.register(kept); got != Hasher(kept) {
+		t.Fatalf("re-register returned %v, want the value it was given", got)
+	}
+	tests := []struct {
+		name  string
+		value Hasher
+		want  []string
+	}{
+		{"an untyped nil", nil, []string{"crypto.RegisterStub [0.2.4.1 DUPLICATE_REGISTRATION]: nil"}},
+		{"a typed nil", (*stubHasher)(nil), []string{"crypto.RegisterStub [0.2.4.1 DUPLICATE_REGISTRATION]: nil *crypto.stubHasher"}},
+		{"an uncomparable value", uncomparableHasher{tags: []string{"x"}}, []string{"crypto.uncomparableHasher is not comparable"}},
+		{"a distinct value under a taken name", stubHasher{id: "kept", tag: 1}, []string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.RegisterStub"`, `algorithm="kept"`}},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
-			runCase(t, c)
+			msg := recoverRegister(&r, c.value)
+			for _, want := range c.want {
+				if !strings.Contains(msg, want) {
+					t.Errorf("register panicked with %q, want it to say %q", msg, want)
+				}
+			}
 		})
 	}
+}
+
+// recoverRegister runs r.register(v) and returns what it panicked with, or the
+// empty string when it did not panic.
+func recoverRegister(r *schemeRegistry[Hasher], v Hasher) (msg string) {
+	defer func() {
+		//: the registrar refuses by panicking; read the refusal back.
+		if recovered := recover(); recovered != nil {
+			msg = fmt.Sprint(recovered)
+		}
+	}()
+	r.register(v)
+	return ""
 }

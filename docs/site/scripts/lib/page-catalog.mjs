@@ -5,7 +5,7 @@
 // structure both Sidebar.astro and Search.astro need:
 //
 //     Overview         (Home / Getting started)
-//     Packages         (codec / errs / logger / …)        — formerly "services"
+//     Packages         (data/codec / errs / observe/logger / …) — formerly "services"
 //     Reference        (Concepts / Changelog)
 //
 // Hidden slugs (adr, contributors) still get pages built but are
@@ -107,9 +107,11 @@ export function buildCatalog(entries, root, base) {
       href = `${base}/`;
     } else {
       const rest = entry.id.slice(prefix.length);
-      //: deeper pages (e.g. adr/0001-foo) are surfaced by their
-      //: group's landing page — keep the catalog flat.
-      if (rest.includes("/")) continue;
+      //: a reserved section's deeper pages (e.g. adr/0001-foo) are
+      //: surfaced by that section's landing page — they stay out of the
+      //: catalog. Any other nested id is a package under a family
+      //: directory (data/codec — ADR 0155), listed at its full path.
+      if (rest.includes("/") && RESERVED[rest.split("/")[0]]) continue;
       key = rest;
       href = `${base}/${key}/`;
     }
@@ -126,8 +128,10 @@ export function buildCatalog(entries, root, base) {
         order: reserved.order,
       });
     } else {
-      //: everything else is a Go package auto-discovered from
-      //: pkg/<major>/<sub>/README.md. Label = the directory name.
+      //: everything else is a Go package auto-discovered from a
+      //: pkg/<major>/**/README.md (lib/packages.mjs). Label = its path
+      //: under pkg/<major>/, so the family reads in the sidebar
+      //: ("data/codec") and the alphabetical sort groups each family.
       push("Packages", { href, label: key, hint: "Package", order: 100 });
     }
   }

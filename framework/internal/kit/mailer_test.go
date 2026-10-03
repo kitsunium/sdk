@@ -17,8 +17,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
 )
 
 // relay is an SMTP server for the tests: plain text, no TLS, no AUTH, and it
@@ -316,7 +316,7 @@ func TestMailIsQueuedThenDelivered(t *testing.T) {
 		t.Error("the send is not drawn")
 	}
 	loop := loopNamed(g, "members/mailer/mail outbox")
-	if loop == nil || loop.Kind != model.LoopConsumer || loop.Provenance != model.ProvenanceLibrary || loop.Library != "sdk/v1/mail" ||
+	if loop == nil || loop.Kind != model.LoopConsumer || loop.Provenance != model.ProvenanceLibrary || loop.Library != "sdk/v1/app/mail/spool" ||
 		loop.Runs != 1 || loop.State != model.LoopWaiting {
 		t.Errorf("outbox loop %+v", loop)
 	}

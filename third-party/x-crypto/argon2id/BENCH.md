@@ -12,7 +12,7 @@ hardware, so an operator can choose a latency budget for their own box instead
 of inheriting one. The shipped policy is the OWASP 2023 set, `m=19456` KiB
 (19 MiB), `t=2`, `p=1`.
 
-The reference arm is `internal/service/crypto/pbkdf2pw` — the password hash a
+The reference arm is `internal/service/crypto/password/pbkdf2pw` — the password hash a
 consumer gets **without** this dependency — measured in the same process, in the
 same run, under the same load.
 
@@ -204,8 +204,8 @@ theirs are faster.
 
 (That same file is also why this package is quarantined: `blamka_amd64.go`
 imports `golang.org/x/sys/cpu`, the dependency the four inner modules ban. The
-root `go.mod` carries it as an indirect. ADR 0012's placement is load-bearing,
-not stylistic.)
+`third-party/x-crypto` module's `go.mod` carries it as an indirect (ADR 0157).
+ADR 0012's placement is load-bearing, not stylistic.)
 
 ## The constant-time comparison — corroborated, and left alone
 
@@ -356,7 +356,7 @@ is PHC handling, and PHC handling is measured directly: `NeedsRehash`, which is
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Library            | `golang.org/x/crypto` v0.55.0 |
-| Reference arm      | `internal/service/crypto/pbkdf2pw` (same repo, same run) |
+| Reference arm      | `internal/service/crypto/password/pbkdf2pw` (same repo, same run) |
 | Shipped policy     | `m=19456` KiB, `t=2`, `p=1`, 128-bit salt, 256-bit digest |
 | Git branch         | `jaimerias-que-tu-te-connect` |
 | Git commit         | `c411206` (pre-commit) |

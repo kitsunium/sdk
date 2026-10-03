@@ -1,4 +1,4 @@
-<!-- generated from third-party/transform/transform_bench_test.go — run `GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./third-party/transform/` to refresh; ratios come from `GOWORK=off go test -run TestReportRatios -v ./third-party/transform/` -->
+<!-- generated from third-party/transform/transform_bench_test.go — run `GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s .` in third-party/transform, the module's root, to refresh; ratios come from `GOWORK=off go test -run TestReportRatios -v .` there -->
 # Benchmarks — `third-party/transform`
 
 A compressor is chosen on numbers or it is chosen on folklore. This report
@@ -6,7 +6,7 @@ exists to answer one question — **which scheme should I register, for which
 traffic?** — and to make the answer checkable rather than quotable.
 
 Every row compares SDK compressor against SDK compressor: same
-`core/transform.Compressor` port, same append-to-dst convention, same bounded
+`core/data/transform.Compressor` port, same append-to-dst convention, same bounded
 decompression. The stdlib **gzip** row is the reference, because gzip is what
 the SDK already had and what a new scheme has to beat to be worth a dependency.
 
@@ -138,7 +138,7 @@ fleet feels.
 | **balanced wire format**, general RPC / log shipping | `zstd` at `ZstdFastest` | 2.5× gzip's compression speed, 3.4× its decompression, one allocation to decode, ratio within 5 % of gzip |
 | **latency**, hot path, many small payloads | `s2` | 7.6× gzip's compression speed, 7.3× its decompression, one allocation, at 56 % of zstd's ratio |
 | **throughput on data that may not compress** (blobs, TLS bodies, images) | `s2` | 3 837 MB/s compressing entropy and 8 bytes of overhead on 4 MiB; zstd spends 22 MB of allocation discovering the same thing |
-| **interoperability with a peer that names an encoding** | whatever the peer named | a wire format is not a performance choice; `gzip` and `zlib` stay in `internal/service/transform` for exactly this |
+| **interoperability with a peer that names an encoding** | whatever the peer named | a wire format is not a performance choice; `gzip` and `zlib` stay in `internal/service/data/transform` for exactly this |
 | **no dependency at all** | stdlib `gzip` | it is 2–7× slower everywhere, and that is the price of a zero-dependency build |
 
 Neither scheme here replaces gzip. gzip stays the answer whenever the *name* of
@@ -241,7 +241,7 @@ once, correctly, with no guess and no branch.
 
 ## What is deliberately not measured here
 
-- **Streaming.** `core/transform.Compressor` is a whole-buffer port. Both
+- **Streaming.** `core/data/transform.Compressor` is a whole-buffer port. Both
   libraries have streaming APIs; neither is exposed, so neither is benchmarked.
 - **Concurrent throughput.** `TestConcurrentUseIsSafe` proves the singletons are
   safe under `-race`; how they *scale* is a property of the caller's fan-out and

@@ -1,5 +1,11 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:prefix github.com/kitsunium/sdk/third-party/db/writer/redis
+
+# third-party/db/writer/redis is a Go module of its own (ADR 0157): the "redis"
+# logger writer and its one vendor, go-redis/v9. One vendor per module, so a
+# consumer's graph carries the vendor it imports and no other.
+
 package(default_visibility = ["//visibility:public"])
 
 go_library(
@@ -14,10 +20,10 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/db/writer/redis",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/logger",
-        "//internal/core/writer",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/writer",
         "//internal/kernel/errs",
-        "//internal/service/writer/dbsink",
+        "//internal/service/observe/logger/writer/dbsink",
         "@com_github_redis_go_redis_v9//:go-redis",
     ],
 )
@@ -40,9 +46,9 @@ go_test(
     ],
     embed = [":redis"],
     deps = [
-        "//internal/core/logger",
-        "//internal/core/logger/level",
-        "//internal/core/writer",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/logger/writer",
         "//internal/kernel/errs",
     ],
 )

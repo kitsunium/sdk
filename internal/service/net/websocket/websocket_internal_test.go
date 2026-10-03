@@ -17,6 +17,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -276,11 +277,11 @@ func wireOpcodes(t *testing.T, wire []byte) []corenet.WSOpCode {
 	var ops []corenet.WSOpCode
 	//: one frame per iteration, header first, exactly as a peer reads them.
 	for len(wire) > 0 {
-		size := corenet.WSFrameHeaderLen(wire)
+		size := FrameHeaderLen(wire)
 		if size == 0 || size > len(wire) {
 			t.Fatalf("a truncated frame header on the wire: % x", wire)
 		}
-		header, err := corenet.ParseWSFrameHeader(wire[:size])
+		header, err := ParseFrameHeader(wire[:size])
 		if err != nil {
 			t.Fatalf("an unparseable frame on the wire: %v", err)
 		}
@@ -306,4 +307,88 @@ func countOpcode(ops []corenet.WSOpCode, want corenet.WSOpCode) int {
 	}
 	//: how many there were.
 	return count
+}
+
+// Test_Conn_heartbeatOnInjectedClock pins the heartbeat on the clock it is given: a
+// Ping goes out when the clock passes one interval, and a peer that has sent
+// nothing by the next one is ended — an hour apart on a manual clock, with no
+// wall-clock time in between. The silent peer here reads every byte and
+// answers nothing, which is exactly the vanished peer the heartbeat exists to
+// notice.
+//
+// Goroutine lifecycle: one goroutine reads the peer's end of the pipe frame by
+// frame and reports each opcode; it ends at the EOF the termination produces,
+// and the test receives that end before returning.
+func Test_Conn_heartbeatOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name     string
+		interval time.Duration
+	}
+	tests := []tc{
+		{"an hourly heartbeat", time.Hour},
+		{"the default heartbeat", DefaultPingInterval},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		cfg, err := resolve([]Option{PingInterval(c.interval), func(cf *config) { cf.clock = manual }})
+		if err != nil {
+			t.Fatalf("resolve: %v", err)
+		}
+		server, peer := stdnet.Pipe()
+		frames := make(chan corenet.WSOpCode, 4)
+		go func() {
+			defer close(frames)
+			//: an unmasked server frame with an empty payload is two bytes.
+			var header [2]byte
+			for {
+				if _, rerr := io.ReadFull(peer, header[:]); rerr != nil {
+					//: the termination closed the socket: the peer is done.
+					swallowErr(peer.Close())
+					return
+				}
+				frames <- corenet.WSOpCode(header[0] & 0x0F)
+			}
+		}()
+		conn := NewConn(server, bufio.NewReader(server), "", &cfg, nil)
+		defer func() {
+			if cerr := conn.Close(); cerr != nil {
+				t.Errorf("Close: %v", cerr)
+			}
+		}()
+		//: the pinger armed its ticker on the manual clock.
+		manual.BlockUntil(1)
+		manual.Advance(c.interval)
+		select {
+		case op := <-frames:
+			if op != corenet.WSPing {
+				t.Fatalf("the first tick sent %v, want a ping", op)
+			}
+		case <-time.After(wireWait):
+			t.Fatal("one interval on the injected clock sent no ping")
+		}
+		//: probed, and the peer has sent nothing: still open until the next tick.
+		select {
+		case <-conn.Done():
+			t.Fatal("the connection ended before the second interval")
+		default:
+		}
+		manual.Advance(c.interval)
+		select {
+		case <-conn.Done():
+		case <-time.After(wireWait):
+			t.Fatal("a peer silent for a whole interval after a ping was not ended")
+		}
+		//: the termination closes the socket and sends nothing more.
+		for op := range frames {
+			t.Errorf("after the termination the peer received %v, want nothing", op)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
 }

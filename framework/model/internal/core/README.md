@@ -2107,7 +2107,7 @@ HTTPServer is the product's HTTP server, and whose loop serves it. Its address i
 
 ```go
 type HTTPServer struct {
-    // Library is the implementation: "sdk/v1/server" — the SDK's engine
+    // Library is the implementation: "sdk/v1/net/server" — the SDK's engine
     // accepting and draining the connections, net/http speaking the protocol.
     Library string `json:"library"`
     // Loop says how it serves: one accept loop, one goroutine per
@@ -2407,8 +2407,8 @@ type LoopMessage struct {
     // Provenance is one of the Provenance constants.
     Provenance string `json:"provenance,omitempty"`
     // Library names the code that loops, for a library or kit loop:
-    // "net/http", "sdk/v1/scheduler", "sdk/v1/queue", "sdk/v1/mail",
-    // "sdk/v1/statemachine", "kit".
+    // "net/http", "sdk/v1/app/scheduler", "sdk/v1/data/queue",
+    // "sdk/v1/app/mail/spool", "sdk/v1/app/statemachine", "kit".
     Library string `json:"library,omitempty"`
     // State is one of the Loop state constants.
     State string `json:"state,omitempty"`

@@ -1,0 +1,60 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "profiling",
+    srcs = [
+        "canonical.go",
+        "capture.go",
+        "fold.go",
+        "goroutine.go",
+        "group.go",
+        "labels.go",
+        "parse.go",
+        "profiling.go",
+        "resolve.go",
+        "tables.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/profiling",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/transform",
+        "//internal/core/observe/profiling",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":profiling",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "profiling_test",
+    srcs = [
+        "capture_external_test.go",
+        "capture_internal_test.go",
+        "fold_external_test.go",
+        "goroutine_external_test.go",
+        "group_external_test.go",
+        "labels_internal_test.go",
+        "parse_external_test.go",
+    ],
+    embed = [":profiling"],
+    deps = [
+        "//internal/core/observe/profiling",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/data/transform",
+    ],
+)

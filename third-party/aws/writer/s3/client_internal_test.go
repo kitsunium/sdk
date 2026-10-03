@@ -10,7 +10,7 @@ import (
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 	"github.com/aws/smithy-go/middleware"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // fakeProvider is a CredentialProvider that returns fixed credentials, or an

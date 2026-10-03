@@ -1,9 +1,9 @@
 # Kernel benchmark template
 
-Every `*_bench_test.go` under `internal/kernel/*` follows this shape. It is the
+Every `*_bench_test.go` under `internal/kernel/**` follows this shape. It is the
 canonical reference for the bench-coverage work tracked by #16 (sub-issues #17
 errs, #18 buffer, #19 clock, #20 ring). The living example is
-`internal/kernel/batcher/batcher_bench_test.go`.
+`internal/kernel/concur/batcher/batcher_bench_test.go`.
 
 ## File naming
 
@@ -78,7 +78,7 @@ git checkout <branch> && make sdk-bench
 make sdk-bench-compare
 
 # Single package via go test
-cd internal/kernel && GOWORK=off go test -run='^$' -bench=. -benchmem ./ring/
+cd internal/kernel && GOWORK=off go test -run='^$' -bench=. -benchmem ./collections/ring/
 ```
 
 ## Anti-patterns (forbidden)

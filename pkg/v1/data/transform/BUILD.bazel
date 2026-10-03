@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "transform",
+    srcs = ["transform.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/transform",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/transform",
+        "//internal/kernel/errs",
+        "//internal/service/data/transform",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":transform",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "transform_test",
+    srcs = ["transform_external_test.go"],
+    deps = [
+        ":transform",
+        "//internal/core/data/transform",
+        "//pkg/v1/errs",
+    ],
+)

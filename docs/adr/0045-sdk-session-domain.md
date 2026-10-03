@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) §As built — §D5 gains a sixth guarantee: `Dir` is audited with `pathchain`, then held as an `os.Root`, a link at a record's name is never read, and a link at the lock file or at a component of `Dir` is refused (`PATH_REDIRECTED`, `0.3.46.6`); [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — the lock is `kernel/fs/flock`, and the reason Windows is refused is restated: an owner-only DACL built and verified, and a directory flush, are missing there — not a standard-library API
 - **Related**: [ADR 0042](0042-sdk-token-domain.md) (the token domain — the thing a session is constantly confused with), [ADR 0013](0013-sdk-crypto-domain.md) (the AEAD the sealer and the file store are built on), [ADR 0018](0018-sdk-cross-platform-portability.md) (build bar / runtime bar, and the `UnsupportedPlatform` sentinel), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows a sibling, never a method), [ADR 0035](0035-pp-range-ownership-enforcement.md) (range ownership), [ADR 0001](0001-sdk-go-multimodule-layout.md) (the 4-layer shape)
 - **Amends**: `internal/core/CLAUDE.md` §Purpose — a 14th core sibling
 

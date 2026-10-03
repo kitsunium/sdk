@@ -1,12 +1,7 @@
 // Package crypto — the process-wide StreamSealer registry + SealStream / OpenStream dispatch.
 package crypto
 
-import (
-	"fmt"
-	"io"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
+import "io"
 
 // streamSealers maps each Algorithm to its StreamSealer. Backed by the shared
 // read-mostly schemeRegistry — register once at import, dispatch is lock-free.
@@ -24,19 +19,9 @@ var streamSealers = schemeRegistry[StreamSealer]{verb: "RegisterStreamSealer"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterStreamSealer(s StreamSealer) StreamSealer {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(s); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterStreamSealer [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := streamSealers.publish(s.Algorithm(), s); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
-	}
-	//: returning the sealer lets callers bind it to a typed singleton var.
-	return s
+	//: refuse an unusable sealer, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return streamSealers.register(s)
 }
 
 // LookupStreamSealer returns the StreamSealer registered under name.
@@ -44,15 +29,15 @@ func RegisterStreamSealer(s StreamSealer) StreamSealer {
 // IFACE-PLUGIN: the registry stores plug-in StreamSealer instances behind the
 // StreamSealer interface — concrete types are intentionally unexported per scheme.
 func LookupStreamSealer(name Algorithm) (s StreamSealer, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return streamSealers.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return streamSealers.table.Lookup(name)
 }
 
 // AvailableStreamSealers returns the sorted list of registered streaming-AEAD
 // Algorithms.
 func AvailableStreamSealers() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return streamSealers.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return streamSealers.table.Names()
 }
 
 // SealStream wraps dst so writes are sealed under key with aad by the

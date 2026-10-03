@@ -9,8 +9,8 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/authz"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // Who may dispatch a command or ask a query: the permissions Allow declares,
@@ -166,7 +166,7 @@ func (x *access[Req]) mechanics() []model.Mechanic {
 	var out []model.Mechanic
 	for _, p := range x.allowed {
 		out = append(out, model.Mechanic{
-			Kind: "authorize", Label: p.perm.Action + " " + p.perm.Resource, Package: "github.com/kitsunium/sdk/pkg/v1/authz",
+			Kind: "authorize", Label: p.perm.Action + " " + p.perm.Resource, Package: "github.com/kitsunium/sdk/pkg/v1/security/authz",
 			Config: map[string]string{"action": p.perm.Action, "resource": p.perm.Resource},
 		})
 	}

@@ -2,17 +2,18 @@
 
 ## Purpose
 
-HCL codec — wraps HashiCorp HCL v2 behind the universal `core/codec.Codec`
-dispatch. **Lives under `third-party/` (root module), NOT
-`internal/service/codec`**, because `hashicorp/hcl/v2` pulls `go-cty` and a
+HCL codec — wraps HashiCorp HCL v2 behind the universal `core/data/codec.Codec`
+dispatch. **Lives under `third-party/` — the `third-party/codec/hcl` module
+(ADR 0157) — NOT `internal/service/data/codec`**, because `hashicorp/hcl/v2` pulls `go-cty` and a
 heavier dep graph that, added to `internal/service`, would **introduce**
 `golang.org/x/sys` there (measured: `v0.20.0`, pulled by `x/tools`) — a module
 that is **banned SDK-wide**, which is exactly why `proc`'s syscall code is
-written against raw stdlib `syscall`. Quarantining it in the root module keeps
-the dep-light service module untouched (ADR 0022, with its mechanism corrected
+written against raw stdlib `syscall`. Quarantining it in a module of its own keeps
+the dep-light service module untouched, and a consumer of HCL inherits no other
+vendor (ADR 0022, with its mechanism corrected
 by ADR 0034 — nothing is *downgraded*; mirrors the ADR 0012 writer-quarantine
 policy). **Opt-in**: blank-import this package to
-register the `"hcl"` Format — `pkg/v1/codec` does NOT pull it, so the public
+register the `"hcl"` Format — `pkg/v1/data/codec` does NOT pull it, so the public
 module stays dep-light.
 
 ## Surface
@@ -75,7 +76,7 @@ ADR 0022/0034 dependency argument and the cost point the same way.
 
 ## Do NOT
 
-- Add HCL to `pkg/v1/codec`'s blank imports — it would pull `go-cty` into the
+- Add HCL to `pkg/v1/data/codec`'s blank imports — it would pull `go-cty` into the
   dep-light public module. HCL is opt-in by design.
 - Marshal a non-struct and expect success.
 - Use `fmt.Errorf`/`errors.New`; wrap through `errs.Wrap`.

@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "toml",
+    srcs = [
+        "codec.go",
+        "decode.go",
+        "decode_scalar.go",
+        "decode_value.go",
+        "decoder.go",
+        "encode.go",
+        "encode_value.go",
+        "encoder.go",
+        "errors.go",
+        "localtime.go",
+        "parse_datetime.go",
+        "parse_number.go",
+        "parse_string.go",
+        "parse_table.go",
+        "parse_value.go",
+        "parser.go",
+        "parser_tree.go",
+        "plan.go",
+        "syntax.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/toml",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/core/data/codec/toml",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":toml",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "toml_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+        "conformance_external_test.go",
+        "decode_external_test.go",
+        "decoder_internal_test.go",
+        "encode_external_test.go",
+        "encoder_internal_test.go",
+        "fuzz_external_test.go",
+        "localtime_external_test.go",
+        "toml_bench_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":toml"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/kernel/errs",
+    ],
+)

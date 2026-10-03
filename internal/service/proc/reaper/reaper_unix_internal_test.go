@@ -21,6 +21,7 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -460,6 +461,68 @@ func Test_unixReaper_Start(t *testing.T) {
 			default:
 				t.Fatalf("cycle %d: the loop goroutine is still running after Stop", cycle)
 			}
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_unixReaper_timerSweep pins the sweep illumos and Solaris need beside
+// SIGCHLD (ADR 0144) — on every Unix, by handing the reaper the period those
+// two kernels get and a manual clock to tick it on. The sweep runs when the
+// clock passes the period and not a nanosecond before, and Stop releases the
+// ticker with the loop.
+//
+// It holds reapMu, like every test here: no other test spawns a child or
+// raises a SIGCHLD meanwhile, so every sweep this test observes is the
+// initial drain or a tick.
+func Test_unixReaper_timerSweep(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		every time.Duration
+	}
+	tests := []tc{
+		{"the one-second sweep illumos and Solaris run", time.Second},
+		{"an hourly sweep costs the test no more", time.Hour},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		reapMu.Lock()
+		defer reapMu.Unlock()
+
+		sweeps := make(chan int, 16)
+		r, ok := New(WithOnReap(func(n int) { sweeps <- n })).(*unixReaper)
+		if !ok {
+			t.Fatal("New did not return a unixReaper")
+		}
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		r.clk, r.sweepEvery = manual, c.every
+		r.Start()
+		//: the initial drain, which runs before the ticker is armed.
+		<-sweeps
+		//: the loop armed its sweep ticker on the manual clock.
+		manual.BlockUntil(1)
+		manual.Advance(c.every - time.Nanosecond)
+		select {
+		case <-sweeps:
+			t.Fatal("a sweep ran before the clock passed the period")
+		default:
+		}
+		manual.Advance(time.Nanosecond)
+		select {
+		case <-sweeps:
+		case <-time.After(reapDeadline):
+			t.Fatal("advancing the clock past the period ran no sweep")
+		}
+		r.Stop()
+		//: the loop stops its ticker on the way out, so nothing stays armed.
+		if pending := manual.Pending(); pending != 0 {
+			t.Errorf("after Stop the clock holds %d armed waits, want 0", pending)
 		}
 	}
 	for _, c := range tests {

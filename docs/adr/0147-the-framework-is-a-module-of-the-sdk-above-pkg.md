@@ -1,8 +1,9 @@
 # ADR 0147 — the framework is a module of the SDK, above `pkg`, and a product imports nothing else
 
-- **Status**: Proposed
+- **Status**: Accepted (proposed 2026-09-28; accepted 2026-10-03, once the code it decides had shipped)
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — §9: the vendor modules join the release chain; [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the framework holds the distribution mechanisms, and the ssh identity as a connector
 - **Amends**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md) §Layout (layer `4` is allocated), [ADR 0007](0007-sdk-release-and-versioning.md) §2 (the release chain gains the framework and its connectors), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (a fifth query)
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (the four layers), [ADR 0009](0009-pkg-public-module-resolvability.md) (a published module resolves without `replace`), [ADR 0012](0012-logger-writer-registry.md) (vendor code under `third-party/` or a module of its own), [ADR 0035](0035-pp-range-ownership-enforcement.md) (range ownership), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) / [ADR 0040](0040-changing-a-published-shape-while-v0.md) (what a published shape may do while v0), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md) (the module census), [ADR 0142](0142-one-key-per-subject-under-a-rotating-root-and-an-erasure-destroys-it.md) (the erasure the framework's privacy wave rests on)
 

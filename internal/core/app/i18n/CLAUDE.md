@@ -1,0 +1,135 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
+# internal/core/app/i18n/
+
+## Purpose
+
+Declares the **message-translation port**: `Catalog` (frozen at two methods),
+the `TagValue` that names a language, the `MessageValue` a translator wrote —
+held as compiled `PatternValue`s of `PartValue` spans — the CLDR plural `Form`
+a quantity falls in, the `CountValue` that decides which, and the `Args` that
+fill a message's holes. The 27th core sibling, admitted by **ADR 0063**. The
+tag PARSER, the pattern COMPILER, the CLDR rule table, the concrete
+catalogue, the Accept-Language negotiation and the renderer live in
+`internal/service/app/i18n`: reading text into these values is a mechanism
+(ADR 0160 §4), and what stays here is each value and its own invariants.
+
+Code ranges: `0.2.30.*` (ADR 0063) for the port's verdicts, and `0.3.60.*` for
+the outcomes only a concrete catalogue can produce — allocated to
+`internal/service/app/i18n`, which raises them, and declared here since
+ADR 0160. A code keeps its value when its declaration moves.
+
+## Contents
+
+| File | Surface |
+|---|---|
+| `i18n.go` | package doc · `PluralRule func(CountValue) Form` · `Args map[string]string` |
+| `i18n_interface.go` | `Catalog` (frozen) + the ADR 0039 siblings `KeyLister` and `Fallbacker` |
+| `tag_value.go` | `TagValue` + `NewTag(language, script, region)` — each subtag's shape checked and its case canonicalised — + `String` / `IsZero` / `Language` / `Script` / `Region` / `Parent` |
+| `count_value.go` | `CountValue` + `Int` / `Decimal` + `IntegerPart` / `FractionValue` / `VisibleFractionDigits` / `IsIntegerValued` |
+| `form.go` | `Form` + the six categories + `ParseForm` / `String` / `Valid` |
+| `message_value.go` | `Key` + `ValidateKey` + `MessageValue` + `FormPatternValue` + `NewCompiledMessage` / `Format` / `HasForm` / `IsPlural` |
+| `pattern.go` | `PartValue` (one span: literal `Text` or placeholder `Name`) + `PatternValue` + `NewPattern` + `literal` / `expand` + `ValidPlaceholder`, the placeholder-name grammar |
+| `codes.go` | `Code*` constants — ranges 0.2.30.* and 0.3.60.* |
+| `errors.go` | `InvalidTag` / `InvalidKey` / `InvalidPattern` / `ArgumentMissing` / `MessageNotFound` / `PluralFormMissing` / `InvalidCount` / `InvalidForm`, and the catalogue's `UnsupportedLanguage` / `CatalogInvalid` / `CatalogLoadFailed` / `TranslationIncomplete` / `NegotiationEmpty` (`errs.Define`) |
+
+## The frontier
+
+The SDK ships the **mechanism**. Everything below the line is the
+application's, because it needs to know what the product says.
+
+| The SDK ships | The application ships |
+|---|---|
+| `Catalog` / `TagValue` / `MessageValue` / `Form` / `CountValue` | the catalogue files, and the sentences in them |
+| CLDR plural selection for thirteen named languages | which languages the product is sold in |
+| RFC 4647 lookup over `Accept-Language` | how the chosen language reaches the request (cookie, path prefix, header) |
+| A missing key rendered as the key, plus an error | what a page does about it |
+| `Store.Missing` as a build-time gate | the test that calls it |
+| Named placeholders, substituted literally | the HTML escaping (`view`, ADR 0058) and the number formatting (nothing) |
+
+## Conventions
+
+- **`Catalog` is FROZEN at two methods.** `pkg/v1/app/i18n` aliases it and Go
+  interfaces are structural, so a third method breaks every downstream
+  two-method double at compile time with no deprecation window (ADR 0039).
+  The executable guard is a package-level assertion in
+  `internal/service/app/i18n`'s `store_external_test.go` —
+  `var _ corei18n.Catalog = twoMethodDouble{}` — which stops that file
+  compiling if a third method is added.
+- **`Lookup` is EXACT.** No fallback, no parent truncation, no plural
+  selection. All three are policy, and a Catalog that decided them would decide
+  them invisibly for every caller. The walk lives in exactly one place —
+  `service/app/i18n`'s renderer — which therefore knows which language answered and
+  can pick THAT language's rules (ADR 0063 §D3).
+- **`FormOther` is the zero `Form`.** ADR 0031 on a func port with no
+  constructor to refuse in: `other` is the one category CLDR guarantees in
+  every language, so a rule that forgets to set a result names the form every
+  message must carry.
+- **The zero `TagValue` is REFUSED, never defaulted.** No constructor in this
+  domain reads an unset tag as "use English".
+- **`Args` is `map[string]string`, never `map[string]any`.** The values are
+  substituted verbatim; a caller who wants a locale-formatted number formats
+  it, and learns at the call site that this SDK does not ship a formatter.
+- **A pattern is compiled ONCE**, at catalogue load, by the compiler in
+  `internal/service/app/i18n`. A render never parses, which is why a malformed
+  translation fails at startup and the hot path has nothing to fail at. What
+  the compiler hands over is held to the value's invariants here: a span is
+  literal text or a placeholder and never both, a placeholder name passes
+  `ValidPlaceholder`, `other` is always carried, the plural categories are
+  ascending and distinct. `NewPattern` and `NewCompiledMessage` RETAIN the
+  slices they are given — the compiler builds a fresh one per pattern, and a
+  copy would cost an allocation per message at every load.
+- **A tag is assembled by `NewTag` alone.** The parser in
+  `internal/service/app/i18n` splits the written form and places each subtag;
+  `NewTag` checks each one's shape and canonicalises its case, so no path
+  into `TagValue` skips the subset.
+- **Substitution is single-pass and literal.** A value containing `{other}`
+  produces those seven characters. `TestMessageFormatNeverRescansASubstitutedValue`
+  is the guard, and it is a security property: patterns are trusted, values are
+  not.
+- **No error ever names an argument VALUE** — not in `Error()`, not in
+  `Public`, not in `Private`, not in a field. Errors name the key, the
+  placeholder, the category and the tag. `TestNoErrorEverNamesAnArgumentValue`
+  is the guard. Same rule as `validation` (ADR 0046), `authz` (ADR 0057) and
+  `view` (ADR 0058).
+- **A surplus `Args` entry is ignored; a missing one is an error.** One map is
+  handed to every language in turn and languages legitimately use different
+  subsets, so refusing a surplus would make the English render fail for a
+  reason living in the French catalogue. A missing one is a hole in the
+  sentence being rendered right now.
+- **`Format` refuses a category the message does not carry.** It never falls
+  back to `other`, because that renders a grammatically wrong sentence nobody
+  on the team can read.
+- **The zero `MessageValue` is not an empty translation.** `pattern.set`
+  distinguishes a compiled empty pattern from one that was never compiled, so
+  `var m MessageValue` reports `PLURAL_FORM_MISSING` rather than rendering `""`.
+
+## Do NOT
+
+- **Add a method to `Catalog`.** A capability arrives as a SIBLING —
+  `KeyLister` and `Fallbacker` are the two that exist (ADR 0039).
+- **Make `Lookup` fall back**, truncate a tag, or select a plural form.
+- **Widen `Args` to `any`**, or add a format specifier, a positional
+  placeholder, a filter call or an ICU `plural`/`select` construct to the
+  pattern grammar. Each is refused BY NAME in ADR 0063 §D5.
+- **Escape anything here.** A rendered message is a `string`; HTML escaping is
+  `view`'s and is contextual.
+- **Put a plural rule, a language table or a negotiation policy in this
+  package.** They are facts about the world, not contracts, and they live in
+  `internal/service/app/i18n`.
+- **Give `TagValue`, `CountValue`, `PatternValue` or `MessageValue` a
+  constructor that does not validate.** Every one of them comes out of a call
+  that does — `NewTag`, `Int` / `Decimal`, `NewPattern`, `NewCompiledMessage`
+  — and a way in that skipped it would let a value break the invariant every
+  reader of it relies on.
+- **Parse text here.** A written tag, a pattern's braces and escapes, an
+  `Accept-Language` header are wire formats; their readers are the service's
+  (ADR 0160 §4).
+- **Read a zero `TagValue` as a default language**, anywhere.
+
+## Verification
+
+```
+bazel test --config=race //internal/core/app/i18n:i18n_test
+# OR
+cd internal/core && GOWORK=off go test -race ./app/i18n
+```

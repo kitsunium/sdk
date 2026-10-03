@@ -12,9 +12,9 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 The SDK is shipped as three importable subpackages under one module per major version. Install all three (they coexist; only the parts you import end up in your binary):
 
 ```bash
-go get github.com/kitsunium/sdk/pkg/v1/codec
+go get github.com/kitsunium/sdk/pkg/v1/data/codec
 go get github.com/kitsunium/sdk/pkg/v1/errs
-go get github.com/kitsunium/sdk/pkg/v1/logger
+go get github.com/kitsunium/sdk/pkg/v1/observe/logger
 ```
 
 A single `go get github.com/kitsunium/sdk/pkg/v1/...` works too if you want everything in one shot.
@@ -29,7 +29,7 @@ package main
 import (
     "fmt"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
 )
 
 func main() {
@@ -48,7 +48,7 @@ func main() {
 }
 ```
 
-Twenty-four Format names are registered out of the box (`asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the nine base-N variants `base16`/`base32`/`base45`/`base58`/`base62`/`base64`/`base64url`/`hex`/`ascii85`). `codec.Available()` returns the live list if you would rather ask the registry than trust this page. See the [codec page](../codec/) for the full surface.
+Twenty-four Format names are registered out of the box (`asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml`, and the nine base-N variants `base16`/`base32`/`base45`/`base58`/`base62`/`base64`/`base64url`/`hex`/`ascii85`). `codec.Available()` returns the live list if you would rather ask the registry than trust this page. See the [codec page](../data/codec/) for the full surface.
 
 ## Hello, logger
 
@@ -60,7 +60,7 @@ package main
 import (
     "context"
 
-    "github.com/kitsunium/sdk/pkg/v1/logger"
+    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 func main() {
@@ -86,7 +86,7 @@ logger.Build(lg, logger.LevelInfo).
     Send(ctx, "service started")
 ```
 
-See the [logger page](../logger/) for sink composition (multi / async / route / failover / sample / recover / tee / encwrite) and the perf rows that back the 1-alloc-per-emit figure.
+See the [logger page](../observe/logger/) for sink composition (multi / async / route / failover / sample / recover / tee / encwrite) and the perf rows that back the 1-alloc-per-emit figure.
 
 ## Hello, errs
 
@@ -98,7 +98,7 @@ package main
 import (
     "fmt"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
     "github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -130,9 +130,9 @@ import (
     "context"
     "os"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
     "github.com/kitsunium/sdk/pkg/v1/errs"
-    "github.com/kitsunium/sdk/pkg/v1/logger"
+    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 func main() {
@@ -160,7 +160,7 @@ func main() {
 ## Where to go next
 
 - [Concepts](../concepts/) — the four-layer model (kernel → core → service → pkg/v1), the error code allocation table, codec dispatch semantics
-- [codec](../codec/), [errs](../errs/), [logger](../logger/) — full Go doc surface per package, with the inline benchmarks at the bottom of each page
+- [codec](../data/codec/), [errs](../errs/), [logger](../observe/logger/) — full Go doc surface per package, with the inline benchmarks at the bottom of each page
 - [Changelog](../changelog/) — what changed across releases
 - [For contributors ↗](../contributors/) — ADRs, verification gates, benchmark methodology
 

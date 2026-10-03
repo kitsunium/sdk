@@ -6,8 +6,8 @@ import (
 	"context"
 	stdsql "database/sql"
 
-	"github.com/kitsunium/sdk/pkg/v1/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Engine is an SQL engine a database runs on. An engine module returns one —

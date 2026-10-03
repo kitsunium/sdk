@@ -7,8 +7,8 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // A database's migrations: at start, manually, and through the product's

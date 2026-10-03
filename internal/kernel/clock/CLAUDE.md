@@ -66,8 +66,8 @@ only producer of — splitting them left three files nothing else referenced.
 ## Why `Clock` was NOT extended
 
 `Clock` is a **published port**, not an internal detail. `pkg/v1/clock`
-publishes it as an alias (ADR 0090), and `pkg/v1/cache.Config` is a *type
-alias* for `internal/kernel/cache.Config[K,V]`, whose `Clock` field carries this
+publishes it as an alias (ADR 0090), and `pkg/v1/data/cache.Config` is a *type
+alias* for `internal/kernel/collections/cache.Config[K,V]`, whose `Clock` field carries this
 exact interface — so any consumer of the released `pkg` module can write a
 two-method double and pass it in. Go interfaces are structural: a double
 satisfies `clock.Clock` whether or not it names it, and adding a method breaks
@@ -79,13 +79,13 @@ a complete `Timed`:
 
 | Package | Type |
 |---|---|
-| `internal/kernel/cache` | `fakeClock`, `fixedClock` |
-| `internal/service/logger` | `frozenClock` |
-| `internal/service/writer/dbsink` | `frozenClock` |
-| `internal/service/writer/rotfile` | `fakeClock` |
-| `internal/service/resilience` | `steppedClock` |
-| `internal/service/id` | `steppedClock` |
-| `internal/service/queue` | `steppingClock` |
+| `internal/kernel/collections/cache` | `fakeClock`, `fixedClock` |
+| `internal/service/observe/logger` | `frozenClock` |
+| `internal/service/observe/logger/writer/dbsink` | `frozenClock` |
+| `internal/service/observe/logger/writer/rotfile` | `fakeClock` |
+| `internal/service/app/resilience` | `steppedClock` |
+| `internal/service/app/id` | `steppedClock` |
+| `internal/service/data/queue` | `steppingClock` |
 | `pkg/v1/clock` | `readOnlyClock`, `handClock` |
 
 Widening `Clock` would break all ten plus every downstream one. Adding

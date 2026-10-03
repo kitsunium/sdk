@@ -4,7 +4,7 @@ package checks
 import (
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // Test_newBufferLogger pins the fixture every logger check is built on.

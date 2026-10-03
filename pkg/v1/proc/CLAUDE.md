@@ -1,14 +1,43 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-03T04:55:00Z -->
 # pkg/v1/proc
 
 ## Purpose
 
 The **capability-preflight** facade for the process-supervision domain (ADR 0016).
-It does not spawn, signal, or confine anything — the per-capability facades
-(`process`, `signal`, `reaper`, `rlimit`, `cgroup`, `sdnotify`, `sdlisten`) do
-that. This package lets a CONSUMER ask, up front, *which proc capabilities have a
-native backend on the current platform* and choose to fail fast when a required
-one is missing.
+It does not spawn, signal, or confine anything — the per-capability facades, its
+children (`process`, `signal`, `reaper`, `rlimit`, `cgroup`, `systemd/notify`,
+`systemd/listen`), do that. This package lets a CONSUMER ask, up front, *which
+proc capabilities have a native backend on the current platform* and choose to
+fail fast when a required one is missing.
+
+It is also the root of the proc family (ADR 0155): every facade of the family is
+its child. A child is a package of its own — importing `pkg/v1/proc/process`
+links neither this package nor any sibling, because Go links what a package
+imports and never its parent directory (checked below), and this package imports
+no child either.
+
+## The family
+
+| Child | What it publishes | Engine under `internal/service/proc` |
+|---|---|---|
+| `process/` | `Start` / `MustStart` → a `Process` to wait on, signal and stop; and the running program itself — `Self`, `Build`, `ParseBuild` (ADR 0016, ADR 0100) | `exec`, `self` (and `childwait`, which `exec` and `reaper` share) |
+| `signal/` | `Notify`, `Relay` to a `Target`, `Parse` | `signal` |
+| `reaper/` | PID 1 / subreaper zombie collection (ADR 0016, ADR 0093) | `reaper` |
+| `rlimit/` | per-process resource limits over `Resource` | `rlimit` |
+| `cgroup/` | control groups — `Create` / `MustCreate` → a `Group`, `Available` | `cgroup` |
+| `memlimit/` | the runtime soft memory limit from the cap already bounding this process (ADR 0075) | `memlimit` |
+| `systemd/notify/` | sd_notify(3): the notifier, and `Listen` for a supervisor | `systemd/notify` |
+| `systemd/listen/` | socket activation, sd_listen_fds(3), and `Prepare` for an activator | `systemd/listen` |
+| `ipc/` | a private socket between processes of one machine, the peer the kernel names (ADR 0148); `Listener` and `Dialer` are ports a test can double (ADR 0160) | `ipc` |
+
+`systemd/` holds no Go code: it groups the two systemd protocols, and each was
+renamed for the path it sits at — package `notify`, formerly `sdnotify`, and
+package `listen`, formerly `sdlisten` (`systemd/CLAUDE.md`). Every child but
+`ipc` builds on `internal/core/proc` — its ports, values and `0.2.6.*`
+sentinels; `ipc` builds on its own contract, `internal/core/proc/ipc` — the
+`Listener` and `Dialer` ports, `Peer`, `Conn` and the `0.3.91.*` codes it
+re-exports (ADR 0160). Each child has its own `CLAUDE.md` and generated
+`README.md`.
 
 ## Why this exists
 
@@ -31,9 +60,9 @@ panic across a CGO/FFI boundary is UB). So this package gives the consumer the
 | `MustSupport(caps...)` | func | **panics** (typed `UnsupportedPlatform` error) when any cap is missing; no-op otherwise — the consumer's opt-in |
 | `UnsupportedPlatform` | var | the central sentinel re-exported for recover handlers |
 
-Sibling `MustX` constructors live in the facades: `cgroup.MustCreate`,
-`process.MustStart` — thin wrappers that panic with the same typed error their
-`Create`/`Start` form returns.
+The `MustX` constructors of the children are the same pattern:
+`cgroup.MustCreate`, `process.MustStart` — thin wrappers that panic with the
+same typed error their `Create`/`Start` form returns.
 
 ## Contract (non-negotiable)
 
@@ -70,9 +99,32 @@ if proc.Supported(proc.CapCgroup) { /* confine */ }
 `README.md` is produced by `gomarkdoc` from the `capability.go` package doc
 (ADR 0008). Edit the doc comment, then `make docs-readme`. Do **not** hand-edit it.
 
+## Do NOT
+
+- Import a child from this package's production code, or this package from a
+  child's. The family shares a directory, not a link: a consumer of `process`
+  must not pay for the preflight, nor a consumer of `Supported` for nine
+  facades.
+- Put Go code in `systemd/`: it would publish a package nobody designed at the
+  path both protocols appear to belong to.
+
 ## Verification
 
 ```sh
 bazel test --config=race //pkg/v1/proc:proc_test
+cd pkg && GOWORK=off go test -race ./v1/proc
+# The whole family
+bazel test --config=race //pkg/v1/proc/...
 cd pkg && GOWORK=off go test -race ./v1/proc/...
+# A child never links its parent (ADR 0155) — must print nothing:
+cd pkg && for c in process signal reaper rlimit cgroup memlimit ipc systemd/notify systemd/listen; do
+  GOWORK=off go list -deps ./v1/proc/$c | grep -x 'github.com/kitsunium/sdk/pkg/v1/proc'
+done
 ```
+
+## Subtree
+
+`process/`, `signal/`, `reaper/`, `rlimit/`, `cgroup/`, `memlimit/`, `ipc/`,
+`systemd/notify/`, `systemd/listen/` — each documents its own facade in its
+`CLAUDE.md`; `systemd/CLAUDE.md` names the two protocols and why they are
+grouped.

@@ -5,7 +5,7 @@
 // interfaces, and that separation is the load-bearing design decision:
 //
 //   - [Clock] READS time (Now, Since). It is frozen at two methods on purpose.
-//     It is reachable from the published pkg module — pkg/v1/cache.Config is a
+//     It is reachable from the published pkg module — pkg/v1/data/cache.Config is a
 //     type alias whose Clock field has this type — so every method added to it
 //     would break every hand-written double downstream, at compile time, with
 //     no deprecation window.

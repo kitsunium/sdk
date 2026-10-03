@@ -1,9 +1,52 @@
-<!-- updated: 2026-10-02T19:53:28Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # kitsunium/sdk
 
 ## Purpose
 
-Go SDK providing a normed, performant toolbox for downstream applications. Thirty-three domains ship today — a structured **logger** (one alloc per emit, multi-sink; the `sync.Pool` recycles the builder but the handler clones the attrs — see `pkg/v1/logger/BENCH.md`, pinned by `TestV116BuildSendAllocatesOnePerEmit`; **trace-correlated by default** — ADR 0062: a record emitted inside a span carries `trace_id` and `span_id` as top-level fields in lowercase hex, a record emitted outside one carries neither key rather than an all-zero identifier W3C declares invalid, both names are RESERVED at that level so a caller attribute spelling one renders as `attr.trace_id` rather than letting a decoder read it as the line's correlation — ADR 0070 — and it costs no second allocation because the ids are hex-encoded straight into the handler's borrowed buffer and never become a Go string), a universal **codec** (24 wire formats behind a single `Marshal/Unmarshal` dispatch), typed **errs** (dotted-quad codes + public/private split), a **crypto** suite (AEAD, hash, sign, MAC, KDF, key-agreement, password hashing, and JWK/JWKS key representation — RFC 7517 for EC/OKP/oct, with private export opt-in and never the default), **transform** (compression — stdlib gzip/flate/zlib; `flate` is raw DEFLATE, `zlib` is the RFC 1950 envelope HTTP misnames `deflate`), OS **proc** supervision, **id** generation (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024), **resilience** policies (retry/circuit-breaker/rate-limit/bulkhead/timeout/fallback/hedging — ADR 0026; hedging duplicates the operation, so it demands an in-code idempotence assertion and a load cap — ADR 0031), **metrics** (the OpenTelemetry metrics DATA MODEL, implemented from the specification with **zero** `go.opentelemetry.io` imports — ADR 0027/0044: typed attributes whose KIND is part of the series identity, explicit delta/cumulative temporality where a delta `Collect` consumes the window it reports, `Resource` + `InstrumentationScope` carried once per payload, counter/up-down-counter/gauge/histogram plus observable instruments read at collection, all over a bounded, visibly-overflowing cardinality; the stdlib `prometheus` exporter is a deliberately LOSSY connector that refuses a snapshot that is not cumulative and refuses a name the exposition format cannot spell rather than transliterating it into a collision, while **OTLP/JSON** — ADR 0048, written from the specification with `encoding/json`/`net/http` and no OTel or protobuf dependency — is the native wire that loses nothing and carries the temporality), **net** (inbound and outbound over one substrate: TLS/mTLS identity, per-phase deadlines, policy, and Server-Sent Events and **WebSocket** — ADR 0029/0043/0047; RFC 6455 is implemented in the stdlib and its MUST-fails are enforced rather than tolerated, because a length-prefixed frame stream that keeps going after a disagreement is two endpoints reading different messages from the same bytes), and **config** (env+file layering — a file on disk or inside an `io/fs.FS`, such as the program's own embedded configuration, `FSSource`, refused when absent exactly as on disk — typed decode, cross-OS poll-watch — ADR 0028; plus a **schema** — ADR 0061: a missing required key fails at STARTUP and every missing key is named in one error, because the pass runs over the merged map BEFORE the decode, the only position where "absent" and "explicitly zeroed" are still distinguishable; a key no field addresses is REFUSED by default, since the symptom of an ignored `APP_PORTT` is the absence of an effect; a default is a LAYER under every source rather than a post-decode fallback, so `timeout = 0` stays 0, and a key is never both required and defaulted, or the clause could never fire; the schema describes the SHAPE and delegates the VALUE to `validation` — `Rule` IS a `validation.Constraint` and there is no `min`, `max` or `oneof` in this domain; and no message ever names a value; plus PROVENANCE — ADR 0097: `LoadWithOrigins` / `LoadSchemaWithOrigins` return, per leaf key, the layer that supplied its final value and the variable or file behind it, never the value, through a `Describer` sibling of the frozen `Source`, and a `secret.Value` field is marked `Secret` and filled from the environment's RAW text, because the JSON coercion that makes `8080` an int makes `1e3` a thousand). The Phase-B wave also adds the kernel `cache` primitive (ADR 0025). New domains land in the same 4-layer shape (ADR 0001), and **scheduler** (five-field POSIX cron + fixed intervals — ADR 0041; DST, missed deadlines and overlap are decided and documented rather than emergent: a non-existent wall-clock time does not fire, a repeated one fires once, a missed deadline is skipped **and counted**, and an overlapping fire is skipped by default), and **token** (JWT over JWS Compact + PASETO v4.public — ADR 0042; the algorithm is bound by the constructor, never read from the token, so algorithm confusion is a call that does not compile, and `alg:none` has no representation in the type), and **validation** (a `Constraint` port, a located `Violation` and the engine that composes them — ADR 0046; a violation says WHERE in one path grammar (`user.addresses[2].zip`), every violation is collected by default and stopping is a real short-circuit rather than a truncated report, a violation is not an error and neither is the report — `Report.Err()` converts on demand and returns a genuine nil — and a message names the rule and the bound but never the value, which is a security property with its own test; both a reflection-free programmatic path and a struct-tag front end whose plan is cached per type, measured in `internal/service/validation/BENCH.md`; it FEEDS `config.Validator` rather than replacing it), and **session** (server-side sessions — ADR 0045; an opaque 256-bit identifier that redacts itself, a memory store and a file store behind one frozen `Store` port, expiry that is absolute AND sliding with the earlier deadline always winning, and `Regenerate` as the only call that binds a subject — so session fixation is prevented by the absence of any other way to spell a login rather than by remembering a step), and **cache** (ADR 0049, amending ADR 0025: the kernel LRU+TTL primitive stays exactly where it was and a DOMAIN is added above it, carrying the three things a primitive deliberately lacks — invalidation by tag, protection against a stampede of concurrent misses, and L1/L2 chaining. `Store[V]` is frozen at three methods with `EntryFetcher`/`Tagger`/`Loader` as type-asserted siblings; there is no registry, and here the mechanics settle it rather than taste, since Go has no `map[Name]Store[V]` for an open `V`. `Fetch` keeps the primitive's honest verb because a read mutates, and in the memory store it takes a write lock for exactly that reason. Tag invalidation is indexed both ways and measured — 100 entries out of 100 000 costs 1.16× what the same 100 cost out of 1 000, so it does not scan. The stampede protection collapses concurrent misses **within one process and not across replicas**, which is stated in four places because a reader who assumes otherwise sizes an origin wrong by a factor of N. It rests on a new kernel primitive, `singleflight`, where a caller that abandons does not condemn the others still waiting and a panic is re-raised in every waiter carrying the stack of the goroutine that actually failed), and **lifecycle** (ADR 0050 — ordered bring-up, reverse teardown, and the two things everyone gets wrong: a partial start is unwound before `Start` returns, through the SAME code path an ordinary `Stop` uses and with contexts detached from the cancellation that caused the failure, while the component that failed is never stopped because a `Start` that fails owns what it acquired; and the shutdown budget is PER COMPONENT, so the first thing that will not finish cannot spend everyone else's — an expired budget cancels that `Stop`'s context, records it, and steps aside, killing no goroutine and closing nothing the component owns. The Add order is the dependency order and there is deliberately no graph and no autowiring; signals and `sd_notify` are opt-in and delegate to `proc`), and **lock** (ADR 0052; named exclusive leases over one process or one machine. A lock that lies is worse than no lock, so a zero TTL is REFUSED at construction rather than read as "expires immediately", `Release` releases only a lock this holder still holds — a lapsed lease releases NOTHING rather than ending the new holder's section — `Extend` renews and a `Keepalive` cancels the protected work's context when it cannot, and every acquisition carries a strictly-increasing fencing token. What the domain does not guarantee is stated as loudly: the SDK can only ISSUE a fence, so where the protected resource cannot compare it, mutual exclusion is not guaranteed against a GC pause or a `SIGSTOP`. The in-process lease expires and says so through the `Deadliner` sibling; the file lease never does, because the kernel already notices a dead process, and its absence of `Deadliner` is how a caller finds out. `flock(2)` gives ZERO exclusion between goroutines on a shared descriptor — measured at 8 of 8 inside one section — so the file locker composes it with an in-process gate. Windows is served by `LockFileEx` since ADR 0081, bound from `kernel32` with no `x/sys`, and its answer to that same question is the OPPOSITE — re-locking one handle is refused where `flock` converts — so the gate is redundant for exclusion there and kept for three other reasons; its locks are also MANDATORY, which protects the fencing ledger better than an advisory one and costs a non-holder the ability to read a HELD lock file; and the lock directory's permission rule runs on Unix only, because `os.Stat` synthesises `0777` for every writable directory on Windows and the rule would refuse all of them. That directory rule was also the whole of the answer to substitution, and it reached only half of it — ADR 0082: the lock filename is `hex(sha256(name))`, steered by no caller string and in the same stroke PREDICTABLE, and the rule governs UNLINKING an entry that exists while the attack CREATES one at a name nobody has taken, which `0777|sticky` — what `/tmp` is, a row the table explicitly accepts — permits. Probed against the shipped locker, an acquisition over a planted symlink returned `held=true` with no error and put the `flock` and the fencing ledger outside the checked directory, and a link to a decimal file handed the planter the fencing token the victim then reported. It is closed on BOTH kernels by one refusal with two mechanisms — `O_NOFOLLOW`, where the kernel fails the open, and `FILE_FLAG_OPEN_REPARSE_POINT`, where the open SUCCEEDS on the link and the handle is rejected on its attributes — under the new `LOCK_PATH_REDIRECTED` rather than `LOCK_BACKEND_FAILED`, because nothing failed and that code invites a retry, which is the one wrong response; and the errno is never branched on, since `O_NOFOLLOW` is `ELOOP` on Linux, `EMLINK` on FreeBSD and `EFTYPE` on NetBSD and a three-value table across six kernels is wrong on the seventh. ADR 0082 §Deferred named two things it did not close and ADR 0083 closes both, one by prevention and one by DETECTION, and says which is which: a link planted at a PARENT component still moved the whole lock directory, because `O_NOFOLLOW` is a final-component flag, so a new kernel primitive `pathchain` resolves a path one component at a time over `os.Root` directory handles and reports every indirection with the mode of the directory that HOLDS it — `syscall.Openat` was read rather than assumed and exists in go1.27 for linux, aix and wasip1 alone, so a hand-rolled walk would have served one of the six kernels `e2e-cross` runs. The policy stays in the domain because the primitive cannot have one: `/tmp` is a symbolic link on macOS and `/var/run` is one on most Linux distributions, so an indirection at a parent is refused only when the directory holding it is WORLD-WRITABLE, and the sticky bit exempts nothing there since planting a component creates an entry rather than unlinking one. The second half is `LOCK_FILE_REPLACED` (`0.3.51.5`): in a `0777|sticky` directory the entry's owner may unlink the lock file WHILE the victim holds it, reproduced as two holders over two inodes with the fence reset to 1 on both and the victim's `Extend` returning nil — and no flag prevents it, because the descriptor outlives the name on every kernel. So the lock is not kept and the holder is TOLD, at `Acquire` and at `Extend`, which a `Keepalive` turns into a cancelled context; a test asserts the second holder still acquires, on purpose, so nobody reads prevention into it), and **trace** (distributed tracing — ADR 0051; observability's third pillar, on the OpenTelemetry trace DATA MODEL and the W3C Trace Context propagation format, both implemented from their documents with **zero** `go.opentelemetry.io` imports and the same OTLP/JSON wire `metrics` already speaks, on `/v1/traces`. The sampling decision is taken ONCE at the root and travels in the `sampled` bit, because a per-span decision produces a trace with holes and a span whose parent was dropped is an orphan the backend renders as its own root; a malformed `traceparent` starts a new trace and never fails a request, which is what W3C §4.3 requires of a header a stranger wrote; and a sampling rate of exactly 0 is REFUSED rather than honoured, because it also spells "nobody configured this" and the symptom of guessing wrong is the absence of telemetry. Its attributes, `Resource` and `Scope` are the SAME types `metrics` uses — they are OTel's shared `common.proto`, so `trace.Attr` and `metrics.Attr` are one type and the exemplars ADR 0044 deferred have somewhere to put a trace id), and **events** (ADR 0053 — an IN-PROCESS event bus, and the ADR's first job is the line between it and the `queue` domain that follows: `events` is one process, synchronous, the publisher's goroutine and the publisher's transaction, with no durability, no retry and no dead-letter path, so a caller who wants "asynchronous but reliable" is sent to `queue` rather than served half of it — there is deliberately no async mode. Subscriptions are keyed on the event's concrete Go TYPE rather than a name, so the compiler mints the key and an interface type is refused at registration instead of being listed and never called; the typing is erased plus a package-level `On[E]`, because Go methods take no type parameters and a `Bus[E]` would carry exactly one event type — the assertion that buys the typing back is measured at 2.4 ns per listener call, and the 16 B the caller pays to box the event is published beside it. Listeners run in ascending priority with ties in registration order; stopping propagation is an authority declared at the wiring site and a halt is not a failure; a listener error never short-circuits and aggregates with `errors.Join`; a listener panic is recovered on the publisher's goroutine with its originating stack, is never read as a halt, and never silences the siblings), and **health** (ADR 0060 — liveness, readiness and startup are three different questions, and the domain makes them take three different TYPES rather than three different names. A readiness `Check` is `func(ctx context.Context) error` and may reach a dependency; a liveness `SelfCheck` is `func() error` and has no context to reach one with — so "liveness pings the database", the mistake that turns one slow dependency into a rolling restart of every replica, needs a closure that visibly discards the deadline. It does not become impossible, it becomes impossible to write by accident. Startup is the third: it latches, because a probe that can go back to "still starting" after it has reported ready is describing readiness, not startup), and **authz** (ADR 0057 — RBAC, ABAC and their combinators, resting on two decisions. **There is no policy DSL**: a condition is a Go func, a grant table a Go slice, a resource a string compared by byte equality. A DSL is a second, weaker language inside a program that already has one, it puts a parser on the authorization path, and it is untyped — while what it is bought for, changing a rule without recompiling, is already available by loading rule DATA through `config`. And **abstention is a third verdict**, not a shade of one of the other two: `Abstain` is the zero value, because folding "this policy has no opinion" into a grant is a hole, and folding it into a refusal is an outage that gets repaired by making the combiner permissive — which puts the hole back one layer up. `DenyOverrides` is the only combining algorithm, the XACML alternatives are refused by name, and an `Allow` does not short-circuit so the fold stays commutative and associative. A request no policy is applicable to is refused, in `Check`, the single closure that turns "nobody said Allow" into a denial — and it is a refusal rather than an error, because an unmatched request is not a fault. Every refusal renders the byte-identical sentence and names no policy, role or attribute, because a refusal that explains itself is a description of the policy set handed to the party it exists to keep out; the diagnosis lives in Private and fields. Evaluation allocates zero at ~210 ns), and **cli** (ADR 0065 — command-line applications on the stdlib `flag`, with zero third-party dependencies, because an argument parser is a mechanism and not a connector. It adds exactly four things `flag` lacks — sub-commands to arbitrary depth, one help generated from the declarations, a typed exit status, and a seam to `config` — and a `Binder` receives the stdlib's own `*flag.FlagSet` unwrapped, exactly as `vfs` takes `io/fs`. `flag.ExitOnError` is refused BY NAME, because it calls `os.Exit` from inside a library: the parse becomes untestable, every deferred function is skipped, and a decision that belongs to `main` is taken elsewhere — enforced by an AST audit over production code AND the suite. `flag` is also kept silent, since on failure it writes its own message and calls usage before returning the error. A command is a leaf or a group, never both and never neither, and the whole tree is validated at construction — which is what catches a command binding `-h`, the one flag whose absence is how `flag` signals a help request. There is no prefix matching and no "did you mean": the help just written already lists every name that would have worked), and **i18n** (ADR 0063 — message translation, and the failure it exists to refuse: Polish has four plural categories and English two, so a library that resolves an unknown language to English's rules renders a grammatically wrong sentence on every page and NOTHING observes it — the page renders, the tests pass, nothing is logged. So the CLDR subset is NAMED: thirteen hand-transcribed entries covering all six categories and every rule shape, and every other language is refused BY NAME at construction with the supported set beside it. A counted message missing a category its own language can produce is refused at LOAD, naming the file, the key and the form — the one catalogue defect a translator cannot see by reading their own file. The plural rules follow the MESSAGE and not the request, so an English message serving a Polish miss is pluralised with English rules rather than asked for a `few` it does not carry. Negotiation is RFC 4647 §3.4 Lookup for selection and §3.3.1 basic filtering for a `q=0` refusal, §3.3.2 refused by name, and it has no error return at all because the header was written by a stranger. A missing key renders the KEY plus an error, because a blank is a defect nobody reports. Interpolation is named placeholders, substituted once and never rescanned, never escaped — that is `view`'s job and it is contextual — and no error ever names an argument value. The catalogue is decoded through `codec` and read through `io/fs`, so the domain ships no parser and no filesystem), and **mail** (ADR 0064 — MIME composition is a mechanism and lives in the SDK, SMTP is a third-party protocol whose client is already in the standard library so it costs no dependency, and a provider API would be a `third-party/` connector. A CR or LF in a header is REFUSED and never repaired, because the three stdlib helpers that would repair it deliver a message the caller did not write while reporting success — and `net/mail.Address.String()` passes a CRLF in the *address* straight through. Bcc reaches `RCPT TO` and no header. The MIME container is a pure function of the populated fields, plain first inside `multipart/alternative` because RFC 2046 §5.1.4 orders alternatives by increasing preference, and the structure is checked by reparsing it rather than by comparing strings. `TLSMode`'s zero is refused, there is no opportunistic STARTTLS mode at all, and credentials never leave the process unencrypted — checked twice, because `smtp.PlainAuth` sends them in the clear to a server named localhost; an `SMTPConfig` writes `<redacted>` for its password under every fmt verb and in its JSON, and `ParseURL` reads `smtp://user:pass@host:587?tls=starttls|implicit|none` or `smtps://…` into a configuration `NewSMTP` accepts, never quoting the URL in a refusal), and **queue** (ADR 0054 — the asynchronous, durable counterpart `events` was drawn against before it existed, and the right-hand column of ADR 0053's frontier table on every axis: many processes, asynchronous, a consumer's goroutine, durable, retried, dead-lettered. Delivery is AT-LEAST-ONCE because exactly-once does not exist over a transport, and the consequence is in the type rather than in a paragraph — `Deliveries` is a field of every delivery and `ConsumerConfig.HandlerIsIdempotent` is refused at its zero value. A message is removed at acknowledgement and never at read, so a consumer that is SIGKILLed loses only its lease; ordering is not guaranteed and one retry is enough to lose it. The durable broker's entire state is a directory and every transition is one `rename(2)`, which is also the exclusion — the loser gets `ENOENT`, identically for goroutines and processes, unlike the `flock(2)` ADR 0052 measured — so there is no lock, no sweeper and nothing a dead process can hold. It composes `vfs` for the two writes that must be atomic and durable and stops where `WritableFS` stops, at `Rename`. Durability costs 1 865× on a round trip and the cost is the two `fsync`s and not the payload; and since ADR 0151 a third broker, `NewSQL`, keeps the queue in ONE table of the caller's own PostgreSQL, MySQL or SQLite database with every call on the transaction its context carries, so a message published inside a transaction exists if and only if it commits — the transactional outbox, and the frontier's Transaction row is kept, because the MESSAGE joins while the handler still runs in its own — an idle Receive being one read and no lock and a leasing one `FOR UPDATE SKIP LOCKED`; and on every broker a retry delay grows on the one backoff curve when `MaxRetryDelay` asks, a failure a handler marks `DoNotRetry` is dead-lettered at once through the `Rejecter` sibling with the handler's own cause, and a dead letter is replayed with its count reset or deleted through `DeadLetterManager`), and **sql** (ADR 0055 — a set of PORTS above `database/sql` and deliberately never an ORM: the ports speak the stdlib's own `*sql.Rows`/`*sql.Row`/`sql.Result`, because once `Rows` is ours scanning is ours and mapping is one refactor away. `database/sql` is permitted and a DRIVER never is — pgx, go-sql-driver and the sqlite bindings are vendor connectors that live under `third-party/` or nowhere — so the suite writes its own `driver.Driver`, which buys a statement log and deterministic failure on a named statement that no live database can give. Transaction ownership is structural: a `TxFunc` receives an `Executor` with no Commit, no Rollback and no Begin, so a callee committing under its caller is a sentence with no spelling. Nesting is a savepoint whose name the SDK generates from a counter that never resets — a reused name shadows rather than replaces, so `RELEASE` would free the wrong one — and a cleanup statement never travels on the context whose cancellation caused it, because the nested undo on an expired context poisoned a transaction that was perfectly healthy. The migration lock is the ENGINE's session-scoped advisory lock and deliberately not the `lock` domain, since what decides a migration lock is what happens when its holder DIES: a row in a table survives that death and every later deploy hangs behind it, while the server drops a session lock when the process stops existing — and on SQLite, which has no such lock, it is the database file's write lock, held by the run's ONE transaction from a write that writes nothing to its COMMIT, each migration a savepoint of it, which the operating system drops with a dead process just as surely (ADR 0140). A callee handed only a context joins the transaction it carries through the `Joiner` sibling, and the `Deferrer` sibling holds a function until that transaction commits, dropping it with the rollback of the savepoint that held it (ADR 0139). And a partially applied migration is answered per engine rather than glossed — PostgreSQL and SQLite roll the schema change and its version row back together, MySQL's DDL commits implicitly and cannot, which is stated in four places instead of once), and **view** (ADR 0058 — server-side rendering built ON the stdlib `html/template` and deliberately not reimplementing it: contextual escaping is not an escaping function but an HTML parser tracking the cursor through branches that must agree on where they leave it, and a hand-written one would be the single most likely source of the XSS the domain exists to prevent. `text/template` has no representation at all, because the two packages are API-compatible — the substitution compiles, passes every test that does not assert on escaped output, and ships stored XSS — so an AST audit fails the build on the import, in production code and in the suite. `Render` returns `[]byte` and never takes an `io.Writer`, since execution fails halfway and a `ResponseWriter` would already carry the status line and half the page. `TrustHTML` is the one bypass the SDK spells, the other six trust types are refused in render data, and what is NOT prevented is said out loud: `TrustedHTML` is a type alias — it must be, because html/template recognises trust by an exact type switch — so a `Trusted` built from user input is an XSS the SDK cannot see. Measured: reparsing per request costs 34× on a realistic tree and only 1.7× on a toy one, which is exactly how the mistake survives review), and **vfs** (ADR 0056 — a filesystem port whose read half is `io/fs` *unchanged* (`FS` is a type alias, so `fs.WalkDir` and `fs.Glob` apply with no adapter and there is deliberately no `vfs.Walk`), a write half frozen at four verbs, and publication as an ADR 0039 sibling rather than a fifth method. The ADR's subject is how far "atomic" reaches: a concurrent reader sees the complete old or the complete new content — measured at 0 torn reads out of 600 against 540–597 for the same harness writing in place — and on any failure through the rename the previous bytes are byte-for-byte intact with no temporary surviving, proved by injecting a failure at each of five steps over a genuinely half-written handle and comparing SHA-256 before and after. What it does NOT reach is stated as loudly: nothing across filesystems (`EXDEV` is made unreachable by keeping the temporary in the target's directory, and there is no copy-and-delete fallback because that is not atomic), nothing where `rename` is not the kernel's (FUSE, SMB, FAT), no durability beyond what `fsync` truly does, and no mutual exclusion between publishers since the domain takes no locks. A directory flush that fails AFTER the rename is a different verdict and is deliberately not rolled back, because undoing it means a second non-atomic write to repair a durability problem. Publication costs two device round trips and not the bytes — a 256× larger payload costs 4.7 % more — so batching helps and buffering does not), **secret** (ADR 0096 — a secret is a value no rendering writes down: `secret.Value` writes `<redacted>` from `String`, `GoString`, `Format` (every fmt verb), `MarshalJSON` and `MarshalText`, holds its bytes behind a pointer so fmt's reflection over an UNEXPORTED field prints an address rather than a byte list, does not compile with `==`, and decodes from a JSON string only — a number has been re-spelled before a decoder sees it, and the placeholder coming back in means a dumped configuration was loaded as a real one. A frozen five-method `Store` keeps numbered versions that are never reused, over a closed DNS-label name grammar that maps one-to-one onto an environment variable; three stores — memory, the environment with the `NAME_FILE` convention (both set is REFUSED, not resolved), and a 0700 directory of 0600 records published through `vfs`, serialised through `lock`, and sealed with AES-256-GCM when given a key — a key `KeyFile` creates on first use as exactly 32 raw bytes, published by a hard link the kernel refuses on an existing name, so processes racing on first use all return the one key that won. A `Keyring` turns one secret's versions into keys: boxes and signatures carry their version, the newest seals, every kept one opens, a pruned one is refused; a `Rotator` keeps at least two versions and starts no goroutine; and — ADR 0142 — `SubjectKeys` keeps one data key per SUBJECT wrapped by such a keyring, so a rotation re-wraps one small key per subject and never a field, and a rotator given `InUse` never prunes a version a key is still wrapped under; destroying a subject's key is the cryptographic erase of NIST SP 800-88r2, reaching every copy of every box it sealed, and `KEY_DESTROYED` — the value was erased — is kept apart from `SUBJECT_KEY_UNREADABLE`, a key held that does not unwrap, which is a fault and never an erasure; a box names its subject and key and is bound to length-prefixed parts, a subject is a LOWERCASE reference because a case-insensitive collation would fold two subjects onto one key, and the store of wrapped keys is a frozen five-method port the caller implements, whose `Insert` and `Replace` must be atomic across processes or a re-wrap writes an erased key back), and — the second wave of a framework's mechanisms moving into the SDK — a program's knowledge of itself: `git.Head` for what a working tree is at, and the running process's own `Build` and `Self` (ADR 0100 — a module keeps its release, its commit and its local directory apart, the commit time is read from the raw object because `git log` honours `log.showSignature`, and a CPU time that is only the runtime's GC-refreshed estimate says so), **redact** (ADR 0101: a value, a JSON document, a text or log attributes rendered for DISPLAY with every secret the `Redactor` recognises replaced — a NAME carrying a configured word, a field DECLARED secret by a configurable tag, a URL's credentials — within an EXACT byte bound, because the writer is the package's own and counts every byte before writing it; credentials are scrubbed BEFORE a text is cut, a cut is a prefix, and nothing it is given is mutated), a strict JSON decoder in `codec/strictjson` (ADR 0102: one document read ONE way — `encoding/json/v2` refuses the duplicate name, the case-only match, the unknown member, invalid UTF-8 and trailing data that `encoding/json` silently accepts — within a bound on READING, with refusals that never quote the input and a request-body form that answers 413, 415 or 400), a keyed rate limiter, a public backoff curve and a retry waiting on an injected clock (ADR 0103 — publishing the curve fixed a float-to-duration conversion that made amd64 retries stop waiting at attempt 35), and a `Waker` sibling that lets an idle queue consumer sleep until a publication or a due instant rather than poll (ADR 0104); and — the third wave — the engines a service keeps running: a **docstore** (ADR 0110: typed, keyed JSON documents with unique and multi-valued indexes, persisted as ONE overlay entry per write through `vfs` and folded into one `{key: document}` snapshot at rest, so a write at 100 000 documents costs what it costs at 100 — the whole-file rewrite it replaces cost 70.3 ms — with a replay that is order-free and idempotent at every crash point of a fold; and since ADR 0139 the same store over SQL, `OpenSQL`, answering the same refusals under the same codes from two tables per store — binary keys compared as Go compares them, the document as the bytes encoded and never the engine's JSON type, uniqueness the table's own constraint — every call on the transaction its context carries, a write in a savepoint of it and its hooks after the commit, a collision raced in after its check asked about after the rollback rather than parsed from a driver whose words `STATEMENT_FAILED` withholds, because they quote the row; and since ADR 0143, in either engine, a document's last VERSIONS — numbered from 1 and never reused while it lives, stamped with an instant and the caller's metadata, the current one being the document itself — kept in the same durable write as the document, one overlay entry or one transaction, pruned in that write unless `Held` reports a legal hold, and rewritten under the writers' lock by `RewriteVersions` for an erasure, so no crash ever leaves the versions ahead of or behind their document — and what changed between two of them is `codec/jsonpatch`'s: two JSON documents' difference as RFC 6902 operations with both values, compared as RFC 6902 compares values, numbers exactly, arrays aligned before they are paired; and `password.IsCommon`, the ten thousand most common passwords a new one is checked against, case-insensitively — SecLists' list, MIT, embedded byte for byte at a pinned commit), a durable mail **spool** (ADR 0111: validated and stamped at Send with a Message-ID every retry keeps, delivered from the queue domain with a failure PARKED by extending its lease on a growing backoff and only the last attempt nacked into a dead letter carrying the true cause, a redelivery of a delivered mail dropped, and `NewCapture`, the bounded memory transport; ADR 0141: `SendWithID` queues under an identifier its caller minted before the spool had the mail, every identifier a dot-atom of at most 255 bytes because it becomes the Message-ID's left half, and a repeated one meets the delivered-ID ledger rather than a refusal), a **supervisor** in `lifecycle` (ADR 0112: a function run until stopped and restarted after every early end — error, nil return, recovered panic — on the published backoff, observed run by run, joined on `Stop`, and a `Lifecycle` component), a **statemachine** over stored entities (ADR 0120: the caller's store is the source of truth through a port frozen at five methods where absence is an answer and `Replace` never resurrects; events a caller fires, timers after a duration in a state, deadlines the entity carries and guards on it, the first declared transition due firing; per-entity locks with nothing held across a panic and a hook that fires its own machine refused rather than deadlocked; and an AGENDA — one heap entry per entity — so the loop sleeps until the next transition due or a write and finds it in O(log N) where re-reading the store cost O(N), measured at 4.1 µs against 68 ms for a hundred thousand entities, with a failing entity backed off alone), and the process's own profiles (ADR 0121: a CPU window and the live heap captured, the pprof format decoded with the standard library and checked against Google's decoder, folded onto owners the caller names so that the parts add up to the total exactly, and the runtime's goroutine dump read into goroutines — state, minutes waited, labels in either printed form, stacks — and grouped).
+Go SDK providing a normed, performant toolbox for downstream applications: the mechanisms a service is made of — typed errors, observability, codecs, cryptography, storage, networking, process supervision and the application mechanisms above them — built on the standard library (ADR 0156) and published as one stable surface, `pkg/v1`. The kernel's generic primitives build `internal/core`'s ports, values and error codes, the core builds `internal/service`'s engines, a complete service is exported through `pkg/v1`, and the framework (ADR 0147) sits above `pkg/v1`. Every domain follows the principles of the charter (ADR 0154), and ADR 0155 groups the tree into the families the table names. One line per domain below; what each ADR decided is digested in `docs/adr/CLAUDE.md`, and every package documents itself in its own `CLAUDE.md`.
+
+| Domain | Family (ADR 0155) | What it is | ADRs |
+|---|---|---|---|
+| `errs` | root | Typed errors: `Define` / `Wrap`, dotted-quad `MM.LL.PP.SS` codes, a wire-safe `Public` and a log-only `Private`, origin wins on wrap | 0002, 0005, 0006, 0019, 0020, 0035, 0160, 0161 |
+| `clock` | root | The time port — `Clock`, `Waiter`, `Timed`, `System`, `ManualClock`; every SDK wait runs on an injected clock | 0039, 0090 |
+| `crypto` | crypto | AEAD `Seal` / `Open` with a hidden nonce at the family's root, and as its children hashes, MACs, KDFs, signatures, key agreement, password hashing (with `IsCommon`) and JWK/JWKS | 0013, 0014, 0143 |
+| `secret` | security | A `Value` no rendering writes down; versioned stores (memory, environment, sealed file), a keyring and a rotator; one key per subject, destroyed to erase | 0096, 0142 |
+| `redact` | security | Display redaction of values, JSON, text and log attributes — names, declared fields, URL credentials — within an exact byte bound | 0101 |
+| `token` | security | JWT over JWS Compact and PASETO v4.public; the algorithm is bound by the constructor, never read from the token | 0042 |
+| `session` | security | Server-side sessions: a self-redacting 256-bit identifier, memory and file stores (the file store's directory audited for a planted link, then held, so nothing is read or locked through one), absolute and sliding expiry, `Regenerate` the only login | 0045, 0073 |
+| `authz` | security | RBAC and ABAC with no policy language; abstention is the zero verdict, deny-overrides the one combiner | 0057 |
+| `net` | net | TLS/mTLS identities, the guarded outbound client, the server engine and its drain signal, SSE, WebSocket (RFC 6455) and a static file tree | 0029, 0043, 0047, 0069, 0130 |
+| `proc` | proc | Spawn and wait, signals, the reaper, rlimits, cgroups and the cap already bounding the process, sd_notify and socket activation, what the program was built from | 0016, 0075, 0093, 0100, 0144 |
+| `ipc` | proc | A private socket between processes of one machine: the directory gates it, the path above that directory is refused where another account could steer it, the kernel names the peer where it can | 0148 |
+| `logger` | observe | Structured logger, one allocation per emit, trace-correlated; named writers (console, file, rotation, journald, database, network) and a `slog` bridge at the edge | 0012, 0015, 0030, 0032, 0062, 0070, 0132 |
+| `metrics` | observe | The OpenTelemetry metrics data model from its specification, zero OTel imports; text, Prometheus and OTLP/JSON exporters | 0027, 0044, 0048, 0067 |
+| `trace` | observe | The OTel span model and W3C Trace Context from their documents, sampled once at the root, exported as OTLP/JSON | 0051 |
+| `profiling` | observe | The process's own CPU, heap and goroutine profiles, decoded with the standard library and folded onto owners the caller names | 0121 |
+| `codec` | data | 24 wire formats behind one `Marshal` / `Unmarshal` dispatch with per-format facades, strict JSON decoding, a type's wire shape and JSON patch | 0003, 0021, 0022, 0023, 0036, 0037, 0102, 0133, 0134, 0143, 0156 |
+| `transform` | data | Compression: stdlib gzip, raw DEFLATE and zlib; zstd and s2 opt-in under `third-party/`, with a ceiling that cannot be omitted | 0014, 0066 |
+| `sql` | data | Ports over `database/sql`, never an ORM or a driver: structural transaction ownership, savepoints, migrations under a lock that dies with its holder | 0055, 0139, 0140 |
+| `docstore` | data | Typed keyed JSON documents with indexes and versions — one overlay entry per write through `vfs`, or tables of the caller's database | 0110, 0139, 0143 |
+| `queue` | data | Durable at-least-once queue over a directory, a SQL table joined to the caller's transaction, or memory; retried and dead-lettered | 0054, 0104, 0151 |
+| `cache` | data | The kernel LRU+TTL primitive and the domain above it: tag invalidation, in-process stampede protection, L1/L2 chaining | 0025, 0049 |
+| `vfs` | data | `io/fs` reading unchanged and atomic publication, with how far "atomic" reaches stated | 0056 |
+| `config` | app | Environment, file and `fs.FS` layering, typed decode, a schema (required keys, defaults, unknown keys refused), provenance, a poll watcher | 0028, 0061, 0097 |
+| `cli` | app | Command lines on the stdlib `flag`: sub-commands, generated help, a typed exit status, a seam to `config` | 0065 |
+| `i18n` | app | Message translation over a named 13-language CLDR subset; every other language refused by name | 0063 |
+| `validation` | app | A `Constraint` port, located violations and the engine composing them; a message never names the value | 0046 |
+| `view` | app | Server-side rendering on `html/template`: one trust type, templates parsed once, `text/template` refused | 0058 |
+| `events` | app | An in-process synchronous event bus keyed on Go types — not a queue | 0053 |
+| `scheduler` | app | Five-field POSIX cron and fixed intervals, with DST, missed deadlines and overlap decided | 0041 |
+| `statemachine` | app | Entities moved by events, timers, deadlines and guards over the caller's store, on an agenda rather than a sweep | 0120 |
+| `resilience` | app | Retry, circuit breaker, keyed rate limit, bulkhead, timeout, fallback, hedging, and the published backoff curve | 0026, 0031, 0103 |
+| `lifecycle` | app | Ordered start and reverse stop with a per-component budget, and the supervisor that restarts a loop | 0050, 0112 |
+| `health` | app | Startup, readiness and liveness as three types, every wait bounded, and the loopback readiness probe | 0060, 0072, 0131 |
+| `lock` | app | Named exclusive leases over one process or one machine, with fencing tokens and the guarantee that is not made said out loud | 0052, 0081, 0082, 0083, 0084, 0086 |
+| `id` | app | UUIDv4/v7, ULID, snowflake, NanoID, KSUID and TypeID | 0024, 0038 |
+| `mail` | app | MIME composition and SMTP with header injection refused, and a durable spool | 0064, 0111, 0141 |
+| `selfupdate` | framework (ADR 0158) | A signed release verified before its digest, then an atomic replacement; no key, no install | 0077, 0150 |
+| `entitlement` | framework (ADR 0158) | A vendor-signed roster read into a grant, with an offline cache, an anti-rollback ratchet and a CI seat | 0078, 0079, 0091, 0092 |
+| `gate` | framework (ADR 0158) | Whether an invocation is subject to the check: a policy value and a decision that performs nothing | 0080 |
+| `git` | framework (ADR 0158) | What a branch changed and what a working tree is at, through hardened git invocations; it degrades, never empties | 0076, 0087, 0100 |
 
 **Repository**: `github.com/kitsunium/sdk` · **Module name**: same · **Go**: 1.27.1 (pinned in `MODULE.bazel`)
 
@@ -11,181 +54,279 @@ Go SDK providing a normed, performant toolbox for downstream applications. Thirt
 
 ```
 internal/
-├── kernel/        stdlib-only AND generic primitives
-│                  batcher, buffer, cache, clock, errs, group, heap,
-│                  pathchain, plugin, recycler, ring, singleflight,
-│                  snapshot, topic, worker
-├── core/          domain interfaces + domain values
-│                  authz, cache, cli, codec (+ scratch), config, crypto,
-│                  entitlement, events,
-│                  gate,
-│                  health, i18n, id, lifecycle, lock, logger, logger/level,
-│                  mail, metrics, net, proc, queue, resilience, scheduler,
-│                  secret, selfupdate, session, sql, statemachine, token,
-│                  trace, transform,
-│                  validation, vcs,
-│                  vfs,
-│                  view, writer
+├── kernel/        stdlib-only AND generic primitives, by family (ADR 0155)
+│                  backoff, clock, errs, plugin, semver,
+│                  concur/{batcher, buffer, group, recycler, singleflight,
+│                          snapshot, worker},
+│                  collections/{cache, heap, ring},
+│                  fs/{flock, pathchain, winacl}
+├── core/          domain interfaces + domain values — each package by its path
+│                  crypto, crypto/key/jwk, net, proc, proc/ipc,
+│                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
+│                       mail, mail/spool, resilience, scheduler, statemachine,
+│                       validation, view},
+│                  data/{cache, codec, codec/scratch,
+│                        codec/{asn1, baseenc, bson, cbor, csv, flatbuffers,
+│                               form, json, jsonpatch, msgpack, multipart,
+│                               ndjson, pem, strictjson, tlv, toml, xml,
+│                               yaml},
+│                        docstore, queue, sql, transform, vfs},
+│                  observe/{logger, logger/{level, writer},
+│                           logger/middleware/{async, encwrite, failover,
+│                           multi, recover, route, sample, tee},
+│                           logger/sink/{console, file, syslog},
+│                           logger/writer/{journald, nettransport, rotfile},
+│                           metrics, otel, profiling, trace},
+│                  security/{authz, redact, secret, session, token}
 └── service/       concrete implementations
-                   authz  (RBAC + ABAC + deny-overrides + Check)
-                   cache   (tagged memory store + L1/L2 chain)
-                   cli    (resolution loop + generated help + config seam)
-                   config (env, file and fs.FS sources + layered decode +
-                           schema + origins + poll watcher)
-                   events  (synchronous priority-ordered bus + On[E])
-                   health (check registry + per-check timeouts + drain latch
-                           + HTTP handler + the loopback Ask)
-                   lifecycle (ordered engine + per-component stop budget
-                              + opt-in signal/sd_notify Run + the supervisor)
-                   docstore (typed JSON documents + unique/multi indexes;
-                             one overlay entry per write, one snapshot at rest;
-                             + the same store over SQL, joined to the
-                             context's transaction — ADR 0139; + a document's
-                             versions, in its own write — ADR 0143)
-                   lock    (in-process leases + file locker over flock(2)
-                            or LockFileEx + keepalive)
-                   logger (+ encoder, sink/{console,file,memory,syslog},
-                             middleware/{async,encwrite,failover,multi,
-                                         recover,route,sample,tee})
-                   writer (console, dbsink, file, journald, levelgate,
-                           nettransport, rotfile)
-                   crypto (aesgcm, commonpw, ecdsasig, ed25519sig,
-                           hkdfsha256, hmacsha2, jwk, keyenvelope, keytree,
-                           pbkdf2pw, stdhash, streamaead, x25519)
-                   codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
-                           form, json, msgpack, multipart, ndjson, pem, tlv, toml,
-                           xml, yaml; + strictjson, a decoder and not a Format;
-                           + jsonshape, a type's wire shape, not a Format;
-                           + jsonpatch, two documents' difference, not a Format)
-                   queue  (file, SQL and memory brokers + Consume loop
-                           waiting on the Waker sibling; the SQL broker
-                           joins the context's transaction — ADR 0151)
-                   proc   (cgroup, childwait, exec, memlimit, reaper,
-                           rlimit, sdlisten, sdnotify, self, signal)
-                   i18n   (CLDR plural table + catalogue + negotiator + printer)
-                   profiling (CPU/heap capture + a stdlib pprof decoder +
-                           fold onto owners + goroutine dumps, grouped)
-                   id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
-                           ksuid, typeid)
-                   net    (tlsid, client, server, sse, websocket, static)
-                   mail   (MIME composition + SMTP + memory and capture
-                           doubles; spool/ — the durable outbox)
-                   metrics (in-memory meter + text/prometheus/otlpjson
-                             exporters + the OTLP/HTTP emitter)
-                   resilience (retry, circuit breaker, rate limit + keyed,
-                           bulkhead, timeout, fallback, hedging; the backoff curve)
-                   scheduler (cron parser + fixed interval + engine)
-                   secret (memory, environment and sealed file stores,
-                           keyring over versions, rotator; subject keys
-                           under a rotating root, destroyed to erase)
-                   session (memory store, file store, AEAD cookie sealer)
-                   statemachine (declarations + per-entity transitions +
-                           an agenda heap the loop sleeps on)
-                   sql    (transaction manager + savepoints + pool policy
-                           + Join/Defer siblings + migration runner, SQLite's
-                           on the database file's write lock — ADR 0140)
-                   token  (JWS compact + PASETO v4.public)
-                   trace  (tracer + samplers + recorder + otlpjson
+                   observe (the family — ADR 0155; a directory, no Go code:
+                           logger — + encoder, sink/{console,file,memory,
+                             syslog}, middleware/{async,encwrite,failover,
+                             multi,recover,route,sample,tee};
+                           logger/writer — console, dbsink, file, journald,
+                             levelgate, nettransport, rotfile;
+                           logger/internal/logfile — the hardened open both
+                             file sinks share;
+                           metrics — in-memory meter + text/prometheus/
+                             otlpjson exporters + the OTLP/HTTP emitter;
+                           trace — tracer + samplers + recorder + otlpjson
                              exporter + the OTLP/HTTP emitter + the
-                             server/client HTTP middlewares)
-                   transform
-                   validation (constraints + combinators + struct-tag plan)
-                   view   (html/template engine + trust scan + parse-once)
-                   vfs    (os.Root-confined FS + memory FS + atomic publish)
-                   vcs    (git changed-set: merge-base + index + worktree
-                           + untracked, hardened invocations; + Head)
-                   redact (display redaction: names, declared fields, URL
-                           credentials, within an exact byte bound)
-                   selfupdate (signed release -> verified archive -> atomic
-                           replacement, with consent and escalation opt-ins)
-                   entitlement (vendor-signed roster -> grant, with an
-                           offline cache, an anti-rollback ratchet and a CI seat)
-                   gate   (may this invocation run? a policy value and a pure
-                           decision; it verifies nothing and exits nothing)
-                   ipc    (a private socket between processes of one machine:
-                           the directory gates, SO_PEERCRED on Linux, a
-                           named pipe with its own DACL on Windows — ADR 0148)
+                             server/client HTTP middlewares + the W3C
+                             traceparent/tracestate reader and writer
+                             (moved from the core — ADR 0160 §4);
+                           profiling — CPU/heap capture + a stdlib pprof
+                             decoder + fold onto owners + goroutine dumps,
+                             grouped;
+                           internal/otlp — the OTLP/HTTP + JSON transport
+                             metrics and trace share)
+                   crypto (the schemes by role — ADR 0155:
+                           aead/{aesgcm, streamaead}, agree/{x25519},
+                           hash/{stdhash}, kdf/{hkdfsha256, keytree},
+                           key/{jwk, keyenvelope}, mac/{hmacsha2},
+                           password/{commonpw, pbkdf2pw},
+                           sign/{ecdsasig, ed25519sig})
+                   security (the family — ADR 0155; a directory, no Go code:
+                           authz  — RBAC + ABAC + deny-overrides + Check;
+                           redact — display redaction: names, declared
+                             fields, URL credentials, within an exact
+                             byte bound;
+                           secret — memory, environment and sealed file
+                             stores, keyring over versions, rotator; subject
+                             keys under a rotating root, destroyed to erase;
+                           session — memory store, file store (its Dir
+                             audited with pathchain, then held as an
+                             os.Root), AEAD cookie sealer;
+                           token  — JWS compact + PASETO v4.public)
+                   data   (the family — ADR 0155; a directory, no Go code:
+                           cache — tagged memory store + L1/L2 chain;
+                           codec — asn1, baseenc, bson, cbor, csv,
+                             flatbuffers, form, json, msgpack, multipart,
+                             ndjson, pem, tlv, toml, xml, yaml; + strictjson,
+                             a decoder and not a Format, its request-body
+                             form in strictjson/httpbody; + jsonshape, a
+                             type's wire shape, not a Format; + jsonpatch,
+                             two documents' difference, not a Format;
+                           docstore — typed JSON documents + unique/multi
+                             indexes; one overlay entry per write, one
+                             snapshot at rest; + the same store over SQL,
+                             joined to the context's transaction — ADR 0139;
+                             + a document's versions, in its own write —
+                             ADR 0143;
+                           queue — file, SQL and memory brokers + Consume
+                             loop waiting on the Waker sibling; the SQL
+                             broker joins the context's transaction —
+                             ADR 0151;
+                           sql — transaction manager + savepoints + pool
+                             policy + Join/Defer siblings + migration
+                             runner, SQLite's on the database file's write
+                             lock — ADR 0140;
+                           transform — the stdlib gzip, raw DEFLATE and
+                             zlib compressors;
+                           vfs — os.Root-confined FS + memory FS + atomic
+                             publish)
+                   proc   (the family — ADR 0155; a directory, no Go code:
+                           cgroup, childwait, exec, memlimit, reaper,
+                           rlimit, self, signal — process supervision,
+                           ADR 0016; internal/rlim — the syscall.Rlimit
+                           constructor exec and rlimit share;
+                           systemd/{listen, notify} — socket activation and
+                           sd_notify; ipc — a private socket between
+                           processes of one machine, the engines behind
+                           core/proc/ipc's Listener and Dialer ports: the
+                           directory gates, the path above it audited with
+                           pathchain (PATH_UNSAFE), SO_PEERCRED on Linux, a
+                           named pipe with its own DACL on Windows —
+                           ADR 0148, ADR 0160)
+                   net    (the family — ADR 0155; a directory, no Go code:
+                           client, server, sse, static, tlsid, websocket —
+                           one engine each over the one contract core/net;
+                           the WebSocket and SSE wire formats are the
+                           engines' own — ADR 0160 §4)
+                   app    (the family — ADR 0155; a directory, no Go code:
+                           config — env, file and fs.FS sources + layered
+                             decode + schema + origins + poll watcher;
+                           cli — resolution loop + generated help + config
+                             seam;
+                           i18n — CLDR plural table + catalogue + negotiator
+                             + printer + the BCP 47 tag parser and pattern
+                             compiler (ADR 0160 §4);
+                           validation — constraints + combinators +
+                             struct-tag plan;
+                           view — html/template engine + trust scan +
+                             parse-once;
+                           events — synchronous priority-ordered bus +
+                             On[E];
+                           scheduler — cron parser + fixed interval + engine;
+                           statemachine — declarations + per-entity
+                             transitions + an agenda heap the loop sleeps on;
+                           resilience — retry, circuit breaker, rate limit +
+                             keyed, bulkhead, timeout, fallback, hedging; the
+                             backoff curve, an alias of kernel/backoff's;
+                           lifecycle — ordered engine + per-component stop
+                             budget + opt-in signal/sd_notify Run + the
+                             supervisor;
+                           health — check registry + per-check timeouts +
+                             drain latch + HTTP handler + the loopback Ask;
+                           lock — in-process leases + file locker over
+                             flock(2) or LockFileEx + keepalive;
+                           id — uuidv4, uuidv7, ulid, snowflake, nanoid,
+                             ksuid, typeid;
+                           mail — the guards (Validate, the injection gate,
+                             Envelope — moved from the core, ADR 0160) +
+                             MIME composition + SMTP + memory and capture
+                             doubles; spool/ — the durable outbox)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
-    ├── logger/    (+ ldflags-injected Version, + writer/, + slogbridge/)
+    ├── concur/    (a family directory, no Go code — ADR 0159 §4: group/, singleflight/,
+    │                 worker/, batcher/, snapshot/, recycler/ — pure aliases of the
+    │                 kernel's concurrency primitives)
+    ├── collections/ (a family directory, no Go code — ADR 0159 §4: heap/, ring/ —
+    │                 pure aliases of the kernel's containers, ring single-producer)
+    ├── observe/   (a family directory, no Go code — ADR 0155:
+    │                 logger/ — + ldflags-injected Version, + writer/, + slogbridge/;
+    │                 metrics/ — the OTel data model, zero OTel imports — ADR 0044;
+    │                 trace/ — W3C Trace Context + the OTel span model — ADR 0051;
+    │                 profiling/ — the process's CPU, heap and goroutines, folded
+    │                   onto your owners — ADR 0121)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
-    ├── events/    (in-process synchronous bus — ADR 0053; NOT a queue)
-    ├── codec/     (blank-imports all 16 service codecs + transform;
-    │                 + strictjson/ — one document read one way — ADR 0102;
-    │                 + jsonshape/ — a type's wire shape — ADR 0133;
-    │                 + jsonpatch/ — two documents' difference — ADR 0143;
-    │                 + json/, yaml/, toml/ — one format each — ADR 0134)
-    ├── crypto/    (AEAD and keys; its scheme facades are siblings, not children:
+    ├── data/      (a family directory, no Go code — ADR 0155:
+    │                 codec/ — the aggregate of its sixteen per-format packages,
+    │                   one format each with its codes — asn1/, baseenc/, bson/,
+    │                   cbor/, csv/, flatbuffers/, form/, json/, msgpack/,
+    │                   multipart/, ndjson/, pem/, tlv/, toml/, xml/, yaml/ —
+    │                   ADR 0134; bson/ also names BSON's value types;
+    │                   + strictjson/ — one document read one way — ADR 0102,
+    │                   its request-body form in strictjson/httpbody/;
+    │                   + jsonshape/ — a type's wire shape — ADR 0133;
+    │                   + jsonpatch/ — two documents' difference — ADR 0143;
+    │                 transform/ — compression without the codec package, the
+    │                   caller's ceiling honoured — ADR 0014;
+    │                 sql/ — ports over database/sql, no driver, no ORM — ADR 0055;
+    │                   Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140;
+    │                 docstore/ — typed JSON documents, indexes, one entry per write —
+    │                   ADR 0110; the same store over SQL, OpenSQL — ADR 0139;
+    │                   a document's versions, in its own write — ADR 0143;
+    │                 queue/ — durable at-least-once broker, no lock — ADR 0054;
+    │                 cache/ — the ADR 0025 primitive AND the ADR 0049 domain,
+    │                   side by side;
+    │                 vfs/ — io/fs reading unchanged + atomic publication — ADR 0056;
+    │                 semver/ — SemVer precedence + Go pseudo-versions on the
+    │                   standard library — ADR 0156 §4, ADR 0159 §4)
+    ├── crypto/    (AEAD and keys at the family's root; its scheme facades are
+    │                 its children — a child never links its parent, ADR 0155:
     │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
     │                 since ADR 0143)
-    ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
-    ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
-    │                 the supervisor — ADR 0112)
-    ├── config/    (env, file and fs.FS layering, schema, origins, poll watch — ADR 0028, ADR 0061, ADR 0097)
-    ├── health/    (startup, readiness and liveness — three questions, three types — ADR 0060;
-    │                 Ask, the loopback readiness probe — ADR 0131)
-    ├── resilience/ (retry, breaker, rate limit + keyed, bulkhead, timeout, fallback, hedging — ADR 0026, ADR 0103)
-    ├── docstore/  (typed JSON documents, indexes, one entry per write — ADR 0110;
-    │                 the same store over SQL, OpenSQL — ADR 0139;
-    │                 a document's versions, in its own write — ADR 0143)
-    ├── lock/      (Locker/Lease/Deadliner + memory & file lockers — ADR 0052, ADR 0081, ADR 0082, ADR 0083)
-    ├── proc/      (its facades are siblings: cgroup, memlimit, process, reaper, rlimit,
-    │                 sdlisten, sdnotify, signal; process also reads the process itself
-    │                 — Self, Build — ADR 0100)
-    ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
-    └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
-    └── server/    (+ sse/ — ADR 0029/0043, + websocket/ — ADR 0047,
-                     + static/ — a file tree served by name — ADR 0130)
-    └── client/    (the guarded outbound HTTP client, posture enforced by the transport — ADR 0029)
-    └── tlsid/     (TLS and mutual-TLS identities, shared by server and client — ADR 0029)
-    └── secret/    (a Value no rendering writes down, versioned stores, keyring, rotator — ADR 0096;
-                     one key per subject, destroyed to erase — ADR 0142)
-    └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
-    └── profiling/ (the process's CPU, heap and goroutines, folded onto your owners — ADR 0121)
-    └── session/   (memory + file Store, AEAD Sealer, Regenerate — ADR 0045)
-    └── token/     (JWT over JWS compact + PASETO v4.public — ADR 0042)
-    └── trace/     (W3C Trace Context + the OTel span model — ADR 0051)
-    └── validation/ (Constraint / Violation / Report + the struct-tag front end — ADR 0046)
-    └── authz/      (RBAC + ABAC, no DSL, abstention is the zero — ADR 0057)
-    └── i18n/       (CLDR plurals over a named 13-language subset — ADR 0063)
-    └── cli/        (flag + sub-commands + generated help + typed exit — ADR 0065)
-    └── mail/       (compose + Transport, injection refused — ADR 0064;
-                     the spool, the durable outbox — ADR 0111)
-    └── queue/      (durable at-least-once broker, no lock — ADR 0054)
-    └── sql/        (ports over database/sql, no driver, no ORM — ADR 0055;
-                     Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140)
-    └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
-    └── git/        (what a branch changed; degrades, never empties — ADR 0076)
-    └── selfupdate/ (signature THEN digest THEN disk; no key, no install — ADR 0077)
-    └── entitlement/ (signed roster -> grant; bring your own Identity — ADR 0079)
-    └── gate/        (may this invocation run? decides, performs nothing — ADR 0080)
-    └── ipc/         (a private socket, the peer the kernel names — ADR 0148)
-    └── redact/      (secrets replaced for display, exact bound — ADR 0101)
-    └── view/       (html/template, one trust type, parse once — ADR 0058)
-third-party/       opt-in vendor integrations (root module only)
-                   aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
-                   entitlement (the ssh Identity + enrolment ONLY; the
-                     mechanism is pkg/v1/entitlement — ADR 0079),
+    ├── security/  (a family directory, no Go code — ADR 0155:
+    │                 authz/ — RBAC + ABAC, no DSL, abstention is the zero — ADR 0057;
+    │                 redact/ — secrets replaced for display, exact bound — ADR 0101;
+    │                   the Redactor a port a test can double — ADR 0160;
+    │                 secret/ — a Value no rendering writes down, versioned stores,
+    │                   keyring, rotator — ADR 0096; one key per subject, destroyed
+    │                   to erase — ADR 0142;
+    │                 session/ — memory + file Store, AEAD Sealer, Regenerate — ADR 0045;
+    │                 token/ — JWT over JWS compact + PASETO v4.public — ADR 0042)
+    ├── net/       (a family directory, no Go code — ADR 0155:
+    │                 server/ — the inbound engine, its drain announced — ADR 0029/0043;
+    │                 client/ — the guarded outbound HTTP client, posture enforced by
+    │                   the transport — ADR 0029;
+    │                 tlsid/ — TLS and mutual-TLS identities, shared by server and
+    │                   client — ADR 0029;
+    │                 sse/ — ADR 0029/0043; websocket/ — ADR 0047;
+    │                 static/ — a file tree served by name — ADR 0130)
+    ├── proc/      (the capability preflight at the family's root — ADR 0016, ADR 0144;
+    │                 its facades are its children — a child never links its parent,
+    │                 ADR 0155: process/ — spawn, wait, stop, and the process itself,
+    │                 Self and Build — ADR 0100; signal/, reaper/, rlimit/, cgroup/;
+    │                 memlimit/ — the cap already bounding this process — ADR 0075;
+    │                 systemd/{notify, listen}/ — sd_notify and socket activation;
+    │                 ipc/ — a private socket, the peer the kernel names — ADR 0148;
+    │                   Listener/Dialer ports a test can double — ADR 0160)
+    └── app/       (a family directory, no Go code — ADR 0155:
+                      config/ — env, file and fs.FS layering, schema, origins,
+                        poll watch — ADR 0028, ADR 0061, ADR 0097;
+                      cli/ — flag + sub-commands + generated help + typed exit —
+                        ADR 0065;
+                      i18n/ — CLDR plurals over a named 13-language subset —
+                        ADR 0063;
+                      validation/ — Constraint / Violation / Report + the
+                        struct-tag front end — ADR 0046;
+                      view/ — html/template, one trust type, parse once — ADR 0058;
+                      events/ — in-process synchronous bus — ADR 0053; NOT a queue;
+                      scheduler/ — Parse/ParseInLocation/Every + the engine —
+                        ADR 0041;
+                      statemachine/ — entities moved by events, timers,
+                        deadlines, guards; an agenda, not a sweep — ADR 0120;
+                      resilience/ — retry, breaker, rate limit + keyed, bulkhead,
+                        timeout, fallback, hedging — ADR 0026, ADR 0103;
+                      lifecycle/ — ordered start, reverse stop, per-component
+                        budget — ADR 0050; the supervisor — ADR 0112;
+                      health/ — startup, readiness and liveness — three
+                        questions, three types — ADR 0060; Ask, the loopback
+                        readiness probe — ADR 0131;
+                      lock/ — Locker/Lease/Deadliner + memory & file lockers —
+                        ADR 0052, ADR 0081, ADR 0082, ADR 0083;
+                      id/ — UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID —
+                        ADR 0024, ADR 0038;
+                      mail/ — compose + Transport, injection refused — ADR 0064;
+                      mail/spool/ — the durable outbox — ADR 0111, ADR 0141)
+third-party/       opt-in vendor integrations, one Go module per vendor
+                   (ADR 0157) — see third-party/CLAUDE.md:
+                   aws (writer/{cloudwatch,s3}), codec/hcl, codec/protobuf,
+                   codec/yaml (yaml.v3 as the opt-in "yaml-full" Format,
+                     beside the native "yaml" subset — ADR 0156),
                    db/writer/{clickhouse,mysql,redis},
-                   db/sql (the SQL mechanisms on real engines — integration
-                     tests only, no production code — ADR 0139/0140),
                    transform (zstd + s2 — ADR 0066),
-                   x-crypto/{argon2id,xchacha}
+                   x-crypto (argon2id, xchacha);
+                   the SQL mechanisms' suites on real engines moved to
+                     e2e/integration/sql (ADR 0139/0140, ADR 0157)
 framework/         the layer above pkg/v1, its own module — ADR 0147
                    model (the graph types + the ID grammar, Version 5),
-                   kit (the runtime a product imports), telemetry (the
-                     telemetry port + exporter — ADR 0149),
-                   connectors/{postgres,mysql,sqlite} (one driver, one module each)
+                   kit (the runtime a product imports; beneath it the
+                     opt-in subsystems config/{toml,yaml}, server and
+                     studio, and storetest, the stores' conformance
+                     suite; its engine internal/kit, + plug, serverkit,
+                     studiokit), telemetry (the telemetry port + exporter
+                     — ADR 0149),
+                   entitlement, selfupdate, gate, git (the distribution
+                     mechanisms the SDK library shipped until ADR 0158:
+                     signed roster -> grant; signature THEN digest THEN
+                     disk; may this invocation run?; what a branch
+                     changed and what a working tree is at), their
+                     contracts and engines in internal/{core,service}/<domain>,
+                   connectors/{postgres,mysql,sqlite} (one driver, one module each),
+                   connectors/ssh (entitlement's ssh Identity + enrolment,
+                     a module of its own — ADR 0079, ADR 0158)
 ```
 
-`baseenc` is NOT a `pkg/v1/codec` subpackage — it is a service codec
-(`internal/service/codec/baseenc`) registering nine base-N Formats
-(base16/32/45/58/62/64/64url, hex, ascii85) through the same registry as
-every other codec.
+`baseenc` is ONE codec registering nine base-N Formats
+(base16/32/45/58/62/64/64url, hex, ascii85) through the same registry as every
+other codec —
+`internal/service/data/codec/baseenc`, published like the other fifteen by its
+per-format facade `pkg/v1/data/codec/baseenc` (ADR 0134). There is no
+byte-level base-N API: `codec.Marshal("base64", v)` is the one verb.
 
-- Nine SDK modules held together by `go.work` — plus three **auxiliary** modules deliberately kept OUT of it: `e2e/`, `tools/genindex/` and `tools/sdkguard/`. Bazel's `go_deps` extension reads `go.work` and cannot process extra modules, so adding any of them breaks the build; they carry `replace` directives (or need none) and are built with `GOWORK=off`. Counting `go.mod` files therefore yields twelve — that is not drift, it is the invariant — and `bash scripts/ci/go-modules.sh` prints them: it is the census every lane that loops over modules reads, so a module git tracks is built, vetted, tested on 32 bits and scanned without anybody editing a workflow (ADR 0137). See `e2e/CLAUDE.md` §Do NOT and `tools/CLAUDE.md` §Do NOT. The nine workspace modules are: root (umbrella — also hosts the opt-in, vendor-dependent integrations under `third-party/*`, e.g. the AWS writers; see ADR 0012), `internal/kernel`, `internal/core`, `internal/service`, and the public `pkg` (module `github.com/kitsunium/sdk/pkg`, `go.mod` at `pkg/go.mod`; its consumer packages live under `pkg/v1/` and import as `…/pkg/v1/*`, but the *module* is the bare `…/pkg` because Go forbids a `/v1` module-path suffix — ADR 0017), and the **framework** (module `github.com/kitsunium/sdk/framework`, `go.mod` at `framework/go.mod` — the layer above `pkg/v1` a product imports, which reaches `internal/` only through `pkg/v1` and `kernel/errs`, owns layer `4` of the dotted-quad and is released in lockstep with `pkg` — ADR 0147), and its three database engines `framework/connectors/{postgres,mysql,sqlite}`, one driver and one module each, released in the same lockstep. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Heavy vendor deps (AWS SDK) live in the **root** `go.mod` only — nothing requires the root module, so `pkg` consumers stay dep-light.
+- Nineteen SDK modules held together by `go.work` — plus three **auxiliary** modules deliberately kept OUT of it: `e2e/`, `tools/genindex/` and `tools/sdkguard/`. Bazel's `go_deps` extension reads `go.work` and cannot process extra modules, so adding any of them breaks the build; they carry `replace` directives (or need none) and are built with `GOWORK=off`. Counting `go.mod` files therefore yields twenty-two — that is not drift, it is the invariant — and `bash scripts/ci/go-modules.sh` prints them: it is the census every lane that loops over modules reads, so a module git tracks is built, vetted, tested on 32 bits and scanned without anybody editing a workflow (ADR 0137). A pattern never crosses a module boundary — `go build ./...` at the repository root builds the root module alone, in workspace mode or not — so a check of the whole SDK loops over that census. See `e2e/CLAUDE.md` §Do NOT and `tools/CLAUDE.md` §Do NOT. The nineteen workspace modules are: the root (the workspace's anchor beside `go.work` and `MODULE.bazel`: required by nothing, never tagged, and holding no package since entitlement's ssh `Identity` left for the framework — ADR 0157, ADR 0158 — so the census lanes skip it while it stays empty), `internal/kernel`, `internal/core`, `internal/service`, and the public `pkg` (module `github.com/kitsunium/sdk/pkg`, `go.mod` at `pkg/go.mod`; its consumer packages live under `pkg/v1/` and import as `…/pkg/v1/*`, but the *module* is the bare `…/pkg` because Go forbids a `/v1` module-path suffix — ADR 0017), the **framework** (module `github.com/kitsunium/sdk/framework`, `go.mod` at `framework/go.mod` — the layer above `pkg/v1` a product imports, which reaches `internal/` only through `pkg/v1` and `kernel/errs`, owns layer `4` of the dotted-quad and is released in lockstep with `pkg` — ADR 0147) and its four connectors — the three database engines `framework/connectors/{postgres,mysql,sqlite}`, one driver and one module each, and `framework/connectors/ssh`, entitlement's ssh `Identity` (ADR 0158) — and the nine vendor modules under `third-party/` — `aws`, `codec/hcl`, `codec/protobuf`, `codec/yaml`, `db/writer/{clickhouse,mysql,redis}`, `transform` and `x-crypto`, one vendor each (ADR 0157). All of them but the root are released in the same lockstep. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Each vendor lives in its own module's `go.mod` — nothing in the SDK requires a vendor module, and `pkg`, `internal/*` and the framework require no module outside the SDK at all (ADR 0156), so `pkg` consumers link the standard library alone and a consumer of one integration takes that vendor's graph and no other's.
 - Dependency direction is strictly top-down: kernel → core → service → pkg/v1 → framework, with `third-party/` above all but the framework. It is enforced on the BUILD GRAPH by `scripts/check-layer-deps.sh` (in `make lint` and CI — ADR 0068), not by visibility: ADR 0004 put it on `package_group` + `visibility`, but Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, and a kernel package importing core was shown to build. A rogue import fails `make lint` and CI, naming the target it reached.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall, which is also what keeps them out under Bazel.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`. Because the two build systems disagree about what is in scope, anything excluded from one MUST be covered by the other — see rule 12.
@@ -196,7 +337,7 @@ every other codec.
 |---|---|
 | New feature or bug fix | `/plan "description"` → `/do` → `/git --commit` → `/git --merge` |
 | Code review | `/review` |
-| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + package docs + BENCH.md presence + error-code drift + layer firewall + `make guard` + `make doclinks`) |
+| Linting | `make lint` (mod-tidy + gazelle drift + gofumpt -l + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + package docs + BENCH.md presence + error-code drift + layer firewall + `make guard` + `make doclinks`) |
 | Vulnerability scan | `make vuln-install && make vuln-check` — govulncheck over every module, fails on a reachable vulnerability (ADR 0136); online, so not part of `make lint` |
 | Local test suite | `make build && make test` (build prep + race tests) |
 | Allocation gates | `make test-alloc` — race-off pass; the ONLY lane that runs `//go:build !race` tests (targets in `tools/alloc-lane-targets.txt`, see rule 12) |
@@ -204,24 +345,24 @@ every other codec.
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | Release dry-run | `make release-dry-run` (computes patch bumps locally without pushing tags — see ADR 0007) |
-| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 66 today — and of every package of the `framework` module declaring one (not the `framework/connectors/*` modules, which that `go generate` does not reach), from its package doc comment; see ADR 0008) |
+| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 87 today — and of every package of the `framework` module declaring one — 26 today — from its package doc comment; not the four `framework/connectors/*` modules, which that `go generate` does not reach, though `check-readme-drift.sh` checks them too; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.
 
 ## SDK-wide rules (non-negotiable)
 
 1. **Kernel gate.** A kernel package MUST be stdlib-only AND generic (no domain vocabulary). `level` was moved OUT of kernel because it fails the second half — see ADR 0002 / the layer-placement audit in `.claude/contexts/sdk-layer-placement-audit.md`.
-2. **Typed errors only.** Every error returned from SDK code goes through `errs.Define` or `errs.Wrap` (`internal/kernel/errs`). `fmt.Errorf` / `errors.New` are banned in production code. The AST audit (`//internal/kernel/errs:errs_test`, run as part of `make test`) fails the build on violations.
-3. **Dotted-quad error codes.** `Code` is a `uint32` laid out `MM.LL.PP.SS` (Major / Layer / Package / Serial) — see ADR 0005. Each package owns a `PP` slot; ADR 0005 §Registry + the ADR 0006 extension (logger v2 + ring) are the authoritative allocation table. Two AST audits enforce it: `registry_external_test.go` checks that no two `Define` calls resolve to the same **value**, and `registry_ownership_external_test.go` checks **range ownership** — one package per `MM.LL.PP`, against a hand-maintained `codeRangeOwners` table that is deliberately independent of the constants it audits (ADR 0035). A new range is allocated in that table in the same change that introduces its codes. Both audits only judge files that reach them as runfiles of `//:audit_sources`, so `scripts/pre-commit/check-audit-coverage.sh` fails the build when a package declaring codes is missing from that list — the gap ADR 0020 records having already hidden ~10 emitters, and which had silently reopened for all five `internal/service/net/*` packages. Match codes with `errs.HasCode(err, CodeX)` (walks `Unwrap() error` *and* `Unwrap() []error`) or `errors.Is(err, errs.NewPrefixMatcher(...))` for subnet-style routing.
+2. **Typed errors only.** Every error returned from SDK code goes through `errs.Define` or `errs.Wrap` (`internal/kernel/errs`). `fmt.Errorf` / `errors.New` are banned in production code — every non-`_test.go` file under `internal/`, `pkg/`, `third-party/` and `framework/`, with no exemption. `make guard` enforces it: `tools/sdkguard`'s SDK002 over that tree, failing `make lint` and CI's lint gate on either call and on a `//sdkguard:allow SDK002` directive (SDK002 stays a convention for consumers — ADR 0033). `errors.Is` / `As` / `AsType` / `Join` / `Unwrap` and `errors.ErrUnsupported` stay allowed.
+3. **Dotted-quad error codes.** `Code` is a `uint32` laid out `MM.LL.PP.SS` (Major / Layer / Package / Serial) — see ADR 0005. Each package owns a `PP` slot; ADR 0005 §Registry + the ADR 0006 extension (logger v2 + ring) are the authoritative allocation table. Two AST audits enforce it: `registry_external_test.go` checks that no two `Define` calls resolve to the same **value**, and `registry_ownership_external_test.go` checks **range ownership** — one package per `MM.LL.PP`, against a hand-maintained `codeRangeOwners` table that is deliberately independent of the constants it audits (ADR 0035). A new range is allocated in that table in the same change that introduces its codes. Both audits only judge files that reach them as runfiles of `//:audit_sources`, so `scripts/pre-commit/check-audit-coverage.sh` fails the build when a package declaring codes is missing from that list — the gap ADR 0020 records having already hidden ~10 emitters. Where a code is declared is checked too (ADR 0160): every code is declared by an `internal/core` package, at the path of the engine that raises it, and `scripts/pre-commit/check-core-symmetry.sh` — `make lint` and CI — fails when a production file under `internal/service` declares one (an `errs.Define` under any import name, or a `Code` constant), when a service domain has no core package at the same path, or when a core package declares a code no engine at its path accounts for — a layer-3 range sits at its engine's path, and only a sub-contract beneath a domain may hold, without one, a range the core allocated (`observe/logger/level`). A code's VALUE never changes when its declaration moves: `LL` records the layer that allocated the range, not the directory that declares it, so an engine's range declared in the core keeps `0.3.PP.*` and the distribution domains' ranges kept theirs in the framework (ADR 0160 §3, ADR 0158) — `codeRangeOwners` keeps its keys and re-points its directories, and `make error-codes` shows the same values under new paths. Match codes with `errs.HasCode(err, CodeX)` (walks `Unwrap() error` *and* `Unwrap() []error`) or `errors.Is(err, errs.NewPrefixMatcher(...))` for subnet-style routing.
 4. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes, no newline) and a log-only `Private`. `err.Error()` renders `"[<code> <REASON>] <public>"` on the no-trail fast path; when the wrap trail is non-empty, ADR 0005 §Semantics extends the bracket header with `" <- "`-separated trail codes and an optional `" (truncated)"` marker — never Private, never Fields. Log-parser regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`.
 5. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it.
 6. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields` (and extend the intrinsic wrap trail). To relabel, define a fresh sentinel.
-7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
-8. **Every package is documented.** The guard `scripts/pre-commit/check-pkg-docs.sh` — run by `make lint` and CI — fails when any `internal/*` or `pkg/v*/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) require BOTH: `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`) and `CLAUDE.md` (agent-facing), because the two roles do not collapse. The `scripts/release/*.{sh,mjs}` and `docs/site/scripts/*.mjs` trees are tooling, not library code, and are exempt from this gate.
+7. **`Version` via build-time injection.** `pkg/v1/observe/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
+8. **Every package is documented.** The guard `scripts/pre-commit/check-pkg-docs.sh` — run by `make lint` and CI — fails when any `internal/*`, `pkg/v*/**` or `framework/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) and every framework package require BOTH: `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`) and `CLAUDE.md` (agent-facing), because the two roles do not collapse. The `scripts/` and `docs/site/scripts/` trees are tooling, not library code, and the gate does not walk them.
 9. **Every benchmark package ships its numbers.** The guard `scripts/pre-commit/check-bench-md.sh` — run by `make lint` and CI — fails when a directory contains `*_bench_test.go` but no sibling `BENCH.md`. The report is regenerated with `make bench`; it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so cross-machine deltas can be evaluated honestly.
-10. **`pkg/v*/**/README.md` are generated, not hand-authored.** The `gomarkdoc` binary (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`) reads each package's Go doc comments and emits `README.md` per package (ADR 0008). Edit the package comment in the existing `.go` file (`codec.go` / `accessors.go` / `logger.go`); run `make docs-readme` to regenerate; `scripts/pre-commit/check-readme-drift.sh` — run by CI's `bazel` job — blocks any change where the file on disk doesn't match what gomarkdoc would produce now. Maintainer rationale (Why-this-shape, layering, do-not lists) stays in `CLAUDE.md` — consumer-facing prose belongs in the package doc comment.
-11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the `internal/core` directories, when a domain is described twice in the Purpose paragraph, or when either ADR index drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
-12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` / `localstack` tagged tests declare their run procedure in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module, a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
+10. **`pkg/v*/**/README.md` are generated, not hand-authored — and so are the framework's.** The `gomarkdoc` binary (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`) reads each package's Go doc comments and emits `README.md` per package (ADR 0008), for every `pkg/v1` and `framework` package declaring `//go:generate gomarkdoc`. Edit the package comment in the existing `.go` file (`codec.go` / `accessors.go` / `logger.go`); run `make docs-readme` to regenerate; `scripts/pre-commit/check-readme-drift.sh` — run by CI's `bazel` job — blocks any change where the file on disk doesn't match what gomarkdoc would produce now. Maintainer rationale (Why-this-shape, layering, do-not lists) stays in `CLAUDE.md` — consumer-facing prose belongs in the package doc comment.
+11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/data/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the Go packages under `internal/core`, at any depth (a family's packages may be written `family/{a, b}`), when a domain is described twice in the Purpose paragraph, or when one of the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, this file's Reference list) drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
+12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/observe/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; the Docker-backed `integration` suites declare their run procedure in `e2e/integration/CLAUDE.md` (they live in the auxiliary `e2e` module — ADR 0157), and every other tagged suite — the AWS writers' `localstack` ones and `encwrite`'s `integration` socket test — in its package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module of the census — the framework and its four connectors, `connectors/ssh` included — a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
 
 ## Layout
 
@@ -229,11 +370,11 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 sdk/
 ├── internal/              see internal/CLAUDE.md
 ├── pkg/v1/                see pkg/CLAUDE.md + pkg/v1/CLAUDE.md
-├── third-party/           opt-in vendor integrations in the root module (AWS writers — ADR 0012)
+├── third-party/           opt-in vendor integrations, one Go module per vendor — see third-party/CLAUDE.md (ADR 0157)
 ├── framework/             the framework module above pkg/v1 — see framework/CLAUDE.md (ADR 0147)
 ├── docs/                  ADRs — see docs/CLAUDE.md
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
-├── go.work, go.mod        workspace + umbrella module (read by Bazel via from_file)
+├── go.work, go.mod        workspace + the root module, its anchor (read by Bazel via from_file)
 ├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.1 + go_deps)
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
 ├── .bazelrc               race-on by default; named configs: race / pure / ci / alloc
@@ -241,7 +382,7 @@ sdk/
 ├── Makefile               build / test / test-alloc / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── scripts/               guards (scripts/pre-commit/, run by make lint and CI — ADR 0153), release (scripts/release/) and CI (scripts/ci/) scripts, the layer firewall (check-layer-deps.sh)
 ├── .ktn-linter.yaml       ktn-linter configuration — the phases 1-7 gate `make lint-ktn-check` runs
-├── e2e/                   real-kernel conformance harness — auxiliary module, OUTSIDE go.work (GOWORK=off)
+├── e2e/                   real-kernel conformance harness + the Docker-backed integration suites (e2e/integration) — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── tools/alloc-lane-targets.txt  target list for the race-off alloc lane (rule 12)
@@ -267,13 +408,14 @@ sdk/
 | `make test` | every `*_test` target green incl. `//internal/kernel/errs:errs_test` (AST audit) |
 | `make test-alloc` | race-off allocation gates green — every target in `tools/alloc-lane-targets.txt`, the only lane running `//go:build !race` tests |
 | `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
-| `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree still names exactly the `internal/core` directories, no domain is described twice, and both ADR indexes name exactly the ADRs on disk, once each (rule 11) |
+| `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree's one `core/` block still names exactly the Go packages under `internal/core`, at any depth, no domain is described twice, and the three ADR indexes name exactly the ADRs on disk, once each (rule 11) |
 | `bash scripts/pre-commit/check-audit-coverage.sh` | exit 0 — no package declaring an `errs.Define`/`errs.Code` sits outside `//:audit_sources` (rule 3) |
-| `GOWORK=off GOARCH=386 CGO_ENABLED=0 go test ./...` (in every module `bash scripts/ci/go-modules.sh` prints) | green — the 32-bit RUNTIME bar, run by CI's `test-386` job over the whole census, `tools/` and the root module included (ADR 0137). `cross-build` proves the SDK compiles on 386; this proves it behaves, which is where a `int(0xffffffff)` read as `-1` shows up |
+| `bash scripts/pre-commit/check-core-symmetry.sh` | exit 0 — no production file under `internal/service` declares an error code, every service domain has a core package at the same path, and every code an `internal/core` package declares belongs to an engine at its path or, beneath a domain, to a range the core allocated (rule 3, ADR 0160) |
+| `GOWORK=off GOARCH=386 CGO_ENABLED=0 go test ./...` (in every module `bash scripts/ci/go-modules.sh` prints) | green — the 32-bit RUNTIME bar, run by CI's `test-386` job over the whole census, `tools/` included and the root module skipped while it holds no package (ADR 0137, ADR 0157). `cross-build` proves the SDK compiles on 386; this proves it behaves, which is where a `int(0xffffffff)` read as `-1` shows up |
 | `make vuln-install && make vuln-check` | every module: no REACHABLE known vulnerability (`govulncheck` source mode, pinned in the `Makefile`; needs `vuln.go.dev`). Blocking in CI's `bazel` job and run daily by `vuln-scan.yml` (ADR 0136) |
-| `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
-| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
-| `make guard` | `tools/sdkguard` over the SDK's own tree at invariant level (ADR 0033); no network — `-version-check=off` |
+| `cd pkg && go test ./...` | green; `pkg/v1/data/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
+| `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + core symmetry + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
+| `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161); no network — `-version-check=off` |
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
 
 ## Reference
@@ -408,5 +550,13 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0150 — a release names its tag, its keys rotate, and a replacement answers before it stands — `docs/adr/0150-a-release-names-its-tag-keys-rotate-and-a-replacement-answers-before-it-stands.md`
 - ADR 0151 — a message published in a transaction exists if and only if it commits — `docs/adr/0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md`
 - ADR 0153 — the repository carries no devcontainer and no git hooks, and its guards run in CI — `docs/adr/0153-the-repository-carries-no-devcontainer-and-no-git-hooks.md`
+- ADR 0154 — the SDK's principles are one charter, and an incident's rule lives with the code it hit — `docs/adr/0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md`
+- ADR 0155 — every layer groups its packages by family, at the depth the families need, and an import path may move while v0 — `docs/adr/0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md`
+- ADR 0156 — the public module links the standard library and nothing else — `docs/adr/0156-the-public-module-links-the-standard-library-and-nothing-else.md`
+- ADR 0157 — one module per vendor, released with the SDK — `docs/adr/0157-one-module-per-vendor-released-with-the-sdk.md`
+- ADR 0158 — distribution mechanisms are the framework's, not the SDK's — `docs/adr/0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md`
+- ADR 0159 — the kernel holds what the domains were rewriting, and is published by nature — `docs/adr/0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md`
+- ADR 0160 — every service has a core, and a code keeps its value when its declaration moves — `docs/adr/0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md`
+- ADR 0161 — an untyped error fails the build — `docs/adr/0161-an-untyped-error-fails-the-build.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

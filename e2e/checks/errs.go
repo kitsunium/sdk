@@ -8,7 +8,7 @@ import (
 	"fmt"
 
 	"github.com/kitsunium/sdk/e2e/harness"
-	"github.com/kitsunium/sdk/pkg/v1/codec"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -41,7 +41,7 @@ const httpStatusCeil int = 599
 const (
 	// wantMajor is the MM octet — SemVer major (1 = pkg/v1 surface).
 	wantMajor int = 1
-	// wantLayer is the LL octet — SDK layer (2 = core/codec block).
+	// wantLayer is the LL octet — SDK layer (2 = core/data/codec block).
 	wantLayer int = 2
 	// wantPkg is the PP octet — per-layer package slot (0 = codec facade).
 	wantPkg int = 0

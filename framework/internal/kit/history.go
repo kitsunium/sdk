@@ -7,9 +7,9 @@ import (
 	"errors"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // Field history (ADR 0007 §1). A field tagged history=N keeps its N former

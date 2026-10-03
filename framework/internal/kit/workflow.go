@@ -14,9 +14,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/statemachine"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // maxHistory caps the transitions remembered per instance.

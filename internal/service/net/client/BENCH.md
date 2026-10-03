@@ -1,7 +1,7 @@
 <!-- generated from internal/service/net/client/client_bench_test.go — run `cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=200ms -count=5 ./net/client/` and take medians -->
 # Benchmarks — `internal/service/net/client`
 
-`pkg/v1/client/BENCH.md` already prices the end-to-end outbound call against a
+`pkg/v1/net/client/BENCH.md` already prices the end-to-end outbound call against a
 loopback origin and attributes **5.53 %** of its allocations to
 `guard.RoundTrip`. This report measures what is INSIDE that 5.53 %, and it does
 so against a **stub transport** — no sockets, no kernel — because the loopback
@@ -9,7 +9,7 @@ number cannot see anything smaller than itself.
 
 Two of the things it found were claims this package had written down and its own
 code contradicted, and one is a number a consumer needs before following the
-advice `pkg/v1/client/BENCH.md` gives them.
+advice `pkg/v1/net/client/BENCH.md` gives them.
 
 > **Every figure below is the median of five runs.** Spreads were 2–4 % on the
 > nanosecond columns; the allocation columns are exact and did not vary.
@@ -79,7 +79,7 @@ does.
 
 A refused request is now free in the guard entirely: with the policy's refusal
 built once outside the measurement, `RoundTrip` allocates **0** on the refusal
-path. The ~35 allocations `pkg/v1/client/BENCH.md` reports for a denied `Get`
+path. The ~35 allocations `pkg/v1/net/client/BENCH.md` reports for a denied `Get`
 are the typed `errs` refusal and the `Get` path around it — not this function.
 
 The comment has been corrected in the same change, and the claim is now gated by
@@ -198,7 +198,7 @@ ways, in `path_equivalence_internal_test.go`:
 ## 4. A pattern list is linear, and it is the ADMISSIONS that scale
 
 This is the number a consumer needs and did not have.
-`pkg/v1/client/BENCH.md` measures one allow pattern and one deny pattern, then
+`pkg/v1/net/client/BENCH.md` measures one allow pattern and one deny pattern, then
 recommends denying by default and enumerating what you allow. A real service
 enumerates 30–50 endpoints. `pathPolicy.Allow` and `denyPolicy.Allow` each run
 `regexp.MatchString` per pattern, in order, until one answers.
@@ -229,7 +229,7 @@ no. Pattern *count* is not the variable; **prefix similarity × count** is.
 "deny by default" posture runs most often, and it is the one that stays flat.
 
 **The expensive case is admitting the LAST-listed endpoint**, at 3 436 ns.
-Against `pkg/v1/client/BENCH.md`'s 186 823 ns loopback `Get` that is **1.8 %**,
+Against `pkg/v1/net/client/BENCH.md`'s 186 823 ns loopback `Get` that is **1.8 %**,
 and against a real dependency across a network it is a fraction of a percent.
 
 **So the recommendation survives, and this report says so.** Deny by default,
@@ -401,7 +401,7 @@ written down rather than explained away.
 
 They are a stub transport, chosen so the package's own contribution is visible
 at all. Against a real dependency every figure here is dwarfed by the network,
-which is precisely `pkg/v1/client/BENCH.md`'s point and is not contradicted by
+which is precisely `pkg/v1/net/client/BENCH.md`'s point and is not contradicted by
 anything above. Nothing in this report argues the client is slow. It argues that
 three of its documented properties were not true, that they now are, and that
 they are gated.

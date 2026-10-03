@@ -15,8 +15,8 @@ go_library(
     ],
     deps = [
         "//framework/internal/kit/plug",
-        "//pkg/v1/server",
-        "//pkg/v1/server/static",
+        "//pkg/v1/net/server",
+        "//pkg/v1/net/static",
     ],
 )
 

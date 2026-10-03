@@ -9,7 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//framework/internal/kit",
-        "//pkg/v1/codec/yaml",
+        "//pkg/v1/data/codec/yaml",
     ],
 )
 

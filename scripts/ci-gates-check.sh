@@ -24,11 +24,14 @@
 # written `main` requires only the `bazel` check, so it is currently nobody's.
 # Recorded under ADR 0088 Deferred rather than overstated here.
 #
-# Scope, deliberately: this asserts the Makefile↔CI link for the targets in
-# GATES. It does NOT audit the shell checks bazel-ci.yml invokes directly as
-# `bash scripts/…`; those fail loudly by themselves when renamed (exit 127).
-# The measured asymmetries that are NOT covered here are written down in
-# ADR 0088 rather than silently enforced.
+# Scope: this asserts the Makefile↔CI link for the targets in GATES, and the
+# same link for the guards in GUARDS — the shell checks `make lint` runs and
+# the `bazel` job invokes directly as `bash scripts/…` steps. A renamed guard
+# fails loudly by itself (exit 127), but a DELETED step is the second shape
+# above, silent: the guard survives in `make lint` and gates nothing, which is
+# what this script exists to catch, so the guards are listed too. The measured
+# asymmetries that are NOT covered here are written down in ADR 0088 rather
+# than silently enforced.
 
 set -euo pipefail
 
@@ -67,6 +70,23 @@ GATES=(
   # govulncheck over every module, in the required `bazel` job (#210, ADR
   # 0136). `vuln-install` is its installer, not a gate, and is not listed.
   vuln-check
+)
+
+# Guards that `make lint` runs AND the `bazel` job invokes as a direct
+# `bash <path>` step: each must exist, be a step of the workflow and a line of
+# the Makefile's `lint` recipe. Add a guard here in the commit that wires it.
+# check-readme-drift.sh and check-readme-determinism.sh are CI steps only —
+# gomarkdoc is not a `make lint` prerequisite — and are not listed.
+GUARDS=(
+  scripts/pre-commit/check-alloc-lane-coverage.sh
+  scripts/pre-commit/check-audit-coverage.sh
+  scripts/pre-commit/check-domain-docs.sh
+  # ADR 0160: no service declares a code; the core mirrors the service.
+  scripts/pre-commit/check-core-symmetry.sh
+  scripts/pre-commit/check-pkg-docs.sh
+  scripts/pre-commit/check-bench-md.sh
+  scripts/pre-commit/check-error-codes-drift.sh
+  scripts/check-layer-deps.sh
 )
 
 fail=0
@@ -198,10 +218,51 @@ for gate in "${GATES[@]}"; do
   fi
 done
 
+# The commands of the Makefile's `lint` recipe: its tab-indented lines, up to
+# the next rule, comment-only lines dropped — the recipe's long justification
+# comments name the guards too, and must not satisfy enforcement.
+lint_recipe="$(
+  awk '
+    /^lint:/ { in_lint = 1; next }
+    in_lint && /^[^\t#[:space:]]/ { exit }
+    in_lint && /^\t/ {
+      body = $0
+      sub(/^\t+/, "", body)
+      if (body !~ /^#/) { print body }
+    }
+  ' "$MAKEFILE"
+)"
+
+if [ -z "${lint_recipe//[[:space:]]/}" ]; then
+  echo "ci-gates-check: $MAKEFILE has no lint recipe — has the layout changed?"
+  exit 1
+fi
+
+for guard in "${GUARDS[@]}"; do
+  if [ ! -f "$guard" ]; then
+    echo "MISSING GUARD: '${guard}' is listed as a guard but no such file exists"
+    note "either restore the script or remove it from GUARDS in $0"
+    fail=1
+    continue
+  fi
+  # The same command-position rule as for the make targets: an echo naming the
+  # guard, or a comment above a deleted step, is not a step.
+  if ! grep -qE "(^|[;&|(][[:space:]]*)bash ${guard}([[:space:]]|$)" <<<"$ci_run_commands"; then
+    echo "UNGATED: '${guard}' is a guard but $WORKFLOW never runs it"
+    note "add the step to the bazel job, or remove it from GUARDS in $0"
+    fail=1
+  fi
+  if ! grep -qE "(^|[;&|(][[:space:]]*)bash ${guard}([[:space:]]|$)" <<<"$lint_recipe"; then
+    echo "NOT LINTED: '${guard}' is a guard but $MAKEFILE's lint recipe never runs it"
+    note "add 'bash ${guard}' to lint, or remove it from GUARDS in $0"
+    fail=1
+  fi
+done
+
 if [ "$fail" -ne 0 ]; then
   echo
   echo "ci-gates-check: at least one quality gate is not enforced."
   exit 1
 fi
 
-printf 'All %d named gates are enforced by %s.\n' "${#GATES[@]}" "$WORKFLOW"
+printf 'All %d named gates and %d guards are enforced by %s.\n' "${#GATES[@]}" "${#GUARDS[@]}" "$WORKFLOW"

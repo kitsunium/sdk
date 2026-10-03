@@ -15,13 +15,13 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // ListenHandler serves one connection of a [Listener] until it returns; the
 // connection is closed after it. conn.Peer says who connected, as the kernel
-// says where it can (pkg/v1/ipc).
+// says where it can (pkg/v1/proc/ipc).
 type ListenHandler func(ctx context.Context, conn *ipc.Conn) error
 
 // Listener is an inbound port that is not HTTP: a private socket on this
@@ -37,7 +37,7 @@ type Listener struct {
 	opts     listenerOptions
 
 	mu     sync.Mutex
-	ln     *ipc.Listener
+	ln     ipc.Listener
 	path   string
 	cancel context.CancelFunc
 	open   map[*ipc.Conn]bool

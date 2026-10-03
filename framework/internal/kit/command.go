@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/authz"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // Command changes something: a typed input, a typed result, and one handler
@@ -406,12 +406,12 @@ func (c *Command[C, R]) transactionDrawn() []model.Mechanic {
 // transactionMechanic is a command's transaction: its writes commit
 // together, and its effects leave at the commit.
 func transactionMechanic() model.Mechanic {
-	return model.Mechanic{Kind: "transaction", Label: "one transaction · effects at the commit", Package: "github.com/kitsunium/sdk/pkg/v1/sql"}
+	return model.Mechanic{Kind: "transaction", Label: "one transaction · effects at the commit", Package: "github.com/kitsunium/sdk/pkg/v1/data/sql"}
 }
 
 // keyMechanic is the key's step: the SDK's lock, in the process.
 func keyMechanic(label string) model.Mechanic {
-	return model.Mechanic{Kind: "key", Label: label, Package: "github.com/kitsunium/sdk/pkg/v1/lock", Config: map[string]string{"scope": "process"}}
+	return model.Mechanic{Kind: "key", Label: label, Package: "github.com/kitsunium/sdk/pkg/v1/app/lock", Config: map[string]string{"scope": "process"}}
 }
 
 // NewCommand is a command no service declares yet: [Service.Command] makes

@@ -222,7 +222,7 @@ func frame(fin bool, rsv byte, op byte, masked bool, payload []byte) []byte {
 	key := [4]byte{0x37, 0xfa, 0x21, 0x3d}
 	out = append(out, key[:]...)
 	body := slices.Clone(payload)
-	corenet.ApplyWSMask(body, key)
+	websocket.ApplyMask(body, key)
 	//: masked, as a client must.
 	return append(out, body...)
 }
@@ -1047,7 +1047,7 @@ func TestAdversarialFramesFailTheConnection(t *testing.T) {
 				body := bytes.Repeat([]byte{'a'}, 124)
 				key := [4]byte{1, 2, 3, 4}
 				masked := slices.Clone(body)
-				corenet.ApplyWSMask(masked, key)
+				websocket.ApplyMask(masked, key)
 				out := []byte{0x81, 0xFE, 0x00, 0x7C}
 				out = append(out, key[:]...)
 				p.write(p.t, append(out, masked...))

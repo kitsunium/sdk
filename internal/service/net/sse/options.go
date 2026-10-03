@@ -5,6 +5,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -38,6 +39,10 @@ type config struct {
 	// a separate field rather than a sentinel duration because "never" and "use
 	// the default" are different intents and a single zero cannot carry both.
 	noKeepAlive bool
+	// clock is what the keep-alive ticks on. No public option sets it: resolve
+	// defaults it to clock.System, and only a white-box test hands it a
+	// ManualClock, so a cadence is asserted by advancing time.
+	clock clock.Waiter
 }
 
 // KeepAlive sets the interval between keep-alive comments.
@@ -129,6 +134,10 @@ func resolve(opts []Option) (resolved config, err error) {
 	//: an unset write budget gets the working default, for the same reason.
 	if cfg.writeTimeout == 0 {
 		cfg.writeTimeout = DefaultWriteTimeout
+	}
+	//: the keep-alive ticks on the wall clock unless a test said otherwise.
+	if cfg.clock == nil {
+		cfg.clock = clock.System
 	}
 	//: the retry hint is validated by the frame that carries it, so a bad one
 	//: is reported with the same code whether it came from here or from Send.

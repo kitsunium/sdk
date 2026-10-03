@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/pkg/v1/authz"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // The product the tests of commands and queries run: an order counter, whose

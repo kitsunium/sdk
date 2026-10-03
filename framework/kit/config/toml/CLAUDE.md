@@ -3,7 +3,7 @@
 
 A subsystem of `framework/kit`, enabled by a blank import:
 `import _ "github.com/kitsunium/sdk/framework/kit/config/toml"`. It gives kit
-the `pkg/v1/codec/toml` codec for configuration files of extension `toml`
+the `pkg/v1/data/codec/toml` codec for configuration files of extension `toml`
 (`ikit.RegisterConfigFormat`). kit reads JSON itself; a product with a
 TOML file and without this import is refused at the start, the refusal
 naming the import.

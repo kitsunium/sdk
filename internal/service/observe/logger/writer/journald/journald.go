@@ -1,0 +1,90 @@
+// Package journald registers the "journald" writer factory (ADR 0015): a
+// stdlib unix-datagram sink that ships records to the systemd journal. Importing
+// the package self-registers the factory (no init()), so
+// writer.Open("journald", journald.Config{…}) and YAML FromConfig
+// topologies resolve. Linux-only in practice (the socket is systemd's), but the
+// code is plain stdlib net and builds everywhere; on a host without journald the
+// Open simply fails with JournaldOpenFailed. On Windows, whose AF_UNIX sockets
+// are stream-only, the default dialer cannot connect a datagram socket at all
+// and Open refuses it with UNSUPPORTED_PLATFORM before trying (ADR 0018).
+package journald
+
+import (
+	"net"
+
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate"
+)
+
+// writerName is the canonical registry key. socketNetwork / defaultSocketPath
+// are the unix-datagram network and the systemd journal socket default.
+const (
+	writerName        = "journald"
+	socketNetwork     = "unixgram"
+	defaultSocketPath = "/run/systemd/journal/socket"
+)
+
+// Writer is the registered journald factory singleton. The blank assignment runs
+// writer.Register at package load (no init()), mirroring the codec convention.
+var Writer = writer.Register(&journaldFactory{})
+
+// journaldFactory builds a journald Sink from a Config.
+type journaldFactory struct{}
+
+// Name reports the canonical key "journald".
+func (*journaldFactory) Name() writer.Name {
+	//: the literal key consumers pass in a writer spec.
+	return writerName
+}
+
+// Open connects the journal socket and composes the level-gated, non-blocking
+// chain over the datagram sink. A wrong config type yields the shared
+// WriterConfigInvalid; a connect failure surfaces JournaldOpenFailed; the
+// default dialer on a platform with no AF_UNIX datagram socket (Windows) is
+// UNSUPPORTED_PLATFORM. A caller-supplied Dialer is used as given everywhere.
+func (*journaldFactory) Open(cfg writer.Config) (sink corelogger.Sink, err error) {
+	//: reject a mismatched config type with the shared sentinel.
+	c, ok := cfg.(Config)
+	//: the type assertion guards the rest of the construction.
+	if !ok {
+		//: surface the documented config-type-mismatch sentinel.
+		return nil, writer.WriterConfigInvalid
+	}
+	//: default to the systemd journal socket when no override is given.
+	path := c.SocketPath
+	//: the zero value selects the standard journald datagram socket.
+	if path == "" {
+		//: standard systemd journal socket path.
+		path = defaultSocketPath
+	}
+	//: nil dialer falls back to stdlib net.Dial (injectable for tests).
+	dial := c.Dialer
+	//: the fallback is a one-time construction branch, not a hot path.
+	if dial == nil {
+		//: the default dialer needs a socket family this platform may lack;
+		//: refused by name, never the path (secret gate), before any connect.
+		if !unixDatagrams {
+			//: the SDK's uniform answer for a missing mechanic (ADR 0018).
+			return nil, errs.Wrap(coreproc.UnsupportedPlatform, errs.WrapParams{},
+				errs.String("network", socketNetwork))
+		}
+		//: default dialer preserves zero-config usage.
+		dial = net.Dial
+	}
+	//: connect the unix-datagram socket; a failure surfaces the open sentinel.
+	conn, derr := dial(socketNetwork, path)
+	//: forward the connect failure (the socket path is never echoed).
+	if derr != nil {
+		//: JournaldOpenFailed already carries the right code/reason.
+		return nil, wrapOpen(derr)
+	}
+	//: terminal datagram sink → async (non-block + OnDrop) → levelgate (floor).
+	base := newJournaldSink(conn)
+	nonblocking := async.New(base, async.Config{BufferSize: c.BufferSize, OnDrop: c.OnDrop, OnError: c.OnError})
+	//: outermost gate drops below-floor records before they reach the ring.
+	return levelgate.New(nonblocking, c.MinLevel), nil
+}

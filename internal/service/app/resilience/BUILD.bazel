@@ -1,0 +1,85 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "resilience",
+    srcs = [
+        "backoff.go",
+        "breaker.go",
+        "breaker_config.go",
+        "breaker_state.go",
+        "bulkhead.go",
+        "fallback.go",
+        "fallback_config.go",
+        "hedge.go",
+        "hedge_config.go",
+        "hedge_outcome.go",
+        "hedge_race.go",
+        "keyed_ratelimit.go",
+        "keyed_ratelimit_config.go",
+        "misconfigured.go",
+        "ratelimit.go",
+        "ratelimit_config.go",
+        "retry.go",
+        "retry_config.go",
+        "retryable.go",
+        "timeout.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/resilience",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":resilience",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "resilience_test",
+    srcs = [
+        "backoff_external_test.go",
+        "breaker_external_test.go",
+        "breaker_internal_test.go",
+        "bulkhead_external_test.go",
+        "bulkhead_internal_test.go",
+        "fallback_external_test.go",
+        "fallback_internal_test.go",
+        "hedge_clock_external_test.go",
+        "hedge_external_test.go",
+        "hedge_internal_test.go",
+        "keyed_ratelimit_external_test.go",
+        "keyed_ratelimit_internal_test.go",
+        "misconfigured_internal_test.go",
+        "ratelimit_external_test.go",
+        "ratelimit_internal_test.go",
+        "retry_clock_external_test.go",
+        "retry_external_test.go",
+        "retry_internal_test.go",
+        "retryable_internal_test.go",
+        "timeout_external_test.go",
+        "timeout_internal_test.go",
+        "wrap_internal_test.go",
+    ],
+    embed = [":resilience"],
+    deps = [
+        "//internal/core/app/resilience",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)

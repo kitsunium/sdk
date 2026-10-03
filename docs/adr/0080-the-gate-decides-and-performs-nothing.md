@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework
 - **Related**: [ADR 0079](0079-the-entitlement-split-x-sys-was-never-in-the-mechanism.md) (the domain it gates on), [ADR 0077](0077-a-self-update-is-an-order-of-operations-and-a-product-name-is-not-part-of-it.md) (the upgrade it asks for), [ADR 0065](0065-sdk-cli-domain.md) (why nothing here ends a process), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (both enums leave zero unclaimed), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range), [ADR 0035](0035-pp-range-ownership-enforcement.md) (range ownership)
 
 ## Context

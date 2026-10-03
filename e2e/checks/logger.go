@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/e2e/harness"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // loggerDomain labels every logger-suite Result.

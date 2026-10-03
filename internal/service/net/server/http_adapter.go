@@ -8,7 +8,7 @@ import (
 	"sync"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 )
 
 // httpAdapter serves connections through an http.Server mounted on our listener.

@@ -1,0 +1,73 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "ipc",
+    srcs = ["ipc.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/ipc",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc/ipc",
+        "//internal/kernel/errs",
+        "//internal/service/proc/ipc",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ipc",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ipc_test",
+    srcs = ["ipc_external_test.go"],
+    deps = select({
+        "@rules_go//go/platform:aix": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:android": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:linux": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            ":ipc",
+            "//pkg/v1/errs",
+        ],
+        "//conditions:default": [],
+    }),
+)

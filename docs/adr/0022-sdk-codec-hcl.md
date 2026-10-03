@@ -3,6 +3,7 @@
 - **Status**: Accepted (decision stands; §Context.1 + §Why not mechanism corrected by [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) — HCL *introduces* the banned `x/sys`, it does not downgrade it)
 - **Date**: 2026-06-21
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — the HCL codec becomes a module of its own; the quarantine stands
 - **Related**: ADR 0003 (codec package, M5), ADR 0012 (third-party quarantine for vendor-heavy integrations), ADR 0021 (BSON codec — the library-backed-in-service precedent this ADR deliberately does NOT follow), ADR 0005/0006 (error-code registry)
 
 ## Context

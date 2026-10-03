@@ -5,7 +5,7 @@ package transform
 import (
 	"github.com/klauspost/compress/s2"
 
-	coretransform "github.com/kitsunium/sdk/internal/core/transform"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -17,7 +17,7 @@ import (
 // mistake HTTP made with "deflate", refused here before it can be made.
 const S2Algorithm coretransform.Algorithm = "s2"
 
-// S2Compressor is the concrete core/transform.Compressor for the s2 block
+// S2Compressor is the concrete core/data/transform.Compressor for the s2 block
 // format. Unlike the zstd scheme it holds no encoder or decoder — s2's block
 // API is a pair of free functions — so the value is stateless apart from its
 // ceiling and needs no Close.
@@ -62,7 +62,7 @@ func NewS2Compressor(maxDecompressedBytes int64) (compressor *S2Compressor, err 
 	return &S2Compressor{maxDecompressedBytes: maxDecompressedBytes}, nil
 }
 
-// Algorithm implements core/transform.Compressor and returns the registry key.
+// Algorithm implements core/data/transform.Compressor and returns the registry key.
 func (*S2Compressor) Algorithm() coretransform.Algorithm {
 	//: canonical identifier, frozen per scheme.
 	return S2Algorithm

@@ -11,7 +11,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // localName is the data directory and memory, as a refusal names them.
@@ -133,7 +133,8 @@ func (u *unit) held() int {
 
 // errTransactionPanicked ends a level whose function panicked: its writes
 // are undone as an error's are, and the panic continues.
-var errTransactionPanicked = errors.New("kit: the transaction's function panicked")
+var errTransactionPanicked = errs.New(CodeTransactionPanic, "TRANSACTION_PANICKED", "the transaction's function panicked",
+	"kit: a transaction's function panicked; its writes are undone and the panic continues")
 
 // unitKey carries the innermost level of the transaction a context runs in.
 type unitKey struct{}

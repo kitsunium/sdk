@@ -9,11 +9,16 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
+	"runtime"
+	"strconv"
+	"strings"
 	"syscall"
 	"testing"
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -431,6 +436,149 @@ func Test_handle_Stop(t *testing.T) {
 	}
 }
 
+// startZombieLeader spawns a group leader that exits at once and returns once
+// it is a zombie this process has not reaped: the state darwin's kill(2)
+// refuses with EPERM when the escalation reaches it.
+func startZombieLeader(t *testing.T) *handle {
+	t.Helper()
+	h := startChild(t, true, "exit 0")
+	awaitZombie(t, h.pid)
+	return h
+}
+
+// awaitZombie waits until pid has exited and is still unreaped, asking the
+// kernel through something other than the probe under test: on darwin the
+// group's own refusal (kill(-pgid, 0) is EPERM once nothing in it is alive),
+// on Linux /proc's state letter. Elsewhere there is no oracle independent of
+// leaderIsZombie, and the test says so rather than sleeping.
+func awaitZombie(t *testing.T, pid int) {
+	t.Helper()
+	var zombie func() bool
+	switch runtime.GOOS {
+	//: XNU skips zombies when it signals a group, and says so.
+	case "darwin", "ios":
+		zombie = func() bool { return errors.Is(syscall.Kill(-pid, 0), syscall.EPERM) }
+	//: the third field of /proc/<pid>/stat, after the parenthesised command.
+	case "linux", "android":
+		zombie = func() bool {
+			raw, err := os.ReadFile("/proc/" + strconv.Itoa(pid) + "/stat")
+			if err != nil {
+				return false
+			}
+			_, after, found := strings.Cut(string(raw), ") ")
+			return found && strings.HasPrefix(after, "Z")
+		}
+	default:
+		t.Skipf("no zombie oracle independent of leaderIsZombie on %s", runtime.GOOS)
+	}
+	deadline := time.Now().Add(10 * time.Second)
+	//: the child exits within milliseconds; the loop only waits for the kernel
+	//: to say so.
+	for !zombie() {
+		//: a child that never gets there is a broken fixture, not a pass.
+		if time.Now().After(deadline) {
+			t.Fatalf("pid %d never became an unreaped zombie", pid)
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Test_handle_zombieGroupRefused pins when an EPERM from the group kill means
+// "gone". It is darwin's answer for a group holding nothing alive, so it is
+// read as gone only when the leader was unreaped when the signal left and is
+// dead now; every other EPERM is a real refusal — above all a LIVE leader this
+// process may not signal, which reporting as gone would turn into a Stop that
+// claims success while the process runs on.
+func Test_handle_zombieGroupRefused(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// start returns the handle in the state the row needs.
+		start func(t *testing.T) *handle
+		err   error
+		// reapedBefore is whether the leader was collected before the signal.
+		reapedBefore bool
+		want         bool
+	}
+	live := func(t *testing.T) *handle { return startChild(t, true, "sleep 30") }
+	collected := func(t *testing.T) *handle {
+		h := startChild(t, true, "exit 0")
+		if _, err := h.Wait(); err != nil {
+			t.Fatalf("reaping: %v", err)
+		}
+		return h
+	}
+	darwin := runtime.GOOS == "darwin" || runtime.GOOS == "ios"
+	tests := []tc{
+		{"an ESRCH is processGone's, not this rule's", live, wrapSignal(syscall.ESRCH), false, false},
+		{"an EPERM without a private group", func(t *testing.T) *handle { return startChild(t, false, "sleep 30") }, wrapSignal(syscall.EPERM), false, false},
+		{"an EPERM from a live leader stays a refusal", live, wrapSignal(syscall.EPERM), false, false},
+		{"an EPERM sent after the leader was collected stays a refusal", collected, wrapSignal(syscall.EPERM), true, false},
+		{"an EPERM that is not a signal failure", collected, wrapSpawn(syscall.EPERM), false, false},
+		{"an EPERM, and the leader collected during the signal", collected, wrapSignal(syscall.EPERM), false, true},
+		{"an EPERM while the leader is an unreaped zombie", startZombieLeader, wrapSignal(syscall.EPERM), false, darwin},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := c.start(t)
+		if got := h.zombieGroupRefused(c.err, c.reapedBefore); got != c.want {
+			t.Errorf("zombieGroupRefused(%v, reapedBefore=%t) = %t, want %t", c.err, c.reapedBefore, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_handle_StopOnALeaderThatDiedUnreaped pins the escalation's darwin
+// defect: a group whose leader has exited but not been reaped holds nothing
+// alive, and darwin's kill(-pgid) answers it with EPERM where Linux reports
+// success. Stop read that EPERM as SIGNAL_FAILED — on the graceful signal when
+// the leader died before Stop was called, and on the SIGKILL when it died
+// inside the grace window before the reaper collected it. Both are a group
+// that is gone, and both must stop cleanly.
+//
+// MUTATION-CHECKED on darwin. Making zombieGroupRefused return false fails
+// both rows: Stop with SIGNAL_FAILED (EPERM), and the escalation's
+// signalGroupAllowGone(SIGKILL) with the same.
+func Test_handle_StopOnALeaderThatDiedUnreaped(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		// stop is the call under test, on a leader that is an unreaped zombie.
+		stop func(t *testing.T, h *handle) error
+	}
+	tests := []tc{
+		{"Stop's graceful signal", func(t *testing.T, h *handle) error {
+			return h.Stop(t.Context(), time.Second, coreproc.Signal(syscall.SIGTERM))
+		}},
+		{"the escalation's SIGKILL", func(_ *testing.T, h *handle) error {
+			return h.signalGroupAllowGone(coreproc.Signal(syscall.SIGKILL))
+		}},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		h := startZombieLeader(t)
+		if err := c.stop(t, h); err != nil {
+			t.Fatalf("on a leader that already exited = %v, want nil", err)
+		}
+		//: the status is still the leader's own, collected by the handle.
+		exit, err := h.Wait()
+		if err != nil || exit.Code != 0 {
+			t.Errorf("Wait = (%+v, %v), want exit 0", exit, err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // Test_handle_awaitExit pins the three ways the wait ends: the process exits,
 // the caller cancels, or the grace window closes without an exit. Only the last
 // is "not settled", and that distinction is what tells Stop to escalate.
@@ -487,6 +635,105 @@ func Test_handle_awaitExit(t *testing.T) {
 		}
 		if err != nil {
 			t.Errorf("awaitExit = %v, want nil", err)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// startTermIgnoringChild spawns a shell that ignores SIGTERM and returns once
+// the trap is installed. Signalling it any earlier races the shell's start-up:
+// the default SIGTERM action kills it before `trap` runs, so a test meant for
+// the escalation exercises the graceful path instead — or, when the grace
+// window closes before the reaper has collected the corpse, it escalates to a
+// group holding only a zombie. darwin's kill(2) refuses that group with EPERM
+// where Linux reports success; Stop now reads it as gone
+// (Test_handle_StopOnALeaderThatDiedUnreaped), so the wait is here for the
+// path under test, no longer to dodge a false SIGNAL_FAILED.
+func startTermIgnoringChild(t *testing.T) *handle {
+	t.Helper()
+	ready := filepath.Join(t.TempDir(), "ready")
+	h := startChild(t, true, "trap '' TERM; : > '"+ready+"'; sleep 30")
+	deadline := time.Now().Add(10 * time.Second)
+	//: the shell creates the file only after its trap is in place.
+	for {
+		//: the trap is installed: SIGTERM is now ignored by the shell and by
+		//: the sleep it forks, which inherits the disposition.
+		if _, err := os.Stat(ready); err == nil {
+			return h
+		}
+		//: a child that never gets there is a broken fixture, not a pass.
+		if time.Now().After(deadline) {
+			t.Fatal("the child never reported its SIGTERM trap installed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
+// Test_handle_graceOnInjectedClock pins that Stop's grace window is measured on
+// the handle's clock: an hour of grace closes when a manual clock is advanced
+// an hour, and not a nanosecond before — so a supervisor's stop path is tested
+// without sleeping through its grace.
+//
+// Goroutine lifecycle: one goroutine runs the call under test and reports on a
+// buffered channel; the test always receives from it, and startChild's cleanup
+// kills and reaps whatever the escalation left.
+func Test_handle_graceOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	const grace time.Duration = time.Hour
+	type tc struct {
+		name string
+		//: the call whose grace window is under test.
+		call func(ctx context.Context, h *handle) error
+	}
+	tests := []tc{
+		{
+			name: "awaitExit reports the window closed, not settled",
+			call: func(ctx context.Context, h *handle) error {
+				settled, err := h.awaitExit(ctx, grace)
+				//: only an elapsed window is "not settled".
+				if settled {
+					return errs.Wrap(coreproc.StopFailed, errs.WrapParams{}, errs.String("why", "settled before the grace closed"))
+				}
+				return err
+			},
+		},
+		{
+			name: "Stop escalates a child that ignores SIGTERM once the window closes",
+			call: func(ctx context.Context, h *handle) error {
+				return h.Stop(ctx, grace, coreproc.Signal(syscall.SIGTERM))
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: a child that ignores SIGTERM: only the escalation can stop it —
+		//: once its trap is installed, which startTermIgnoringChild waits for.
+		h := startTermIgnoringChild(t)
+		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
+		h.clk = manual
+		done := make(chan error, 1)
+		go func() { done <- c.call(t.Context(), h) }()
+		//: the grace timer is armed on the manual clock.
+		manual.BlockUntil(1)
+		manual.Advance(grace - time.Nanosecond)
+		select {
+		case err := <-done:
+			t.Fatalf("the call returned (%v) before the grace window closed", err)
+		default:
+		}
+		manual.Advance(time.Nanosecond)
+		select {
+		case err := <-done:
+			if err != nil {
+				t.Errorf("the call = %v, want nil", err)
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatal("advancing the clock past the grace did not end the call")
 		}
 	}
 	for _, c := range tests {

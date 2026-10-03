@@ -1,0 +1,74 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "rotfile",
+    srcs = [
+        "backups.go",
+        "decode.go",
+        "prune.go",
+        "rotate.go",
+        "rotate_interval.go",
+        "rotate_manual.go",
+        "rotating_sink.go",
+        "rotating_sink_config.go",
+        "rotfile.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/writer/rotfile",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/logger/writer",
+        "//internal/core/observe/logger/writer/rotfile",
+        "//internal/kernel/clock",
+        "//internal/kernel/concur/worker",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/logfile",
+        "//internal/service/observe/logger/writer/levelgate",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":rotfile",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "rotfile_test",
+    srcs = [
+        "backups_internal_test.go",
+        "decode_internal_test.go",
+        "prune_internal_test.go",
+        "rotate_internal_test.go",
+        "rotate_interval_bench_test.go",
+        "rotate_interval_internal_test.go",
+        "rotate_manual_internal_test.go",
+        "rotating_sink_internal_test.go",
+        "rotfile_external_test.go",
+        "rotfile_internal_test.go",
+        "wrap_internal_test.go",
+    ],
+    embed = [":rotfile"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/logger/writer",
+        "//internal/core/observe/logger/writer/rotfile",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/logfile",
+    ],
+)
+
+# audit_srcs ships this package's *.go to the errs AST audit (ADR 0014); the
+# package defines new dotted-quad codes (0.3.27.*) so it must be listed in the
+# root //:audit_sources filegroup.

@@ -71,7 +71,7 @@
 //   - [Service].Every and [Service].Cron: scheduled jobs.
 //   - [Service].Static: a frontend.
 //   - [Service].Listen: an inbound port that is not HTTP — a private socket on
-//     this machine speaking a versioned contract (pkg/v1/ipc).
+//     this machine speaking a versioned contract (pkg/v1/proc/ipc).
 //   - [Service].CLI: a short command-line command, run once by [App].Main.
 //
 // The app, the composition root, says where the data lives: [Database]

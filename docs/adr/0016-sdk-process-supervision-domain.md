@@ -3,6 +3,7 @@
 **Status**: Accepted
 **Date**: 2026-06-14
 **Deciders**: @kodflow
+**Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the facades move under `pkg/v1/proc`, `sdnotify` and `sdlisten` as `systemd/notify` and `systemd/listen`
 **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad error codes),
 ADR 0013 (crypto domain — sibling-admission precedent), ADR 0014 (the verb wave)
 

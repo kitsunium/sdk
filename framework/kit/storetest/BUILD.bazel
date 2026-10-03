@@ -7,11 +7,23 @@ go_library(
     srcs = ["storetest.go"],
     importpath = "github.com/kitsunium/sdk/framework/kit/storetest",
     visibility = ["//visibility:public"],
-    deps = ["//framework/kit"],
+    deps = [
+        "//framework/kit",
+        "//pkg/v1/errs",
+    ],
 )
 
 alias(
     name = "go_default_library",
     actual = ":storetest",
     visibility = ["//visibility:public"],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit: it declares CodeRolledBack, in the 0.4.4.* range codeRangeOwners
+# gives it.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
 )

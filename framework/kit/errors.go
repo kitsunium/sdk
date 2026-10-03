@@ -112,7 +112,7 @@ const (
 
 	// Deprecated: kit no longer returns it. The outbox is the SDK's mail
 	// spool, which dead-letters a record that does not decode itself
-	// (mail.SpooledMailUndecodable).
+	// (MessageUndecodable, in pkg/v1/app/mail/spool).
 	CodeMailUndecodable errs.Code = ikit.CodeMailUndecodable
 
 	// CodeMailPanic is CodeMailPanic.
@@ -244,6 +244,25 @@ const (
 
 	// CodeRetentionPanic is CodeRetentionPanic.
 	CodeRetentionPanic errs.Code = ikit.CodeRetentionPanic
+
+	// The signals kit ends one of its own steps with and catches itself — a
+	// caller never receives one —, typed when the SDK made rule 2 a gate.
+	CodeSealErased errs.Code = ikit.CodeSealErased
+
+	// CodeSealKeyMoved is CodeSealKeyMoved.
+	CodeSealKeyMoved errs.Code = ikit.CodeSealKeyMoved
+
+	// CodeResealInPlace is CodeResealInPlace.
+	CodeResealInPlace errs.Code = ikit.CodeResealInPlace
+
+	// CodeResealMoved is CodeResealMoved.
+	CodeResealMoved errs.Code = ikit.CodeResealMoved
+
+	// CodeWorkflowNotInPlace is CodeWorkflowNotInPlace.
+	CodeWorkflowNotInPlace errs.Code = ikit.CodeWorkflowNotInPlace
+
+	// CodeTransactionPanic is CodeTransactionPanic.
+	CodeTransactionPanic errs.Code = ikit.CodeTransactionPanic
 )
 
 // Error is an error a product returns to its callers. Message travels on the

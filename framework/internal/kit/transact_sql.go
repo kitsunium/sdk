@@ -6,7 +6,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // A transaction on a database (ADR 0004) is the database's own: the SDK's
@@ -71,6 +72,11 @@ func openScope(wait context.Context, at scopeBase) (*sqlScope, error) {
 	}
 }
 
+// errHeldPanicked is what run returns when a function the SDK held until the
+// commit panicked: close raises the panic again before anyone reads it.
+var errHeldPanicked = errs.New(CodeTransactionPanic, "TRANSACTION_HELD_PANICKED", "a function held until the commit panicked",
+	"kit: a function the SDK ran after a transaction's commit panicked; the level's end raises the panic again")
+
 // run is the SDK's Transact of the scope, its function waiting for the
 // level's end. A panic of what the SDK runs after the commit is caught, for
 // the level's end to raise.
@@ -78,7 +84,7 @@ func (s *sqlScope) run(ctx context.Context, tm sql.Transactor, ready chan struct
 	defer func() {
 		if p := recover(); p != nil {
 			s.caught = p
-			err = fmt.Errorf("kit: a function held until the commit panicked")
+			err = errHeldPanicked
 		}
 	}()
 	return tm.Transact(ctx, sql.TxOptions{}, func(ctx context.Context, _ sql.Executor) error {

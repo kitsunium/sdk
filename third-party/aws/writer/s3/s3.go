@@ -1,7 +1,9 @@
-// Package s3 registers the "s3" writer factory. It lives under third-party/* in
-// the root umbrella module — NOT in pkg/v1 — so the AWS SDK it pulls never
-// enters the module graph of pkg/v1 consumers (nothing requires the root
-// module); see ADR 0012. Blank-importing the package self-registers the factory
+// Package s3 registers the "s3" writer factory. It lives under third-party/ —
+// NOT in pkg/v1 — in the third-party/aws module it shares with the cloudwatch
+// writer, so the AWS SDK it pulls never enters the module graph of pkg/v1
+// consumers (nothing in the SDK requires that module; see ADR 0012), and a
+// consumer of this writer inherits no other vendor (ADR 0157).
+// Blank-importing the package self-registers the factory
 // (and pulls the AWS SDK), so writer.Open("s3", logger.S3Config{…}) resolves
 // only in builds that opt in. The factory wraps the batching terminal sink
 // (s3sink.go) with the async middleware for a non-blocking ring + OnDrop, and
@@ -9,11 +11,11 @@
 package s3
 
 import (
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
-	"github.com/kitsunium/sdk/internal/service/writer/levelgate"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate"
 )
 
 // Writer is the registered s3 factory singleton (no init(); package-level var).

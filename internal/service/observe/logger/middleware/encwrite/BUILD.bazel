@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "encwrite",
+    srcs = [
+        "config.go",
+        "doc.go",
+        "encwrite.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite",
+    visibility = ["//:__subpackages__"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/middleware/encwrite",
+        "//internal/kernel/errs",
+    ],
+)
+
+go_test(
+    name = "encwrite_test",
+    srcs = [
+        "encwrite_external_test.go",
+        "encwrite_internal_test.go",
+        "frame_overflow_internal_test.go",
+    ],
+    embed = [":encwrite"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/middleware/encwrite",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/aead/aesgcm",
+        "//internal/service/crypto/kdf/hkdfsha256",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":encwrite",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)

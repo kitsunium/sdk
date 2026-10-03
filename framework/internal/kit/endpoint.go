@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/resilience"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
+	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // EmptyValue is the request or the response of an endpoint that has none. An
@@ -140,7 +140,7 @@ func RateLimit(perSecond float64, burst int) OperationOption {
 			mech: model.Mechanic{
 				Kind:    "ratelimit",
 				Label:   fmt.Sprintf("%s/s burst %d", strconv.FormatFloat(perSecond, 'f', -1, 64), burst),
-				Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 				Config:  map[string]string{"rate": strconv.FormatFloat(perSecond, 'f', -1, 64), "burst": strconv.Itoa(burst)},
 			},
 			runner: resilience.NewRateLimiter(resilience.RateLimiterConfig{Rate: perSecond, Burst: burst}),
@@ -159,7 +159,7 @@ func Timeout(d time.Duration) OperationOption {
 			mech: model.Mechanic{
 				Kind:    "timeout",
 				Label:   d.String(),
-				Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 				Config:  map[string]string{"after": d.String()},
 			},
 			runner: resilience.NewTimeout(d),
@@ -178,7 +178,7 @@ func Bulkhead(maxConcurrent int) OperationOption {
 			mech: model.Mechanic{
 				Kind:    "bulkhead",
 				Label:   fmt.Sprintf("%d at once", maxConcurrent),
-				Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 				Config:  map[string]string{"max": strconv.Itoa(maxConcurrent)},
 			},
 			runner: resilience.NewBulkhead(maxConcurrent),

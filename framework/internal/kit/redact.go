@@ -6,7 +6,7 @@ import (
 	"reflect"
 	"strings"
 
-	"github.com/kitsunium/sdk/pkg/v1/redact"
+	"github.com/kitsunium/sdk/pkg/v1/security/redact"
 )
 
 // Redaction: what the Studio shows of a payload or a log record, and what

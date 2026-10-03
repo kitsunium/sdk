@@ -1,0 +1,36 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "httpbody",
+    srcs = ["httpbody.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/codec/strictjson",
+        "//internal/service/data/codec/strictjson",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":httpbody",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "httpbody_test",
+    srcs = ["httpbody_external_test.go"],
+    deps = [
+        ":httpbody",
+        "//internal/core/data/codec/strictjson",
+        "//internal/kernel/errs",
+    ],
+)

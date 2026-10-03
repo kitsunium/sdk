@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) — D2: `SendWithID` queues under an identifier the caller minted, and every identifier, `Config.NewID`'s included, is a dot-atom of at most 255 bytes; D4: a repeated identifier meets the ledger; D5: the Sends of one identifier are counted
+- **Amended by**: [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) — D2: `SendWithID` queues under an identifier the caller minted, and every identifier, `Config.NewID`'s included, is a dot-atom of at most 255 bytes; D4: a repeated identifier meets the ledger; D5: the Sends of one identifier are counted; [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) §As built — the spool is published by a facade of its own, `pkg/v1/app/mail/spool` (`New`, `Config`, `Event`… without the `Spool` prefix), and its codes are declared in `internal/core/app/mail/spool`
 - **Related**: [ADR 0064](0064-sdk-mail-domain.md) (the mail domain it builds on), [ADR 0054](0054-sdk-queue-domain.md) (the queue it spools into), [ADR 0104](0104-an-idle-consumer-sleeps-until-there-may-be-work.md) (the wake its consumer sleeps on), [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve), [ADR 0112](0112-a-loop-that-must-keep-running-is-supervised-beside-the-lifecycle.md) (what restarts its consumer)
 
 ## Context

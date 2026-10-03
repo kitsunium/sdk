@@ -14,10 +14,10 @@ import (
 // Centralised so any future code-range change touches one place.
 func newSampleSentinel(tb testing.TB) *errs.Error {
 	tb.Helper()
-	//: 0.3.1.1 = service/logger WriterNil (ADR 0005).
+	//: 0.3.1.1 = service/observe/logger WriterNil (ADR 0005).
 	return errs.Define(0x00_03_01_01, "WRITER_NIL",
 		"Log handler requires a non-nil writer",
-		"service/logger.NewTextHandler called with nil io.Writer")
+		"service/observe/logger.NewTextHandler called with nil io.Writer")
 }
 
 func TestDefine(t *testing.T) {
@@ -349,7 +349,7 @@ func TestError_Private(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if sentinel := newSampleSentinel(t); sentinel.Private() != "service/logger.NewTextHandler called with nil io.Writer" {
+			if sentinel := newSampleSentinel(t); sentinel.Private() != "service/observe/logger.NewTextHandler called with nil io.Writer" {
 				t.Errorf("Private = %q", sentinel.Private())
 			}
 		})

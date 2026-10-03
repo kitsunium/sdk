@@ -54,8 +54,8 @@ vocabulary:
     # GetWithBearer, which is not a word". A func type is not available here,
     # because the engine reaches this contract by type assertion on a value it
     # holds as an Identity.
-    - github.com/kitsunium/sdk/internal/core/entitlement.BoundProver
-    # core/mail.Transport and core/mail.BatchSender (ADR 0064). "Transport" is a
+    - github.com/kitsunium/sdk/framework/internal/core/entitlement.BoundProver
+    # core/app/mail.Transport and core/app/mail.BatchSender (ADR 0064). "Transport" is a
     # NOMINAL role, the word this domain is discussed in — "the SMTP transport",
     # "the in-memory transport" — and the -er form the rule would impose,
     # "Sender", names the verb the port happens to expose today instead of the
@@ -64,21 +64,21 @@ vocabulary:
     # BatchSender's -er form would be "SendBatcher", which is not a word; the
     # type already ends in -er and names its role, exactly as EntryFetcher does
     # below. Outbox is not listed: it has two methods, so the rule does not fire.
-    - github.com/kitsunium/sdk/internal/core/mail.Transport
-    - github.com/kitsunium/sdk/internal/core/mail.BatchSender
+    - github.com/kitsunium/sdk/internal/core/app/mail.Transport
+    - github.com/kitsunium/sdk/internal/core/app/mail.BatchSender
     # ConnHandler / PacketHandler follow the stdlib's own precedent: http.Handler
     # is a single-method interface named <Noun>Handler, and "Handler" names the
     # role the type plays rather than its method. The -er forms the rule would
     # impose here ("ServeConner", "ServePacketter") are not words.
-    # BoundedDecompressor is the optional widening of core/transform.Compressor,
+    # BoundedDecompressor is the optional widening of core/data/transform.Compressor,
     # which it embeds; "Decompressor" names the role exactly as "Compressor"
     # does two lines above it in the same file, and the two read as the pair
     # they are. The -er form the rule would impose is "DecompressBoundedder",
-    # which is not a word in any reading. Same argument as core/mail.Transport.
-    - github.com/kitsunium/sdk/internal/core/transform.BoundedDecompressor
+    # which is not a word in any reading. Same argument as core/app/mail.Transport.
+    - github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
-    # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/cache.Store
+    # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/data/cache.Store
     # port, and the -er forms the rule would impose — "FetchEntrier" and
     # "InvalidateTagger" — are not words. Both name the ROLE a store plays rather
     # than its method: a tier that can hand back its whole entry, and a store that
@@ -87,9 +87,9 @@ vocabulary:
     # ergonomics of a port that grows by siblings. Same argument as UpDownMeter
     # below. Loader is NOT listed: its method is Load, so it satisfies the rule
     # natively — the exemption is only for the two the rule cannot spell.
-    - github.com/kitsunium/sdk/internal/core/cache.EntryFetcher
-    - github.com/kitsunium/sdk/internal/core/cache.Tagger
-    # core/sql.Transactor and core/sql.Preparer (ADR 0055). The -er forms the rule
+    - github.com/kitsunium/sdk/internal/core/data/cache.EntryFetcher
+    - github.com/kitsunium/sdk/internal/core/data/cache.Tagger
+    # core/data/sql.Transactor and core/data/sql.Preparer (ADR 0055). The -er forms the rule
     # would impose are "Transacter" and "PrepareContexter", neither of which is a
     # word. Both name the ROLE the type plays, which is how the domain is
     # discussed end to end — "the transactor owns the transaction", "assert for
@@ -98,25 +98,25 @@ vocabulary:
     # Preparer is an ADR 0039 sibling of the frozen Executor port, exactly the
     # EntryFetcher/Tagger case above: the family name says at a glance which
     # capability a type assertion is asking for.
-    - github.com/kitsunium/sdk/internal/core/sql.Transactor
-    - github.com/kitsunium/sdk/internal/core/sql.Preparer
-    # UpDownMeter is the ADR 0039 sibling of the frozen core/metrics.Meter port,
+    - github.com/kitsunium/sdk/internal/core/data/sql.Transactor
+    - github.com/kitsunium/sdk/internal/core/data/sql.Preparer
+    # UpDownMeter is the ADR 0039 sibling of the frozen core/observe/metrics.Meter port,
     # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
     # the word the whole domain is discussed in. The -er form the rule would
     # impose, "UpDownCounterrer", is not a word; and naming the sibling after
     # its method rather than its role would break the Meter / UpDownMeter /
     # AsyncMeter / FullMeter family that says, at a glance, which capabilities a
     # parameter requires. Same argument as ConnHandler above.
-    - github.com/kitsunium/sdk/internal/core/metrics.UpDownMeter
-    # core/trace.Tracer is OpenTelemetry's own vocabulary for the type that
+    - github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownMeter
+    # core/observe/trace.Tracer is OpenTelemetry's own vocabulary for the type that
     # starts spans — the word the entire domain, the specification and every
     # backend are discussed in — exactly as Meter is for the type that mints
     # instruments. The -er form the rule would impose, "Starter", names the
     # METHOD rather than the role, and it collides with the ordinary English
     # meaning of the word in a domain full of things that start. Same argument
     # as UpDownMeter above and ConnHandler further up.
-    - github.com/kitsunium/sdk/internal/core/trace.Tracer
-    # AtomicWriter is the ADR 0039 capability sibling of the frozen core/vfs
+    - github.com/kitsunium/sdk/internal/core/observe/trace.Tracer
+    # AtomicWriter is the ADR 0039 capability sibling of the frozen core/data/vfs
     # WritableFS port, and the -er form the rule would impose —
     # "WriteAtomiccer" — is not a word. The name already ENDS in -er: it names
     # the role a filesystem plays (one that can publish a whole file
@@ -124,9 +124,9 @@ vocabulary:
     # and UpDownMeter do above. The family (FS / WritableFS / AtomicWriter /
     # FullFS) is what tells a reader at a glance which capability a type
     # assertion is asking for.
-    - github.com/kitsunium/sdk/internal/core/vfs.AtomicWriter
+    - github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter
     # DeadLetterReader and LeaseExtender are the ADR 0039 capability siblings of
-    # the frozen core/queue.Broker port, and they are the EntryFetcher/Tagger
+    # the frozen core/data/queue.Broker port, and they are the EntryFetcher/Tagger
     # case again. The -er forms the rule would impose are "DeadLetterser",
     # which is not a word, and "Extender", which drops the noun that says WHAT
     # is being extended — a lease, not a deadline, not a batch, not a queue.
@@ -136,9 +136,9 @@ vocabulary:
     # LeaseExtender) is what tells a reader at a glance which capability a type
     # assertion is asking for, which is the whole ergonomics of a port that
     # grows by siblings.
-    - github.com/kitsunium/sdk/internal/core/queue.DeadLetterReader
-    - github.com/kitsunium/sdk/internal/core/queue.LeaseExtender
-    # KeyLister is the ADR 0063 sibling of the frozen core/i18n.Catalog port,
+    - github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterReader
+    - github.com/kitsunium/sdk/internal/core/data/queue.LeaseExtender
+    # KeyLister is the ADR 0063 sibling of the frozen core/app/i18n.Catalog port,
     # and the -er form the rule would impose — "Keyser" — is not a word. The
     # name already ENDS in -er and names the ROLE a catalogue plays: one that
     # can enumerate what it holds, so a consumer's own test can compare a
@@ -147,17 +147,17 @@ vocabulary:
     # family (Catalog / KeyLister / Fallbacker) is what tells a reader at a
     # glance which capability a type assertion is asking for. Fallbacker is NOT
     # listed: its method is Fallback, so it satisfies the rule natively.
-    - github.com/kitsunium/sdk/internal/core/i18n.KeyLister
-    # core/cli.Executor (ADR 0065). The -er form the rule would impose,
+    - github.com/kitsunium/sdk/internal/core/app/i18n.KeyLister
+    # core/app/cli.Executor (ADR 0065). The -er form the rule would impose,
     # "Executer", is not a word: the English agent noun for something that
     # executes is "executor", which is why the SDK already spells
-    # internal/core/sql.Executor that way. The rule does not fire there only
+    # internal/core/data/sql.Executor that way. The rule does not fire there only
     # because that interface carries three methods; this one is FROZEN at one
     # by ADR 0039, so the same word trips a rule the same word survived
     # elsewhere. Renaming for the rule would give the SDK two spellings of one
     # concept — the exact confusion the naming rule exists to prevent. Same
     # class as Transactor and Tracer above: the name is the domain's own word.
-    - github.com/kitsunium/sdk/internal/core/cli.Executor
+    - github.com/kitsunium/sdk/internal/core/app/cli.Executor
 
 # ── Global options ────────────────────────────────────────────────────────────
 
@@ -267,7 +267,7 @@ rules:
   # Value union demands it for Time / Group / Any payloads (logger).
   # KTN-VAR-STRMAP (phase 4) — the keys are the INPUT, not an enum.
   #
-  # core/sql's dialectByName and refusedDialects are the two halves of
+  # core/data/sql's dialectByName and refusedDialects are the two halves of
   # ParseDialect: they turn a configuration STRING a human wrote ("postgres",
   # "mariadb", "sqlserver") into a Dialect or into a refusal that says why. An
   # int-keyed map cannot do that — the string is what is being looked up, and
@@ -283,7 +283,7 @@ rules:
   # scheduler.go, lifecycle.go, vfs.go, events.go, clock.go — holding the
   # package doc comment plus every type alias the domain publishes. The
   # declarations are "unrelated" to each other by construction: they are a
-  # domain's whole vocabulary re-exported side by side, and pkg/v1/trace.go is
+  # domain's whole vocabulary re-exported side by side, and pkg/v1/observe/trace.go is
   # reported as 62 unrelated groups precisely because tracing has 62 public
   # names.
   #
@@ -300,16 +300,16 @@ rules:
   # deliberately rather than covered in advance.
   KTN-STRUCT-COHESION:
     exclude:
-      - "**/pkg/v1/authz/authz.go"
-      - "pkg/v1/authz/authz.go"
-      - "**/pkg/v1/i18n/i18n.go"
-      - "pkg/v1/i18n/i18n.go"
-      - "**/pkg/v1/server/server.go"
-      - "pkg/v1/server/server.go"
-      - "**/pkg/v1/server/websocket/websocket.go"
-      - "pkg/v1/server/websocket/websocket.go"
-      - "**/pkg/v1/trace/trace.go"
-      - "pkg/v1/trace/trace.go"
+      - "**/pkg/v1/security/authz/authz.go"
+      - "pkg/v1/security/authz/authz.go"
+      - "**/pkg/v1/app/i18n/i18n.go"
+      - "pkg/v1/app/i18n/i18n.go"
+      - "**/pkg/v1/net/server/server.go"
+      - "pkg/v1/net/server/server.go"
+      - "**/pkg/v1/net/websocket/websocket.go"
+      - "pkg/v1/net/websocket/websocket.go"
+      - "**/pkg/v1/observe/trace/trace.go"
+      - "pkg/v1/observe/trace/trace.go"
 
   # KTN-VAR-MINLEN (phase 4) — "a one or two letter name only reads while its
   # declaration is still on screen".
@@ -319,8 +319,9 @@ rules:
   # `Zstd` is, and the registry key it is built from is the string "s2" (ADR
   # 0066). Lengthening it would invent a name no specification, no
   # `Content-Encoding` and no caller uses — and it is an EXPORTED symbol of the
-  # root module, documented in third-party/transform/CLAUDE.md, so the rename
-  # would be a breaking change to a published surface bought with nothing.
+  # third-party/transform module (ADR 0157), documented in its CLAUDE.md, so the
+  # rename would be a breaking change to a published surface bought with
+  # nothing.
   #
   # Scoped to the one file that declares it; every other package-scope name in
   # the SDK still has to earn its length.
@@ -331,12 +332,12 @@ rules:
 
   KTN-VAR-STRMAP:
     exclude:
-      - "**/internal/core/sql/sql_dialect.go"
-      - "internal/core/sql/sql_dialect.go"
+      - "**/internal/core/data/sql/sql_dialect.go"
+      - "internal/core/data/sql/sql_dialect.go"
       # The i18n domain (ADR 0063) is the same direction as sql_dialect.go, in
       # two places and for two reasons.
       #
-      # service/i18n's rulesByTag turns a BCP 47 tag a REQUEST or a FILENAME
+      # service/app/i18n's rulesByTag turns a BCP 47 tag a REQUEST or a FILENAME
       # carried ("pl", "pt-PT", "fr-CA") into that language's CLDR plural rule
       # or into a refusal naming the supported set. The string is what is being
       # looked up; there is no integer to key on until after the lookup has
@@ -347,14 +348,14 @@ rules:
       # a catalogue FILE has, decoded through the codec domain. The names are
       # Unicode's, not the SDK's enum, and an int-keyed map cannot be decoded
       # from a JSON object.
-      - "**/internal/core/i18n/**"
-      - "internal/core/i18n/**"
-      - "**/internal/service/i18n/**"
-      - "internal/service/i18n/**"
+      - "**/internal/core/app/i18n/**"
+      - "internal/core/app/i18n/**"
+      - "**/internal/service/app/i18n/**"
+      - "internal/service/app/i18n/**"
 
   KTN-INTERFACE-ANYUSE:
     exclude:
-      # internal/service/sql — `arg any` is database/sql's OWN bind-parameter
+      # internal/service/data/sql — `arg any` is database/sql's OWN bind-parameter
       # type. (*sql.Tx).ExecContext, QueryContext and QueryRowContext are all
       # `args ...any` in the standard library, and driver.Value is defined as a
       # closed set the DRIVER narrows, not the caller. The three flagged sites
@@ -364,65 +365,83 @@ rules:
       # widened again at the call, and inventing one here is the first step of
       # the ORM ADR 0055 D1 refuses to become: once the bind type is ours,
       # conversion is ours.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
-      - "**/internal/core/codec/**"
-      - "internal/core/codec/**"
-      - "**/internal/service/codec/**"
-      - "internal/service/codec/**"
-      - "**/pkg/v1/codec/**"
-      - "pkg/v1/codec/**"
-      - "**/internal/core/logger/**"
-      - "internal/core/logger/**"
-      - "**/internal/service/logger/**"
-      - "internal/service/logger/**"
-      - "**/pkg/v1/logger/**"
-      - "pkg/v1/logger/**"
-      # kernel/singleflight carries a recovered PANIC value across a goroutine
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      - "**/internal/core/data/codec/**"
+      - "internal/core/data/codec/**"
+      - "**/internal/service/data/codec/**"
+      - "internal/service/data/codec/**"
+      # The full yaml.v3 codec (the opt-in "yaml-full" Format) implements the
+      # same Codec, Encoder and Decoder contracts as the in-tree codecs and
+      # streams documents into a `v any` for the same reason; it lives under
+      # third-party/ only because of the library it wraps.
+      - "**/third-party/codec/yaml/**"
+      - "third-party/codec/yaml/**"
+      - "**/pkg/v1/data/codec/**"
+      - "pkg/v1/data/codec/**"
+      # The logger's subtree is listed part by part, in core and in service:
+      # since ADR 0155 the writers (logger/writer) and the logfile helper
+      # (logger/internal/logfile) sit beneath it, and this exclusion has never
+      # covered them — a logger-wide "**" would have widened it in a rename.
+      - "**/internal/core/observe/logger/*.go"
+      - "internal/core/observe/logger/*.go"
+      - "**/internal/core/observe/logger/level/**"
+      - "internal/core/observe/logger/level/**"
+      - "**/internal/service/observe/logger/*.go"
+      - "internal/service/observe/logger/*.go"
+      - "**/internal/service/observe/logger/encoder/**"
+      - "internal/service/observe/logger/encoder/**"
+      - "**/internal/service/observe/logger/middleware/**"
+      - "internal/service/observe/logger/middleware/**"
+      - "**/internal/service/observe/logger/sink/**"
+      - "internal/service/observe/logger/sink/**"
+      - "**/pkg/v1/observe/logger/**"
+      - "pkg/v1/observe/logger/**"
+      # kernel/concur/singleflight carries a recovered PANIC value across a goroutine
       # boundary. recover() is defined by the language to return `any`, and the
       # payload really can be anything a panic() call was given — so `any` is not
       # a missing abstraction here, it is the only type the value HAS. Narrowing
       # it would either drop payloads (the rule's suggestion, an interface with
       # String()) or silently change what a caller recovers, which is exactly
       # what PanicValue.Raised exists to preserve verbatim.
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
-      # kernel/group carries a recovered panic out of a TASK goroutine for the
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
+      # kernel/concur/group carries a recovered panic out of a TASK goroutine for the
       # identical reason, and the two PanicValue types are deliberately
       # separate so the message a crash prints names the primitive that was
       # running the code which failed. Same rule limitation, same justification.
-      - "**/internal/kernel/group/**"
-      - "internal/kernel/group/**"
+      - "**/internal/kernel/concur/group/**"
+      - "internal/kernel/concur/group/**"
       # The events domain (ADR 0053) is an in-process bus carrying MANY event
       # types on one Bus. Go methods cannot take type parameters, so a
       # `Subscribe[E]` method cannot be written and a `Bus[E]` would carry
       # exactly one event type — a typed channel, not a bus. The port is
       # therefore erased (`Listener func(ctx, any) error`) and the typing is
       # restored by the package-level generic `On[E]`, which asserts on
-      # delivery at a measured 2.4 ns (internal/service/events/BENCH.md). The
+      # delivery at a measured 2.4 ns (internal/service/app/events/BENCH.md). The
       # rule's suggestion — a specific interface — would mean every event type
       # in every downstream application had to implement an SDK interface, which
       # is the framework this SDK is not. `any` here is the language's answer,
       # not a missing abstraction, exactly as it is for a recovered panic above.
-      - "**/internal/core/events/**"
-      - "internal/core/events/**"
-      - "**/internal/service/events/**"
-      - "internal/service/events/**"
-      - "**/pkg/v1/events/**"
-      - "pkg/v1/events/**"
-      # The view domain renders an arbitrary caller MODEL. core/view.Renderer's
+      - "**/internal/core/app/events/**"
+      - "internal/core/app/events/**"
+      - "**/internal/service/app/events/**"
+      - "internal/service/app/events/**"
+      - "**/pkg/v1/app/events/**"
+      - "pkg/v1/app/events/**"
+      # The view domain renders an arbitrary caller MODEL. core/app/view.Renderer's
       # Render(ctx, name string, data any) fixes the parameter — the whole point
       # of a template engine is that the user's struct type is not known to it,
       # exactly as for codec's Marshal. The concrete engine and its internal
       # helpers implement that contract, so narrowing the parameter breaks
       # interface satisfaction (ADR 0058 §D3).
-      - "**/internal/core/view/**"
-      - "internal/core/view/**"
-      - "**/internal/service/view/**"
-      - "internal/service/view/**"
-      - "**/pkg/v1/view/**"
-      - "pkg/v1/view/**"
-      # service/i18n decodes a catalogue FILE through the codec domain, and a
+      - "**/internal/core/app/view/**"
+      - "internal/core/app/view/**"
+      - "**/internal/service/app/view/**"
+      - "internal/service/app/view/**"
+      - "**/pkg/v1/app/view/**"
+      - "pkg/v1/app/view/**"
+      # service/app/i18n decodes a catalogue FILE through the codec domain, and a
       # catalogue entry is legitimately one of two shapes — a pattern string or
       # a map of CLDR forms. `map[string]any` is what every codec produces for
       # a nested object and is the only shape both entry forms can land on;
@@ -430,21 +449,21 @@ rules:
       # auto-exemption. A typed struct would need per-format tags and still
       # could not hold both shapes in one field. Same argument as codec's
       # Marshal and view's Render above (ADR 0063 §D5).
-      - "**/internal/service/i18n/**"
-      - "internal/service/i18n/**"
-      # service/cli.flagValue extracts a parsed flag's value for the
+      - "**/internal/service/app/i18n/**"
+      - "internal/service/app/i18n/**"
+      # service/app/cli.flagValue extracts a parsed flag's value for the
       # configuration layer FlagSource yields (ADR 0065 §D6). Its return type is
       # fixed at BOTH ends and by neither of this domain's choices:
       # flag.Getter.Get() is declared `Get() any` in the standard library, and
-      # core/config.Source.Load returns map[string]any. The whole function is
+      # core/app/config.Source.Load returns map[string]any. The whole function is
       # the bridge between those two `any`s. A "specific interface" here could
       # only be one every int, bool, string, time.Duration and caller-defined
       # flag.Value already satisfies — which is `any` with extra steps — and it
       # would have to be widened again one line later to enter the map. Same
       # class as the recovered-panic entries above: `any` is the type the value
       # HAS, not a missing abstraction.
-      - "**/internal/service/cli/**"
-      - "internal/service/cli/**"
+      - "**/internal/service/app/cli/**"
+      - "internal/service/app/cli/**"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #
@@ -465,10 +484,10 @@ rules:
   # because one rule limitation causes them all.
   KTN-API-MINIF:
     exclude:
-      # internal/service/cli and internal/core/cli — this is the sql entry's
+      # internal/service/app/cli and internal/core/app/cli — this is the sql entry's
       # argument, and here it is the domain's DEFINING decision rather than an
       # incidental one. ADR 0065 §D1: a cli.Binder receives the standard
-      # library's own *flag.FlagSet, unwrapped, exactly as core/vfs takes
+      # library's own *flag.FlagSet, unwrapped, exactly as core/data/vfs takes
       # io/fs unchanged (ADR 0056). The rule suggests replacing it with
       # `interface{ VisitAll(func(*flag.Flag)) }` and `interface{ Int(string,
       # int, string) *int }` — two synthetic types that mention flag.Flag in
@@ -480,14 +499,14 @@ rules:
       #
       # help.go's writeUsage takes a corecli.CommandValue for the second
       # reason the sql entry gives: it is the domain's published declaration
-      # value (pkg/v1/cli.Command aliases it), the help renderer reads its
+      # value (pkg/v1/app/cli.Command aliases it), the help renderer reads its
       # Name, Summary, Description AND Commands, and the suggested
       # `interface{ IsGroup() bool }` would keep exactly one of the four.
-      - "**/internal/core/cli/**"
-      - "internal/core/cli/**"
-      - "**/internal/service/cli/**"
-      - "internal/service/cli/**"
-      # internal/service/sql — the SAME class, and here it is the domain's
+      - "**/internal/core/app/cli/**"
+      - "internal/core/app/cli/**"
+      - "**/internal/service/app/cli/**"
+      - "internal/service/app/cli/**"
+      # internal/service/data/sql — the SAME class, and here it is the domain's
       # central decision rather than an incidental one. ADR 0055 D1: the sql
       # ports speak *sql.DB, *sql.Conn, *sql.Rows and sql.Result — the standard
       # library's own types, deliberately NOT re-declared equivalents — because
@@ -498,26 +517,41 @@ rules:
       # the stdlib type a consumer already knows with a synthetic one that
       # exists only to satisfy a linter.
       #
-      # internal/core/i18n and internal/service/i18n — the same #385 limitation
+      # internal/core/app/i18n and internal/service/app/i18n — the same #385 limitation
       # on a domain built out of VALUES. TagValue, CountValue and MessageValue
-      # are comparable domain values published through pkg/v1/i18n, and the
+      # are comparable domain values published through pkg/v1/app/i18n, and the
       # rule's suggestions ("interface tagValue with IsZero() bool", "interface
       # countValue with IntegerPart() uint64") would replace a map key with an
       # interface — TagValue is used as a map key in three places, which an
       # interface cannot be safely, and CountValue is the parameter of the
-      # frozen core/i18n.PluralRule func port, so narrowing it breaks every
+      # frozen core/app/i18n.PluralRule func port, so narrowing it breaks every
       # rule's signature at once.
-      - "**/internal/core/i18n/**"
-      - "internal/core/i18n/**"
-      - "**/internal/service/i18n/**"
-      - "internal/service/i18n/**"
+      - "**/internal/core/app/i18n/**"
+      - "internal/core/app/i18n/**"
+      - "**/internal/service/app/i18n/**"
+      - "internal/service/app/i18n/**"
       # sql.TxOptionsValue is the same contract-required-value case as
-      # tlsid.Identity below: it is core/sql's single per-transaction option
-      # type, published as pkg/v1/sql.TxOptions and frozen by ADR 0039.
+      # tlsid.Identity below: it is core/data/sql's single per-transaction option
+      # type, published as pkg/v1/data/sql.TxOptions and frozen by ADR 0039.
       # Narrowing it to `interface{ IsZero() bool }` would hide that the
       # isolation level and the read-only flag travel with it.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      # core/data/sql.Dialect is the same VALUE case since it spells its engine's
+      # vocabulary itself — Placeholder, QuoteIdent, ForUpdate and
+      # ForUpdateSkipLocked. The SQL renderers of docstore and queue take the
+      # dialect their store or broker was configured with, and the rule now
+      # suggests `interface{ Placeholder(int) string }` or
+      # `interface{ QuoteIdent(string) string }` for them. Dialect is a CLOSED
+      # set, refused at construction when unset or unknown (ADR 0055 §D4,
+      # ADR 0031): an interface over its vocabulary would let any type pretend
+      # to be an engine — the one thing the type exists to make impossible —
+      # and the same renderers compare it against the three constants. Scoped
+      # to the two renderers.
+      - "**/internal/service/data/docstore/sql_dialect.go"
+      - "internal/service/data/docstore/sql_dialect.go"
+      - "**/internal/service/data/queue/sql_dialect.go"
+      - "internal/service/data/queue/sql_dialect.go"
       # The view engine's helpers take *html/template.Template, and here the
       # suggestion is not merely unactionable but actively dangerous: the rule
       # proposes `interface{ Execute(wr io.Writer, data any) error }`, which
@@ -525,14 +559,14 @@ rules:
       # passes every test that does not assert on escaped output, and ships
       # stored XSS — it is the one thing ADR 0058 §D2 and the domain's AST audit
       # exist to make impossible. The concrete type IS the guarantee.
-      - "**/internal/service/view/**"
-      - "internal/service/view/**"
+      - "**/internal/service/app/view/**"
+      - "internal/service/app/view/**"
       # The tlsid handshake test takes two Identity values and uses BOTH halves
       # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
       # each parameter to a one-method interface would replace the single domain
       # type with two synthetic ones and obscure that both are the same thing.
-      - "**/pkg/v1/tlsid/**"
-      - "pkg/v1/tlsid/**"
+      - "**/pkg/v1/net/tlsid/**"
+      - "pkg/v1/net/tlsid/**"
       # Same false positive again, on the authz evaluators. Check, evaluateRBAC
       # and lookupAttr all take `request coreauthz.RequestValue`, and that type
       # is fixed by the FUNC ports they implement — coreauthz.Policy is
@@ -543,8 +577,8 @@ rules:
       # unactionable. The suggestion is also wrong on the merits here: a policy
       # that took `interface{ Action() string }` could no longer read the
       # attributes, which is the half of the request ABAC exists for.
-      - "**/internal/service/authz/**"
-      - "internal/service/authz/**"
+      - "**/internal/service/security/authz/**"
+      - "internal/service/security/authz/**"
       # New takes a tlsid.Identity, the domain's single TLS value type. Narrowing
       # it to a one-method interface would hide that the client and the server
       # consume the very same identity, which is the point of sharing it.
@@ -555,23 +589,36 @@ rules:
       # one-method interface would hide that both ends share it.
       - "**/internal/service/net/server/**"
       - "internal/service/net/server/**"
-      # Stream.Send takes a core/net.SSEEventValue, the domain's event-stream
-      # frame. The suggested `interface{ AppendTo([]byte) ([]byte, error) }`
+      # Stream.Send and AppendEvent take a core/net.SSEEventValue, the domain's
+      # event-stream frame. The suggested one-method interface (its Validate)
       # would let any caller append arbitrary bytes to an open stream, which is
       # precisely what the value type exists to prevent: it validates that no
-      # single-line field carries a terminator before a byte reaches the wire.
-      # Narrowing the parameter would move that guarantee from the type system
-      # to a convention.
+      # single-line field carries a terminator before a byte reaches the wire,
+      # and the encoder reads all four of its fields. Narrowing the parameter
+      # would move that guarantee from the type system to a convention.
       - "**/internal/service/net/sse/**"
       - "internal/service/net/sse/**"
+      # The WebSocket codec takes core/net's two protocol enums, WSOpCode (four
+      # bits) and WSCloseCode (sixteen), and WRITES them: AppendClosePayload
+      # puts uint16(code) on the wire and validateOutbound builds the frame
+      # header around op. The suggested `interface{ Sendable() bool }` and
+      # `interface{ Defined() bool }` keep the predicate and lose the number,
+      # so the codec could no longer emit the bytes it exists to emit — and a
+      # closed set of RFC 6455 values would accept any type with a method of
+      # that name. Scoped to the two codec files (ADR 0160 §4 moved them here
+      # from internal/core/net, where the same parameters raised nothing).
+      - "**/internal/service/net/websocket/close.go"
+      - "internal/service/net/websocket/close.go"
+      - "**/internal/service/net/websocket/frame.go"
+      - "internal/service/net/websocket/frame.go"
       # The slog bridge converts a stdlib slog.Value, whose type is fixed by the
       # slog.Handler contract it implements — the same contract-required-type
       # class as the AEAD Key below. The suggested `interface{ Any() any }` is
       # actively wrong here: the function's whole job is to switch on Kind() and
       # preserve the payload's type across the bridge, so narrowing to Any()
       # would erase exactly what the package exists to keep (ADR 0032).
-      - "**/pkg/v1/logger/slogbridge/**"
-      - "pkg/v1/logger/slogbridge/**"
+      - "**/pkg/v1/observe/logger/slogbridge/**"
+      - "pkg/v1/observe/logger/slogbridge/**"
       # The vfs domain is the same contract-required class, and its two cases
       # are the clearest examples in this file of a suggestion that does not
       # compile. ValidatePerm takes an fs.FileMode and the rule suggests
@@ -584,30 +631,30 @@ rules:
       # advertise that any Syncer will do, which is false — and the testing seam
       # the suggestion is reaching for already exists one level up, as the
       # injectable atomicOps.syncDir that publish() drives.
-      - "**/internal/core/vfs/**"
-      - "internal/core/vfs/**"
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/core/data/vfs/**"
+      - "internal/core/data/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
 
       - "**/internal/service/crypto/**"
       - "internal/service/crypto/**"
       - "**/third-party/x-crypto/**"
       - "third-party/x-crypto/**"
       # The token domain is the same class, three times over. Its parameters
-      # are core/token.ClaimsValue (the redacting claim set), jwk.KeyValue,
-      # core/crypto.Key and core/token.Algorithm — every one of them fixed by a
+      # are core/security/token.ClaimsValue (the redacting claim set), jwk.KeyValue,
+      # core/crypto.Key and core/security/token.Algorithm — every one of them fixed by a
       # contract the function implements or by the value type the domain is
       # ABOUT. The suggestion for Algorithm is the clearest tell: a uint8 enum
       # would become `interface{ String() string }`, which is every type in Go
       # that can print itself, and the comparison it feeds exists precisely to
       # be against a closed set (ADR 0042 §Algorithm confusion).
-      - "**/internal/core/token/**"
-      - "internal/core/token/**"
-      - "**/internal/service/token/**"
-      - "internal/service/token/**"
-      - "**/pkg/v1/token/**"
-      - "pkg/v1/token/**"
-      # The session stores' lookup helpers take a core/session.ID and the rule
+      - "**/internal/core/security/token/**"
+      - "internal/core/security/token/**"
+      - "**/internal/service/security/token/**"
+      - "internal/service/security/token/**"
+      - "**/pkg/v1/security/token/**"
+      - "pkg/v1/security/token/**"
+      # The session stores' lookup helpers take a core/security/session.ID and the rule
       # suggests `interface{ Digest() string }`. That is the contract-required
       # class in its most dangerous form: ID is an OPAQUE BEARER SECRET whose
       # whole value is that no other type can stand in for it. The suggested
@@ -618,28 +665,28 @@ rules:
       # guard that keeps an unnamed session off the filesystem). Same reasoning
       # as the AEAD Key above: the parameter's type IS the security boundary
       # (ADR 0045 §D3).
-      - "**/internal/core/session/**"
-      - "internal/core/session/**"
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
-      - "**/pkg/v1/session/**"
-      - "pkg/v1/session/**"
+      - "**/internal/core/security/session/**"
+      - "internal/core/security/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
+      - "**/pkg/v1/security/session/**"
+      - "pkg/v1/security/session/**"
       # The trace domain is the same class as the token one above. The OTLP
-      # encoder's helpers take core/trace.StatusValue, SpanValue, LinkValue and
+      # encoder's helpers take core/observe/trace.StatusValue, SpanValue, LinkValue and
       # SpanContextValue — the domain's own immutable value types, each fixed by
       # the OTLP payload it renders. The suggestion for StatusValue is the
       # clearest tell: `interface{ Resolved() trace.StatusValue }` mentions the
       # very type it proposes to remove, so it cannot be written at all.
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
-      - "**/pkg/v1/trace/**"
-      - "pkg/v1/trace/**"
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
+      - "**/pkg/v1/observe/trace/**"
+      - "pkg/v1/observe/trace/**"
       # The health domain is the token/Algorithm case above, four times over —
       # and here the suggestion does not even compile. shortCircuit and unknown
-      # take a core/health.Probe and STORE it in ReportValue.Probe, a field
-      # typed Probe; statusCode and notifyState take a core/health.Status, and
+      # take a core/app/health.Probe and STORE it in ReportValue.Probe, a field
+      # typed Probe; statusCode and notifyState take a core/app/health.Status, and
       # notifyState assigns it to health.lastNotified, a field typed Status.
       # Replacing either parameter with the proposed one-method interface
       # (`interface{ String() string }` / `interface{ Serving() bool }`) means
@@ -651,22 +698,22 @@ rules:
       # Probe's zero is deliberately unclaimed so that an unset probe is refused
       # rather than answered. An interface parameter trades both for a nil no
       # caller can be stopped from passing.
-      - "**/internal/service/health/handler.go"
-      - "internal/service/health/handler.go"
-      - "**/internal/service/health/notify.go"
-      - "internal/service/health/notify.go"
-      - "**/internal/service/health/probe.go"
-      - "internal/service/health/probe.go"
+      - "**/internal/service/app/health/handler.go"
+      - "internal/service/app/health/handler.go"
+      - "**/internal/service/app/health/notify.go"
+      - "internal/service/app/health/notify.go"
+      - "**/internal/service/app/health/probe.go"
+      - "internal/service/app/health/probe.go"
       # The health suite's probeUnderClock takes the SDK's own
       # *clock.ManualClock and uses BOTH halves of it: BlockUntil to prove the
       # budget timer exists BEFORE the clock is moved, then Advance to move it.
       # The rule's suggested interface carries only Advance, so adopting it
       # would drop the very call that makes every timeout assertion in this
       # suite deterministic instead of a race between the test and the engine.
-      # Same both-halves-of-the-type case as the pkg/v1/tlsid handshake test
+      # Same both-halves-of-the-type case as the pkg/v1/net/tlsid handshake test
       # above.
-      - "**/internal/service/health/harness_external_test.go"
-      - "internal/service/health/harness_external_test.go"
+      - "**/internal/service/app/health/harness_external_test.go"
+      - "internal/service/app/health/harness_external_test.go"
       # The entitlement verifier's two single-method roster readers —
       # VerifyCI (ci.go) and matchSubject (service.go). Same class as the
       # session ID above, in the same dangerous form: the parameter is the
@@ -679,11 +726,11 @@ rules:
       # the six functions taking *coreent.RosterValue, and only because they
       # happen to read ONE method; ciSeat, authorise, ciRefusalIsFinal and
       # rememberRoster cross the same boundary and are not flagged.
-      - "**/internal/service/entitlement/ci.go"
-      - "internal/service/entitlement/ci.go"
-      - "**/internal/service/entitlement/service.go"
-      - "internal/service/entitlement/service.go"
-      # The enrolment writer, GenerateKeyPair (third-party/entitlement). It
+      - "**/framework/internal/service/entitlement/ci.go"
+      - "framework/internal/service/entitlement/ci.go"
+      - "**/framework/internal/service/entitlement/service.go"
+      - "framework/internal/service/entitlement/service.go"
+      # The enrolment writer, GenerateKeyPair (framework/connectors/ssh). It
       # reads one method off the product, and the suggested `interface{
       # Label() string }` would silently DELETE a documented contract: every
       # ProductValue method tolerates a nil receiver, so GenerateKeyPair(nil,
@@ -694,8 +741,8 @@ rules:
       # panic; narrowing the type would reintroduce it under a different
       # spelling. The sibling call in the same flow, IssueURL, keeps the same
       # parameter and is not flagged only because it reads a FIELD.
-      - "**/third-party/entitlement/enroll.go"
-      - "third-party/entitlement/enroll.go"
+      - "**/framework/connectors/ssh/enroll.go"
+      - "framework/connectors/ssh/enroll.go"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #
@@ -739,10 +786,10 @@ rules:
   # TestWithLockExcludesGoroutines pins, and which the rule would restore.
   KTN-GOROUTINE-RWOVERMU:
     exclude:
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
       #
-      # service/trace/recorder.go — the rule's advice here is CORRECT about the
+      # service/observe/trace/recorder.go — the rule's advice here is CORRECT about the
       # code and WRONG about the workload, and the difference was measured
       # rather than argued. Recorder.Len and Recorder.Dropped really are
       # read-only, so the heuristic fires accurately; what it cannot see is that
@@ -752,7 +799,7 @@ rules:
       # too, so the shared side was serving nothing else.
       #
       # This field DID hold a sync.RWMutex, on exactly the reasoning the rule
-      # states. internal/service/trace/BENCH.md §2 prices it: 1.27x-1.65x slower
+      # states. internal/service/observe/trace/BENCH.md §2 prices it: 1.27x-1.65x slower
       # on record with no reader at all, and 2.7x-9.0x slower in the mixed shape
       # the RWMutex's own field comment named — spans arriving while an operator
       # polls Len — because a writer's Lock must drain the in-flight reader and
@@ -769,13 +816,13 @@ rules:
       # TestRecorderTakesAnExclusiveLockOnEveryPath pins the choice through
       # reflect, so this exclusion cannot quietly become permission to drift
       # back. Scoped to the one file that holds the lock.
-      - "**/internal/service/trace/recorder.go"
-      - "internal/service/trace/recorder.go"
+      - "**/internal/service/observe/trace/recorder.go"
+      - "internal/service/observe/trace/recorder.go"
 
   # KTN-GOROUTINE-DOUBLECLOSE (error) — the guard the rule asks for would
   # SILENCE the defect it exists to catch.
   #
-  # service/health.perform closes inflight.done, and exactly one goroutine per
+  # service/app/health.perform closes inflight.done, and exactly one goroutine per
   # inflight ever reaches that line: entry.claim publishes the run and returns
   # `mine` to a single caller under the entry's own lock, and perform is called
   # only for that caller. A second inflight is a different channel. The rule
@@ -792,13 +839,13 @@ rules:
   # Scoped to the one file that closes it.
   KTN-GOROUTINE-DOUBLECLOSE:
     exclude:
-      - "**/internal/service/health/runner.go"
-      - "internal/service/health/runner.go"
+      - "**/internal/service/app/health/runner.go"
+      - "internal/service/app/health/runner.go"
 
   # KTN-STRUCT-FLAGS (info) — the suggested bitfield would create a data race
   # in one case and delete a test's own vocabulary in the other.
   #
-  # service/health.entry carries nonCritical, latching and passed, and they are
+  # service/app/health.entry carries nonCritical, latching and passed, and they are
   # NOT three flags of one kind. nonCritical and latching are written once at
   # registration and read afterwards WITHOUT the entry's mutex — entry.verdict
   # runs on the measuring goroutine, outside every critical section, which is
@@ -816,19 +863,19 @@ rules:
   # Degraded serves.
   KTN-STRUCT-FLAGS:
     exclude:
-      - "**/internal/service/health/entry.go"
-      - "internal/service/health/entry.go"
-      - "**/internal/service/health/probe_external_test.go"
-      - "internal/service/health/probe_external_test.go"
+      - "**/internal/service/app/health/entry.go"
+      - "internal/service/app/health/entry.go"
+      - "**/internal/service/app/health/probe_external_test.go"
+      - "internal/service/app/health/probe_external_test.go"
 
   # KTN-ERROR-DISCARD (error) — the one seam where "log or propagate" is not
   # available at all.
   #
-  # service/health's ServeHTTP ends in `_, _ = w.Write(body)`. It cannot
+  # service/app/health's ServeHTTP ends in `_, _ = w.Write(body)`. It cannot
   # PROPAGATE: http.Handler.ServeHTTP returns nothing, and the status line and
   # Content-Length are already on the wire by the time Write can fail. It
   # cannot LOG: ADR 0030 forbids the SDK writing to stdout, this domain extends
-  # that to stderr, and the handler deliberately holds a core/health.Health and
+  # that to stderr, and the handler deliberately holds a core/app/health.Health and
   # not the Config that carries the caller's hooks — a route must not be able
   # to reach the registry's internals. The only failure Write can report here
   # is a client that hung up mid-response, which is the client's news and not
@@ -837,9 +884,9 @@ rules:
   # bare call for a reader to wonder about. Scoped to the one file.
   KTN-ERROR-DISCARD:
     exclude:
-      - "**/internal/service/health/handler.go"
-      - "internal/service/health/handler.go"
-      # service/cli's writeHelp ends in `_, _ = e.errOut.Write(...)`, and it is
+      - "**/internal/service/app/health/handler.go"
+      - "internal/service/app/health/handler.go"
+      # service/app/cli's writeHelp ends in `_, _ = e.errOut.Write(...)`, and it is
       # the health/handler.go case with one extra reason.
       #
       # It cannot PROPAGATE usefully: writeHelp is called from the two paths
@@ -856,8 +903,8 @@ rules:
       # that broke, which is the caller's news about the caller's own object.
       # Writing `_, _ =` says that out loud instead of leaving a bare call for
       # a reader to wonder about. Scoped to the one file.
-      - "**/internal/service/cli/help.go"
-      - "internal/service/cli/help.go"
+      - "**/internal/service/app/cli/help.go"
+      - "internal/service/app/cli/help.go"
 
   # KTN-FUNC-EMPTYSENTINEL (phase 5) — "" is a domain value here, not a sentinel.
   #
@@ -878,26 +925,34 @@ rules:
   # would stutter, which the same linter's own naming rules discourage elsewhere.
   KTN-STRUCT-CTOR:
     exclude:
-      # service/mail/spool.Spool is the one main type of package spool, so
+      # kernel/plugin.Registry's zero value IS the empty registry, ready to
+      # use, as sync.Mutex's is an unlocked mutex: every registry is a
+      # package-level `var registry plugin.Registry[...]`, initialised before
+      # the first RegisterX at import. A NewRegistry() could only return that
+      # same zero value behind a pointer — a second way in that adds a heap
+      # allocation and nothing else.
+      - "**/internal/kernel/plugin/registry.go"
+      - "internal/kernel/plugin/registry.go"
+      # service/app/mail/spool.Spool is the one main type of package spool, so
       # Go's convention names its constructor New — spool.New, as server.New
       # below. NewSpool would stutter at every call site (spool.NewSpool),
       # which the same linter's naming rules discourage elsewhere (ADR 0111).
-      - "**/internal/service/mail/spool/spool.go"
-      - "internal/service/mail/spool/spool.go"
-      # service/docstore.Store is built by Open, as os.Open and sql.Open build
+      - "**/internal/service/app/mail/spool/spool.go"
+      - "internal/service/app/mail/spool/spool.go"
+      # service/data/docstore.Store is built by Open, as os.Open and sql.Open build
       # theirs: the constructor LOADS — the snapshot read, the overlay
       # replayed, the indexes rebuilt — and "open" is what that is called. A
       # NewStore beside it would be a second way in, one that either loads too
       # or builds a store over files it never read (ADR 0110).
-      - "**/internal/service/docstore/docstore.go"
-      - "internal/service/docstore/docstore.go"
-      # service/docstore.SQLStore is built by OpenSQL, the same engine family's
+      - "**/internal/service/data/docstore/docstore.go"
+      - "internal/service/data/docstore/docstore.go"
+      # service/data/docstore.SQLStore is built by OpenSQL, the same engine family's
       # constructor under the same verb as Store's Open. A NewSQLStore beside it
       # would be a second way in that skips the configuration's refusals — a
       # transactor that cannot join, a table name that is not safe to
       # interpolate — which OpenSQL decides before the store exists (ADR 0139).
-      - "**/internal/service/docstore/sql_store.go"
-      - "internal/service/docstore/sql_store.go"
+      - "**/internal/service/data/docstore/sql_store.go"
+      - "internal/service/data/docstore/sql_store.go"
       # service/proc/childwait.Claim is MINTED by Spawn, under the ledger's
       # spawning gate, and by nothing else (ADR 0093): the gate is what keeps a
       # sweep from taking the child for an orphan between the fork and the
@@ -912,23 +967,23 @@ rules:
       # and "NewNewFlagSourceValue()", neither of which is a name anything could
       # satisfy — and it hits it for the two opposite reasons already on file.
       #
-      # core/cli.InvocationValue is MINTED BY THE ENGINE and by nothing else:
-      # every field is filled by service/cli.dispatch from a resolution that has
+      # core/app/cli.InvocationValue is MINTED BY THE ENGINE and by nothing else:
+      # every field is filled by service/app/cli.dispatch from a resolution that has
       # already happened, so a from-parts constructor would be a second way in
       # that produces an invocation no command line ever produced. It stays an
       # exported struct because an Action receives one and a test double
       # legitimately writes one — the adapter is written to tolerate exactly
       # that (a nil FlagSet is skipped rather than dereferenced).
       #
-      # service/cli.FlagSourceValue DOES have a constructor: FlagSource. The
+      # service/app/cli.FlagSourceValue DOES have a constructor: FlagSource. The
       # rule wants it spelled NewFlagSourceValue, which would stutter at the
       # call site the domain is designed around — `cli.FlagSource(invocation)`
       # as the last argument of a config.Load — and would read as a second
-      # constructor beside the one pkg/v1/cli publishes under its own name.
-      - "**/internal/core/cli/**"
-      - "internal/core/cli/**"
-      - "**/internal/service/cli/**"
-      - "internal/service/cli/**"
+      # constructor beside the one pkg/v1/app/cli publishes under its own name.
+      - "**/internal/core/app/cli/**"
+      - "internal/core/app/cli/**"
+      - "**/internal/service/app/cli/**"
+      - "internal/service/app/cli/**"
       - "**/internal/service/net/client/**"
       - "internal/service/net/client/**"
       # Same rule, same reason: these packages each produce one main type, and
@@ -945,7 +1000,7 @@ rules:
       # records.
       - "**/internal/service/net/sse/**"
       - "internal/service/net/sse/**"
-      # crypto/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
+      # crypto/key/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
       # KeyValue comes out of Parse or a From* bridge, and each of those
       # validates the material — coordinates at the curve's fixed length, the
       # point actually on the curve, "d" actually deriving the declared "x"/"y".
@@ -953,81 +1008,71 @@ rules:
       # of it, i.e. exactly the "poorly initialized struct" the rule exists to
       # prevent. (The rule's own message here reads "constructor
       # NewNewKeyValue()", which is not a name anything could satisfy.)
-      - "**/internal/service/crypto/jwk/**"
-      - "internal/service/crypto/jwk/**"
-      # core/metrics.AttrValue is built by FOUR kind-specific constructors —
+      - "**/internal/service/crypto/key/jwk/**"
+      - "internal/service/crypto/key/jwk/**"
+      # core/observe/otel.AttrValue is built by FOUR kind-specific constructors —
       # String / Bool / Int64 / Float64 — and by nothing else: the value payload
       # is unexported precisely so a struct literal cannot produce an attribute
       # whose kind and payload disagree. A NewAttrValue(key, kind, num, str)
       # would be exactly the "poorly initialized struct" the rule exists to
       # prevent, reachable in one call. (The rule's own message here reads
       # "constructor NewNewAttrValue()", which is not a name anything could
-      # satisfy — the same broken suggestion the jwk entry above records.)
-      - "**/internal/core/metrics/**"
-      - "internal/core/metrics/**"
+      # satisfy — the same broken suggestion the jwk entry above records.) It
+      # was declared in core/observe/metrics until the shared OTel model moved to
+      # core/observe/otel (ADR 0051 §Decision 2); the exclusion moved with the type.
+      - "**/internal/core/observe/otel/**"
+      - "internal/core/observe/otel/**"
       # The i18n values (ADR 0063) are the jwk and metrics case again: every
       # one comes out of a constructor that VALIDATES, and each is named for
       # what it does rather than for the type it returns. TagValue comes from
-      # ParseTag, which refuses everything outside the BCP 47 subset BY NAME;
-      # CountValue comes from Int or Decimal, which are the two ways CLDR's
-      # operands can be derived and which say at the call site which one the
-      # caller means; MessageValue comes from NewMessage or NewPluralMessage,
-      # which parse the placeholders once so no render ever parses. A
-      # NewTagValue / NewCountValue / NewMessageValue would each be a second
-      # way in that skips the validation — exactly the "poorly initialized
-      # struct" the rule exists to prevent. (Same broken "NewNewTagValue()"
-      # suggestion the entries above record.)
+      # NewTag, which holds each subtag to the BCP 47 subset's shape (the
+      # service's ParseTag reads a written tag into it, ADR 0160); CountValue
+      # comes from Int or Decimal, which are the two ways CLDR's operands can
+      # be derived and which say at the call site which one the caller means;
+      # PatternValue comes from NewPattern and MessageValue from
+      # NewCompiledMessage, which hold compiled spans to their invariants (the
+      # service's NewMessage / NewPluralMessage parse the placeholders once, so
+      # no render ever parses). A NewTagValue / NewCountValue / NewMessageValue
+      # would each be a second way in that skips the validation — exactly the
+      # "poorly initialized struct" the rule exists to prevent. (Same broken
+      # "NewNewTagValue()" suggestion the entries above record.)
       #
-      # service/i18n.PluralValue is stronger still: a caller never constructs
+      # service/app/i18n.PluralValue is stronger still: a caller never constructs
       # one. Its only instances are the thirteen entries of the hand-written
       # CLDR rule table, and a public constructor would let a consumer mint a
       # language whose declared categories and whose rule disagree — which is
       # the one inconsistency the load-time completeness check assumes away,
       # and which TestEveryRuleOnlyEverReturnsACategoryItDeclares pins for the
       # entries that do exist.
-      - "**/internal/core/i18n/**"
-      - "internal/core/i18n/**"
-      - "**/internal/service/i18n/**"
-      - "internal/service/i18n/**"
-      # kernel/singleflight.Group has NO constructor on purpose: its zero value
+      - "**/internal/core/app/i18n/**"
+      - "internal/core/app/i18n/**"
+      - "**/internal/service/app/i18n/**"
+      - "internal/service/app/i18n/**"
+      # kernel/concur/singleflight.Group has NO constructor on purpose: its zero value
       # is usable, exactly as sync.Mutex, sync.WaitGroup and sync.Map are, and
       # the map it lazily builds is the only state it owns. A NewGroup() would
       # be a second way in that adds nothing and makes `var g Group[K,V]` look
       # wrong when it is the intended spelling. (The rule's own message here
       # reads "constructor NewNewGroup()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
-      # The three primitives added alongside it hit the SAME broken suggestion,
-      # for two different reasons, both recorded rather than waved through:
-      #
-      #   - kernel/topic.Topic and kernel/topic.Subscriber. Topic has no
-      #     constructor for singleflight's reason exactly — its zero value is
-      #     usable and the membership snapshot it lazily publishes is the only
-      #     state it owns. Subscriber has none ON PURPOSE in the opposite
-      #     direction: every one comes out of Topic.Subscribe, which is what
-      #     binds the handle to its topic and refuses an unset delivery policy
-      #     (ADR 0031). A NewSubscriber() would be a second way in that skips
-      #     both, i.e. exactly the "poorly initialized struct" the rule exists
-      #     to prevent — the same shape as the jwk.KeyValue entry above.
-      #   - kernel/group.Group and kernel/heap.Heap DO have constructors, named
-      #     New, because each package produces one main type and Go's
-      #     convention for that case is group.New() / heap.New(). NewGroup() and
-      #     NewHeap() would stutter, which the same linter's naming rules
-      #     discourage elsewhere — the net/client entry above records the very
-      #     same trade.
-      # (The rule's own messages here read "constructor NewNewTopic()",
-      # "NewNewSubscriber()", "NewNewGroup()" and "NewNewHeap()", none of which
-      # is a name anything could satisfy.)
-      - "**/internal/kernel/topic/**"
-      - "internal/kernel/topic/**"
-      - "**/internal/kernel/group/**"
-      - "internal/kernel/group/**"
-      - "**/internal/kernel/heap/**"
-      - "internal/kernel/heap/**"
-      # core/trace.StateValue is the parsed W3C `tracestate` list, and it has no
-      # from-parts constructor ON PURPOSE: every instance comes out of
-      # ParseTraceState or Insert, each of which validates the key against
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
+      # The two primitives added alongside it hit the SAME broken suggestion:
+      # kernel/concur/group.Group and kernel/collections/heap.Heap DO have constructors, named
+      # New, because each package produces one main type and Go's convention
+      # for that case is group.New() / heap.New(). NewGroup() and NewHeap()
+      # would stutter, which the same linter's naming rules discourage
+      # elsewhere — the net/client entry above records the very same trade.
+      # (The rule's own messages here read "constructor NewNewGroup()" and
+      # "NewNewHeap()", neither of which is a name anything could satisfy.)
+      - "**/internal/kernel/concur/group/**"
+      - "internal/kernel/concur/group/**"
+      - "**/internal/kernel/collections/heap/**"
+      - "internal/kernel/collections/heap/**"
+      # core/observe/trace.StateValue is the W3C `tracestate` list as a value, and
+      # it has no from-parts constructor ON PURPOSE: every instance comes out of
+      # Insert or a StateBuilder (the engine's ParseTraceState fills one since
+      # ADR 0160 §4), each of which validates the key against
       # `simple-key`/`multi-tenant-key` and the value against `value = 0*255(chr)
       # nblk-chr` before an entry reaches the list. A NewStateValue(entries)
       # would be a second way in that skips all of it and produces a header the
@@ -1035,9 +1080,9 @@ rules:
       # struct" the rule exists to prevent. (The rule's own message here reads
       # "constructor NewNewStateValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
-      # core/authz.AttrValue has FOUR constructors on purpose — AttrString,
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
+      # core/security/authz.AttrValue has FOUR constructors on purpose — AttrString,
       # AttrInt64, AttrBool and AttrStrings — one per kind, each taking only
       # the payload its kind can hold. That is what makes the kind part of the
       # attribute's identity instead of a field somebody can forget to set, and
@@ -1048,13 +1093,24 @@ rules:
       # them through — precisely the "poorly initialized struct" the rule
       # exists to prevent, same shape as the jwk.KeyValue entry above. (The
       # message here likewise reads "constructor NewNewAttrValue()".)
-      - "**/internal/core/authz/**"
-      - "internal/core/authz/**"
+      - "**/internal/core/security/authz/**"
+      - "internal/core/security/authz/**"
+      # service/data/codec/toml.LocalDateTime is a VALUE of exported fields — a
+      # LocalDate and a LocalTime, embedded — written as a composite literal,
+      # exactly as the LocalDate and LocalTime it is made of (which the rule
+      # does not flag), as time.Date's components are, and as the
+      # github.com/pelletier/go-toml/v2 type it replaces was: that library had
+      # no constructor either, and a type switch moving from one to the other
+      # must change its import and nothing else. NewLocalDateTime(date, clock)
+      # would be a second spelling of the literal with nothing to validate:
+      # the decoder fills it from a date and a time it has already checked.
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
   #
-  # kernel/singleflight.Group holds `map[K]*call[V]` under an RWMutex, and the
+  # kernel/concur/singleflight.Group holds `map[K]*call[V]` under an RWMutex, and the
   # RWMutex exists for exactly one read-only method (InFlight); every other path
   # mutates. Neither suggestion works here:
   #   - sync.Map is for read-heavy, insert-once maps. Join must, ATOMICALLY,
@@ -1070,9 +1126,9 @@ rules:
   # is; they cannot see that the workload is write-heavy by construction.
   KTN-GOROUTINE-SYNCMAP:
     exclude:
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
-      # service/vfs.memFS is the same shape and the same answer. Its RWMutex
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
+      # service/data/vfs.memFS is the same shape and the same answer. Its RWMutex
       # guards `map[string]*memNode`, and the map is a FILESYSTEM TREE: MkdirAll
       # inserts a whole chain of parents, RemoveAll deletes a node and every
       # descendant, and WriteFile must observe "is there a non-directory in the
@@ -1083,18 +1139,18 @@ rules:
       # unreachable. The workload is write-heavy by construction too: the
       # RWMutex earns its keep on the read side, and the read side is the half
       # sync.Map would not be helping.
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
   KTN-GOROUTINE-ATOMICVAL:
     exclude:
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
       # Same struct, same reason, plus one of its own: atomic.Value replaces a
       # field a writer swaps WHOLESALE, and memFS mutates its map in place under
       # the lock that also orders the compound operations above. Copy-on-write
       # would make every WriteFile clone the entire tree.
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
 
   # KTN-STRUCT-ROLE-STUTTER (phase 4) — the package name IS the signal's name.
   #
@@ -1110,8 +1166,8 @@ rules:
   # implementation, which is the only place a concrete struct carries the name.
   KTN-STRUCT-ROLE-STUTTER:
     exclude:
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
 
   # KTN-STRUCT-ROLE (info) — "every exported struct declares its role by a
   # suffix". The suffixes the rule accepts (Value, State, Config, Spec, Event)
@@ -1126,20 +1182,50 @@ rules:
     exclude:
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
-      # service/docstore.Store is the word the SDK's storage ports already use
-      # — core/session.Store, core/cache.Store, core/secret.Store — and the
+      # service/data/docstore.Store is the word the SDK's storage ports already use
+      # — core/security/session.Store, core/data/cache.Store, core/security/secret.Store — and the
       # rule only spares them because they are interfaces. The concrete
       # document store is the same role under the same name; the suffix the
       # rule infers ("Service") would read docstore.StoreService and name the
       # one engine differently from every port it sits beside (ADR 0110).
-      - "**/internal/service/docstore/docstore.go"
-      - "internal/service/docstore/docstore.go"
-      # service/docstore.SQLStore is the same role over a database: the store,
+      - "**/internal/service/data/docstore/docstore.go"
+      - "internal/service/data/docstore/docstore.go"
+      # service/data/docstore.SQLStore is the same role over a database: the store,
       # named as its sibling engine is, prefixed by what it keeps its documents
       # in. "SQLStoreService" would name the second engine differently from the
       # first, and from every storage port beside them (ADR 0139).
-      - "**/internal/service/docstore/sql_store.go"
-      - "internal/service/docstore/sql_store.go"
+      - "**/internal/service/data/docstore/sql_store.go"
+      - "internal/service/data/docstore/sql_store.go"
+      # kernel/plugin.Registry is the word every registrar in the SDK is
+      # discussed in — "the exporter registry", "the codec registry",
+      # RegisterExporter — and the table those registrars now share. None of
+      # the accepted suffixes names it: it is not a Value (it has identity:
+      # each registrar's package-level table is THE table), nor a State, a
+      # Config, a Spec or an Event, and "RegistryState" would name the one
+      # generic table differently from every registry built on it.
+      - "**/internal/kernel/plugin/registry.go"
+      - "internal/kernel/plugin/registry.go"
+      # service/data/codec/bson's value types — Binary, Regex, DBPointer,
+      # CodeWithScope, Timestamp, E, MinKey, MaxKey, Undefined, Null — are the
+      # names of the BSON types they stand for (bsonspec.org), and the names
+      # every MongoDB-shaped document is spoken in: a caller type-switches on
+      # bson.Binary exactly as it did on the driver's primitive.Binary, and on
+      # bson.Binary in the driver's own v2. A suffix ("BinaryValue",
+      # "TimestampValue") would rename the vocabulary to satisfy a rule, and a
+      # compatibility alias to dodge it is itself a finding
+      # (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      # service/data/codec/toml's LocalDate, LocalTime and LocalDateTime are the
+      # names of the three TOML kinds they hold — TOML v1.0.0 §Local Date,
+      # §Local Time, §Local Date-Time — and the names the
+      # github.com/pelletier/go-toml/v2 types they replace had, so that code
+      # type-switching on a decoded map[string]any moves from one to the
+      # other by changing its import alone. The suffix the rule infers
+      # ("Service") would name a value a service, and "LocalDateValue" would
+      # break that one-line migration for every consumer.
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the
@@ -1161,7 +1247,7 @@ rules:
 
   # KTN-VAR-BIGSTRUCT (phase 4, warning) — contract-required value type.
   #
-  # The pkg/v1/process facade's exported entry point is, by ADR 0016 design,
+  # The pkg/v1/proc/process facade's exported entry point is, by ADR 0016 design,
   # `func Start(ctx, spec Spec)` where Spec is a TYPE ALIAS of the core port's
   # immutable coreproc.Spec (176 bytes). The public surface is deliberately an
   # alias of the port value type — pointers would (a) diverge the public API
@@ -1174,10 +1260,10 @@ rules:
   # too but is not flagged (it is not a pure forwarder).
   KTN-VAR-BIGSTRUCT:
     exclude:
-      # core/cli.CommandValue is 88 bytes — Name + Summary + Description (16
+      # core/app/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the
-      # contract, exactly as for pkg/v1/process.Spec below: a command tree is
+      # contract, exactly as for pkg/v1/proc/process.Spec below: a command tree is
       # written as a nested composite LITERAL at a call site, so
       # `cli.New(cfg, cli.Command{…})` is the spelling the domain is designed
       # around, and taking *Command would force every child in every
@@ -1187,20 +1273,20 @@ rules:
       #
       # The copy happens once per command per PROCESS, during a construction
       # measured at 52 µs for a 27-command tree — 2.6 % of the 1.99 ms it takes
-      # to start a Go binary that does nothing (internal/service/cli/BENCH.md).
+      # to start a Go binary that does nothing (internal/service/app/cli/BENCH.md).
       # The performance concern the rule guards is not merely moot here, it is
       # below the noise floor of process startup.
       #
-      # pkg/v1/cli is included because its three functions are pure forwarders
+      # pkg/v1/app/cli is included because its three functions are pure forwarders
       # of the same alias; excluding only the core layer would leave findings on
       # bodies whose entire content is `return svccli.New(cfg, root)`.
-      - "**/internal/core/cli/**"
-      - "internal/core/cli/**"
-      - "**/pkg/v1/cli/**"
-      - "pkg/v1/cli/**"
-      - "**/pkg/v1/process/**"
-      - "pkg/v1/process/**"
-      # service/sql.Config is 72 bytes — eight over the threshold — and the
+      - "**/internal/core/app/cli/**"
+      - "internal/core/app/cli/**"
+      - "**/pkg/v1/app/cli/**"
+      - "pkg/v1/app/cli/**"
+      - "**/pkg/v1/proc/process/**"
+      - "pkg/v1/proc/process/**"
+      # service/data/sql.Config is 72 bytes — eight over the threshold — and the
       # eight are not removable: *sql.DB (8) + Dialect (1, padded to 8) +
       # PoolConfig (32) + clock.Timed (16) + CheckTimeout (8). Every field is
       # 8-aligned, so there is no padding hole for the Dialect byte and no
@@ -1208,23 +1294,23 @@ rules:
       # field or boxing PoolConfig behind a pointer, which trades eight bytes
       # once per PORT for a nil check on every read.
       #
-      # Value semantics are the contract, exactly as for pkg/v1/process.Spec
+      # Value semantics are the contract, exactly as for pkg/v1/proc/process.Spec
       # above: a constructor must not be able to observe a later mutation of
       # the caller's struct, and taking *Config would let a caller change the
       # dialect or the pool ceiling after NewTransactor returned. The copy
       # happens ONCE per port — three times in the life of a process, next to
       # a BeginTx that costs a network round trip — so the performance concern
       # the rule guards is not merely moot here, it is unmeasurable
-      # (internal/service/sql/BENCH.md).
+      # (internal/service/data/sql/BENCH.md).
       #
-      # pkg/v1/sql is included because its constructors are pure forwarders of
+      # pkg/v1/data/sql is included because its constructors are pure forwarders of
       # the same alias; excluding only the service layer would leave three
       # findings on functions whose entire body is `return svcsql.New…(cfg)`.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
-      - "**/pkg/v1/sql/**"
-      - "pkg/v1/sql/**"
-      # service/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      - "**/pkg/v1/data/sql/**"
+      - "pkg/v1/data/sql/**"
+      # service/security/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
       # (16 each, interfaces), Name (16), PolicySpec (24: Every, Keep and the
       # generator func) and OnRotate (8) — and every field is a collaborator a
       # rotator needs or an option a caller must be able to omit. Value
@@ -1235,13 +1321,13 @@ rules:
       # that costs a system call — so the performance concern the rule guards is
       # not measurable here.
       #
-      # pkg/v1/secret is included because NewRotator there is a pure forwarder
+      # pkg/v1/security/secret is included because NewRotator there is a pure forwarder
       # of the same alias; its whole body is `return svcsecret.NewRotator(cfg)`.
-      - "**/internal/service/secret/**"
-      - "internal/service/secret/**"
-      - "**/pkg/v1/secret/**"
-      - "pkg/v1/secret/**"
-      # service/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
+      - "**/internal/service/security/secret/**"
+      - "internal/service/security/secret/**"
+      - "**/pkg/v1/security/secret/**"
+      - "pkg/v1/security/secret/**"
+      # service/data/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
       # gave both Versions (8), Clock (16, an interface) and Held (8): the key
       # function (8), the filesystem (16) and the path (16), or the transactor
       # (16), IndexKey (8), the table (16) and the dialect (8), were already 48
@@ -1254,14 +1340,14 @@ rules:
       # that opened a pool, so the performance concern the rule guards is not
       # measurable here.
       #
-      # pkg/v1/docstore is included because Open and OpenSQL there are pure
+      # pkg/v1/data/docstore is included because Open and OpenSQL there are pure
       # forwarders of the same aliases.
-      - "**/internal/service/docstore/**"
-      - "internal/service/docstore/**"
-      - "**/pkg/v1/docstore/**"
-      - "pkg/v1/docstore/**"
-      # service/queue.FileConfig is 72 bytes and SQLConfig 96 since ADR 0151
-      # gave core/queue.PolicyValue MaxRetryDelay (8), taking it to 40: the
+      - "**/internal/service/data/docstore/**"
+      - "internal/service/data/docstore/**"
+      - "**/pkg/v1/data/docstore/**"
+      - "pkg/v1/data/docstore/**"
+      # service/data/queue.FileConfig is 72 bytes and SQLConfig 96 since ADR 0151
+      # gave core/data/queue.PolicyValue MaxRetryDelay (8), taking it to 40: the
       # clock (16, an interface) and the directory (16), or the transactor and
       # the clock (16 each), the table (16) and the dialect (8), were already
       # 32 and 56 beside it. Every field is a collaborator or a policy knob a
@@ -1273,12 +1359,12 @@ rules:
       # transactor that opened a pool, so the performance concern the rule
       # guards is not measurable here.
       #
-      # pkg/v1/queue is included because NewFile and NewSQL there are pure
+      # pkg/v1/data/queue is included because NewFile and NewSQL there are pure
       # forwarders of the same aliases.
-      - "**/internal/service/queue/**"
-      - "internal/service/queue/**"
-      - "**/pkg/v1/queue/**"
-      - "pkg/v1/queue/**"
+      - "**/internal/service/data/queue/**"
+      - "internal/service/data/queue/**"
+      - "**/pkg/v1/data/queue/**"
+      - "pkg/v1/data/queue/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
@@ -1302,16 +1388,16 @@ rules:
       # exactly as ADR 0016 avoids for process.Spec above.
       - "**/internal/service/net/tlsid/**"
       - "internal/service/net/tlsid/**"
-      - "**/pkg/v1/tlsid/**"
-      - "pkg/v1/tlsid/**"
+      - "**/pkg/v1/net/tlsid/**"
+      - "pkg/v1/net/tlsid/**"
       # The outbound client forwards the same value types. Config (72 B) is
       # taken and returned BY VALUE by withDefaults precisely so filling the
       # defaults cannot mutate the Config its caller still holds, and New copies
       # it exactly once per client, at construction.
       - "**/internal/service/net/client/**"
       - "internal/service/net/client/**"
-      - "**/pkg/v1/client/**"
-      - "pkg/v1/client/**"
+      - "**/pkg/v1/net/client/**"
+      - "pkg/v1/net/client/**"
       # The mail domain — value semantics ARE the contract (ADR 0064).
       # MessageValue is 264 B because a mail HAS eleven fields: four address
       # lists, two bodies, an attachment slice, a header slice, a subject, a
@@ -1325,18 +1411,18 @@ rules:
       # and AttachmentValue (72 B) is copied for the same reason one level down.
       # The single copy happens once per SEND, immediately before a MIME
       # composition measured at 12 microseconds and a network round trip
-      # measured in milliseconds (internal/service/mail/BENCH.md), so the
+      # measured in milliseconds (internal/service/app/mail/BENCH.md), so the
       # performance concern the rule guards is unmeasurable here.
       #
-      # pkg/v1/mail is included because its Compose/Validate helpers are pure
+      # pkg/v1/app/mail is included because its Compose/Validate helpers are pure
       # forwarders of the same alias; excluding only core would leave findings
       # on functions whose entire body is `return coremail.Validate(msg)`.
-      - "**/internal/core/mail/**"
-      - "internal/core/mail/**"
-      - "**/internal/service/mail/**"
-      - "internal/service/mail/**"
-      - "**/pkg/v1/mail/**"
-      - "pkg/v1/mail/**"
+      - "**/internal/core/app/mail/**"
+      - "internal/core/app/mail/**"
+      - "**/internal/service/app/mail/**"
+      - "internal/service/app/mail/**"
+      - "**/pkg/v1/app/mail/**"
+      - "pkg/v1/app/mail/**"
       # The trace domain — value semantics ARE the contract, for four types
       # (ADR 0051). SpanValue (296 B) is a FINISHED span handed to a SpanSink,
       # and SpansValue (80 B) is a batch handed to a SpanExporter: both are
@@ -1347,20 +1433,20 @@ rules:
       # SpanContextValue on purpose, so that a link's own sampled bit and
       # tracestate travel with it; SpanParams is the caller's literal at a Start
       # call site, copied once per span immediately before work that dwarfs it.
-      # The exporter port's Export(SpansValue) mirrors core/metrics.Exporter's
+      # The exporter port's Export(SpansValue) mirrors core/observe/metrics.Exporter's
       # Export(SnapshotValue) exactly, and diverging the two signals' ports
       # would be a worse cost than one copy per export.
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
-      - "**/pkg/v1/trace/**"
-      - "pkg/v1/trace/**"
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
+      - "**/pkg/v1/observe/trace/**"
+      - "pkg/v1/observe/trace/**"
       # StateValue (96 B) is returned by value so a caller can hold, log or
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
-      - "**/pkg/v1/server/**"
-      - "pkg/v1/server/**"
+      - "**/pkg/v1/net/server/**"
+      - "pkg/v1/net/server/**"
       # authz.AttrValue (80 B) — all nine findings in the authz tree are this
       # one type; RequestValue is 56 B and is not flagged. Three reasons, and
       # the third is measured rather than argued.
@@ -1389,21 +1475,21 @@ rules:
       #      end to end. 80 is five whole 16-byte moves and 72 is not, so the
       #      memmove out of the map gets slower despite copying less. Reverted;
       #      the numbers, the spreads and a first measurement that was WRONG
-      #      are in internal/service/authz/BENCH.md §"The 80-byte AttrValue was
+      #      are in internal/service/security/authz/BENCH.md §"The 80-byte AttrValue was
       #      measured, and the first answer was wrong".
       #
       # Getting under 64 B would mean deleting the `key` member, which is what
       # lets the caller write one flat NewRequest(subj, act, res, attrs...)
       # list instead of building a map at the call site. Not worth it: the
       # evaluation path allocates ZERO as it stands.
-      - "**/internal/core/authz/**"
-      - "internal/core/authz/**"
+      - "**/internal/core/security/authz/**"
+      - "internal/core/security/authz/**"
       # The pkg/v1 facade forwards the same value types unchanged; a pointer
       # here would diverge the public API from the port it aliases, exactly as
       # ADR 0016 avoids for process.Spec above.
-      - "**/pkg/v1/authz/**"
-      - "pkg/v1/authz/**"
-      # crypto/jwk.KeyValue (176 B) — the value receiver is the security
+      - "**/pkg/v1/security/authz/**"
+      - "pkg/v1/security/authz/**"
+      # crypto/key/jwk.KeyValue (176 B) — the value receiver is the security
       # mechanism, not a style choice, and it is the SAME precedent as
       # core/net.IdentityValue and core/crypto.Key above.
       #
@@ -1420,8 +1506,8 @@ rules:
       # The type is 176 B because a JWK genuinely carries three strings of
       # metadata plus three octet slices; shrinking it under the 64 B threshold
       # would mean dropping members the format defines.
-      - "**/internal/service/crypto/jwk/**"
-      - "internal/service/crypto/jwk/**"
+      - "**/internal/service/crypto/key/jwk/**"
+      - "internal/service/crypto/key/jwk/**"
       # The token domain, for the same two reasons as jwk and core/net above.
       #
       # ClaimsValue (152 B) is immutable by construction: the With* setters
@@ -1437,12 +1523,12 @@ rules:
       # policy validation that dwarf the copy — and by value so that filling in
       # the defaults cannot mutate the config the caller still holds. Same
       # argument as net/client.Config above.
-      - "**/internal/core/token/**"
-      - "internal/core/token/**"
-      - "**/internal/service/token/**"
-      - "internal/service/token/**"
-      - "**/pkg/v1/token/**"
-      - "pkg/v1/token/**"
+      - "**/internal/core/security/token/**"
+      - "internal/core/security/token/**"
+      - "**/internal/service/security/token/**"
+      - "internal/service/security/token/**"
+      - "**/pkg/v1/security/token/**"
+      - "pkg/v1/security/token/**"
       # The session domain, for the same two reasons as token and jwk above.
       #
       # SessionValue (144 B) is immutable by construction: Set/Delete copy,
@@ -1473,16 +1559,16 @@ rules:
       # net/client.Config above; taking a pointer here would also diverge from
       # every other SDK constructor (`logger.NewText(Config)`,
       # `scheduler.New(Config)`).
-      - "**/internal/core/session/**"
-      - "internal/core/session/**"
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
-      - "**/pkg/v1/session/**"
-      - "pkg/v1/session/**"
+      - "**/internal/core/security/session/**"
+      - "internal/core/security/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
+      - "**/pkg/v1/security/session/**"
+      - "pkg/v1/security/session/**"
       # The metrics domain, for the two reasons already established above.
       # SnapshotValue (128 B) is the payload an Exporter receives, and
       # `Exporter.Export(snap SnapshotValue) error` is a PUBLISHED port —
-      # pkg/v1/metrics.Exporter is a type alias to it, so changing the parameter
+      # pkg/v1/observe/metrics.Exporter is a type alias to it, so changing the parameter
       # to a pointer breaks every downstream implementer at compile time with no
       # deprecation window (ADR 0039). By value is also the safer half: the
       # Attrs slices inside a snapshot ALIAS the meter's own copies, so handing
@@ -1496,15 +1582,15 @@ rules:
       # so filling in the defaults cannot mutate the config its caller still
       # holds, and newMemMeter copies it exactly once, at construction. Same
       # argument as net/client.Config above.
-      - "**/internal/core/metrics/**"
-      - "internal/core/metrics/**"
-      - "**/internal/service/metrics/**"
-      - "internal/service/metrics/**"
-      - "**/pkg/v1/metrics/**"
-      - "pkg/v1/metrics/**"
-      # core/health.ResultValue (72 B) is one check's ANSWER, and value
+      - "**/internal/core/observe/metrics/**"
+      - "internal/core/observe/metrics/**"
+      - "**/internal/service/observe/metrics/**"
+      - "internal/service/observe/metrics/**"
+      - "**/pkg/v1/observe/metrics/**"
+      - "pkg/v1/observe/metrics/**"
+      # core/app/health.ResultValue (72 B) is one check's ANSWER, and value
       # semantics are the contract for the same two reasons core/net and
-      # core/session give above. It is PUBLISHED — pkg/v1/health.Result is a
+      # core/security/session give above. It is PUBLISHED — pkg/v1/app/health.Result is a
       # type alias to it — it is handed to Config.OnReport, which is a caller's
       # own hook, and it is carried in ReportValue.Results, which the handler
       # renders while that hook still holds it. Age is a pure accessor on that
@@ -1517,8 +1603,8 @@ rules:
       # an error honestly cost; nothing can be dropped to get under 64. The one
       # copy per rendered check happens immediately beside the json.Marshal
       # that dwarfs it.
-      - "**/internal/core/health/**"
-      - "internal/core/health/**"
+      - "**/internal/core/app/health/**"
+      - "internal/core/app/health/**"
       # TEMPORARY — kodflow/ktn-linter#694: BIGSTRUCT fires on aliases of external
       # types in framework/internal/kit (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
@@ -1528,7 +1614,7 @@ rules:
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue, and on
-  # core/secret.Value (ADR 0096).
+  # core/security/secret.Value (ADR 0096).
   #
   # MarshalJSON MUST take a value receiver, or a non-pointer struct field of
   # this type will not marshal through it. UnmarshalJSON MUST take a pointer
@@ -1543,9 +1629,16 @@ rules:
   # value) would be printed by reflection instead of redacted. UnmarshalJSON and
   # UnmarshalText are the only two that assign. Scoped to the two packages.
   #
+  # service/data/codec/toml's LocalDate, LocalTime and LocalDateTime are the same
+  # case under encoding.TextMarshaler: String, MarshalText and AsTime must be
+  # VALUE methods, or a local value held in a map[string]any — where every
+  # decode into an untyped target puts it — would not render through them;
+  # UnmarshalText assigns and must take a pointer. time.Time, which they sit
+  # beside, has exactly this method set. Scoped to the one file.
+  #
   # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
   # the two above: the SDK's document store encodes a sealing store's records
-  # BY VALUE — json.Marshal(v) in internal/service/docstore/write.go:123 —, so its
+  # BY VALUE — json.Marshal(v) in internal/service/data/docstore/write.go:123 —, so its
   # MarshalJSON — the record as it rests — must be a value method, while its
   # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
   # one file.
@@ -1553,22 +1646,47 @@ rules:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
+  #
+  # service/data/codec/bson's DateTime, ObjectID and Decimal128 are the same case:
+  # their MarshalJSON / MarshalText — and their String, Hex, IsZero, which a
+  # value held in a map entry or an interface must answer — take a value
+  # receiver, and UnmarshalJSON / UnmarshalText, which assign, a pointer one,
+  # exactly as on the driver types they replace and on time.Time. Scoped to
+  # the three files.
   KTN-VAR-RECVCONS:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
       - "**/framework/internal/kit/seal_store.go"
       - "framework/internal/kit/seal_store.go"
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      - "**/internal/service/data/codec/bson/objectid.go"
+      - "internal/service/data/codec/bson/objectid.go"
+      - "**/internal/service/data/codec/bson/decimal.go"
+      - "internal/service/data/codec/bson/decimal.go"
   KTN-STRUCT-RECVTYPE:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      - "**/internal/service/data/codec/bson/objectid.go"
+      - "internal/service/data/codec/bson/objectid.go"
+      - "**/internal/service/data/codec/bson/decimal.go"
+      - "internal/service/data/codec/bson/decimal.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
@@ -1584,8 +1702,8 @@ rules:
   # call. RETIRE this block once #388 ships (mirror the 2026-05-28 retirements).
   KTN-TEST-PARALLEL:
     exclude:
-      - "**/internal/service/writer/console/console_external_test.go"
-      - "internal/service/writer/console/console_external_test.go"
+      - "**/internal/service/observe/logger/writer/console/console_external_test.go"
+      - "internal/service/observe/logger/writer/console/console_external_test.go"
 
   # KTN-FUNC-DEADCODE / KTN-CONST-UNUSED (error) — build-tag blind spot.
   #
@@ -1597,8 +1715,8 @@ rules:
   #
   #   • applyOptions          (proc/cgroup/option.go)  ← cgroup_linux.go
   #   • wrapCgroupUnavailable (proc/exec/wrap.go)      ← cgroup_placement_linux.go
-  #   • parsePayload          (proc/sdnotify/…)        ← listen_linux.go
-  #   • exitNoPerm            (proc/sdnotify/…)        ← listen_linux.go
+  #   • parsePayload          (proc/systemd/notify/…)  ← listen_linux.go
+  #   • exitNoPerm            (proc/systemd/notify/…)  ← listen_linux.go
   #
   # Without this block `make lint` cannot pass on macOS at all, on a pristine
   # tree, so the repo is only developable from Linux. Moving
@@ -1616,8 +1734,8 @@ rules:
       - "internal/service/proc/cgroup/option.go"
       - "**/internal/service/proc/exec/wrap.go"
       - "internal/service/proc/exec/wrap.go"
-      - "**/internal/service/proc/sdnotify/sdnotify.go"
-      - "internal/service/proc/sdnotify/sdnotify.go"
+      - "**/internal/service/proc/systemd/notify/sdnotify.go"
+      - "internal/service/proc/systemd/notify/sdnotify.go"
       # TEMPORARY — kodflow/ktn-linter#691: DEADCODE fires on methods of generic
       # receivers and on promoted methods (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
@@ -1627,8 +1745,8 @@ rules:
 
   KTN-CONST-UNUSED:
     exclude:
-      - "**/internal/service/proc/sdnotify/sdnotify.go"
-      - "internal/service/proc/sdnotify/sdnotify.go"
+      - "**/internal/service/proc/systemd/notify/sdnotify.go"
+      - "internal/service/proc/systemd/notify/sdnotify.go"
 
   # KTN-FUNC-BLANKPARAM (info) — same build-tag blind spot, other direction.
   #
@@ -1642,8 +1760,8 @@ rules:
   #
   # Scoped to that one stub. RETIRE alongside the block above.
   #
-  # The second entry is the same class on a different seam. service/cache's
-  # memory store implements core/cache.Store, whose methods take a context
+  # The second entry is the same class on a different seam. service/data/cache's
+  # memory store implements core/data/cache.Store, whose methods take a context
   # because a REMOTE tier can block. This one cannot: every operation is an
   # in-process map access under a mutex, so there is no point at which a
   # cancellation could be honoured, and a ctx.Err() check would be a branch that
@@ -1655,7 +1773,7 @@ rules:
   # not read.
   # The third entry is the same class on a FUNC port rather than an interface.
   # AlwaysSample, NeverSample and discardSpan have their signatures fixed by
-  # core/trace.Sampler and core/trace.SpanSink, both of which are func types
+  # core/observe/trace.Sampler and core/observe/trace.SpanSink, both of which are func types
   # (ADR 0041) precisely so a published port cannot grow a method at all. The
   # rule looks for an INTERFACE that requires the parameter and finds none,
   # because there is no interface to find — the signature is no less required
@@ -1666,10 +1784,10 @@ rules:
     exclude:
       - "**/internal/service/proc/cgroup/cgroup_other.go"
       - "internal/service/proc/cgroup/cgroup_other.go"
-      - "**/internal/service/cache/**"
-      - "internal/service/cache/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
+      - "**/internal/service/data/cache/**"
+      - "internal/service/data/cache/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
       # savepointSQL(_ coresql.Dialect, name string) discards its dialect BY
       # DESIGN, and the discard is the documentation. All three supported
       # engines spell SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT
@@ -1680,8 +1798,21 @@ rules:
       # forgetting this file; naming it would only trade this finding for an
       # unused-parameter one, and using it would mean writing an unreachable
       # branch that returns empty SQL. Scoped to the one file.
-      - "**/internal/service/sql/dialect_sql.go"
-      - "internal/service/sql/dialect_sql.go"
+      - "**/internal/service/data/sql/dialect_sql.go"
+      - "internal/service/data/sql/dialect_sql.go"
+      # The trace class again, on the native MessagePack codec's FUNC port.
+      # Every encoder there has the signature of its encodeFunc type,
+      # func(b []byte, v reflect.Value, depth int), because one plan cached
+      # per Go type has to call a string's encoder and a struct's the same
+      # way. depth is what a container, a pointer or an interface checks
+      # before going one level deeper (the CWE-674 bound); a bool, a number,
+      # a string, a time or a marshaler method nests nothing and has no level
+      # to check, and `_` says so in the signature. The element writers of
+      # the direct map[string]V encoders, and the omitempty test of a kind
+      # that is never empty, follow the same ports. Naming the parameter
+      # would trade this finding for an unused-parameter one.
+      - "**/internal/service/data/codec/msgpack/**"
+      - "internal/service/data/codec/msgpack/**"
 
   # KTN-ITER-YIELD / KTN-STRUCT-ACCESSOR — false positives in the framework
   # module (kodflow/ktn-linter#692, #693). TEMPORARY.
@@ -1702,6 +1833,14 @@ rules:
       # framework module only.
       - "framework/**"
       - "**/framework/**"
+      # TEMPORARY — the same kodflow/ktn-linter#693, on service/data/sql.Withheld.
+      # Its Unwrap returns the driver's error it holds, and the rule asks for
+      # it to be renamed Cause; but Unwrap is the errors package's protocol,
+      # which errors.Is and errors.As call by that name, so the rename would
+      # leave the driver's error unreachable — the opposite of what the type
+      # exists for. Scoped to the one file; retire with #693.
+      - "**/internal/service/data/sql/withheld.go"
+      - "internal/service/data/sql/withheld.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
@@ -1712,9 +1851,9 @@ rules:
   # it and carry their own retirement conditions.
   #
   # • KTN-VAR-PTRINTF — false positive on a generic `*T` (kodflow/ktn-linter#365).
-  #   v1.34.5 no longer flags internal/kernel/snapshot's Value[T] *T signatures.
+  #   v1.34.5 no longer flags internal/kernel/concur/snapshot's Value[T] *T signatures.
   # • KTN-API-MINIF — false positive on *snapshot.Value[...] params + a malformed
-  #   message (#366). v1.34.5 no longer flags internal/core/codec/registry.go.
+  #   message (#366). v1.34.5 no longer flags internal/core/data/codec/registry.go.
   # • KTN-TEST-PARALLEL — false positive: a serial test mutating the package
   #   global logger.Version (FrameworkVersion injection) was wrongly required to
   #   call t.Parallel() (a data race). Fixed by #379 (Closes #376) — NOPARALLEL

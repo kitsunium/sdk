@@ -11,9 +11,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/scheduler"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // errOverlapped is what a scheduled job returns instead of running when a
@@ -38,19 +38,19 @@ type schedRunner struct {
 func provenanceOf(kind string) (provenance, library string) {
 	switch kind {
 	case model.LoopJob, model.LoopScheduler:
-		return model.ProvenanceLibrary, "sdk/v1/scheduler"
+		return model.ProvenanceLibrary, "sdk/v1/app/scheduler"
 	case model.LoopConsumer:
-		return model.ProvenanceLibrary, "sdk/v1/queue"
+		return model.ProvenanceLibrary, "sdk/v1/data/queue"
 	case model.LoopHTTP:
-		return model.ProvenanceLibrary, "sdk/v1/server"
+		return model.ProvenanceLibrary, "sdk/v1/net/server"
 	case model.LoopTimer:
-		return model.ProvenanceLibrary, "sdk/v1/statemachine"
+		return model.ProvenanceLibrary, "sdk/v1/app/statemachine"
 	case model.LoopWake:
 		return model.ProvenanceKit, "kit"
 	case model.LoopRoutine:
 		return model.ProvenanceProduct, ""
 	case model.LoopRotation:
-		return model.ProvenanceLibrary, "sdk/v1/secret"
+		return model.ProvenanceLibrary, "sdk/v1/security/secret"
 	default:
 		// A kind kit does not know has no provenance.
 	}

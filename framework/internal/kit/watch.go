@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
 
 // Watches (ADR 0008). A module hears of the writes of the fields a product
@@ -233,34 +233,36 @@ func (w *Watch) describe(a *App, out *model.Node) []model.Edge {
 
 // feed puts w among the watches the store's writes are told to, and returns
 // the function that takes exactly it off: a watch that stops takes back its
-// own, never another's.
+// own, never another's. Each is one read-modify-write of the copy-on-write
+// list, serialised with every other, so two watches starting at once both
+// stay.
 func (s *StoreService[T]) feed(w *Watch) (unfeed func()) {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	s.setFeeds(append(s.watches(), w))
+	s.feeds.Update(func(cur *[]*Watch) *[]*Watch {
+		return feedsOf(append(watchesIn(cur), w))
+	})
 	return func() {
-		s.mu.Lock()
-		defer s.mu.Unlock()
-		s.setFeeds(slices.DeleteFunc(s.watches(), func(x *Watch) bool { return x == w }))
+		s.feeds.Update(func(cur *[]*Watch) *[]*Watch {
+			return feedsOf(slices.DeleteFunc(watchesIn(cur), func(x *Watch) bool { return x == w }))
+		})
 	}
 }
 
-// watches are the watches the store feeds, copied. The caller holds s.mu.
-func (s *StoreService[T]) watches() []*Watch {
-	if feeds := s.feeds.Load(); feeds != nil {
-		return slices.Clone(*feeds)
+// watchesIn is a copy of the watches cur holds, for a feed to change: the
+// list a write may be reading is never touched.
+func watchesIn(cur *[]*Watch) []*Watch {
+	if cur == nil {
+		return nil
 	}
-	return nil
+	return slices.Clone(*cur)
 }
 
-// setFeeds sets the watches the store feeds, nil for none. The caller holds
-// s.mu.
-func (s *StoreService[T]) setFeeds(ws []*Watch) {
+// feedsOf is ws as a store keeps it: nil for none, so that a write no watch
+// hears stops at one load.
+func feedsOf(ws []*Watch) *[]*Watch {
 	if len(ws) == 0 {
-		s.feeds.Store(nil)
-		return
+		return nil
 	}
-	s.feeds.Store(&ws)
+	return &ws
 }
 
 // notify tells the watches the store feeds that kit confirmed a write under

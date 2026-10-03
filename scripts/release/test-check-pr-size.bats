@@ -44,7 +44,7 @@ pr_commits() {
 
 # The case the merge would refuse: a request nobody with the authority decided.
 @test "an unlabelled pull request whose commits ask for a minor fails, naming the fix" {
-  pr_files 2 pkg/v1/codec/codec.go
+  pr_files 2 pkg/v1/data/codec/codec.go
   pr_labels 2 bug
   pr_commits 2 'feat(codec): one' $'feat(codec): two\n\nRelease-bump: minor'
   run "$SCRIPT" --pr=2
@@ -66,7 +66,7 @@ pr_commits() {
 # #224 at the door: a contributor's request is declined with a label, not by
 # rewriting the contributor's commits.
 @test "release:patch declines a contributor's request" {
-  pr_files 4 pkg/v1/codec/codec.go
+  pr_files 4 pkg/v1/data/codec/codec.go
   pr_labels 4 release:patch
   pr_commits 4 $'feat(codec): proposal\n\nRelease-bump: minor'
   run "$SCRIPT" --pr=4
@@ -79,7 +79,7 @@ pr_commits() {
 # message the release reads, so a request in the middle of the first commit is
 # as much a request as one at the end of the last.
 @test "a request in the middle of any branch commit counts" {
-  pr_files 5 pkg/v1/codec/codec.go
+  pr_files 5 pkg/v1/data/codec/codec.go
   pr_labels 5
   pr_commits 5 $'feat(codec): one\n\nRelease-bump: minor\n\nProse after it.' 'fix(codec): two'
   run "$SCRIPT" --pr=5
@@ -87,7 +87,7 @@ pr_commits() {
 }
 
 @test "an unlabelled pull request that asks for nothing is a patch" {
-  pr_files 6 pkg/v1/codec/codec.go
+  pr_files 6 pkg/v1/data/codec/codec.go
   pr_labels 6
   pr_commits 6 'fix(codec): one'
   run "$SCRIPT" --pr=6
@@ -96,7 +96,7 @@ pr_commits() {
 }
 
 @test "two release labels fail" {
-  pr_files 7 pkg/v1/codec/codec.go
+  pr_files 7 pkg/v1/data/codec/codec.go
   pr_labels 7 release:minor release:major
   pr_commits 7 'feat(codec): one'
   run "$SCRIPT" --pr=7
@@ -114,7 +114,7 @@ pr_commits() {
 }
 
 @test "the commits GitHub could not list fail, never pass" {
-  pr_files 9 pkg/v1/codec/codec.go
+  pr_files 9 pkg/v1/data/codec/codec.go
   pr_labels 9
   : >"$GH_FIXTURES/pulls_9_commits.fail"
   run "$SCRIPT" --pr=9

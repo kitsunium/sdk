@@ -9,7 +9,8 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 // Where a store's versions are kept (ADR 0007 §3): the SDK's document store
@@ -215,10 +216,12 @@ func (e *sealedEngine[T]) rewriteVersions(ctx context.Context, key string, fn fu
 var (
 	// errReseal ends a write whose record means what it meant but must rest
 	// otherwise: it is written again in place.
-	errReseal = errors.New("kit: the record is sealed again, unchanged")
+	errReseal = errs.New(CodeResealInPlace, "RESEAL_IN_PLACE", "the record is sealed again, unchanged",
+		"kit: a write that changed nothing ended so the record is sealed again in place, without a version")
 	// errRestMoved ends that second write when another write changed the
 	// record meanwhile.
-	errRestMoved = errors.New("kit: the record changed meanwhile")
+	errRestMoved = errs.New(CodeResealMoved, "RESEAL_MOVED", "the record changed meanwhile",
+		"kit: a reseal in place found the record changed by another write")
 )
 
 // resealed is what a write that seals a record again in place writes: the

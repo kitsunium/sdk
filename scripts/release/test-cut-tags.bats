@@ -108,7 +108,7 @@ use (
 )
 EOF
 
-  : >pkg/v1/codec.go
+  : >pkg/v1/doc.go
   g add -A
   g commit -q --no-verify -m "init"
 
@@ -133,7 +133,7 @@ tag_release() {
 # commit_pkg <message> — a commit that touches pkg/, so the size its pull
 # request carries — or the request its <message> makes — is in scope for it.
 commit_pkg() {
-  echo "// $RANDOM" >>pkg/v1/codec.go
+  echo "// $RANDOM" >>pkg/v1/doc.go
   g commit -aq --no-verify -F - <<<"$1"
 }
 
@@ -369,7 +369,7 @@ need_toolchain() {
   mkdir -p tools
   pad="$(printf 'y%.0s' $(seq 1 200))"
   for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
-  echo "// touched" >>pkg/v1/codec.go
+  echo "// touched" >>pkg/v1/doc.go
   g add -A
   g commit -q --no-verify -m 'feat(codec): wide merge'
   label_pr 111 release:minor
@@ -699,6 +699,62 @@ commit_pkg_bench() {
   [ "$(gh_calls)" -eq 0 ]
 }
 
+# commit_under <dir> <message> — a commit touching a Go file under <dir> and
+# nothing else: framework/ (ADR 0147) or third-party/ (ADR 0157), whose changes
+# cut the chain through their own tokens, so must be able to size it.
+commit_under() {
+  mkdir -p "$1"
+  echo "// $RANDOM" >>"$1/x.go"
+  g add -A
+  g commit -q --no-verify -F - <<<"$2"
+}
+
+@test "a label on a framework/-only merge sizes the release (ADR 0089, ADR 0147)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_under framework/kit 'feat(kit): a declaration'
+  label_pr 124 release:minor
+  run bash -c "echo framework | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+@test "a label on a third-party/-only merge sizes the release (ADR 0089, ADR 0157)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_under third-party/aws/writer/s3 'feat(s3): a knob'
+  label_pr 125 release:minor
+  run bash -c "echo third-party | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.2.0"* ]]
+}
+
+# The refusal follows: a framework or vendor merge CAN size the release, so an
+# unlabelled request on one is the silent patch the refusal exists to stop.
+@test "an unlabelled request on a third-party/-only merge is refused (ADR 0089, ADR 0157)" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  commit_under third-party/transform $'feat(transform): a level\n\nRelease-bump: minor'
+  run bash -c "echo third-party | $SCRIPT --dry-run"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refusing to size this release"* ]]
+}
+
+# And the maintainer-only filter still applies under both prefixes.
+@test "a label on a third-party/ CLAUDE.md-only merge does NOT size the release" {
+  need_toolchain
+  tag_release pkg/v0.1.0
+  mkdir -p third-party/aws
+  echo "# $RANDOM" >>third-party/aws/CLAUDE.md
+  g add -A
+  g commit -q --no-verify -m 'docs(aws): notes'
+  label_pr 126 release:minor
+  run bash -c "echo third-party | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"pkg/v0.1.1"* ]]
+  [[ "$output" != *"pkg/v0.2.0"* ]]
+}
+
 @test "an unwalkable --range is refused rather than read as no size" {
   run bash -c "echo pkg | $SCRIPT --dry-run --range=nosuchrev..HEAD"
   [ "$status" -eq 64 ]
@@ -923,5 +979,101 @@ EOF
 @test "an unknown token is still refused" {
   run bash -c "echo tools | $SCRIPT"
   [ "$status" -eq 1 ]
-  [[ "$output" == *"expected 'pkg' or 'framework'"* ]]
+  [[ "$output" == *"expected 'pkg', 'framework' or 'third-party'"* ]]
+}
+
+# ── ADR 0157: the vendor modules join the chain, read from go.work ──────────
+
+# add_third_party — two vendor modules under third-party/, each requiring and
+# replacing internal/*, used by go.work after the framework: the shape of the
+# real tree, where a vendor module requires internal/* exactly.
+add_third_party() {
+  add_framework
+  mkdir -p third-party/aws/writer/s3 third-party/x-crypto/argon2id
+  cat >third-party/aws/go.mod <<'GOMOD'
+module github.com/kitsunium/sdk/third-party/aws
+
+go 1.26
+
+require (
+	github.com/kitsunium/sdk/internal/core v0.0.0-00010101000000-000000000000
+	github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
+)
+
+replace github.com/kitsunium/sdk/internal/core => ../../internal/core
+
+replace github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
+GOMOD
+  cat >third-party/x-crypto/go.mod <<'GOMOD'
+module github.com/kitsunium/sdk/third-party/x-crypto
+
+go 1.26
+
+require github.com/kitsunium/sdk/internal/kernel v0.0.0-00010101000000-000000000000
+
+replace github.com/kitsunium/sdk/internal/kernel => ../../internal/kernel
+GOMOD
+  echo "package s3" >third-party/aws/writer/s3/s3.go
+  echo "package argon2id" >third-party/x-crypto/argon2id/argon2id.go
+  cat >go.work <<'GOWORK'
+go 1.26
+
+use (
+	.
+	./framework
+	./framework/connectors/postgres // one driver
+	./internal/core
+	./internal/kernel
+	./internal/service
+	./pkg
+	./third-party/x-crypto
+	./third-party/aws
+)
+GOWORK
+  g add -A
+  g commit -q --no-verify -m "feat(third-party): one module per vendor"
+}
+
+@test "chain_modules puts the vendor modules last, by name" {
+  add_third_party
+  run bash -c ". '$LIB'; chain_modules go.work"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'internal/core\ninternal/kernel\ninternal/service\npkg\nframework\nframework/connectors/postgres\nthird-party/aws\nthird-party/x-crypto' ]
+}
+
+@test "the vendor tag shapes are valid chain tags, and a stray shape is not" {
+  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v0.17.0 && is_valid_chain_tag third-party/x-crypto/v0.17.0 && is_valid_chain_tag third-party/db/writer/mysql/v0.17.0 && is_valid_third_party_tag third-party/codec/hcl/v1.0.0"
+  [ "$status" -eq 0 ]
+  # No module component, an upper-case one, a v2+ major, a version without its
+  # patch: none of them is a vendor module's tag.
+  run bash -c ". '$LIB'; is_valid_chain_tag third-party/v0.17.0"
+  [ "$status" -ne 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag third-party/AWS/v0.17.0"
+  [ "$status" -ne 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v2.0.0"
+  [ "$status" -ne 0 ]
+  run bash -c ". '$LIB'; is_valid_chain_tag third-party/aws/v0.17"
+  [ "$status" -ne 0 ]
+}
+
+@test "a vendor release tags the whole chain once, pinned, with no replace left" {
+  need_toolchain
+  add_third_party
+  run bash -c "printf 'pkg\nthird-party\n' | $SCRIPT --dry-run"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"would tag chain: internal/core/v0.1.0 internal/kernel/v0.1.0 internal/service/v0.1.0 pkg/v0.1.0 framework/v0.1.0 framework/connectors/postgres/v0.1.0 third-party/aws/v0.1.0 third-party/x-crypto/v0.1.0"* ]]
+  # One chain for two tokens: a second pass would cut the next patch on top.
+  [ "$(grep -c 'would tag chain' <<<"$output")" -eq 1 ]
+  # Each vendor module pins internal/* at the release …
+  [[ "$output" == *"--- third-party/aws/go.mod ---"* ]]
+  [[ "$output" == *"github.com/kitsunium/sdk/internal/core v0.1.0"* ]]
+  # … and every intra-repo replace is gone.
+  [[ "$output" != *"=> ../"* ]]
+}
+
+@test "the third-party token alone is accepted and cuts the chain" {
+  add_third_party
+  run bash -c "echo third-party | $SCRIPT"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refusing to auto-cut the FIRST release (pkg/v0.1.0)"* ]]
 }

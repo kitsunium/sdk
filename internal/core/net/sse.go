@@ -1,8 +1,10 @@
-// Package net — the Server-Sent Events frame and its wire form.
+// Package net — the Server-Sent Events frame: the value a stream sends and the
+// rules a frame must satisfy to be carried at all. Writing it — the encoder
+// that splits Data into data lines, and the comment frame — is
+// internal/service/net/sse's (ADR 0160 §4).
 package net
 
 import (
-	"strconv"
 	"strings"
 	"time"
 
@@ -21,15 +23,6 @@ const SSEMinRetry time.Duration = time.Millisecond
 // SSELastEventIDHeader is the request header a reconnecting client sends,
 // carrying the id of the last event it processed.
 const SSELastEventIDHeader string = "Last-Event-ID"
-
-// sseRetryBase is the numeric base the retry field is written in. The format
-// says decimal, so this is not a choice.
-const sseRetryBase int = 10
-
-// sseCRLFWidth is how many bytes a CRLF terminator occupies. Naming it is the
-// point: treating CRLF as two terminators emits a spurious empty data line
-// between every pair of lines, which is a corruption nobody reads back.
-const sseCRLFWidth int = 2
 
 // SSEEventValue is one Server-Sent Events frame.
 //
@@ -67,10 +60,10 @@ func (e SSEEventValue) IsZero() bool {
 
 // Validate reports whether the frame can be carried by the wire format.
 //
-// It is separate from AppendTo so a caller can check a frame before committing
-// to send it, and so AppendTo can validate everything BEFORE it appends
-// anything — a half-written frame on a stream is unrecoverable, since the peer
-// has already read it.
+// It is separate from the encoder (internal/service/net/sse.AppendEvent) so a
+// caller can check a frame before committing to send it, and so the encoder
+// can validate everything BEFORE it appends anything — a half-written frame on
+// a stream is unrecoverable, since the peer has already read it.
 func (e SSEEventValue) Validate() error {
 	//: a frame with no field at all serialises to a bare blank line, which the
 	//: client reads as an empty dispatch. That is never what a caller meant.
@@ -105,61 +98,6 @@ func (e SSEEventValue) Validate() error {
 	return validateSSERetry(e.Retry.Duration())
 }
 
-// AppendTo appends the frame's wire form to dst and returns the extended slice.
-//
-// It appends nothing when the frame is invalid: the whole frame is validated
-// first, so a stream never emits a partial one. Appending rather than returning
-// a fresh slice is what lets a stream reuse one buffer for its whole life.
-func (e SSEEventValue) AppendTo(dst []byte) (wire []byte, err error) {
-	//: validate before touching dst, so a refusal leaves the caller's buffer
-	//: exactly as it was.
-	if verr := e.Validate(); verr != nil {
-		//: hand back the untouched buffer with the reason.
-		return dst, verr
-	}
-	//: id first, so a client that stops reading mid-frame still has the resume
-	//: token for the frame it is about to discard.
-	if e.ID != "" {
-		dst = appendSSEField(dst, "id", e.ID)
-	}
-	//: the event type, when the frame is not the default "message".
-	if e.Name != "" {
-		dst = appendSSEField(dst, "event", e.Name)
-	}
-	//: the reconnection hint, in whole milliseconds.
-	if retry := e.Retry.Duration(); retry != 0 {
-		dst = append(dst, "retry: "...)
-		dst = strconv.AppendInt(dst, int64(retry/time.Millisecond), sseRetryBase)
-		dst = append(dst, '\n')
-	}
-	//: one data line per line of payload; an empty payload emits none, which is
-	//: how an id-only checkpoint frame is expressed.
-	if e.Data != "" {
-		dst = appendSSEData(dst, e.Data)
-	}
-	//: the blank line terminates the frame and triggers the client's dispatch.
-	return append(dst, '\n'), nil
-}
-
-// AppendSSEComment appends a comment frame — a line beginning with ':' that
-// every client ignores — to dst.
-//
-// It exists for keep-alive: an idle event stream is indistinguishable from a
-// dead one to a proxy counting idle seconds, and a comment is the only traffic
-// the format offers that cannot be mistaken for an event.
-func AppendSSEComment(dst []byte, text string) (wire []byte, err error) {
-	//: a comment is a single line, so a terminator inside it would end the
-	//: comment early and turn the remainder into fields the client obeys.
-	if verr := validateSSELine("comment", text); verr != nil {
-		//: hand back the untouched buffer with the reason.
-		return dst, verr
-	}
-	dst = appendSSEField(dst, "", text)
-	//: the blank line keeps the comment from merging with the next frame's
-	//: fields, so a comment can be written between any two events.
-	return append(dst, '\n'), nil
-}
-
 // validateSSELine refuses a line terminator in a field the format cannot split.
 func validateSSELine(field, value string) error {
 	//: LF and CR both terminate a line in this format, so both are fatal here.
@@ -169,7 +107,8 @@ func validateSSELine(field, value string) error {
 	//: set per call or, for a value of eight bytes or fewer, decodes a rune per
 	//: byte. IndexByte is the assembly-backed primitive. Measured in BENCH.md;
 	//: the same substitution is made for the same reason in
-	//: internal/service/proc/sdnotify.
+	//: internal/service/proc/systemd/notify, and for a comment's single line
+	//: in internal/service/net/sse.
 	//: The empty test is not redundant with them, it is the row that made the
 	//: substitution a win instead of a wash: Validate calls this for id AND
 	//: event whether the frame carries them or not, and on the empty string
@@ -210,112 +149,4 @@ func validateSSERetry(retry time.Duration) error {
 	}
 	//: representable.
 	return nil
-}
-
-// appendSSEData writes the payload as one "data:" line per line it contains.
-//
-// The scan is what this function costs. Both terminator cursors are found once
-// over the WHOLE payload and afterwards only ever move FORWARD, so each of the
-// two searches reads each stretch of the payload exactly once and the walk is
-// linear whatever shape the payload has. The obvious alternative — an IndexByte
-// pair per line — is quadratic on half of the possible payloads, and which half
-// depends on which of the two scans is left unbounded: bound neither and a
-// payload of LF-terminated lines re-reads its whole tail looking for a CR that
-// is not there; bound the CR scan by the LF and the mirror payload, CR-only,
-// does the same. Both are measured in BENCH.md and both are refused.
-func appendSSEData(dst []byte, data string) []byte {
-	lf := strings.IndexByte(data, '\n')
-	cr := strings.IndexByte(data, '\r')
-	at := 0
-	//: walk the payload one line at a time until the last one is written.
-	for {
-		idx := sseFirstTerminator(lf, cr)
-		//: no terminator left, so the remainder is the final line.
-		if idx < 0 {
-			//: every line is written.
-			return appendSSEField(dst, "data", data[at:])
-		}
-		dst = appendSSEField(dst, "data", data[at:idx])
-		at = idx + sseTerminatorWidth(data, idx)
-		//: refresh only a cursor this cut consumed or overtook, resuming AT the
-		//: new position rather than at the start — that is the whole linearity
-		//: argument, so these are not an optimisation on top of a correct loop,
-		//: they ARE the loop.
-		lf = sseAdvance(data, lf, at, '\n')
-		cr = sseAdvance(data, cr, at, '\r')
-	}
-}
-
-// sseTerminatorWidth reports how many bytes the terminator at idx occupies.
-func sseTerminatorWidth(data string, idx int) int {
-	//: CRLF is one terminator, not two — treating it as two would emit a
-	//: spurious empty data line between every pair of lines.
-	if data[idx] == '\r' && idx+1 < len(data) && data[idx+1] == '\n' {
-		//: the pair, counted once.
-		return sseCRLFWidth
-	}
-	//: a lone LF or a lone CR.
-	return 1
-}
-
-// sseAdvance returns where the next b sits at or after at, re-scanning only
-// when the cut just made consumed or overtook the cursor it is given.
-//
-// The untouched case is not an optimisation: a cursor still ahead of the cut is
-// already the answer, and re-scanning for it would read the same bytes again on
-// every line, which is what makes the obvious per-line form quadratic.
-func sseAdvance(data string, cursor, at int, b byte) int {
-	//: absent stays absent, and a cursor beyond the cut is still correct.
-	if cursor < 0 || cursor >= at {
-		//: nothing to re-scan.
-		return cursor
-	}
-	//: consumed or overtaken — look for the next one, from here forward only.
-	return sseIndexFrom(data, at, b)
-}
-
-// sseFirstTerminator returns whichever of the two cursors comes first, with -1
-// meaning that terminator is absent from the rest of the payload.
-func sseFirstTerminator(lf, cr int) int {
-	//: an absent LF leaves the CR to decide, absent or not.
-	if lf < 0 {
-		//: the carriage return, or -1 when there is none either.
-		return cr
-	}
-	//: an absent CR, or one after the LF, leaves the LF.
-	if cr < 0 || lf < cr {
-		//: the line feed cuts.
-		return lf
-	}
-	//: the carriage return is the earlier of the two.
-	return cr
-}
-
-// sseIndexFrom returns the index of b at or after from in s, expressed in s's
-// own coordinates, or -1 when the rest of s does not carry it.
-func sseIndexFrom(s string, from int, b byte) int {
-	idx := strings.IndexByte(s[from:], b)
-	//: a miss over the remainder stays a miss over the whole string.
-	if idx < 0 {
-		//: absent from here on.
-		return -1
-	}
-	//: re-base onto the whole string, which is what the cursors are kept in.
-	return from + idx
-}
-
-// appendSSEField writes one "name: value" line, or ": value" when name is empty
-// (a comment).
-func appendSSEField(dst []byte, name, value string) []byte {
-	dst = append(dst, name...)
-	dst = append(dst, ':')
-	//: the client strips exactly one leading space from a value, so the
-	//: conventional space costs nothing — but writing it on an EMPTY value
-	//: would leave trailing whitespace on the wire for no gain.
-	if value != "" {
-		dst = append(dst, ' ')
-		dst = append(dst, value...)
-	}
-	//: one field, one line.
-	return append(dst, '\n')
 }

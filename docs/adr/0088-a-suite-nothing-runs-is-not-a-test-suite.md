@@ -1,6 +1,6 @@
 # ADR 0088 — a suite nothing runs is not a test suite, and a gate is a name CI says out loud
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `scripts/CLAUDE.md` §Rules from ADR 0088. Before that: Accepted (§Decision 5 and the hook-only checks of §Deferred had been amended by [ADR 0153](0153-the-repository-carries-no-devcontainer-and-no-git-hooks.md))
 - **Date**: 2026-09-14
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0085](0085-both-halves-of-a-release-read-the-same-range.md) (whose §Deferred this closes), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics and the unsmugglable trailer), [ADR 0009](0009-pkg-public-module-resolvability.md) (the detached release commit, the `major` refusal), [ADR 0004](0004-sdk-bazel-build-system.md) (`bazel-ci.yml` is the gating lane)

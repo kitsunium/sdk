@@ -256,3 +256,11 @@ Handle_Wait_Memoised-8                            18.06     0.4%      0      0
 Handle_Signal_Live-8                              488.6     1.3%      0      0
 Handle_SignalGroup_Live-8                         390.0     0.4%      0      0
 ```
+
+> **`Start_*` rows, 2026-10.** A process handle now carries the clock its `Stop`
+> grace window is measured on — one interface more in the handle — so every
+> `Start_*` row allocates **16 B more, with the same allocation count**.
+> Measured on darwin/arm64 (Apple M1 Pro, go1.27.1), where the spawn path
+> differs from linux and the absolute figures do not compare with the rows
+> above: `Start_SelfBinary_NoOp` read 1 776 B / 29 allocs before the change and
+> 1 792 B / 29 after. The linux rows above predate it and were not re-measured.

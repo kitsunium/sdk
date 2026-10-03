@@ -291,5 +291,5 @@ None. `statemachine` is a new domain in this change set.
 
 ## References
 
-- [`container/heap`](https://pkg.go.dev/container/heap) — why the kernel's generic heap is used instead ([`internal/kernel/heap`](../../internal/kernel/heap/CLAUDE.md)).
+- [`container/heap`](https://pkg.go.dev/container/heap) — why the kernel's generic heap is used instead ([`internal/kernel/collections/heap`](../../internal/kernel/collections/heap/CLAUDE.md)).
 - [Go Code Review Comments — goroutine lifetimes](https://go.dev/wiki/CodeReviewComments#goroutine-lifetimes) — why Run runs on the caller's goroutine.

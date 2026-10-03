@@ -1,0 +1,44 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "file",
+    srcs = ["file.go"],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/sink/file",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/logfile",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":file",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "file_test",
+    srcs = [
+        "file_external_test.go",
+        "file_internal_test.go",
+    ],
+    embed = [":file"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/core/observe/logger/sink/file",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/internal/logfile",
+    ],
+)

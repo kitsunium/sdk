@@ -1,0 +1,90 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "notify",
+    srcs = ["sdnotify.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/systemd/notify",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":notify",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "notify_test",
+    srcs = [
+        "sdnotify_external_test.go",
+        "sdnotify_linux_external_test.go",
+        "sdnotify_other_test.go",
+    ],
+    deps = [
+        ":notify",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
+)

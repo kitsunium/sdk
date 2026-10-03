@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -61,6 +62,10 @@ type config struct {
 	// anyOrigin disables the origin check entirely, which the caller must ask
 	// for by name.
 	anyOrigin bool
+	// clock is what the heartbeat ticks on. No public option sets it:
+	// clampToDefaults makes it clock.System, and only a white-box test hands
+	// it a ManualClock, so a probe is driven by advancing time.
+	clock clock.Waiter
 }
 
 // Subprotocols declares the subprotocols this server speaks, most preferred
@@ -310,6 +315,10 @@ func clampToDefaults(cfg *config) {
 	//: the same default for the frame ceiling.
 	if cfg.maxFrameSize == 0 {
 		cfg.maxFrameSize = DefaultMaxFrameSize
+	}
+	//: the heartbeat ticks on the wall clock unless a test said otherwise.
+	if cfg.clock == nil {
+		cfg.clock = clock.System
 	}
 	//: every field now carries a number somebody decided on.
 }

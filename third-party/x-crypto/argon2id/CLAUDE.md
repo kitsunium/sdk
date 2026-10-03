@@ -6,14 +6,16 @@
 Registers the **"argon2id"** password-hashing scheme (ADR 0013) — the memory-hard,
 OWASP-first-choice password hash. It depends on `golang.org/x/crypto/argon2`, so
 it lives under `third-party/x-crypto` as an **opt-in** scheme (same precedent as
-xchacha vs the stdlib aesgcm default): `pkg/v1/password` does NOT blank-import it,
+xchacha vs the stdlib aesgcm default): `pkg/v1/crypto/password` does NOT blank-import it,
 keeping that facade dep-light. Consumers who can take the x/crypto dependency
 blank-import this package, then `password.Hash("argon2id", …)` resolves and
 `password.Verify` routes any stored hash back to its scheme by PHC id.
 
-Lives in the **root** module (which hosts the x/crypto dep) and legitimately
-imports `internal/core/crypto` + `internal/kernel/errs` (third-party packages may
-reach into `internal/*` — they ship with the umbrella module, not `pkg/v1`).
+Lives in the **`third-party/x-crypto` module** (ADR 0157), whose `go.mod` hosts
+the x/crypto dep it shares with xchacha, and legitimately imports
+`internal/core/crypto` + `internal/kernel/errs` (third-party packages may reach
+into `internal/*` — their module path sits under `github.com/kitsunium/sdk`, and
+they ship in their own module, not in `pkg/v1`).
 
 ## Contents
 

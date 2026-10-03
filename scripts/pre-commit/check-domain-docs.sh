@@ -8,23 +8,56 @@
 # matters — `events` documented only in the stale copy while `health` was in
 # neither. Nothing failed. The file just quietly stopped describing the tree.
 #
-# Two mechanical invariants close that, both keyed on what is ON DISK rather
+# Three mechanical invariants close that, all keyed on what is ON DISK rather
 # than on a number someone maintains (CLAUDE.md rule 11, and the repository's
 # own rule that a counter is measured and never deduced):
 #
-#   1. the `core/` list in the architecture tree names EXACTLY the directories
-#      under internal/core, no more and no fewer;
-#   2. no domain is bolded twice in the Purpose paragraph — a duplicate there is
-#      the union-merge signature;
-#   3. the two ADR indexes (docs/adr/CLAUDE.md and this file's Reference list)
-#      name exactly the ADRs on disk, once each. A duplicated index row is what
-#      a re-run of a half-failed insertion script leaves behind, and it happened
-#      here: the queue row was written twice and neither copy was wrong, so
-#      nothing looked broken.
+#   1. the architecture tree has ONE `core/` block, and it names EXACTLY the Go
+#      packages under internal/core, no more and no fewer — every directory,
+#      at any depth, that holds a non-test .go file, by its path relative to
+#      internal/core (ADR 0155 §6). This compared the directories one level
+#      down while the core was flat; grouped by family, that would have shrunk
+#      to the family names, and a domain could have left the tree, or never
+#      entered it, while its family stayed;
+#   2. no domain is described twice in the Purpose section — a duplicate there
+#      is the union-merge signature. Since ADR 0154 the domains are a TABLE
+#      under a short Purpose paragraph, one row each, so the check is a
+#      repeated row; the paragraph is still checked for a domain bolded twice,
+#      should prose ever grow back into it;
+#   3. the three ADR indexes (docs/adr/CLAUDE.md, docs/CLAUDE.md and this
+#      file's Reference list) name exactly the ADRs on disk, once each. A
+#      duplicated index row is what a re-run of a half-failed insertion script
+#      leaves behind, and it happened here: the queue row was written twice and
+#      neither copy was wrong, so nothing looked broken.
 #
-# It deliberately does NOT require every core package to appear in the Purpose
-# prose: `writer` and `logger/level` are parts of a domain rather than domains,
-# and inventing a rule about which is which is how a guard starts lying.
+# It deliberately does NOT require every core package to have a row:
+# `writer` and `logger/level` are parts of a domain rather than domains, and
+# inventing a rule about which is which is how a guard starts lying.
+#
+# How the core/ block is read. It is the `├── core/` line, whose text after
+# the name is a caption and is not read, and every `│` line under it, taken as
+# ONE text so that a group or a note may wrap onto the next line:
+#
+#   ├── core/          domain interfaces + domain values
+#   │                  crypto, net, proc,
+#   │                  security/{authz, secret, session, token},
+#   │                  observe/{logger, logger/{level, writer}, metrics,
+#   │                           otel, trace},
+#   │                  data/{cache, codec (the registry), codec/scratch}
+#
+#   - a parenthesised note is dropped first, whatever it holds, commas and
+#     braces included — but not parentheses of its own, which do not nest;
+#   - a brace group is expanded next, BEFORE any comma is split, innermost
+#     first so that groups nest: what stands in front of the "{", back to the
+#     nearest comma or "{", is put in front of every member, and what stands
+#     after the "}", up to the next comma or "}", behind it — so
+#     "logger/{level, writer}" names logger/level and logger/writer;
+#   - what is left is split on commas; each name is trimmed, and a trailing
+#     "/" is dropped.
+#
+# A name is therefore a package's full path. A family directory holds no Go
+# code, so it is never a name of its own: it is the prefix of a group. A brace
+# that does not pair into a group is refused rather than read as part of a path.
 set -euo pipefail
 
 root="${1:-$(cd "$(dirname "$0")/../.." && pwd)}"
@@ -33,45 +66,122 @@ cd "$root"
 doc="CLAUDE.md"
 [ -f "$doc" ] || { echo "✗ $doc missing — run this from the repo root." >&2; exit 1; }
 
-# --- 1. the architecture tree's core/ list vs the directories on disk --------
+# --- 1. the architecture tree's core/ block vs the Go packages on disk -------
 
-# The prefix is stripped with sed rather than printed away with `-printf '%f'`:
-# -printf is GNU find's, and the BSD find macOS ships refuses it (#260).
-on_disk="$(find internal/core -mindepth 1 -maxdepth 1 -type d | sed 's#^internal/core/##' | sort)"
+# Every Go package under internal/core, at any depth, as its path relative to
+# internal/core: a directory holding a non-test .go file. What the go tool
+# skips is skipped here — a testdata directory, and any file or directory whose
+# name starts with "." or "_" — and a file at internal/core itself reads as
+# ".". The prefix is stripped with sed rather than printed away with
+# `-printf '%h'`: -printf is GNU find's, and the BSD find macOS ships refuses
+# it (#260). This list and the block's are sorted, and compared, in the C
+# locale, so the two orders cannot disagree whatever the caller's locale is.
+core_pkgs="$(find internal/core -type f -name '*.go' ! -name '*_test.go' \
+		! -name '.*' ! -name '_*' \
+		! -path '*/testdata/*' ! -path '*/.*/*' ! -path '*/_*/*' \
+	| sed -e 's#/[^/]*$##' -e 's#^internal/core$#.#' -e 's#^internal/core/##' \
+	| LC_ALL=C sort -u)"
+if [ -z "$core_pkgs" ]; then
+	echo "✗ internal/core holds no Go package — is $root the repository root?" >&2
+	exit 1
+fi
 
-# The tree block: the `├── core/` line plus every `│` continuation under it.
-# Names are comma-separated and may carry a parenthesised note, e.g.
-# "codec (+ scratch)" — the note is stripped, the name is not.
+# A package's NAME, the last element of its path, is what invariant 2 matches a
+# bolded word against: `**authz**` names security/authz exactly as it named
+# authz while the core was flat, instead of the family above it.
+on_disk="$(printf '%s\n' "$core_pkgs" | sed 's#.*/##' | sort -u)"
+
+# The reader below takes ONE block: a second either runs into it, when nothing
+# separates them, or is never read at all. A second list of the same layer is
+# exactly what a union merge of the tree leaves behind, so it is refused here
+# rather than half-compared.
+blocks="$(grep -c '^├── core/' "$doc" || true)"
+if [ "$blocks" -gt 1 ]; then
+	echo "✗ $doc: found $blocks 'core/' blocks in the architecture tree — there" >&2
+	echo "  must be one. A second list of the same layer is what a union merge" >&2
+	echo "  leaves behind; read, it would have been merged into the first or skipped." >&2
+	exit 1
+fi
+
+# The block, read as the header describes. Empty lines are dropped with
+# sed '/^$/d' and not grep -v '^$': grep exits 1 when it selects nothing,
+# pipefail hands that status to the assignment, and set -e then ended the
+# script — so a tree with no core/ block failed with no message at all, and
+# the one below was never printed.
 in_doc="$(awk '
 	/^├── core\// { grab = 1; next }
 	grab && /^│/  { print; next }
 	grab          { exit }
 ' "$doc" \
 	| sed 's/^│ *//' \
+	| tr '\n' ' ' \
+	| sed 's/([^)]*)//g' \
+	| awk '
+	{
+		# The first "}" closes an innermost group, and the nearest "{" before
+		# it opens that group, so neither the members nor the prefix hold a
+		# brace. Every pass consumes one "}", which is what ends the loop.
+		s = $0
+		for (;;) {
+			rb = index(s, "}")
+			if (rb == 0) break
+			lb = rb - 1
+			while (lb > 0 && substr(s, lb, 1) != "{") lb--
+			if (lb == 0) break
+			p = lb - 1
+			while (p > 0 && index(",{", substr(s, p, 1)) == 0) p--
+			q = rb + 1
+			while (q <= length(s) && index(",}", substr(s, q, 1)) == 0) q++
+			prefix = substr(s, p + 1, lb - p - 1)
+			sub(/^[ \t]+/, "", prefix)
+			suffix = substr(s, rb + 1, q - rb - 1)
+			n = split(substr(s, lb + 1, rb - lb - 1), member, ",")
+			out = ""
+			for (i = 1; i <= n; i++) {
+				m = member[i]
+				sub(/^[ \t]+/, "", m)
+				sub(/[ \t]+$/, "", m)
+				out = out (i > 1 ? "," : "") prefix m suffix
+			}
+			s = substr(s, 1, p) out substr(s, q)
+		}
+		print s
+	}' \
 	| tr ',' '\n' \
-	| sed -e 's/([^)]*)//g' -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' \
-	| grep -v '^$' \
-	| sed 's#/.*##' \
-	| sort -u)"
+	| sed -e 's/^[[:space:]]*//' -e 's/[[:space:]]*$//' -e 's#/*$##' -e '/^$/d' \
+	| LC_ALL=C sort -u)"
 
 if [ -z "$in_doc" ]; then
-	echo "✗ $doc: could not find the 'core/' block of the architecture tree." >&2
-	echo "  The guard keys on a line starting '├── core/'; if the tree was" >&2
-	echo "  reshaped, update this guard in the same change (rule 11)." >&2
+	echo "✗ $doc: could not find the 'core/' block of the architecture tree, or" >&2
+	echo "  it names no package. The guard keys on a line starting '├── core/';" >&2
+	echo "  if the tree was reshaped, update this guard in the same change (rule 11)." >&2
 	exit 1
 fi
 
-missing="$(comm -23 <(printf '%s\n' "$on_disk") <(printf '%s\n' "$in_doc") || true)"
-extra="$(comm -13 <(printf '%s\n' "$on_disk") <(printf '%s\n' "$in_doc") || true)"
+case "$in_doc" in
+*[{}]*)
+	echo "✗ $doc: the core/ block has a brace that does not pair into a group —" >&2
+	echo "  one left open, one closed that was never opened, or two groups side" >&2
+	echo "  by side:" >&2
+	printf '%s\n' "$in_doc" | sed -n '/[{}]/s/^/    /p' >&2
+	exit 1
+	;;
+esac
+
+missing="$(LC_ALL=C comm -23 <(printf '%s\n' "$core_pkgs") <(printf '%s\n' "$in_doc") || true)"
+extra="$(LC_ALL=C comm -13 <(printf '%s\n' "$core_pkgs") <(printf '%s\n' "$in_doc") || true)"
 
 if [ -n "$missing" ] || [ -n "$extra" ]; then
-	echo "✗ $doc: the architecture tree's core/ list disagrees with internal/core." >&2
+	echo "✗ $doc: the architecture tree's core/ block disagrees with the Go packages" >&2
+	echo "  under internal/core." >&2
 	[ -n "$missing" ] && { echo "  on disk but NOT in the doc:" >&2; printf '%s\n' "$missing" | sed 's/^/    /' >&2; }
 	[ -n "$extra" ]   && { echo "  in the doc but NOT on disk:" >&2; printf '%s\n' "$extra"   | sed 's/^/    /' >&2; }
+	echo "  A package is named by its path under internal/core, and a family's" >&2
+	echo "  packages may be grouped as family/{a, b} — see this guard's header." >&2
 	exit 1
 fi
 
-# --- 2. no domain bolded twice in the Purpose paragraph ---------------------
+# --- 2. no domain described twice in the Purpose section --------------------
 
 purpose="$(sed -n '/^Go SDK providing/p' "$doc")"
 if [ -z "$purpose" ]; then
@@ -105,6 +215,32 @@ if [ -n "$dupes" ]; then
 	echo >&2
 	echo "  Merge the clauses into one and delete the stale copy; do not leave" >&2
 	echo "  both, because they will disagree." >&2
+	exit 1
+fi
+
+# The domains themselves are a table in the Purpose section (ADR 0154): one row
+# per domain, its name in backticks in the first cell. The prose rule above
+# cannot see a row, so the union-merge signature is looked for where the
+# domains now are — the same domain on two rows, the second one stale.
+domains="$(awk '
+	/^## Purpose/   { grab = 1; next }
+	grab && /^## /  { exit }
+	grab && /^\| `/ { print }
+' "$doc" | sed -E 's/^\| `([^`]+)`.*/\1/')"
+if [ -z "$domains" ]; then
+	echo "✗ $doc: the Purpose section has no domain table — one row per domain," >&2
+	echo "  its name in backticks in the first cell (ADR 0154). If the section was" >&2
+	echo "  reshaped, update this guard in the same change (rule 11)." >&2
+	exit 1
+fi
+dupes="$(printf '%s\n' "$domains" | sort | uniq -d)"
+if [ -n "$dupes" ]; then
+	echo "✗ $doc: these domains have more than one row in the Purpose table —" >&2
+	echo "  the signature of a union merge:" >&2
+	printf '%s\n' "$dupes" | sed 's/^/    /' >&2
+	echo >&2
+	echo "  Keep one row per domain and delete the stale one; do not leave both," >&2
+	echo "  because they will disagree." >&2
 	exit 1
 fi
 

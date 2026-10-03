@@ -23,7 +23,7 @@ alias to its internal type rather than by reading: `scheduler.Config`,
 `session.FileConfig`, `sql.Config`, `health.Config`, `lifecycle.Config`,
 `queue.ConsumerConfig`, then `health.AskConfig`, `lifecycle.SupervisorConfig`,
 `resilience.RetryConfig`, `secret.FileConfig`, `secret.RotatorConfig`,
-`statemachine.Config` and `mail.SpoolConfig` — none of them deterministically
+`statemachine.Config` and `spool.Config` (`app/mail/spool`) — none of them deterministically
 testable by a downstream consumer without this package. Twenty-one more carry a
 `clock.Clock`, which a two-method double can always satisfy structurally; what
 those lack without this package is a NAME for the type and any way to reach
@@ -68,7 +68,7 @@ held back and nothing is added.
   facade re-exports it — a facade that grows logic is a second implementation.
 - Reach for `internal/kernel/clock` in this package's tests. A test that
   imports it proves the opposite of what this package claims; the precedent is
-  `pkg/v1/token`, whose facade test hid two constructors no downstream module
+  `pkg/v1/security/token`, whose facade test hid two constructors no downstream module
   could call.
 
 ## Verification

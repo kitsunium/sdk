@@ -1,13 +1,15 @@
 #!/usr/bin/env bash
 # scripts/release/compute-bumps.sh — decide whether the public modules need a
 # release since the previous release tag: emit the token `pkg` when the public
-# module `pkg` (github.com/kitsunium/sdk/pkg) changed, and `framework` when the
-# framework module or one of its connectors did (ADR 0147). The chain is cut in
-# lockstep, so either token releases every module once (cut-tags.sh).
+# module `pkg` (github.com/kitsunium/sdk/pkg) changed, `framework` when the
+# framework module or one of its connectors did (ADR 0147), and `third-party`
+# when one of the vendor modules under third-party/ did (ADR 0157). The chain is
+# cut in lockstep, so any token releases every module once (cut-tags.sh).
 #
 # Decision matrix (ADR 0007, updated for the bare-`pkg` module — ADR 0009):
 #   change under pkg/v*/** or pkg/go.mod  -> bump pkg
 #   change under framework/**             -> bump framework (ADR 0147)
+#   change under third-party/**           -> bump third-party (ADR 0157)
 #   change under internal/**              -> bump pkg iff its bazel rdeps
 #                                            reach //pkg/...
 #   no relevant change                    -> emit nothing (exit 0)
@@ -20,8 +22,8 @@
 # it reduces a path to its module dir first, at which point the file's identity
 # is gone (#220). Filtering once, up front, is what makes the two agree.
 #
-# Output: the literal token "pkg", then the literal token "framework", each on
-# its own line and each only when due — so "pkg", "framework", both, or
+# Output: the literal token "pkg", then "framework", then "third-party", each on
+# its own line and each only when due — so any ordered subset of the three, or
 # nothing. (Before the bare-`pkg` migration this emitted one "vN" major per
 # line.) Stable contract — consumed by cut-tags.sh and CI.
 
@@ -46,7 +48,7 @@ for arg in "$@"; do
     --range=*) RANGE="${arg#--range=}" ;;
     --help|-h)
       cat <<EOF
-compute-bumps.sh — emit "pkg" and/or "framework" when a public module needs a release.
+compute-bumps.sh — emit "pkg", "framework" and/or "third-party" when a public module needs a release.
 
 Usage: $0 [--dry-run] [--explain] [--require-bazel] [--range=<rev>..HEAD]
 
@@ -54,9 +56,10 @@ Without --range, infers from the last tag or, on a bootstrap repo,
 falls back to the root commit. Shallow-clone safe.
 
 --explain writes the verdict and the reason for it to stderr. stdout stays
-the stable contract ("pkg", "framework", both, or nothing), so a caller that parses it is
-unaffected. It is opt-in rather than always-on because the BATS suite
-merges the two streams into one assertion.
+the stable contract ("pkg", "framework", "third-party", in that order, each
+only when due), so a caller that parses it is unaffected. It is opt-in
+rather than always-on because the BATS suite merges the two streams into one
+assertion.
 
 --require-bazel refuses, instead of skipping rule 2, when bazel is absent
 and internal/ module dirs changed. The release lane passes it; a developer
@@ -87,6 +90,7 @@ fi
 
 need_bump=0
 need_framework=0
+need_third_party=0
 
 # explain <line…> — the reason, on stderr, only when asked. #226 is that an
 # internal/-only change publishes nothing and "the log cannot say why": every
@@ -167,6 +171,27 @@ done
 for path in ${counting[@]+"${counting[@]}"}; do
   case "$path" in
     framework/*) need_framework=1; explain "rule 1b: $path is a framework-module change -> bump framework"; break ;;
+  esac
+done
+
+# 1c. Vendor-module changes (ADR 0157): anything under third-party/ that can
+# carry a consumer-visible change. Each vendor integration is a module of the
+# chain — third-party/aws, third-party/codec/*, third-party/db/writer/*,
+# third-party/transform, third-party/x-crypto — so its change has to be
+# published, and the token cuts the whole chain once, as `framework` does. The
+# same maintainer-only filter applies, so a CLAUDE.md or a BUILD.bazel alone
+# releases nothing.
+#
+# A glob and not the list go.work names, on purpose: lib/release-scope.sh's
+# rs_releasable sizes a release with the same `third-party/` prefix, and the
+# half that decides WHETHER and the half that decides HOW BIG must read one
+# notion of a path that counts (ADR 0089). Every package under third-party/ is
+# in a chain module: entitlement's ssh Identity, the last one the untagged root
+# module held, is the framework's connector framework/connectors/ssh since ADR
+# 0158, so rule 1b's `framework` token releases it.
+for path in ${counting[@]+"${counting[@]}"}; do
+  case "$path" in
+    third-party/*) need_third_party=1; explain "rule 1c: $path is a vendor-module change -> bump third-party"; break ;;
   esac
 done
 
@@ -294,19 +319,20 @@ if [ "$need_bump" -eq 0 ]; then
 fi
 
 # 3. Emit the tokens. Dry-run echoes the same payload, no side effects.
-if [ "$need_bump" -eq 0 ] && [ "$need_framework" -eq 0 ]; then
-  explain "verdict: NO RELEASE (nothing consumer-visible changed in this range)"
-  exit 0
-fi
-if [ "$need_bump" -eq 1 ] && [ "$need_framework" -eq 1 ]; then
-  explain "verdict: RELEASE (tokens 'pkg' and 'framework')"
-elif [ "$need_bump" -eq 1 ]; then
-  explain "verdict: RELEASE (token 'pkg')"
-else
-  explain "verdict: RELEASE (token 'framework')"
-fi
-[ "$need_bump" -eq 1 ] && echo "pkg"
-[ "$need_framework" -eq 1 ] && echo "framework"
+tokens=()
+[ "$need_bump" -eq 1 ] && tokens+=("pkg")
+[ "$need_framework" -eq 1 ] && tokens+=("framework")
+[ "$need_third_party" -eq 1 ] && tokens+=("third-party")
+case "${#tokens[@]}" in
+  0)
+    explain "verdict: NO RELEASE (nothing consumer-visible changed in this range)"
+    exit 0
+    ;;
+  1) explain "verdict: RELEASE (token '${tokens[0]}')" ;;
+  2) explain "verdict: RELEASE (tokens '${tokens[0]}' and '${tokens[1]}')" ;;
+  *) explain "verdict: RELEASE (tokens '${tokens[0]}', '${tokens[1]}' and '${tokens[2]}')" ;;
+esac
+printf '%s\n' "${tokens[@]}"
 if [ "$DRY_RUN" -eq 1 ]; then
   echo "(dry-run: $RANGE)" >&2
 fi

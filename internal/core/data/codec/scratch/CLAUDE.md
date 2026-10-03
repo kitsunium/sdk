@@ -1,0 +1,81 @@
+<!-- updated: 2026-10-03T12:00:00Z -->
+# internal/core/data/codec/scratch/
+
+## Purpose
+
+Shared, size-bounded recycling primitives for the service codecs. Before
+this package, every codec that encoded into a transient `*bytes.Buffer`
+carried its own `sync.Pool`, its own `256 << 10` cap-discard constant, and
+its own `releaseBuffer` helper — nine byte-for-byte copies of the same
+logic that could silently drift apart. `scratch` is the single source of
+truth for the cap-discard policy and the shared pool.
+
+## Why core, not kernel
+
+Since ADR 0010 the recycling MECHANISM is shared: `bufferPool` is a
+`recycler.CappedPool[*bytes.Buffer]` and `readerPool` a plain
+`recycler.Pool[*bytes.Reader]`. What stays here is the codec VOCABULARY —
+the 256 KiB codec-payload threshold (`MaxRetainedBufBytes`) and the concrete
+`*bytes.Buffer` / `*bytes.Reader` types — which is why this package lives in
+`core/data/codec`, consumed only by `service/data/codec/*` below `core` in the layer
+graph. (Before ADR 0010 each codec hand-rolled its own `sync.Pool`; the
+mechanism was duplicated, the thresholds drifted.)
+
+## Surface
+
+| Symbol | Contract |
+|---|---|
+| `MaxRetainedBufBytes` | `const = 256 << 10`. Buffers larger than this are dropped on release, never re-pooled. |
+| `AcquireBuffer() *bytes.Buffer` | Returns an **already-Reset** buffer from the shared pool. Caller owns it until `ReleaseBuffer`. |
+| `ReleaseBuffer(*bytes.Buffer)` | Repools the buffer unless `Cap() > MaxRetainedBufBytes` (then orphaned for the GC). |
+| `DetachBuffer(*bytes.Buffer) []byte` | Hands the caller the encoded bytes and ends its ownership of the buffer: within the cap, a clone and a `ReleaseBuffer`; over it, the buffer's own storage, orphaned without a copy or a reset. Nil-safe. |
+| `AcquireReader(src []byte) *bytes.Reader` | Returns a `*bytes.Reader` positioned at `src`. Caller owns it until `ReleaseReader`; `src` must stay alive + unmodified while the reader is used. |
+| `ReleaseReader(*bytes.Reader)` | Repools the reader. No cap-discard — a `bytes.Reader` is a fixed-size struct. |
+
+## Lifetime contract (non-negotiable)
+
+A value from `AcquireBuffer` is caller-owned until the matching
+`ReleaseBuffer`. After release, the buffer **and any slice aliasing
+`buf.Bytes()`** must not be used. If the encoded bytes must outlive the
+release, clone them first (`slices.Clone(buf.Bytes())`) or call
+`DetachBuffer`, the size-aware release the codecs share (clone on the small
+path, orphan-without-clone on the over-cap path) — `csv`, `multipart`, `ndjson`
+and `pem` each carried a copy of it before it moved here.
+
+## Why one shared pool
+
+`sync.Pool` is internally per-P sharded, so a single shared pool does not
+add contention versus nine independent pools — and it yields a higher
+reuse rate because any codec's released buffer can serve any other codec's
+next call. The victim-cache semantics (survive one GC, drain after two)
+are unchanged.
+
+## Consumers
+
+`AcquireBuffer` / `ReleaseBuffer`: `service/data/codec/{cbor,csv,json,msgpack,multipart,ndjson,pem,toml,xml,yaml}`
+plus the `baseenc` JSON-mediation buffer — eleven consumers. `DetachBuffer`:
+`service/data/codec/{csv,multipart,ndjson,pem}`, whose `Marshal` returns the
+bytes it encoded into a pooled buffer. `AcquireReader` /
+`ReleaseReader`: `service/data/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
+a recyclable `*bytes.Reader`). The `≥2-consumer` rule for a shared primitive
+is satisfied many times over.
+
+`MaxRetainedBufBytes` alone: `service/data/codec/tlv`. Its streaming encoder grows a
+raw `*[]byte` by `append`, a shape `AcquireBuffer` cannot serve without a copy,
+so it keeps its own `recycler.CappedPool[*[]byte]` — and passes it this
+constant as the ceiling instead of declaring a second `256 << 10`, which is
+what the Do NOT below asks of a codec with its own pool.
+
+## Do NOT
+
+- Reset the buffer yourself before use — `AcquireBuffer` already did.
+- Return a buffer to the pool whose `Bytes()` you handed to a caller
+  without cloning first.
+- Add a second cap-discard constant in a codec — read
+  `scratch.MaxRetainedBufBytes`.
+
+## Verification
+
+```
+bazel test --config=race //internal/core/data/codec/scratch:scratch_test
+```

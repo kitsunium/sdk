@@ -2,8 +2,10 @@
 
 Bazel 9 dropped WORKSPACE; this file is the single source of truth for
 external dependencies. rules_go + gazelle read Go deps directly from the
-workspace's go.work file so the 4 module-local go.mod files stay the
-authoritative list for gopls / IDE tooling.
+workspace's go.work file so the module-local go.mod files it names — the
+internal/* layers, pkg, the framework and its connectors, one module per
+vendor under third-party/ — stay the authoritative list for gopls / IDE
+tooling.
 """
 
 module(
@@ -24,7 +26,7 @@ go_sdk.download(version = "1.27.1")
 
 # ── Go dependencies ────────────────────────────────────────────────────
 # `go_deps.from_file(go_work=...)` imports every direct + indirect
-# dependency across all 4 go.mod files referenced by the workspace.
+# dependency across every go.mod file the workspace references.
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_work = "//:go.work")
 
@@ -39,7 +41,6 @@ use_repo(
     "com_github_aws_aws_sdk_go_v2_service_s3",
     "com_github_aws_smithy_go",
     "com_github_clickhouse_clickhouse_go_v2",
-    "com_github_fxamacker_cbor_v2",
     "com_github_go_sql_driver_mysql",
     "com_github_hashicorp_hcl_v2",
     "com_github_jackc_pgx_v5",
@@ -49,19 +50,9 @@ use_repo(
     "com_github_kitsunium_sdk_internal_service",
     "com_github_kitsunium_sdk_pkg",
     "com_github_klauspost_compress",
-    "com_github_moby_moby_api",
-    "com_github_pelletier_go_toml_v2",
     "com_github_redis_go_redis_v9",
-    "com_github_testcontainers_testcontainers_go",
-    "com_github_testcontainers_testcontainers_go_modules_clickhouse",
-    "com_github_testcontainers_testcontainers_go_modules_mysql",
-    "com_github_testcontainers_testcontainers_go_modules_postgres",
-    "com_github_testcontainers_testcontainers_go_modules_redis",
-    "com_github_vmihailenco_msgpack_v5",
     "in_gopkg_yaml_v3",
     "org_golang_google_protobuf",
     "org_golang_x_crypto",
-    "org_golang_x_mod",
     "org_modernc_sqlite",
-    "org_mongodb_go_mongo_driver",
 )

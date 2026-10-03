@@ -1,0 +1,93 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "token",
+    srcs = [
+        "bound_key_value.go",
+        "bounds_value.go",
+        "claims_codec.go",
+        "depth_scan.go",
+        "ed25519.go",
+        "encoding.go",
+        "es256.go",
+        "hs256_binding.go",
+        "issuer_config.go",
+        "jose_shape.go",
+        "jsonstring.go",
+        "jwkbridge.go",
+        "jws.go",
+        "jws_issuer.go",
+        "jws_parts.go",
+        "jws_verifier.go",
+        "jwt.go",
+        "keys.go",
+        "paseto.go",
+        "paseto_issuer.go",
+        "paseto_issuer_config.go",
+        "paseto_shape.go",
+        "paseto_verifier.go",
+        "paseto_verifier_config.go",
+        "policy.go",
+        "token.go",
+        "token_compliance.go",
+        "validate.go",
+        "verifier_config.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/security/token",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/security/token",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/key/jwk",
+        "//internal/service/crypto/mac/hmacsha2",
+        "//internal/service/crypto/sign/ed25519sig",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":token",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "token_test",
+    srcs = [
+        "claims_codec_external_test.go",
+        "encoding_internal_test.go",
+        "jwkbind_alloc_internal_test.go",
+        "jwkbind_internal_test.go",
+        "jwkbridge_external_test.go",
+        "jwkset_bench_test.go",
+        "jwt_external_test.go",
+        "keys_external_test.go",
+        "parsing_bench_test.go",
+        "paseto_external_test.go",
+        "refusal_bench_test.go",
+        "security_external_test.go",
+        "split_alloc_internal_test.go",
+        "stage_bench_test.go",
+        "token_bench_test.go",
+    ],
+    embed = [":token"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/crypto/key/jwk",
+        "//internal/core/security/token",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/key/jwk",
+        "//internal/service/crypto/mac/hmacsha2",
+        "//internal/service/crypto/sign/ed25519sig",
+    ],
+)

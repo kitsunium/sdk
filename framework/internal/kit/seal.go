@@ -16,8 +16,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Sealing at rest (ADR 0006 §4, step 3). What kit keeps at rest — a store's
@@ -28,7 +28,7 @@ import (
 // nothing.
 //
 // A member's value is replaced by a JSON string, "sealed:v1:" and the box,
-// in base64url: the SDK's subject box (pkg/v1/secret, ADR 0142 there),
+// in base64url: the SDK's subject box (pkg/v1/security/secret, ADR 0142 there),
 // whose header names the data key that sealed it — secret.SubjectOf reads
 // it — and which is bound to where the value lies: the store's node ID, the
 // record's key and the member's JSON pointer. A box copied into another
@@ -90,9 +90,11 @@ const (
 // or — a message sealed under data-key itself — the version that sealed it
 // was pruned. kit reads the value as its zero value.
 var (
-	errErased = errors.New("kit: a sealed value's key is destroyed")
+	errErased = errs.New(CodeSealErased, "SEAL_ERASED", "a sealed value's key is destroyed",
+		"kit: a sealed value's data key is destroyed, or the data-key version that sealed it was pruned")
 	// errNotCurrent ends a replacement of a key that changed meanwhile.
-	errNotCurrent = errors.New("kit: the wrapped key changed")
+	errNotCurrent = errs.New(CodeSealKeyMoved, "SEAL_KEY_MOVED", "the wrapped key changed meanwhile",
+		"kit: a data key's replacement found the wrapped key changed by another write")
 )
 
 // sealer seals and opens the members of an app's data at rest, in one run:

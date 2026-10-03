@@ -6,10 +6,10 @@ import (
 	"net/http"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/server/sse"
+	"github.com/kitsunium/sdk/pkg/v1/net/sse"
 )
 
-// eventStream is a Server-Sent Events stream of the SDK's server/sse: its
+// eventStream is a Server-Sent Events stream of the SDK's net/sse: its
 // framing, the keep-alive a proxy needs to see, the bound on each frame's
 // write, the end on disconnect.
 type eventStream struct {

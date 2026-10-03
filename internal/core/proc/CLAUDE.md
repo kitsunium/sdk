@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/proc/
 
 ## Purpose
@@ -13,8 +13,13 @@ sibling, admitted by ADR 0016, peer of `codec` / `writer` / `crypto` / `logger`
 
 This is a **foundation** package: it carries the shared contract consumed by the
 service implementations under `internal/service/proc/*` and re-exported by nine
-`pkg/v1` facades (`process`, `signal`, `reaper`, `rlimit`, `cgroup`, `sdnotify`,
-`sdlisten`, `memlimit`, and `proc`, the capability preflight).
+`pkg/v1` facades — `proc`, the capability preflight at the family's root, and
+its children `process`, `signal`, `reaper`, `rlimit`, `cgroup`,
+`systemd/notify`, `systemd/listen` and `memlimit` under `pkg/v1/proc` (ADR 0155).
+`ipc`, the family's private socket, does not build on this contract: its own
+— the `Listener` and `Dialer` ports, `PeerValue`, `Conn` and the `0.3.91.*`
+codes — is the child package `internal/core/proc/ipc`, at the path that
+mirrors its engine (ADR 0160).
 It has **no plug-in registry** — unlike codec/crypto, each primitive has a single
 canonical OS implementation chosen at build time by platform tag, not a
 runtime-registered scheme.

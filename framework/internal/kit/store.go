@@ -10,10 +10,10 @@ import (
 	"slices"
 	"strings"
 	"sync"
-	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -61,8 +61,10 @@ type StoreService[T any] struct {
 	// feeds are the watches (Service.Watch, watch.go) its writes are told
 	// of, with the write's context — which the engine's announcements to
 	// onWrite and onDelete do not carry —; nil while none hears it: the one
-	// load a write pays for them.
-	feeds atomic.Pointer[[]*Watch]
+	// load a write pays for them. Copy-on-write, the SDK's snapshot.Value: a
+	// write reads them with no lock, and a watch that starts or stops
+	// publishes a new list, serialised with every other.
+	feeds snapshot.Value[[]*Watch]
 	// started runs once the store is open: kit's own store of data keys
 	// finishes the re-wrap a stop interrupted (seal.go). nil for a product's
 	// store.

@@ -3,6 +3,7 @@
 - **Status**: Accepted. **Console default stream amended by ADR 0030** — the `ConsoleStream` zero value is `ConsoleStderr`, so `ConsoleConfig{}` targets stderr.
 - **Date**: 2026-06-02
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — §D2: every vendor writer is a module of its own, so the `vendor-root` tier has no placement left
 - **Related**: ADR 0001 (multi-module layout), ADR 0005 (dotted-quad codes), ADR 0006 (registry extension), ADR 0012 (writer registry — the pattern this ADR taxonomises), ADR 0013 (crypto domain — the `third-party/*` quarantine precedent), ADR 0014 (the verb wave — `rotfile`, `transform`, `logger.FromConfig` + the `Decoder` config hook this ADR builds the YAML topology on)
 - **Amends**:
   - `internal/core/writer/CLAUDE.md` — promotes **`depTier`** (stdlib / vendor-in-root / third-party) from an implicit folder convention to a **documented, first-class property of every writer**, and states the **never-in-tree** placement rule for vendor-backed writers;

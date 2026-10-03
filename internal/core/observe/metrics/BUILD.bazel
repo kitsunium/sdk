@@ -1,0 +1,68 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "metrics",
+    srcs = [
+        "async_meter.go",
+        "attrs.go",
+        "codes.go",
+        "counter.go",
+        "describer.go",
+        "down.go",
+        "errors.go",
+        "exporter.go",
+        "gauge.go",
+        "gauge_value.go",
+        "histogram.go",
+        "histogram_value.go",
+        "meter.go",
+        "observable.go",
+        "scope.go",
+        "snapshot_value.go",
+        "sum_value.go",
+        "temporality.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/observe/metrics",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/otel",
+        "//internal/kernel/errs",
+        "//internal/kernel/plugin",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":metrics",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "metrics_test",
+    srcs = [
+        "describer_external_test.go",
+        "exporter_external_test.go",
+        "model_external_test.go",
+        "registry_guard_external_test.go",
+    ],
+    deps = [
+        ":metrics",
+        "//internal/core/observe/otel",
+        "//internal/kernel/errs",
+    ],
+)

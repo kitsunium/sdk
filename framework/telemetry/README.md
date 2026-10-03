@@ -12,7 +12,7 @@ Package telemetry — the compile\-time proof that Exporter is an Emitter.
 
 Package telemetry is the port a running product reports what it does on, and the exporter that hands it to a tool attached to the product \(ADR 0149\).
 
-It is not the trace domain. pkg/v1/trace builds spans a backend stores and carries its context through context.WithValue; this port carries nothing through a context, builds nothing a caller keeps, and costs a producer one fixed\-size copy into a bounded ring — zero allocations, pinned by a test \(testing.AllocsPerRun\) and measured in BENCH.md:
+It is not the trace domain. pkg/v1/observe/trace builds spans a backend stores and carries its context through context.WithValue; this port carries nothing through a context, builds nothing a caller keeps, and costs a producer one fixed\-size copy into a bounded ring — zero allocations, pinned by a test \(testing.AllocsPerRun\) and measured in BENCH.md:
 
 ```
 emitter.Emit(&telemetry.Event{Kind: telemetry.KindSpan, Op: telemetry.OpRequest,
@@ -25,7 +25,7 @@ An [Event](<#Event>) holds numbers only: enumerations \([Kind](<#Kind>), [Op](<#
 
 ### Inert unless configured
 
-[Nop](<#OpNames>) is the emitter a product holds by default: Emit returns at once. An [Exporter](<#Exporter>) exists only when the product was started with one, and it only EMITS — it never reads what a client sends, so nothing reaches the product through it. It listens on a private socket \(pkg/v1/ipc, ADR 0148\): the product's account and the UIDs and GIDs the deployment names, under the runtime directory; a stale socket is replaced, a live one refused. A client connects, reads one handshake line — product, binary, role, instance, revision, model version, design digest, the node table, the first sequence number — then fixed\-size records \([RecordSize](<#RecordSize>) bytes each\) for as long as it reads. A slow client loses records, counted; the product never waits.
+[Nop](<#OpNames>) is the emitter a product holds by default: Emit returns at once. An [Exporter](<#Exporter>) exists only when the product was started with one, and it only EMITS — it never reads what a client sends, so nothing reaches the product through it. It listens on a private socket \(pkg/v1/proc/ipc, ADR 0148\): the product's account and the UIDs and GIDs the deployment names, under the runtime directory; a stale socket is replaced, a live one refused. A client connects, reads one handshake line — product, binary, role, instance, revision, model version, design digest, the node table, the first sequence number — then fixed\-size records \([RecordSize](<#RecordSize>) bytes each\) for as long as it reads. A slow client loses records, counted; the product never waits.
 
 Package telemetry — the interfaces: what a producer emits to, and what the exporter needs of its listener and of a client.
 
@@ -261,7 +261,7 @@ ExporterConfig is where the exporter listens, who may attach, and how much it ho
 
 ```go
 type ExporterConfig struct {
-    // Path is the private socket's absolute path (pkg/v1/ipc).
+    // Path is the private socket's absolute path (pkg/v1/proc/ipc).
     Path string
     // AllowUIDs and AllowGIDs admit accounts besides the product's own: the
     // on-call group declared at deployment.

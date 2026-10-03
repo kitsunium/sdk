@@ -1,0 +1,47 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
+# internal/service/data/codec/xml/
+
+## Purpose
+
+XML codec wrapping stdlib `encoding/xml`. Streaming Encoder/Decoder are forwarded.
+
+## Surface
+
+| Item | Value |
+|---|---|
+| `Name()`         | `"xml"` |
+| `MIMETypes()`    | `application/xml`, `text/xml` |
+| `Extensions()`   | `.xml` |
+| Constructor      | `New() codec.Codec` |
+| Streaming        | yes (`NewEncoder`, `NewDecoder`) |
+| Appender         | yes (`Append(dst, v) ([]byte, error)`) — encodes into a pooled buffer, then appends onto dst |
+
+## Error codes (range `0.3.3.*`)
+
+Declared in `internal/core/data/codec/xml` — `codes.go` and `errors.go` — and used
+here as `corexml.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
+| Code         | Var               | Trigger |
+|---|---|---|
+| `0.3.3.1`    | `MarshalFailed`   | `encoding/xml.Marshal` returned an error |
+| `0.3.3.2`    | `UnmarshalFailed` | `encoding/xml.Unmarshal` returned an error |
+
+## Conventions
+
+- **Billion-Laughs bounded** by stdlib: `encoding/xml` does not expand external entities and defines none of the entities a DOCTYPE declares — the declaration is skipped, and a reference to one of its entities is a syntax error (`invalid character entity`) — so the classic XXE / entity-expansion DoS vector is inert. Asserted by `TestUnmarshal_BillionLaughsBounded` in `codec_external_test.go`. No additional hardening is layered on top.
+- Stateless singleton.
+
+## Performance (lib-bound)
+
+`encoding/xml`'s reflect walk is internal to the stdlib and its token API
+exposes no typed fast path, so the only lever here is pooling the outer
+*bytes.Buffer that Marshal/Append encode into — now mutualised via
+`internal/core/data/codec/scratch`. Do not re-add a local pool.
+
+## Verification
+
+```
+bazel test --config=race //internal/service/data/codec/xml:xml_test
+```

@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/process"
 )
 
 // sampleProcess is the SDK's snapshot of the running process (process.Self)

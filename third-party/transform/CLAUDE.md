@@ -4,8 +4,8 @@
 ## Purpose
 
 Vendor compressors — **zstd** (RFC 8878) and **s2** — wrapped as
-`core/transform.Compressor` implementations beside the stdlib gzip/flate/zlib
-schemes in `internal/service/transform`. Both come from **one** library,
+`core/data/transform.Compressor` implementations beside the stdlib gzip/flate/zlib
+schemes in `internal/service/data/transform`. Both come from **one** library,
 `github.com/klauspost/compress`, which is the reason there is one package here
 and not three.
 
@@ -34,8 +34,9 @@ placement rests on ADR 0034 §Decision.3's *other* criterion: it imposes a
 dependency on consumers who never use the integration. `internal/service` and
 `pkg` are dep-light on purpose, and a consumer who wants a logger should not
 resolve, download, verify and link a compression library to get one.
-`third-party/` lives in the root module, which nothing requires, so the cost is
-paid by the blank-import and by nobody else.
+`third-party/transform` is a module of its own (ADR 0157), which nothing in the
+SDK requires, so the cost is paid by the blank-import and by nobody else — and
+a consumer of these two compressors inherits no other vendor.
 
 **Do not cite the downgrade narrative.** ADR 0022's "hcl downgrades `x/sys`"
 sentence was retired as a placement rule by ADR 0034: under minimal version
@@ -57,7 +58,7 @@ consumer-graph criterion, or it cites a measurement.
 | `DefaultMaxDecompressedBytes` | 64 MiB — what the singletons are built with |
 
 An external consumer can use all of it without importing `internal/*`: the
-`core/transform.Algorithm` values that appear in signatures are reachable by
+`core/data/transform.Algorithm` values that appear in signatures are reachable by
 inference (`algo := c.Algorithm()`), never by name.
 `TestNoInternalImportNeeded` is that claim in compilable form.
 
@@ -140,7 +141,7 @@ answer would have been different — and the honest resolution would have been a
 constructor-only package with no registered singleton.
 
 Registration uses a package-level `var`, never `init()`, matching
-`core/transform`'s documented convention and the stdlib sibling.
+`core/data/transform`'s documented convention and the stdlib sibling.
 
 ## Round-trip
 
@@ -161,15 +162,15 @@ silently stop being true:
   destroy the bytes already in it. That bug is invisible to every test that
   passes `dst=nil`.
 - `TestSchemesAreNotWireCompatible` — an s2 block is refused by zstd and a zstd
-  frame by s2. The `flate`-versus-`zlib` interop trap `internal/service/transform`
+  frame by s2. The `flate`-versus-`zlib` interop trap `internal/service/data/transform`
   documents at length, checked before it can be repeated with two new names.
 
 ## What is NOT framed
 
-`pkg/v1/codec`'s compressed-frame format (`compressed.go`) freezes a 1-byte
+`pkg/v1/data/codec`'s compressed-frame format (`compressed.go`) freezes a 1-byte
 `algID` per scheme — `gzip=0x01`, `flate=0x02` — and exports only the `Gzip` and
 `Flate` constants. **Neither scheme here has a frame id**, so
-`codec.MarshalCompressed(f, "zstd", v)` returns `core/transform.UnknownCompressor`.
+`codec.MarshalCompressed(f, "zstd", v)` returns `core/data/transform.UnknownCompressor`.
 
 That is the documented behaviour and the existing precedent: `zlib` has been
 registered-but-not-framed since ADR 0014, for the stated reason that allocating
@@ -233,7 +234,7 @@ because its 2.75 MiB must not be linked by a consumer who came for zstd.
 
 ## Do NOT
 
-- Add these to `pkg/v1/codec`'s blank imports, or to anything under `internal/*`
+- Add these to `pkg/v1/data/codec`'s blank imports, or to anything under `internal/*`
   or `pkg/v1/*`. The isolation is the feature; `scripts`-free proof is
   `GOWORK=off go list -deps ./...` per module, which must return zero hits for
   `klauspost`.
@@ -244,7 +245,7 @@ because its 2.75 MiB must not be linked by a consumer who came for zstd.
   that buy ratio land in zstd's territory at zstd's cost.
 - Turn `maxDecompressedBytes` into a functional option, or default a
   non-positive one.
-- Allocate a `pkg/v1/codec` frame `algID` from here — that is a `pkg/v1`
+- Allocate a `pkg/v1/data/codec` frame `algID` from here — that is a `pkg/v1`
   decision (see §What is NOT framed).
 - Ship zstd dictionaries. They are the biggest available ratio win for small
   homogeneous payloads and they are also a shared mutable artefact that must be
@@ -253,9 +254,12 @@ because its 2.75 MiB must not be linked by a consumer who came for zstd.
 ## Verification
 
 ```sh
-GOWORK=off go test -race -cover ./third-party/transform/     # 95.4% of statements
-GOWORK=off go test -run TestReportRatios -v ./third-party/transform/
-GOWORK=off go test -run '^$' -bench=. -benchmem ./third-party/transform/
+# from the module root, as a consumer builds it (ADR 0157)
+cd third-party/transform
+GOWORK=off go test -race -cover .                  # 95.4% of statements
+GOWORK=off go test -run TestReportRatios -v .
+GOWORK=off go test -run '^$' -bench=. -benchmem .
+cd ../..
 ktn-linter lint --skip-phases=tests ./third-party/transform/...
 # Under Bazel
 bazel test --config=race //third-party/transform:transform_test

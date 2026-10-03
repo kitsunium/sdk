@@ -1,6 +1,6 @@
 # ADR 0092 — a possession proof that cannot name the key it is about
 
-**Status**: Accepted; implemented in `internal/core/entitlement/entitlement.go`, `internal/service/entitlement/service.go`, `third-party/entitlement/sshidentity.go`.
+**Status**: Accepted; implemented in `framework/internal/core/entitlement/entitlement.go`, `framework/internal/service/entitlement/service.go`, `framework/connectors/ssh/sshidentity.go` (in the framework since [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md)).
 **Date**: 2026-09-16
 **Deciders**: kitsunium maintainers
 **Applies**: ADR 0039 (a published port is extended by a sibling, never by widening) and ADR 0040 §4 (the v0 licence does not cover interfaces)

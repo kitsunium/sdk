@@ -10,8 +10,8 @@ import (
 
 	goredis "github.com/redis/go-redis/v9"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // newClient validates the config, optionally resolves credentials, and builds a

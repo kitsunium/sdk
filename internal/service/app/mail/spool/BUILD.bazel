@@ -1,0 +1,63 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "spool",
+    srcs = [
+        "config.go",
+        "deliver.go",
+        "event.go",
+        "identifier.go",
+        "ledger.go",
+        "spool.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/mail/spool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/mail",
+        "//internal/core/app/mail/spool",
+        "//internal/core/data/queue",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/app/id",
+        "//internal/service/app/mail",
+        "//internal/service/data/queue",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":spool",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "spool_test",
+    srcs = [
+        "announce_internal_test.go",
+        "disk_external_test.go",
+        "harness_external_test.go",
+        "identifier_external_test.go",
+        "spool_external_test.go",
+    ],
+    embed = [":spool"],
+    deps = [
+        "//internal/core/app/mail",
+        "//internal/core/app/mail/spool",
+        "//internal/core/data/queue",
+        "//internal/core/proc",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/app/mail",
+        "//internal/service/data/queue",
+    ],
+)

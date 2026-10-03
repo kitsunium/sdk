@@ -12,17 +12,18 @@ box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, plaintext, aad)
 ```
 
 This is the **only** place `golang.org/x/crypto` enters a build for this scheme —
-declared in the **root umbrella `go.mod`** under `third-party/x-crypto`, which no
-other module requires. So `pkg/v1/crypto` consumers stay **dep-light** (zero
-`x/crypto`) unless they opt in with this blank import — the same pattern as the
-AWS writers under `third-party/aws/*` (ADR 0012).
+declared in the `go.mod` of the **`third-party/x-crypto` module** it shares with
+argon2id (ADR 0157), which nothing in the SDK requires. So `pkg/v1/crypto`
+consumers stay **dep-light** (zero `x/crypto`) unless they opt in with this blank
+import — the same pattern as the AWS writers under `third-party/aws/*`
+(ADR 0012) — and the opt-in brings no other vendor.
 
 ## Why XChaCha20-Poly1305
 
 A 192-bit (24-byte) random nonce eliminates the birthday-bound message-count
 limit that AES-256-GCM's 96-bit random nonce imposes (~2^32 safe messages/key).
 Preferred for high-volume random-nonce workloads. AES-256-GCM (`internal/service/
-crypto/aesgcm`, `alg-id 0x01`) remains the dep-free default.
+crypto/aead/aesgcm`, `alg-id 0x01`) remains the dep-free default.
 
 ## Contents
 
@@ -47,7 +48,7 @@ the single non-oracle `DecryptionFailed` for **every** failure.
 
 ## Cost
 
-Measured in `BENCH.md` against `internal/service/crypto/aesgcm` —
+Measured in `BENCH.md` against `internal/service/crypto/aead/aesgcm` —
 the dep-free default — through the same port, in the same run.
 
 | plaintext | XChaCha `Seal` | AES-GCM `Seal` | verdict |
@@ -89,6 +90,6 @@ ships no amd64 assembly for it.
 ## Verification
 
 ```sh
-# from the repo root (root umbrella module)
-GOWORK=off go test -race -cover ./third-party/x-crypto/xchacha/...
+# from the module root, as a consumer builds it (ADR 0157)
+cd third-party/x-crypto && GOWORK=off go test -race -cover ./xchacha/...
 ```

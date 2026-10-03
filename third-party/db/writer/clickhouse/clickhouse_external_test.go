@@ -3,7 +3,7 @@ package clickhouse_test
 import (
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	_ "github.com/kitsunium/sdk/third-party/db/writer/clickhouse"
 )
 

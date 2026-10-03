@@ -5,6 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "sse",
     srcs = [
+        "frame.go",
         "options.go",
         "sse.go",
     ],
@@ -15,8 +16,9 @@ go_library(
     ],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
+        "//internal/kernel/concur/worker",
         "//internal/kernel/errs",
-        "//internal/kernel/worker",
     ],
 )
 
@@ -32,6 +34,8 @@ alias(
 go_test(
     name = "sse_test",
     srcs = [
+        "frame_bench_test.go",
+        "frame_external_test.go",
         "sse_alloc_internal_test.go",
         "sse_bench_test.go",
         "sse_external_test.go",
@@ -40,13 +44,7 @@ go_test(
     embed = [":sse"],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

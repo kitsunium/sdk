@@ -7,7 +7,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/proc/sdlisten"
+	sdlisten "github.com/kitsunium/sdk/internal/service/proc/systemd/listen" // listen is this package's own bind (listen.go)
 )
 
 // adoptedSockets recovers the inherited sockets published under one name.

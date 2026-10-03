@@ -23,6 +23,7 @@ go_library(
     ],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
 )
@@ -58,13 +59,7 @@ go_test(
     embed = [":client"],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

@@ -1,0 +1,122 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "ipc",
+    srcs = [
+        "chain_unix.go",
+        "dir_other.go",
+        "dir_unix.go",
+        "ipc.go",
+        "ipc_compliance.go",
+        "peer_linux.go",
+        "peer_other.go",
+        "pipe_windows.go",
+        "socket.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/ipc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/proc/ipc",
+        "//internal/kernel/errs",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "//conditions:default": [],
+    }),
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ipc",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "ipc_test",
+    srcs = [
+        "admit_internal_test.go",
+        "chain_external_test.go",
+        "chain_internal_test.go",
+        "ipc_external_test.go",
+        "pipe_windows_external_test.go",
+    ],
+    embed = [":ipc"],
+    deps = [
+        "//internal/core/proc/ipc",
+        "//internal/kernel/errs",
+    ] + select({
+        "@rules_go//go/platform:aix": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:android": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:darwin": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:illumos": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:ios": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:linux": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "@rules_go//go/platform:solaris": [
+            "//internal/kernel/fs/pathchain",
+        ],
+        "//conditions:default": [],
+    }),
+)

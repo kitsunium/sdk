@@ -10,7 +10,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // Authentication: one handler per app turns a request's credentials into a

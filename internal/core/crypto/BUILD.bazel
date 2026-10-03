@@ -36,7 +36,6 @@ go_library(
     deps = [
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
-        "//internal/kernel/snapshot",
     ],
 )
 
@@ -75,7 +74,10 @@ go_test(
         "stream_registry_internal_test.go",
     ],
     embed = [":crypto"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/kernel/plugin",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST

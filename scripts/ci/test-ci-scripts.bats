@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # BATS tests for scripts/ci/: the module census every module-looping lane reads
 # (go-modules.sh, ADR 0137) and the govulncheck gate built on it (vuln-check.sh,
-# ADR 0136). Run by `make ci-scripts-check` in the shell-gates job.
+# ADR 0136) — and for the guard half of scripts/ci-gates-check.sh, the manifest
+# that keeps every `make lint` guard a step of the bazel job. Run by
+# `make ci-scripts-check` in the shell-gates job.
 #
 # The census is tested in throwaway repositories — each test copies the script
 # into one, because the script answers for the repository it lives in. The
@@ -127,7 +129,8 @@ job_body() {
 # ── vuln-check.sh ───────────────────────────────────────────────────────────
 
 # stub_scanner — a govulncheck that answers per module: <module>/.vuln-rc holds
-# the exit status to give (default 0), and every call is logged.
+# the exit status to give (default 0), <module>/.vuln-msg a line to print, and
+# every call is logged.
 stub_scanner() {
   cat >"$BATS_TEST_TMPDIR/govulncheck" <<'STUB'
 #!/usr/bin/env bash
@@ -138,6 +141,7 @@ fi
 printf '%s %s\n' "$PWD" "$*" >>"$BATS_TEST_TMPDIR/scans.log"
 rc=0
 [ -f .vuln-rc ] && rc="$(cat .vuln-rc)"
+[ -f .vuln-msg ] && cat .vuln-msg
 [ "$rc" -eq 3 ] && echo "Vulnerability #1: GO-2026-0001 — found in example.com/dep@v1.0.0"
 exit "$rc"
 STUB
@@ -191,6 +195,49 @@ scans() {
   [[ "$output" == *"govulncheck did not complete for . (exit 1)"* ]]
 }
 
+# ADR 0157 §5: the root module is the workspace's anchor and holds no package,
+# and govulncheck answers that with exit 2. For the root, and for that answer
+# only, it is nothing to scan — not an incomplete scan.
+@test "vuln: the root module holding no package is nothing to scan, and passes" {
+  fixture_repo
+  module .
+  module a
+  echo 2 >.vuln-rc
+  echo "govulncheck: no packages matched the provided patterns" >.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"vuln-check: . holds no package — nothing to scan"* ]]
+  [[ "$output" == *"1 module(s) scanned, no reachable vulnerability"* ]]
+  [ "$(scans)" -eq 2 ]
+}
+
+# The exception is the root's alone: a chain module that lost its packages is a
+# defect, and the same answer from it fails as a scan that did not complete.
+@test "vuln: any other module holding no package still fails as incomplete" {
+  fixture_repo
+  module .
+  module a
+  echo 2 >a/.vuln-rc
+  echo "govulncheck: no packages matched the provided patterns" >a/.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"govulncheck did not complete for a (exit 2)"* ]]
+}
+
+# And for the root it is that answer only: any other exit 2 is still incomplete.
+@test "vuln: the root failing for another reason still fails" {
+  fixture_repo
+  module .
+  echo 2 >.vuln-rc
+  echo "govulncheck: loading packages: there are errors" >.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"govulncheck did not complete for . (exit 2)"* ]]
+}
+
 @test "vuln: a scanner that is not the pinned build is refused" {
   fixture_repo
   module .
@@ -222,4 +269,65 @@ scans() {
 @test "vuln: the scan is a step of the required bazel job" {
   body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
   [[ "$body" == *"make vuln-check"* ]]
+}
+
+# ── ci-gates-check.sh: the guards ───────────────────────────────────────────
+
+# gates_fixture — a repository holding this repository's Makefile, workflow and
+# ci-gates-check.sh, with every listed guard present as a file, so each test
+# below changes ONE thing and the script answers for that change alone.
+gates_fixture() {
+  cd "$WORK"
+  mkdir -p scripts/pre-commit .github/workflows
+  cp "$REPO_ROOT/scripts/ci-gates-check.sh" scripts/
+  cp "$REPO_ROOT/Makefile" Makefile
+  cp "$REPO_ROOT/.github/workflows/bazel-ci.yml" .github/workflows/
+  for guard in "$REPO_ROOT"/scripts/pre-commit/check-*.sh "$REPO_ROOT"/scripts/check-layer-deps.sh; do
+    cp "$guard" "${guard#"$REPO_ROOT"/}"
+  done
+}
+
+# drop_line <file> <fixed string> — remove every line holding the string.
+drop_line() {
+  grep -vF -- "$2" "$1" >"$1.tmp" || true
+  mv "$1.tmp" "$1"
+}
+
+@test "gates: this repository's gates and guards are all enforced" {
+  run bash "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"guards are enforced"* ]]
+}
+
+# The shape the header calls silent: the step goes, the guard survives in
+# `make lint`, and CI stops running it. Its name in the step's comment and
+# title must not count.
+@test "gates: a guard whose CI step was deleted is UNGATED" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "run: bash scripts/pre-commit/check-core-symmetry.sh"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"UNGATED: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+@test "gates: a guard make lint no longer runs is NOT LINTED" {
+  gates_fixture
+  drop_line Makefile "	bash scripts/pre-commit/check-core-symmetry.sh"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT LINTED: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+@test "gates: a listed guard that does not exist is MISSING" {
+  gates_fixture
+  rm scripts/pre-commit/check-core-symmetry.sh
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MISSING GUARD: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
 }

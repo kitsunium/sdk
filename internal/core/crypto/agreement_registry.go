@@ -1,12 +1,7 @@
 // Package crypto — the process-wide Agreement registry + GenerateAgreementKey / AgreementShared dispatch.
 package crypto
 
-import (
-	"fmt"
-
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
+import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // agreements maps each Algorithm to its Agreement scheme. Backed by the shared
 // read-mostly schemeRegistry — register once at import, dispatch is lock-free.
@@ -24,19 +19,9 @@ var agreements = schemeRegistry[Agreement]{verb: "RegisterAgreement"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterAgreement(a Agreement) Agreement {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(a); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterAgreement [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := agreements.publish(a.Algorithm(), a); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
-	}
-	//: returning the scheme lets callers bind it to a typed singleton var.
-	return a
+	//: refuse an unusable scheme, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return agreements.register(a)
 }
 
 // LookupAgreement returns the Agreement scheme registered under name.
@@ -44,14 +29,14 @@ func RegisterAgreement(a Agreement) Agreement {
 // IFACE-PLUGIN: the registry stores plug-in Agreement instances behind the
 // Agreement interface — concrete types are intentionally unexported per scheme.
 func LookupAgreement(name Algorithm) (a Agreement, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return agreements.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return agreements.table.Lookup(name)
 }
 
 // AvailableAgreements returns the sorted list of registered agreement Algorithms.
 func AvailableAgreements() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return agreements.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return agreements.table.Names()
 }
 
 // GenerateAgreementKey draws a fresh keypair from the Agreement scheme

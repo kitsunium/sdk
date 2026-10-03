@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "transform",
+    srcs = [
+        "bounded.go",
+        "flate.go",
+        "gzip.go",
+        "pool.go",
+        "wrap.go",
+        "zlib.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/transform",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/transform",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":transform",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "transform_test",
+    srcs = [
+        "bounded_internal_test.go",
+        "flate_external_test.go",
+        "flate_internal_test.go",
+        "gzip_external_test.go",
+        "gzip_internal_test.go",
+        "pool_internal_test.go",
+        "transform_bench_test.go",
+        "zlib_external_test.go",
+        "zlib_internal_test.go",
+    ],
+    embed = [":transform"],
+    deps = [
+        "//internal/core/data/transform",
+        "//internal/kernel/errs",
+    ],
+)

@@ -11,8 +11,6 @@ go_library(
         "rlimit_table_as.go",
         "rlimit_table_openbsd.go",
         "rlimit_unix.go",
-        "rlimit_value_default.go",
-        "rlimit_value_signed.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/rlimit",
     visibility = [
@@ -24,36 +22,47 @@ go_library(
     ] + select({
         "@rules_go//go/platform:aix": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:android": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:darwin": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:dragonfly": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:freebsd": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:illumos": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:ios": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:linux": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:netbsd": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:openbsd": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:solaris": [
             "//internal/kernel/errs",
+            "//internal/service/proc/internal/rlim",
         ],
         "//conditions:default": [],
     }),
@@ -76,8 +85,6 @@ go_test(
         "rlimit_linux_bench_test.go",
         "rlimit_linux_internal_test.go",
         "rlimit_other_test.go",
-        "rlimit_value_default_internal_test.go",
-        "rlimit_value_signed_internal_test.go",
     ],
     embed = [":rlimit"],
     deps = [

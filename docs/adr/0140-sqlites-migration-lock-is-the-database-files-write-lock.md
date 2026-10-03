@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-27
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) §Consequences — `fileLockSQL` is exported as `FileLockSQL`, so the queue's SQL broker takes SQLite's file lock with the same statement
 - **Amends**: [ADR 0055](0055-sdk-sql-domain.md) §D7 — its refusal of SQLite (`MIGRATION_LOCK_UNSUPPORTED`)
 - **Related**: [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) (the `Join` this runner reads its history through, and the tables it migrates), [ADR 0050](0050-sdk-lifecycle-domain.md) (cleanup on a detached context); kitsunium/platform ADR 0004 (kitsunium/platform#18), tracked here as #254
 

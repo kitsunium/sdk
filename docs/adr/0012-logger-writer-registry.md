@@ -12,6 +12,10 @@ Accepted
 
 kodflow
 
+## Amended by
+
+[ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — the AWS writers become a module of their own, `third-party/aws` — the dedicated module this record rejected
+
 ## Amends
 
 ADR 0005 §Registry, ADR 0006 §Registry (adds the `writer` code-range

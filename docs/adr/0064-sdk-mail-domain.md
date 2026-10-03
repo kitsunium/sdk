@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — address and header validation move from the core to the service, `internal/service/app/mail`, so `Message.Envelope()` — which validated before it derived the envelope — becomes the facade's `mail.EnvelopeOf(msg)` (§As built there)
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a policy's zero value is a safe default or an explicit refusal — the rule `TLSMode` is shaped by), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by siblings), [ADR 0029](0029-sdk-net-domain.md) (the TLS identity this domain reuses instead of twinning), [ADR 0046](0046-sdk-validation-domain.md) (a message names the rule and never the value — the non-disclosure rule this follows), [ADR 0055](0055-sdk-sql-domain.md) (the hand-written `driver.Driver` precedent this test suite copies), [ADR 0022](0022-sdk-codec-hcl.md) / [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (where a vendor connector goes), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (nothing is armed from an import)
 
 ## Context

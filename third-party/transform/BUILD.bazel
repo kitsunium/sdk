@@ -1,5 +1,11 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:prefix github.com/kitsunium/sdk/third-party/transform
+
+# third-party/transform is a Go module of its own (ADR 0157): the zstd and s2
+# compressors and their one vendor, klauspost/compress. One vendor per module,
+# so a consumer's graph carries the vendor it imports and no other.
+
 package(default_visibility = ["//visibility:public"])
 
 go_library(
@@ -14,7 +20,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/transform",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/transform",
+        "//internal/core/data/transform",
         "//internal/kernel/errs",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",
@@ -37,9 +43,9 @@ go_test(
     ],
     embed = [":transform"],
     deps = [
-        "//internal/core/transform",
+        "//internal/core/data/transform",
         "//internal/kernel/errs",
-        "//internal/service/transform",
+        "//internal/service/data/transform",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",
     ],

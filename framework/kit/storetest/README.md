@@ -37,8 +37,14 @@ const (
 )
 ```
 
+<a name="CodeRolledBack"></a>CodeRolledBack is the code of the error a case returns from a transaction's function to roll it back — the suite's own, in the framework's range: layer 4, PP 4 this package \(ADR 0147 §3\). A store never returns it; the case that returned it expects kit.Transact to hand it back.
+
+```go
+const CodeRolledBack errs.Code = 0x00_04_04_01 // 0.4.4.1
+```
+
 <a name="Run"></a>
-## func [Run](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L163>)
+## func [Run](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L171>)
 
 ```go
 func Run(t *testing.T, b BackendConfig)
@@ -47,7 +53,7 @@ func Run(t *testing.T, b BackendConfig)
 Run runs every case of the suite on b.
 
 <a name="BackendConfig"></a>
-## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L105-L114>)
+## type [BackendConfig](<https://github.com/kitsunium/sdk/blob/main/framework/kit/storetest/storetest.go#L113-L122>)
 
 BackendConfig is where Run runs kit's stores: a name for the subtests and the options that place the stores there.
 

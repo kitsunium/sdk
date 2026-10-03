@@ -1,0 +1,75 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/kitsunium/sdk/framework/connectors/ssh
+
+# framework/connectors/ssh is a Go module of its own (ADR 0147 §7, ADR 0158):
+# entitlement's ssh Identity, the one vendor dependency of the distribution
+# domains (golang.org/x/crypto/ssh, and the golang.org/x/sys it brings).
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "ssh",
+    srcs = [
+        "codes.go",
+        "discover.go",
+        "enroll.go",
+        "errors.go",
+        "key.go",
+        "key_unix.go",
+        "key_windows.go",
+        "sshidentity.go",
+        "sshidentity_compliance.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/connectors/ssh",
+    deps = [
+        "//framework/entitlement",
+        "//internal/kernel/errs",
+        "@org_golang_x_crypto//ssh",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ssh",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ssh_test",
+    srcs = [
+        "cache_external_test.go",
+        "enroll_external_test.go",
+        "enroll_internal_test.go",
+        "enroll_unix_external_test.go",
+        "grant_external_test.go",
+        "identity_external_test.go",
+        "key_external_test.go",
+        "key_internal_test.go",
+        "key_unix_internal_test.go",
+        "key_windows_internal_test.go",
+        "origin_external_test.go",
+        "product_external_test.go",
+        "roster_parse_external_test.go",
+        "service_external_test.go",
+        "service_unix_external_test.go",
+        "sshidentity_external_test.go",
+        "version_external_test.go",
+        "wrap_internal_test.go",
+    ],
+    embed = [":ssh"],
+    deps = [
+        "//framework/internal/core/entitlement",
+        "//framework/internal/service/entitlement",
+        "//internal/kernel/errs",
+        "@org_golang_x_crypto//ssh",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -1,0 +1,33 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "flock",
+    srcs = [
+        "flock.go",
+        "flock_other.go",
+        "flock_unix.go",
+        "flock_windows.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/fs/flock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":flock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "flock_test",
+    srcs = ["flock_external_test.go"],
+    deps = [":flock"],
+)

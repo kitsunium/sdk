@@ -139,6 +139,16 @@ jobs:
       - name: domain-doc invariant — the root CLAUDE.md still describes the tree
         run: bash scripts/pre-commit/check-domain-docs.sh
 
+      # Guards ADR 0160's symmetry, which six tracks applied by hand and which
+      # reopens silently: a service package declaring its own error code still
+      # compiles and is still audited (the audits ask that a package be listed,
+      # not where it sits), and a codes-only core mirror whose engine moved
+      # still compiles too. Fails when internal/service declares a code, when a
+      # service domain has no core, or when a core package declares a code no
+      # engine at its path owns.
+      - name: core-symmetry invariant — every service domain has a core, and only the core declares codes
+        run: bash scripts/pre-commit/check-core-symmetry.sh
+
       # Three guards the in-repo pre-commit hook used to be the only runner of
       # (ADR 0153): every Go package carries its CLAUDE.md / README.md, every
       # package with a *_bench_test.go commits a BENCH.md, and
@@ -429,6 +439,15 @@ jobs:
           modules="$(bash scripts/ci/go-modules.sh)"
           for mod in $modules; do
             echo "::group::$mod ($GOOS/$GOARCH)"
+            # The root module is the workspace's anchor and holds no package
+            # (ADR 0157 §5), and `go vet ./...` exits 1 on a pattern that
+            # matches nothing. It is skipped by name, and only while `go list`
+            # says it is empty: a package added there is built again.
+            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
+              echo "skip: the root module holds no package"
+              echo "::endgroup::"
+              continue
+            fi
             if (cd "$mod" && go build ./... && go vet ./...); then
               echo "ok"
             else
@@ -443,7 +462,7 @@ jobs:
   # cannot prove it behaves. The two are different questions, and the gap is
   # where a 64-bit assumption survives: `int(0xffffffff)` is -1 where int is 32
   # bits and passes every "> cap" check, which is exactly the bound
-  # internal/service/session's at-rest frame relies on — two of its malformed
+  # internal/service/security/session's at-rest frame relies on — two of its malformed
   # frames can only fail here. Found by adding this job: a bench helper that did
   # not compile (Statfs_t.Type is int32 on 386, int64 elsewhere) and a test
   # synthesising a slice longer than a 32-bit len can hold.
@@ -473,7 +492,8 @@ jobs:
       # other four had never run a test on 386: tools/genindex and
       # tools/sdkguard (477 passing tests, #242), the root module's
       # third-party/ tests and e2e's. All four were run on linux/386 before
-      # being added, and pass.
+      # being added, and pass. Those third-party/ tests now live in one module
+      # per vendor (ADR 0157), which the census reaches like any other.
       - name: test every module on linux/386
         env:
           GOARCH: "386"
@@ -485,6 +505,15 @@ jobs:
           modules="$(bash scripts/ci/go-modules.sh)"
           for mod in $modules; do
             echo "::group::$mod (linux/386)"
+            # The root module is the workspace's anchor and holds no package
+            # (ADR 0157 §5), and `go test ./...` exits 1 on a pattern that
+            # matches nothing. It is skipped by name, and only while `go list`
+            # says it is empty: a package added there is tested again.
+            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
+              echo "skip: the root module holds no package"
+              echo "::endgroup::"
+              continue
+            fi
             if (cd "$mod" && go test ./...); then
               echo "ok"
             else

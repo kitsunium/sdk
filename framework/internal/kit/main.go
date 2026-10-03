@@ -10,8 +10,8 @@ import (
 	"os"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/health"
 )
 
 // environmentFormat says the variables a product reads; %[1]s is its

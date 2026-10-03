@@ -7,7 +7,7 @@ import (
 
 	"github.com/klauspost/compress/zstd"
 
-	coretransform "github.com/kitsunium/sdk/internal/core/transform"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -20,7 +20,7 @@ const ZstdAlgorithm coretransform.Algorithm = "zstd"
 // library actually implements; an unrecognised value CLAMPS to ZstdDefault,
 // because every level round-trips the caller's bytes identically and so trades
 // ratio against CPU rather than carrying the caller's intent (ADR 0031 §clamp,
-// the same call internal/service/transform makes for the zlib level).
+// the same call internal/service/data/transform makes for the zlib level).
 type ZstdLevel int
 
 const (
@@ -37,7 +37,7 @@ const (
 	ZstdBest ZstdLevel = 11
 )
 
-// ZstdCompressor is the concrete core/transform.Compressor for the zstd wire
+// ZstdCompressor is the concrete core/data/transform.Compressor for the zstd wire
 // format. It holds a shared encoder and decoder because building either per
 // call would re-allocate the window buffers on every payload; both are
 // documented safe for concurrent EncodeAll / DecodeAll, so one value serves the
@@ -45,7 +45,7 @@ const (
 //
 // It is a POINTER type, unlike the stateless stdlib schemes. Registry
 // re-registration therefore compares pointer identity, which keeps
-// core/transform.Register's idempotent-republish path working for the singleton
+// core/data/transform.Register's idempotent-republish path working for the singleton
 // and turns a second, distinct compressor claiming "zstd" into the boot-time
 // panic it is meant to be.
 type ZstdCompressor struct {
@@ -146,7 +146,7 @@ func encoderLevel(level ZstdLevel) zstd.EncoderLevel {
 	}
 }
 
-// Algorithm implements core/transform.Compressor and returns the registry key.
+// Algorithm implements core/data/transform.Compressor and returns the registry key.
 func (*ZstdCompressor) Algorithm() coretransform.Algorithm {
 	//: canonical identifier, frozen per scheme.
 	return ZstdAlgorithm

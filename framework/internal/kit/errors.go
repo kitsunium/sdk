@@ -72,7 +72,7 @@ const (
 	CodeMailQueue  errs.Code = 0x00_04_02_15 // 0.4.2.21 — the outbox could not be opened, or refused a mail
 	// Deprecated: kit no longer returns it. The outbox is the SDK's mail
 	// spool, which dead-letters a record that does not decode itself
-	// (mail.SpooledMailUndecodable).
+	// (MessageUndecodable, in pkg/v1/app/mail/spool).
 	CodeMailUndecodable errs.Code = 0x00_04_02_16 // 0.4.2.22
 	CodeMailPanic       errs.Code = 0x00_04_02_17 // 0.4.2.23 — a delivery attempt panicked
 
@@ -134,6 +134,16 @@ const (
 	CodeMigrateRefused errs.Code = 0x00_04_02_37 // 0.4.2.55 — the migrate command cannot do what it was asked
 	CodeCatalogue      errs.Code = 0x00_04_02_38 // 0.4.2.56 — the framework's own message catalogues disagree
 	CodeRetentionPanic errs.Code = 0x00_04_02_39 // 0.4.2.57 — a store's retention function panicked
+
+	// The signals kit ends one of its own steps with and catches itself — a
+	// caller never receives one —, typed when the SDK made rule 2 a gate
+	// (make guard), where they had been stdlib errors.
+	CodeSealErased         errs.Code = 0x00_04_02_46 // 0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value
+	CodeSealKeyMoved       errs.Code = 0x00_04_02_47 // 0.4.2.71 — a data key's replacement ended: another write changed the wrapped key since
+	CodeResealInPlace      errs.Code = 0x00_04_02_48 // 0.4.2.72 — a write that changed nothing ended, for the record to be sealed again in place: no version
+	CodeResealMoved        errs.Code = 0x00_04_02_49 // 0.4.2.73 — a reseal in place ended: another write changed the record since
+	CodeWorkflowNotInPlace errs.Code = 0x00_04_02_4A // 0.4.2.74 — a transition's write in place ended: it changes more than the state, so it makes a version
+	CodeTransactionPanic   errs.Code = 0x00_04_02_4B // 0.4.2.75 — a transaction's function, or a function held until its commit, panicked: the panic continues
 )
 
 // sdkCodes names on the wire the SDK refusals kit's mechanics produce. The

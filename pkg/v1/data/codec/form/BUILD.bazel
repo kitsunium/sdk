@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "form",
+    srcs = ["form.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/form",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/codec/form",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/form",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":form",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "form_test",
+    srcs = ["form_external_test.go"],
+    deps = [
+        ":form",
+        "//internal/core/data/codec",
+        "//pkg/v1/errs",
+    ],
+)

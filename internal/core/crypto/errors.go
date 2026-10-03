@@ -1,10 +1,15 @@
 // Package crypto — declares the sentinels returned by the AEAD facade. Each
 // var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
-// CodeDuplicateRegistration is surfaced via panic at boot (see registry.go),
-// not as an *Error sentinel.
+// DuplicateRegistration is never returned: every registrar panics at boot with
+// conflictText of it (see registry_generic.go and registry.go).
 package crypto
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	"strconv"
+	"strings"
+
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // exitDataErr matches sysexits EX_DATAERR — a bad key or undecryptable box is a
 // data problem, not a generic internal software error (70).
@@ -132,7 +137,7 @@ var (
 	// non-oracle DecryptionFailed instead, so this is no key/password oracle.
 	InvalidKeyEnvelope = errs.Define(CodeInvalidKeyEnvelope, "INVALID_KEY_ENVELOPE",
 		"Key envelope is malformed",
-		"service/crypto/keyenvelope.UnwrapKey: $kenv$ string is not well-formed",
+		"service/crypto/key/keyenvelope.UnwrapKey: $kenv$ string is not well-formed",
 		errs.WithExitCode(exitDataErr))
 
 	// DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
@@ -140,6 +145,34 @@ var (
 	// so the comparison is non-oracle and surfaces only at the terminal read.
 	DigestMismatch = errs.Define(CodeDigestMismatch, "DIGEST_MISMATCH",
 		"Stream digest does not match the expected value",
-		"service/crypto/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF",
+		"service/crypto/hash/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF",
 		errs.WithExitCode(exitDataErr))
+
+	// DuplicateRegistration is the conflict every registrar refuses at boot: a
+	// distinct scheme already holds the Algorithm — or, for an AEAD, the wire
+	// id — a second one claims. The registrar panics with conflictText of it,
+	// so the panic carries the dotted-quad header AND the key that collided.
+	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
+		"A scheme is already registered under that algorithm or wire id",
+		"core/crypto: a distinct scheme already holds this Algorithm, or this AEAD wire id")
 )
+
+// conflictText renders a registry conflict for the boot panic that reports it:
+// the typed error's header and Public, then each field it carries, quoted.
+// Error() never renders a field (rule 4), and the panic is the only place an
+// operator learns WHICH registrar refused WHICH key.
+func conflictText(err error) string {
+	var b strings.Builder
+	//: the canonical "[0.2.4.1 DUPLICATE_REGISTRATION] <public>" header.
+	b.WriteString(err.Error())
+	//: then every field, in the order the conflict attached them.
+	for i, f := range errs.FieldsOf(err) {
+		//: a colon before the first field, a space between the others.
+		if i == 0 {
+			b.WriteString(":")
+		}
+		b.WriteString(" " + f.Key() + "=" + strconv.Quote(f.StringValue()))
+	}
+	//: one line, ready to panic with.
+	return b.String()
+}

@@ -1,0 +1,63 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+# gazelle:prefix github.com/kitsunium/sdk/third-party/codec/yaml
+
+# third-party/codec/yaml is a Go module of its own (ADR 0157): the opt-in
+# "yaml-full" codec and its one vendor, gopkg.in/yaml.v3. One vendor per
+# module, so a consumer's graph carries the vendor it imports and no other.
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "yaml",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "decoder.go",
+        "encoder.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/third-party/codec/yaml",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/errs",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":yaml",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "yaml_test",
+    srcs = [
+        "codec_bench_test.go",
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+        "decoder_internal_test.go",
+        "differential_fuzz_external_test.go",
+        "encoder_internal_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":yaml"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/yaml",
+        "@in_gopkg_yaml_v3//:yaml_v3",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (errs.Define emitters must be in //:audit_sources).
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -15,7 +15,7 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = ["@org_golang_x_mod//module"],
+    deps = ["//internal/kernel/semver"],
 )
 
 alias(

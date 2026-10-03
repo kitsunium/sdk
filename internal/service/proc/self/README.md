@@ -2,7 +2,7 @@
 
 What the running process can say about itself: what it was built from, and what
 it is doing right now. Internal service implementation behind the public
-`pkg/v1/process` facade (`Self`, `Build`, `ParseBuild`) — consumers import the
+`pkg/v1/proc/process` facade (`Self`, `Build`, `ParseBuild`) — consumers import the
 facade, not this package.
 
 ## API
@@ -25,7 +25,8 @@ func (d DistributionValue) Quantile(q float64) time.Duration
 - `ReadBuild` / `ParseBuild` read `runtime/debug.BuildInfo` into a main module
   and its dependencies, each followed through its replacement, with a release,
   a commit and a local directory kept apart. Pseudo-versions are recognised
-  and split by `golang.org/x/mod/module`, not by a hand-written pattern.
+  and split by `internal/kernel/semver`, whose suite holds the grammar to the
+  Go toolchain's own pattern — not by a pattern written here.
 
 ## Errors
 

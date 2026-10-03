@@ -7,7 +7,7 @@ The inbound engine of the network domain (ADR 0029): one unified listener for
 TCP, Unix, TLS and mutual TLS, serving handlers grouped behind shared
 middlewares, with an explicit lifecycle and a bounded drain.
 
-Public façade: `pkg/v1/server`.
+Public façade: `pkg/v1/net/server`.
 
 ## Contents
 
@@ -179,7 +179,7 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
   consequence above changed — the drain still does not wait on the connection,
   the engine still never closes it — which
   `TestAHijackedConnectionStillCountsAgainstTheCeiling` pins in the same run.
-- **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
+- **The serving goroutine is a `kernel/concur/worker.LoopDaemon`**, so its owner and
   termination are explicit and `shutdown` has a `Done()` channel to bound its
   wait on. `http.Server` is interrupted by closing its listener, not by a stop
   signal, which is why the loop ignores the stop channel.
@@ -242,8 +242,8 @@ second on Linux by a review of a downstream framework, and N cores with N shards
 `acceptLoop` now waits first (ADR 0130):
 
 - **The curve is net/http's**: 5 ms, doubling, held at 1 s, started over by the
-  next accepted connection — drawn from `service/resilience`'s published
-  `BackoffValue` (ADR 0103), not a fourth hand-written copy. Temporary or not,
+  next accepted connection — drawn from the SDK's one curve,
+  `kernel/backoff.Value` (ADR 0103), not a fourth hand-written copy. Temporary or not,
   every failure but `net.ErrClosed` waits.
 - **The wait is on the engine's clock** — `Server.clk`, `clock.System` unless an
   internal test sets a manual one — so `TestAFailingAcceptWaitsOnTheEnginesClock`
@@ -335,8 +335,11 @@ connection is lost and no bind races.
   outgoing one still held.
 - **Datagram adoption goes through the raw descriptors.** `sdlisten.Listeners`
   only wraps stream sockets, so `adoptPacket` uses `WithNames` and
-  `net.FilePacketConn`. This is done here rather than by widening `sdlisten`,
-  which is another domain and would need another ADR.
+  `net.FilePacketConn`. This is done here rather than by widening
+  `internal/service/proc/systemd/listen`, which is another domain and would
+  need another ADR. This package imports it as `sdlisten`, the name the
+  comments here use: it declares its own `listen` (`listen.go`), and an import
+  may not share a name with a package-level declaration.
 - **`unsetEnv` is false.** A group may adopt several names; clearing the
   environment on the first lookup would make every later one come back empty.
 - **The end-to-end test runs across a real exec.** It cannot be staged

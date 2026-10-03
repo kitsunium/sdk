@@ -33,8 +33,15 @@ sits, because that is what it is.
 | workload | ns/op | B/op | allocs/op |
 |---|---:|---:|---:|
 | `StartStop_Cycle` | **86 000** | 441 | 7 |
-| `New` | 88.81 | 104 | 2 |
-| `New_WithOption` | 93.45 | 104 | 2 |
+| `New` | 88.81 | 120 ¹ | 2 |
+| `New_WithOption` | 93.45 | 120 ¹ | 2 |
+
+¹ 104 B until 2026-10, when the reaper started carrying its timer sweep's
+clock and period (an interface and a duration) so the illumos/Solaris sweep is
+testable on every Unix. Re-measured on darwin/arm64 (Apple M1 Pro, go1.27.1),
+where the previous code reproduces the published 104 B exactly and this code
+reads 120 B — so the +16 B, one allocation size class, transfers to this box;
+the ns/op column was not re-measured. The allocation COUNT is unchanged.
 
 86 µs is 300× a `ReapOnce` and 1 000× a `New`. Where does it go? The CPU profile
 names one thing:
@@ -135,8 +142,8 @@ cpu: AMD EPYC 7351P 16-Core Processor
 benchmark                    median ns/op   spread   B/op  allocs/op
 ReapOnce_NoChildren-8               283.5     1.4%      0      0
 ReapOnce_WithObserver-8             288.5     0.9%      0      0
-New-8                               88.81     2.3%    104      2
-New_WithOption-8                    93.45     3.2%    104      2
+New-8                               88.81     2.3%    120      2   (B/op re-measured 2026-10, see ¹)
+New_WithOption-8                    93.45     3.2%    120      2   (B/op re-measured 2026-10, see ¹)
 IsPID1-8                            119.0     0.9%      0      0
 StartStop_Cycle-8                  86 000     5.3%    441      7
 SetChildSubreaper-8                 273.7     1.2%      0      0

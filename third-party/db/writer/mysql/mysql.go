@@ -3,8 +3,9 @@
 // socket (local-protocol). Importing the package self-registers the factory (no
 // init()), so writer.Open("mysql", writer.MySQLConfig{…}) resolves. It is a
 // dep-light third-party integration: the go-sql-driver/mysql import is confined
-// to client.go and lives in the ROOT module only, so pkg/v1 consumers never pull
-// a DB driver into their graph.
+// to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers never
+// pull a DB driver into their graph and a consumer of this writer pulls no other
+// vendor.
 //
 // Credentials: MySQLConfig.Credentials is REQUIRED and supplied programmatically
 // (CredentialProvider); like the AWS writers, this factory has no config-file
@@ -17,9 +18,9 @@
 package mysql
 
 import (
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
-	"github.com/kitsunium/sdk/internal/service/writer/dbsink"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink"
 )
 
 // writerName is the canonical registry key.

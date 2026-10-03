@@ -1,0 +1,67 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "bson",
+    srcs = [
+        "codec.go",
+        "decimal.go",
+        "decode.go",
+        "decode_any.go",
+        "decode_container.go",
+        "decode_scalar.go",
+        "decode_special.go",
+        "encode.go",
+        "encode_document.go",
+        "encode_primitive.go",
+        "encode_special.go",
+        "errors.go",
+        "objectid.go",
+        "plan.go",
+        "types.go",
+        "validate.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/bson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/bson",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":bson",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "bson_test",
+    srcs = [
+        "bson_bench_test.go",
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+        "decode_internal_test.go",
+        "encode_internal_test.go",
+        "fuzz_external_test.go",
+        "types_external_test.go",
+    ],
+    embed = [":bson"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/bson",
+        "//internal/kernel/errs",
+    ],
+)

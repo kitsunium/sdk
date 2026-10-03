@@ -1,12 +1,7 @@
 // Package crypto — the process-wide PasswordHasher registry + HashPassword / VerifyPassword / NeedsRehash dispatch.
 package crypto
 
-import (
-	"fmt"
-	"strings"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
+import "strings"
 
 // phcMinSegments is the minimum field count of a `$id$…` PHC string once split
 // on `$`: the empty prefix, the id, and at least one more field.
@@ -29,19 +24,9 @@ var passwordHashers = schemeRegistry[PasswordHasher]{verb: "RegisterPasswordHash
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterPasswordHasher(p PasswordHasher) PasswordHasher {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(p); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterPasswordHasher [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := passwordHashers.publish(p.Algorithm(), p); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
-	}
-	//: returning the hasher lets callers bind it to a typed singleton var.
-	return p
+	//: refuse an unusable hasher, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return passwordHashers.register(p)
 }
 
 // LookupPasswordHasher returns the PasswordHasher registered under name.
@@ -49,15 +34,15 @@ func RegisterPasswordHasher(p PasswordHasher) PasswordHasher {
 // IFACE-PLUGIN: the registry stores plug-in PasswordHasher instances behind the
 // PasswordHasher interface — concrete types are intentionally unexported per scheme.
 func LookupPasswordHasher(name Algorithm) (p PasswordHasher, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return passwordHashers.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return passwordHashers.table.Lookup(name)
 }
 
 // AvailablePasswordHashers returns the sorted list of registered password
 // Algorithms.
 func AvailablePasswordHashers() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return passwordHashers.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return passwordHashers.table.Names()
 }
 
 // HashPassword returns a PHC-string hash of password using the PasswordHasher

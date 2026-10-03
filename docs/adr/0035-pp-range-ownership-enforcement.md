@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — every range is declared in the core, and `errs.Define` is refused under `internal/service`
 - **Related**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md) §Registry (the invariant), [ADR 0006](0006-sdk-error-code-registry-extension.md) (allocation extension), [ADR 0020](0020-errs-audit-dual-reason-derivation.md) (`Code*` naming the audit relies on)
 - **Amends**: nothing. It supplies the enforcement ADR 0005 §Registry assumed.
 

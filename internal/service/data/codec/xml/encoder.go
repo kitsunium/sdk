@@ -1,0 +1,50 @@
+// Package xml — adapts *encoding/xml.Encoder to codec.Encoder.
+package xml
+
+import (
+	stdxml "encoding/xml"
+
+	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// xmlEncoder wraps *encoding/xml.Encoder so it satisfies codec.Encoder.
+type xmlEncoder struct {
+	inner *stdxml.Encoder
+}
+
+// Encode serialises v through the wrapped stdlib encoder.
+func (e *xmlEncoder) Encode(v any) error {
+	//: delegate then wrap.
+	xerr := e.inner.Encode(v)
+	//: success fast-path.
+	if xerr == nil {
+		//: nothing to wrap.
+		return nil
+	}
+	//: wrap.
+	return errs.Wrap(xerr, errs.WrapParams{
+		Code:    corexml.CodeXMLMarshalFailed,
+		Reason:  "MARSHAL_FAILED",
+		Public:  "XML encoding failed",
+		Private: "service/data/codec/xml.Encoder.Encode: encoding/xml returned an error",
+	})
+}
+
+// Close flushes the buffered stdlib encoder state.
+func (e *xmlEncoder) Close() error {
+	//: stdlib encoder requires Flush to emit trailing data.
+	xerr := e.inner.Flush()
+	//: success fast-path.
+	if xerr == nil {
+		//: nothing to wrap.
+		return nil
+	}
+	//: wrap.
+	return errs.Wrap(xerr, errs.WrapParams{
+		Code:    corexml.CodeXMLMarshalFailed,
+		Reason:  "MARSHAL_FAILED",
+		Public:  "XML encoding failed",
+		Private: "service/data/codec/xml.Encoder.Close: Flush returned an error",
+	})
+}

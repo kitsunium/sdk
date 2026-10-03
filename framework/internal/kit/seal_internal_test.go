@@ -10,14 +10,16 @@ import (
 	"path/filepath"
 	"runtime"
 	"slices"
+	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // Sealing at rest, from inside (ADR 0006 §4): the documents as they rest,
@@ -167,6 +169,24 @@ func TestAKeyThatReadsASealedMemberStaysInClear(t *testing.T) {
 	must(t, app.Start(ctx))
 	if b, err := badges.Get(ctx, "holder-1"); err != nil || b.Name != "Ann Holder" {
 		t.Errorf("after a restart: %+v, %v", b, err)
+	}
+}
+
+// Writes that learn at once all keep what they found: learn adds to the
+// members kept in clear in one serialised read-modify-write. Cloning the map
+// and storing it without a lock, as it did before the SDK's snapshot.Value,
+// let the second publish drop the first's members.
+func TestConcurrentLearnsKeepEveryMember(t *testing.T) {
+	e := &sealedEngine[badge]{}
+	e.warned.Store(true) // already said: learn reaches no app
+	const writers int = 32
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Go(func() { e.learn([]string{"/m" + strconv.Itoa(i)}) })
+	}
+	wg.Wait()
+	if got := len(e.clearNow()); got != writers {
+		t.Errorf("%d members kept in clear after %d concurrent learns, want %d", got, writers, writers)
 	}
 }
 

@@ -1,0 +1,60 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "statemachine",
+    srcs = [
+        "agenda.go",
+        "blueprint.go",
+        "book.go",
+        "config.go",
+        "definition.go",
+        "locks.go",
+        "loop.go",
+        "machine.go",
+        "notify.go",
+        "transition.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/statemachine",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/statemachine",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/collections/heap",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":statemachine",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "statemachine_test",
+    srcs = [
+        "agenda_bench_test.go",
+        "agenda_internal_test.go",
+        "definition_external_test.go",
+        "edge_external_test.go",
+        "harness_external_test.go",
+        "loop_external_test.go",
+        "transition_external_test.go",
+    ],
+    embed = [":statemachine"],
+    deps = [
+        "//internal/core/app/statemachine",
+        "//internal/kernel/backoff",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)

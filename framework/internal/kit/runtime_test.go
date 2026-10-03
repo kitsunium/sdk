@@ -17,7 +17,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 func TestStoreSemantics(t *testing.T) {
@@ -217,7 +217,7 @@ func TestWorkflowTimerAndGuard(t *testing.T) {
 		l := loop()
 		return l.State == model.LoopWaiting && l.NextRun == nil
 	})
-	if l := loop(); l.Errors != 0 || l.Provenance != model.ProvenanceLibrary || l.Library != "sdk/v1/statemachine" {
+	if l := loop(); l.Errors != 0 || l.Provenance != model.ProvenanceLibrary || l.Library != "sdk/v1/app/statemachine" {
 		t.Errorf("the loop %+v", l)
 	}
 }

@@ -9,8 +9,8 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svcresilience "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // drainPollInterval is how often the drain re-checks the in-flight count.
@@ -335,7 +335,7 @@ func (s *Server) bindShards(ctx context.Context, group *StreamGroup, addr corene
 // SDK's one published backoff (ADR 0103).
 func acceptDelay(failures int) time.Duration {
 	//: base, ceiling and growth as net/http has them; no jitter.
-	return svcresilience.BackoffValue{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay(failures)
+	return kbackoff.Value{BaseDelay: 5 * time.Millisecond, MaxDelay: time.Second, Multiplier: 2}.Delay(failures)
 }
 
 // acceptLoop accepts connections until its listener is closed.

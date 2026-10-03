@@ -22,7 +22,7 @@ core's vocabulary; this package contributes the filesystem I/O and nothing else.
 Declaring the on-disk half here would have put one domain concept on both sides
 of the layer boundary and left the two free to drift.
 
-Public façade: `pkg/v1/tlsid`.
+Public façade: `pkg/v1/net/tlsid`.
 
 ## Why-this-shape
 

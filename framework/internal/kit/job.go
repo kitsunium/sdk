@@ -6,7 +6,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/scheduler"
+	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 )
 
 // Job is scheduled work: a piece of the daemon's internal loop. It runs on

@@ -1,5 +1,5 @@
 // Package xchacha_test benchmarks the XChaCha20-Poly1305 scheme against the
-// SDK's dep-free default, AES-256-GCM (internal/service/crypto/aesgcm). Both
+// SDK's dep-free default, AES-256-GCM (internal/service/crypto/aead/aesgcm). Both
 // implement the same core/crypto.AEAD port and produce the same self-framed
 // box, so every row here is scheme against scheme with the framing, the key
 // handling and the typed-error wrapping held constant. The question the file
@@ -15,7 +15,7 @@ import (
 	"golang.org/x/crypto/chacha20poly1305"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
-	"github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
+	"github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 	"github.com/kitsunium/sdk/third-party/x-crypto/xchacha"
 )
 

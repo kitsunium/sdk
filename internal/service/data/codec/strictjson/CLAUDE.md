@@ -1,0 +1,94 @@
+<!-- updated: 2026-09-28T19:19:15Z -->
+# internal/service/data/codec/strictjson/
+
+## Purpose
+
+Decodes exactly ONE JSON document into a Go value, within a byte bound, refusing
+what a permissive decoder lets through, with errors that never quote the input
+(ADR 0102). `Decode` for any reader; `PointerOf` for where a refused document
+went wrong. An HTTP request body is `httpbody/`'s (`DecodeRequest`), a package
+of its own so that this one links no `net/http` — `go list -deps` names none.
+Public facades: `pkg/v1/data/codec/strictjson` and
+`pkg/v1/data/codec/strictjson/httpbody`.
+
+Stdlib only — `encoding/json/v2` and `encoding/json/jsontext`, which Go 1.27
+ships without an experiment flag. Not a codec: it registers no Format.
+
+## Contents
+
+| File | Role |
+|---|---|
+| `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `CheckArguments`, `DecodeChecked`, `classify`, `located`, `boundPointer`, `PointerOf`, `Misconfigured` |
+| `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `Unreadable`, the refusal of a failed reader; `causeOf`, which names a read failure by its type |
+| `httpbody/` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839); see `httpbody/CLAUDE.md` |
+| — | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status, are declared in `internal/core/data/codec/strictjson` (ADR 0160 §2) and used here as `corestrictjson.<Var>`; the statuses are literals there, because the core does not import `net/http` for a number |
+
+## Why-this-shape
+
+- **Five ways one document is read two ways.** `encoding/json`'s defaults drop
+  an unknown member, match a member to a field case-insensitively, let the last
+  of two duplicate names win, ignore data after the value, and read any length.
+  None of them fails, and each lets a document mean one thing to this program
+  and another to whatever parsed it first. `encoding/json/v2`'s defaults refuse
+  duplicates, case variants, invalid UTF-8 and trailing data; `RejectUnknownMembers`
+  adds the fourth; the bound is this package's.
+- **The bound is on READING, not a check afterwards.** `boundedReader` hands out
+  the bound plus one byte and then reports the end of input, so a client that
+  never stops sending costs `maxBytes + 1` bytes and the verdict is taken from
+  the count. A document past the bound is refused whatever the decoder made of
+  the part it read — that part is a truncation, not the document.
+  `TestDecodeReadsNoFurtherThanTheBound` pins it against an endless reader.
+- **The reader's verdict precedes the decoder's.** Too large, then a failed
+  source, then an empty one — only then is the decoder's own error classified,
+  because each of the three makes the decoder's conclusion an artefact.
+- **No cause is kept from the decoder.** `jsonv2`'s errors quote the offending
+  member name and, through a field's own unmarshaler, the offending value; this
+  package's refusals are built with the sentinel as the origin and carry only a
+  byte offset and a pointer. A failed READ keeps only the failure's TYPE as its
+  `cause` field (`causeOf`, e.g. `*net.OpError`), never its message, which a
+  reader may have built from the bytes it read.
+  `TestRefusalsNeverQuoteTheDocument` plants a value in each refusal's position
+  and greps every rendering: `Error`, Public, Private, every field, and every
+  error the chain unwraps to.
+- **The pointer is the ONE place the document's text appears.** It is the only
+  location a caller can act on, it is built from member names and indices —
+  never a value — and it is bounded to 256 bytes, cut at a token separator so
+  what remains still names an ancestor. The facade says to render it as
+  untrusted.
+- **A request body is three more rules, and only three — in `httpbody/`.**
+  `http.MaxBytesReader` so net/http closes the connection instead of draining
+  an oversized body; an empty body is `DocumentEmpty` BEFORE its media type is
+  looked at; and a non-empty body must declare JSON or it is not parsed at all.
+  They live in a package of their own because they are the only reason this
+  decoder would link `net/http`. The four exported hooks — `CheckArguments`,
+  `Misconfigured`, `DecodeChecked` (the decode with the caller's recogniser of
+  a size refusal, `http.MaxBytesError` there) and `Unreadable` — exist for that
+  package, so a request body is refused exactly as a document is, by the same
+  code paths, without this package naming an HTTP type.
+- **Zero is refused** (ADR 0031). A bound of zero reads as "unlimited" or as
+  "nothing", opposites, and the first is a memory-exhaustion bug. A target that
+  is not a non-nil pointer is refused before a byte is read.
+
+## Do NOT
+
+- Keep a `jsonv2` error in the chain, or format one into Private. Its text is
+  the input's.
+- Make the bound optional, or default it. The caller knows what a body may be.
+- Register this as a codec Format. A registered codec has no per-call bound and
+  no media-type check, and `codec.Unmarshal("json")` would silently stop
+  meaning what it has always meant.
+- Accept `text/json` or a missing Content-Type (in `httpbody/`). A body that
+  does not say it is JSON is not parsed as JSON.
+- Import `net/http`, `mime` or anything HTTP here. The HTTP form is
+  `httpbody/`'s, and this package's `go list -deps` naming none is what lets a
+  program decode documents without an HTTP stack
+  (`pkg/v1/data/codec/strictjson`'s `TestTheDecoderLinksNoHTTP` asks the go
+  tool).
+
+## Verification
+
+```sh
+bazel test --config=race //internal/service/data/codec/strictjson:strictjson_test
+bazel test --config=race //internal/service/data/codec/strictjson/httpbody:httpbody_test
+cd internal/service && GOWORK=off go test -race ./data/codec/strictjson/...
+```

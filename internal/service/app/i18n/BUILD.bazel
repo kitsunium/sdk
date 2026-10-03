@@ -1,0 +1,65 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "i18n",
+    srcs = [
+        "accept.go",
+        "entry_value.go",
+        "errors.go",
+        "load.go",
+        "message.go",
+        "negotiate.go",
+        "negotiator.go",
+        "pattern.go",
+        "pattern_compiler.go",
+        "plural.go",
+        "plural_value.go",
+        "printer.go",
+        "printer_link.go",
+        "store.go",
+        "store_compliance.go",
+        "tag.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/i18n",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/i18n",
+        "//internal/core/data/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":i18n",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "i18n_test",
+    size = "small",
+    srcs = [
+        "i18n_bench_test.go",
+        "load_external_test.go",
+        "message_external_test.go",
+        "negotiate_external_test.go",
+        "plural_external_test.go",
+        "printer_external_test.go",
+        "store_external_test.go",
+        "tag_external_test.go",
+    ],
+    deps = [
+        ":i18n",
+        "//internal/core/app/i18n",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/json",
+    ],
+)

@@ -8,7 +8,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // Secondary indexes of a store.

@@ -7,7 +7,7 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // What the start refuses of the modules an app mounts, every problem at

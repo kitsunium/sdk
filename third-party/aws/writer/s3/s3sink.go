@@ -5,7 +5,7 @@
 // buffered bytes reach MaxBatchBytes, on the FlushEvery ticker, or on Flush /
 // Close. The per-batch object key and the byte-weight both ride in the deliver
 // closure / WeightOf, so the coalescing/flush/ticker machinery is the shared
-// kernel/batcher (ADR 0014), not a hand-rolled copy.
+// kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
 package s3
 
 import (
@@ -15,8 +15,8 @@ import (
 	"sync"
 	"time"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/batcher"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/kernel/concur/batcher"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

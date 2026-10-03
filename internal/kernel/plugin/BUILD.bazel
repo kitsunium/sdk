@@ -4,12 +4,16 @@ package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
     name = "plugin",
-    srcs = ["plugin.go"],
+    srcs = [
+        "plugin.go",
+        "registry.go",
+    ],
     importpath = "github.com/kitsunium/sdk/internal/kernel/plugin",
     visibility = [
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
     ],
+    deps = ["//internal/kernel/concur/snapshot"],
 )
 
 alias(
@@ -23,6 +27,12 @@ alias(
 
 go_test(
     name = "plugin_test",
-    srcs = ["plugin_external_test.go"],
-    deps = [":plugin"],
+    srcs = [
+        "plugin_external_test.go",
+        "registry_bench_test.go",
+        "registry_external_test.go",
+        "registry_internal_test.go",
+    ],
+    embed = [":plugin"],
+    deps = ["//internal/kernel/concur/snapshot"],
 )

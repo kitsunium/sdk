@@ -1,19 +1,19 @@
 // Package hcl_test measures the quarantined HCL codec against the two in-tree
-// codecs a consumer gets by default, JSON and CBOR (internal/service/codec/*).
-// All three implement the same core/codec.Codec port, and every row below
+// codecs a consumer gets by default, JSON and CBOR (internal/service/data/codec/*).
+// All three implement the same core/data/codec.Codec port, and every row below
 // encodes the SAME Go value — the fixtures carry `hcl` and `json` struct tags
-// side by side, and fxamacker/cbor falls back to the `json` tag — so the
+// side by side, and the cbor codec falls back to the `json` tag — so the
 // comparison is format against format with the data held constant. HCL is a
 // configuration language, so the fixtures are configuration documents rather
-// than the record shapes pkg/v1/codec/BENCH.md uses.
+// than the record shapes pkg/v1/data/codec/BENCH.md uses.
 package hcl_test
 
 import (
 	"testing"
 
-	corecodec "github.com/kitsunium/sdk/internal/core/codec"
-	"github.com/kitsunium/sdk/internal/service/codec/cbor"
-	sdkjson "github.com/kitsunium/sdk/internal/service/codec/json"
+	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
+	"github.com/kitsunium/sdk/internal/service/data/codec/cbor"
+	sdkjson "github.com/kitsunium/sdk/internal/service/data/codec/json"
 	"github.com/kitsunium/sdk/third-party/codec/hcl"
 )
 

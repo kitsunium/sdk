@@ -6,7 +6,7 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // range: 0.3.35.0 - 0.3.35.255
 //
 // s3 was re-allocated off PP octet 0x18 (0.3.24.*) to 0x23 (0.3.35.*) to clear
-// the V92/V99 collision with internal/service/codec/baseenc, which legitimately
+// the V92/V99 collision with internal/service/data/codec/baseenc, which legitimately
 // owns 0x18. The former CodeS3ClientInitFailed=0.3.24.2 and
 // baseenc.CodeBaseEncUnmarshalFailed were the exact same uint32, conflating an
 // S3 client-init failure with a base-encoding unmarshal failure under HasCode /

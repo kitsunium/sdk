@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "recycler",
+    srcs = ["recycler.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/concur/recycler",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/concur/recycler"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":recycler",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "recycler_test",
+    srcs = ["recycler_external_test.go"],
+    deps = [":recycler"],
+)

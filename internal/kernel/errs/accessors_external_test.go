@@ -10,10 +10,10 @@ import (
 
 func newAccessorsSentinel(tb testing.TB) *errs.Error {
 	tb.Helper()
-	//: 0x00_03_01_01 = 0.3.1.1 (service/logger WriterNil dotted-quad).
+	//: 0x00_03_01_01 = 0.3.1.1 (service/observe/logger WriterNil dotted-quad).
 	return errs.Define(0x00_03_01_01, "WRITER_NIL_ACC",
 		"Log handler requires a non-nil writer",
-		"service/logger.NewTextHandler called with nil io.Writer (accessors test)")
+		"service/observe/logger.NewTextHandler called with nil io.Writer (accessors test)")
 }
 
 func TestCodeOf(t *testing.T) {
@@ -109,7 +109,7 @@ func TestPrivateOf(t *testing.T) {
 		want string
 	}
 	tests := []tc{
-		{"sdk error", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, "service/logger.NewTextHandler called with nil io.Writer (accessors test)"},
+		{"sdk error", func(tb testing.TB) error { return newAccessorsSentinel(tb) }, "service/observe/logger.NewTextHandler called with nil io.Writer (accessors test)"},
 		{"stdlib", func(tb testing.TB) error { return errors.New("plain") }, ""},
 		{"nil", func(tb testing.TB) error { return nil }, ""},
 	}

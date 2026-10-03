@@ -3,8 +3,8 @@ package s3_test
 import (
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/codec/baseenc"
 	"github.com/kitsunium/sdk/third-party/aws/writer/s3"
 )
 
@@ -23,8 +23,8 @@ func Test_s3CodesDoNotCollideWithBaseEnc(t *testing.T) {
 		base errs.Code
 	}
 	tests := []tc{
-		{"client-init vs baseenc-unmarshal no longer alias", s3.CodeS3ClientInitFailed, baseenc.CodeBaseEncUnmarshalFailed},
-		{"s3-put vs baseenc-size share neither value nor octet", s3.CodeS3PutFailed, baseenc.CodeBaseEncSizeExceeded},
+		{"client-init vs baseenc-unmarshal no longer alias", s3.CodeS3ClientInitFailed, corebaseenc.CodeBaseEncUnmarshalFailed},
+		{"s3-put vs baseenc-size share neither value nor octet", s3.CodeS3PutFailed, corebaseenc.CodeBaseEncSizeExceeded},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

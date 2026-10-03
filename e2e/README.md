@@ -45,3 +45,18 @@ Only `FAIL` counts against the exit code.
 each real OS VM (kodflow/labs Proxmox), and runs it on the real kernel — the
 definitive "the SDK works everywhere" proof. Locally it runs on whatever host you
 are on.
+
+## Integration suites (Docker)
+
+`integration/` is not part of the binary: it holds the Docker-backed test
+suites — the SQL mechanisms on SQLite, PostgreSQL and MySQL, and the database
+writers against real ClickHouse, MySQL and Redis servers — behind the
+`integration` build tag. They live in this module because it is the one no
+consumer requires, so testcontainers and the drivers never reach a consumer's
+module graph.
+
+```sh
+cd e2e && GOWORK=off go test -tags integration -race ./integration/...
+```
+
+See `integration/CLAUDE.md` for what each suite covers and when to run it.

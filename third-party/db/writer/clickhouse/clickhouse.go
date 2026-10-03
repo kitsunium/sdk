@@ -3,8 +3,9 @@
 // ClickHouse native protocol. Importing the package self-registers the factory
 // (no init()), so writer.Open("clickhouse", writer.ClickHouseConfig{…}) resolves.
 // It is a dep-light third-party integration: the clickhouse-go/v2 import is
-// confined to client.go and lives in the ROOT module only, so pkg/v1 consumers
-// never pull the driver into their graph.
+// confined to client.go, in a module of its own (ADR 0157), so pkg/v1 consumers
+// never pull the driver into their graph and a consumer of this writer pulls no
+// other vendor.
 //
 // Credentials: ClickHouseConfig.Credentials is OPTIONAL (empty falls back to the
 // default user) and supplied programmatically; like the AWS writers, there is no
@@ -16,9 +17,9 @@
 package clickhouse
 
 import (
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
-	"github.com/kitsunium/sdk/internal/service/writer/dbsink"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink"
 )
 
 // writerName is the canonical registry key.

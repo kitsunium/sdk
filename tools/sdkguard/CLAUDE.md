@@ -43,7 +43,7 @@ is identical either way: diagnostics and a non-zero exit.
 | SDK001 | invariant | no second logging pipeline beside the SDK logger | ADR 0032 |
 | SDK002 | convention | errors carry a typed code, not a formatted string | SDK rule 2 / ADR 0019 |
 | SDK003 | invariant | stdout is a protocol channel, never a log destination | ADR 0030 |
-| SDK004 | invariant | `logger.Version` is stamped at link time, not assigned | `pkg/v1/logger/CLAUDE.md` |
+| SDK004 | invariant | `logger.Version` is stamped at link time, not assigned | `pkg/v1/observe/logger/CLAUDE.md` |
 | SDK005 | convention | no second logging pipeline via the legacy `log` package | ADR 0032 |
 
 **Invariant vs convention** is what makes incremental adoption possible. An
@@ -52,6 +52,18 @@ protocol stream corrupted, a binary misreporting what built it. A convention is
 something the SDK *offers* — ADR 0019 makes the error model available to
 downstreams, it does not oblige them. A team runs `-level=invariant` first and
 turns conventions on when ready, instead of switching the whole tool off.
+
+**The SDK holds itself to SDK002.** SDK rule 2 (root `CLAUDE.md`: no
+`fmt.Errorf`, no `errors.New` in production code) used to cite an AST audit
+that did not exist, and 22 calls had passed CI. `make guard` — run by
+`make lint` and by CI's lint gate — now runs a second pass, `-rules=SDK002`,
+over `internal/`, `pkg/`, `third-party/` and `framework/`. Selecting a rule by
+ID runs it whatever its level, so the level a consumer gets by default does not
+move. `tools/` and `e2e/` are outside that pass: stdlib-only modules, they
+cannot import the errs package the rule sends a caller to (`errors.go` here is
+the example). The SDK grants itself no exemption — `make guard` fails on a
+`//sdkguard:allow SDK002` directive in that tree, and fails closed when it
+cannot scan for one.
 
 ## Freshness probe
 
@@ -158,7 +170,7 @@ or the line above it, matching how `//nolint` is already written.
 | File | Role |
 |---|---|
 | `main.go` | CLI entry, flags (`-tests`, `-rules`, `-level`, `-version-check`, `-list`), exit codes |
-| `analyze.go` | walking, parsing, import-alias resolution, suppression directives |
+| `analyze.go` | walking, parsing, import-alias resolution, shadowed names (`shadowedNames`, which skips a type's members — `memberFields`), suppression directives |
 | `file_ctx.go` | `fileCtx` — what every rule reads about one parsed file: its path, the local name of each import, the lines carrying an exemption |
 | `rules.go` | the rule table and the five checks |
 | `pipeline_call.go` | the `log/slog` entry points SDK001 watches, in reporting order |
@@ -188,7 +200,11 @@ resolved, and a selector only matches when the file actually imports the package
   whose local name the file also declares stops matching there. Silent, and
   deliberately so — `logger` is a name consumers bind constantly, and a rule
   that fires on correct code is the kind people switch off. The cost is a
-  missed finding where a file both shadows the name and violates the rule.
+  missed finding where a file both shadows the name and violates the rule. A
+  struct field or an interface method is NOT such a declaration
+  (`memberFields`): it is reached through a selector, never bare. Counting one
+  used to silence every rule in any file with a field named `logger` or
+  `errors` — and let an `errors.New` past the SDK's own gate.
 
 That is the honest trade for staying dependency-free, and it is the right one:
 the rules exist to catch the accidental second pipeline, not to defeat someone

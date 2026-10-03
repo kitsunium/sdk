@@ -57,7 +57,7 @@ func TestAQueuedCommandIsHandledAsItsDispatcher(t *testing.T) {
 		t.Errorf("the handler acted for %q, want alice", got[0])
 	}
 	eventually(t, "the run counted", func() bool { return loopOf(t, app, "lab/command/queued consumer").Runs == 1 })
-	if l := loopOf(t, app, "lab/command/queued consumer"); l.Kind != model.LoopConsumer || l.Library != "sdk/v1/queue" {
+	if l := loopOf(t, app, "lab/command/queued consumer"); l.Kind != model.LoopConsumer || l.Library != "sdk/v1/data/queue" {
 		t.Errorf("the consumer's loop: %+v", l)
 	}
 }

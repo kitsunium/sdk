@@ -18,8 +18,8 @@ go_library(
     deps = [
         "//framework/internal/kit/plug",
         "//framework/model",
-        "//pkg/v1/profiling",
-        "//pkg/v1/server/sse",
+        "//pkg/v1/net/sse",
+        "//pkg/v1/observe/profiling",
     ],
 )
 
@@ -39,6 +39,6 @@ go_test(
     deps = [
         "//framework/internal/kit/plug",
         "//framework/model",
-        "//pkg/v1/profiling",
+        "//pkg/v1/observe/profiling",
     ],
 )

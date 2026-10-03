@@ -1,0 +1,80 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "docstore",
+    srcs = [
+        "config.go",
+        "docstore.go",
+        "docstore_compliance.go",
+        "hooks.go",
+        "index.go",
+        "load.go",
+        "open.go",
+        "persist.go",
+        "sql_config.go",
+        "sql_dialect.go",
+        "sql_migration.go",
+        "sql_reindex.go",
+        "sql_store.go",
+        "sql_version.go",
+        "sql_write.go",
+        "version.go",
+        "write.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/docstore",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/data/docstore",
+        "//internal/core/data/sql",
+        "//internal/core/data/vfs",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/data/sql",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":docstore",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "docstore_test",
+    srcs = [
+        "concurrency_external_test.go",
+        "docstore_bench_test.go",
+        "harness_external_test.go",
+        "index_external_test.go",
+        "persist_external_test.go",
+        "sql_export_test.go",
+        "sql_reindex_external_test.go",
+        "sql_statements_external_test.go",
+        "sql_store_external_test.go",
+        "sql_tx_external_test.go",
+        "sql_version_external_test.go",
+        "sqlfake_external_test.go",
+        "store_external_test.go",
+        "version_external_test.go",
+        "version_persist_external_test.go",
+    ],
+    embed = [":docstore"],
+    deps = [
+        "//internal/core/data/docstore",
+        "//internal/core/data/sql",
+        "//internal/core/data/vfs",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/data/sql",
+        "//internal/service/data/vfs",
+    ],
+)

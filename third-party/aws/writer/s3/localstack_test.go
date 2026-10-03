@@ -5,7 +5,7 @@
 // LocalStack container emulating S3:
 //
 //	docker run --rm -p 4566:4566 localstack/localstack
-//	GOWORK=off go test -tags localstack ./third-party/aws/writer/s3/...
+//	cd third-party/aws && GOWORK=off go test -tags localstack ./writer/s3/...
 //
 // LOCALSTACK_ENDPOINT overrides the endpoint (default http://localhost:4566).
 // It exercises the REAL PutObject against the emulator and reads the object
@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // localCreds is a static CredentialProvider with the canned LocalStack keys.

@@ -63,12 +63,12 @@ import (
 
 	// Activates the default AES-256-GCM scheme. Stdlib-only, so importing
 	// pkg/v1/crypto pulls zero non-stdlib dependencies.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	"github.com/kitsunium/sdk/internal/service/crypto/keyenvelope"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope"
 
 	// Activates the stdlib streaming AES-256-GCM scheme behind SealStream /
 	// OpenStream. Stdlib-only, so it preserves the dep-light invariant.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/streamaead"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/streamaead"
 )
 
 // streamAlgorithm is the frozen algorithm key of the stdlib streaming scheme

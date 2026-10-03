@@ -1,10 +1,10 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
 `Start` turns an immutable `coreproc.Spec` into a running, supervised process and
 returns a `coreproc.Process` handle. This is the only package in the domain that
-forks a process; the others (signal, reaper, rlimit, cgroup, sdnotify) act on a
+forks a process; the others (signal, reaper, rlimit, cgroup, systemd/notify) act on a
 process that already exists.
 
 ## Layering & deps
@@ -12,7 +12,10 @@ process that already exists.
 - Imports: stdlib (`os`, `os/exec`, `os/user`, `syscall`, `context`, `sync`,
   `time`, `strconv`, `strings`, `errors`, `io`, `io/fs`, `path/filepath`, and
   `unsafe` in `joblimits_windows.go`) + `internal/core/proc` +
-  `internal/kernel/errs` + `internal/service/proc/childwait` (Unix files only).
+  `internal/kernel/errs` + `internal/kernel/clock` (the handles' grace timer,
+  Unix and Windows) + `internal/service/proc/childwait` (Unix files only) +
+  `internal/service/proc/internal/rlim` (the trampoline's `syscall.Rlimit`, the
+  constructor `rlimit` shares).
   No `golang.org/x/sys`, no `pkg/*`.
 - Returns `coreproc.Process` (the port interface); the concrete `handle` type is
   unexported.
@@ -35,13 +38,13 @@ process that already exists.
 | `handshake_unix.go` | `unix` | the parent side of the trampoline's status pipe and `handshakeError` (status byte → sentinel) |
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
-| `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
+| `zombie_darwin.go` / `zombie_other.go` | `darwin` / `unix && !darwin` | `leaderIsZombie`: on darwin, `getpgid(2)` answers ESRCH for an exited, unreaped child (see §Stop); `false` on every other kernel, which never needs it |
+| `limits_unix.go` | `unix` | `checkLimits`, before the spawn: `UnknownResource` for a resource with no stdlib `RLIMIT_*` mapping; every mapped one and a `Umask` pass, applied by the trampoline — a limit the kernel then refuses is `RlimitFailed`, through the handshake |
 | `cgroup_placement_linux.go` | `linux` | `validateCgroupPath` (pre-spawn: missing/not-a-cgroup ⇒ `CgroupUnavailable`) + `applyCgroupPlacement` (trampoline writes pid → `cgroup.procs`) |
 | `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
 | `limittable_as.go` / `limittable_openbsd.go` | `unix && !openbsd` / `openbsd` | `addPlatformLimits`: `RLIMIT_AS` where the stdlib exports it; nothing on OpenBSD, whose kernel has none, so `ResourceAS` is `UnknownResource` there |
 | `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go` | `unix` except / only on `386 \|\| arm \|\| mips \|\| mipsle` | `maxRSSKB`: `Rusage.Maxrss` as `int64`, widened from the `int32` those four 32-bit targets declare |
-| `rlimit_value_default.go` / `rlimit_value_signed.go` | `unix && !freebsd && !dragonfly` / `freebsd \|\| dragonfly` | `makeRlimit`: the `syscall.Rlimit` field type (see Cross-platform below) |
 | `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
 | `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,CgroupUnavailable,StdioCapture,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
 
@@ -80,6 +83,28 @@ returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
 A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
+
+**darwin says "gone" differently.** A group whose leader has exited but not
+been reaped holds nothing alive, and XNU's `kill(-pgid)` skips zombies, finds
+nobody to signal and answers **EPERM**, where Linux and the BSDs count the
+zombie and report success. That happens on the graceful signal when the leader
+died before `Stop` was called, and on the escalation when it died inside the
+grace window before the background reap collected it — and `Stop` used to
+report either as `SIGNAL_FAILED`. `zombieGroupRefused` reads that EPERM as
+gone only when the leader was still unreaped when the signal left and is dead
+now: collected since, or a zombie by `leaderIsZombie` (darwin's `getpgid(2)`
+answers ESRCH for one, measured on darwin 25.6, while a live child answers with
+its group; the pid cannot be reused while unreaped). An EPERM from a LIVE
+member this process may not signal — a leader that changed its credentials —
+or one sent after the leader was collected stays `SIGNAL_FAILED`.
+`Test_handle_StopOnALeaderThatDiedUnreaped` and
+`Test_handle_zombieGroupRefused` pin both sides, with an oracle independent of
+the probe (darwin: the group's own EPERM; Linux: `/proc`'s state letter).
+
+The grace window is a timer on the handle's clock — `clock.System` from
+`newHandle`, on Unix and on Windows alike — so `Test_handle_graceOnInjectedClock`
+closes an hour of grace by advancing a `ManualClock` and pins that neither
+`awaitExit` nor `Stop` returns a nanosecond earlier.
 
 ## Exit status ownership (ADR 0093)
 
@@ -139,8 +164,12 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
   the sentinel, then `syscall.Exec`s the real target. The pid is preserved across
   the `execve`, so `Wait`/`Signal`/`Stop` and the stdio pipes all still apply.
 - An `Rlimits` key naming a resource with no stdlib `RLIMIT_*` mapping
-  (`ResourceNProc`, `ResourceMemLock` — only in `golang.org/x/sys`, banned) is
-  rejected with `UnknownResource` **before** the spawn (`checkLimits`).
+  (`ResourceNProc`, `ResourceMemLock` — absent from `syscall`, and
+  `golang.org/x/sys` is banned) is rejected with `UnknownResource` **before** the
+  spawn (`checkLimits`). `proc/rlimit` spells both by their Linux generic-ABI
+  numbers (`rlimit_linux.go`), so on Linux `rlimit.Apply` honours a limit this
+  package refuses — an open disagreement, which moving one `Resource` →
+  `RLIMIT_*` table into `proc/internal/rlim` for both would settle.
 - A limit the kernel **refuses** (e.g. an invalid soft>hard pair, or raising a
   hard cap unprivileged), or a failed `execve` of the target, is reported through
   a **handshake pipe** (`handshake_unix.go`): the trampoline inherits the pipe
@@ -173,9 +202,10 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
 
 Cross-platform: the trampoline is `//go:build unix` (Linux, Darwin, the BSDs);
 the only platform-divergent piece is the `syscall.Rlimit` field type — `int64` on
-FreeBSD/DragonFly (`rlimit_value_signed.go`), `uint64` elsewhere
-(`rlimit_value_default.go`). Non-Unix targets never reach it (`exec_other.go`
-returns `UnsupportedPlatform`).
+FreeBSD/DragonFly, `uint64` elsewhere — and the trampoline never names it: it
+calls `rlim.Make` (`internal/service/proc/internal/rlim`), the build-tagged
+constructor it shares with `rlimit`. Non-Unix targets never reach it
+(`exec_other.go` returns `UnsupportedPlatform`).
 
 Footgun: a binary linking this package that is run with the sentinel env var set
 will re-exec. `Start` sets it only on the trampoline child and strips it before
@@ -212,7 +242,8 @@ back from inside the child, trampoline failures arriving typed (`RlimitFailed`
 `Spec.Env` leaking nothing, and the three stdio modes. The handle is pinned
 white-box in `handle_unix_internal_test.go`: `Stop` escalates
 `SIGTERM`→`SIGKILL` for a child that ignores `SIGTERM`, `SignalGroup` reaches a
-grandchild, `Wait` is memoised, and a signalled exit reports code −1;
+grandchild, `Wait` is memoised, a signalled exit reports code −1, and a leader
+that died unreaped stops cleanly on darwin too (§Stop);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub.

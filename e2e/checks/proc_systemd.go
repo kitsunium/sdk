@@ -14,8 +14,8 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	perrs "github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sdlisten"
-	"github.com/kitsunium/sdk/pkg/v1/sdnotify"
+	"github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen"
+	"github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 )
@@ -102,12 +102,12 @@ func sdnotifyNoopWhenUnset() harness.Result {
 	//: undo the env mutation regardless of the outcome below.
 	defer restore()
 	//: Ready must no-op silently when unsupervised.
-	if err := sdnotify.Ready(); err != nil {
+	if err := notify.Ready(); err != nil {
 		//: a non-nil result violates the unset-socket no-op contract.
 		return harness.Failed(sdnotifyDomain, nameNoopUnset, fmt.Sprintf("Ready unset = %v, want nil", err))
 	}
 	//: Notify must also no-op silently when unsupervised.
-	if err := sdnotify.Notify(readyState); err != nil {
+	if err := notify.Notify(readyState); err != nil {
 		//: surface the unexpected error so the failure is diagnosable.
 		return harness.Failed(sdnotifyDomain, nameNoopUnset, fmt.Sprintf("Notify unset = %v, want nil", err))
 	}
@@ -121,7 +121,7 @@ func sdnotifyNoopWhenUnset() harness.Result {
 // Ready. This exercises the parse-state semantics without needing systemd.
 func sdnotifyNotificationStates() harness.Result {
 	//: a READY=1 datagram must report Ready and nothing else.
-	ready := sdnotify.Notification{State: readyState}
+	ready := notify.Notification{State: readyState}
 	//: the lifecycle vector order is {ready, reloading, stopping, watchdog}.
 	gotReady := [lifecycleFlagCount]bool{ready.Ready(), ready.Reloading(), ready.Stopping(), ready.Watchdog()}
 	//: want only Ready set for a READY=1 frame.
@@ -130,7 +130,7 @@ func sdnotifyNotificationStates() harness.Result {
 		return harness.Failed(sdnotifyDomain, nameNotificationStates, "READY=1 "+detail)
 	}
 	//: a non-ready datagram carrying each lifecycle flag must report it and not Ready.
-	other := sdnotify.Notification{State: reloadStopWatchState}
+	other := notify.Notification{State: reloadStopWatchState}
 	//: read the same {ready, reloading, stopping, watchdog} vector.
 	gotOther := [lifecycleFlagCount]bool{other.Ready(), other.Reloading(), other.Stopping(), other.Watchdog()}
 	//: want Ready clear and the three lifecycle flags set.
@@ -162,7 +162,7 @@ func lifecycleMatch(got, want [lifecycleFlagCount]bool) (detail string, ok bool)
 // Skipped (never a hang).
 func sdnotifyReadinessRoundTrip() harness.Result {
 	//: stand up the supervisor-side socket; this is the Linux-gated entry point.
-	lis, path, err := sdnotify.Listen()
+	lis, path, err := notify.Listen()
 	//: classify a Listen failure as off-platform (NotSupported) or host-gap (Skip).
 	if err != nil {
 		//: an unsupported-platform error is the expected off-platform contract.
@@ -181,7 +181,7 @@ func sdnotifyReadinessRoundTrip() harness.Result {
 	//: restore NOTIFY_SOCKET after the send completes.
 	defer restore()
 	//: the notifier sends READY=1 over the socket addressed by NOTIFY_SOCKET.
-	if rerr := sdnotify.Ready(); rerr != nil {
+	if rerr := notify.Ready(); rerr != nil {
 		//: a send failure is a real conformance failure on a supported host.
 		return harness.Failed(sdnotifyDomain, nameReadinessRoundTrip, fmt.Sprintf("Ready send = %v, want nil", rerr))
 	}
@@ -203,7 +203,7 @@ func sdnotifyReadinessRoundTrip() harness.Result {
 
 // readinessVerdict turns a received Notification into the round-trip check result:
 // Pass only when the datagram is Ready and its kernel-verified SenderPID is ours.
-func readinessVerdict(n sdnotify.Notification) harness.Result {
+func readinessVerdict(n notify.Notification) harness.Result {
 	//: the round-trip property: the datagram is ready and stamped with our PID.
 	if !n.Ready() || n.SenderPID != os.Getpid() {
 		//: report both observed values so the contract violation is diagnosable.
@@ -217,7 +217,7 @@ func readinessVerdict(n sdnotify.Notification) harness.Result {
 // goroutine to the bounded select in recvWithDeadline.
 type recvResult struct {
 	// notification is the parsed datagram on a successful Recv.
-	notification sdnotify.Notification
+	notification notify.Notification
 	// err is the Recv error, nil on success.
 	err error
 }
@@ -225,7 +225,7 @@ type recvResult struct {
 // recvWithDeadline runs ln.Recv in a goroutine and waits at most recvDeadline.
 // timedOut is true when the deadline elapsed first; the goroutine then drains on
 // Close so it never leaks.
-func recvWithDeadline(ln sdnotify.Listener) (n sdnotify.Notification, timedOut bool, err error) {
+func recvWithDeadline(ln notify.Listener) (n notify.Notification, timedOut bool, err error) {
 	//: a one-slot buffered channel lets the goroutine send and exit even after a
 	//: timeout, so it is never blocked forever.
 	ch := make(chan recvResult, 1)
@@ -245,7 +245,7 @@ func recvWithDeadline(ln sdnotify.Listener) (n sdnotify.Notification, timedOut b
 	//: the deadline elapsed before any datagram — report a timeout.
 	case <-time.After(recvDeadline):
 		//: the caller will Close the listener, unblocking the parked goroutine.
-		return sdnotify.Notification{}, true, nil
+		return notify.Notification{}, true, nil
 	}
 }
 
@@ -280,9 +280,9 @@ func sdlistenPreparePopulatesSpec() harness.Result {
 	//: closure defers the Close (a bare defer would close it before Prepare runs).
 	defer func() { dropErr(ln.Close()) }()
 	//: a minimal valid Spec — Prepare only mutates ExtraFiles and Env.
-	spec := sdlisten.Spec{Path: "/usr/bin/true"}
+	spec := listen.Spec{Path: "/usr/bin/true"}
 	//: attach the listener's socket to the child and publish the activation env.
-	err := sdlisten.Prepare(&spec, map[string]net.Listener{prepareFdName: ln})
+	err := listen.Prepare(&spec, map[string]net.Listener{prepareFdName: ln})
 	//: classify a Prepare failure as off-platform (NotSupported) or a real failure.
 	if err != nil {
 		//: an unsupported-platform error is the expected off-Unix contract.
@@ -321,7 +321,7 @@ func sdlistenEmptySetNotError() harness.Result {
 	//: undo the env mutation regardless of the outcome below.
 	defer restore()
 	//: read the activation set; a foreign LISTEN_PID must yield nothing.
-	files, err := sdlisten.Files(false)
+	files, err := listen.Files(false)
 	//: classify a Files failure as off-platform (NotSupported) or a real failure.
 	if err != nil {
 		//: an unsupported-platform error is the expected off-Unix contract.

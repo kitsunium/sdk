@@ -8,7 +8,7 @@ import (
 	"runtime/debug"
 	"slices"
 
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // ActivityHandler is a declared activity of a service: a function that says

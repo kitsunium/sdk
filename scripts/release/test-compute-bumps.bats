@@ -40,7 +40,7 @@ module github.com/kitsunium/sdk/pkg
 
 go 1.26
 EOF
-  : > pkg/v1/codec.go
+  : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
   # A real module directory carries Bazel targets, and compute-bumps now uses
   # their PRESENCE to tell "this path has nothing to ask Bazel about" apart from
@@ -63,7 +63,7 @@ teardown() { rm -rf "$REPO"; }
 }
 
 @test "change under pkg/v1 emits pkg" {
-  echo "// patch" >> pkg/v1/codec.go
+  echo "// patch" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -235,7 +235,7 @@ STUB
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
-  : > pkg/v1/codec.go
+  : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
   base="$(g rev-parse HEAD)"
   # cut-tags-style: a detached commit whose parent is main HEAD, tagged, not on a branch.
@@ -252,12 +252,12 @@ STUB
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
   printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
-  : > pkg/v1/codec.go
+  : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
   base="$(g rev-parse HEAD)"
   rel="$(g commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
   g tag pkg/v0.1.0 "$rel"
-  echo "// new" >> pkg/v1/codec.go
+  echo "// new" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): real change after release"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -314,7 +314,7 @@ STUB
 }
 
 @test "a .go file under pkg/ still cuts a release (control)" {
-  echo "// real change" >> pkg/v1/codec.go
+  echo "// real change" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
@@ -342,7 +342,7 @@ bazel_subtree_fixture() {
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1 internal/kernel/errs
   printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
-  : > pkg/v1/codec.go
+  : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
   printf 'go_library(name = "errs")\n' > internal/kernel/errs/BUILD.bazel
   g add -A; g commit -q --no-verify -m "init"
@@ -416,11 +416,11 @@ STUB
 }
 
 @test "--explain names the rule that fired when something is published" {
-  echo "// real change" >> pkg/v1/codec.go
+  echo "// real change" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   run bash -c "'$SCRIPT' --explain 2>&1 >/dev/null"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1: pkg/v1/codec.go is a public-module change -> bump"* ]]
+  [[ "$output" == *"rule 1: pkg/v1/doc.go is a public-module change -> bump"* ]]
   [[ "$output" == *"verdict: RELEASE"* ]]
 }
 
@@ -453,7 +453,7 @@ STUB
 # The negative witness for the row above: --require-bazel must not fail a run
 # that had no internal/ question to ask, or every docs merge would go red.
 @test "--require-bazel is silent when no internal/ path changed" {
-  echo "// real change" >> pkg/v1/codec.go
+  echo "// real change" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   PATH="/usr/bin:/bin" run "$SCRIPT" --require-bazel
   [ "$status" -eq 0 ]
@@ -498,10 +498,62 @@ STUB
 @test "pkg and framework in one range emit both tokens, pkg first" {
   mkdir -p framework/model
   echo "package model" > framework/model/model.go
-  echo "// patch" >> pkg/v1/codec.go
+  echo "// patch" >> pkg/v1/doc.go
   g add -A
   g commit -q --no-verify -m "feat: both modules"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ "$output" = $'pkg\nframework' ]
+}
+
+# ── The vendor modules (ADR 0157) ───────────────────────────────────────────
+# Every vendor integration under third-party/ is a module of the chain, so a
+# change to one emits the token `third-party`; the chain is cut once whatever
+# the tokens.
+
+@test "a change under third-party/ emits third-party" {
+  mkdir -p third-party/aws/writer/s3
+  echo "package s3" > third-party/aws/writer/s3/s3.go
+  g add -A
+  g commit -q --no-verify -m "feat(s3): a declaration"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "third-party" ]
+}
+
+@test "a change to a vendor module's go.mod emits third-party" {
+  mkdir -p third-party/db/writer/mysql
+  printf 'module github.com/kitsunium/sdk/third-party/db/writer/mysql\n\ngo 1.27\n' > third-party/db/writer/mysql/go.mod
+  g add -A
+  g commit -q --no-verify -m "chore(mysql): the module"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "third-party" ]
+}
+
+@test "a vendor CLAUDE.md or BUILD.bazel alone releases nothing" {
+  mkdir -p third-party/x-crypto
+  echo "# notes" > third-party/x-crypto/CLAUDE.md
+  echo "# gazelle:prefix github.com/kitsunium/sdk/third-party/x-crypto" > third-party/x-crypto/BUILD.bazel
+  g add -A
+  g commit -q --no-verify -m "docs(x-crypto): notes"
+  run "$SCRIPT" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"third-party"$'\n'* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+}
+
+@test "pkg, framework and third-party in one range emit the three tokens, in order" {
+  mkdir -p framework/model third-party/transform
+  echo "package model" > framework/model/model.go
+  echo "package transform" > third-party/transform/zstd.go
+  echo "// patch" >> pkg/v1/doc.go
+  g add -A
+  g commit -q --no-verify -m "feat: three modules"
+  run "$SCRIPT" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verdict: RELEASE (tokens 'pkg', 'framework' and 'third-party')"* ]]
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkg\nframework\nthird-party' ]
 }

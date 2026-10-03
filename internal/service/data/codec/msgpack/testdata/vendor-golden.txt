@@ -1,0 +1,109 @@
+# Generated from github.com/vmihailenco/msgpack/v5 v5.4.1 through this package's
+# vendor-backed Marshal (UseCompactInts) before the native implementation replaced it.
+# Columns: name TAB hex(Marshal(value)) TAB renderAny(Unmarshal(bytes, *any)). Never regenerate.
+nil	c0	nil
+true	c3	bool(true)
+false	c2	bool(false)
+int-0	00	int8(0)
+int-127	7f	int8(127)
+int-128	cc80	uint8(128)
+int-255	ccff	uint8(255)
+int-256	cd0100	uint16(256)
+int-65535	cdffff	uint16(65535)
+int-65536	ce00010000	uint32(65536)
+int-maxuint32	ceffffffff	uint32(4294967295)
+int-maxuint32+1	cf0000000100000000	uint64(4294967296)
+int-maxint64	cf7fffffffffffffff	uint64(9223372036854775807)
+int-minus1	ff	int8(-1)
+int-minus32	e0	int8(-32)
+int-minus33	d0df	int8(-33)
+int-minus128	d080	int8(-128)
+int-minus129	d1ff7f	int16(-129)
+int-minus32768	d18000	int16(-32768)
+int-minus32769	d2ffff7fff	int32(-32769)
+int-minint32	d280000000	int32(-2147483648)
+int-minint32-1	d3ffffffff7fffffff	int64(-2147483649)
+int-minint64	d38000000000000000	int64(-9223372036854775808)
+int8	f8	int8(-8)
+int8-pos	64	int8(100)
+int16	d1f9c0	int16(-1600)
+int16-small	05	int8(5)
+int32	d2fe17b800	int32(-32000000)
+int64	d3fffffff1194d8000	int64(-64000000000)
+int64-small	03	int8(3)
+uint	07	int8(7)
+uint8	ccc8	uint8(200)
+uint16	cdea60	uint16(60000)
+uint32	ceee6b2800	uint32(4000000000)
+uint64	cf0000000218711a00	uint64(9000000000)
+uint64-max	cfffffffffffffffff	uint64(18446744073709551615)
+float32	ca40490fdb	float32(3.1415927)
+float32-whole	ca40000000	float32(2)
+float64	cb4005bf0a8b145769	float64(2.718281828459045)
+float64-zero	cb0000000000000000	float64(0)
+float64-negzero	cb8000000000000000	float64(-0)
+float64-inf	cbfff0000000000000	float64(-Inf)
+str-empty	a0	string()
+str-1	a161	string(a)
+str-31	bf73737373737373737373737373737373737373737373737373737373737373	string(sssssssssssssssssssssssssssssss)
+str-32	d9207373737373737373737373737373737373737373737373737373737373737373	string(ssssssssssssssssssssssssssssssss)
+str-255	d9ff737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373	string(sssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss)
+str-256	da010073737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373737373	string(ssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssssss)
+str-utf8	b268c3a96c6c6f20e4b896e7958c20f09f8cb8	string(héllo 世界 🌸)
+time-epoch	d6ff00000000	time.Time(1970-01-01T00:00:00Z)
+time-32	d6ff00000001	time.Time(1970-01-01T00:00:01Z)
+time-32-max	d6ffffffffff	time.Time(2106-02-07T06:28:15Z)
+time-64	d7ff000007d000000001	time.Time(1970-01-01T00:00:01.0000005Z)
+time-64-max	d7ffee6b27ffffffffff	time.Time(2514-05-30T01:53:03.999999999Z)
+time-96	c70cff000000000000000400000000	time.Time(2514-05-30T01:53:04Z)
+time-96-negative	c70cff00000000ffffffffffffffff	time.Time(1969-12-31T23:59:59Z)
+time-96-negative-nanos	c70cff00000001fffffffffffffffe	time.Time(1969-12-31T23:59:58.000000001Z)
+time-zero	c70cff00000000fffffff1886e0900	time.Time(0001-01-01T00:00:00Z)
+time-fixture	d6ff65a4fb18	time.Time(2024-01-15T09:30:00Z)
+bytes-nil	c0	nil
+bytes-empty	c400	[]byte()
+bytes-3	c403010203	[]byte(010203)
+byte-array	c403010203	[]byte(010203)
+named-bytes	c4020908	[]byte(0908)
+named-byte-elem	c4020405	[]byte(0405)
+ints	93010203	[int8(1) int8(2) int8(3)]
+ints-nil	c0	nil
+ints-empty	90	[]
+int-array	9201fe	[int8(1) int8(-2)]
+int8s	92ff02	[int8(-1) int8(2)]
+strings	92a161a26263	[string(a) string(bc)]
+anys	94c0c3a178cb3ff8000000000000	[nil bool(true) string(x) float64(1.5)]
+array16	dc0010c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2c2	[bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false) bool(false)]
+map-string-int	81a16101	{"a":int8(1)}
+map-int-string	81fda178	ERROR
+map-nil	c0	nil
+map-empty	80	{}
+map-string-any	81a16b92a178c2	{"k":[string(x) bool(false)]}
+map-string-string	81a16ba176	{"k":string(v)}
+struct-tagged	82a46e616d65a161a361676501	{"age":int8(1) "name":string(a)}
+struct-untagged	82a141cd012ca142a162	{"A":uint16(300) "B":string(b)}
+struct-omit-empty	81a16b00	{"k":int8(0)}
+struct-omit-full	89a16101a162a162a1639101a16407a165d6ff65a4fb18a16681a16602a167c3a168cb3fe0000000000000a16b03	{"a":int8(1) "b":string(b) "c":[int8(1)] "d":int8(7) "e":time.Time(2024-01-15T09:30:00Z) "f":{"f":int8(2)} "g":bool(true) "h":float64(0.5) "k":int8(3)}
+struct-skip	81a16202	{"b":int8(2)}
+struct-as-array	9205a466697665	[int8(5) string(five)]
+struct-all-omit	81a142a46f6e6c79	{"B":string(only)}
+struct-embedded	83a14101a142a162a143c3	{"A":int8(1) "B":string(b) "C":bool(true)}
+struct-embedded-ptr	83a14102a142a170a143c3	{"A":int8(2) "B":string(p) "C":bool(true)}
+struct-embedded-ptr-nil	83a141c0a142c0a143c3	{"A":nil "B":nil "C":bool(true)}
+struct-noinline	82ac77697265556e74616767656482a14103a142a0a143c2	{"C":bool(false) "wireUntagged":{"A":int8(3) "B":string()}}
+struct-shadow	82a14109ac77697265556e74616767656482a14104a142a173	{"A":int8(9) "wireUntagged":{"A":int8(4) "B":string(s)}}
+struct-alias	81a16106	{"a":int8(6)}
+struct-nested	84a5696e6e657282a46e616d65a169a361676500a46c6973749182a46e616d65a0a361676502a370747282a46e616d65a170a3616765ffa36e696cc0	{"inner":{"age":int8(0) "name":string(i)} "list":[{"age":int8(2) "name":string()}] "nil":nil "ptr":{"age":int8(-1) "name":string(p)}}
+struct-times	82a174d6ff65a4fb18a170d6ff65a4fb18	{"p":time.Time(2024-01-15T09:30:00Z) "t":time.Time(2024-01-15T09:30:00Z)}
+struct-error	81a165a4626f6f6d	{"e":string(boom)}
+struct-error-nil	81a165c0	{"e":nil}
+struct-iface	81a176a173	{"v":string(s)}
+named-string	a56e616d6564	string(named)
+named-int	d1fed4	int16(-300)
+text-marshaler	c407746578743a6869	[]byte(746578743a6869)
+binary-marshaler	c403b10708	[]byte(b10708)
+netip-addr	c404c0000201	[]byte(c0000201)
+net-ip	c4093139322e302e322e31	[]byte(3139322e302e322e31)
+ptr-int	07	int8(7)
+ptr-ptr-int	07	int8(7)
+duration	ce59682f00	uint32(1500000000)

@@ -8,7 +8,7 @@ import (
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/third-party/codec/protobuf"
 )
 

@@ -14,8 +14,8 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 const (

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — §D5's precedent — `hash` and `sign` standing apart from `crypto` — rests on a false reason, and the facades nest
 - **Related**: [ADR 0003](0003-sdk-codec-package.md) (the universal codec), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero bound), [ADR 0029](0029-sdk-net-domain.md) (the HTTP adapter), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range)
 
 ## Context

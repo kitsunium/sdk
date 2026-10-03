@@ -9,7 +9,7 @@ above it; unlike it — measured on go1.27.1 — it never lists a directory, ans
 only GET and HEAD, sends the security headers on every response, and answers a
 name the file system refuses with 404 where `FileServerFS` answers a 300-byte
 component or a `%00` with a 500. It adds the single-page fallback, which never
-answers a missing script with HTML. Public facade: `pkg/v1/server/static`.
+answers a missing script with HTML. Public facade: `pkg/v1/net/static`.
 
 Stdlib only. Written against `net/http`'s own interfaces, so it works in any
 `http.Handler` chain — under `http.StripPrefix`, behind the SDK engine's

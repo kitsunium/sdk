@@ -5,9 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

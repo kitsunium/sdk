@@ -1,6 +1,6 @@
 # ADR 0149 — a product reports numbers on a port, and its exporter only emits
 
-- **Status**: Proposed
+- **Status**: Accepted (proposed 2026-09-28; accepted 2026-10-03, once the code it decides had shipped)
 - **Date**: 2026-09-28
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework module; layer `4`), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the private socket the exporter listens on), [ADR 0051](0051-sdk-trace-domain.md) (the trace domain this is not), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (nothing armed by an import)

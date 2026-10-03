@@ -66,8 +66,8 @@ func TestSteadyStateReceiveAllocatesNothing(t *testing.T) {
 // TestSteadyStateSendAllocatesNothing pins the write-buffer reuse
 // initialWriteCapacity's comment sells.
 //
-// MUTATION-CHECKED. Changing writeLocked's `corenet.AppendWSFrame(c.wbuf[:0],
-// …)` to `corenet.AppendWSFrame(nil, …)` — which every other test in the suite
+// MUTATION-CHECKED. Changing writeLocked's `AppendFrame(c.wbuf[:0],
+// …)` to `AppendFrame(nil, …)` — which every other test in the suite
 // accepts, because the bytes on the wire are byte-for-byte identical — makes
 // this fail with:
 //

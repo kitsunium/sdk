@@ -6,7 +6,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Modules (ADR 0008). A module is a Go module's services, released together

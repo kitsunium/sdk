@@ -79,7 +79,7 @@ The values a product declares are also its description. [App](<#App>).Graph retu
 - [Service](<#Service>).Workflow: a state machine over a store — event transitions fired by code, timer and guard transitions fired by the daemon's own loop, hooks on entry and after every transition.
 - [Service](<#Service>).Every and [Service](<#Service>).Cron: scheduled jobs.
 - [Service](<#Service>).Static: a frontend.
-- [Service](<#Service>).Listen: an inbound port that is not HTTP — a private socket on this machine speaking a versioned contract \(pkg/v1/ipc\).
+- [Service](<#Service>).Listen: an inbound port that is not HTTP — a private socket on this machine speaking a versioned contract \(pkg/v1/proc/ipc\).
 - [Service](<#Service>).CLI: a short command\-line command, run once by [App](<#App>).Main.
 
 The app, the composition root, says where the data lives: [Database](<#Database>) declares a database on an engine module the product's main imports — github.com/kitsunium/sdk/framework/connectors/postgres and its siblings, the only code that imports a driver — and [Keeps](<#Keeps>) which stores it keeps. A service never names a database: its handle is its store, which runs on the SDK's document store over SQL there, a table per store.
@@ -495,7 +495,7 @@ const (
 
     // Deprecated: kit no longer returns it. The outbox is the SDK's mail
     // spool, which dead-letters a record that does not decode itself
-    // (mail.SpooledMailUndecodable).
+    // (MessageUndecodable, in pkg/v1/app/mail/spool).
     CodeMailUndecodable errs.Code = ikit.CodeMailUndecodable
 
     // CodeMailPanic is CodeMailPanic.
@@ -627,6 +627,25 @@ const (
 
     // CodeRetentionPanic is CodeRetentionPanic.
     CodeRetentionPanic errs.Code = ikit.CodeRetentionPanic
+
+    // The signals kit ends one of its own steps with and catches itself — a
+    // caller never receives one —, typed when the SDK made rule 2 a gate.
+    CodeSealErased errs.Code = ikit.CodeSealErased
+
+    // CodeSealKeyMoved is CodeSealKeyMoved.
+    CodeSealKeyMoved errs.Code = ikit.CodeSealKeyMoved
+
+    // CodeResealInPlace is CodeResealInPlace.
+    CodeResealInPlace errs.Code = ikit.CodeResealInPlace
+
+    // CodeResealMoved is CodeResealMoved.
+    CodeResealMoved errs.Code = ikit.CodeResealMoved
+
+    // CodeWorkflowNotInPlace is CodeWorkflowNotInPlace.
+    CodeWorkflowNotInPlace errs.Code = ikit.CodeWorkflowNotInPlace
+
+    // CodeTransactionPanic is CodeTransactionPanic.
+    CodeTransactionPanic errs.Code = ikit.CodeTransactionPanic
 )
 ```
 
@@ -1132,7 +1151,7 @@ Set gives the setting name a value in code, over the environment and the files: 
 func Singleton(scope string) AppOption
 ```
 
-Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory \(pkg/v1/lock: flock, LockFileEx\) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
+Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory \(pkg/v1/app/lock: flock, LockFileEx\) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
 
 <a name="SingletonPer"></a>
 ### func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go#L51>)
@@ -1159,7 +1178,7 @@ Studio switches the Studio on or off in dev. It is always off in production.
 func Telemetry(path string, gids ...int) AppOption
 ```
 
-Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
+Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/proc/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
 
 <a name="Authenticator"></a>
 ## type [Authenticator](<https://github.com/kitsunium/sdk/blob/main/framework/kit/auth.go#L23>)
@@ -1461,7 +1480,7 @@ Erase erases every record whose subject is one of ids, in every store of the app
 Once sealing lands \(ADR 0006, step 3\), an erasure also moves the held records under keys of their own and destroys the subject's data key, so that it reaches every copy kit sealed.
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L255>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L274>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error](<#Error>).Wrap is logged and never sent.
 
@@ -1472,7 +1491,7 @@ type Error = ikit.Error
 ```
 
 <a name="Conflict"></a>
-### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L274>)
+### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L293>)
 
 ```go
 func Conflict(message string) *Error
@@ -1481,7 +1500,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses \(409\).
 
 <a name="Forbidden"></a>
-### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L286>)
+### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L305>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1490,7 +1509,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this \(403\).
 
 <a name="Invalid"></a>
-### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L262>)
+### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L281>)
 
 ```go
 func Invalid(message string) *Error
@@ -1499,7 +1518,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying \(400\).
 
 <a name="NotFound"></a>
-### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L268>)
+### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L287>)
 
 ```go
 func NotFound(message string) *Error
@@ -1508,7 +1527,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist \(404\).
 
 <a name="Unauthenticated"></a>
-### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L280>)
+### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L299>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -1517,7 +1536,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are \(401\).
 
 <a name="Unavailable"></a>
-### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L292>)
+### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L311>)
 
 ```go
 func Unavailable(message string) *Error
@@ -1612,7 +1631,7 @@ type Keepable = ikit.Keeper
 <a name="ListenHandler"></a>
 ## type [ListenHandler](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go#L12>)
 
-ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/ipc\).
+ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/proc/ipc\).
 
 ```go
 type ListenHandler = ikit.ListenHandler
@@ -2517,7 +2536,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in\-process [Endpoint](<#Endpoint>).Call carries its caller's user along.
 
 <a name="Violation"></a>
-## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L259>)
+## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L278>)
 
 Violation is one validation rule a request failed: where, which rule, and why — never the value.
 
