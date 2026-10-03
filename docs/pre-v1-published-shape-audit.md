@@ -49,7 +49,7 @@ This is the cheap two thirds of the surface.
 |---|---|---|---|
 | `BreakerConfig` | `BreakerConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
 | `ChainConfig` | `ChainConfig` | `svccache` | `pkg/v1/cache/cache.go` |
-| `Config` | `ClientConfig` | `corenet` | `pkg/v1/client/client.go` |
+| `Config` | `ClientConfig` | `corenet` | `pkg/v1/net/client/client.go` |
 | `CloudWatchConfig` | `CloudWatchConfig` | `corewriter` | `pkg/v1/logger/writer.go` |
 | `Config` | `Config` | `kcache` | `pkg/v1/cache/cache.go` |
 | `Config` | `Config` | `svchealth` | `pkg/v1/health/health.go` |
@@ -64,8 +64,8 @@ This is the cheap two thirds of the surface.
 | `FileConfig` | `FileConfig` | `svcsession` | `pkg/v1/security/session/session.go` |
 | `HandlerConfig` | `HandlerConfig` | `svchealth` | `pkg/v1/health/health.go` |
 | `HedgeConfig` | `HedgeConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
-| `FileParams` | `IdentityFileParams` | `corenet` | `pkg/v1/tlsid/tlsid.go` |
-| `Params` | `IdentityParams` | `corenet` | `pkg/v1/tlsid/tlsid.go` |
+| `FileParams` | `IdentityFileParams` | `corenet` | `pkg/v1/net/tlsid/tlsid.go` |
+| `Params` | `IdentityParams` | `corenet` | `pkg/v1/net/tlsid/tlsid.go` |
 | `IssuerConfig` | `IssuerConfig` | `svctoken` | `pkg/v1/security/token/token.go` |
 | `KeepaliveConfig` | `KeepaliveConfig` | `svclock` | `pkg/v1/lock/lock.go` |
 | `MemoryConfig` | `MemoryConfig` | `svccache` | `pkg/v1/cache/cache.go` |
@@ -103,7 +103,7 @@ This is the expensive third.
 | `Attr` | `AttrValue` | `coreauthz` | `pkg/v1/security/authz/authz.go` |
 | `Attr` | `AttrValue` | `corelogger` | `pkg/v1/logger/logger.go` |
 | `Attr` | `AttrValue` | `coreotel` | `pkg/v1/metrics/metrics.go` |
-| `CallInfo` | `CallValue` | `corenet` | `pkg/v1/client/client.go` |
+| `CallInfo` | `CallValue` | `corenet` | `pkg/v1/net/client/client.go` |
 | `Claims` | `ClaimsValue` | `coretoken` | `pkg/v1/security/token/token.go` |
 | `Component` | `ComponentValue` | `corelc` | `pkg/v1/lifecycle/lifecycle.go` |
 | `CredentialValue` | `CredentialValue` | `corewriter` | `pkg/v1/logger/writer.go` |
@@ -119,11 +119,11 @@ This is the expensive third.
 | `Grant` | `GrantValue` | `svcauthz` | `pkg/v1/security/authz/authz.go` |
 | `HistogramMetric` | `HistogramMetricValue` | `coremetrics` | `pkg/v1/metrics/metrics.go` |
 | `HistogramPoint` | `HistogramValue` | `coremetrics` | `pkg/v1/metrics/metrics.go` |
-| `Identity` | `IdentityValue` | `corenet` | `pkg/v1/tlsid/tlsid.go` |
+| `Identity` | `IdentityValue` | `corenet` | `pkg/v1/net/tlsid/tlsid.go` |
 | `JWK` | `KeyValue` | `jwk` | `pkg/v1/security/token/constructors.go` |
 | `Limit` | `LimitValue` | `coreproc` | `pkg/v1/process/process.go` |
 | `Link` | `LinkValue` | `coretrace` | `pkg/v1/trace/trace.go` |
-| `ListenerState` | `ListenerStateValue` | `corenet` | `pkg/v1/server/server.go` |
+| `ListenerState` | `ListenerStateValue` | `corenet` | `pkg/v1/net/server/server.go` |
 | `LivenessCheck` | `LivenessCheckValue` | `corehealth` | `pkg/v1/health/health.go` |
 | `Migration` | `MigrationValue` | `coresql` | `pkg/v1/sql/sql.go` |
 | `Notification` | `NotificationValue` | `coreproc` | `pkg/v1/sdnotify/sdnotify.go` |
@@ -132,13 +132,13 @@ This is the expensive third.
 | `Report` | `ReportValue` | `corehealth` | `pkg/v1/health/health.go` |
 | `Report` | `ReportValue` | `corevalidation` | `pkg/v1/validation/validation.go` |
 | `Request` | `RequestValue` | `coreauthz` | `pkg/v1/security/authz/authz.go` |
-| `RequestInfo` | `RequestValue` | `corenet` | `pkg/v1/client/client.go` |
+| `RequestInfo` | `RequestValue` | `corenet` | `pkg/v1/net/client/client.go` |
 | `Resource` | `ResourceValue` | `coreotel` | `pkg/v1/metrics/metrics.go` |
-| `Response` | `ResponseValue` | `corenet` | `pkg/v1/client/client.go` |
+| `Response` | `ResponseValue` | `corenet` | `pkg/v1/net/client/client.go` |
 | `Result` | `ResultValue` | `corehealth` | `pkg/v1/health/health.go` |
 | `Result` | `ResultValue` | `coresched` | `pkg/v1/scheduler/scheduler.go` |
 | `Rule` | `RuleValue` | `svcauthz` | `pkg/v1/security/authz/authz.go` |
-| `Event` | `SSEEventValue` | `corenet` | `pkg/v1/server/sse/sse.go` |
+| `Event` | `SSEEventValue` | `corenet` | `pkg/v1/net/sse/sse.go` |
 | `Schema` | `SchemaValue` | `svcconfig` | `pkg/v1/config/config.go` |
 | `Scope` | `ScopeValue` | `coreotel` | `pkg/v1/metrics/metrics.go` |
 | `Session` | `SessionValue` | `coresession` | `pkg/v1/security/session/session.go` |
@@ -147,7 +147,7 @@ This is the expensive third.
 | `SpanData` | `SpanValue` | `coretrace` | `pkg/v1/trace/trace.go` |
 | `Spans` | `SpansValue` | `coretrace` | `pkg/v1/trace/trace.go` |
 | `StartupCheck` | `StartupCheckValue` | `corehealth` | `pkg/v1/health/health.go` |
-| `State` | `StateValue` | `corenet` | `pkg/v1/server/server.go` |
+| `State` | `StateValue` | `corenet` | `pkg/v1/net/server/server.go` |
 | `State` | `StateValue` | `coresession` | `pkg/v1/security/session/session.go` |
 | `TraceState` | `StateValue` | `coretrace` | `pkg/v1/trace/trace.go` |
 | `Stats` | `StatsValue` | `kcache` | `pkg/v1/cache/cache.go` |
@@ -158,7 +158,7 @@ This is the expensive third.
 | `Transition` | `TransitionValue` | `corelc` | `pkg/v1/lifecycle/lifecycle.go` |
 | `TxOptions` | `TxOptionsValue` | `coresql` | `pkg/v1/sql/sql.go` |
 | `Violation` | `ViolationValue` | `corevalidation` | `pkg/v1/validation/validation.go` |
-| `Message` | `WSMessageValue` | `corenet` | `pkg/v1/server/websocket/websocket.go` |
+| `Message` | `WSMessageValue` | `corenet` | `pkg/v1/net/websocket/websocket.go` |
 
 ## C. Everything else — 23
 
@@ -169,9 +169,9 @@ change; a plain shape is as exposed as group B.
 | public name (`pkg/v1`) | concrete type | declared in | published from |
 |---|---|---|---|
 | `Cache` | `Cache` | `kcache` | `pkg/v1/cache/cache.go` |
-| `Client` | `Client` | `svcclient` | `pkg/v1/client/client.go` |
-| `Conn` | `Conn` | `corenet` | `pkg/v1/server/server.go` |
-| `Conn` | `Conn` | `svcws` | `pkg/v1/server/websocket/websocket.go` |
+| `Client` | `Client` | `svcclient` | `pkg/v1/net/client/client.go` |
+| `Conn` | `Conn` | `corenet` | `pkg/v1/net/server/server.go` |
+| `Conn` | `Conn` | `svcws` | `pkg/v1/net/websocket/websocket.go` |
 | `ManualClock` | `ManualClock` | `kclock` | `pkg/v1/clock/clock.go` |
 | `DigestWriter` | `DigestWriter` | `stdhash` | `pkg/v1/crypto/hash/hash.go` |
 | `Group` | `Group` | `coreproc` | `pkg/v1/cgroup/cgroup.go` |
@@ -182,12 +182,12 @@ change; a plain shape is as exposed as group B.
 | `Listener` | `Listener` | `coreproc` | `pkg/v1/sdnotify/sdnotify.go` |
 | `Listener` | `Listener` | `corev` | `pkg/v1/events/events.go` |
 | `MemorySink` | `Memory` | `memory` | `pkg/v1/logger/memory.go` |
-| `PacketGroup` | `PacketGroup` | `svcserver` | `pkg/v1/server/server.go` |
+| `PacketGroup` | `PacketGroup` | `svcserver` | `pkg/v1/net/server/server.go` |
 | `RecordSnapshot` | `RecordEvent` | `corelogger` | `pkg/v1/logger/memory.go` |
-| `Server` | `Server` | `svcserver` | `pkg/v1/server/server.go` |
+| `Server` | `Server` | `svcserver` | `pkg/v1/net/server/server.go` |
 | `JWKSet` | `Set` | `jwk` | `pkg/v1/security/token/constructors.go` |
-| `Stream` | `Stream` | `svcsse` | `pkg/v1/server/sse/sse.go` |
-| `Group` | `StreamGroup` | `svcserver` | `pkg/v1/server/server.go` |
+| `Stream` | `Stream` | `svcsse` | `pkg/v1/net/sse/sse.go` |
+| `Group` | `StreamGroup` | `svcserver` | `pkg/v1/net/server/server.go` |
 | `Tracer` | `Tracer` | `coretrace` | `pkg/v1/trace/trace.go` |
 | `LevelVar` | `Var` | `level` | `pkg/v1/logger/levelvar.go` |
 | `VerifyingReader` | `VerifyingReader` | `stdhash` | `pkg/v1/crypto/hash/hash.go` |

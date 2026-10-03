@@ -6,7 +6,7 @@
 The server side of WebSocket, RFC 6455 (ADR 0047): an HTTP request upgraded into
 a bidirectional, message-oriented connection over the same socket.
 
-Public façade: `pkg/v1/server/websocket`.
+Public façade: `pkg/v1/net/websocket`.
 
 It is written against `net/http`'s own interfaces — `http.ResponseWriter`,
 `*http.Request`, `http.ResponseController` — not against the SDK's listener

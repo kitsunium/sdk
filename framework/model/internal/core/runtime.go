@@ -399,7 +399,7 @@ type ProcessSpec struct {
 // HTTPServer is the product's HTTP server, and whose loop serves it.
 // Its address is the one it listens on; its loop is the node that runs it.
 type HTTPServer struct {
-	// Library is the implementation: "sdk/v1/server" — the SDK's engine
+	// Library is the implementation: "sdk/v1/net/server" — the SDK's engine
 	// accepting and draining the connections, net/http speaking the protocol.
 	Library string `json:"library"`
 	// Loop says how it serves: one accept loop, one goroutine per

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:15:00Z -->
+<!-- updated: 2026-10-03T04:40:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -121,7 +121,9 @@ internal/
                            fold onto owners + goroutine dumps, grouped)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
-                   net    (tlsid, client, server, sse, websocket, static)
+                   net    (the family — ADR 0155; a directory, no Go code:
+                           client, server, sse, static, tlsid, websocket —
+                           one engine each over the one contract core/net)
                    mail   (MIME composition + SMTP + memory and capture
                            doubles; spool/ — the durable outbox)
                    metrics (in-memory meter + text/prometheus/otlpjson
@@ -176,6 +178,14 @@ pkg/
     │                   to erase — ADR 0142;
     │                 session/ — memory + file Store, AEAD Sealer, Regenerate — ADR 0045;
     │                 token/ — JWT over JWS compact + PASETO v4.public — ADR 0042)
+    ├── net/       (a family directory, no Go code — ADR 0155:
+    │                 server/ — the inbound engine, its drain announced — ADR 0029/0043;
+    │                 client/ — the guarded outbound HTTP client, posture enforced by
+    │                   the transport — ADR 0029;
+    │                 tlsid/ — TLS and mutual-TLS identities, shared by server and
+    │                   client — ADR 0029;
+    │                 sse/ — ADR 0029/0043; websocket/ — ADR 0047;
+    │                 static/ — a file tree served by name — ADR 0130)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
     ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
     │                 the supervisor — ADR 0112)
@@ -192,10 +202,6 @@ pkg/
     │                 — Self, Build — ADR 0100)
     ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
     └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
-    └── server/    (+ sse/ — ADR 0029/0043, + websocket/ — ADR 0047,
-                     + static/ — a file tree served by name — ADR 0130)
-    └── client/    (the guarded outbound HTTP client, posture enforced by the transport — ADR 0029)
-    └── tlsid/     (TLS and mutual-TLS identities, shared by server and client — ADR 0029)
     └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
     └── profiling/ (the process's CPU, heap and goroutines, folded onto your owners — ADR 0121)
     └── trace/     (W3C Trace Context + the OTel span model — ADR 0051)

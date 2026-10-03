@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:10:00Z -->
+<!-- updated: 2026-10-03T04:40:00Z -->
 # internal/service/
 
 ## Purpose
@@ -55,9 +55,12 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 
 A family that holds several domains is a directory with no Go code of its own
 and a `CLAUDE.md` naming its members (ADR 0155 §2): `crypto/` groups its
-schemes by role, and `security/` holds `authz`, `redact`, `secret`, `session`
+schemes by role, `security/` holds `authz`, `redact`, `secret`, `session`
 and `token`, at the same paths as their facades under `pkg/v1` and — for the
-four that have one — their contracts under `internal/core`.
+four that have one — their contracts under `internal/core`, and `net/` holds
+the network domain's six engines — `server`, `client`, `tlsid`, `sse`,
+`websocket`, `static` — under the one contract `internal/core/net`, with their
+facades at the same paths under `pkg/v1/net`.
 
 The distribution domains' engines — `entitlement`, `selfupdate`, `gate` and
 `vcs/git` — left this layer for the framework (ADR 0158):
@@ -90,6 +93,7 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 - `mail/` — see `internal/service/mail/CLAUDE.md` (MIME composition, the SMTP policy above net/smtp, and why nothing is sanitised — ADR 0064)
 - `codec/` — see `internal/service/codec/CLAUDE.md` (16 codec packages + per-codec error ranges)
 - `crypto/` — see `internal/service/crypto/CLAUDE.md` (scheme packages grouped by role — `aead/`, `agree/`, `hash/`, `kdf/`, `key/`, `mac/`, `password/`, `sign/` — the keyenvelope/keytree compositions, the `jwk` key format, and the `commonpw` list)
+- `net/` — see `internal/service/net/CLAUDE.md` (the net family's engines — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — the rule that put them together, and why none declares a code)
 - `security/` — see `internal/service/security/CLAUDE.md` (the security family's engines — `authz`, `redact`, `secret`, `session`, `token` — the rule that put them together, and why the schemes they compose stay in `crypto/`)
 - `id/` — see `internal/service/id/CLAUDE.md` (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
 - `i18n/` — see `internal/service/i18n/CLAUDE.md` (the thirteen-language table, the load-time refusal, and the negotiator that cannot fail — ADR 0063)

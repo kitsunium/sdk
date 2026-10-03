@@ -1,8 +1,8 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /framework/internal/kit/serverkit .
 
 // Package serverkit is what framework/kit/server plugs into kit: the HTTP
-// engine an app in the server profile serves on (the SDK's server) and the
-// frontends' file server (the SDK's server/static). kit imports neither: a
+// engine an app in the server profile serves on (the SDK's net/server) and the
+// frontends' file server (the SDK's net/static). kit imports neither: a
 // daemon or a CLI neither links nor initialises them.
 package serverkit
 
@@ -12,8 +12,8 @@ import (
 	"net/http"
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
-	"github.com/kitsunium/sdk/pkg/v1/server"
-	"github.com/kitsunium/sdk/pkg/v1/server/static"
+	"github.com/kitsunium/sdk/pkg/v1/net/server"
+	"github.com/kitsunium/sdk/pkg/v1/net/static"
 )
 
 // httpServer is the SDK's server engine, one group of one listener.

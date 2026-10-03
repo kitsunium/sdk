@@ -243,7 +243,7 @@ is in `tools/alloc-lane-targets.txt` for that reason (SDK-wide rule 12).
 
 This package's `CLAUDE.md` says a graceful shutdown "finishes in milliseconds";
 ADR 0043 says "40 ms, clean". The only executable statement anywhere was
-`pkg/v1/server`'s `TestHTTPAdapterDrainsOnShutdown`, which fails at **3 s** with
+`pkg/v1/net/server`'s `TestHTTPAdapterDrainsOnShutdown`, which fails at **3 s** with
 three streams open — three orders of magnitude looser than the claim. A
 regression from 40 ms to 2.9 s would have passed every test in the repository.
 

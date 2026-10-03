@@ -42,7 +42,7 @@ func provenanceOf(kind string) (provenance, library string) {
 	case model.LoopConsumer:
 		return model.ProvenanceLibrary, "sdk/v1/queue"
 	case model.LoopHTTP:
-		return model.ProvenanceLibrary, "sdk/v1/server"
+		return model.ProvenanceLibrary, "sdk/v1/net/server"
 	case model.LoopTimer:
 		return model.ProvenanceLibrary, "sdk/v1/statemachine"
 	case model.LoopWake:

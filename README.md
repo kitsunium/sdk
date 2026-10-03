@@ -4,16 +4,17 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 41 at the top level, plus twenty-three nested
-ones (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
-`server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
-`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, the six scheme facades
-under `crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — and the
-five under `security/` — `authz`, `redact`, `secret`, `session`, `token`), and
-links the standard library and nothing else (ADR 0156). They are grouped
-below by the job they do, and each links to its own generated `README.md`. The
-distribution mechanisms that close the list are the framework's packages,
-imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
+`pkg/v1` ships **64 packages**: 38 at the top level, plus twenty-six nested
+ones (`logger/writer`, `logger/slogbridge`, `codec/strictjson`,
+`codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`,
+`codec/bson`, the six scheme facades under `crypto/` — `agree`, `hash`, `kdf`,
+`mac`, `password`, `sign` — the five under `security/` — `authz`, `redact`,
+`secret`, `session`, `token` — and the six under `net/` — `server`, `client`,
+`tlsid`, `sse`, `websocket`, `static`), and links the standard library and
+nothing else (ADR 0156). They are grouped below by the job they do, and each
+links to its own generated `README.md`. The distribution mechanisms that close
+the list are the framework's packages, imported from
+`github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ### Observability
 
@@ -47,9 +48,9 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 | Package | What it does |
 |---|---|
-| [`server`](./pkg/v1/server) + [`sse`](./pkg/v1/server/sse), [`websocket`](./pkg/v1/server/websocket), [`static`](./pkg/v1/server/static) | Inbound HTTP with TLS/mTLS identity, per-phase deadlines and policy; Server-Sent Events; and RFC 6455 WebSocket written in the stdlib, whose MUST-fails are enforced rather than tolerated. `static` serves a file tree — an embedded single-page application — the way `http.FileServerFS` does not: never a directory listing, never HTML for a missing script, and the security headers on every answer. Draining is **announced** to the handler, never imposed. |
-| [`client`](./pkg/v1/client) | The outbound half over the same substrate: policy, per-phase deadlines, call hooks. |
-| [`tlsid`](./pkg/v1/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
+| [`server`](./pkg/v1/net/server) + [`sse`](./pkg/v1/net/sse), [`websocket`](./pkg/v1/net/websocket), [`static`](./pkg/v1/net/static) | Inbound HTTP with TLS/mTLS identity, per-phase deadlines and policy; Server-Sent Events; and RFC 6455 WebSocket written in the stdlib, whose MUST-fails are enforced rather than tolerated. `static` serves a file tree — an embedded single-page application — the way `http.FileServerFS` does not: never a directory listing, never HTML for a missing script, and the security headers on every answer. Draining is **announced** to the handler, never imposed. |
+| [`client`](./pkg/v1/net/client) | The outbound half over the same substrate: policy, per-phase deadlines, call hooks. |
+| [`tlsid`](./pkg/v1/net/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
 | [`view`](./pkg/v1/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
 | [`i18n`](./pkg/v1/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
 | [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |

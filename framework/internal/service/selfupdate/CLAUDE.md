@@ -233,7 +233,7 @@ Signatures go through `pkg/v1/crypto/sign` (`keys.go`), the archive digest throu
 `pkg/v1/crypto/hash` (`checksum.go`), the statement's expiry through an injected
 `pkg/v1/clock` clock and the Windows refusal is `pkg/v1/proc`'s. HTTP is the
 exception: `newReleaseHTTPClient` (`transport.go`) stays a `net/http` client over
-`http.DefaultTransport` rather than `pkg/v1/client`, because the guarded
+`http.DefaultTransport` rather than `pkg/v1/net/client`, because the guarded
 transport sets no `Proxy` and so ignores `HTTP(S)_PROXY` and `NO_PROXY` —
 measured, it dialled the host directly where the default transport went through
 the proxy — and an update that cannot leave a network through its proxy never
@@ -243,7 +243,7 @@ this client's https-only, bounded hops.
 
 ## Do NOT
 
-- Swap `newReleaseHTTPClient` for `pkg/v1/client` while the guarded transport
+- Swap `newReleaseHTTPClient` for `pkg/v1/net/client` while the guarded transport
   ignores the environment's proxy (see the section above).
 - Reorder the trust chain, or check a digest against a manifest whose signature
   has not been verified.

@@ -1,6 +1,6 @@
 // Package client — what the guard, the path checks and the policies cost.
 //
-// Everything here runs against a STUB transport. pkg/v1/client/BENCH.md already
+// Everything here runs against a STUB transport. pkg/v1/net/client/BENCH.md already
 // prices the end-to-end call against a loopback origin and attributes 5.53 % of
 // its allocations to guard.RoundTrip; this file measures what is INSIDE that
 // share, which a benchmark carrying a real socket cannot see.
@@ -308,7 +308,7 @@ func benchPolicyRow(policy corenet.Policy, req corenet.RequestValue) func(*testi
 
 // BenchmarkAllowPathsScaling is the number a consumer needs and does not have.
 //
-// pkg/v1/client/BENCH.md recommends denying by default and enumerating what is
+// pkg/v1/net/client/BENCH.md recommends denying by default and enumerating what is
 // allowed. That recommendation is only affordable if the enumeration is cheap,
 // and the enumeration is a LINEAR scan of compiled patterns. This measures the
 // slope at 1, 5, 10, 25 and 50 patterns, matching first, matching last, and not

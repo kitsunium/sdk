@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:10:00Z -->
+<!-- updated: 2026-10-03T04:40:00Z -->
 # pkg/v1/
 
 ## Purpose
@@ -47,7 +47,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `codec/jsonpatch/` | Two JSON documents' difference as RFC 6902 operations (ADR 0143 §D9): `Diff(from, to)` → `[]Edit` (`Op` add / remove / replace, `Path` an RFC 6901 pointer, `Value` written, `Old` replaced or removed), in the order they apply; documents read strictly and compared as RFC 6902 §4.6 does, numbers exactly; arrays aligned before they are paired; encodes as a JSON Patch document; `NotJSON` names the document and the offset, never its content | `pkg/v1/codec/jsonpatch/README.md` |
 | `codec/json/`, `codec/yaml/`, `codec/toml/` | One format registered alone (ADR 0134): a blank import registers that codec and links nothing else — every codec is written on the standard library, YAML as a named subset (ADR 0156) — where `codec/` links every format. Each exports `Format`, an untyped constant | `pkg/v1/codec/{json,yaml,toml}/README.md` |
 | `codec/bson/` | BSON alone, implemented with the standard library (ADR 0021, ADR 0134): importing it registers the codec, and it carries BSON's value types — `D`, `E`, `M`, `A`, `ObjectID`, `DateTime`, `Decimal128`, `Binary`, `Regex`, `Timestamp` and the deprecated ones — with `Marshal` / `Append` / `Unmarshal`, `ObjectIDFromHex`, `ParseDecimal128`. The driver's v1 mapping and struct tags, checked against it; malformed input refused whole before the target is written; 100 levels of nesting. stdlib-only | `pkg/v1/codec/bson/README.md` |
-| `server/static/` | A file tree served over HTTP (ADR 0130): `New(fsys, Config)` → an `http.Handler` that cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types, and answers a refused NAME 404 and a failing tree 500. stdlib-only | `pkg/v1/server/static/README.md` |
+| `net/static/` | A file tree served over HTTP (ADR 0130): `New(fsys, Config)` → an `http.Handler` that cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types, and answers a refused NAME 404 and a failing tree 500. stdlib-only | `pkg/v1/net/static/README.md` |
 | `view/` | Server-side rendering (ADR 0058): `New(Config{FS: …})` → a `Renderer` you `Render(ctx, name, data)`, returning the complete document or nothing — it never takes an `io.Writer`, because a mid-execution failure would already have flushed the status line and half the page. The engine is the stdlib `html/template`, USED and not reimplemented: it is the only Go engine that escapes according to CONTEXT, and a hand-written escaper would be the security regression this domain exists to prevent. `text/template` has no representation at all and an AST audit fails the build on the import. **`TrustHTML` is the one bypass and the only spelling the SDK offers**; the other six html/template trust types are REFUSED in render data with the path named. **What it does NOT prevent is stated out loud: `TrustedHTML` is a type alias, so a `Trusted` the caller built wrongly is an XSS the SDK cannot see** — the domain prevents an accidental bypass and gives the deliberate one one greppable word. **Parse once**: reparsing per request costs 34× on a realistic tree. Stdlib-only, cross-OS | `pkg/v1/view/README.md` |
 | `logger/writer/` | Blank-import activation of the dependency-free logger writers `"console"`, `"file"` and `"rotfile"` (ADR 0012), so `logger.NewMulti` resolves those names; no exported symbols | `pkg/v1/logger/writer/README.md` |
 | `crypto/` | Authenticated encryption (ADR 0013): `NewKey` (exactly 32 bytes, redacting), `Seal` / `Open` with the nonce generated and hidden in the box, AES-256-GCM by default and `SealAs` for another `Algorithm` (`XChaCha20Poly1305` activates through its own blank import), `SealStream` / `OpenStream`, `WrapKey` / `UnwrapKey` passphrase envelopes (ADR 0014). The crypto family's root: the six scheme facades below are its children, and importing one never links it (ADR 0155) | `pkg/v1/crypto/README.md` |
@@ -57,11 +57,11 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `crypto/mac/` | Message authentication (ADR 0014): `Tag` / `Verify` with `HMACSHA256` over a `Key` | `pkg/v1/crypto/mac/README.md` |
 | `crypto/password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id`; `IsCommon`, one of the ten thousand most common passwords, case-insensitively (ADR 0143) | `pkg/v1/crypto/password/README.md` |
 | `crypto/sign/` | Signatures: `GenerateKey` / `Sign` / `Verify` over `Ed25519` and `ECDSAP256` | `pkg/v1/crypto/sign/README.md` |
-| `client/` | The outbound half of the network domain (ADR 0029): `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` (`AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies`) is enforced in the transport; a refusal is `RequestDenied` | `pkg/v1/client/README.md` |
-| `tlsid/` | TLS and mutual-TLS identities shared by `server` and `client` (ADR 0029): `New` for material in memory, `Load` for material on disk; `MaterialInvalid` | `pkg/v1/tlsid/README.md` |
-| `server/` | The inbound engine (ADR 0029): `New` → a `Server` of stream `Group`s and `PacketGroup`s configured by `GroupOption`s (`Listen`, `TLS`, the timeouts, `MaxConns`, `Shards`, …), `Chain` / `ChainPacket` middlewares, and a drain announced through `DrainSignal` rather than imposed (ADR 0043) under `WithDrainTimeout` | `pkg/v1/server/README.md` |
-| `server/sse/` | Server-Sent Events (ADR 0029, ADR 0043): `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` | `pkg/v1/server/sse/README.md` |
-| `server/websocket/` | WebSocket, RFC 6455 in the stdlib (ADR 0047): `Upgrade` → a `Conn`, the origin checked by default (`AllowOrigins` / `AllowAnyOrigin` widen it), frame and message ceilings, ping; `DrainSignal` | `pkg/v1/server/websocket/README.md` |
+| `net/client/` | The outbound half of the network domain (ADR 0029): `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` (`AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies`) is enforced in the transport; a refusal is `RequestDenied` | `pkg/v1/net/client/README.md` |
+| `net/tlsid/` | TLS and mutual-TLS identities shared by `server` and `client` (ADR 0029): `New` for material in memory, `Load` for material on disk; `MaterialInvalid` | `pkg/v1/net/tlsid/README.md` |
+| `net/server/` | The inbound engine (ADR 0029): `New` → a `Server` of stream `Group`s and `PacketGroup`s configured by `GroupOption`s (`Listen`, `TLS`, the timeouts, `MaxConns`, `Shards`, …), `Chain` / `ChainPacket` middlewares, and a drain announced through `DrainSignal` rather than imposed (ADR 0043) under `WithDrainTimeout` | `pkg/v1/net/server/README.md` |
+| `net/sse/` | Server-Sent Events (ADR 0029, ADR 0043): `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` | `pkg/v1/net/sse/README.md` |
+| `net/websocket/` | WebSocket, RFC 6455 in the stdlib (ADR 0047): `Upgrade` → a `Conn`, the origin checked by default (`AllowOrigins` / `AllowAnyOrigin` widen it), frame and message ceilings, ping; `DrainSignal` | `pkg/v1/net/websocket/README.md` |
 | `proc/` | Capability preflight for the process domain (ADR 0016, ADR 0018): `Supported` / `MissingCapabilities` / `MustSupport` over `Capability`, and the `UnsupportedPlatform` a primitive returns where its OS has no secure mechanism | `pkg/v1/proc/README.md` |
 | `process/` | Spawn a child under explicit credentials in its own process group and session (ADR 0016): `Start` / `MustStart(ctx, Spec)` → a `Process` to wait on, signal and stop with a SIGTERM→SIGKILL escalation; and the running program itself — `Build` / `ParseBuild`, `Self` (ADR 0100) | `pkg/v1/process/README.md` |
 | `cgroup/` | Control groups (ADR 0016): `Create` / `MustCreate` → a `Group` (`WithRoot`), `Available` | `pkg/v1/cgroup/README.md` |
@@ -80,6 +80,12 @@ The security facades — `authz`, `redact`, `secret`, `session` and `token` —
 are children of `security/`, a family directory with no Go code of its own
 (ADR 0155): `github.com/kitsunium/sdk/pkg/v1/security/<name>`, moved from
 `pkg/v1/<name>` with no alias left behind, under the same v0 licence.
+
+The network facades — `server`, `client`, `tlsid`, `sse`, `websocket` and
+`static` — are children of `net/`, a family directory with no Go code of its
+own (ADR 0155): `github.com/kitsunium/sdk/pkg/v1/net/<name>`. The first three
+moved from the root of `pkg/v1` and the last three from under the `server`
+facade, with no alias left behind, under the same v0 licence.
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -184,7 +190,7 @@ GOWORK=off go test -race -cover ./v1/...
 - `codec/jsonpatch/` — see `pkg/v1/codec/jsonpatch/CLAUDE.md`
 - `codec/json/`, `codec/yaml/`, `codec/toml/` — see their `CLAUDE.md`
 - `codec/bson/` — see `pkg/v1/codec/bson/CLAUDE.md`
-- `server/static/` — see `pkg/v1/server/static/CLAUDE.md`
+- `net/static/` — see `pkg/v1/net/static/CLAUDE.md`
 - `logger/writer/` — see `pkg/v1/logger/writer/CLAUDE.md`
 - `crypto/` — see `pkg/v1/crypto/CLAUDE.md`
 - `crypto/agree/` — see `pkg/v1/crypto/agree/CLAUDE.md`
@@ -194,11 +200,12 @@ GOWORK=off go test -race -cover ./v1/...
 - `crypto/password/` — see `pkg/v1/crypto/password/CLAUDE.md`
 - `crypto/sign/` — see `pkg/v1/crypto/sign/CLAUDE.md`
 - `security/` — see `pkg/v1/security/CLAUDE.md` (the security family — `authz`, `redact`, `secret`, `session`, `token` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/security` to import)
-- `client/` — see `pkg/v1/client/CLAUDE.md`
-- `tlsid/` — see `pkg/v1/tlsid/CLAUDE.md`
-- `server/` — see `pkg/v1/server/CLAUDE.md`
-- `server/sse/` — see `pkg/v1/server/sse/CLAUDE.md`
-- `server/websocket/` — see `pkg/v1/server/websocket/CLAUDE.md`
+- `net/` — see `pkg/v1/net/CLAUDE.md` (the net family — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/net` to import)
+- `net/client/` — see `pkg/v1/net/client/CLAUDE.md`
+- `net/tlsid/` — see `pkg/v1/net/tlsid/CLAUDE.md`
+- `net/server/` — see `pkg/v1/net/server/CLAUDE.md`
+- `net/sse/` — see `pkg/v1/net/sse/CLAUDE.md`
+- `net/websocket/` — see `pkg/v1/net/websocket/CLAUDE.md`
 - `proc/` — see `pkg/v1/proc/CLAUDE.md`
 - `process/` — see `pkg/v1/process/CLAUDE.md`
 - `cgroup/` — see `pkg/v1/cgroup/CLAUDE.md`

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-03T04:40:00Z -->
 # internal/core/net/
 
 ## Purpose
@@ -9,8 +9,8 @@ and **every** `0.2.11.*` sentinel for both faces of the domain — inbound
 WebSocket wire format, the static file handler's one refusal) and outbound (the
 guarded HTTP transport). Concrete behaviour lives in
 `internal/service/net/{tlsid,client,server,sse,websocket,static}`; the public
-façades are `pkg/v1/{tlsid,client,server}`, `pkg/v1/server/sse`,
-`pkg/v1/server/websocket` and `pkg/v1/server/static`.
+façades are `pkg/v1/net/{tlsid,client,server,sse,websocket,static}`, at the
+same paths (ADR 0155).
 
 This package follows the **`proc` shape** (ADR 0016): one core sibling owns one
 code block and declares every sentinel; service implementations and façades
@@ -298,7 +298,7 @@ ABI constants instead of `x/net/ipv4`.
 
 ## Do NOT
 
-- Declare an error code in `internal/service/net/*` or `pkg/v1/{tlsid,client,server}`.
+- Declare an error code in `internal/service/net/*` or `pkg/v1/net/*`.
   Add it here and wrap it there.
 - Add an accessor that returns the raw `[]tls.Certificate`, the private key, or
   the PEM bytes out of `IdentityValue`. `ClientConfig` / `ServerConfig` are the

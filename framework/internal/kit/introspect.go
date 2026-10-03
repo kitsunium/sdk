@@ -229,7 +229,7 @@ func (a *App) findNode(id string) node {
 //
 // The stream itself — framing, the keep-alive comment a proxy needs to see,
 // the bound on each frame's write, the end on disconnect — is the SDK's
-// server/sse; the Studio's own is only which events, in which order.
+// net/sse; the Studio's own is only which events, in which order.
 func (a *App) serveEvents(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Cache-Control", "no-store")
 	open := plug.OpenEventStream.Load()

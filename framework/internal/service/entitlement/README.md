@@ -221,7 +221,7 @@ DefaultBearerFetch is the transport the mint request should use.
 
 It refuses redirects outright. checkTokenURL vouches for the URL it is GIVEN, and a redirect is a second destination nobody checked: Go's default client decides whether to forward an Authorization header by comparing HOSTS, not schemes, so a same\-host https→http redirect would put the runner's credential on the wire in plaintext. There is no legitimate redirect on this endpoint, so the safe answer and the correct one coincide.
 
-It builds a net/http client over http.DefaultTransport rather than reaching for pkg/v1/client: the guarded transport ignores HTTP\(S\)\_PROXY, which a self\-hosted runner may depend on, and its configuration documents no way to follow no redirect at all — a zero MaxRedirects is its default of three.
+It builds a net/http client over http.DefaultTransport rather than reaching for pkg/v1/net/client: the guarded transport ignores HTTP\(S\)\_PROXY, which a self\-hosted runner may depend on, and its configuration documents no way to follow no redirect at all — a zero MaxRedirects is its default of three.
 
 <a name="InCI"></a>
 ## func [InCI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L49>)

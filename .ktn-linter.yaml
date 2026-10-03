@@ -304,10 +304,10 @@ rules:
       - "pkg/v1/security/authz/authz.go"
       - "**/pkg/v1/i18n/i18n.go"
       - "pkg/v1/i18n/i18n.go"
-      - "**/pkg/v1/server/server.go"
-      - "pkg/v1/server/server.go"
-      - "**/pkg/v1/server/websocket/websocket.go"
-      - "pkg/v1/server/websocket/websocket.go"
+      - "**/pkg/v1/net/server/server.go"
+      - "pkg/v1/net/server/server.go"
+      - "**/pkg/v1/net/websocket/websocket.go"
+      - "pkg/v1/net/websocket/websocket.go"
       - "**/pkg/v1/trace/trace.go"
       - "pkg/v1/trace/trace.go"
 
@@ -553,8 +553,8 @@ rules:
       # of the type (ServerConfig on one, ClientConfig on the other). Narrowing
       # each parameter to a one-method interface would replace the single domain
       # type with two synthetic ones and obscure that both are the same thing.
-      - "**/pkg/v1/tlsid/**"
-      - "pkg/v1/tlsid/**"
+      - "**/pkg/v1/net/tlsid/**"
+      - "pkg/v1/net/tlsid/**"
       # Same false positive again, on the authz evaluators. Check, evaluateRBAC
       # and lookupAttr all take `request coreauthz.RequestValue`, and that type
       # is fixed by the FUNC ports they implement — coreauthz.Policy is
@@ -685,7 +685,7 @@ rules:
       # The rule's suggested interface carries only Advance, so adopting it
       # would drop the very call that makes every timeout assertion in this
       # suite deterministic instead of a race between the test and the engine.
-      # Same both-halves-of-the-type case as the pkg/v1/tlsid handshake test
+      # Same both-halves-of-the-type case as the pkg/v1/net/tlsid handshake test
       # above.
       - "**/internal/service/health/harness_external_test.go"
       - "internal/service/health/harness_external_test.go"
@@ -1360,16 +1360,16 @@ rules:
       # exactly as ADR 0016 avoids for process.Spec above.
       - "**/internal/service/net/tlsid/**"
       - "internal/service/net/tlsid/**"
-      - "**/pkg/v1/tlsid/**"
-      - "pkg/v1/tlsid/**"
+      - "**/pkg/v1/net/tlsid/**"
+      - "pkg/v1/net/tlsid/**"
       # The outbound client forwards the same value types. Config (72 B) is
       # taken and returned BY VALUE by withDefaults precisely so filling the
       # defaults cannot mutate the Config its caller still holds, and New copies
       # it exactly once per client, at construction.
       - "**/internal/service/net/client/**"
       - "internal/service/net/client/**"
-      - "**/pkg/v1/client/**"
-      - "pkg/v1/client/**"
+      - "**/pkg/v1/net/client/**"
+      - "pkg/v1/net/client/**"
       # The mail domain — value semantics ARE the contract (ADR 0064).
       # MessageValue is 264 B because a mail HAS eleven fields: four address
       # lists, two bodies, an attachment slice, a header slice, a subject, a
@@ -1417,8 +1417,8 @@ rules:
       # StateValue (96 B) is returned by value so a caller can hold, log or
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
-      - "**/pkg/v1/server/**"
-      - "pkg/v1/server/**"
+      - "**/pkg/v1/net/server/**"
+      - "pkg/v1/net/server/**"
       # authz.AttrValue (80 B) — all nine findings in the authz tree are this
       # one type; RequestValue is 56 B and is not flagged. Three reasons, and
       # the third is measured rather than argued.

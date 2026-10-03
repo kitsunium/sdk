@@ -2,7 +2,7 @@
 # framework/internal/kit/studiokit — the Studio's event stream and profiler
 
 What `framework/kit/studio` plugs into kit (`plug`): the live events as a
-Server-Sent Events stream (the SDK's `server/sse`) and the profiler — the
+Server-Sent Events stream (the SDK's `net/sse`) and the profiler — the
 live heap folded onto the graph's nodes, every goroutine grouped (the SDK's
 `profiling`). kit keeps the routes, the guard and the error words; this
 package keeps what needs those two SDK packages, so a product without the

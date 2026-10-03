@@ -71,7 +71,7 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 	}
 
 	h := rt.HTTP
-	if h == nil || h.Library != "sdk/v1/server" || !strings.Contains(h.Loop, "accepts") || h.Addr != strings.TrimPrefix(app.URL(), "http://") {
+	if h == nil || h.Library != "sdk/v1/net/server" || !strings.Contains(h.Loop, "accepts") || h.Addr != strings.TrimPrefix(app.URL(), "http://") {
 		t.Fatalf("http %+v", h)
 	}
 	var chain []string
@@ -89,7 +89,7 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 	}
 
 	want := map[string][3]string{ // name → kind, provenance, library
-		"http":                               {model.LoopHTTP, model.ProvenanceLibrary, "sdk/v1/server"},
+		"http":                               {model.LoopHTTP, model.ProvenanceLibrary, "sdk/v1/net/server"},
 		"scheduler":                          {model.LoopScheduler, model.ProvenanceLibrary, "sdk/v1/scheduler"},
 		"audit/job/tally":                    {model.LoopJob, model.ProvenanceLibrary, "sdk/v1/scheduler"},
 		"shop/workflow/lifecycle timers":     {model.LoopTimer, model.ProvenanceLibrary, "sdk/v1/statemachine"},

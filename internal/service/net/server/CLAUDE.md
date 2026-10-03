@@ -7,7 +7,7 @@ The inbound engine of the network domain (ADR 0029): one unified listener for
 TCP, Unix, TLS and mutual TLS, serving handlers grouped behind shared
 middlewares, with an explicit lifecycle and a bounded drain.
 
-Public façade: `pkg/v1/server`.
+Public façade: `pkg/v1/net/server`.
 
 ## Contents
 

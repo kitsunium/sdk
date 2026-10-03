@@ -424,10 +424,10 @@ and each is said again at its code site:
   vendor adds a field.
   Measured: a JWK carrying a member its decoding type does not declare is
   refused `MEMBER_UNKNOWN` by strictjson.
-- **HTTP: `net/http` over `http.DefaultTransport`, not `pkg/v1/client`.** The
+- **HTTP: `net/http` over `http.DefaultTransport`, not `pkg/v1/net/client`.** The
   guarded client's transport sets no `Proxy`, so it ignores `HTTP(S)_PROXY` and
   `NO_PROXY`. Measured with `HTTP_PROXY` set: `http.DefaultClient` sent the
-  request through the proxy, `pkg/v1/client` dialled the host directly. A
+  request through the proxy, `pkg/v1/net/client` dialled the host directly. A
   roster fetch or a CI token mint that cannot leave a network through its proxy
   refuses every customer behind one, so the roster client (`service.go`) and
   `DefaultBearerFetch` (`ci.go`) keep the default transport. The guarded
@@ -475,7 +475,7 @@ it.
 - Collapse `RosterUnreachable` into a refusal. It says "cannot decide", and
   reporting an outage as a revocation is the one wrong answer.
 - Swap `jsonnames.go` for `strictjson`, or the roster and mint clients for
-  `pkg/v1/client`, while the reasons in "Where ADR 0158 §2 is not followed"
+  `pkg/v1/net/client`, while the reasons in "Where ADR 0158 §2 is not followed"
   still hold: the first refuses a genuine Actions token and any roster with a
   field this build predates, the second every customer behind a proxy.
 - Read the anchor list anywhere but `parseBundleAnyAnchor` / `bundleMarkAnyAnchor`,
