@@ -9,6 +9,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreconsole "github.com/kitsunium/sdk/internal/core/observe/logger/sink/console"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
 )
@@ -57,7 +58,7 @@ func TestConsoleSink_Write_OriginWins_CtxCancelled(t *testing.T) {
 				t.Errorf("errors.Is(%v, %v) = false", werr, tc.wantErr)
 			}
 			//: the SDK reason is layered on top of the stdlib cause, not in place of it.
-			if !errs.HasCode(werr, console.CodeCtxCancelled) {
+			if !errs.HasCode(werr, coreconsole.CodeCtxCancelled) {
 				t.Errorf("HasCode(%v, CtxCancelled) = false", werr)
 			}
 		})
@@ -81,7 +82,7 @@ func TestConsoleSink_Write_WriteFailed_OriginWins(t *testing.T) {
 			}
 			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
 			//: WriteFailed is the wrapping reason the consumer routes on.
-			if !errs.HasCode(werr, console.CodeWriteFailed) {
+			if !errs.HasCode(werr, coreconsole.CodeWriteFailed) {
 				t.Errorf("HasCode(%v, WriteFailed) = false", werr)
 			}
 			//: origin wins: the underlying writer error stays reachable via Unwrap.
@@ -145,7 +146,7 @@ func TestConsoleSink_Write_WriteFailed_ExitCode(t *testing.T) {
 		{"stdlib cause yields default EX_SOFTWARE", errBoom, 70},
 		//: *errs.Error cause → origin wins, so the WriteFailed sentinel's
 		//: WithExitCode(74) is inherited and EX_IOERR reaches the CLI consumer.
-		{"errs cause inherits sentinel EX_IOERR", console.WriteFailed, 74},
+		{"errs cause inherits sentinel EX_IOERR", coreconsole.WriteFailed, 74},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -186,7 +187,7 @@ func TestConsoleSink_Flush_CancelledContext_Identity(t *testing.T) {
 				t.Errorf("errors.Is(%v, %v) = false", ferr, tc.wantErr)
 			}
 			//: intentional asymmetry — Flush does NOT errs.Wrap the way Write does.
-			if errs.HasCode(ferr, console.CodeCtxCancelled) {
+			if errs.HasCode(ferr, coreconsole.CodeCtxCancelled) {
 				t.Errorf("Flush unexpectedly wrapped CtxCancelled: %v", ferr)
 			}
 		})

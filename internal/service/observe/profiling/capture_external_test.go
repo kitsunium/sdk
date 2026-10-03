@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
@@ -81,18 +82,18 @@ func TestTheCPUProfilerIsOneAtATime(t *testing.T) {
 	}
 	_, err := profiling.CaptureCPU(t.Context(), time.Second)
 	pprof.StopCPUProfile()
-	if !errs.HasCode(err, profiling.CodeProfilerBusy) || errs.HTTPStatusOf(err) != 409 {
+	if !errs.HasCode(err, coreprofiling.CodeProfilerBusy) || errs.HTTPStatusOf(err) != 409 {
 		t.Errorf("a capture beside another profiler = %v", err)
 	}
 	for _, window := range []time.Duration{0, -time.Second, profiling.MaxCPUWindow + time.Nanosecond} {
-		if _, err := profiling.CaptureCPU(t.Context(), window); !errs.HasCode(err, profiling.CodeWindowInvalid) {
+		if _, err := profiling.CaptureCPU(t.Context(), window); !errs.HasCode(err, coreprofiling.CodeWindowInvalid) {
 			t.Errorf("window %v = %v", window, err)
 		}
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), 50*time.Millisecond)
 	defer cancel()
 	p, err := profiling.CaptureCPU(ctx, time.Minute)
-	if p != nil || !errs.HasCode(err, profiling.CodeCaptureCanceled) || !errors.Is(err, context.DeadlineExceeded) {
+	if p != nil || !errs.HasCode(err, coreprofiling.CodeCaptureCanceled) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("a canceled capture = %v, %v", p, err)
 	}
 	if _, err := profiling.CaptureCPU(t.Context(), 20*time.Millisecond); err != nil {
@@ -123,8 +124,8 @@ func TestAHeapProfileFindsTheBytesByTheirStack(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	byStack := func(s profiling.SampleValue) string {
-		if slices.ContainsFunc(s.Stack, func(f profiling.FrameValue) bool { return strings.HasSuffix(f.Function, ".hoard") }) {
+	byStack := func(s coreprofiling.SampleValue) string {
+		if slices.ContainsFunc(s.Stack, func(f coreprofiling.FrameValue) bool { return strings.HasSuffix(f.Function, ".hoard") }) {
 			return "hoard"
 		}
 		return ""

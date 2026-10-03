@@ -183,10 +183,7 @@ func TestSpanValueDurationAndRoot(t *testing.T) {
 // TestSpanContextValidityAndSampling pins the two normative validity rules and
 // the fact that the sampled bit is the only sampling question anything asks.
 func TestSpanContextValidityAndSampling(t *testing.T) {
-	valid, err := coretrace.ParseTraceParent(specHeader)
-	if err != nil {
-		t.Fatalf("ParseTraceParent: %v", err)
-	}
+	valid := specContext(t)
 	if !valid.IsValid() || !valid.IsSampled() {
 		t.Error("the specification example is a valid, sampled context")
 	}
@@ -207,10 +204,7 @@ func TestSpanContextValidityAndSampling(t *testing.T) {
 // and it must SHADOW an outer one rather than silently re-parenting children onto
 // a trace that ended.
 func TestContextCarriesAnInvalidContextDeliberately(t *testing.T) {
-	outer, err := coretrace.ParseTraceParent(specHeader)
-	if err != nil {
-		t.Fatalf("ParseTraceParent: %v", err)
-	}
+	outer := specContext(t)
 	ctx := coretrace.ContextWithSpanContext(context.Background(), outer)
 	if coretrace.SpanContextFromContext(ctx).TraceID != outer.TraceID {
 		t.Fatal("the stored context was not read back")

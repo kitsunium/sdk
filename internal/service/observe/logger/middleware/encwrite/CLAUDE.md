@@ -27,14 +27,16 @@ the self-framed `[Version][algorithm id][nonce][ciphertext || tag]` produced by
 
 ## Error codes
 
-Slot 0x1c. See `codes.go`.
+Slot 0x1c (`0.3.28.*`): `EncWriteSealFailed` and `FramingFailed`, declared in
+`internal/core/observe/logger/middleware/encwrite` since ADR 0160 — this engine
+returns them and declares none.
 
 ## Test lanes
 
 | File | Tag | Lane that runs it |
 |---|---|---|
 | `encwrite_external_test.go`, `encwrite_internal_test.go` | — | `bazel test --config=race //...` (default) |
-| `codes_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) — and CI's `test-386` job, where `Test_frame_overflow` skips: `len` cannot exceed `MaxUint32` on a 32-bit `int` |
+| `frame_overflow_internal_test.go` | `//go:build !race` | race-off alloc lane — `make test-alloc` (listed in `tools/alloc-lane-targets.txt`) — and CI's `test-386` job, where `Test_frame_overflow` skips: `len` cannot exceed `MaxUint32` on a 32-bit `int` |
 | `encwrite_integration_test.go` | `//go:build integration` | **none** — opt-in, run by hand (below) |
 
 `Test_EncWriter_Integration_RealSocket` drives a sealed-frame round trip over a

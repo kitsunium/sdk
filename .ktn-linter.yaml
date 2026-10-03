@@ -1067,9 +1067,10 @@ rules:
       - "internal/kernel/concur/group/**"
       - "**/internal/kernel/collections/heap/**"
       - "internal/kernel/collections/heap/**"
-      # core/observe/trace.StateValue is the parsed W3C `tracestate` list, and it has no
-      # from-parts constructor ON PURPOSE: every instance comes out of
-      # ParseTraceState or Insert, each of which validates the key against
+      # core/observe/trace.StateValue is the W3C `tracestate` list as a value, and
+      # it has no from-parts constructor ON PURPOSE: every instance comes out of
+      # Insert or a StateBuilder (the engine's ParseTraceState fills one since
+      # ADR 0160 §4), each of which validates the key against
       # `simple-key`/`multi-tenant-key` and the value against `value = 0*255(chr)
       # nblk-chr` before an entry reaches the list. A NewStateValue(entries)
       # would be a second way in that skips all of it and produces a header the

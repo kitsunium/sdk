@@ -8,9 +8,9 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corefile "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	filesink "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file"
 	_ "github.com/kitsunium/sdk/internal/service/observe/logger/writer/file"
 )
 
@@ -160,7 +160,7 @@ func TestFileOpen_ErrorCodes(t *testing.T) {
 	}
 	tests := []tc{
 		//: empty path defers to the sink, so the sink's PathEmpty wins (origin).
-		{"empty path carries CodePathEmpty", writer.FileConfig{Path: ""}, filesink.CodePathEmpty},
+		{"empty path carries CodePathEmpty", writer.FileConfig{Path: ""}, corefile.CodePathEmpty},
 		//: a mismatched config type is rejected before delegation with the shared code.
 		{"wrong config type carries CodeWriterConfigInvalid", writer.ConsoleConfig{}, writer.CodeWriterConfigInvalid},
 	}

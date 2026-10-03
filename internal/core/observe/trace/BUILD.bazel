@@ -21,11 +21,11 @@ go_library(
         "span_kind.go",
         "span_value.go",
         "spans_value.go",
+        "state_builder.go",
         "state_value.go",
         "status_value.go",
         "trace.go",
         "trace_state_entry.go",
-        "traceparent.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/observe/trace",
     visibility = [
@@ -61,9 +61,9 @@ go_test(
         "carrier_external_test.go",
         "model_external_test.go",
         "registry_guard_external_test.go",
+        "span_context_external_test.go",
         "trace_bench_test.go",
         "trace_state_external_test.go",
-        "traceparent_external_test.go",
     ],
     deps = [
         ":trace",

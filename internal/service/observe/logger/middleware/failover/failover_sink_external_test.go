@@ -11,6 +11,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corefailover "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover"
 	filesink "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file"
@@ -113,7 +114,7 @@ func TestNew_SkipsNilBranches(t *testing.T) {
 			s, err := failover.New(branches...)
 			//: an all-nil slate must collapse to the Empty sentinel.
 			if tc.wantErr {
-				if !errs.HasCode(err, failover.CodeFailoverEmpty) {
+				if !errs.HasCode(err, corefailover.CodeFailoverEmpty) {
 					t.Errorf("New err = %v, want Empty", err)
 				}
 				return
@@ -156,7 +157,7 @@ func TestFailover_Write(t *testing.T) {
 			}
 			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
 			if tc.wantErr {
-				if !errs.HasCode(werr, failover.CodeFailoverExhausted) {
+				if !errs.HasCode(werr, corefailover.CodeFailoverExhausted) {
 					t.Errorf("err = %v, want Exhausted", werr)
 				}
 			} else if werr != nil {
@@ -270,11 +271,11 @@ func TestNew_EmptyReturnsSentinel(t *testing.T) {
 				t.Errorf("New() sink = %v, want nil", s)
 			}
 			//: the error must carry the dotted-quad Empty code for routing.
-			if !errs.HasCode(err, failover.CodeFailoverEmpty) {
+			if !errs.HasCode(err, corefailover.CodeFailoverEmpty) {
 				t.Errorf("HasCode(err, CodeFailoverEmpty) = false, err = %v", err)
 			}
 			//: and it must unwrap to the exported Empty sentinel identity.
-			if !errors.Is(err, failover.Empty) {
+			if !errors.Is(err, corefailover.Empty) {
 				t.Errorf("errors.Is(err, Empty) = false, err = %v", err)
 			}
 		})
@@ -308,7 +309,7 @@ func TestFailover_Write_ExhaustedJoin(t *testing.T) {
 			}
 			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
 			//: the top-level wrap must carry the Exhausted code.
-			if !errs.HasCode(werr, failover.CodeFailoverExhausted) {
+			if !errs.HasCode(werr, corefailover.CodeFailoverExhausted) {
 				t.Errorf("HasCode(werr, CodeFailoverExhausted) = false, werr = %v", werr)
 			}
 			//: each cause must remain individually matchable through the join.
@@ -526,8 +527,8 @@ func TestFailoverSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Exhausted carries 0.3.19.1", failover.Exhausted, failover.CodeFailoverExhausted},
-		{"Empty carries 0.3.19.2", failover.Empty, failover.CodeFailoverEmpty},
+		{"Exhausted carries 0.3.19.1", corefailover.Exhausted, corefailover.CodeFailoverExhausted},
+		{"Empty carries 0.3.19.2", corefailover.Empty, corefailover.CodeFailoverEmpty},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

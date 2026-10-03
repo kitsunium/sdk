@@ -52,7 +52,7 @@ func NewWithTraceContext(h corelogger.Handler, src corelogger.TraceContextSource
 	//: reject nil handlers so callers cannot accidentally construct a dead Logger.
 	if h == nil {
 		//: caller supplied no handler — return the documented sentinel.
-		return nil, HandlerNil
+		return nil, corelogger.HandlerNil
 	}
 	//: wrap the handler in the concrete loggerImpl.
 	return &loggerImpl{h: h, trace: src}, nil

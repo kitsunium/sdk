@@ -2,7 +2,7 @@
 package trace
 
 // traceStateEntry is one `key=value` list member. It is unexported because the
-// only way to obtain one is through ParseTraceState or Insert, both of which
+// only ways to obtain one are Insert and StateBuilder.Add, both of which
 // validate — a struct literal would let an unspellable entry into a header.
 type traceStateEntry struct {
 	// key is the vendor identifier, already validated against the grammar.

@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -86,7 +87,7 @@ func Test_newConnSeam(t *testing.T) {
 			//: failure arm — a failing dialer must surface the dial code.
 			if tc.fail {
 				_, _, err := newConnSeam("tcp", "x:1", failingDialer)
-				if !errs.HasCode(err, CodeNetTransportDialFailed) {
+				if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 					t.Errorf("%s: err=%v want dial-failed", tc.name, err)
 				}
 				return
@@ -226,7 +227,7 @@ func Test_defaultClientRejectsRedirect(t *testing.T) {
 			//: sandbox blocks them the SSRF guard is still proven by a dial refusal.
 			if !loopbackConnectWorks() {
 				_, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
-				if !errs.HasCode(err, CodeNetTransportDialFailed) {
+				if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 					t.Errorf("%s: loopback-blocked fallback err=%v want dial-failed", tc.name, err)
 				}
 				return
@@ -330,7 +331,7 @@ func assertNilDialerFallback(t *testing.T, name string) {
 	//: refusal arm — a nil dialer to a closed port still proves net.Dial was
 	//: selected (the branch under test) and its error surfaces the dial sentinel.
 	_, _, err := newConnSeam("tcp", closedLoopbackAddr, nil)
-	if !errs.HasCode(err, CodeNetTransportDialFailed) {
+	if !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 		t.Errorf("%s: nil-dialer refusal err=%v want dial-failed", name, err)
 	}
 }

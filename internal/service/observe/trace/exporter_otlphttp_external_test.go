@@ -96,7 +96,7 @@ func TestNewOTLPHTTPExporterRefusesAnEndpointThatCannotBeACollector(t *testing.T
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			exporter, err := svctrace.NewOTLPHTTPExporter("otlphttp", svctrace.OTLPHTTPConfig{Endpoint: tc.endpoint})
-			if !errors.Is(err, svctrace.OTLPEndpointInvalid) {
+			if !errors.Is(err, coretrace.OTLPEndpointInvalid) {
 				t.Fatalf("want OTLPEndpointInvalid, got %v", err)
 			}
 			if exporter != nil {
@@ -186,17 +186,17 @@ func TestOTLPHTTPClassification(t *testing.T) {
 		{"200 empty body", http.StatusOK, "", nil, false},
 		{"200 zero rejected", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"0"}}`, nil, false},
 		{"200 unparseable body", http.StatusOK, `not json at all`, nil, false},
-		{"200 partial success as a string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"3"}}`, svctrace.OTLPPartialSuccess, false},
-		{"200 partial success as a number", http.StatusOK, `{"partialSuccess":{"rejectedSpans":3}}`, svctrace.OTLPPartialSuccess, false},
-		{"200 partial success as an escaped string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"\u0033"}}`, svctrace.OTLPPartialSuccess, false},
-		{"429", http.StatusTooManyRequests, "", svctrace.OTLPExportUnavailable, true},
-		{"502", http.StatusBadGateway, "", svctrace.OTLPExportUnavailable, true},
-		{"503", http.StatusServiceUnavailable, "", svctrace.OTLPExportUnavailable, true},
-		{"504", http.StatusGatewayTimeout, "", svctrace.OTLPExportUnavailable, true},
-		{"400", http.StatusBadRequest, "", svctrace.OTLPExportRejected, false},
-		{"404", http.StatusNotFound, "", svctrace.OTLPExportRejected, false},
-		{"500 is NOT retryable", http.StatusInternalServerError, "", svctrace.OTLPExportRejected, false},
-		{"501 is NOT retryable", http.StatusNotImplemented, "", svctrace.OTLPExportRejected, false},
+		{"200 partial success as a string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"3"}}`, coretrace.OTLPPartialSuccess, false},
+		{"200 partial success as a number", http.StatusOK, `{"partialSuccess":{"rejectedSpans":3}}`, coretrace.OTLPPartialSuccess, false},
+		{"200 partial success as an escaped string", http.StatusOK, `{"partialSuccess":{"rejectedSpans":"\u0033"}}`, coretrace.OTLPPartialSuccess, false},
+		{"429", http.StatusTooManyRequests, "", coretrace.OTLPExportUnavailable, true},
+		{"502", http.StatusBadGateway, "", coretrace.OTLPExportUnavailable, true},
+		{"503", http.StatusServiceUnavailable, "", coretrace.OTLPExportUnavailable, true},
+		{"504", http.StatusGatewayTimeout, "", coretrace.OTLPExportUnavailable, true},
+		{"400", http.StatusBadRequest, "", coretrace.OTLPExportRejected, false},
+		{"404", http.StatusNotFound, "", coretrace.OTLPExportRejected, false},
+		{"500 is NOT retryable", http.StatusInternalServerError, "", coretrace.OTLPExportRejected, false},
+		{"501 is NOT retryable", http.StatusNotImplemented, "", coretrace.OTLPExportRejected, false},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
@@ -251,7 +251,7 @@ func TestOTLPHTTPDoesNotFollowARedirect(t *testing.T) {
 		t.Fatalf("NewOTLPHTTPExporter: %v", err)
 	}
 	exportErr := exporter.Export(fixtureSpans(t))
-	if !errors.Is(exportErr, svctrace.OTLPExportRejected) {
+	if !errors.Is(exportErr, coretrace.OTLPExportRejected) {
 		t.Fatalf("an unfollowed redirect must classify as a permanent rejection, got %v", exportErr)
 	}
 	if elsewhereCalls != 0 {
@@ -279,7 +279,7 @@ func TestOTLPHTTPReportsATransportFaultAsRetryable(t *testing.T) {
 		t.Fatalf("NewOTLPHTTPExporter: %v", err)
 	}
 	exportErr := exporter.Export(fixtureSpans(t))
-	if !errors.Is(exportErr, svctrace.OTLPExportUnavailable) {
+	if !errors.Is(exportErr, coretrace.OTLPExportUnavailable) {
 		t.Fatalf("want OTLPExportUnavailable, got %v", exportErr)
 	}
 	if !svctrace.OTLPRetryable(exportErr) {
@@ -302,7 +302,7 @@ func TestOTLPHTTPRefusesAnUnencodableBatchBeforeTouchingTheNetwork(t *testing.T)
 	}
 	batch := fixtureSpans(t)
 	batch.Spans[0].Context.TraceID = coretrace.TraceID{}
-	if exportErr := exporter.Export(batch); !errors.Is(exportErr, svctrace.OTLPInvalidSpanContext) {
+	if exportErr := exporter.Export(batch); !errors.Is(exportErr, coretrace.OTLPInvalidSpanContext) {
 		t.Fatalf("want OTLPInvalidSpanContext, got %v", exportErr)
 	}
 	if calls != 0 {

@@ -9,6 +9,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coresample "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/sample"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/sample"
 )
@@ -56,9 +57,9 @@ func TestNew(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"valid rate + downstream succeeds", 10, false, 0},
-		{"zero rate yields RateInvalid", 0, false, sample.CodeSampleRateInvalid},
-		{"negative rate yields RateInvalid", -1, false, sample.CodeSampleRateInvalid},
-		{"nil downstream yields DownstreamNil", 1, true, sample.CodeSampleDownstreamNil},
+		{"zero rate yields RateInvalid", 0, false, coresample.CodeSampleRateInvalid},
+		{"negative rate yields RateInvalid", -1, false, coresample.CodeSampleRateInvalid},
+		{"nil downstream yields DownstreamNil", 1, true, coresample.CodeSampleDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -149,8 +150,8 @@ func TestSampleSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"RateInvalid carries 0.3.20.1", sample.RateInvalid, sample.CodeSampleRateInvalid},
-		{"DownstreamNil carries 0.3.20.2", sample.DownstreamNil, sample.CodeSampleDownstreamNil},
+		{"RateInvalid carries 0.3.20.1", coresample.RateInvalid, coresample.CodeSampleRateInvalid},
+		{"DownstreamNil carries 0.3.20.2", coresample.DownstreamNil, coresample.CodeSampleDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

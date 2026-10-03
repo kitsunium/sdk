@@ -66,8 +66,12 @@ internal/
 │                       view},
 │                  data/{cache, codec, codec/scratch, queue, sql, transform,
 │                        vfs},
-│                  observe/{logger, logger/{level, writer}, metrics, otel,
-│                           trace},
+│                  observe/{logger, logger/{level, writer},
+│                           logger/middleware/{async, encwrite, failover,
+│                           multi, recover, route, sample, tee},
+│                           logger/sink/{console, file, syslog},
+│                           logger/writer/{journald, nettransport, rotfile},
+│                           metrics, otel, profiling, trace},
 │                  security/{authz, redact, secret, session, token}
 └── service/       concrete implementations
                    observe (the family — ADR 0155; a directory, no Go code:

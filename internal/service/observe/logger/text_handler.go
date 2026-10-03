@@ -65,7 +65,7 @@ func NewTextHandler(w io.Writer, min level.Level) (h *TextHandler, err error) {
 	//: reject nil writers early rather than panic at first write.
 	if w == nil {
 		//: caller supplied no sink — return the documented sentinel.
-		return nil, WriterNil
+		return nil, corelogger.WriterNil
 	}
 	//: construct a fresh handler bound to the real wall clock.
 	return &TextHandler{w: w, min: min, clk: clock.System}, nil
@@ -117,7 +117,7 @@ func (h *TextHandler) Handle(ctx context.Context, r corelogger.RecordEvent) erro
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
 		return errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeCtxCancelled,
+			Code:    corelogger.CodeCtxCancelled,
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/observe/logger.TextHandler.Handle saw a cancelled context",
@@ -177,7 +177,7 @@ func (h *TextHandler) writeLine(line []byte) error {
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the writer's cause.
 		return errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeWriteFailed,
+			Code:    corelogger.CodeWriteFailed,
 			Reason:  "WRITE_FAILED",
 			Public:  "Log write failed",
 			Private: "service/observe/logger.TextHandler.Handle underlying writer returned an error",

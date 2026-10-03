@@ -11,6 +11,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreconsole "github.com/kitsunium/sdk/internal/core/observe/logger/sink/console"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
 )
@@ -29,7 +30,7 @@ func TestNew(t *testing.T) {
 		wantErr error
 	}{
 		{"non-nil writer succeeds", false, nil},
-		{"nil writer is rejected", true, console.WriterNil},
+		{"nil writer is rejected", true, coreconsole.WriterNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -102,8 +103,8 @@ func TestConsoleSink_Write(t *testing.T) {
 		wantCode  errs.Code
 	}{
 		{"happy path writes verbatim", false, "ok", "hello", 0},
-		{"cancelled context wraps CtxCancelled", true, "ok", "", console.CodeCtxCancelled},
-		{"writer error wraps WriteFailed", false, "fail", "", console.CodeWriteFailed},
+		{"cancelled context wraps CtxCancelled", true, "ok", "", coreconsole.CodeCtxCancelled},
+		{"writer error wraps WriteFailed", false, "fail", "", coreconsole.CodeWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -231,9 +232,9 @@ func TestErrorsCarryConsoleCodes(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"WriterNil carries 0.3.13.1", console.WriterNil, console.CodeWriterNil},
-		{"CtxCancelled carries 0.3.13.10", console.CtxCancelled, console.CodeCtxCancelled},
-		{"WriteFailed carries 0.3.13.20", console.WriteFailed, console.CodeWriteFailed},
+		{"WriterNil carries 0.3.13.1", coreconsole.WriterNil, coreconsole.CodeWriterNil},
+		{"CtxCancelled carries 0.3.13.10", coreconsole.CtxCancelled, coreconsole.CodeCtxCancelled},
+		{"WriteFailed carries 0.3.13.20", coreconsole.WriteFailed, coreconsole.CodeWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

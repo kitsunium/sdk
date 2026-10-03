@@ -341,7 +341,7 @@ func otlpTemporality(name string, temporality coremetrics.Temporality) (value in
 	//: TemporalityUnspecified, or a value cast into existence.
 	default:
 		//: name the metric, which is structure and safe to echo.
-		return otlpTemporalityUnspecified, errs.Wrap(OTLPUnresolvedTemporality, errs.WrapParams{}, errs.String("metric", name))
+		return otlpTemporalityUnspecified, errs.Wrap(coremetrics.OTLPUnresolvedTemporality, errs.WrapParams{}, errs.String("metric", name))
 	}
 }
 
@@ -365,7 +365,7 @@ func checkOTLPBucketLayout(name string, point coremetrics.HistogramValue) error 
 	//: one count per declared bucket, plus the implicit +Inf overflow slot.
 	if len(point.Counts) != len(point.Bounds)+1 {
 		//: name the metric, which is structure and safe to echo.
-		return errs.Wrap(OTLPInvalidBucketLayout, errs.WrapParams{}, errs.String("metric", name))
+		return errs.Wrap(coremetrics.OTLPInvalidBucketLayout, errs.WrapParams{}, errs.String("metric", name))
 	}
 	//: -Inf opens the ladder, so the first finite bound always exceeds it.
 	previous := math.Inf(-1)
@@ -375,7 +375,7 @@ func checkOTLPBucketLayout(name string, point coremetrics.HistogramValue) error 
 		//: refuse a bound that is not a real number, or that does not advance.
 		if math.IsNaN(bound) || math.IsInf(bound, 0) || bound <= previous {
 			//: name the metric, which is structure and safe to echo.
-			return errs.Wrap(OTLPInvalidBucketLayout, errs.WrapParams{}, errs.String("metric", name))
+			return errs.Wrap(coremetrics.OTLPInvalidBucketLayout, errs.WrapParams{}, errs.String("metric", name))
 		}
 		//: advance the ladder.
 		previous = bound

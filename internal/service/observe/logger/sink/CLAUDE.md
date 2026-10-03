@@ -6,7 +6,8 @@
 Terminal `core/observe/logger.Sink` implementations — a sink chain ends in one of
 these or in a writer sink from `internal/service/observe/logger/writer/*` /
 `third-party/*/writer/*`. `console`, `file` and `syslog` each own one
-transport and one PP slot in the dotted-quad error registry (ADR 0006);
+transport and one PP slot in the dotted-quad error registry (ADR 0006),
+declared since ADR 0160 in its core mirror, `internal/core/observe/logger/sink/<name>`;
 `memory` keeps records in process and mints no code.
 
 ## Contents

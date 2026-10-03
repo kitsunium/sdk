@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coretee "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -116,17 +117,17 @@ func Test_TeeSink_handleAllFailed(t *testing.T) {
 		{
 			name:    "no spill",
 			spill:   nil,
-			wantErr: CodeTeeAllBranchesFailed,
+			wantErr: coretee.CodeTeeAllBranchesFailed,
 		},
 		{
 			name:    "spill ok",
 			spill:   &stubSink{n: 1},
-			wantErr: CodeTeeAllBranchesFailed,
+			wantErr: coretee.CodeTeeAllBranchesFailed,
 		},
 		{
 			name:    "spill fails",
 			spill:   &stubSink{writeErr: errors.New("spill down")},
-			wantErr: CodeSpillFailed,
+			wantErr: coretee.CodeSpillFailed,
 		},
 	}
 	for _, tc := range tests {
@@ -165,12 +166,12 @@ func Test_wrapAllBranchesFailed(t *testing.T) {
 		{
 			name:    "all branches failed",
 			wrap:    wrapAllBranchesFailed,
-			wantErr: CodeTeeAllBranchesFailed,
+			wantErr: coretee.CodeTeeAllBranchesFailed,
 		},
 		{
 			name:    "spill failed",
 			wrap:    wrapSpillFailed,
-			wantErr: CodeSpillFailed,
+			wantErr: coretee.CodeSpillFailed,
 		},
 	}
 	for _, tc := range tests {
@@ -190,7 +191,7 @@ func Test_wrapSpillFailed(t *testing.T) {
 		{
 			name:    "spill failed direct",
 			wrap:    wrapSpillFailed,
-			wantErr: CodeSpillFailed,
+			wantErr: coretee.CodeSpillFailed,
 		},
 	}
 	for _, tc := range tests {

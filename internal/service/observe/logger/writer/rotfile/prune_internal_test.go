@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -177,7 +178,7 @@ func Test_rotatingSink_pruneByAge_slotRemoveFails(t *testing.T) {
 		//: freeze the directory so removing the aged .1 fails (restored in cleanup).
 		freezeDirReadOnly(t, dir)
 		//: the removal EACCES surfaces under the rotate sentinel.
-		if perr := rs.pruneByAge(); !errs.HasCode(perr, CodeRotFileRotateFailed) {
+		if perr := rs.pruneByAge(); !errs.HasCode(perr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("pruneByAge err=%v want rotate-failed", perr)
 		}
 	}
@@ -216,7 +217,7 @@ func Test_rotatingSink_pruneSlotByAge_removeFails(t *testing.T) {
 		cutoff := now.AddDate(10, 0, 0)
 		more, perr := rs.pruneSlotByAge(1, cutoff)
 		//: a removal failure must stop the sweep and surface the rotate sentinel.
-		if more || !errs.HasCode(perr, CodeRotFileRotateFailed) {
+		if more || !errs.HasCode(perr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("pruneSlotByAge more=%v err=%v want false+rotate-failed", more, perr)
 		}
 	}

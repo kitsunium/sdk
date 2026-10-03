@@ -10,6 +10,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coresyslog "github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/syslog"
 )
@@ -75,8 +76,8 @@ func TestNew(t *testing.T) {
 		addr     string
 		wantCode errs.Code
 	}{
-		{"empty addr yields AddrEmpty", "udp", "", syslog.CodeSyslogAddrEmpty},
-		{"unsupported proto yields ProtoInvalid", "icmp", "127.0.0.1:1", syslog.CodeSyslogProtoInvalid},
+		{"empty addr yields AddrEmpty", "udp", "", coresyslog.CodeSyslogAddrEmpty},
+		{"unsupported proto yields ProtoInvalid", "icmp", "127.0.0.1:1", coresyslog.CodeSyslogProtoInvalid},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -143,7 +144,7 @@ func TestSyslog_WriteHonoursCancelledContext(t *testing.T) {
 				t.Error("Write on cancelled ctx err = nil, want non-nil")
 			}
 			//: the cancellation must surface the typed CtxCancelled code, not a bare ctx.Err.
-			if !errs.HasCode(werr, syslog.CodeSyslogCtxCancelled) {
+			if !errs.HasCode(werr, coresyslog.CodeSyslogCtxCancelled) {
 				t.Errorf("HasCode(%v, CtxCancelled) = false", werr)
 			}
 		})
@@ -208,13 +209,13 @@ func TestNewWithConfig(t *testing.T) {
 			name:     "empty addr yields AddrEmpty",
 			network:  "udp",
 			addr:     "",
-			wantCode: syslog.CodeSyslogAddrEmpty,
+			wantCode: coresyslog.CodeSyslogAddrEmpty,
 		},
 		{
 			name:     "unsupported proto yields ProtoInvalid",
 			network:  "sctp",
 			addr:     addr,
-			wantCode: syslog.CodeSyslogProtoInvalid,
+			wantCode: coresyslog.CodeSyslogProtoInvalid,
 		},
 		{
 			name:      "dialer error surfaces as DialFailed",
@@ -222,7 +223,7 @@ func TestNewWithConfig(t *testing.T) {
 			addr:      "127.0.0.1:1",
 			useDialer: true,
 			dialErr:   errDialerBoom{},
-			wantCode:  syslog.CodeSyslogDialFailed,
+			wantCode:  coresyslog.CodeSyslogDialFailed,
 		},
 	}
 	for _, tc := range tests {
@@ -273,12 +274,12 @@ func TestSyslogSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"AddrEmpty carries 0.3.15.1", syslog.AddrEmpty, syslog.CodeSyslogAddrEmpty},
-		{"DialFailed carries 0.3.15.2", syslog.DialFailed, syslog.CodeSyslogDialFailed},
-		{"WriteFailed carries 0.3.15.3", syslog.WriteFailed, syslog.CodeSyslogWriteFailed},
-		{"CloseFailed carries 0.3.15.4", syslog.CloseFailed, syslog.CodeSyslogCloseFailed},
-		{"ProtoInvalid carries 0.3.15.5", syslog.ProtoInvalid, syslog.CodeSyslogProtoInvalid},
-		{"CtxCancelled carries 0.3.15.6", syslog.CtxCancelled, syslog.CodeSyslogCtxCancelled},
+		{"AddrEmpty carries 0.3.15.1", coresyslog.AddrEmpty, coresyslog.CodeSyslogAddrEmpty},
+		{"DialFailed carries 0.3.15.2", coresyslog.DialFailed, coresyslog.CodeSyslogDialFailed},
+		{"WriteFailed carries 0.3.15.3", coresyslog.WriteFailed, coresyslog.CodeSyslogWriteFailed},
+		{"CloseFailed carries 0.3.15.4", coresyslog.CloseFailed, coresyslog.CodeSyslogCloseFailed},
+		{"ProtoInvalid carries 0.3.15.5", coresyslog.ProtoInvalid, coresyslog.CodeSyslogProtoInvalid},
+		{"CtxCancelled carries 0.3.15.6", coresyslog.CtxCancelled, coresyslog.CodeSyslogCtxCancelled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -313,7 +314,7 @@ func TestSyslog_FlushCtxCancelledHasCode(t *testing.T) {
 				t.Fatal("Flush on cancelled ctx err = nil, want non-nil")
 			}
 			//: Flush must reuse the same typed cancellation code as Write.
-			if !errs.HasCode(ferr, syslog.CodeSyslogCtxCancelled) {
+			if !errs.HasCode(ferr, coresyslog.CodeSyslogCtxCancelled) {
 				t.Errorf("HasCode(%v, CtxCancelled) = false", ferr)
 			}
 		})
@@ -409,7 +410,7 @@ func TestSyslog_WriteAfterClose(t *testing.T) {
 			}
 			//: the closed connection must make the subsequent write fail typed.
 			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
-			if !errs.HasCode(werr, syslog.CodeSyslogWriteFailed) {
+			if !errs.HasCode(werr, coresyslog.CodeSyslogWriteFailed) {
 				t.Errorf("HasCode(%v, WriteFailed) = false", werr)
 			}
 		})

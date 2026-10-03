@@ -10,24 +10,26 @@ import (
 	"runtime/pprof"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // CaptureCPU samples the process's CPU for window and returns the profile,
-// decoded. The runtime has ONE CPU profiler per process: while a capture —
-// this one, or anyone's pprof.StartCPUProfile, net/http/pprof's included — is
-// going, another is refused with [ProfilerBusy] rather than queued.
+// decoded. The runtime has ONE CPU profiler per process: while a capture — this
+// one, or anyone's pprof.StartCPUProfile, net/http/pprof's included — is going,
+// another is refused with [coreprofiling.ProfilerBusy] rather than queued.
 //
 // A window that is not positive or exceeds [MaxCPUWindow] is refused with
-// [WindowInvalid]. A context that ends before the window stops the profiler
-// and returns [CaptureCanceled], joined with the context's error, and no
-// profile: a partial window would read as the whole one.
+// [coreprofiling.WindowInvalid]. A context that ends before the window stops
+// the profiler and returns [coreprofiling.CaptureCanceled], joined with the
+// context's error, and no profile: a partial window would read as the whole
+// one.
 //
-// Each sample carries the pprof labels its goroutine had — set with pprof.Do
-// or pprof.SetGoroutineLabels — which is how [Fold] can charge CPU to whoever
-// was doing the work.
-func CaptureCPU(ctx context.Context, window time.Duration) (*ProfileValue, error) {
+// Each sample carries the pprof labels its goroutine had — set with pprof.Do or
+// pprof.SetGoroutineLabels — which is how [Fold] can charge CPU to whoever was
+// doing the work.
+func CaptureCPU(ctx context.Context, window time.Duration) (*coreprofiling.ProfileValue, error) {
 	//: the window is measured on the wall clock.
 	return captureCPU(ctx, clock.System, window)
 }
@@ -35,17 +37,17 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*ProfileValue, error
 // captureCPU is CaptureCPU with the clock the window is measured on, which a
 // white-box test sets to a ManualClock so a window ends when the test advances
 // it rather than after the test has slept through it.
-func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*ProfileValue, error) {
+func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*coreprofiling.ProfileValue, error) {
 	//: a window with no length, or one that would hold the profiler too long.
 	if window <= 0 || window > MaxCPUWindow {
 		//: the window is a field; the bound is in the Public text.
-		return nil, errs.Wrap(WindowInvalid, errs.WrapParams{}, errs.String("window", window.String()))
+		return nil, errs.Wrap(coreprofiling.WindowInvalid, errs.WrapParams{}, errs.String("window", window.String()))
 	}
 	var buf bytes.Buffer
 	//: the runtime refuses a second profiler: that IS the busy verdict.
 	if err := pprof.StartCPUProfile(&buf); err != nil {
 		//: the runtime's own sentence goes to the chain, not to Public.
-		return nil, errors.Join(ProfilerBusy, err)
+		return nil, errors.Join(coreprofiling.ProfilerBusy, err)
 	}
 	timer := clk.NewTimer(window)
 	defer timer.Stop()
@@ -57,7 +59,7 @@ func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*P
 	case <-ctx.Done():
 		pprof.StopCPUProfile()
 		//: the context's own error stays reachable through errors.Is.
-		return nil, errors.Join(CaptureCanceled, ctx.Err())
+		return nil, errors.Join(coreprofiling.CaptureCanceled, ctx.Err())
 	}
 	pprof.StopCPUProfile()
 	//: the runtime's bytes, decoded.
@@ -73,14 +75,17 @@ func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*P
 // back up, so a figure is an estimate — eight megabytes held may read as six
 // or ten. Ask where the bytes are, not how many exactly. Heap samples carry
 // no pprof labels; a caller charges them to an owner by their stack.
-func CaptureHeap() (*ProfileValue, error) {
+func CaptureHeap() (*coreprofiling.ProfileValue, error) {
 	runtime.GC()
 	var buf bytes.Buffer
 	//: the runtime writes the gzipped protocol-buffer form at debug 0.
 	if err := pprof.Lookup("heap").WriteTo(&buf, 0); err != nil {
 		//: the runtime's error goes to the chain.
 		return nil, errs.Wrap(err, errs.WrapParams{
-			Code: CodeCaptureFailed, Reason: "CAPTURE_FAILED", Public: CaptureFailed.Public(), Private: CaptureFailed.Private(),
+			Code:    coreprofiling.CodeCaptureFailed,
+			Reason:  "CAPTURE_FAILED",
+			Public:  coreprofiling.CaptureFailed.Public(),
+			Private: coreprofiling.CaptureFailed.Private(),
 		}, errs.String("profile", "heap"))
 	}
 	//: the runtime's bytes, decoded.

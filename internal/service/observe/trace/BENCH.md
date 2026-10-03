@@ -1,4 +1,4 @@
-<!-- generated from internal/service/observe/trace/{http_server,recorder}_bench_test.go — see §5 for the exact run procedure; a single `-count=3` is NOT it -->
+<!-- generated from internal/service/observe/trace/{http_server,recorder,propagation}_bench_test.go — see §5 for the exact run procedure; a single `-count=3` is NOT it -->
 # Benchmarks — `internal/service/observe/trace`
 
 `pkg/v1/observe/trace/BENCH.md` prices a SPAN: 728.4 ns sampled, 403.5 ns unsampled,
@@ -536,3 +536,143 @@ largest single entry in the alloc-space profile at 22.13 % of the bytes.
   `cd internal/service && GOWORK=off go test -run='^$' -bench='ServeHTTP_<arm>$' -benchmem -benchtime=200000x -cpu=8 -count=3 ./observe/trace/`
 - Reproduce §2 with the same shape and
   `-bench='RecorderRecordAtCapacity$' -cpu=1,2,4,8 -benchtime=2000000x`.
+
+## 6. W3C propagation — the parsers, moved here with their numbers
+
+`ParseTraceParent`, `FormatTraceParent`, `ParseTraceState`, `Extract` and
+`Inject` lived in `internal/core/observe/trace` until ADR 0160 §4 moved reading
+and writing a wire format to the engine; their benchmarks
+(`propagation_bench_test.go`) and this section came with them. The code moved
+unchanged, except that `ParseTraceState` now hands each member to the core's
+`StateBuilder` instead of building the list itself (§6.3). `Extract` runs **once per inbound request** on a traced service and
+`Inject` once per outbound call, before any of the work the request came to do,
+so a per-call allocation here is a per-request garbage generator. The tables
+quote the run that was recorded in the core (linux/amd64, commit 33c0c3e,
+2026-09-10, machine shared with four other jobs); §6.5 is today's, whose
+allocation columns are identical.
+
+### 6.1 What the profile found, and what it cost to fix
+
+`BenchmarkParseTraceParent_Valid` measured **266.4 ns with 2 allocations**. A
+memory profile attributed them precisely:
+
+| source | share of allocated objects |
+|---|---:|
+| `strings.Split` in `parseTraceParentPrefix` | 92.63 % |
+| `hex.DecodeString` in `parseTraceFlags` | 7.03 % |
+
+Both were avoidable without changing a single decision the parser makes.
+
+**`strings.Split` built a four-element `[]string` on every inbound request.** A
+traceparent is fixed-width by specification — §3.2.4 requires *every* version to
+keep the first 55 characters exactly where version 00 puts them — so the three
+dashes sit at known offsets and the fields can be read in place. The offsets are
+derived from the width constants rather than written as literals, so the grammar
+and the arithmetic cannot drift apart. The dash check that replaces the
+field-count check is *stricter*, not looser: a dash landing inside a field is
+still caught, by the width check `ParseTraceID` already performs.
+
+**`hex.DecodeString` RETURNS a fresh slice** — one heap-allocated byte per
+request. Its sibling `ParseTraceID`, ten lines away, already decodes into a
+fixed array with `hex.Decode`; `parseTraceFlags` now does the same. The
+inconsistency was the whole bug.
+
+| | before | after |
+|---|---:|---:|
+| `ParseTraceParent` (valid) | 266.4 ns · 65 B · 2 allocs | **127.1 ns · 0 B · 0 allocs** |
+| `ParseTraceParent` (all-zero, a refusal) | 185.8 ns · 64 B · 1 alloc | **61.65 ns · 0 B · 0 allocs** |
+| `Extract` (traceparent only) | 346.0 ns · 65 B · 2 allocs | **199.6 ns · 0 B · 0 allocs** |
+
+Every test stayed green, including the conformance suite for §3.2.2 and §3.2.4.
+
+### 6.2 The refusal paths are cheap, and that is a security property
+
+A public entry point is the one place a caller cannot choose its input, so a
+refusal that costs far more than an acceptance is an amplification an attacker
+gets for free.
+
+- `ParseTraceParent_Malformed` (wrong-length identifier) — **10.83 ns**, and it
+  never reaches the decoder: the width test comes first.
+- `ParseTraceParent_AllZero` — **61.65 ns**. Higher, because §3.2.2.3 requires
+  the id to be decoded before it can be judged all-zero. It is now cheaper than
+  a *successful* parse was before this change.
+- `Extract_Absent` — **24.86 ns**, zero allocations. The untraced request is the
+  common case on any public endpoint, and it is the cheapest path here.
+- `Inject_Invalid` — **12.15 ns**, zero allocations, and it writes nothing at
+  all. The documented shortcut is real: an invalid context does not pay for
+  formatting a header the next hop is obliged to discard.
+
+### 6.3 `tracestate` is the expensive header, and it grows at every hop
+
+| | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| `ParseTraceState` (1 entry) | 191.5 | 48 | 2 |
+| `ParseTraceState` (4 entries) | 578.9 | 192 | 2 |
+| `Extract` with tracestate | 567.3 | 96 | 2 |
+
+The actionable fact: **carrying a tracestate roughly triples the cost of
+`Extract`** — 199.6 ns to 567.3 ns — and the list grows by one entry at every
+hop, so the cost is a property of how deep the caller sits in a call graph, not
+of this code. Four entries cost 3× one entry, which is linear as it should be.
+
+The list itself — `Insert`, `Get`, `String` — is the core's value, priced in
+`internal/core/observe/trace/BENCH.md`. Since ADR 0160 the parser hands each
+member to a `coretrace.StateBuilder`, which validates it as `Insert` does; the
+allocation count did not move (2, the `strings.Split` and the list).
+
+### 6.4 Left alone, with the reason
+
+`FormatTraceParent` (145.6 ns, 1 alloc) **returns a string**, so the allocation
+is structural — it is the returned value. Removing it means an `Append`-style
+API, which is a published-surface change for a benefit that is invisible next
+to the outbound call it accompanies. Recorded rather than done.
+
+### 6.5 Results
+
+Today's run (Apple M1 Pro, darwin/arm64, go1.27.1, `-benchtime=1s`, single run,
+machine under heavy load — load average 26-37 on 10 cores; the nanoseconds are
+not comparable with the historical run, the allocations are):
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/kitsunium/sdk/internal/service/observe/trace
+cpu: Apple M1 Pro
+BenchmarkParseTraceParent_Valid-10        	15553694	        95.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParseTraceParent_Malformed-10    	162828621	         7.127 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParseTraceParent_AllZero-10      	33336573	        50.14 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFormatTraceParent-10             	10698034	       101.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkParseTraceState_1-10             	14487030	       123.6 ns/op	      48 B/op	       2 allocs/op
+BenchmarkParseTraceState_4-10             	 3277712	       362.2 ns/op	     192 B/op	       2 allocs/op
+BenchmarkExtract-10                       	 8206032	       162.0 ns/op	       0 B/op	       0 allocs/op
+BenchmarkExtract_WithState-10             	 4851038	       396.6 ns/op	      96 B/op	       2 allocs/op
+BenchmarkExtract_Absent-10                	92982710	        17.47 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInject-10                        	16065036	       101.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkInject_Invalid-10                	166579732	         9.328 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/kitsunium/sdk/internal/service/observe/trace	16.698s
+```
+
+The historical run, recorded in the core before the move (linux/amd64, AMD EPYC
+7351P, commit 33c0c3e):
+
+```
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/internal/core/observe/trace
+cpu: AMD EPYC 7351P 16-Core Processor
+BenchmarkParseTraceParent_Valid-8       	 9490064	       127.1 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParseTraceParent_Malformed-8   	100000000	        10.83 ns/op	       0 B/op	       0 allocs/op
+BenchmarkParseTraceParent_AllZero-8     	17081222	        61.65 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFormatTraceParent-8            	 8318391	       145.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkParseTraceState_1-8            	 6459033	       191.5 ns/op	      48 B/op	       2 allocs/op
+BenchmarkParseTraceState_4-8            	 2041093	       578.9 ns/op	     192 B/op	       2 allocs/op
+BenchmarkExtract-8                      	 6004743	       199.6 ns/op	       0 B/op	       0 allocs/op
+BenchmarkExtract_WithState-8            	 2273522	       567.3 ns/op	      96 B/op	       2 allocs/op
+BenchmarkExtract_Absent-8               	47024042	        24.86 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInject-8                       	 6826572	       176.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkInject_Invalid-8               	94023556	        12.15 ns/op	       0 B/op	       0 allocs/op
+```
+
+Reproduce with
+`cd internal/service && GOWORK=off go test -run='^$' -bench='ParseTrace|FormatTrace|Extract|Inject' -benchmem -benchtime=1s ./observe/trace/`.

@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corejournald "github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -87,7 +88,7 @@ func Test_journaldSink_Write(t *testing.T) {
 			_, err := s.Write(ctx, corelogger.RecordEvent{}, []byte("ping"))
 			//: error arms carry the write sentinel.
 			if tc.wantErr {
-				if !errs.HasCode(err, CodeJournaldWriteFailed) {
+				if !errs.HasCode(err, corejournald.CodeJournaldWriteFailed) {
 					t.Errorf("%s: err=%v want write-failed", tc.name, err)
 				}
 				return
@@ -209,7 +210,7 @@ func Test_journaldSink_Close(t *testing.T) {
 			//: the journald_sink.go:89-91 wrap branch is exercised directly.
 			if tc.fail {
 				s := newJournaldSink(failingConn{})
-				if cerr := s.Close(); !errs.HasCode(cerr, CodeJournaldWriteFailed) {
+				if cerr := s.Close(); !errs.HasCode(cerr, corejournald.CodeJournaldWriteFailed) {
 					t.Errorf("%s: Close()=%v want write-failed", tc.name, cerr)
 				}
 				return

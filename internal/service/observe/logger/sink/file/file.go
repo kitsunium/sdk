@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corefile "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile"
 )
@@ -33,13 +34,13 @@ const defaultFilePerm os.FileMode = 0o600
 // "kind" field the shared open adds.
 var openRefusals = logfile.RefusalSpec{
 	Symlink: errs.WrapParams{
-		Code:    CodeOpenFailed,
+		Code:    corefile.CodeOpenFailed,
 		Reason:  "OPEN_FAILED",
 		Public:  "File sink refuses to open a symlink",
 		Private: "service/observe/logger/sink/file.New: path is a symlink; refusing per hardening policy",
 	},
 	Open: errs.WrapParams{
-		Code:    CodeOpenFailed,
+		Code:    corefile.CodeOpenFailed,
 		Reason:  "OPEN_FAILED",
 		Public:  "File sink could not open the destination file",
 		Private: "service/observe/logger/sink/file.New: os.OpenFile returned an error",
@@ -62,7 +63,7 @@ func New(path string) (sink corelogger.Sink, err error) {
 	//: refuse an empty path so callers detect the misconfiguration immediately.
 	if path == "" {
 		//: documented sentinel — caller must supply a path.
-		return nil, PathEmpty
+		return nil, corefile.PathEmpty
 	}
 	//: reject a pre-existing symlink (CWE-59), then open with O_NOFOLLOW where
 	//: the platform has it, so a link planted between the check and the open
@@ -86,7 +87,7 @@ func New(path string) (sink corelogger.Sink, err error) {
 		if cerr := f.Close(); cerr != nil {
 			//: chain the close error onto err so callers see both via errors.Is.
 			err = errs.Wrap(cerr, errs.WrapParams{
-				Code:    CodeCloseFailed,
+				Code:    corefile.CodeCloseFailed,
 				Reason:  "CLOSE_FAILED",
 				Public:  "File close failed",
 				Private: "service/observe/logger/sink/file.New: deferred close failed after another error",
@@ -103,7 +104,7 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
 		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeCtxCancelled,
+			Code:    corefile.CodeCtxCancelled,
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/observe/logger/sink/file.Write saw a cancelled context",
@@ -118,7 +119,7 @@ func (s *fileSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return written, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeWriteFailed,
+			Code:    corefile.CodeWriteFailed,
 			Reason:  "WRITE_FAILED",
 			Public:  "File write failed",
 			Private: "service/observe/logger/sink/file.Write underlying *os.File returned an error",
@@ -144,7 +145,7 @@ func (s *fileSink) Flush(ctx context.Context) error {
 	if serr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return errs.Wrap(serr, errs.WrapParams{
-			Code:    CodeSyncFailed,
+			Code:    corefile.CodeSyncFailed,
 			Reason:  "SYNC_FAILED",
 			Public:  "File flush failed",
 			Private: "service/observe/logger/sink/file.Flush underlying *os.File.Sync returned an error",
@@ -165,7 +166,7 @@ func (s *fileSink) Close() error {
 	if cerr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeCloseFailed,
+			Code:    corefile.CodeCloseFailed,
 			Reason:  "CLOSE_FAILED",
 			Public:  "File close failed",
 			Private: "service/observe/logger/sink/file.Close underlying *os.File.Close returned an error",

@@ -6,9 +6,7 @@ go_library(
     name = "metrics",
     srcs = [
         "carved.go",
-        "codes.go",
         "config.go",
-        "errors.go",
         "exporter_otlphttp.go",
         "exporter_otlpjson.go",
         "exporter_prometheus.go",
@@ -81,11 +79,4 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

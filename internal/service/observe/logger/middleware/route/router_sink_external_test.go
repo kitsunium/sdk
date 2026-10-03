@@ -12,6 +12,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreroute "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/route"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/route"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
@@ -107,7 +108,7 @@ func TestRouterNoMatchWithoutFallback(t *testing.T) {
 			t.Parallel()
 			r := route.New(nil)
 			_, err := r.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
-			if !errs.HasCode(err, route.CodeRouteNoMatch) {
+			if !errs.HasCode(err, coreroute.CodeRouteNoMatch) {
 				t.Errorf("err = %v, want NoMatch", err)
 			}
 		})
@@ -178,7 +179,7 @@ func TestNoMatchSentinel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if !errs.HasCode(route.NoMatch, route.CodeRouteNoMatch) {
+			if !errs.HasCode(coreroute.NoMatch, coreroute.CodeRouteNoMatch) {
 				t.Errorf("HasCode(NoMatch) = false")
 			}
 		})
@@ -213,11 +214,11 @@ func TestRouterNoMatch_TypedCode(t *testing.T) {
 			r := route.New(nil, tc.entries...)
 			_, err := r.Write(t.Context(), corelogger.RecordEvent{Level: tc.recLvl}, []byte("x"))
 			//: dotted-quad identity — the wire-routable code consumers match on.
-			if !errs.HasCode(err, route.CodeRouteNoMatch) {
+			if !errs.HasCode(err, coreroute.CodeRouteNoMatch) {
 				t.Errorf("HasCode(err, CodeRouteNoMatch) = false, err = %v", err)
 			}
 			//: sentinel identity — errors.Is must also hold for the public var.
-			if !errors.Is(err, route.NoMatch) {
+			if !errors.Is(err, coreroute.NoMatch) {
 				t.Errorf("errors.Is(err, NoMatch) = false, err = %v", err)
 			}
 		})

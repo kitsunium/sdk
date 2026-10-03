@@ -41,8 +41,8 @@ func TestServerMiddlewareJoinsTheUpstreamTrace(t *testing.T) {
 	}))
 
 	request := httptest.NewRequest(http.MethodGet, "/orders/42?q=x", nil)
-	request.Header.Set(coretrace.TraceParentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
-	request.Header.Set(coretrace.TraceStateHeader, "congo=t61rcWkgMzE")
+	request.Header.Set(svctrace.TraceParentHeader, "00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	request.Header.Set(svctrace.TraceStateHeader, "congo=t61rcWkgMzE")
 	handler.ServeHTTP(httptest.NewRecorder(), request)
 
 	spans := recorder.Collect().Spans
@@ -200,8 +200,8 @@ func TestServerMiddlewareNeverFailsARequestOverABadHeader(t *testing.T) {
 		w.WriteHeader(http.StatusOK)
 	}))
 	request := httptest.NewRequest(http.MethodGet, "/", nil)
-	request.Header.Set(coretrace.TraceParentHeader, "00-00000000000000000000000000000000-00f067aa0ba902b7-01")
-	request.Header.Set(coretrace.TraceStateHeader, "congo=t61rcWkgMzE")
+	request.Header.Set(svctrace.TraceParentHeader, "00-00000000000000000000000000000000-00f067aa0ba902b7-01")
+	request.Header.Set(svctrace.TraceStateHeader, "congo=t61rcWkgMzE")
 	response := httptest.NewRecorder()
 	handler.ServeHTTP(response, request)
 
@@ -226,7 +226,7 @@ func TestClientMiddlewareInjectsAndClonesTheRequest(t *testing.T) {
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: recorder.Sink()})
 	var sentHeader string
 	transport := svctrace.ClientMiddleware(tracer)(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		sentHeader = r.Header.Get(coretrace.TraceParentHeader)
+		sentHeader = r.Header.Get(svctrace.TraceParentHeader)
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 	}))
 
@@ -240,14 +240,14 @@ func TestClientMiddlewareInjectsAndClonesTheRequest(t *testing.T) {
 	if sentHeader == "" {
 		t.Fatal("no traceparent was injected into the outbound request")
 	}
-	if request.Header.Get(coretrace.TraceParentHeader) != "" {
+	if request.Header.Get(svctrace.TraceParentHeader) != "" {
 		t.Error("the caller's own request was mutated; RoundTrip must clone")
 	}
 	span := recorder.Collect().Spans[0]
 	if span.Kind != coretrace.SpanKindClient {
 		t.Errorf("kind = %v, want CLIENT", span.Kind)
 	}
-	if rendered, ok := coretrace.FormatTraceParent(span.Context); !ok || rendered != sentHeader {
+	if rendered, ok := svctrace.FormatTraceParent(span.Context); !ok || rendered != sentHeader {
 		t.Errorf("the injected header %q does not name the span that was recorded", sentHeader)
 	}
 	if !hasAttr(span.Attrs, svctrace.URLFullKey, "https://api.example/v1/charge?token=x") {
@@ -262,7 +262,7 @@ func TestClientMiddlewareInjectsAnUnsampledDecisionToo(t *testing.T) {
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sampler: svctrace.NeverSample})
 	var sentHeader string
 	transport := svctrace.ClientMiddleware(tracer)(roundTripperFunc(func(r *http.Request) (*http.Response, error) {
-		sentHeader = r.Header.Get(coretrace.TraceParentHeader)
+		sentHeader = r.Header.Get(svctrace.TraceParentHeader)
 		return &http.Response{StatusCode: http.StatusOK, Body: http.NoBody}, nil
 	}))
 	response, err := transport.RoundTrip(httptest.NewRequest(http.MethodGet, "https://api.example/v1/ping", nil))
@@ -342,7 +342,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 	recorder := svctrace.NewRecorder(svctrace.RecorderConfig{})
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: recorder.Sink()})
 	_, span := tracer.Start(t.Context(), "op", coretrace.SpanParams{})
-	svctrace.RecordError(span, svctrace.OTLPPartialSuccess)
+	svctrace.RecordError(span, coretrace.OTLPPartialSuccess)
 	span.End()
 
 	recorded := recorder.Collect().Spans[0]
@@ -350,7 +350,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 		t.Fatalf("events = %+v, want one %q event", recorded.Events, coretrace.ExceptionEventName)
 	}
 	attrs := recorded.Events[0].Attrs
-	code, ok := errs.CodeOf(svctrace.OTLPPartialSuccess)
+	code, ok := errs.CodeOf(coretrace.OTLPPartialSuccess)
 	if !ok {
 		t.Fatal("the sentinel must carry a dotted-quad code")
 	}
@@ -361,7 +361,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 		t.Error("RecordError must also mark the span ERROR")
 	}
 	//: a nil span and a nil error are no-ops rather than panics.
-	svctrace.RecordError(nil, svctrace.OTLPPartialSuccess)
+	svctrace.RecordError(nil, coretrace.OTLPPartialSuccess)
 	svctrace.RecordError(span, nil)
 }
 

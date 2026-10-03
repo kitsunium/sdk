@@ -10,6 +10,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -275,5 +276,5 @@ func asInt64(v any) (n int64, ok bool) {
 // Origin-wins keeps errors.Is matching RotFileDecodeFailed through the wrap.
 func decodeInvalid() error {
 	//: attach the writer name (never an option value) for offender ID.
-	return errs.Wrap(RotFileDecodeFailed, errs.WrapParams{}, errs.String("writer", "rotfile"))
+	return errs.Wrap(corerotfile.RotFileDecodeFailed, errs.WrapParams{}, errs.String("writer", "rotfile"))
 }

@@ -11,6 +11,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corefile "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/file"
 )
@@ -22,9 +23,9 @@ func TestNew(t *testing.T) {
 		path     string
 		wantCode errs.Code
 	}{
-		{"empty path is rejected", "", file.CodePathEmpty},
+		{"empty path is rejected", "", corefile.CodePathEmpty},
 		{"valid path opens the file", filepath.Join(t.TempDir(), "ok.log"), 0},
-		{"invalid directory yields OpenFailed", "/this/dir/does/not/exist/file.log", file.CodeOpenFailed},
+		{"invalid directory yields OpenFailed", "/this/dir/does/not/exist/file.log", corefile.CodeOpenFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -85,7 +86,7 @@ func TestNew_RejectsSymlink(t *testing.T) {
 				//: best-effort cleanup so the test never leaks descriptors.
 				closeIgnore(t, s)
 			}
-			if !errs.HasCode(err, file.CodeOpenFailed) {
+			if !errs.HasCode(err, corefile.CodeOpenFailed) {
 				t.Errorf("HasCode(err, CodeOpenFailed) = false; err = %v", err)
 			}
 		})
@@ -301,7 +302,7 @@ func TestFileSink_FlushCtxCancelledReturnsCtxErr(t *testing.T) {
 				t.Errorf("errors.Is(%v, context.Canceled) = false", ferr)
 			}
 			//: but Flush does NOT wrap, so the dotted-quad code is absent by design.
-			if errs.HasCode(ferr, file.CodeCtxCancelled) {
+			if errs.HasCode(ferr, corefile.CodeCtxCancelled) {
 				t.Errorf("HasCode(%v, CodeCtxCancelled) = true, want false (Flush returns bare ctx.Err)", ferr)
 			}
 		})
@@ -332,7 +333,7 @@ func TestFileSink_WriteCtxCancelledCodeIdentity(t *testing.T) {
 			rec := corelogger.RecordEvent{Level: level.Info}
 			_, werr := s.Write(cancelled, rec, []byte("dropped"))
 			//: Write wraps ctx.Err() under CtxCancelled — both identities hold.
-			if !errs.HasCode(werr, file.CodeCtxCancelled) {
+			if !errs.HasCode(werr, corefile.CodeCtxCancelled) {
 				t.Errorf("HasCode(%v, CodeCtxCancelled) = false", werr)
 			}
 			if !errors.Is(werr, context.Canceled) {
@@ -349,12 +350,12 @@ func TestFileSinkSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"PathEmpty carries 0.3.14.1", file.PathEmpty, file.CodePathEmpty},
-		{"OpenFailed carries 0.3.14.2", file.OpenFailed, file.CodeOpenFailed},
-		{"CtxCancelled carries 0.3.14.10", file.CtxCancelled, file.CodeCtxCancelled},
-		{"WriteFailed carries 0.3.14.20", file.WriteFailed, file.CodeWriteFailed},
-		{"SyncFailed carries 0.3.14.30", file.SyncFailed, file.CodeSyncFailed},
-		{"CloseFailed carries 0.3.14.40", file.CloseFailed, file.CodeCloseFailed},
+		{"PathEmpty carries 0.3.14.1", corefile.PathEmpty, corefile.CodePathEmpty},
+		{"OpenFailed carries 0.3.14.2", corefile.OpenFailed, corefile.CodeOpenFailed},
+		{"CtxCancelled carries 0.3.14.10", corefile.CtxCancelled, corefile.CodeCtxCancelled},
+		{"WriteFailed carries 0.3.14.20", corefile.WriteFailed, corefile.CodeWriteFailed},
+		{"SyncFailed carries 0.3.14.30", corefile.SyncFailed, corefile.CodeSyncFailed},
+		{"CloseFailed carries 0.3.14.40", corefile.CloseFailed, corefile.CodeCloseFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

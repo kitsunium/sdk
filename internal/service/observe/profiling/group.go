@@ -7,6 +7,8 @@ import (
 	"encoding/binary"
 	"slices"
 	"strings"
+
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 )
 
 // Presence marks of a grouping label in a group key, and the room a key
@@ -31,30 +33,12 @@ type GroupConfig struct {
 	MaxStack int
 }
 
-// GoroutineGroupValue is goroutines sharing their labels, their state and
-// their top frame.
-type GoroutineGroupValue struct {
-	// Labels holds the grouping labels the goroutines carry, by key; a key
-	// they do not carry is absent.
-	Labels map[string]string
-	// State is the goroutines' state.
-	State string
-	// Top is the innermost frame that is not the runtime's own machinery —
-	// the code that asked to wait — or the innermost frame when every frame
-	// is the runtime's.
-	Top string
-	// Stack is one member's stack, innermost first.
-	Stack []FrameValue
-	// Count is how many goroutines share the group.
-	Count int
-}
-
 // GroupGoroutines groups gs by the configured labels, the state and the top
 // frame, and returns the groups largest first — ties by labels in the
 // configured order, then state, then top frame. Nothing in gs is mutated.
-func GroupGoroutines(gs []GoroutineValue, cfg GroupConfig) []GoroutineGroupValue {
+func GroupGoroutines(gs []coreprofiling.GoroutineValue, cfg GroupConfig) []coreprofiling.GoroutineGroupValue {
 	index := make(map[string]int, len(gs))
-	var groups []GoroutineGroupValue
+	var groups []coreprofiling.GoroutineGroupValue
 	//: each goroutine joins the group of its key.
 	for i := range gs {
 		g := &gs[i]
@@ -67,11 +51,11 @@ func GroupGoroutines(gs []GoroutineValue, cfg GroupConfig) []GoroutineGroupValue
 			continue
 		}
 		index[key] = len(groups)
-		groups = append(groups, GoroutineGroupValue{
+		groups = append(groups, coreprofiling.GoroutineGroupValue{
 			Labels: pick(g.Labels, cfg.Labels), State: g.State, Top: top, Count: 1, Stack: cut(g.Stack, cfg.MaxStack),
 		})
 	}
-	slices.SortFunc(groups, func(x, y GoroutineGroupValue) int {
+	slices.SortFunc(groups, func(x, y coreprofiling.GoroutineGroupValue) int {
 		//: largest first, then a total order over the key.
 		return cmp.Or(cmp.Compare(y.Count, x.Count), compareLabels(x.Labels, y.Labels, cfg.Labels),
 			cmp.Compare(x.State, y.State), cmp.Compare(x.Top, y.Top))
@@ -88,7 +72,7 @@ func GroupGoroutines(gs []GoroutineValue, cfg GroupConfig) []GoroutineGroupValue
 // present or absent — its state and its top frame, every string prefixed by
 // its length. No separator is needed, so no value — a label is the caller's
 // text, and may hold any byte — can make two different goroutines one group.
-func groupKey(g *GoroutineValue, keys []string, top string) string {
+func groupKey(g *coreprofiling.GoroutineValue, keys []string, top string) string {
 	key := make([]byte, 0, keyRoom)
 	//: each grouping label, present or not.
 	for _, k := range keys {
@@ -161,7 +145,7 @@ func cmpBool(x, y bool) int {
 
 // cut returns stack's innermost n frames, copied; the whole stack when n is
 // not positive.
-func cut(stack []FrameValue, n int) []FrameValue {
+func cut(stack []coreprofiling.FrameValue, n int) []coreprofiling.FrameValue {
 	//: no bound, or a stack within it.
 	if n <= 0 || len(stack) <= n {
 		//: a copy the group owns.
@@ -173,7 +157,7 @@ func cut(stack []FrameValue, n int) []FrameValue {
 
 // topFrame returns the innermost frame that is not the runtime's machinery,
 // else the innermost frame.
-func topFrame(stack []FrameValue) string {
+func topFrame(stack []coreprofiling.FrameValue) string {
 	//: innermost first.
 	for _, f := range stack {
 		//: the code that asked to wait.

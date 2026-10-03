@@ -19,7 +19,8 @@ each composes `levelgate(async(netSink))` over a stdlib `net.Conn` or
 | `netsink.go` | `netSink` per-record sink (`Write`/`Flush`/`Close`) + `sendFunc` seam |
 | `client.go` | the ONLY net/net-http file: `newConnSeam` (tcp/udp) + `newHTTPSeam`/`postRecord` + the default client and its own pool (`newHTTPClient`/`newHTTPTransport`) |
 | `decode.go` | `netFactory.Decode` (`core/observe/logger/writer.Decoder`) + key coercion helpers |
-| `codes.go`, `errors.go` | sentinels — range 0.3.30.\* (service slot 0x1e) |
+| `wrap.go` | `wrapDial` / `wrapWrite` — the single wrap points that put a cause under the mirror's codes; never a value parsed from a config or a record |
+| `internal/core/observe/logger/writer/nettransport` | its sentinels — range 0.3.30.\* (service slot 0x1e) — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Composition
 
@@ -135,6 +136,8 @@ The `Dialer` / `HTTPClient` SSRF seams and the `OnDrop` / `OnError` callbacks ar
 (no per-package code), tagged with the protocol only — never the value.
 
 ## Error catalogue — range 0.3.30.\*
+
+Declared in `internal/core/observe/logger/writer/nettransport` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corenettransport.X`.
 
 | Code | Sentinel | Trigger |
 |---|---|---|

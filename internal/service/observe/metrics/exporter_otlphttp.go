@@ -46,28 +46,28 @@ const rejectedFieldKey string = "rejected_data_points"
 // own codes (0.3.45.7-10) and its own wording, byte for byte what this
 // exporter returned before the transport was shared.
 var otlpSignal = otlp.SignalSpec{
-	EndpointInvalid: OTLPEndpointInvalid,
+	EndpointInvalid: coremetrics.OTLPEndpointInvalid,
 	EndpointUnparsable: errs.WrapParams{
-		Code:    CodeOTLPEndpointInvalid,
+		Code:    coremetrics.CodeOTLPEndpointInvalid,
 		Reason:  "OTLP_ENDPOINT_INVALID",
 		Public:  "The OTLP endpoint is not an absolute http or https URL with a path",
 		Private: "service/observe/metrics: the configured OTLP endpoint could not be parsed as a URL",
 	},
 	RequestUnbuildable: errs.WrapParams{
-		Code:    CodeOTLPExportRejected,
+		Code:    coremetrics.CodeOTLPExportRejected,
 		Reason:  "OTLP_EXPORT_REJECTED",
 		Public:  "The OTLP collector rejected the metrics payload",
 		Private: "service/observe/metrics: the OTLP/HTTP request could not be built",
 	},
 	TransportFault: errs.WrapParams{
-		Code:    CodeOTLPExportUnavailable,
+		Code:    coremetrics.CodeOTLPExportUnavailable,
 		Reason:  "OTLP_EXPORT_UNAVAILABLE",
 		Public:  "The OTLP collector is unreachable or overloaded",
 		Private: "service/observe/metrics: the OTLP/HTTP request failed before a response was read",
 	},
-	Rejected:       OTLPExportRejected,
-	Unavailable:    OTLPExportUnavailable,
-	PartialSuccess: OTLPPartialSuccess,
+	Rejected:       coremetrics.OTLPExportRejected,
+	Unavailable:    coremetrics.OTLPExportUnavailable,
+	PartialSuccess: coremetrics.OTLPPartialSuccess,
 	RejectedField:  rejectedFieldKey,
 	DecodeRejected: decodeRejected,
 }
@@ -138,7 +138,7 @@ func NewOTLPHTTPExporter(name coremetrics.ExporterName, cfg OTLPHTTPConfig) (exp
 // this exporter classifies instead of looping.
 func OTLPRetryable(err error) bool {
 	//: one code carries the transient verdict; HasCode walks the wrap trail.
-	return errs.HasCode(err, CodeOTLPExportUnavailable)
+	return errs.HasCode(err, coremetrics.CodeOTLPExportUnavailable)
 }
 
 // Name implements core/observe/metrics.Exporter.

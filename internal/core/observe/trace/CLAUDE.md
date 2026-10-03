@@ -5,8 +5,9 @@
 
 Declares the SDK's **distributed-tracing port**: the `Tracer`/`Span` pair an
 application instruments against, the immutable `SpanContextValue` that travels
-between processes, the OpenTelemetry trace data model, and the W3C Trace Context
-propagation format. The 18th core sibling, admitted by **ADR 0051**.
+between processes, the OpenTelemetry trace data model, and the values the W3C
+Trace Context format carries — reading and writing the format itself is the
+engine's since ADR 0160 §4. The 18th core sibling, admitted by **ADR 0051**.
 
 Like `metrics` since ADR 0044, it speaks the OpenTelemetry model and imports
 **none** of OpenTelemetry's code. OTel is a published specification; this SDK
@@ -14,10 +15,15 @@ implements it from the document. Interoperability is a property of the WIRE, not
 of the import graph.
 
 Concrete implementations — the tracer, the samplers, the recorder, the OTLP/JSON
-encoder, the HTTP middlewares — live in `internal/service/observe/trace`.
+encoder, the W3C header parsers and `Inject` / `Extract`, the HTTP middlewares —
+live in `internal/service/observe/trace`.
 
-Code range: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
-attribute model moved to `internal/core/observe/otel`).
+Code ranges: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
+attribute model moved to `internal/core/observe/otel`), and `0.3.50.*` — the range
+ADR 0051 allocated to the engine, `internal/service/observe/trace`, declared here
+since ADR 0160 §2 with its values unchanged (`ENTROPY_FAILED`,
+`INVALID_SAMPLE_RATIO` and the six `OTLP_*`). The engine returns those sentinels
+and declares none; `codeRangeOwners` maps both keys to this directory.
 
 ## Contents
 
@@ -26,10 +32,10 @@ attribute model moved to `internal/core/observe/otel`).
 | `trace.go` | package doc + `Tracer` (1 method, FROZEN) + `Span` (5 methods, FROZEN) |
 | `identifier.go` | `TraceID` / `SpanID` / `TraceFlags` + `ParseTraceID` / `ParseSpanID` + `FlagSampled` + `Sanitized` |
 | `span_context.go` | `SpanContextValue` — TraceID, SpanID, Flags, State, Remote; `IsValid` / `IsSampled` / `WithState` |
-| `traceparent.go` | `ParseTraceParent` / `FormatTraceParent` + `TraceParentHeader` / `TraceStateHeader` / `TraceParentLen` / `VersionSupported` |
-| `state_value.go` | `StateValue` — the `tracestate` list, ordered and immutable; `ParseTraceState` + `Get` / `Insert` / `Delete` / `Len` / `String` + the three grammar limits (`MaxTraceStateMembers` / `MaxTraceStateKeyLen` / `MaxTraceStateValueLen`) |
+| `state_value.go` | `StateValue` — the `tracestate` list, ordered and immutable; `Get` / `Insert` / `Delete` / `Len` / `String` + the member grammar + the three grammar limits (`MaxTraceStateMembers` / `MaxTraceStateKeyLen` / `MaxTraceStateValueLen`) |
+| `state_builder.go` | `StateBuilder` + `NewStateBuilder` — a list assembled leftmost first under `Insert`'s checks, the engine's header parser's way in (ADR 0160 §4) |
 | `trace_state_entry.go` | `traceStateEntry` — one list member, unexported |
-| `carrier.go` | `Carrier` (2 methods, FROZEN) + `Inject` / `Extract` |
+| `carrier.go` | `Carrier` (2 methods, FROZEN) — `Inject` / `Extract` are the engine's |
 | `context.go` | `ContextWithSpanContext` / `SpanContextFromContext` |
 | `span_kind.go` | `SpanKind` + the five values + `Resolved` |
 | `status_value.go` | `StatusValue` + `StatusCode` (`Unset`/`OK`/`Error`) + `Resolved` / `IsUnset` |
@@ -42,8 +48,8 @@ attribute model moved to `internal/core/observe/otel`).
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
 | `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/observe/otel` and refusing with this package's `InvalidAttribute` |
 | `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/observe/metrics`' exporter registry runs on too |
-| `codes.go` | `Code*` constants — range 0.2.20.* |
-| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute` |
+| `codes.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.* |
+| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
 
 ## The one rule everything else follows from
 
@@ -104,48 +110,32 @@ What is NOT shared, and has a test each:
   empty or repeated key, a value no constructor set — so only the code in the
   message changed, and no constant changed value.
 
-## W3C Trace Context — the refusals that look arbitrary
+## W3C Trace Context — what the value keeps, and what moved
 
-Each is normative, and each is the one a future reader would delete.
-
-| Refused | Section |
-|---|---|
-| all-zero `trace-id` | §3.2.2.3 "MUST ignore the `traceparent`" |
-| all-zero `parent-id` | §3.2.2.4, same |
-| version `ff` | §3.2.2.1 "Version `ff` is invalid" |
-| uppercase hex | the grammar is `32HEXDIGLC` / `16HEXDIGLC` |
-| a header under 55 characters | §3.2.4 "should not parse … should restart the trace" |
-| trailing content on version `00` | version 00 has no extension point |
-| a higher version whose tail is not dash-delimited | §3.2.4 — without it, a 56th hex byte reads as a TRUNCATED flag field, so the sampled bit is wrong rather than the header rejected |
-
-**Flags are masked on OUTPUT, never on input.** §3.2.2.5.2 says a vendor MUST
-zero the undefined bits; §3.2.4 says a receiver must not assume anything about
-unknown fields. Clearing on receipt satisfies the first and violates the second.
-`TraceFlags.Sanitized` runs in `FormatTraceParent` and nowhere else.
-
-**`Extract` returns no error.** §4.3 prescribes exactly one response to a
-malformed parent — start a new trace, delete the tracestate — so there is nothing
-to decide. An error would invite the response the specification forbids: failing
-a request because a stranger wrote a bad header. `ParseTraceParent` is the
-typed-error form, for diagnosis.
-
-Three §4.3 consequences, each tested:
-
-- a malformed **traceparent** drops the tracestate with it;
-- a malformed **tracestate** does NOT drop the traceparent;
-- **two** traceparent headers merge to `"v1,v2"`, fail the grammar, and restart —
-  which is correct, because neither claim may be believed.
+Reading and writing the two headers — `ParseTraceParent`, `FormatTraceParent`,
+`ParseTraceState`, `Inject`, `Extract` and the header names — is a mechanism,
+and lives in the engine, `internal/service/observe/trace`, since ADR 0160 §4;
+its `CLAUDE.md` carries the refusals that look arbitrary and the §4.3 rules.
+What stays here is what a second implementation would have to accept: the
+identifiers and their all-zero invalidity (`ParseTraceID` / `ParseSpanID` read
+an identifier's own text form), the flag byte and `Sanitized`, the span
+context, the `Carrier` port, and the `tracestate` list as a value.
 
 `StateValue` is an ordered slice and not a map, because §3.5 makes the order
 meaning: leftmost is the system that touched the trace most recently. The
 grammar's own numbers are the limits (32 members, 256-char keys and values,
-241/14 for `tenant@system`) — there is no SDK-invented ceiling.
+241/14 for `tenant@system`) — there is no SDK-invented ceiling. A list is built
+three ways only — the zero value, `Insert`, and a `StateBuilder` — and the last
+two check every member against the grammar before it enters, so no list holds
+an entry the next hop would refuse. The builder is the engine parser's way in:
+it appends LEFTMOST FIRST, the header's order, where `Insert` puts the newest at
+the front; it refuses a repeated key and a 33rd member, and `State` hands its
+storage over and starts again, so a value it returned stays immutable.
 
-**One leniency, and it is the only one**: OWS is stripped at the list's edges,
-where the `list` rule grants no OWS slot, because RFC 7230 §3.2.4 already
-normalises a field value's surrounding whitespace. The `nblk-chr` rule is
-enforced in `Insert` instead. Documented in place and in
-`TestTraceStateAbsorbsEdgeWhitespaceButInsertRefusesIt`.
+The one leniency of the header parser (OWS stripped at the list's edges) is the
+engine's; the `nblk-chr` rule it does not apply on input is enforced HERE, in
+`Insert` and `StateBuilder.Add`, where a trailing space would otherwise be
+absorbed by the next hop and silently change the value.
 
 ## Do NOT
 
@@ -153,19 +143,25 @@ enforced in `Insert` instead. Documented in place and in
   published through `pkg/v1/observe/trace` aliases and Go interfaces are structural, so
   widening breaks every downstream double at compile time with no deprecation
   window (ADR 0039). `Carrier` is two methods on purpose: it is exactly
-  `http.Header`'s `Get`/`Set` pair, which is what lets `Inject(ctx, req.Header)`
-  compile with no adapter. A test holds that assignment.
+  `http.Header`'s `Get`/`Set` pair, which is what lets the engine's
+  `Inject(ctx, req.Header)` compile with no adapter. A test holds that assignment.
 - **Do NOT import `net/http` here.** `Carrier` exists so this package does not
   have to. An HTTP opinion in the contract would exclude a message queue and a
   gRPC metadata map.
+- **Do NOT parse or write a header here again.** A wire format is the engine's
+  mechanism (ADR 0160 §4); a value this package needs built from one gets a
+  validating builder, as `StateValue` has, never a parser.
 - **Do NOT add `RecordError` to `Span`.** What an error's TYPE is, is a judgement
   about the caller's error model. It is a helper in `internal/service/observe/trace`, and
   that is the shape that does not freeze a decision into a port.
 - **Do NOT emit an all-zero identifier.** It is the specification's own invalid
-  value; `Inject` writes nothing for an invalid context, and the OTLP encoder
-  refuses one outright.
+  value; the engine's `Inject` writes nothing for an invalid context, and its
+  OTLP encoder refuses one outright.
 - **Do NOT re-derive the sampling decision anywhere below the root.**
-- **Do NOT clear undefined trace-flags bits on receipt.** See above.
+- **Do NOT clear undefined trace-flags bits on receipt.** §3.2.2.5.2 asks a
+  producer to zero them and §3.2.4 a receiver to assume nothing about them:
+  `TraceFlags` keeps the byte whole and `Sanitized` masks it, and only the
+  engine's `FormatTraceParent` calls it.
 
 ## Verification
 
@@ -173,11 +169,14 @@ enforced in `Insert` instead. Documented in place and in
 |---|---|
 | `GOWORK=off go test ./observe/trace/...` (from `internal/core`) | green |
 | `bazel test //internal/core/observe/trace:trace_test` | green |
-| `TestParseTraceParentRefusals` | every W3C refusal, each naming its section |
-| `TestParseTraceParentIsForwardCompatible` | §3.2.4, including the undashed-tail case |
-| `TestFormatTraceParentMasksUndefinedFlagBits` | mask on output, keep on input |
-| `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
+| `TestStateBuilderKeepsTheOrderItWasGiven` / `TestStateBuilderRefusesWhatInsertRefuses` / `TestStateBuilderLetsGoOfTheListItHandedOver` | the builder is not a second way in |
+| `TestTraceStateInsertMovesTheKeyToTheFront` / `…TruncatesWholeEntriesFromTheRight` / `…RefusesAnUnspellableEntry` | §3.5 and §3.3.1.5 on the value |
 | `TestAttributesAreTheSameTypeAsMetrics` | one attribute type across every model value of BOTH signals, as a compile and value fact |
 | `TestAnUnusableAttributeIsRefusedUnderTheTraceCode` | every attribute refusal here carries `0.2.20.7`, never the metrics code |
 | `TestScopeDefaultNamesTheTracePackage` | the one thing that is NOT shared |
 | `TestHTTPHeaderIsACarrierWithNoAdapter` | the ADR 0039 freeze on `Carrier` |
+
+The W3C conformance tests (`TestParseTraceParentRefusals`,
+`TestParseTraceParentIsForwardCompatible`,
+`TestFormatTraceParentMasksUndefinedFlagBits`, the two §4.3 `TestExtract…`)
+moved with the parsers to `internal/service/observe/trace`.

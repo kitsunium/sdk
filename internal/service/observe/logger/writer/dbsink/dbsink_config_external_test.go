@@ -10,10 +10,10 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreasync "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	servicelogger "github.com/kitsunium/sdk/internal/service/observe/logger"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/encoder"
-	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink"
 )
 
@@ -439,7 +439,7 @@ func TestComposeOnDrop(t *testing.T) {
 		//: contract under test, not a test failure — so swallow that sentinel here.
 		for range c.writes {
 			//: a saturated ring returns BufferFull (typed); any OTHER error is a bug.
-			if _, err := sink.Write(t.Context(), corelogger.RecordEvent{Message: "x"}, []byte("x")); err != nil && !errs.HasCode(err, async.CodeAsyncBufferFull) {
+			if _, err := sink.Write(t.Context(), corelogger.RecordEvent{Message: "x"}, []byte("x")); err != nil && !errs.HasCode(err, coreasync.CodeAsyncBufferFull) {
 				t.Fatalf("%s: Write surfaced unexpected error: %v", c.name, err)
 			}
 		}
@@ -640,7 +640,7 @@ func TestComposeWriteAfterClose(t *testing.T) {
 		}
 		//: the late Write must surface the typed ASYNC_STOPPED to the caller.
 		_, err := sink.Write(t.Context(), corelogger.RecordEvent{Message: "late"}, []byte("late"))
-		if !errs.HasCode(err, async.CodeAsyncStopped) {
+		if !errs.HasCode(err, coreasync.CodeAsyncStopped) {
 			t.Fatalf("post-Close Write err=%v want HasCode ASYNC_STOPPED", err)
 		}
 		//: the rejected record must never have reached the deliver seam.

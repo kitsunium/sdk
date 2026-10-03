@@ -9,6 +9,8 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 )
 
 // joinDepth is how many innermost frames identify a stack when labels are
@@ -199,7 +201,7 @@ func stackKey(stack []string) string {
 
 // joinLabels gives each goroutine of a dump the labels the counted profile
 // records for its stack, one goroutine per counted record.
-func joinLabels(gs []GoroutineValue, records []countRecord) {
+func joinLabels(gs []coreprofiling.GoroutineValue, records []countRecord) {
 	byStack := make(map[string][]*countRecord, len(records))
 	//: only labelled records can give anything.
 	for i := range records {

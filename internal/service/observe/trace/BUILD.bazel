@@ -5,9 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "trace",
     srcs = [
-        "codes.go",
         "config.go",
-        "errors.go",
         "exporter_otlphttp.go",
         "exporter_otlpjson.go",
         "http_client.go",
@@ -18,12 +16,15 @@ go_library(
         "otlp_export_response.go",
         "otlp_request.go",
         "otlphttp_config.go",
+        "propagation.go",
         "record_error.go",
         "recorder.go",
         "recorder_config.go",
         "sampler.go",
         "span.go",
+        "traceparent.go",
         "tracer.go",
+        "tracestate.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/trace",
     visibility = [
@@ -49,13 +50,6 @@ alias(
     ],
 )
 
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
-)
-
 go_test(
     name = "trace_test",
     srcs = [
@@ -64,11 +58,15 @@ go_test(
         "exporter_otlpjson_external_test.go",
         "http_middleware_external_test.go",
         "http_server_bench_test.go",
+        "propagation_bench_test.go",
+        "propagation_external_test.go",
         "recorder_bench_test.go",
         "recorder_external_test.go",
         "sampler_external_test.go",
         "testhelpers_external_test.go",
+        "traceparent_external_test.go",
         "tracer_external_test.go",
+        "tracestate_external_test.go",
     ],
     deps = [
         ":trace",

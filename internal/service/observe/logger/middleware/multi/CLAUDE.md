@@ -17,7 +17,7 @@ independent failure modes per branch.
 | File | Role |
 |---|---|
 | `multi.go` | `fanoutSink` + `New` + `Write` / `Flush` / `Close` |
-| `failed.go` | sentinels — range 0.3.16.\* |
+| `internal/core/observe/logger/middleware/multi` | its sentinels — range 0.3.16.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -32,6 +32,8 @@ independent failure modes per branch.
   the failures, not wrapped in `FanoutWriteFailed`.
 
 ## Error catalogue — range 0.3.16.\*
+
+Declared in `internal/core/observe/logger/middleware/multi` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coremulti.X`.
 
 | Code      | Sentinel             | Trigger |
 |---|---|---|

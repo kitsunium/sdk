@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coresample "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/sample"
 )
 
 // sampleSink keeps every Nth Write; the rest are discarded. The counter
@@ -31,12 +32,12 @@ func New(downstream corelogger.Sink, rate int) (sink corelogger.Sink, err error)
 	//: refuse a non-positive rate — the modulo would panic.
 	if rate <= 0 {
 		//: documented sentinel — caller must supply a positive rate.
-		return nil, RateInvalid
+		return nil, coresample.RateInvalid
 	}
 	//: refuse a nil downstream — kept records would have nowhere to land.
 	if downstream == nil {
 		//: documented sentinel — caller must supply a downstream sink.
-		return nil, DownstreamNil
+		return nil, coresample.DownstreamNil
 	}
 	//: hand back the sink behind the public Sink interface.
 	return &sampleSink{downstream: downstream, rate: uint64(rate)}, nil

@@ -11,6 +11,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -80,7 +81,7 @@ func (s *netSink) Flush(ctx context.Context) error {
 	if ctx != nil && ctx.Err() != nil {
 		//: surface the cancellation under the write sentinel.
 		return errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeNetTransportWriteFailed,
+			Code:    corenettransport.CodeNetTransportWriteFailed,
 			Reason:  "NET_TRANSPORT_WRITE_FAILED",
 			Public:  "Network transport flush aborted due to cancellation",
 			Private: "service/observe/logger/writer/nettransport.Flush saw a cancelled context",

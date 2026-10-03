@@ -18,7 +18,7 @@ hot path.
 | `recover_sink.go` | `recoverSink` + `New` / `NewWithConfig`; every method `defer`s its own recover block |
 | `config.go`       | `Config{OnPanic}` — observability hook (V34) |
 | `panic_value.go`  | `panicValue` adapter; `safeString` / `safeTypeName` panic-safe formatters |
-| `codes.go`, `errors.go` | sentinels — range 0.3.21.\* |
+| `internal/core/observe/logger/middleware/recover` | its sentinels — range 0.3.21.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -47,6 +47,8 @@ hot path.
   cannot panic — included for symmetry and call-site documentation.
 
 ## Error catalogue — range 0.3.21.\*
+
+Declared in `internal/core/observe/logger/middleware/recover` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corerecover.X`.
 
 | Code      | Sentinel        | Trigger |
 |---|---|---|

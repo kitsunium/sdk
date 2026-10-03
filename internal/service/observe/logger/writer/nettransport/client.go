@@ -11,6 +11,8 @@ import (
 	"net"
 	"net/http"
 	"time"
+
+	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
 )
 
 // defaultHTTPTimeout bounds an HTTP POST so a stalled collector cannot wedge the
@@ -229,7 +231,7 @@ func postRecord(ctx context.Context, c *http.Client, url string, p []byte) error
 	//: a non-2xx status is a delivery failure — return the typed sentinel.
 	if resp.StatusCode < httpStatusFloor || resp.StatusCode >= httpStatusCeil {
 		//: origin-wins: netSink's wrap keeps this sentinel's code.
-		return NetTransportWriteFailed
+		return corenettransport.NetTransportWriteFailed
 	}
 	//: 2xx — the record was accepted.
 	return nil

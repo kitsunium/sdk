@@ -12,6 +12,7 @@ import (
 	"errors"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coremulti "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -71,7 +72,7 @@ func (s *fanoutSink) Write(ctx context.Context, r corelogger.RecordEvent, p []by
 	if len(errs2) > 0 {
 		//: wrap with the documented sentinel for HasCode-style introspection.
 		return n, errs.Wrap(errors.Join(errs2...), errs.WrapParams{
-			Code:    CodeFanoutWriteFailed,
+			Code:    coremulti.CodeFanoutWriteFailed,
 			Reason:  "FANOUT_WRITE_FAILED",
 			Public:  "One or more fan-out sinks failed",
 			Private: "service/observe/logger/middleware/multi.Write aggregated per-sink errors",

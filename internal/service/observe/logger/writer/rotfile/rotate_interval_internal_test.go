@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -53,7 +54,7 @@ func Test_rotatingSink_tickRotate(t *testing.T) {
 		//: failure arm — the typed rotate error must be stashed for the next Write.
 		if c.wantErr {
 			//: the stash must carry the rotate-failed code.
-			if !errs.HasCode(s.tickErr, CodeRotFileRotateFailed) {
+			if !errs.HasCode(s.tickErr, corerotfile.CodeRotFileRotateFailed) {
 				t.Errorf("%s: tickErr=%v want rotate-failed", c.name, s.tickErr)
 			}
 			return
@@ -102,7 +103,7 @@ func Test_rotatingSink_tickErr_writesRecord(t *testing.T) {
 		defer closeQuiet(t, s)
 		//: stash a typed rotate failure as if a tick had failed on the daemon.
 		s.mu.Lock()
-		s.tickErr = RotFileRotateFailed
+		s.tickErr = corerotfile.RotFileRotateFailed
 		s.mu.Unlock()
 		//: the next Write must succeed AND persist its record despite the stash.
 		rec := []byte("after-tick-failure\n")
@@ -114,7 +115,7 @@ func Test_rotatingSink_tickErr_writesRecord(t *testing.T) {
 			t.Errorf("tickErr not cleared after Write: %v", s.tickErr)
 		}
 		//: OnError must have fired exactly once with the rotate-failed code.
-		if calls != 1 || !errs.HasCode(seen, CodeRotFileRotateFailed) {
+		if calls != 1 || !errs.HasCode(seen, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("OnError fired %d times with err=%v; want 1 rotate-failed", calls, seen)
 		}
 		//: the record must be on disk — the triggering line was not dropped.

@@ -117,7 +117,7 @@ func Ratio(fraction float64) (sampler coretrace.Sampler, err error) {
 	if math.IsNaN(fraction) || fraction <= 0 || fraction > 1 {
 		//: the fraction is configuration, not data, so echoing it is safe and
 		//: is what makes the message actionable.
-		return nil, errs.Wrap(InvalidSampleRatio, errs.WrapParams{}, errs.String("ratio", formatRatio(fraction)))
+		return nil, errs.Wrap(coretrace.InvalidSampleRatio, errs.WrapParams{}, errs.String("ratio", formatRatio(fraction)))
 	}
 	//: 1 keeps everything, and the threshold below would too — but naming it
 	//: skips a multiplication and a comparison on every root span.

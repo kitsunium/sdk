@@ -116,7 +116,7 @@ func TestAnUnsampledTraceStillPropagates(t *testing.T) {
 	if context.IsSampled() {
 		t.Error("the sampled bit must be CLEAR, so the next hop inherits the decision")
 	}
-	header, ok := coretrace.FormatTraceParent(context)
+	header, ok := svctrace.FormatTraceParent(context)
 	if !ok || header[len(header)-2:] != "00" {
 		t.Errorf("traceparent = %q (%v), want a header whose flags say not-sampled", header, ok)
 	}
@@ -130,7 +130,7 @@ func TestAnUnsampledTraceStillPropagates(t *testing.T) {
 // boundary, including the fact that the remote parent's DECISION wins over the
 // local sampler.
 func TestStartInheritsAnExtractedRemoteParent(t *testing.T) {
-	upstream, err := coretrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	upstream, err := svctrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}
@@ -277,7 +277,7 @@ func TestStartTimeOverrideIsHonoured(t *testing.T) {
 func TestInvalidLinksAreDroppedRatherThanExported(t *testing.T) {
 	sink := &collector{}
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: sink.sink()})
-	valid, err := coretrace.ParseTraceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
+	valid, err := svctrace.ParseTraceParent("00-0af7651916cd43dd8448eb211c80319c-b7ad6b7169203331-01")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}

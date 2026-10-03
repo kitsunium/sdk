@@ -7,6 +7,7 @@ import (
 	"compress/gzip"
 	"testing"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
@@ -97,7 +98,7 @@ func TestAHandBuiltProfileDecodesEveryField(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(p.SampleTypes) != 2 || p.SampleTypes[1] != (profiling.SampleTypeValue{Type: "cpu", Unit: "nanoseconds"}) {
+	if len(p.SampleTypes) != 2 || p.SampleTypes[1] != (coreprofiling.SampleTypeValue{Type: "cpu", Unit: "nanoseconds"}) {
 		t.Errorf("SampleTypes = %v", p.SampleTypes)
 	}
 	if p.Period != 10_000_000 || p.PeriodType.Type != "cpu" || p.DefaultSampleType != "cpu" || p.Duration.Seconds() != 1 || p.Time.IsZero() {
@@ -110,7 +111,7 @@ func TestAHandBuiltProfileDecodesEveryField(t *testing.T) {
 		t.Fatalf("%d samples", len(p.Samples))
 	}
 	first := p.Samples[0]
-	want := []profiling.FrameValue{
+	want := []coreprofiling.FrameValue{
 		{Function: "main.work", File: "/src/main.go", Line: 12, StartLine: 10},
 		{Function: "main.work", File: "/src/main.go", Line: 13, StartLine: 10},
 		{Function: "main.inlined", File: "/src/main.go", Line: 25, StartLine: 20},
@@ -186,7 +187,7 @@ func TestEveryMalformationIsRefusedByCode(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		p, err := profiling.Parse(c.data)
-		if p != nil || !errs.HasCode(err, profiling.CodeProfileMalformed) {
+		if p != nil || !errs.HasCode(err, coreprofiling.CodeProfileMalformed) {
 			t.Fatalf("Parse() = %v, %v; want PROFILE_MALFORMED", p, err)
 		}
 	}
@@ -220,7 +221,7 @@ func TestAVarintOfSixtyFourBitsIsRead(t *testing.T) {
 // TestParseIsBounded pins ProfileTooLarge, before reading and once inflated.
 func TestParseIsBounded(t *testing.T) {
 	t.Parallel()
-	if _, err := profiling.Parse(make([]byte, profiling.MaxProfileBytes+1)); !errs.HasCode(err, profiling.CodeProfileTooLarge) {
+	if _, err := profiling.Parse(make([]byte, profiling.MaxProfileBytes+1)); !errs.HasCode(err, coreprofiling.CodeProfileTooLarge) {
 		t.Errorf("an oversized input = %v", err)
 	}
 	var z bytes.Buffer
@@ -237,7 +238,7 @@ func TestParseIsBounded(t *testing.T) {
 	if err := zw.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := profiling.Parse(z.Bytes()); !errs.HasCode(err, profiling.CodeProfileTooLarge) {
+	if _, err := profiling.Parse(z.Bytes()); !errs.HasCode(err, coreprofiling.CodeProfileTooLarge) {
 		t.Errorf("a stream inflating past the bound = %v", err)
 	}
 }

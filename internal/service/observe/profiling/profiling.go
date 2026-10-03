@@ -25,7 +25,13 @@
 // # One CPU profiler per process
 //
 // The runtime has one. [CaptureCPU] refuses a second capture with
-// [ProfilerBusy] rather than queueing it, whoever started the first.
+// ProfilerBusy rather than queueing it, whoever started the first.
+//
+// # Values and codes are the core's
+//
+// What a capture returns — the profile, a fold, a goroutine — and every
+// sentinel are declared in internal/core/observe/profiling (ADR 0160); this
+// package is the engine and declares none of them.
 package profiling
 
 import "time"

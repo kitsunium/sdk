@@ -22,7 +22,7 @@ import (
 // none, and it cannot be produced by forgetting anything.
 func TestRatioRefusesZeroBecauseZeroIsAmbiguous(t *testing.T) {
 	sampler, err := svctrace.Ratio(0)
-	if !errors.Is(err, svctrace.InvalidSampleRatio) {
+	if !errors.Is(err, coretrace.InvalidSampleRatio) {
 		t.Fatalf("Ratio(0) must be refused, got %v", err)
 	}
 	if sampler != nil {
@@ -45,7 +45,7 @@ func TestRatioRefusalsAndAcceptances(t *testing.T) {
 	}
 	for _, tc := range refused {
 		t.Run("refused/"+tc.name, func(t *testing.T) {
-			if _, err := svctrace.Ratio(tc.fraction); !errors.Is(err, svctrace.InvalidSampleRatio) {
+			if _, err := svctrace.Ratio(tc.fraction); !errors.Is(err, coretrace.InvalidSampleRatio) {
 				t.Fatalf("Ratio(%v) must be refused, got %v", tc.fraction, err)
 			}
 		})
@@ -132,11 +132,11 @@ func TestRatioOneIsAlwaysSample(t *testing.T) {
 // TestParentBasedHonoursTheParentAndConsultsRootOnly pins the sampler almost
 // every deployment wants, in both directions.
 func TestParentBasedHonoursTheParentAndConsultsRootOnly(t *testing.T) {
-	sampled, err := coretrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	sampled, err := svctrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}
-	unsampled, err := coretrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
+	unsampled, err := svctrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}

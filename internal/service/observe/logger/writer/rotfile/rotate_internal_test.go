@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -130,7 +131,7 @@ func Test_rotatingSink_rotate_shiftFails(t *testing.T) {
 		rerr := s.rotate()
 		s.mu.Unlock()
 		//: the EACCES on the oldest-backup removal surfaces as rotate-failed.
-		if !errs.HasCode(rerr, CodeRotFileRotateFailed) {
+		if !errs.HasCode(rerr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("rotate err=%v want rotate-failed", rerr)
 		}
 	}
@@ -184,7 +185,7 @@ func Test_rotatingSink_rotate_reopenRefusesSymlink(t *testing.T) {
 			t.Fatalf("reopen followed a planted symlink")
 		}
 		//: the refusal must carry the documented open sentinel.
-		if !errs.HasCode(oerr, CodeRotFileOpenFailed) {
+		if !errs.HasCode(oerr, corerotfile.CodeRotFileOpenFailed) {
 			t.Errorf("reopen err=%v want open-failed", oerr)
 		}
 	}
@@ -230,7 +231,7 @@ func Test_rotatingSink_rotate_selfHealsAfterShiftFailure(t *testing.T) {
 		rerr := s.rotate()
 		s.mu.Unlock()
 		//: the EACCES on the oldest-backup removal surfaces as rotate-failed.
-		if !errs.HasCode(rerr, CodeRotFileRotateFailed) {
+		if !errs.HasCode(rerr, corerotfile.CodeRotFileRotateFailed) {
 			t.Fatalf("rotate err=%v want rotate-failed", rerr)
 		}
 		//: V45 core assertion: the reopened descriptor must be live. Before the
@@ -355,7 +356,7 @@ func Test_rotatingSink_shiftBackups_removeOldestFails(t *testing.T) {
 		//: freeze the directory so removing .1 fails (restored in cleanup).
 		freezeDirReadOnly(t, dir)
 		//: the EACCES on the oldest-backup removal surfaces as rotate-failed.
-		if serr := s.shiftBackups(); !errs.HasCode(serr, CodeRotFileRotateFailed) {
+		if serr := s.shiftBackups(); !errs.HasCode(serr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("shiftBackups err=%v want rotate-failed", serr)
 		}
 	}

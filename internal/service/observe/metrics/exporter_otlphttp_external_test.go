@@ -182,7 +182,7 @@ func TestOTLPHTTPPartialSuccess(t *testing.T) {
 			t.Parallel()
 			exporter, _ := collectorStub(t, http.StatusOK, body, nil)
 			err := exporter.Export(gaugeSnapshot(nil, 1))
-			if !errors.Is(err, svcmetrics.OTLPPartialSuccess) {
+			if !errors.Is(err, coremetrics.OTLPPartialSuccess) {
 				t.Fatalf("want OTLPPartialSuccess, got %v", err)
 			}
 			if svcmetrics.OTLPRetryable(err) {
@@ -221,7 +221,7 @@ func TestOTLPHTTPRetryableStatuses(t *testing.T) {
 			t.Parallel()
 			exporter, _ := collectorStub(t, status, "", nil)
 			err := exporter.Export(gaugeSnapshot(nil, 1))
-			if !errors.Is(err, svcmetrics.OTLPExportUnavailable) {
+			if !errors.Is(err, coremetrics.OTLPExportUnavailable) {
 				t.Fatalf("want OTLPExportUnavailable, got %v", err)
 			}
 			if !svcmetrics.OTLPRetryable(err) {
@@ -247,13 +247,13 @@ func TestOTLPHTTPNonRetryableStatuses(t *testing.T) {
 			t.Parallel()
 			exporter, _ := collectorStub(t, status, "", nil)
 			err := exporter.Export(gaugeSnapshot(nil, 1))
-			if !errors.Is(err, svcmetrics.OTLPExportRejected) {
+			if !errors.Is(err, coremetrics.OTLPExportRejected) {
 				t.Fatalf("want OTLPExportRejected, got %v", err)
 			}
 			if svcmetrics.OTLPRetryable(err) {
 				t.Errorf("status %d is outside the retryable set", status)
 			}
-			if !kerrs.HasCode(err, svcmetrics.CodeOTLPExportRejected) {
+			if !kerrs.HasCode(err, coremetrics.CodeOTLPExportRejected) {
 				t.Errorf("want code 0.3.45.8 on the trail, got %v", err)
 			}
 		})
@@ -267,7 +267,7 @@ func TestOTLPHTTPSurfacesRetryAfter(t *testing.T) {
 	header := http.Header{"Retry-After": []string{"30"}}
 	exporter, _ := collectorStub(t, http.StatusTooManyRequests, "", header)
 	err := exporter.Export(gaugeSnapshot(nil, 1))
-	if !errors.Is(err, svcmetrics.OTLPExportUnavailable) {
+	if !errors.Is(err, coremetrics.OTLPExportUnavailable) {
 		t.Fatalf("want OTLPExportUnavailable, got %v", err)
 	}
 	if !hasField(err, "retry_after_seconds", "30") {
@@ -302,7 +302,7 @@ func TestOTLPHTTPDoesNotFollowARedirect(t *testing.T) {
 	header := http.Header{"Location": []string{elsewhere.URL + "/v1/metrics"}}
 	exporter, _ := collectorStub(t, http.StatusTemporaryRedirect, "", header)
 	err := exporter.Export(gaugeSnapshot(nil, 1))
-	if !errors.Is(err, svcmetrics.OTLPExportRejected) {
+	if !errors.Is(err, coremetrics.OTLPExportRejected) {
 		t.Fatalf("an unfollowed redirect is a permanent rejection, got %v", err)
 	}
 	if elsewhereHits != 0 {
@@ -334,7 +334,7 @@ func TestOTLPHTTPTransportFaultIsRetryable(t *testing.T) {
 		t.Fatalf("NewOTLPHTTPExporter: unexpected error: %v", err)
 	}
 	exportErr := exporter.Export(gaugeSnapshot(nil, 1))
-	if !errors.Is(exportErr, svcmetrics.OTLPExportUnavailable) {
+	if !errors.Is(exportErr, coremetrics.OTLPExportUnavailable) {
 		t.Fatalf("want OTLPExportUnavailable, got %v", exportErr)
 	}
 	if !svcmetrics.OTLPRetryable(exportErr) {
@@ -353,7 +353,7 @@ func TestOTLPHTTPRefusesAnUnencodableSnapshotBeforeDialing(t *testing.T) {
 	snap := coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
 		"s": {Temporality: coremetrics.TemporalityUnspecified, Points: []coremetrics.SumValue{{Value: 1}}},
 	}}
-	if err := exporter.Export(snap); !errors.Is(err, svcmetrics.OTLPUnresolvedTemporality) {
+	if err := exporter.Export(snap); !errors.Is(err, coremetrics.OTLPUnresolvedTemporality) {
 		t.Fatalf("want OTLPUnresolvedTemporality, got %v", err)
 	}
 	if seen := captured.snapshot(); seen.seen != 0 {
@@ -821,13 +821,13 @@ func TestNewOTLPHTTPExporterRefusesAnUnusableEndpoint(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
 			exporter, err := svcmetrics.NewOTLPHTTPExporter("otlp-http-test", svcmetrics.OTLPHTTPConfig{Endpoint: test.endpoint})
-			if !errors.Is(err, svcmetrics.OTLPEndpointInvalid) {
+			if !errors.Is(err, coremetrics.OTLPEndpointInvalid) {
 				t.Fatalf("want OTLPEndpointInvalid, got %v", err)
 			}
 			if exporter != nil {
 				t.Errorf("a refused construction must return no exporter")
 			}
-			if !kerrs.HasCode(err, svcmetrics.CodeOTLPEndpointInvalid) {
+			if !kerrs.HasCode(err, coremetrics.CodeOTLPEndpointInvalid) {
 				t.Errorf("want code 0.3.45.7 on the trail, got %v", err)
 			}
 		})

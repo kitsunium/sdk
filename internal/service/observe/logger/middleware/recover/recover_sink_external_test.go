@@ -11,6 +11,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corerecover "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/recover"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	recoversink "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/recover"
 	filesink "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file"
@@ -72,7 +73,7 @@ func TestNew(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"non-nil downstream succeeds", false, 0},
-		{"nil downstream yields DownstreamNil", true, recoversink.CodeRecoverDownstreamNil},
+		{"nil downstream yields DownstreamNil", true, corerecover.CodeRecoverDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -106,7 +107,7 @@ func TestRecover_Write(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
-		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
+		{"panic surfaces as Panicked", true, corerecover.CodeRecoverPanicked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -141,7 +142,7 @@ func TestRecover_Flush(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
-		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
+		{"panic surfaces as Panicked", true, corerecover.CodeRecoverPanicked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -176,7 +177,7 @@ func TestRecover_Close(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"happy path delegates to downstream", false, 0},
-		{"panic surfaces as Panicked", true, recoversink.CodeRecoverPanicked},
+		{"panic surfaces as Panicked", true, corerecover.CodeRecoverPanicked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -210,8 +211,8 @@ func TestRecoverSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Panicked carries 0.3.21.1", recoversink.Panicked, recoversink.CodeRecoverPanicked},
-		{"DownstreamNil carries 0.3.21.2", recoversink.DownstreamNil, recoversink.CodeRecoverDownstreamNil},
+		{"Panicked carries 0.3.21.1", corerecover.Panicked, corerecover.CodeRecoverPanicked},
+		{"DownstreamNil carries 0.3.21.2", corerecover.DownstreamNil, corerecover.CodeRecoverDownstreamNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -250,7 +251,7 @@ func TestRecover_Write_ByteCount(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"happy path forwards downstream byte count", false, "hello", 5, 0},
-		{"panic yields zero bytes and Panicked", true, "hello", 0, recoversink.CodeRecoverPanicked},
+		{"panic yields zero bytes and Panicked", true, "hello", 0, corerecover.CodeRecoverPanicked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -292,7 +293,7 @@ func TestRecover_Flush_ByteCount(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"happy path returns nil", false, 0},
-		{"panic surfaces Panicked", true, recoversink.CodeRecoverPanicked},
+		{"panic surfaces Panicked", true, corerecover.CodeRecoverPanicked},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -354,7 +355,7 @@ func TestRecover_Write_DownstreamError(t *testing.T) {
 				t.Errorf("err = %v, want errors.Is(io.ErrClosedPipe)", got)
 			}
 			//: and it must NOT have been relabelled as a recovered panic.
-			if errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+			if errs.HasCode(got, corerecover.CodeRecoverPanicked) {
 				t.Errorf("non-panic error %v was wrongly tagged Panicked", got)
 			}
 		})
@@ -443,7 +444,7 @@ func TestRecover_Write_NilPanic(t *testing.T) {
 			}
 			got := tc.op(t.Context(), s)
 			//: a nil panic must surface as Panicked, proving rv != nil still fired.
-			if !errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+			if !errs.HasCode(got, corerecover.CodeRecoverPanicked) {
 				t.Errorf("HasCode(%v, Panicked) = false — panic(nil) was swallowed", got)
 			}
 		})
@@ -550,7 +551,7 @@ func TestRecover_OnPanic_Observes(t *testing.T) {
 			}
 			got := tc.op(t.Context(), s)
 			//: the absorbed panic must still surface to the caller as Panicked.
-			if !errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+			if !errs.HasCode(got, corerecover.CodeRecoverPanicked) {
 				t.Fatalf("returned err HasCode(Panicked) = false, got %v", got)
 			}
 			//: the hook fires exactly once — no double-observe, no silent absorption.
@@ -558,7 +559,7 @@ func TestRecover_OnPanic_Observes(t *testing.T) {
 				t.Fatalf("OnPanic fired %d times, want 1", len(observed))
 			}
 			//: the hook must see the SAME Panicked error returned to the caller.
-			if !errs.HasCode(observed[0], recoversink.CodeRecoverPanicked) {
+			if !errs.HasCode(observed[0], corerecover.CodeRecoverPanicked) {
 				t.Errorf("OnPanic arg HasCode(Panicked) = false, got %v", observed[0])
 			}
 		})
@@ -633,7 +634,7 @@ func TestNewWithConfig(t *testing.T) {
 			s, err := recoversink.NewWithConfig(tc.down, recoversink.Config{})
 			//: a nil downstream must surface the documented DownstreamNil sentinel.
 			if tc.wantNil {
-				if !errs.HasCode(err, recoversink.CodeRecoverDownstreamNil) {
+				if !errs.HasCode(err, corerecover.CodeRecoverDownstreamNil) {
 					t.Fatalf("HasCode(%v, DownstreamNil) = false", err)
 				}
 				return
@@ -643,7 +644,7 @@ func TestNewWithConfig(t *testing.T) {
 			}
 			//: the zero-Config sink must still absorb panics exactly like New.
 			_, werr := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
-			if !errs.HasCode(werr, recoversink.CodeRecoverPanicked) {
+			if !errs.HasCode(werr, corerecover.CodeRecoverPanicked) {
 				t.Errorf("HasCode(%v, Panicked) = false on zero-Config path", werr)
 			}
 		})
@@ -681,7 +682,7 @@ func TestRecover_New_DefaultUnchanged(t *testing.T) {
 			//: a nil OnPanic must not panic the recover block — default stays safe.
 			got := tc.op(t.Context(), s)
 			//: the absorbed panic still surfaces as Panicked, identical to pre-V34.
-			if !errs.HasCode(got, recoversink.CodeRecoverPanicked) {
+			if !errs.HasCode(got, corerecover.CodeRecoverPanicked) {
 				t.Errorf("HasCode(%v, Panicked) = false on default New path", got)
 			}
 		})

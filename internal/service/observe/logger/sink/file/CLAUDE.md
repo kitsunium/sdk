@@ -20,7 +20,7 @@ the SAME hardening on every reopen: both sinks open through
 | File | Role |
 |---|---|
 | `file.go`                  | `fileSink` + `New` + `Write` / `Flush` (`fsync`) / `Close` + `openRefusals`, this sink's `logfile.RefusalSpec` for the shared hardened open |
-| `codes.go`, `errors.go`    | sentinels — range 0.3.14.\* |
+| `internal/core/observe/logger/sink/file` | its sentinels — range 0.3.14.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 The hardened open itself — `refuseSymlink`, `explainOpenFailure`, `openFlags`
 and the `open_flags_{unix,other}.go` split — is `internal/service/observe/logger/internal/logfile`
@@ -108,6 +108,8 @@ then be rejected (ADR 0082 §D2 measured both shapes for
   closed" error wrapped as `WriteFailed`.
 
 ## Error catalogue — range 0.3.14.\*
+
+Declared in `internal/core/observe/logger/sink/file` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corefile.X`.
 
 | Code      | Sentinel       | Trigger |
 |---|---|---|

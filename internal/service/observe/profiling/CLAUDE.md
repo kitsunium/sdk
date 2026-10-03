@@ -10,31 +10,34 @@ pruned flame graph; `Goroutines` / `ParseGoroutines`, the runtime's dump read
 into goroutines, and `GroupGoroutines`; `CanonicalName`. Public facade:
 `pkg/v1/observe/profiling`.
 
-Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.System` from `CaptureCPU`, a `ManualClock` in `Test_captureCPU` — and `kernel/errs`). Code range `0.3.89.*`.
+Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.System` from `CaptureCPU`, a `ManualClock` in `Test_captureCPU` — `kernel/errs`, and its core, `internal/core/observe/profiling`). Code range `0.3.89.*`, declared in that core since ADR 0160 §2 together with the values this engine produces; this package imports it as `coreprofiling` and declares neither.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `profiling.go` | package doc; `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` |
+| `profiling.go` | package doc; `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames` — the bounds of the capture and the decoder, the engine's |
 | `capture.go` | `CaptureCPU`, `CaptureHeap` |
-| `profile.go` | `ProfileValue`, `SampleTypeValue`, `SampleValue`, `FrameValue`; the default sample type |
 | `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
 | `parse.go` | `Parse`: the bound, gzip or raw, the Profile's top-level fields through a reader table |
 | `tables.go` | Sample, Label, Location, Line, Function; `resolve(frames)` |
 | `resolve.go` | string, location and function indexes checked and resolved; a location's frames built once and shared; the frame budget (`spend`) |
-| `fold.go` | `Fold`, `FoldConfig` and its defaults, `FoldedValue`, `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
-| `goroutine.go` | `GoroutineValue`, `Goroutines` (over `goroutinesFrom`, the writer injectable), `ParseGoroutines` and the dump parser |
+| `fold.go` | `Fold`, `FoldConfig` and its defaults; `sampleTypeIndex` / `defaultSampleType`, the lookups that were methods of the profile value |
+| `goroutine.go` | `Goroutines` (over `goroutinesFrom`, the writer injectable), `ParseGoroutines` and the dump parser; `readState`, the header's bracket read into a goroutine |
 | `labels.go` | the labels in a dump header (the runtime's quoting) and in the counted profile (`%q`), and their matching by stack |
-| `group.go` | `GroupGoroutines`, `GroupConfig`, `GoroutineGroupValue`, the length-prefixed group key, the top frame |
+| `group.go` | `GroupGoroutines`, `GroupConfig`, the length-prefixed group key, the top frame |
 | `canonical.go` | `CanonicalName` |
-| `codes.go` / `errors.go` | `0.3.89.*`, seven codes |
+| `internal/core/observe/profiling` | the values (`ProfileValue`, `SampleTypeValue`, `SampleValue`, `FrameValue`, `FoldedValue`, `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot`, `GoroutineValue`, `GoroutineGroupValue`) and the seven codes and sentinels of `0.3.89.*` — the core since ADR 0160 |
 
 ## Why-this-shape
 
-- **No core package.** One engine, the runtime's; the attribution is a
-  PARAMETER (`FoldConfig.Attribute`), not a port; the values are the engine's
-  (ADR 0074).
+- **A core with values and codes, and no port.** ADR 0121 §D1 gave this
+  domain no core: one engine, the runtime's, and the attribution a PARAMETER
+  (`FoldConfig.Attribute`), not a port. ADR 0160 §1 gave it one anyway, for
+  the rule "every service domain has a core": `internal/core/observe/profiling`
+  holds what a capture, a fold and a dump produce and the seven sentinels. The
+  reasoning against a PORT still holds and is recorded there. The configs,
+  their defaults and the bounds stay here — they parametrise mechanisms.
 - **No protobuf dependency.** `Parse` is written from profile.proto; it was
   checked against `github.com/google/pprof/profile` out of tree on real CPU,
   heap, allocs and goroutine profiles (identical on every field it reads) and

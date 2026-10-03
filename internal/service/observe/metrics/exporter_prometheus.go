@@ -543,7 +543,7 @@ func checkTemporality(name string, temporality coremetrics.Temporality) error {
 	//: delta would be misread, and an unresolved or cast value would have to
 	//: be guessed — the OTLP encoder refuses the same values for that reason.
 	//: Origin wins on wrap: the sentinel keeps its code/reason/public.
-	return errs.Wrap(UnsupportedTemporality, errs.WrapParams{}, errs.String("metric", name))
+	return errs.Wrap(coremetrics.UnsupportedTemporality, errs.WrapParams{}, errs.String("metric", name))
 }
 
 // checkMetricName refuses an instrument name the format cannot carry.
@@ -558,7 +558,7 @@ func checkMetricName(name string) error {
 		return nil
 	}
 	//: origin wins on wrap — the sentinel keeps its code/reason/public.
-	return errs.Wrap(InvalidMetricName, errs.WrapParams{}, errs.String("metric", name))
+	return errs.Wrap(coremetrics.InvalidMetricName, errs.WrapParams{}, errs.String("metric", name))
 }
 
 // checkAttrNames refuses an attribute set the format cannot carry. bucketBound
@@ -577,18 +577,18 @@ func checkAttrNames(attrs []coreotel.AttrValue, bucketBound bool) error {
 		//: the format's label-name grammar — no colon, unlike a metric name.
 		if !validLabelName(attr.Key) {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(InvalidLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
+			return errs.Wrap(coremetrics.InvalidLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 		//: "__foo" is syntactically fine and silently dropped by the server.
 		if strings.HasPrefix(attr.Key, reservedLabelPrefix) {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
+			return errs.Wrap(coremetrics.ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 		//: a second "le" on a bucket line is a duplicate label name, which
 		//: the format rejects outright.
 		if bucketBound && attr.Key == boundLabelKey {
 			//: origin wins on wrap; the key rides in a field.
-			return errs.Wrap(ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
+			return errs.Wrap(coremetrics.ReservedLabelName, errs.WrapParams{}, errs.String("label", attr.Key))
 		}
 	}
 	//: the whole set is representable.

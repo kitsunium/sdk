@@ -5,14 +5,19 @@
 
 The concrete tracing implementation behind `internal/core/observe/trace`: a `Tracer`, the
 live span, four samplers, an in-memory `Recorder`, the `RecordError` helper, the
-**OTLP/JSON** encoder and OTLP/HTTP emitter for `/v1/traces`, and the two HTTP
-middlewares. Admitted by **ADR 0051**.
+**OTLP/JSON** encoder and OTLP/HTTP emitter for `/v1/traces`, the **W3C Trace
+Context** headers read and written (`ParseTraceParent`, `FormatTraceParent`,
+`ParseTraceState`, `Inject`, `Extract` — moved here from the core by ADR 0160 §4,
+because a wire format is a mechanism), and the two HTTP middlewares. Admitted by
+**ADR 0051**.
 
 Everything here is written from the OpenTelemetry and W3C specifications with the
 standard library. Nothing imports `go.opentelemetry.io`; nothing imports a
 protobuf runtime.
 
-Code range: `0.3.50.*` (ADR 0051).
+Code range: `0.3.50.*` (ADR 0051), declared in `internal/core/observe/trace` since
+ADR 0160 §2 beside the core's own `0.2.20.*`: this package returns those
+sentinels as `coretrace.X` and declares none.
 
 ## Contents
 
@@ -34,8 +39,56 @@ Code range: `0.3.50.*` (ADR 0051).
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
 | `http_client.go` | `ClientMiddleware` + `tracedRoundTripper` |
 | `numeric.go` | the shortest-round-trip rendering a refused sampling ratio is reported with |
-| `codes.go` | `Code*` constants — range 0.3.50.* |
-| `errors.go` | `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
+| `traceparent.go` | `ParseTraceParent` / `FormatTraceParent` + `TraceParentHeader` / `TraceStateHeader` / `TraceParentLen` / `VersionSupported` + the fixed-offset reading of §3.2.4 |
+| `tracestate.go` | `ParseTraceState` — the header's list syntax; each member goes through a `coretrace.StateBuilder`, which owns the member grammar, the repeated-key refusal and the 32-member cap |
+| `propagation.go` | `Inject` / `Extract` over the core's `Carrier` |
+| `internal/core/observe/trace` | the codes (range 0.3.50.*) and sentinels — `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` — declared in the core since ADR 0160; this package declares none |
+
+## W3C Trace Context — the refusals that look arbitrary
+
+Moved here from `internal/core/observe/trace` with the parsers (ADR 0160 §4);
+the values they produce — the span context, the flags, the `tracestate` list —
+and the `Carrier` port stay in the core.
+
+Each is normative, and each is the one a future reader would delete.
+
+| Refused | Section |
+|---|---|
+| all-zero `trace-id` | §3.2.2.3 "MUST ignore the `traceparent`" |
+| all-zero `parent-id` | §3.2.2.4, same |
+| version `ff` | §3.2.2.1 "Version `ff` is invalid" |
+| uppercase hex | the grammar is `32HEXDIGLC` / `16HEXDIGLC` |
+| a header under 55 characters | §3.2.4 "should not parse … should restart the trace" |
+| trailing content on version `00` | version 00 has no extension point |
+| a higher version whose tail is not dash-delimited | §3.2.4 — without it, a 56th hex byte reads as a TRUNCATED flag field, so the sampled bit is wrong rather than the header rejected |
+
+**Flags are masked on OUTPUT, never on input.** §3.2.2.5.2 says a vendor MUST
+zero the undefined bits; §3.2.4 says a receiver must not assume anything about
+unknown fields. Clearing on receipt satisfies the first and violates the second.
+`TraceFlags.Sanitized` runs in `FormatTraceParent` and nowhere else.
+
+**`Extract` returns no error.** §4.3 prescribes exactly one response to a
+malformed parent — start a new trace, delete the tracestate — so there is nothing
+to decide. An error would invite the response the specification forbids: failing
+a request because a stranger wrote a bad header. `ParseTraceParent` is the
+typed-error form, for diagnosis.
+
+Three §4.3 consequences, each tested:
+
+- a malformed **traceparent** drops the tracestate with it;
+- a malformed **tracestate** does NOT drop the traceparent;
+- **two** traceparent headers merge to `"v1,v2"`, fail the grammar, and restart —
+  which is correct, because neither claim may be believed.
+
+The list is the core's `StateValue`, ordered because §3.5 makes the order
+meaning; its limits are the grammar's own, enforced by the core's
+`StateBuilder` as the parser hands it each member.
+
+**One leniency, and it is the only one**: OWS is stripped at the list's edges,
+where the `list` rule grants no OWS slot, because RFC 7230 §3.2.4 already
+normalises a field value's surrounding whitespace. The `nblk-chr` rule is
+enforced in the core's `Insert` (and `StateBuilder.Add`) instead. Documented in place and in
+`TestTraceStateAbsorbsEdgeWhitespaceButInsertRefusesIt`.
 
 ## `Ratio(0)` is refused — the ADR 0031 answer
 
@@ -237,6 +290,11 @@ Four decisions:
 - **Do NOT forward `Flush`/`Hijack` from `statusRecorder`.** See above.
 - **Do NOT decode the encoder's own output in a conformance test.**
 - **Do NOT put the path in a span name.**
+- **Do NOT build a `tracestate` list here.** The parser reads the header's
+  syntax and hands each member to `coretrace.StateBuilder`; the member grammar
+  and the list's invariants are the value's, in the core.
+- **Do NOT clear undefined trace-flags bits on receipt.** `Sanitized` runs in
+  `FormatTraceParent` and nowhere else.
 
 ## Verification
 
@@ -252,6 +310,11 @@ Four decisions:
 | `TestOTLPHTTPExporterIsNeverRegistered` | absent from `AvailableExporters()` |
 | `TestOTLPHTTPDoesNotFollowARedirect` | the credentialled POST never leaves the configured host |
 | `TestServerMiddlewarePreservesWriterCapabilities` | Flush works, Hijack reports `ErrNotSupported` |
+| `TestParseTraceParentRefusals` | every W3C refusal, each naming its section |
+| `TestParseTraceParentIsForwardCompatible` | §3.2.4, including the undashed-tail case |
+| `TestFormatTraceParentMasksUndefinedFlagBits` | mask on output, keep on input |
+| `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
+| `TestParseTraceStateRefusals` / `…EnforcesTheThirtyTwoMemberCap` | the whole header refused, never salvaged |
 | `TestClientMiddlewareInjectsAndClonesTheRequest` | the caller's `*http.Request` is untouched |
 | `TestServerMiddlewareStaysWithinItsPerRequestAllocationBudget` | 12 allocations sampled, 10 unsampled — the §Cost argument, guarded (`!race` lane) |
 | `TestRecordingAtCapacityAllocatesNothing` | refusing a span costs less than keeping it (`!race` lane) |

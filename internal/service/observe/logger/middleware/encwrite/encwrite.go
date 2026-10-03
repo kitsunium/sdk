@@ -10,6 +10,7 @@ import (
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreencwrite "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -86,7 +87,7 @@ func deriveSubkey(master corecrypto.Key, info string) (subkey corecrypto.Key, er
 	if derr != nil {
 		//: surface the typed sentinel; consumers HasCode(err, CodeEncWriteSealFailed).
 		return corecrypto.Key{}, errs.Wrap(derr, errs.WrapParams{
-			Code:    CodeEncWriteSealFailed,
+			Code:    coreencwrite.CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/observe/logger/middleware/encwrite: Subkey derivation failed at construction",
@@ -100,7 +101,7 @@ func deriveSubkey(master corecrypto.Key, info string) (subkey corecrypto.Key, er
 	if kerr != nil {
 		//: same typed sentinel — the subkey could not be materialised.
 		return corecrypto.Key{}, errs.Wrap(kerr, errs.WrapParams{
-			Code:    CodeEncWriteSealFailed,
+			Code:    coreencwrite.CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/observe/logger/middleware/encwrite: derived subkey was not KeyLen bytes",
@@ -121,7 +122,7 @@ func (s *EncWriter) Write(ctx context.Context, r corelogger.RecordEvent, p []byt
 	if serr != nil {
 		//: wrap the cause under the typed seal sentinel.
 		return 0, errs.Wrap(serr, errs.WrapParams{
-			Code:    CodeEncWriteSealFailed,
+			Code:    coreencwrite.CodeEncWriteSealFailed,
 			Reason:  "ENC_WRITE_SEAL_FAILED",
 			Public:  "Encrypting middleware could not seal the record",
 			Private: "service/observe/logger/middleware/encwrite: Seal returned an error",
@@ -168,7 +169,7 @@ func frame(box []byte) (framed []byte, err error) {
 	//: so the MaxUint32 constant does not overflow int on a 32-bit GOARCH.
 	if uint64(len(box)) > math.MaxUint32 {
 		//: no underlying cause — return the framing sentinel directly.
-		return nil, FramingFailed
+		return nil, coreencwrite.FramingFailed
 	}
 	//: allocate exactly the prefix plus the payload, no slack.
 	framed = make([]byte, lenPrefixBytes+len(box))

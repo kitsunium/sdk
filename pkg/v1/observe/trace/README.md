@@ -214,19 +214,19 @@ const ServiceNameKey string = coreotel.ServiceNameKey
 <a name="TraceParentHeader"></a>TraceParentHeader is the W3C header carrying the span context.
 
 ```go
-const TraceParentHeader string = coretrace.TraceParentHeader
+const TraceParentHeader string = svctrace.TraceParentHeader
 ```
 
 <a name="TraceParentLen"></a>TraceParentLen is the length of a version\-00 traceparent: 55 characters.
 
 ```go
-const TraceParentLen int = coretrace.TraceParentLen
+const TraceParentLen int = svctrace.TraceParentLen
 ```
 
 <a name="TraceStateHeader"></a>TraceStateHeader is the W3C header carrying the vendor list.
 
 ```go
-const TraceStateHeader string = coretrace.TraceStateHeader
+const TraceStateHeader string = svctrace.TraceStateHeader
 ```
 
 <a name="URLFullKey"></a>URLFullKey is the outbound URL attribute, recorded on CLIENT spans.
@@ -250,7 +250,7 @@ const URLSchemeKey string = svctrace.URLSchemeKey
 <a name="VersionSupported"></a>VersionSupported is the traceparent version this SDK emits: "00".
 
 ```go
-const VersionSupported string = coretrace.VersionSupported
+const VersionSupported string = svctrace.VersionSupported
 ```
 
 ## Variables
@@ -277,22 +277,22 @@ var (
     // DuplicateRegistration is the boot-time registry panic sentinel.
     DuplicateRegistration = coretrace.DuplicateRegistration
     // EntropyFailed reports a crypto/rand failure while minting an identifier.
-    EntropyFailed = svctrace.EntropyFailed
+    EntropyFailed = coretrace.EntropyFailed
     // InvalidSampleRatio reports a fraction Ratio will not accept — including
     // exactly 0, which also spells "unconfigured".
-    InvalidSampleRatio = svctrace.InvalidSampleRatio
+    InvalidSampleRatio = coretrace.InvalidSampleRatio
     // OTLPInvalidSpanContext reports a span with an all-zero identifier.
-    OTLPInvalidSpanContext = svctrace.OTLPInvalidSpanContext
+    OTLPInvalidSpanContext = coretrace.OTLPInvalidSpanContext
     // OTLPSpanNotEnded reports a span that reached the encoder unended.
-    OTLPSpanNotEnded = svctrace.OTLPSpanNotEnded
+    OTLPSpanNotEnded = coretrace.OTLPSpanNotEnded
     // OTLPEndpointInvalid reports an endpoint that cannot address a collector.
-    OTLPEndpointInvalid = svctrace.OTLPEndpointInvalid
+    OTLPEndpointInvalid = coretrace.OTLPEndpointInvalid
     // OTLPExportRejected reports a permanent refusal by the collector.
-    OTLPExportRejected = svctrace.OTLPExportRejected
+    OTLPExportRejected = coretrace.OTLPExportRejected
     // OTLPExportUnavailable reports a transient failure worth retrying.
-    OTLPExportUnavailable = svctrace.OTLPExportUnavailable
+    OTLPExportUnavailable = coretrace.OTLPExportUnavailable
     // OTLPPartialSuccess reports an accepted request with rejected spans.
-    OTLPPartialSuccess = svctrace.OTLPPartialSuccess
+    OTLPPartialSuccess = coretrace.OTLPPartialSuccess
 
     // String returns a string-valued attribute.
     String = coreotel.String

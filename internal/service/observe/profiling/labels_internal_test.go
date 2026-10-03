@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -43,8 +44,8 @@ func TestTheCountedProfileReadsPastItsAlignmentTabs(t *testing.T) {
 // stack, a fourth gets none, and each gets its own copy of the map.
 func TestLabelsAreMatchedOneGoroutinePerCount(t *testing.T) {
 	t.Parallel()
-	frames := []FrameValue{{Function: "example.com/app.park"}, {Function: "sync.(*WaitGroup).Go.func1"}, {Function: "runtime.goexit"}}
-	gs := make([]GoroutineValue, 4)
+	frames := []coreprofiling.FrameValue{{Function: "example.com/app.park"}, {Function: "sync.(*WaitGroup).Go.func1"}, {Function: "runtime.goexit"}}
+	gs := make([]coreprofiling.GoroutineValue, 4)
 	for i := range gs {
 		gs[i].Stack = frames
 	}
@@ -124,7 +125,7 @@ func TestTheFramesAreBoundedBeforeTheyAreBuilt(t *testing.T) {
 			}
 			return
 		}
-		if p != nil || !errs.HasCode(err, CodeProfileTooLarge) {
+		if p != nil || !errs.HasCode(err, coreprofiling.CodeProfileTooLarge) {
 			t.Fatalf("resolve() = %v, %v; want PROFILE_TOO_LARGE", p, err)
 		}
 	}

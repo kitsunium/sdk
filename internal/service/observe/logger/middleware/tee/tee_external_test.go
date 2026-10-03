@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coretee "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee"
 )
@@ -94,20 +95,20 @@ func Test_TeeSink_Write(t *testing.T) {
 			name:        "all fail spilled",
 			primaries:   []*fakeSink{{writeErr: errors.New("a")}, {writeErr: errors.New("b")}},
 			spill:       &fakeSink{},
-			wantErr:     tee.CodeTeeAllBranchesFailed,
+			wantErr:     coretee.CodeTeeAllBranchesFailed,
 			wantSpilled: true,
 		},
 		{
 			name:      "all fail no spill",
 			primaries: []*fakeSink{{writeErr: errors.New("a")}},
 			spill:     nil,
-			wantErr:   tee.CodeTeeAllBranchesFailed,
+			wantErr:   coretee.CodeTeeAllBranchesFailed,
 		},
 		{
 			name:        "all fail spill also fails",
 			primaries:   []*fakeSink{{writeErr: errors.New("a")}},
 			spill:       &fakeSink{writeErr: errors.New("spill down")},
-			wantErr:     tee.CodeSpillFailed,
+			wantErr:     coretee.CodeSpillFailed,
 			wantSpilled: true,
 		},
 	}
@@ -238,8 +239,8 @@ func Test_Sentinels(t *testing.T) {
 	t.Parallel()
 	//: table asserting each exported sentinel carries its dotted-quad code.
 	tests := []sentinelCase{
-		{name: "all-branches", err: tee.AllBranchesFailed, code: tee.CodeTeeAllBranchesFailed},
-		{name: "spill", err: tee.SpillFailed, code: tee.CodeSpillFailed},
+		{name: "all-branches", err: coretee.AllBranchesFailed, code: coretee.CodeTeeAllBranchesFailed},
+		{name: "spill", err: coretee.SpillFailed, code: coretee.CodeSpillFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

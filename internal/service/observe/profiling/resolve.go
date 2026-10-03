@@ -4,13 +4,16 @@
 // are built and each time a stack copies them — and labels into maps.
 package profiling
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // resolver resolves a decoder's raw tables.
 type resolver struct {
 	d *decoder
 	// frames caches the frames of each location already resolved.
-	frames map[uint64][]FrameValue
+	frames map[uint64][]coreprofiling.FrameValue
 	// budget is how many more frames may be built or copied, from limit
 	// down.
 	budget int
@@ -24,7 +27,7 @@ func (r *resolver) spend(n int) error {
 	//: the frames would take the profile past the bound.
 	if n > r.budget {
 		//: the bound is the field; the input is not quoted.
-		return errs.Wrap(ProfileTooLarge, errs.WrapParams{}, errs.Int("max_frames", r.limit))
+		return errs.Wrap(coreprofiling.ProfileTooLarge, errs.WrapParams{}, errs.Int("max_frames", r.limit))
 	}
 	r.budget -= n
 	//: within the bound.
@@ -43,21 +46,21 @@ func (r *resolver) str(i int64) (string, error) {
 }
 
 // valueType resolves a ValueType's two strings.
-func (r *resolver) valueType(t rawType) (SampleTypeValue, error) {
+func (r *resolver) valueType(t rawType) (coreprofiling.SampleTypeValue, error) {
 	typ, err := r.str(t.typ)
 	//: an unresolvable type name.
 	if err != nil {
 		//: already typed.
-		return SampleTypeValue{}, err
+		return coreprofiling.SampleTypeValue{}, err
 	}
 	unit, err := r.str(t.unit)
 	//: the pair, or the malformation.
-	return SampleTypeValue{Type: typ, Unit: unit}, err
+	return coreprofiling.SampleTypeValue{Type: typ, Unit: unit}, err
 }
 
 // header resolves the profile-level strings: the sample types, the period
 // type, the default sample type and the comments.
-func (r *resolver) header(p *ProfileValue) error {
+func (r *resolver) header(p *coreprofiling.ProfileValue) error {
 	//: one value type per value of every sample.
 	for _, t := range r.d.types {
 		st, err := r.valueType(t)
@@ -95,36 +98,36 @@ func (r *resolver) header(p *ProfileValue) error {
 
 // sample resolves one sample: its values checked against the sample types,
 // its stack built from its locations, its labels mapped.
-func (r *resolver) sample(raw *rawSample, types int) (SampleValue, error) {
+func (r *resolver) sample(raw *rawSample, types int) (coreprofiling.SampleValue, error) {
 	//: profile.proto: one value per sample type, always.
 	if len(raw.values) != types {
 		//: a sample a fold could not index.
-		return SampleValue{}, malformed("sample values")
+		return coreprofiling.SampleValue{}, malformed("sample values")
 	}
-	stack := make([]FrameValue, 0, min(len(raw.locations), r.budget))
+	stack := make([]coreprofiling.FrameValue, 0, min(len(raw.locations), r.budget))
 	//: innermost location first, as the profile orders them.
 	for _, id := range raw.locations {
 		frames, err := r.location(id)
 		//: a location id that points nowhere.
 		if err != nil {
 			//: already typed.
-			return SampleValue{}, err
+			return coreprofiling.SampleValue{}, err
 		}
 		//: the copy is counted before it is made.
 		if err := r.spend(len(frames)); err != nil {
 			//: already typed.
-			return SampleValue{}, err
+			return coreprofiling.SampleValue{}, err
 		}
 		stack = append(stack, frames...)
 	}
 	labels, numbers, err := r.labels(raw.labels)
 	//: the sample, or the malformation.
-	return SampleValue{Labels: labels, NumLabels: numbers, Stack: stack, Values: raw.values}, err
+	return coreprofiling.SampleValue{Labels: labels, NumLabels: numbers, Stack: stack, Values: raw.values}, err
 }
 
 // location returns the frames of a location, innermost inlined call first,
 // resolving them the first time.
-func (r *resolver) location(id uint64) ([]FrameValue, error) {
+func (r *resolver) location(id uint64) ([]coreprofiling.FrameValue, error) {
 	//: already resolved for an earlier sample.
 	if frames, done := r.frames[id]; done {
 		//: shared, read-only.
@@ -141,10 +144,10 @@ func (r *resolver) location(id uint64) ([]FrameValue, error) {
 		//: already typed.
 		return nil, err
 	}
-	var frames []FrameValue
+	var frames []coreprofiling.FrameValue
 	//: no symbol was found: the address is all there is.
 	if len(loc.lines) == 0 {
-		frames = []FrameValue{{Address: loc.address}}
+		frames = []coreprofiling.FrameValue{{Address: loc.address}}
 	}
 	//: one frame per line; several when calls were inlined.
 	for _, line := range loc.lines {
@@ -162,22 +165,22 @@ func (r *resolver) location(id uint64) ([]FrameValue, error) {
 }
 
 // frame resolves one line of a location.
-func (r *resolver) frame(line rawLine) (FrameValue, error) {
+func (r *resolver) frame(line rawLine) (coreprofiling.FrameValue, error) {
 	fn, known := r.d.functions[line.function]
 	//: a function id that points nowhere.
 	if !known {
 		//: the id is not repeated.
-		return FrameValue{}, malformed("function id")
+		return coreprofiling.FrameValue{}, malformed("function id")
 	}
 	name, err := r.str(fn.name)
 	//: an unresolvable name.
 	if err != nil {
 		//: already typed.
-		return FrameValue{}, err
+		return coreprofiling.FrameValue{}, err
 	}
 	file, err := r.str(fn.file)
 	//: the frame, or the malformation.
-	return FrameValue{Function: name, File: file, Line: int(line.line), StartLine: int(fn.start)}, err
+	return coreprofiling.FrameValue{Function: name, File: file, Line: int(line.line), StartLine: int(fn.start)}, err
 }
 
 // labels resolves a sample's labels: a string value into Labels, a number

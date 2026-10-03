@@ -16,6 +16,10 @@ groups := profiling.GroupGoroutines(gs, profiling.GroupConfig{Labels: []string{"
 A heap profile is sampled and a CPU profile counts about a hundred samples a
 second: ask where the cost is, not exactly how much.
 
+The codes and sentinels — and the values a capture, a fold and a dump
+produce — are declared in `internal/core/observe/profiling` (ADR 0160); this
+engine returns them:
+
 | Code | Reason | When |
 |---|---|---|
 | `0.3.89.1` | `WINDOW_INVALID` | a CPU window not positive or over `MaxCPUWindow` (400) |

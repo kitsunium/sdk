@@ -423,39 +423,39 @@ func TestPrometheusExporterRefusesUnrepresentableNames(t *testing.T) {
 	//: this wire refuses. Naming it here keeps the loss executable.
 	otelKey := counter("ok", "http.request.method", "GET")
 	tests := []tc{
-		{"a dotted metric name", counter("http.requests"), svcmetrics.CodeInvalidMetricName},
-		{"a dashed metric name", counter("http-requests"), svcmetrics.CodeInvalidMetricName},
-		{"a metric name opening on a digit", counter("5xx"), svcmetrics.CodeInvalidMetricName},
-		{"an empty metric name", counter(""), svcmetrics.CodeInvalidMetricName},
-		{"a metric name holding a quote", counter(`a"b`), svcmetrics.CodeInvalidMetricName},
-		{"a metric name holding a newline", counter("a\nb 9"), svcmetrics.CodeInvalidMetricName},
-		{"a UTF-8 metric name", counter("µs_total"), svcmetrics.CodeInvalidMetricName},
-		{"a dotted label name", counter("ok", "http.method", "GET"), svcmetrics.CodeInvalidLabelName},
-		{"an OTel-conventional attribute key", otelKey, svcmetrics.CodeInvalidLabelName},
-		{"a colon in a label name", counter("ok", "a:b", "GET"), svcmetrics.CodeInvalidLabelName},
-		{"a label name opening on a digit", counter("ok", "5xx", "GET"), svcmetrics.CodeInvalidLabelName},
-		{"a label name holding a quote", counter("ok", `a"b`, "GET"), svcmetrics.CodeInvalidLabelName},
-		{"a server-reserved label prefix", counter("ok", "__name__", "x"), svcmetrics.CodeReservedLabelName},
+		{"a dotted metric name", counter("http.requests"), coremetrics.CodeInvalidMetricName},
+		{"a dashed metric name", counter("http-requests"), coremetrics.CodeInvalidMetricName},
+		{"a metric name opening on a digit", counter("5xx"), coremetrics.CodeInvalidMetricName},
+		{"an empty metric name", counter(""), coremetrics.CodeInvalidMetricName},
+		{"a metric name holding a quote", counter(`a"b`), coremetrics.CodeInvalidMetricName},
+		{"a metric name holding a newline", counter("a\nb 9"), coremetrics.CodeInvalidMetricName},
+		{"a UTF-8 metric name", counter("µs_total"), coremetrics.CodeInvalidMetricName},
+		{"a dotted label name", counter("ok", "http.method", "GET"), coremetrics.CodeInvalidLabelName},
+		{"an OTel-conventional attribute key", otelKey, coremetrics.CodeInvalidLabelName},
+		{"a colon in a label name", counter("ok", "a:b", "GET"), coremetrics.CodeInvalidLabelName},
+		{"a label name opening on a digit", counter("ok", "5xx", "GET"), coremetrics.CodeInvalidLabelName},
+		{"a label name holding a quote", counter("ok", `a"b`, "GET"), coremetrics.CodeInvalidLabelName},
+		{"a server-reserved label prefix", counter("ok", "__name__", "x"), coremetrics.CodeReservedLabelName},
 		{
 			"le on a histogram, which owns it",
 			coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
 				"latency": promHistogram(coremetrics.HistogramValue{Attrs: labelsOf("le", "1"), Count: 1}),
 			}},
-			svcmetrics.CodeReservedLabelName,
+			coremetrics.CodeReservedLabelName,
 		},
 		{
 			"a gauge name the format cannot spell",
 			coremetrics.SnapshotValue{Gauges: map[string]coremetrics.GaugeMetricValue{
 				"in flight": promGauge(coremetrics.GaugeValue{Value: 1}),
 			}},
-			svcmetrics.CodeInvalidMetricName,
+			coremetrics.CodeInvalidMetricName,
 		},
 		{
 			"a histogram name the format cannot spell",
 			coremetrics.SnapshotValue{Histograms: map[string]coremetrics.HistogramMetricValue{
 				"latency/ms": promHistogram(coremetrics.HistogramValue{Count: 1}),
 			}},
-			svcmetrics.CodeInvalidMetricName,
+			coremetrics.CodeInvalidMetricName,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -490,7 +490,7 @@ func TestPrometheusExporterRefusalIsAtomicAcrossFamilies(t *testing.T) {
 		Histograms: map[string]coremetrics.HistogramMetricValue{"bad.name": promHistogram(coremetrics.HistogramValue{Count: 1})},
 	})
 
-	if !kerrs.HasCode(err, svcmetrics.CodeInvalidMetricName) {
+	if !kerrs.HasCode(err, coremetrics.CodeInvalidMetricName) {
 		t.Fatalf("Export = %v, want INVALID_METRIC_NAME", err)
 	}
 	if buf.Len() != 0 {
@@ -696,7 +696,7 @@ func TestPrometheusRefusesADeltaSnapshot(t *testing.T) {
 		t.Helper()
 		var buf bytes.Buffer
 		err := svcmetrics.NewPrometheusExporter("test", &buf).Export(c.snap)
-		if !kerrs.HasCode(err, svcmetrics.CodeUnsupportedTemporality) {
+		if !kerrs.HasCode(err, coremetrics.CodeUnsupportedTemporality) {
 			t.Fatalf("Export = %v, want UNSUPPORTED_TEMPORALITY", err)
 		}
 		//: nothing is written, exactly as for a refused name.

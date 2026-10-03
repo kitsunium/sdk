@@ -23,7 +23,8 @@ family, never the path. A caller-supplied `Dialer` is used as given there too.
 | `journald_sink.go` | `journaldSink` (`Write`/`Flush`/`Close`) — the datagram framing terminal |
 | `decode.go` | `journaldFactory.Decode` (`core/observe/logger/writer.Decoder`) + key coercion helpers |
 | `socket_windows.go` / `socket_other.go` | `unixDatagrams` — whether the default dialer's socket family exists here (not on Windows) |
-| `codes.go`, `errors.go` | sentinels — range 0.3.31.\* (service slot 0x1f) |
+| `wrap.go` | `wrapOpen` / `wrapWrite` — the single wrap points that put a cause under the mirror's codes; never a value parsed from a config or a record |
+| `internal/core/observe/logger/writer/journald` | its sentinels — range 0.3.31.\* (service slot 0x1f) — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -51,6 +52,8 @@ The `Dialer` seam is code-only. A malformed shape returns the shared
 name only — never the value (secret gate).
 
 ## Error catalogue — range 0.3.31.\*
+
+Declared in `internal/core/observe/logger/writer/journald` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corejournald.X`.
 
 | Code | Sentinel | Trigger |
 |---|---|---|

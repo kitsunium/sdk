@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -199,7 +200,7 @@ func Test_rotatingSink_shiftExisting_renameFails(t *testing.T) {
 		//: freeze the directory so the .1 -> .2 rename fails (restored in cleanup).
 		freezeDirReadOnly(t, dir)
 		//: the rename EACCES surfaces under the rotate sentinel.
-		if serr := s.shiftExisting(); !errs.HasCode(serr, CodeRotFileRotateFailed) {
+		if serr := s.shiftExisting(); !errs.HasCode(serr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("shiftExisting err=%v want rotate-failed", serr)
 		}
 	}
@@ -234,7 +235,7 @@ func Test_rotatingSink_promoteActive_renameFails(t *testing.T) {
 		//: freeze the directory so renaming active -> .1 fails (restored in cleanup).
 		freezeDirReadOnly(t, dir)
 		//: the rename EACCES surfaces under the rotate sentinel.
-		if perr := s.promoteActive(); !errs.HasCode(perr, CodeRotFileRotateFailed) {
+		if perr := s.promoteActive(); !errs.HasCode(perr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("promoteActive err=%v want rotate-failed", perr)
 		}
 	}
@@ -268,7 +269,7 @@ func Test_rotatingSink_gzipActive_createFails(t *testing.T) {
 		//: freeze the directory so creating .1.gz fails (restored in cleanup).
 		freezeDirReadOnly(t, dir)
 		//: the OpenFile EACCES on the .gz sibling surfaces under the rotate sentinel.
-		if gerr := s.gzipActive(); !errs.HasCode(gerr, CodeRotFileRotateFailed) {
+		if gerr := s.gzipActive(); !errs.HasCode(gerr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("gzipActive err=%v want rotate-failed", gerr)
 		}
 	}
@@ -301,7 +302,7 @@ func Test_rotatingSink_gzipActive_compressIntoFails(t *testing.T) {
 			t.Fatalf("remove active: %v", rerr)
 		}
 		//: the ENOENT on the source open surfaces under the rotate sentinel.
-		if gerr := s.gzipActive(); !errs.HasCode(gerr, CodeRotFileRotateFailed) {
+		if gerr := s.gzipActive(); !errs.HasCode(gerr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("gzipActive err=%v want rotate-failed", gerr)
 		}
 	}
@@ -324,7 +325,7 @@ func Test_compressInto_openFails(t *testing.T) {
 		//: a path whose parent does not exist makes os.Open fail with ENOENT.
 		missing := filepath.Join(t.TempDir(), "nosuchdir", "src")
 		//: the open failure surfaces under the rotate sentinel.
-		if cerr := compressInto(io.Discard, missing); !errs.HasCode(cerr, CodeRotFileRotateFailed) {
+		if cerr := compressInto(io.Discard, missing); !errs.HasCode(cerr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("compressInto err=%v want rotate-failed", cerr)
 		}
 	}

@@ -4,7 +4,10 @@
 // SDK carries no protobuf dependency (the same choice as OTLP/JSON, ADR 0048).
 package profiling
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // Wire types of the protocol-buffer encoding.
 const (
@@ -37,7 +40,8 @@ const (
 
 // wire reads one message's bytes, field by field. Every read is bounds-checked:
 // a truncated or overlong varint, or a length past the end, is
-// [ProfileMalformed] — never a panic and never a read past the buffer.
+// [coreprofiling.ProfileMalformed] — never a panic and never a read past the
+// buffer.
 type wire struct {
 	buf []byte
 }
@@ -180,8 +184,8 @@ func (w *wire) varints(dst []uint64, kind uint64) ([]uint64, error) {
 	return dst, nil
 }
 
-// malformed builds [ProfileMalformed] naming what could not be read.
+// malformed builds [coreprofiling.ProfileMalformed] naming what could not be read.
 func malformed(what string) error {
 	//: the part named as a field; the input is never quoted.
-	return errs.Wrap(ProfileMalformed, errs.WrapParams{}, errs.String("reading", what))
+	return errs.Wrap(coreprofiling.ProfileMalformed, errs.WrapParams{}, errs.String("reading", what))
 }

@@ -43,12 +43,12 @@ func NewHandler(enc encoder.Encoder, sink corelogger.Sink, min level.Level) (h c
 	//: reject nil encoder so the format step never panics on the hot path.
 	if enc == nil {
 		//: caller supplied no encoder — return the documented sentinel.
-		return nil, EncoderNil
+		return nil, corelogger.EncoderNil
 	}
 	//: reject nil sink so the transport step never panics on the hot path.
 	if sink == nil {
 		//: caller supplied no sink — return the documented sentinel.
-		return nil, SinkRequired
+		return nil, corelogger.SinkRequired
 	}
 	//: hand back the configured handler bound to the real wall clock.
 	return &genericHandler{enc: enc, sink: sink, min: min, clk: clock.System}, nil
@@ -75,7 +75,7 @@ func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) e
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
 		return errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeCtxCancelled,
+			Code:    corelogger.CodeCtxCancelled,
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/observe/logger.genericHandler.Handle saw a cancelled context",

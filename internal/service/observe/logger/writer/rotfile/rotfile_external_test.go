@@ -12,6 +12,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/rotfile"
 )
@@ -357,7 +358,7 @@ func TestRotFileSymlinkRefused(t *testing.T) {
 			t.Fatalf("opened a symlink target")
 		}
 		//: the refusal must carry the documented open code.
-		if !errs.HasCode(err, rotfile.CodeRotFileOpenFailed) {
+		if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) {
 			t.Errorf("err=%v want CodeRotFileOpenFailed", err)
 		}
 	}

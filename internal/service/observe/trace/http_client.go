@@ -97,7 +97,7 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 	outbound := request.Clone(ctx)
 	//: an unsampled span still injects, with the sampled bit CLEAR, so the
 	//: upstream inherits the decision instead of taking a contradictory one.
-	coretrace.Inject(span.SpanContext(), outbound.Header)
+	Inject(span.SpanContext(), outbound.Header)
 	//: perform the call.
 	answer, callErr := t.next.RoundTrip(outbound)
 	//: a transport fault produced no status to record.

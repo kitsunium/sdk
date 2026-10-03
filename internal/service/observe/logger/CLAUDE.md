@@ -68,8 +68,7 @@ Logger ── Handler (genericHandler / TextHandler)
 | `text_handler.go` | `TextHandler` legacy fused handler (`NewTextHandler`) |
 | `source.go`       | `WithCaller` + `sourceHandler` — an opt-in Handler decorator appending a `source` attribute (`SourceFieldKey`, `file:line:function`) resolved from the captured `RecordEvent.PC`; a foreign `Logger` (not a `*loggerImpl`) comes back unchanged |
 | `pool.go`         | `recordPool` — `recycler.Pool[*chainBuilder]` with pre-sized attrs |
-| `codes.go`        | `Code*` constants — ADR 0005 range **0.3.1.\*** |
-| `errors.go`       | Sentinels — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` |
+| `internal/core/observe/logger` | the codes (ADR 0005 range **0.3.1.\***) and sentinels — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` — declared in the core since ADR 0160; this package declares none |
 
 ## Conventions
 
@@ -121,6 +120,9 @@ Logger ── Handler (genericHandler / TextHandler)
   `pkg/v1/observe/logger/BENCH.md`.
 
 ## Error catalogue — range 0.3.1.\*
+
+Declared in `internal/core/observe/logger` since ADR 0160 §2, beside the ports
+they refuse on: this engine returns them as `corelogger.X` and declares none.
 
 | Code      | Sentinel       | Trigger |
 |---|---|---|

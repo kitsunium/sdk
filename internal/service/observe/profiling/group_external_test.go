@@ -4,12 +4,13 @@ package profiling_test
 import (
 	"testing"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
 
 // goroutine builds a goroutine with labels, a state and a stack.
-func goroutine(labels map[string]string, state string, names ...string) profiling.GoroutineValue {
-	return profiling.GoroutineValue{Labels: labels, State: state, Stack: stack(names...)}
+func goroutine(labels map[string]string, state string, names ...string) coreprofiling.GoroutineValue {
+	return coreprofiling.GoroutineValue{Labels: labels, State: state, Stack: stack(names...)}
 }
 
 // TestGoroutinesGroupByLabelsStateAndTopFrame pins the key — a label absent
@@ -18,7 +19,7 @@ func goroutine(labels map[string]string, state string, names ...string) profilin
 func TestGoroutinesGroupByLabelsStateAndTopFrame(t *testing.T) {
 	t.Parallel()
 	web := map[string]string{"node": "web", "loop": "http"}
-	gs := []profiling.GoroutineValue{
+	gs := []coreprofiling.GoroutineValue{
 		goroutine(web, "select", "runtime.gopark", "runtime.selectgo", "app.Wait", "app.serve"),
 		goroutine(web, "select", "runtime.gopark", "runtime.selectgo", "app.Wait", "app.serve"),
 		goroutine(web, "IO wait", "runtime.gopark", "internal/poll.runtime_pollWait", "net.(*conn).Read"),
@@ -33,7 +34,7 @@ func TestGoroutinesGroupByLabelsStateAndTopFrame(t *testing.T) {
 	if g := groups[0]; g.Count != 2 || g.Top != "app.Wait" || g.Labels["node"] != "web" || g.Labels["loop"] != "http" || len(g.Stack) != 4 {
 		t.Errorf("the largest group = %+v", g)
 	}
-	var io, allRuntime *profiling.GoroutineGroupValue
+	var io, allRuntime *coreprofiling.GoroutineGroupValue
 	for i := range groups {
 		switch groups[i].State {
 		case "IO wait":
@@ -65,18 +66,18 @@ func TestNoValueMergesTwoGroups(t *testing.T) {
 	type tc struct {
 		name   string
 		labels []string
-		gs     []profiling.GoroutineValue
+		gs     []coreprofiling.GoroutineValue
 	}
 	cases := []tc{
-		{"a label holding what separated the next one", []string{"node", "loop"}, []profiling.GoroutineValue{
+		{"a label holding what separated the next one", []string{"node", "loop"}, []coreprofiling.GoroutineValue{
 			goroutine(map[string]string{"node": "a\x00=b"}, "S", "app.T"),
 			goroutine(map[string]string{"node": "a", "loop": "b\x00"}, "S", "app.T"),
 		}},
-		{"a state holding what separated the frame", nil, []profiling.GoroutineValue{
+		{"a state holding what separated the frame", nil, []coreprofiling.GoroutineValue{
 			goroutine(nil, "x\x00y", "z"),
 			goroutine(nil, "x", "y\x00z"),
 		}},
-		{"an absent label and an empty one", []string{"node"}, []profiling.GoroutineValue{
+		{"an absent label and an empty one", []string{"node"}, []coreprofiling.GoroutineValue{
 			goroutine(map[string]string{"node": ""}, "S", "app.T"),
 			goroutine(nil, "S", "app.T"),
 		}},
