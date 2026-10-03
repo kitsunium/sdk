@@ -11,7 +11,11 @@
 // The SDK is one module, github.com/kitsunium/sdk, since ADR 0162. A consumer
 // whose go.mod still requires github.com/kitsunium/sdk/pkg — the public module
 // before it — is not behind by a version but by a module: once the SDK module
-// has a release, the notice is the one command that migrates.
+// has a release, the notice is the one command that migrates. So is a build
+// that requires the SDK module AND one of the modules it merged, whose every
+// package the build then finds twice. The SDK module's releases start at
+// v0.18.0: the proxy also lists its path at v0.0.0, a tag of an earlier
+// history that holds no package, and that version is never advice.
 //
 // This is a WARNING and never an error by default. Being behind is not a
 // violation — it is a fact the maintainer may already know and may have
@@ -37,6 +41,21 @@ const sdkModule string = "github.com/kitsunium/sdk"
 // legacyModule is the public module before ADR 0162, the bare `…/pkg` (ADR
 // 0017). A go.mod that still requires it has a migration to make.
 const legacyModule string = "github.com/kitsunium/sdk/pkg"
+
+// firstSDKModuleRelease is the SDK module's first release (ADR 0162). The proxy
+// also lists the module's path at v0.0.0, a tag of an earlier history
+// whose zip holds a LICENSE and no package: advice to move to it would put a
+// go.mod on an empty module, so no version below this one is ever a candidate.
+const firstSDKModuleRelease string = "v0.18.0"
+
+// mergedModules lists the module paths ADR 0162 merged into the SDK module, in
+// the order the migration command drops them. A build that requires one of
+// them beside the SDK module finds each of its packages in two modules.
+const mergedModules string = legacyModule + " " +
+	sdkModule + "/framework " +
+	sdkModule + "/internal/kernel " +
+	sdkModule + "/internal/core " +
+	sdkModule + "/internal/service"
 
 // defaultProxy is what the go command uses when GOPROXY is unset.
 const defaultProxy string = "https://proxy.golang.org"
@@ -137,7 +156,9 @@ func (r moduleRef) Replaced() bool {
 }
 
 // checkVersion returns the warning text for an outdated SDK, and whether the
-// SDK was found to be outdated at all.
+// SDK was found to be outdated at all. A build that requires the SDK module
+// and still a module it merged is reported too, from the go.mod alone: that
+// build fails already, and the notice is the command that repairs it.
 //
 // Every failure path returns silently: no go.mod, no SDK requirement, a
 // replace directive, GOPROXY=off, no network, a malformed response. A
@@ -146,6 +167,13 @@ func checkVersion(dir string, p probe) (string, bool) {
 	ref, ok := requirementOf(dir, sdkModule)
 	//: a go.mod on the SDK module is measured against its releases.
 	if ok {
+		merged, half := mergedRequirement(dir)
+		//: half migrated: the SDK module beside one it merged is an ambiguous
+		//: import on every package of that one, whatever the versions say.
+		if half {
+			//: no network needed — the go.mod alone says it cannot build.
+			return halfMigrationNotice(ref, merged), true
+		}
 		//: the probe this file has always made, on the one module.
 		return freshness(ref, p)
 	}
@@ -156,9 +184,11 @@ func checkVersion(dir string, p probe) (string, bool) {
 		//: silence, which is the documented behaviour of every failure path.
 		return "", false
 	}
-	releases, err := p.versions(sdkModule)
-	//: until the SDK module has a release, the split modules are still the
-	//: SDK's newest, and the old probe still answers for them.
+	listed, err := p.versions(sdkModule)
+	releases := sdkModuleReleases(listed)
+	//: until the SDK module has a release — the proxy's v0.0.0 is none —
+	//: the split modules are still the SDK's newest, and the old probe still
+	//: answers for them.
 	if err != nil || len(releases) == 0 {
 		//: measured against the module the go.mod requires.
 		return freshness(legacy, p)
@@ -166,6 +196,42 @@ func checkVersion(dir string, p probe) (string, bool) {
 	sortVersions(releases)
 	//: behind by a module, not a version: the notice is the migration.
 	return migrationNotice(legacy.Version, releases[len(releases)-1]), true
+}
+
+// mergedRequirement finds a requirement of a module ADR 0162 merged into the
+// SDK module, through the same go.mod or go.work the SDK requirement was read
+// from, and reports whether there is one. A merged module the build replaces
+// locally is someone's checkout, and does not count.
+func mergedRequirement(dir string) (moduleRef, bool) {
+	//: in the order the migration command drops them, so the notice names the
+	//: first one a reader finds in the command too.
+	for module := range strings.FieldsSeq(mergedModules) {
+		ref, ok := requirementOf(dir, module)
+		//: required and not redirected to a directory: the build resolves it
+		//: from the proxy, beside the SDK module.
+		if ok && !ref.Replaced() {
+			//: one is enough to make the build ambiguous.
+			return ref, true
+		}
+	}
+	//: fully migrated, or never split.
+	return moduleRef{}, false
+}
+
+// sdkModuleReleases keeps the SDK module's releases among versions:
+// firstSDKModuleRelease and above. What it drops is the proxy's v0.0.0 of the
+// path, which holds no package.
+func sdkModuleReleases(versions []string) []string {
+	var kept []string
+	//: one comparison per listed version; the list is a handful of tags.
+	for _, v := range versions {
+		//: below the first release is no release of this module's content.
+		if !semverLess(v, firstSDKModuleRelease) {
+			kept = append(kept, v)
+		}
+	}
+	//: possibly empty, which every caller reads as "no release yet".
+	return kept
 }
 
 // requirementOf finds the go.mod's requirement of module by walking up from
@@ -196,6 +262,13 @@ func freshness(ref moduleRef, p probe) (string, bool) {
 	if err != nil {
 		//: a nudge that breaks a build has failed at being a nudge.
 		return "", false
+	}
+	//: the SDK module's list starts at its first release, whatever older
+	//: version the proxy keeps for its path.
+	if ref.module == sdkModule {
+		//: a pseudo-version sorts below every release, and must not be told
+		//: to move to the empty v0.0.0.
+		versions = sdkModuleReleases(versions)
 	}
 	newer := newerThan(ref.Version, versions)
 	//: up to date, or ahead of the proxy on an unreleased tag.
@@ -729,19 +802,40 @@ func versionNotice(module, cur string, newer []string) string {
 	return b.String()
 }
 
-// migrateCommand is the one command a go.mod still on the split modules
-// migrates with: the SDK module at latest, and every module it replaced
-// dropped, so no package is provided by two modules of the build. A vendor or
-// connector module the go.mod requires is upgraded in the same command.
-func migrateCommand(latest string) string {
+// dropMerged is the half of the migration command that drops every module ADR
+// 0162 merged into the SDK module: `<module>@none` for each, space-separated,
+// so no package is provided by two modules of the build.
+func dropMerged() string {
+	var b strings.Builder
 	//: the order go get reads them in does not matter; this is the order a
 	//: reader checks them against their go.mod.
-	return "go get " + sdkModule + "@" + latest + " " +
-		legacyModule + "@none " +
-		sdkModule + "/framework@none " +
-		sdkModule + "/internal/kernel@none " +
-		sdkModule + "/internal/core@none " +
-		sdkModule + "/internal/service@none"
+	for module := range strings.FieldsSeq(mergedModules) {
+		//: one separator between arguments, none before the first.
+		if b.Len() > 0 {
+			b.WriteString(" ")
+		}
+		b.WriteString(module + "@none")
+	}
+	//: the arguments, ready to follow a go get.
+	return b.String()
+}
+
+// migrateCommand is the one command a go.mod still on the split modules
+// migrates with: the SDK module at latest, and every module it replaced
+// dropped. A vendor or connector module the go.mod requires is upgraded in the
+// same command (vendorHint).
+func migrateCommand(latest string) string {
+	//: the requirement and the removals, together or the build is ambiguous.
+	return "go get " + sdkModule + "@" + latest + " " + dropMerged()
+}
+
+// vendorHint is the line both migration notices end on. A vendor or connector
+// module is named at @latest, never at the SDK's version: since ADR 0162 it is
+// tagged only by a release that changes it, so the SDK's newest version need
+// not exist for it.
+func vendorHint() string {
+	//: the module directory is the reader's to fill in from their go.mod.
+	return "           (plus " + sdkModule + "/<vendor module>@latest for each one go.mod requires)\n"
 }
 
 // migrationNotice renders the warning for a go.mod still on the public module
@@ -754,7 +848,24 @@ func migrationNotice(cur, latest string) string {
 	b.WriteString("  the requirement does, and the old modules must leave go.mod with it, or every\n")
 	b.WriteString("  package is found in two modules and the build fails on an ambiguous import.\n")
 	b.WriteString("  Migrate: " + migrateCommand(latest) + "\n")
-	b.WriteString("           (plus " + sdkModule + "/<vendor module>@" + latest + " for each one go.mod requires)\n")
+	b.WriteString(vendorHint())
+	b.WriteString("  Silence: -version-check=off")
+	//: one block of text, printed verbatim by the caller.
+	return b.String()
+}
+
+// halfMigrationNotice renders the warning for a build that requires the SDK
+// module and still merged, one of the modules it replaced — what a migration
+// that dropped `…/pkg` but not the `…/internal/*` modules leaves behind. The
+// SDK requirement stays as it is; only the removals are left to make.
+func halfMigrationNotice(ref, merged moduleRef) string {
+	var b strings.Builder
+	b.WriteString("warning: the build requires " + sdkModule + " " + ref.Version + " and still\n")
+	b.WriteString("  " + merged.module + " " + merged.Version + ", a module the SDK module replaced (ADR 0162):\n")
+	b.WriteString("  each of its packages is found in two modules, and the build fails on an\n")
+	b.WriteString("  ambiguous import. Every replaced module leaves together:\n")
+	b.WriteString("  Migrate: go get " + dropMerged() + "\n")
+	b.WriteString(vendorHint())
 	b.WriteString("  Silence: -version-check=off")
 	//: one block of text, printed verbatim by the caller.
 	return b.String()

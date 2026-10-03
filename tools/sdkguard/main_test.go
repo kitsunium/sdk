@@ -2514,16 +2514,31 @@ func Test_checkVersion(t *testing.T) {
 		wantText  string
 	}
 	tests := []tc{
-		{"behind by patches", "v0.1.9", []string{"v0.1.9", "v0.1.10", "v0.1.24"}, true, "2 patch releases behind"},
-		{"on the latest release", "v0.1.24", []string{"v0.1.9", "v0.1.24"}, false, ""},
-		{"ahead of the proxy", "v0.2.0", []string{"v0.1.24"}, false, ""},
-		{"a major gap says so", "v0.9.0", []string{"v0.9.0", "v1.0.0"}, true, "crossing a MAJOR version"},
-		{"a minor gap says so", "v0.1.0", []string{"v0.1.0", "v0.2.0"}, true, "crossing a minor version"},
+		{"behind by patches", "v0.18.9", []string{"v0.18.9", "v0.18.10", "v0.18.24"}, true, "2 patch releases behind"},
+		{"on the latest release", "v0.18.24", []string{"v0.18.9", "v0.18.24"}, false, ""},
+		{"ahead of the proxy", "v0.19.0", []string{"v0.18.24"}, false, ""},
+		{"a major gap says so", "v0.19.0", []string{"v0.19.0", "v1.0.0"}, true, "crossing a MAJOR version"},
+		{"a minor gap says so", "v0.18.0", []string{"v0.18.0", "v0.19.0"}, true, "crossing a minor version"},
 		{
 			"prereleases are not candidates",
-			"v0.1.24",
-			[]string{"v0.1.24", "v0.2.0-rc1", "v0.0.0-20260101120000-abcdef123456"},
+			"v0.18.24",
+			[]string{"v0.18.24", "v0.19.0-rc1", "v0.0.0-20260101120000-abcdef123456"},
 			false, "",
+		},
+		{
+			//: the proxy lists the path at v0.0.0, a tag whose zip holds a
+			//: LICENSE: a build on a pseudo-version of main sorts below it, and
+			//: must not be told to move onto an empty module.
+			"the v0.0.0 of the path is no release",
+			"v0.0.0-20261003145325-1896ad230f09",
+			[]string{"v0.0.0"},
+			false, "",
+		},
+		{
+			"below the first release nothing is a candidate, above it everything is",
+			"v0.0.0-20261003145325-1896ad230f09",
+			[]string{"v0.0.0", "v0.18.0"},
+			true, "go get " + sdkModule + "@v0.18.0",
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -2559,6 +2574,11 @@ func Test_checkVersionMigration(t *testing.T) {
 		wantText  []string
 	}
 	onPkg := "module x\n\nrequire (\n\t" + legacyModule + " v0.17.0\n\t" + sdkModule + "/framework v0.17.0\n)\n"
+	// What the migration without the internal modules leaves: the SDK module,
+	// and the three internal modules go mod tidy had listed as indirect.
+	halfway := "module x\n\nrequire (\n\t" + sdkModule + " v0.18.0\n\t" +
+		sdkModule + "/internal/core v0.17.0 // indirect\n\t" +
+		sdkModule + "/internal/kernel v0.17.0 // indirect\n)\n"
 	tests := []tc{
 		{
 			"the SDK module released: migrate",
@@ -2571,6 +2591,9 @@ func Test_checkVersionMigration(t *testing.T) {
 				"go get " + sdkModule + "@v0.18.1 " + legacyModule + "@none " + sdkModule + "/framework@none",
 				sdkModule + "/internal/service@none",
 				"ambiguous import",
+				//: a vendor module is tagged only by a release that changes it,
+				//: so the SDK's newest version need not exist for it.
+				sdkModule + "/<vendor module>@latest",
 			},
 		},
 		{
@@ -2579,6 +2602,54 @@ func Test_checkVersionMigration(t *testing.T) {
 			map[string][]string{legacyModule: {"v0.17.0", "v0.17.1"}},
 			true,
 			[]string{"1 patch releases behind", "go get " + legacyModule + "@v0.17.1"},
+		},
+		{
+			//: the proxy lists the root path at v0.0.0 today, and it is no
+			//: release of the SDK module: the old module is still the newest.
+			"the proxy's v0.0.0 is no release of the SDK module: the old probe answers",
+			onPkg,
+			map[string][]string{sdkModule: {"v0.0.0"}, legacyModule: {"v0.17.0", "v0.17.1"}},
+			true,
+			[]string{"1 patch releases behind", "go get " + legacyModule + "@v0.17.1"},
+		},
+		{
+			"the proxy's v0.0.0 and an up-to-date pin: silent",
+			onPkg,
+			map[string][]string{sdkModule: {"v0.0.0"}, legacyModule: {"v0.17.0"}},
+			false, nil,
+		},
+		{
+			//: told from the go.mod alone, whatever the proxy answers.
+			"the SDK module beside a module it merged: the removals are the notice",
+			halfway,
+			map[string][]string{sdkModule: {"v0.18.0"}},
+			true,
+			[]string{
+				"requires " + sdkModule + " v0.18.0 and still",
+				//: the first merged module in the command's order is the one named.
+				sdkModule + "/internal/kernel v0.17.0, a module the SDK module replaced",
+				"ambiguous import",
+				"Migrate: go get " + legacyModule + "@none " + sdkModule + "/framework@none",
+				sdkModule + "/internal/kernel@none " + sdkModule + "/internal/core@none " + sdkModule + "/internal/service@none",
+				sdkModule + "/<vendor module>@latest",
+			},
+		},
+		{
+			"the SDK module beside a merged one, with no network: still told",
+			halfway,
+			nil,
+			true,
+			[]string{"a module the SDK module replaced"},
+		},
+		{
+			//: a merged module redirected to a directory is someone's checkout,
+			//: and what is left is the freshness of the SDK module.
+			"a merged module replaced locally does not count",
+			halfway + "replace " + sdkModule + "/internal/core => ../core\n" +
+				"replace " + sdkModule + "/internal/kernel => ../kernel\n",
+			map[string][]string{sdkModule: {"v0.18.0", "v0.18.1"}},
+			true,
+			[]string{"1 patch releases behind", "go get " + sdkModule + "@v0.18.1"},
 		},
 		{
 			"no SDK module release and up to date: silent",
@@ -2602,7 +2673,11 @@ func Test_checkVersionMigration(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		notice, stale := checkVersion(modDir(t, c.gomod), proxyStubFor(t, c.lists))
+		p := probe{proxy: "http://127.0.0.1:9", client: &http.Client{}}
+		if c.lists != nil {
+			p = proxyStubFor(t, c.lists)
+		}
+		notice, stale := checkVersion(modDir(t, c.gomod), p)
 		if stale != c.wantStale {
 			t.Fatalf("stale = %v, want %v (notice: %q)", stale, c.wantStale, notice)
 		}
@@ -2611,12 +2686,60 @@ func Test_checkVersionMigration(t *testing.T) {
 				t.Errorf("notice lacks %q:\n%s", want, notice)
 			}
 		}
+		// Whatever the case, the empty v0.0.0 of the path is never a target.
+		if strings.Contains(notice, "@v0.0.0") {
+			t.Errorf("notice advises the empty v0.0.0:\n%s", notice)
+		}
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// The SDK module's releases start at v0.18.0 (ADR 0162); the proxy's v0.0.0 of
+// the path, and anything else below the floor, is no candidate.
+func Test_sdkModuleReleases(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name string
+		in   []string
+		want string
+	}
+	tests := []tc{
+		{"the empty v0.0.0 alone", []string{"v0.0.0"}, ""},
+		{"the floor itself is kept", []string{"v0.0.0", firstSDKModuleRelease}, firstSDKModuleRelease},
+		{"above the floor, in order", []string{"v0.18.1", "v0.17.9", "v1.0.0"}, "v0.18.1 v1.0.0"},
+		{"nothing listed", nil, ""},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := strings.Join(sdkModuleReleases(c.in), " "); got != c.want {
+			t.Errorf("sdkModuleReleases(%v) = %q, want %q", c.in, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// The removals name every module ADR 0162 merged, each once, in the order a
+// reader checks them against a go.mod.
+func Test_dropMerged(t *testing.T) {
+	t.Parallel()
+	want := legacyModule + "@none " + sdkModule + "/framework@none " +
+		sdkModule + "/internal/kernel@none " + sdkModule + "/internal/core@none " +
+		sdkModule + "/internal/service@none"
+	if got := dropMerged(); got != want {
+		t.Errorf("dropMerged() = %q, want %q", got, want)
+	}
+	if got := migrateCommand("v0.18.0"); got != "go get "+sdkModule+"@v0.18.0 "+want {
+		t.Errorf("migrateCommand = %q", got)
 	}
 }
 
