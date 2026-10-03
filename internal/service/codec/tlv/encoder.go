@@ -8,16 +8,11 @@ import (
 	"io"
 	"math"
 	"reflect"
-	"sync"
 
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
-
-// maxRetainedScratchBytes caps the size of recycled encode-scratch
-// buffers. A one-off oversized payload would otherwise pin a large
-// allocation in the pool for the lifetime of the GC window. 256 KiB is
-// the project-wide threshold.
-const maxRetainedScratchBytes int = 256 << 10
 
 // scratchInitialCap is the starting capacity for fresh pooled scratch
 // buffers. 256 bytes fits a typical small TLV record without forcing
@@ -30,52 +25,22 @@ const scratchInitialCap int = 256
 // record lengths (struct field names, small scalars, sub-record sizes).
 const uvarintSingleByteCap uint64 = 0x80
 
-// scratchPool reuses []byte scratch buffers across tlvEncoder.Encode
-// and Marshal/Append calls. Without it every record paid one
-// allocation for the scratch slice that grows via append's geometric
-// doubling. Returning a *[]byte avoids the interface-boxing alloc on
-// sync.Pool.Put — per the pool & locality engineer's imposed rules.
-var scratchPool = sync.Pool{
-	New: newScratch,
-}
-
-// newScratch returns a freshly-allocated *[]byte with the standard
-// initial capacity. Uses the Go 1.26+ new(expr) form so the slice
-// header is heap-allocated in one shot without the v := expr; &v
-// intermediate (KTN-VAR-NEWEXPR).
-func newScratch() any {
-	//: pool stores pointers to avoid the Put-time boxing alloc.
-	return new(make([]byte, 0, scratchInitialCap))
-}
-
-// getScratch rents a *[]byte from scratchPool with a clean header.
-func getScratch() *[]byte {
-	//: pool invariant guard: New always returns *[]byte.
-	bp, ok := scratchPool.Get().(*[]byte)
-	//: pool invariant guard — never expected to fail at runtime.
-	if !ok {
-		//: invariant broken — fail loud at the call site.
-		panic("service/codec/tlv: scratchPool yielded non-*[]byte")
-	}
-	//: reset header so caller writes from offset 0.
-	*bp = (*bp)[:0]
-	//: caller owns the buffer until putScratch returns it.
-	return bp
-}
-
-// putScratch returns bp to the pool unless its capacity exceeds the
-// cap-discard threshold (otherwise a one-off huge payload pins the
-// buffer).
-func putScratch(bp *[]byte) {
-	//: cap-discard: drop oversized buffers, the GC reclaims them.
-	if cap(*bp) > maxRetainedScratchBytes {
-		//: orphan the buffer.
-		return
-	}
-	//: zero the header before returning to the pool.
-	*bp = (*bp)[:0]
-	scratchPool.Put(bp)
-}
+// encodeScratch recycles the record buffers of the streaming Encoder — the
+// only encode path that rents one: Marshal hands Append a nil destination
+// and Append writes into the caller's. Without it every record paid for a
+// scratch slice grown by append's doubling. It is the kernel recycler's
+// CappedPool over *[]byte, the shape kernel/buffer has: a pointer, so a Put
+// boxes nothing; reset to zero length on Put; and orphaned instead when a
+// record grew it past scratch.MaxRetainedBufBytes, so one oversized record
+// cannot pin its buffer in the pool. That ceiling is the codec domain's,
+// read rather than copied, so it cannot drift from the one the other codecs
+// release their buffers under.
+var encodeScratch = recycler.NewCappedPool[*[]byte](
+	func() *[]byte { return new(make([]byte, 0, scratchInitialCap)) },
+	func(bp *[]byte) { *bp = (*bp)[:0] },
+	func(bp *[]byte) int { return cap(*bp) },
+	scratch.MaxRetainedBufBytes,
+)
 
 // tlvEncoder adapts an io.Writer to codec.Encoder. Each Encode call emits
 // exactly one independent TLV record.
@@ -86,10 +51,8 @@ type tlvEncoder struct {
 // Encode serialises v as a single TLV record and writes it to the wrapped
 // writer.
 func (e *tlvEncoder) Encode(v any) error {
-	//: rent a recycled scratch buffer (zero-len header). Pool eliminates
-	//: the fresh `nil` slice allocation that grew via append doubling
-	//: on every Encode call. Cap-discard release returns it.
-	bp := getScratch()
+	//: rent a recycled scratch buffer — empty, since the pool resets on Put.
+	bp := encodeScratch.Get()
 	//: encode into the pooled scratch first so a partial write never
 	//: leaves a torn record on the wire.
 	buf, eerr := encodeValue(*bp, v, 0)
@@ -97,16 +60,18 @@ func (e *tlvEncoder) Encode(v any) error {
 	if eerr != nil {
 		//: stash the (possibly grown) backing array before bailing.
 		*bp = buf
-		putScratch(bp)
+		//: the pool resets it, or orphans it past the ceiling.
+		encodeScratch.Put(bp)
 		//: caller sees the wrapped TLV error.
 		return eerr
 	}
 	//: hand the whole record to the writer in one shot.
 	n, werr := e.w.Write(buf)
 	//: stash the (possibly grown) backing array back into the pool
-	//: before any error wrap so the slow path also amortises.
+	//: before any error wrap so the slow path also amortises. io.Writer
+	//: forbids Write from retaining buf, so it is recyclable once Write returns.
 	*bp = buf
-	putScratch(bp)
+	encodeScratch.Put(bp)
 	//: detect partial writes — Go's io.Writer contract permits n < len(buf)
 	//: with a nil error, but a torn TLV record on the wire is unrecoverable.
 	//: Surface as io.ErrShortWrite so callers can errors.Is() against it.

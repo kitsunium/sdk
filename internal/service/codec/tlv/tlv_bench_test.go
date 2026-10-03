@@ -6,6 +6,8 @@ import (
 	"runtime"
 	"strconv"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
 // benchScratchCap pre-sizes the Append destination so the encode benchmarks
@@ -218,7 +220,7 @@ func benchStreamCases() []benchStreamCase {
 		{name: "scalar", value: benchStreamScalar},
 		{name: "mixed", value: benchMixed{ID: 9_007_199_254_740_993, Name: "kitsunium", Active: true, Ratio: 0.5, Count: 42}},
 		{name: "large", value: benchLargeSlice()},
-		{name: "oversize", value: make([]byte, 2*maxRetainedScratchBytes)},
+		{name: "oversize", value: make([]byte, 2*scratch.MaxRetainedBufBytes)},
 	}
 }
 

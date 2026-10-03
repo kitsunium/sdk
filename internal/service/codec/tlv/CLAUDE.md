@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T01:02:40Z -->
 # internal/service/codec/tlv/
 
 ## Purpose
@@ -97,14 +97,26 @@ reuse the input `data`, so aliasing it risks a use-after-free — the
 the cached `structTypeInfo`, inline-scalar dispatch, pre-computed name
 prefixes, and typed root decode (Phases 6-8).
 
-The encode scratch is a **local** `sync.Pool` of `*[]byte` (`scratchPool`,
-`encoder.go`), capped at `maxRetainedScratchBytes = 256 << 10`. It is
-deliberately NOT part of the shared `internal/core/codec/scratch`
-mutualisation: that package pools `*bytes.Buffer` / `*bytes.Reader` (the shape
-the eleven library-mediated codecs share), whereas TLV's varint encoder grows a
-raw `[]byte` and would gain nothing from a `bytes.Buffer` wrapper. The shared
-`256 << 10` retain threshold is matched intentionally — it is the project-wide
-oversize-discard ceiling, not copied pool boilerplate.
+The encode scratch is `encodeScratch` (`encoder.go`), a
+`recycler.CappedPool[*[]byte]` — the kernel primitive of ADR 0010, in the shape
+`kernel/buffer` has — and only the streaming `Encoder` rents from it: `Marshal`
+hands `Append` a nil destination and `Append` writes into the caller's. It
+resets a buffer to zero length on `Put`, not on `Get`, and orphans one a record
+grew past `scratch.MaxRetainedBufBytes` instead (discard-before-reset), so an
+oversized record pays for its own buffer and cannot pin it in the pool. The
+ceiling is read from `internal/core/codec/scratch`, the codec domain's single
+source for it, and never copied into a local constant. Two neighbours were
+rejected on their shape: `scratch.AcquireBuffer` pools `*bytes.Buffer`, which
+cannot adopt the raw `[]byte` TLV's varint encoder grows by `append` without
+copying the record; `kernel/buffer` pools the right type but with the logger's
+thresholds — a 1 KiB first buffer and a 64 KiB ceiling — so records between 64
+and 256 KiB would stop being recycled. Moving off the hand-rolled `sync.Pool`
+it replaced changed no allocation count and costs **3.5 ns per rent and
+return** — `CappedPool.Put` is not inlined and calls its cap check and its
+reset through function values, the indirection every `CappedPool` consumer
+pays (`BENCH.md` §7). Do not hand-roll a `sync.Pool` again to win those
+nanoseconds back: it re-creates the duplicated cap-discard ADR 0010
+consolidated.
 
 ## Verification
 
@@ -126,6 +138,8 @@ guards (`BENCH.md` §7). `TestAllocBudget/stream-encode` holds the streaming
 `Encoder` at **0 allocations** — it reports 2 when `Encode` bypasses the pool —
 and runs only on the race-off alloc lane (`make test-alloc`), like every
 `codec_integration_test.go`. `Test_tlvEncoder_Encode` rents the pool back after
-every case, an over-ceiling record included, and fails if a buffer comes out
-non-empty or wider than the retain ceiling — which is what an unbounded pool
-would hand out.
+every case — a record that fails halfway and an over-ceiling record included —
+and fails if a buffer comes out non-empty, narrower than `scratchInitialCap` or
+wider than the retain ceiling: a reset that stopped truncating shows up as
+`len=11` after the mid-record failure, and an unbounded pool as a 532 480-byte
+buffer handed out again.

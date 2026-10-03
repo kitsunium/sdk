@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T01:02:40Z -->
 # internal/core/codec/scratch/
 
 ## Purpose
@@ -55,6 +55,12 @@ plus the `baseenc` JSON-mediation buffer — eleven consumers. `AcquireReader` /
 `ReleaseReader`: `service/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
 a recyclable `*bytes.Reader`). The `≥2-consumer` rule for a shared primitive
 is satisfied many times over.
+
+`MaxRetainedBufBytes` alone: `service/codec/tlv`. Its streaming encoder grows a
+raw `*[]byte` by `append`, a shape `AcquireBuffer` cannot serve without a copy,
+so it keeps its own `recycler.CappedPool[*[]byte]` — and passes it this
+constant as the ceiling instead of declaring a second `256 << 10`, which is
+what the Do NOT below asks of a codec with its own pool.
 
 ## Do NOT
 

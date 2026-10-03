@@ -18,6 +18,10 @@ func AcquireReader(src []byte) *bytes.Reader // returns a reader positioned at s
 func ReleaseReader(r *bytes.Reader)          // repools (no cap-discard — fixed-size)
 ```
 
+`MaxRetainedBufBytes` is the codec domain's one ceiling. A codec that pools a
+buffer shape this package does not offer passes it to a
+`recycler.CappedPool` of its own rather than declaring another threshold.
+
 ## Usage
 
 ```go
