@@ -56,7 +56,7 @@ internal/kernel/
 | Package | Purpose | Code range |
 |---|---|---|
 | `fs/flock/` | `TryLock(file)` / `Unlock(file)` / `Native` — an exclusive lock on a whole file that never blocks: `flock(LOCK_EX\|LOCK_NB)` on Linux and the BSDs, `LockFileEx` over every byte with `LOCKFILE_FAIL_IMMEDIATELY` on Windows (ADR 0081), `errors.ErrUnsupported` where neither exists; a caller polls on its own clock. The copy `service/app/lock` and `service/security/session` each carried (ADR 0159 §3) | (none — contention is `(false, nil)`, any other failure the kernel's errno, unwrapped) |
-| `fs/pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because the two callers in view want opposite verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
+| `fs/pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because its callers — `service/app/lock`, `service/proc/ipc`, `service/security/session` — want different verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
 | `fs/winacl/` | `GrantsAnyone(dir, onDirectory, onFilesWithin)` — reads a Windows directory's DACL and reports whether Everyone, Authenticated Users or BUILTIN\Users holds a right on the directory or on what the files created in it inherit, naming every answer that is not a verdict; plus the rights and the three masks (`ReplaceRights`, `CreateRights`, `ContentRights`) the SDK's directory rules ask (ADR 0084, ADR 0086, ADR 0095). Moved from `service/app/lock`, which exported it for `service/data/queue`. The reader is Windows-only; the vocabulary compiles everywhere | (none — a failed Win32 call travels as its status inside `observed`) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
@@ -115,7 +115,9 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   and its components — no lock, no directory role, no policy. It shipped with
   one in-tree consumer, `internal/service/app/lock`, and that was stated rather than
   dressed up; `internal/service/proc/ipc` is the second (its socket directory's
-  parents); three neighbours ask a related question with hand-rolled checks
+  parents) and `internal/service/security/session` the third (its file store's
+  `Dir`), each with a policy of its own (ADR 0154, as built); three neighbours
+  ask a related question with hand-rolled checks
   today (`internal/service/data/queue`'s symlinked state directory,
   `internal/core/data/vfs`'s `PathEscaped`, `internal/service/observe/logger/writer/rotfile`'s
   `refuseSymlink`) and none of them can ask THIS one. It deliberately produces

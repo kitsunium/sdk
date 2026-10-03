@@ -55,9 +55,10 @@ the internal one, so every facade naming it shares its identity
 (`pkg/v1/CLAUDE.md` §Public surface contract), not because one facade links
 the other.
 
-Each moved here from `pkg/v1/<name>` in one minor release, with no alias left
-at the old path — a clean break, permitted only while the module is v0
-(ADR 0155 §4, extending ADR 0040).
+Each that existed before moved here from `pkg/v1/<name>` in one minor
+release, with no alias left at the old path — a clean break, permitted only
+while the module is v0 (ADR 0155 §4, extending ADR 0040). `mail/spool` is new in the same release: the spool
+was published by `mail` until ADR 0160 gave it a facade of its own.
 
 ## Do NOT
 

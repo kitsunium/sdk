@@ -54,9 +54,10 @@ signatures — `sql.Dialect`, `sql.Migration` — so a consumer's documentation
 never shows an internal package: the one sibling import in the family, which
 both packages' `CLAUDE.md` files name.
 
-Each moved here from `pkg/v1/<name>` in one minor release, with no alias left
-at the old path — a clean break, permitted only while the module is v0
-(ADR 0155 §4, extending ADR 0040).
+Each that existed before moved here from `pkg/v1/<name>` in one minor
+release, with no alias left at the old path — a clean break, permitted only
+while the module is v0 (ADR 0155 §4, extending ADR 0040). The per-format children, `transform` and
+`codec/strictjson/httpbody` are new in the same release and had no earlier path.
 
 ## Do NOT
 

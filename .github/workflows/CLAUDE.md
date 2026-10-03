@@ -32,7 +32,7 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
 
 1. `bazel-contrib/setup-bazel@…` — caches `bazelisk`, disk cache keyed on `.bazelrc`+`.bazelversion`+`MODULE.bazel`+all `go.mod`/`go.sum`, plus the repository cache.
 2. **Drift check** — `bazel mod tidy && bazel run //:gazelle`, then `git diff --exit-code` AND a check for untracked `BUILD.bazel`/`go.mod`/`go.sum`. Catches both modifications and new files (post-audit finding #11).
-3. **README drift + determinism** — `gomarkdoc@v1.1.0` installed, then `scripts/pre-commit/check-readme-drift.sh` (every `pkg/v1` README matches its package doc comment) and `check-readme-determinism.sh` (two renderings agree) — ADR 0008.
+3. **README drift + determinism** — `gomarkdoc@v1.1.0` installed, then `scripts/pre-commit/check-readme-drift.sh` (every generated README — `pkg/v1`'s and the framework's — matches its package doc comment) and `check-readme-determinism.sh` (two renderings agree) — ADR 0008.
 4. `bazel build --config=ci //...`
 5. `bazel test --config=ci //...` — race on, so every `//go:build !race` file is dropped at compile time. Step 6 is their only gate.
    Then **framework suites** — `make test-framework`: `go test -race`, `GOWORK=off`, in every framework module of the census. It is the gate of `//framework/internal/kit:kit_test`, `manual` under Bazel because the suite reads its own sources and positions relative to its module root (ADR 0147, rule 12); `test-framework` is in `scripts/ci-gates-check.sh`'s GATES.

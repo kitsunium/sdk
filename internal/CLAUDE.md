@@ -9,8 +9,10 @@ The SDK's private layer. Everything here is blocked from external import by Go's
 kernel/    stdlib-only, generic primitives (no domain vocabulary), by family:
            concur/, collections/, fs/, and a root for errs, clock, backoff,
            semver and plugin (ADR 0155)
-core/      domain interfaces and domain values
-service/   concrete implementations of core contracts
+core/      domain interfaces, domain values and every error code, by family:
+           app/, crypto/, data/, net/, observe/, proc/, security/ (ADR 0155,
+           ADR 0160)
+service/   concrete implementations of core contracts, at the same paths
 ```
 
 ## Dependency direction
@@ -108,8 +110,8 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
   group: unrelated declarations sharing a file is `KTN-STRUCT-COHESION`, and
   it still fires.
 - **Doc comments follow Effective Go.** Lead with the identifier name and name the parameters and return values inline (`Foo returns the X computed from y and z.`). No Javadoc-style `Params:` / `Returns:` sections — they were removed project-wide in PR #26. Every control block still takes a `//:` intent comment; every `case` label has its own intent comment.
-- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 927** test files under `internal/` define one, while **437** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
-- **Interface assertions live in `*_compliance.go`**: a compile-time `var _ Port = (*impl)(nil)` sits in a `<name>_compliance.go` file (or a test file), never beside the implementation — `KTN-IFACE-ASSERT-PLACEMENT` (17 occurrences).
+- **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 955** test files under `internal/` define one, while **483** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
+- **Interface assertions live in `*_compliance.go`**: a compile-time `var _ Port = (*impl)(nil)` sits in a `<name>_compliance.go` file (or a test file), never beside the implementation — `KTN-IFACE-ASSERT-PLACEMENT` (19 such files under `internal/`).
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
   group and may share a file — `core/observe/logger/level`'s `unknown.go` — or stay
   split as `codes.go` / `errors.go` where the package is large enough for the
@@ -124,9 +126,9 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 ## Do NOT
 
 - Move a logger-specific or codec-specific concept into `kernel/`. The kernel rule is both "stdlib-only" AND "generic". `level` was moved OUT for that reason.
-- Call `fmt.Errorf` / `errors.New` in production. All errors go through `errs.Define` / `errs.Wrap`.
+- Call `fmt.Errorf` / `errors.New` in production. All errors go through `errs.Define` / `errs.Wrap` — `make guard` fails on either call (ADR 0161) — and `errs.Define` itself only in a `core/` package (ADR 0160).
 - Reference `service/*` from `core/*` or `kernel/*`; the direction is top-down.
-- Add a third-party import in `kernel/*` or `core/*` — codec parsers and encoders live in `service/data/codec/*`.
+- Add a third-party import anywhere under `internal/`. Every internal module links the standard library alone (ADR 0156): the codecs are written natively under `service/data/codec/*`, and a vendor integration is a module of its own under `third-party/` (ADR 0157).
 
 ## Verification
 
@@ -141,8 +143,7 @@ bazel query 'kind("go_library", deps(//internal/kernel/...)) except //internal/k
 # expected: empty result
 
 # Fallback (go test — still works for quick local iteration)
-GOWORK=off
 for m in internal/kernel internal/core internal/service; do
-  (cd $m && go test -race -cover ./...)
+  (cd $m && GOWORK=off go test -race -cover ./...)
 done
 ```

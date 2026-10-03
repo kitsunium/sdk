@@ -12,8 +12,8 @@ the analyzer, the generator, `kit check`.
 
 | Path | Package | Status |
 |---|---|---|
-| `model/` | the graph types and the ID grammar (`Version` 5) | V-0 |
-| `kit/` | the runtime a product imports — the platform's kit moved whole (V-A to V-D: declarations, stores and CQRS, workflows and history, privacy, modules, watches), minus the Studio's pages and every route that acts (D13), plus the process profiles, listeners, binaries and roles | moved |
+| `model/` | the graph types and the ID grammar (`Version` 5), aliased from `model/internal/core`, where each carries its role suffix | V-0 |
+| `kit/` | the runtime a product imports — the platform's kit moved whole (V-A to V-D: declarations, stores and CQRS, workflows and history, privacy, modules, watches), minus the Studio's pages and every route that acts (D13), plus the process profiles, listeners, binaries and roles; beneath it the opt-in subsystems a blank import enables — `config/toml`, `config/yaml`, `server`, `studio` — and `storetest`, the stores' conformance suite every engine runs | moved |
 | `internal/kit/` | the implementation behind `kit/`, under role-suffixed names (`StoreService` for `Store`…), and the opt-in subsystems' hooks (`plug/`, `serverkit/`, `studiokit/`) | moved |
 | `telemetry/` | the telemetry port and its exporter (ADR 0149) | new |
 | `entitlement/` | a vendor-signed roster → a grant, with an offline cache, an anti-rollback ratchet and a CI seat (ADR 0079) — was `pkg/v1/entitlement` | moved (ADR 0158) |

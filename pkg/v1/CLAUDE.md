@@ -81,7 +81,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `proc/systemd/listen/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/proc/systemd/listen/README.md` |
 | `proc/systemd/notify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/proc/systemd/notify/README.md` |
 | `proc/signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/proc/signal/README.md` |
-| `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` returning the `Listener` port, `NewDialer(Config)` the `Dialer` port, `Dial(ctx, Config)` over a `0700` directory, `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the ports, `Peer` and `Conn` alias `internal/core/proc/ipc`, so a test can double either end (ADR 0160); the nine codes re-exported |
+| `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` returning the `Listener` port, `NewDialer(Config)` the `Dialer` port, `Dial(ctx, Config)` over a `0700` directory whose path above is refused where another account could steer it (`CodePathUnsafe`), `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the ports, `Peer` and `Conn` alias `internal/core/proc/ipc`, so a test can double either end (ADR 0160); the nine codes re-exported | `pkg/v1/proc/ipc/README.md` |
 
 The distribution packages — `git`, `selfupdate`, `entitlement` and `gate` — are
 the framework's since ADR 0158: `github.com/kitsunium/sdk/framework/<name>`,
@@ -132,8 +132,8 @@ at `internal/kernel/semver`. `transform` publishes the compressors beside
 
 The application facades — `config`, `cli`, `i18n`, `validation`, `view`,
 `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`,
-`lock`, `id` and `mail` (which also publishes the mail spool) — are children
-of `app/`, a family directory with no Go code of its own (ADR 0155):
+`lock`, `id` and `mail` (with the mail spool beneath it, `mail/spool`, a
+facade of its own since ADR 0160) — are children of `app/`, a family directory with no Go code of its own (ADR 0155):
 `github.com/kitsunium/sdk/pkg/v1/app/<name>`. They moved from the root of
 `pkg/v1` with no alias left behind, under the same v0 licence. With them every
 facade sits in its family, and the root of `pkg/v1` holds `errs` and `clock`
@@ -152,7 +152,7 @@ primitive is published beside its domain in `data/cache`. A published alias
 freezes the kernel shape it names: `ring.Queue` is an interface and now
 grows only by a sibling (ADR 0039).
 
-The `data/codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
+The legacy byte-level `codec/baseenc` package — an `Encoding` enum over raw bytes — was removed (PR #27) in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch, so every encoding format goes through the same verb. `data/codec/baseenc` today is something else: the per-format facade of ADR 0134, which registers the nine base-N Formats and offers no byte-level API.
 
 ## Module
 
@@ -219,7 +219,7 @@ GOWORK=off go test -race -cover ./v1/...
 ## Subtree
 
 - `observe/` — see `pkg/v1/observe/CLAUDE.md` (the observe family — `logger`, `metrics`, `trace`, `profiling` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/observe` to import)
-- `data/` — see `pkg/v1/data/CLAUDE.md` (the data family — `codec`, `sql`, `docstore`, `queue`, `cache`, `vfs`, `semver` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/data` to import)
+- `data/` — see `pkg/v1/data/CLAUDE.md` (the data family — `codec`, `transform`, `sql`, `docstore`, `queue`, `cache`, `vfs`, `semver` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/data` to import)
 - `app/` — see `pkg/v1/app/CLAUDE.md` (the app family — `config`, `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`, `lock`, `id`, `mail` — and the rule that put them together; a directory with no Go code, so there is no `pkg/v1/app` to import)
 - `observe/logger/` — see `pkg/v1/observe/logger/CLAUDE.md`
 - `app/mail/` — see `pkg/v1/app/mail/CLAUDE.md`
@@ -302,9 +302,10 @@ widening); ADR 0040 covers this half, and gives it an expiry date — a concrete
 shape may change while the module is v0, said out loud, and **not after**.
 
 `docs/pre-v1-published-shape-audit.md` is the inventory that licence
-applies to: **125 concrete structs**, split by what a change to each actually
-costs. 43 are construction shapes a caller fills in by field name, where adding
-a field is free. The expensive group is the `*Value` shapes the SDK **returns** —
+applies to: **248 concrete structs** on the reorganised tree (125 when it was
+first taken), split by what a change to each actually costs. 70 are
+construction shapes a caller fills in by field name, where adding a field is
+free. The expensive group — 124 — is the `*Value` shapes the SDK **returns**:
 a caller destructures those, so even an added field breaks a composite literal
 written without field names.
 

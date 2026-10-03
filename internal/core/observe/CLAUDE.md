@@ -18,8 +18,8 @@ A domain belongs here when what it carries is the process's account of
 ITSELF, kept for somebody other than the caller of the call being made: a line
 that says what happened (`logger`), a number that says how much (`metrics`), a
 span that says how long and on whose behalf (`trace`) — OpenTelemetry's three
-signals — and, in the engine and facade layers, the profiles that say where the
-time and the memory went (`profiling`). `otel` is here because it is what two
+signals — and the profiles that say where the time and the memory went
+(`profiling`). `otel` is here because it is what two
 of the signals share: the attribute, resource and scope types of
 OpenTelemetry's `common.proto`, extracted so that neither signal borrows the
 other's model (ADR 0051 §Decision 2).

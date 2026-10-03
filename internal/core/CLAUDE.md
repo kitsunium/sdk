@@ -18,8 +18,8 @@ code mirrors of the logger engine's `middleware/*`, `sink/*` and
 `trace`), `data/` (`cache`, `codec` with `codec/scratch` and one code
 package per codec beneath it, `docstore`, `queue`, `sql`, `transform`, `vfs`)
 and `app/` (`cli`, `config`, `events`,
-`health`, `i18n`, `id`, `lifecycle`, `lock`, `mail`, `resilience`,
-`scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
+`health`, `i18n`, `id`, `lifecycle`, `lock`, `mail` with `mail/spool` beneath
+it, `resilience`, `scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
 one package, that package sits at the family's path (`crypto/`, `net/`,
 `proc/`), and a service package beneath it with codes, values or ports of its
 own is mirrored beneath it at the same path (`crypto/key/jwk`, `proc/ipc` —
@@ -129,7 +129,7 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `app/lifecycle/` — see `internal/core/app/lifecycle/CLAUDE.md` (ordered start/stop, ADR 0050 — and why there is deliberately no dependency graph and no autowiring)
 - `observe/` — see `internal/core/observe/CLAUDE.md` (the observe family: its members, the rule that put them together, and why the writer registry sits beneath the logger)
 - `security/` — see `internal/core/security/CLAUDE.md` (the security family: its members, the rule that put them together, and why a scheme they call stays in `crypto/`)
-- `data/` — see `internal/core/data/CLAUDE.md` (the data family: its members, the rule that put them together, and why `docstore` has no contract here yet)
+- `data/` — see `internal/core/data/CLAUDE.md` (the data family: its members, the rule that put them together, and why `docstore` gained its contract here only with ADR 0160)
 - `app/` — see `internal/core/app/CLAUDE.md` (the app family: its members, the rule that put them together, and why the in-process `events` bus is here while the durable `queue` is `data`'s)
 - `security/token/` — see `internal/core/security/token/CLAUDE.md` (security tokens, ADR 0042)
 - `app/validation/` — see `internal/core/app/validation/CLAUDE.md` (value validation, ADR 0046)
@@ -152,4 +152,8 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `observe/logger/level/` — see `internal/core/observe/logger/level/CLAUDE.md`
 - `app/health/` — see `internal/core/app/health/CLAUDE.md` (startup, readiness and liveness as three types, ADR 0060)
 - `data/codec/scratch/` — see `internal/core/data/codec/scratch/CLAUDE.md`
+- `data/docstore/` — see `internal/core/data/docstore/CLAUDE.md` (the two port families — one engine takes no context, the other cannot lose one — the values and the index declaration, ADR 0110, ADR 0139, ADR 0160)
+- `observe/profiling/` — see `internal/core/observe/profiling/CLAUDE.md` (the profiles' values and codes, and why there is no port — ADR 0121, ADR 0160)
+- `crypto/key/` — see `internal/core/crypto/key/CLAUDE.md` (a directory, no Go code: the key formats' code packages, `jwk` alone today)
+- `observe/logger/middleware/` and `observe/logger/sink/` — see their `CLAUDE.md` (directories, no Go code: the code packages of the logger engine's decorators and terminals, one per engine package that declares a code); `observe/logger/writer/{journald,nettransport,rotfile}/` — one `CLAUDE.md` each, the writers' codes beneath the registry (ADR 0160)
 - `data/codec/{asn1,baseenc,bson,cbor,csv,flatbuffers,form,json,jsonpatch,msgpack,multipart,ndjson,pem,strictjson,tlv,toml,xml,yaml}/` — one `CLAUDE.md` each: the codes and sentinels of the service package at the same path (ADR 0160)
