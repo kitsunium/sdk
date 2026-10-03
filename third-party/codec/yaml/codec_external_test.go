@@ -220,9 +220,9 @@ func TestRegisteredViaImport(t *testing.T) {
 	tests := []tc{
 		{"format registered", func() bool { _, ok := codec.Lookup(codec.Format(yaml.Format)); return ok }},
 		//: it claims no alias: application/yaml and .yaml stay the native
-		//: codec's, which this test binary does not import.
-		{"MIME left to the native codec", func() bool { _, ok := codec.LookupMIME("application/yaml"); return !ok }},
-		{"extension left to the native codec", func() bool { _, ok := codec.LookupExt(".yaml"); return !ok }},
+		//: codec's (linked here by the differential test), never this one.
+		{"MIME left to the native codec", func() bool { c, ok := codec.LookupMIME("application/yaml"); return !ok || c.Name() != yaml.Format }},
+		{"extension left to the native codec", func() bool { c, ok := codec.LookupExt(".yaml"); return !ok || c.Name() != yaml.Format }},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

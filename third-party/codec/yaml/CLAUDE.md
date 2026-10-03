@@ -52,6 +52,25 @@ blank-import this package to register `"yaml-full"`; `pkg/v1/codec` and
 | `0.3.77.1` | `MarshalFailed` (`YAML_FULL_MARSHAL_FAILED`) | yaml.v3 encode error, a `MarshalYAML` hook error, a failing stream writer |
 | `0.3.77.2` | `UnmarshalFailed` (`YAML_FULL_UNMARSHAL_FAILED`) | yaml.v3 decode error, or input over `maxYAMLBytes` |
 
+## The native subset's reference
+
+This is the one module that links both readers, so it holds the differential
+fuzzers that keep the native subset honest
+(`differential_fuzz_external_test.go`):
+
+| Fuzzer | Property |
+|---|---|
+| `FuzzNativeAgreesWithYAMLv3` | every document the native codec accepts, yaml.v3 accepts too and reads as the same value — bar the subset's three documented differences (a timestamp and a non-string key stay text; a YAML 1.1 number is text to the core schema) |
+| `FuzzNativeOutputReadsTheSame` | everything the native encoder writes reads back as the same value in the native decoder AND in yaml.v3, strictly |
+
+Every input either fuzzer has failed on is kept under
+`testdata/fuzz/<Fuzzer>/`, so `go test` replays it on every run; each one
+is a divergence that was fixed in the native codec: a `:` before a flow
+indicator, a lone tab, a raw U+0085, the `\/` escape, a multi-line flow key, a
+`...` closing nothing, a `\U` escape past Unicode, a second byte order mark,
+an over-long flow key, and `+_0` written plain. A new failure is a bug in one
+of the two readers: fix the native codec, keep the input.
+
 ## Cost
 
 `BENCH.md` measures this codec on the same fixtures as the native one
@@ -73,4 +92,6 @@ this package for what it reads, never for speed.
 bazel test --config=race //third-party/codec/yaml:yaml_test
 bazel test --config=alloc //third-party/codec/yaml:yaml_test   # the !race budget test
 go test -race ./third-party/codec/yaml/
+go test -run='^$' -fuzz='^FuzzNativeAgreesWithYAMLv3$' -fuzztime=60s ./third-party/codec/yaml/
+go test -run='^$' -fuzz='^FuzzNativeOutputReadsTheSame$' -fuzztime=60s ./third-party/codec/yaml/
 ```

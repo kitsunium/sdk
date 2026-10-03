@@ -29,3 +29,10 @@ configuration with nested sections, a flow list, a map and a literal block
 
 `Marshal/large` allocates 10.5 MiB to write a 57 927-byte document: yaml.v3 builds a
 node tree and an event stream and grows its emitter buffer per event.
+
+`internal/service/codec/yaml/BENCH.md` runs these benchmarks ALTERNATELY with
+the native codec's, eight samples each, so the two columns share the same
+machine load: the native subset is 2.9× to 9.9× faster (4.96× in geometric
+mean) and makes 1 to 4 752 allocations where this codec makes 28 to 50 042.
+Its absolute times are higher than the ones above because the machine was
+busier then; its ratios are the comparison to quote.

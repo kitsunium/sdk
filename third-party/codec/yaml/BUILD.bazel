@@ -35,12 +35,15 @@ go_test(
         "codec_integration_test.go",
         "codec_internal_test.go",
         "decoder_internal_test.go",
+        "differential_fuzz_external_test.go",
         "encoder_internal_test.go",
     ],
+    data = glob(["testdata/**"]),
     embed = [":yaml"],
     deps = [
         "//internal/core/codec",
         "//internal/kernel/errs",
+        "//internal/service/codec/yaml",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )
