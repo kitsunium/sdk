@@ -17,6 +17,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/internal/rlim"
 )
 
 // exitOSErr is sysexits.h EX_OSERR (71), restated to carry the RLIMIT_FAILED
@@ -116,7 +117,7 @@ func applyOne(pid int, r coreproc.Resource, lv coreproc.LimitValue) error {
 		return err
 	}
 	//: setrlimit(2) operates on the calling process only.
-	if serr := syscall.Setrlimit(rl, new(makeRlimit(lv.Soft, lv.Hard))); serr != nil {
+	if serr := syscall.Setrlimit(rl, new(rlim.Make(lv.Soft, lv.Hard))); serr != nil {
 		//: surface the failure through the shared RLIMIT_FAILED wrapper.
 		return rlimitFailed(serr, pid, r.String())
 	}

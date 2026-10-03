@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/proc/
 
 ## Purpose
@@ -54,6 +54,11 @@ when the package moved here from the root of `internal/service` (ADR 0160):
 
 Two members import a sibling, and say so: `exec` and `reaper` share
 `childwait`, because the kernel hands a zombie's status to exactly one wait.
+`exec` and `rlimit` share a helper instead, `internal/rlim`, the constructor of
+the kernel's `syscall.Rlimit` whose field width FreeBSD and DragonFly declare
+differently: one function is not worth an edge from one engine to the other, so
+it sits under `internal/`, where Go's rule confines it to this family
+(`internal/CLAUDE.md`).
 Outside the family, `internal/service/app/health` and `internal/service/app/lifecycle`
 import `systemd/notify`, and `internal/service/net/server` imports
 `systemd/listen` to adopt a socket a supervisor passed.

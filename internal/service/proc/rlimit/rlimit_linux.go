@@ -9,6 +9,7 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/proc/internal/rlim"
 )
 
 // exitOSErr is sysexits.h EX_OSERR (71), the exit status the RLIMIT_FAILED
@@ -103,14 +104,15 @@ func applyOne(pid int, r coreproc.Resource, lv coreproc.LimitValue) error {
 		//: hand back the UNKNOWN_RESOURCE sentinel verbatim.
 		return err
 	}
-	rlim := syscall.Rlimit{Cur: lv.Soft, Max: lv.Hard}
+	//: the kernel struct, built where every proc engine builds it.
+	ceiling := rlim.Make(lv.Soft, lv.Hard)
 	//: pid 0 and the caller's own pid take the simpler setrlimit path.
 	if pid == 0 || pid == syscall.Getpid() {
 		//: setrlimit(2) operates on the calling process only.
-		return applySelf(pid, r.String(), rl, &rlim)
+		return applySelf(pid, r.String(), rl, &ceiling)
 	}
 	//: a foreign pid requires prlimit64(2) and CAP_SYS_RESOURCE.
-	return applyForeign(pid, r.String(), rl, &rlim)
+	return applyForeign(pid, r.String(), rl, &ceiling)
 }
 
 // rlimitFailed wraps a syscall cause in the central RLIMIT_FAILED sentinel,
