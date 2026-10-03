@@ -71,7 +71,7 @@ internal/
 │                           multi, recover, route, sample, tee},
 │                           logger/sink/{console, file, syslog},
 │                           logger/writer/{journald, nettransport, rotfile},
-│                           metrics, otel, trace},
+│                           metrics, otel, profiling, trace},
 │                  security/{authz, secret, session, token}
 └── service/       concrete implementations
                    observe (the family — ADR 0155; a directory, no Go code:

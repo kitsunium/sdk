@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -31,32 +32,6 @@ const (
 // say something about the moment rather than what the goroutine waits on.
 var stateFlags = []string{" (scan)", " (leaked)", " (durable)"}
 
-// GoroutineValue is one goroutine of the process, as the runtime's dump
-// describes it.
-type GoroutineValue struct {
-	// Labels are the goroutine's pprof labels.
-	Labels map[string]string
-	// CreatedBy is the frame of the go statement that started the goroutine;
-	// zero for the main goroutine and for those the runtime starts itself.
-	CreatedBy FrameValue
-	// State is the runtime's word for what the goroutine does: "running",
-	// "runnable", "syscall", or what it waits on — "select", "chan receive",
-	// "IO wait", "sleep", "sync.Mutex.Lock".
-	State string
-	// Stack is the goroutine's stack, innermost frame first.
-	Stack []FrameValue
-	// Waiting is how long the goroutine has been blocked, to the minute the
-	// runtime reports; zero under a minute or when it is not blocked.
-	Waiting time.Duration
-	// ID is the goroutine's number.
-	ID int64
-	// Creator is the number of the goroutine that ran the go statement; zero
-	// when the dump does not say.
-	Creator int64
-	// LockedToThread says the goroutine is locked to its OS thread.
-	LockedToThread bool
-}
-
 // Goroutines returns every goroutine of the process, from the runtime's
 // traceback dump. Labels come from the dump's headers (GODEBUG
 // tracebacklabels=1, the default since Go 1.27); when the headers carry none,
@@ -65,14 +40,14 @@ type GoroutineValue struct {
 //
 // Only the traceback dump can fail it; when the labelled profile cannot be
 // written, the goroutines are returned without their labels.
-func Goroutines() ([]GoroutineValue, error) {
+func Goroutines() ([]coreprofiling.GoroutineValue, error) {
 	//: the runtime's own writer, for both dumps.
 	return goroutinesFrom(goroutineProfile)
 }
 
 // goroutinesFrom is Goroutines over a writer of the goroutine profile at a
 // debug level, so the fallback on labels is testable.
-func goroutinesFrom(profile func(debug int) ([]byte, error)) ([]GoroutineValue, error) {
+func goroutinesFrom(profile func(debug int) ([]byte, error)) ([]coreprofiling.GoroutineValue, error) {
 	dump, err := profile(debugTraceback)
 	//: the runtime could not write its own dump.
 	if err != nil {
@@ -81,7 +56,7 @@ func goroutinesFrom(profile func(debug int) ([]byte, error)) ([]GoroutineValue, 
 	}
 	gs := ParseGoroutines(dump)
 	//: the headers carried the labels: nothing to match.
-	if slices.ContainsFunc(gs, func(g GoroutineValue) bool { return len(g.Labels) > 0 }) {
+	if slices.ContainsFunc(gs, func(g coreprofiling.GoroutineValue) bool { return len(g.Labels) > 0 }) {
 		//: complete.
 		return gs, nil
 	}
@@ -104,7 +79,7 @@ func goroutineProfile(debug int) ([]byte, error) {
 	if err := pprof.Lookup("goroutine").WriteTo(&buf, debug); err != nil {
 		//: the runtime's error goes to the chain.
 		return nil, errs.Wrap(err, errs.WrapParams{
-			Code: CodeCaptureFailed, Reason: "CAPTURE_FAILED", Public: CaptureFailed.Public(), Private: CaptureFailed.Private(),
+			Code: coreprofiling.CodeCaptureFailed, Reason: "CAPTURE_FAILED", Public: coreprofiling.CaptureFailed.Public(), Private: coreprofiling.CaptureFailed.Private(),
 		}, errs.String("profile", "goroutine"))
 	}
 	//: the text.
@@ -124,7 +99,7 @@ func goroutineProfile(debug int) ([]byte, error) {
 // It never fails: a block whose header does not parse is skipped, and a line
 // it does not recognise is ignored, so a dump from a newer runtime still
 // yields what this parser understands.
-func ParseGoroutines(dump []byte) []GoroutineValue {
+func ParseGoroutines(dump []byte) []coreprofiling.GoroutineValue {
 	var p dumpParser
 	sc := bufio.NewScanner(bytes.NewReader(dump))
 	sc.Buffer(make([]byte, 0, 64<<10), dumpLineMax)
@@ -139,12 +114,12 @@ func ParseGoroutines(dump []byte) []GoroutineValue {
 // dumpParser holds the goroutine being read and where its next location line
 // goes.
 type dumpParser struct {
-	out []GoroutineValue
+	out []coreprofiling.GoroutineValue
 	// cur is the goroutine being read; nil between blocks.
-	cur *GoroutineValue
+	cur *coreprofiling.GoroutineValue
 	// pending is the frame a location line completes: the last function
 	// line, or the created-by frame.
-	pending *FrameValue
+	pending *coreprofiling.FrameValue
 }
 
 // line reads one line of a dump.
@@ -165,7 +140,7 @@ func (p *dumpParser) line(line string) {
 		p.createdBy(line)
 	//: a frame's function line — "...additional frames elided..." is not.
 	case p.cur != nil && strings.Contains(line, "(") && !strings.HasPrefix(line, "..."):
-		p.cur.Stack = append(p.cur.Stack, FrameValue{Function: functionOf(line)})
+		p.cur.Stack = append(p.cur.Stack, coreprofiling.FrameValue{Function: functionOf(line)})
 		p.pending = &p.cur.Stack[len(p.cur.Stack)-1]
 	//: outside a block, a separator, or a line this parser does not know.
 	default:
@@ -202,7 +177,7 @@ func (p *dumpParser) location(line string) {
 func (p *dumpParser) createdBy(line string) {
 	rest := strings.TrimPrefix(line, "created by ")
 	fn, creator, found := strings.Cut(rest, " in goroutine ")
-	p.cur.CreatedBy = FrameValue{Function: fn}
+	p.cur.CreatedBy = coreprofiling.FrameValue{Function: fn}
 	//: newer runtimes name the creating goroutine; a number that does not
 	//: parse leaves it unknown.
 	if id, err := strconv.ParseInt(creator, 10, 64); found && err == nil {
@@ -212,7 +187,7 @@ func (p *dumpParser) createdBy(line string) {
 }
 
 // parseHeader reads a goroutine header.
-func parseHeader(line string) (GoroutineValue, bool) {
+func parseHeader(line string) (coreprofiling.GoroutineValue, bool) {
 	rest := strings.TrimPrefix(line, "goroutine ")
 	idText, _, _ := strings.Cut(rest, " ")
 	id, err := strconv.ParseInt(idText, 10, 64)
@@ -220,16 +195,16 @@ func parseHeader(line string) (GoroutineValue, bool) {
 	//: no number, or no state: not a header this parser knows.
 	if err != nil || open < 0 {
 		//: skipped.
-		return GoroutineValue{}, false
+		return coreprofiling.GoroutineValue{}, false
 	}
 	shut := strings.IndexByte(rest[open:], ']')
 	//: a state that never closes.
 	if shut < 0 {
 		//: skipped.
-		return GoroutineValue{}, false
+		return coreprofiling.GoroutineValue{}, false
 	}
-	g := GoroutineValue{ID: id}
-	g.readState(rest[open+2 : open+shut])
+	g := coreprofiling.GoroutineValue{ID: id}
+	readState(&g, rest[open+2:open+shut])
 	tail := strings.TrimSuffix(strings.TrimSpace(rest[open+shut+1:]), ":")
 	//: labels, when the runtime prints them.
 	if strings.HasPrefix(tail, "{") && strings.HasSuffix(tail, "}") {
@@ -239,9 +214,9 @@ func parseHeader(line string) (GoroutineValue, bool) {
 	return g, true
 }
 
-// readState reads the bracket: the state, then ", N minutes", ", locked to
-// thread" and whatever else the runtime adds.
-func (g *GoroutineValue) readState(bracket string) {
+// readState reads the bracket into g: the state, then ", N minutes",
+// ", locked to thread" and whatever else the runtime adds.
+func readState(g *coreprofiling.GoroutineValue, bracket string) {
 	parts := strings.Split(bracket, ", ")
 	state := parts[0]
 	//: the flags the runtime appends to the state itself.

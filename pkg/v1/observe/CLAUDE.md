@@ -34,7 +34,7 @@ rather than record what happened.
 | `logger/slogbridge/` | `NewHandler` / `New`: an SDK `Logger` behind `log/slog`, the one package allowed to import `log/slog` (ADR 0032) | `pkg/v1/observe/logger` | `logger/slogbridge/README.md` |
 | `metrics/` | the OpenTelemetry metrics data model with zero OTel imports: `NewMeter`, the instruments, typed attributes, `Temporality`, `Collect` → `Snapshot`, the exporter registry and the OTLP wire (ADR 0027, ADR 0044, ADR 0048) | `internal/core/observe/metrics`, `internal/core/observe/otel`, `internal/service/observe/metrics` | `metrics/README.md` |
 | `trace/` | the OTel span model and W3C Trace Context with zero OTel imports: `NewTracer`, the samplers, `NewRecorder`, `Inject` / `Extract`, the server and client middlewares, `RecordError` and the OTLP wire (ADR 0051) | `internal/core/observe/trace`, `internal/core/observe/otel`, `internal/core/net`, `internal/service/observe/trace` | `trace/README.md` |
-| `profiling/` | `CaptureCPU` / `CaptureHeap`, `Parse`, `Fold` onto the owners your `Attribute` names, `Goroutines` / `ParseGoroutines` / `GroupGoroutines`, `CanonicalName` (ADR 0121) | `internal/service/observe/profiling` | `profiling/README.md` |
+| `profiling/` | `CaptureCPU` / `CaptureHeap`, `Parse`, `Fold` onto the owners your `Attribute` names, `Goroutines` / `ParseGoroutines` / `GroupGoroutines`, `CanonicalName` (ADR 0121) | `internal/core/observe/profiling` (values, sentinels), `internal/service/observe/profiling` | `profiling/README.md` |
 
 Each moved here from the root of `pkg/v1` — `pkg/v1/<name>` — in one minor
 release, with no alias left at the old path: a clean break, permitted only

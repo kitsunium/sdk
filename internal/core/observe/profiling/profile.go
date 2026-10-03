@@ -1,5 +1,6 @@
-// Package profiling — hosts the values a decoded profile is made of: the
-// profile, its samples, their stacks' frames and the sample types.
+// Package profiling — the values a decoded profile is made of: the profile,
+// its samples, their stacks' frames and the sample types. Decoding them from
+// the pprof format is the engine's, internal/service/observe/profiling.
 package profiling
 
 import "time"
@@ -75,37 +76,4 @@ type FrameValue struct {
 	// Address is the program counter of an unsymbolized frame; zero
 	// otherwise.
 	Address uint64
-}
-
-// sampleType returns the index of the sample type named typ, or -1.
-func (p *ProfileValue) sampleType(typ string) int {
-	//: the first sample type by that name.
-	for i, st := range p.SampleTypes {
-		//: an exact name match.
-		if st.Type == typ {
-			//: its index in every sample's Values.
-			return i
-		}
-	}
-	//: the profile does not measure it.
-	return -1
-}
-
-// defaultType returns the name of the sample type a fold uses when it is not
-// told: the profile's own default, else the last sample type — the pprof
-// tool's convention, which picks cpu for a CPU profile and inuse_space for a
-// heap profile.
-func (p *ProfileValue) defaultType() string {
-	//: the profile says.
-	if p.DefaultSampleType != "" {
-		//: honoured.
-		return p.DefaultSampleType
-	}
-	//: a profile with no sample type has nothing to fold.
-	if len(p.SampleTypes) == 0 {
-		//: the fold refuses it.
-		return ""
-	}
-	//: the convention.
-	return p.SampleTypes[len(p.SampleTypes)-1].Type
 }

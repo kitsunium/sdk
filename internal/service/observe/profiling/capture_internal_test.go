@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -29,7 +30,7 @@ func Test_captureCPU(t *testing.T) {
 		t.Helper()
 		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
 		type outcome struct {
-			profile *ProfileValue
+			profile *coreprofiling.ProfileValue
 			err     error
 		}
 		done := make(chan outcome, 1)

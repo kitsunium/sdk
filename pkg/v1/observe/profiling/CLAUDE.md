@@ -2,7 +2,8 @@
 
 ## Purpose
 
-Public facade over `internal/service/observe/profiling` (ADR 0121): the running
+Public facade over `internal/core/observe/profiling` and
+`internal/service/observe/profiling` (ADR 0121): the running
 process's CPU over a bounded window, its live heap, and its goroutines —
 decoded with the standard library, folded onto the owners you name, grouped.
 
@@ -23,8 +24,11 @@ decoded with the standard library, folded onto the owners you name, grouped.
 | `MaxCPUWindow`, `MaxProfileBytes`, `MaxFrames`, `FlameRoot`, `Default*` | const | |
 | `Code*` (7) and the sentinels | const / var | `0.3.89.1`–`0.3.89.7`; each code declared on its own, the sentinels in one `var` block |
 
-All types alias the service: there is no port, and the values are the
-engine's (ADR 0074).
+The values and the sentinels alias the core, `internal/core/observe/profiling`,
+where ADR 0160 put them; `FoldConfig`, `GroupConfig`, the bounds and the
+defaults alias the engine, whose parameters they are; the functions delegate
+to the engine. An alias points at the layer that owns its symbol (ADR 0074).
+There is no port: one engine, and the attribution is a function you pass.
 
 ## Why-this-shape
 

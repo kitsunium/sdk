@@ -77,43 +77,43 @@ A heap profile is SAMPLED — about one allocation per 512 KiB is recorded and s
 <a name="CodeCaptureCanceled"></a>CodeCaptureCanceled identifies a CPU capture whose context ended before its window \(0.3.89.3\).
 
 ```go
-const CodeCaptureCanceled errs.Code = svcprof.CodeCaptureCanceled
+const CodeCaptureCanceled errs.Code = coreprofiling.CodeCaptureCanceled
 ```
 
 <a name="CodeCaptureFailed"></a>CodeCaptureFailed identifies a profile runtime/pprof could not write \(0.3.89.4\).
 
 ```go
-const CodeCaptureFailed errs.Code = svcprof.CodeCaptureFailed
+const CodeCaptureFailed errs.Code = coreprofiling.CodeCaptureFailed
 ```
 
 <a name="CodeProfileMalformed"></a>CodeProfileMalformed identifies bytes that are not a well\-formed pprof profile, or a hand\-built profile Fold cannot read \(0.3.89.5\).
 
 ```go
-const CodeProfileMalformed errs.Code = svcprof.CodeProfileMalformed
+const CodeProfileMalformed errs.Code = coreprofiling.CodeProfileMalformed
 ```
 
 <a name="CodeProfileTooLarge"></a>CodeProfileTooLarge identifies a profile over MaxProfileBytes, or whose stacks exceed MaxFrames \(0.3.89.6\).
 
 ```go
-const CodeProfileTooLarge errs.Code = svcprof.CodeProfileTooLarge
+const CodeProfileTooLarge errs.Code = coreprofiling.CodeProfileTooLarge
 ```
 
 <a name="CodeProfilerBusy"></a>CodeProfilerBusy identifies a CPU capture refused because the process's one CPU profiler is running \(0.3.89.2\).
 
 ```go
-const CodeProfilerBusy errs.Code = svcprof.CodeProfilerBusy
+const CodeProfilerBusy errs.Code = coreprofiling.CodeProfilerBusy
 ```
 
 <a name="CodeSampleTypeMissing"></a>CodeSampleTypeMissing identifies a fold asked for a sample type the profile does not measure \(0.3.89.7\).
 
 ```go
-const CodeSampleTypeMissing errs.Code = svcprof.CodeSampleTypeMissing
+const CodeSampleTypeMissing errs.Code = coreprofiling.CodeSampleTypeMissing
 ```
 
 <a name="CodeWindowInvalid"></a>CodeWindowInvalid identifies a CPU window not positive or over MaxCPUWindow \(0.3.89.1\).
 
 ```go
-const CodeWindowInvalid errs.Code = svcprof.CodeWindowInvalid
+const CodeWindowInvalid errs.Code = coreprofiling.CodeWindowInvalid
 ```
 
 <a name="DefaultFlameMaxDepth"></a>DefaultFlameMaxDepth is how deep the flame graph goes when FoldConfig.FlameMaxDepth is not positive.
@@ -143,7 +143,7 @@ const DefaultTopPerOwner int = svcprof.DefaultTopPerOwner
 <a name="FlameRoot"></a>FlameRoot is the name of a flame graph's root frame.
 
 ```go
-const FlameRoot string = svcprof.FlameRoot
+const FlameRoot string = coreprofiling.FlameRoot
 ```
 
 <a name="MaxCPUWindow"></a>MaxCPUWindow is the longest window CaptureCPU samples.
@@ -171,37 +171,37 @@ const MaxProfileBytes int = svcprof.MaxProfileBytes
 ```go
 var (
     // WindowInvalid refuses a CPU window not positive or over MaxCPUWindow (400).
-    WindowInvalid = svcprof.WindowInvalid
+    WindowInvalid = coreprofiling.WindowInvalid
 
     // ProfilerBusy refuses a CPU capture while the process's one CPU profiler is
     // running, whoever started it (409).
-    ProfilerBusy = svcprof.ProfilerBusy
+    ProfilerBusy = coreprofiling.ProfilerBusy
 
     // CaptureCanceled is a CPU capture whose context ended before the window
     // (503); errors.Is still finds the context's error.
-    CaptureCanceled = svcprof.CaptureCanceled
+    CaptureCanceled = coreprofiling.CaptureCanceled
 
     // CaptureFailed wraps an error runtime/pprof returned while writing a
     // profile.
-    CaptureFailed = svcprof.CaptureFailed
+    CaptureFailed = coreprofiling.CaptureFailed
 
     // ProfileMalformed refuses bytes that are not a well-formed pprof profile —
     // the field names the part, the input is never quoted — and a nil profile or
     // a sample short of values handed to Fold.
-    ProfileMalformed = svcprof.ProfileMalformed
+    ProfileMalformed = coreprofiling.ProfileMalformed
 
     // ProfileTooLarge refuses a profile over MaxProfileBytes, compressed or
     // inflated, or whose stacks would take more than MaxFrames frames.
-    ProfileTooLarge = svcprof.ProfileTooLarge
+    ProfileTooLarge = coreprofiling.ProfileTooLarge
 
     // SampleTypeMissing refuses a fold asked for a sample type the profile does
     // not measure.
-    SampleTypeMissing = svcprof.SampleTypeMissing
+    SampleTypeMissing = coreprofiling.SampleTypeMissing
 )
 ```
 
 <a name="CanonicalName"></a>
-## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L246>)
+## func [CanonicalName](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L247>)
 
 ```go
 func CanonicalName(name string) string
@@ -210,16 +210,16 @@ func CanonicalName(name string) string
 CanonicalName spells a function the same way whoever named it.
 
 <a name="FlameNode"></a>
-## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L191>)
+## type [FlameNode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L192>)
 
 FlameNode is one frame of a flame graph.
 
 ```go
-type FlameNode = svcprof.FlameNodeValue
+type FlameNode = coreprofiling.FlameNodeValue
 ```
 
 <a name="FoldConfig"></a>
-## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L179>)
+## type [FoldConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L180>)
 
 FoldConfig says how Fold reads a profile; every zero field has a default.
 
@@ -228,16 +228,16 @@ type FoldConfig = svcprof.FoldConfig
 ```
 
 <a name="Folded"></a>
-## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L182>)
+## type [Folded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L183>)
 
 Folded is a profile folded, in the sample type's own unit.
 
 ```go
-type Folded = svcprof.FoldedValue
+type Folded = coreprofiling.FoldedValue
 ```
 
 <a name="Fold"></a>
-### func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L221>)
+### func [Fold](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L222>)
 
 ```go
 func Fold(p *Profile, cfg FoldConfig) (Folded, error)
@@ -246,34 +246,34 @@ func Fold(p *Profile, cfg FoldConfig) (Folded, error)
 Fold charges every sample of p to an owner and adds it all up.
 
 <a name="Frame"></a>
-## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L176>)
+## type [Frame](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L177>)
 
 Frame is one frame of a stack.
 
 ```go
-type Frame = svcprof.FrameValue
+type Frame = coreprofiling.FrameValue
 ```
 
 <a name="FunctionCost"></a>
-## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L188>)
+## type [FunctionCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L189>)
 
 FunctionCost is what one function cost.
 
 ```go
-type FunctionCost = svcprof.FunctionCostValue
+type FunctionCost = coreprofiling.FunctionCostValue
 ```
 
 <a name="Goroutine"></a>
-## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L194>)
+## type [Goroutine](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L195>)
 
 Goroutine is one goroutine, as the runtime's dump describes it.
 
 ```go
-type Goroutine = svcprof.GoroutineValue
+type Goroutine = coreprofiling.GoroutineValue
 ```
 
 <a name="Goroutines"></a>
-### func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L227>)
+### func [Goroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L228>)
 
 ```go
 func Goroutines() ([]Goroutine, error)
@@ -282,7 +282,7 @@ func Goroutines() ([]Goroutine, error)
 Goroutines returns every goroutine of the process.
 
 <a name="ParseGoroutines"></a>
-### func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L233>)
+### func [ParseGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L234>)
 
 ```go
 func ParseGoroutines(dump []byte) []Goroutine
@@ -291,16 +291,16 @@ func ParseGoroutines(dump []byte) []Goroutine
 ParseGoroutines reads a goroutine dump; it never fails.
 
 <a name="GoroutineGroup"></a>
-## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L200>)
+## type [GoroutineGroup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L201>)
 
 GoroutineGroup is goroutines sharing their labels, state and top frame.
 
 ```go
-type GoroutineGroup = svcprof.GoroutineGroupValue
+type GoroutineGroup = coreprofiling.GoroutineGroupValue
 ```
 
 <a name="GroupGoroutines"></a>
-### func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L240>)
+### func [GroupGoroutines](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L241>)
 
 ```go
 func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
@@ -309,7 +309,7 @@ func GroupGoroutines(gs []Goroutine, cfg GroupConfig) []GoroutineGroup
 GroupGoroutines groups goroutines by labels, state and top frame, largest first.
 
 <a name="GroupConfig"></a>
-## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L197>)
+## type [GroupConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L198>)
 
 GroupConfig says how GroupGoroutines groups.
 
@@ -318,25 +318,25 @@ type GroupConfig = svcprof.GroupConfig
 ```
 
 <a name="OwnerCost"></a>
-## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L185>)
+## type [OwnerCost](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L186>)
 
 OwnerCost is what one owner cost.
 
 ```go
-type OwnerCost = svcprof.OwnerCostValue
+type OwnerCost = coreprofiling.OwnerCostValue
 ```
 
 <a name="Profile"></a>
-## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L167>)
+## type [Profile](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L168>)
 
 Profile is a decoded pprof profile.
 
 ```go
-type Profile = svcprof.ProfileValue
+type Profile = coreprofiling.ProfileValue
 ```
 
 <a name="CaptureCPU"></a>
-### func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L203>)
+### func [CaptureCPU](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L204>)
 
 ```go
 func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
@@ -345,7 +345,7 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error)
 CaptureCPU samples the process's CPU for window and returns the profile.
 
 <a name="CaptureHeap"></a>
-### func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L209>)
+### func [CaptureHeap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L210>)
 
 ```go
 func CaptureHeap() (*Profile, error)
@@ -354,7 +354,7 @@ func CaptureHeap() (*Profile, error)
 CaptureHeap returns the live heap, after a garbage collection.
 
 <a name="Parse"></a>
-### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L215>)
+### func [Parse](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L216>)
 
 ```go
 func Parse(data []byte) (*Profile, error)
@@ -363,21 +363,21 @@ func Parse(data []byte) (*Profile, error)
 Parse decodes a pprof profile, gzipped or not.
 
 <a name="Sample"></a>
-## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L173>)
+## type [Sample](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L174>)
 
 Sample is one sample: a stack, a value per sample type, and labels.
 
 ```go
-type Sample = svcprof.SampleValue
+type Sample = coreprofiling.SampleValue
 ```
 
 <a name="SampleType"></a>
-## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L170>)
+## type [SampleType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/profiling/profiling.go#L171>)
 
 SampleType names what a value measures and its unit.
 
 ```go
-type SampleType = svcprof.SampleTypeValue
+type SampleType = coreprofiling.SampleTypeValue
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

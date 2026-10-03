@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
 
@@ -61,7 +62,7 @@ func TestADumpParsesIntoGoroutines(t *testing.T) {
 		t.Errorf("goroutine 11 = %+v", last)
 	}
 	first := gs[0]
-	if first.ID != 1 || first.State != "running" || len(first.Stack) != 1 || first.Stack[0] != (profiling.FrameValue{Function: "main.main", File: "/src/main.go", Line: 18}) {
+	if first.ID != 1 || first.State != "running" || len(first.Stack) != 1 || first.Stack[0] != (coreprofiling.FrameValue{Function: "main.main", File: "/src/main.go", Line: 18}) {
 		t.Errorf("goroutine 1 = %+v", first)
 	}
 	labelled := gs[1]
@@ -75,7 +76,7 @@ func TestADumpParsesIntoGoroutines(t *testing.T) {
 	if windows.ID != 7 || windows.State != "select" || !windows.LockedToThread || len(windows.Stack) != 2 {
 		t.Fatalf("goroutine 7 = %+v", windows)
 	}
-	if windows.Stack[0] != (profiling.FrameValue{Function: "sync.(*Cond).Wait", File: "C:/Program Files/Go/src/sync/cond.go", Line: 71}) ||
+	if windows.Stack[0] != (coreprofiling.FrameValue{Function: "sync.(*Cond).Wait", File: "C:/Program Files/Go/src/sync/cond.go", Line: 71}) ||
 		windows.Stack[1].Function != "github.com/x/y.(*T)[...].Loop" || windows.CreatedBy.File != "C:/work/y/start.go" || windows.Creator != 0 {
 		t.Errorf("goroutine 7's frames = %+v, created by %+v", windows.Stack, windows.CreatedBy)
 	}
@@ -105,21 +106,21 @@ func TestLiveGoroutinesCarryTheirLabelsEitherWay(t *testing.T) {
 	for _, godebug := range []string{"tracebacklabels=1", "tracebacklabels=0"} {
 		t.Run(godebug, func(t *testing.T) {
 			t.Setenv("GODEBUG", godebug)
-			var waiters []profiling.GoroutineValue
+			var waiters []coreprofiling.GoroutineValue
 			deadline := time.Now().Add(10 * time.Second)
 			for len(waiters) < 3 && time.Now().Before(deadline) {
 				gs, err := profiling.Goroutines()
 				if err != nil {
 					t.Fatal(err)
 				}
-				waiters = slices.DeleteFunc(gs, func(g profiling.GoroutineValue) bool { return g.Labels["node"] != "waiter" })
+				waiters = slices.DeleteFunc(gs, func(g coreprofiling.GoroutineValue) bool { return g.Labels["node"] != "waiter" })
 				time.Sleep(10 * time.Millisecond)
 			}
 			if len(waiters) != 3 {
 				t.Fatalf("found %d labelled waiters", len(waiters))
 			}
 			for _, g := range waiters {
-				top := profiling.GroupGoroutines([]profiling.GoroutineValue{g}, profiling.GroupConfig{})[0].Top
+				top := profiling.GroupGoroutines([]coreprofiling.GoroutineValue{g}, profiling.GroupConfig{})[0].Top
 				if g.State != "select" || !strings.HasSuffix(top, ".parkInSelect") || g.CreatedBy.Function == "" {
 					t.Errorf("a waiter = %+v, top %q", g, top)
 				}

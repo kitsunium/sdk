@@ -2,7 +2,11 @@
 // functions, and their resolution into frames once the string table is known.
 package profiling
 
-import "time"
+import (
+	"time"
+
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
+)
 
 // Field numbers of the nested messages Parse reads.
 const (
@@ -222,20 +226,20 @@ func (d *decoder) readFunction(w *wire, kind uint64) error {
 
 // resolve turns the raw tables into a ProfileValue, checking every index and
 // building at most frames frames, the locations' and the stacks' together.
-func (d *decoder) resolve(frames int) (*ProfileValue, error) {
+func (d *decoder) resolve(frames int) (*coreprofiling.ProfileValue, error) {
 	//: profile.proto requires the empty string first.
 	if len(d.strings) == 0 || d.strings[0] != "" {
 		//: every "absent" string index would resolve to something else.
 		return nil, malformed("string table")
 	}
-	r := resolver{d: d, frames: make(map[uint64][]FrameValue, len(d.locations)), budget: frames, limit: frames}
-	p := &ProfileValue{Time: timeOf(d.timeNanos), Duration: time.Duration(d.durationNanos), Period: d.period}
+	r := resolver{d: d, frames: make(map[uint64][]coreprofiling.FrameValue, len(d.locations)), budget: frames, limit: frames}
+	p := &coreprofiling.ProfileValue{Time: timeOf(d.timeNanos), Duration: time.Duration(d.durationNanos), Period: d.period}
 	//: the header first: its strings are few and every sample needs its types.
 	if err := r.header(p); err != nil {
 		//: already typed.
 		return nil, err
 	}
-	p.Samples = make([]SampleValue, 0, len(d.samples))
+	p.Samples = make([]coreprofiling.SampleValue, 0, len(d.samples))
 	//: every sample, its stack built from the shared location frames.
 	for i := range d.samples {
 		s, err := r.sample(&d.samples[i], len(p.SampleTypes))

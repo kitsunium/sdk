@@ -9,6 +9,7 @@ import (
 	"io"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -103,17 +104,17 @@ type decoder struct {
 // runtime/pprof writes, or the same stream uncompressed. It is written from
 // profile.proto with the standard library alone.
 //
-// It refuses input over [MaxProfileBytes], compressed or not, and stacks
-// that add up to more than [MaxFrames] frames, with [ProfileTooLarge]; and
-// anything that is not a well-formed profile — a truncated field, a varint
+// It refuses input over [MaxProfileBytes], compressed or not, and stacks that
+// add up to more than [MaxFrames] frames, with [coreprofiling.ProfileTooLarge];
+// and anything that is not a well-formed profile — a truncated field, a varint
 // past 64 bits, a string, function or location index that points nowhere, a
-// sample with the wrong number of values — with [ProfileMalformed]. No
-// refusal quotes the input.
-func Parse(data []byte) (*ProfileValue, error) {
+// sample with the wrong number of values — with
+// [coreprofiling.ProfileMalformed]. No refusal quotes the input.
+func Parse(data []byte) (*coreprofiling.ProfileValue, error) {
 	//: the compressed input is bounded before anything is read.
 	if len(data) > MaxProfileBytes {
 		//: the size is a field; the bytes are not.
-		return nil, errs.Wrap(ProfileTooLarge, errs.WrapParams{}, errs.Int("bytes", len(data)))
+		return nil, errs.Wrap(coreprofiling.ProfileTooLarge, errs.WrapParams{}, errs.Int("bytes", len(data)))
 	}
 	raw, err := inflate(data)
 	//: not gzip after all, or inflating past the bound.
@@ -153,7 +154,7 @@ func inflate(data []byte) ([]byte, error) {
 	//: a stream that inflates past the bound is refused whole.
 	if len(out) > MaxProfileBytes {
 		//: nothing past the bound was kept.
-		return nil, ProfileTooLarge
+		return nil, coreprofiling.ProfileTooLarge
 	}
 	//: the checksum and the trailer are checked on close.
 	if err := zr.Close(); err != nil {
@@ -168,8 +169,8 @@ func inflate(data []byte) ([]byte, error) {
 func malformedParams(what string) errs.WrapParams {
 	//: the library's error goes to Private through the chain, never to Public.
 	return errs.WrapParams{
-		Code: CodeProfileMalformed, Reason: "PROFILE_MALFORMED", Public: ProfileMalformed.Public(),
-		Private: ProfileMalformed.Private() + " (" + what + ")",
+		Code: coreprofiling.CodeProfileMalformed, Reason: "PROFILE_MALFORMED", Public: coreprofiling.ProfileMalformed.Public(),
+		Private: coreprofiling.ProfileMalformed.Private() + " (" + what + ")",
 	}
 }
 

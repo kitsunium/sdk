@@ -2509,31 +2509,31 @@ codes:
   - code: "0.3.89.1"
     const: CodeWindowInvalid
     hex: "0x00_03_59_01"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.2"
     const: CodeProfilerBusy
     hex: "0x00_03_59_02"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.3"
     const: CodeCaptureCanceled
     hex: "0x00_03_59_03"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.4"
     const: CodeCaptureFailed
     hex: "0x00_03_59_04"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.5"
     const: CodeProfileMalformed
     hex: "0x00_03_59_05"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.6"
     const: CodeProfileTooLarge
     hex: "0x00_03_59_06"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.89.7"
     const: CodeSampleTypeMissing
     hex: "0x00_03_59_07"
-    package: internal/service/observe/profiling
+    package: internal/core/observe/profiling
   - code: "0.3.90.1"
     const: CodeNotJSON
     hex: "0x00_03_5A_01"

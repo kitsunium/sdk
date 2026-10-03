@@ -72,6 +72,7 @@ import (
 	"context"
 	"time"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcprof "github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
@@ -83,7 +84,7 @@ const MaxCPUWindow time.Duration = svcprof.MaxCPUWindow
 const MaxProfileBytes int = svcprof.MaxProfileBytes
 
 // FlameRoot is the name of a flame graph's root frame.
-const FlameRoot string = svcprof.FlameRoot
+const FlameRoot string = coreprofiling.FlameRoot
 
 // MaxFrames bounds the frames Parse builds: each location's once, and every
 // copy a sample's stack makes of them.
@@ -107,97 +108,97 @@ const DefaultFlameMaxDepth int = svcprof.DefaultFlameMaxDepth
 
 // CodeWindowInvalid identifies a CPU window not positive or over MaxCPUWindow
 // (0.3.89.1).
-const CodeWindowInvalid errs.Code = svcprof.CodeWindowInvalid
+const CodeWindowInvalid errs.Code = coreprofiling.CodeWindowInvalid
 
 // CodeProfilerBusy identifies a CPU capture refused because the process's one
 // CPU profiler is running (0.3.89.2).
-const CodeProfilerBusy errs.Code = svcprof.CodeProfilerBusy
+const CodeProfilerBusy errs.Code = coreprofiling.CodeProfilerBusy
 
 // CodeCaptureCanceled identifies a CPU capture whose context ended before its
 // window (0.3.89.3).
-const CodeCaptureCanceled errs.Code = svcprof.CodeCaptureCanceled
+const CodeCaptureCanceled errs.Code = coreprofiling.CodeCaptureCanceled
 
 // CodeCaptureFailed identifies a profile runtime/pprof could not write
 // (0.3.89.4).
-const CodeCaptureFailed errs.Code = svcprof.CodeCaptureFailed
+const CodeCaptureFailed errs.Code = coreprofiling.CodeCaptureFailed
 
 // CodeProfileMalformed identifies bytes that are not a well-formed pprof
 // profile, or a hand-built profile Fold cannot read (0.3.89.5).
-const CodeProfileMalformed errs.Code = svcprof.CodeProfileMalformed
+const CodeProfileMalformed errs.Code = coreprofiling.CodeProfileMalformed
 
 // CodeProfileTooLarge identifies a profile over MaxProfileBytes, or whose
 // stacks exceed MaxFrames (0.3.89.6).
-const CodeProfileTooLarge errs.Code = svcprof.CodeProfileTooLarge
+const CodeProfileTooLarge errs.Code = coreprofiling.CodeProfileTooLarge
 
 // CodeSampleTypeMissing identifies a fold asked for a sample type the profile
 // does not measure (0.3.89.7).
-const CodeSampleTypeMissing errs.Code = svcprof.CodeSampleTypeMissing
+const CodeSampleTypeMissing errs.Code = coreprofiling.CodeSampleTypeMissing
 
 var (
 	// WindowInvalid refuses a CPU window not positive or over MaxCPUWindow (400).
-	WindowInvalid = svcprof.WindowInvalid
+	WindowInvalid = coreprofiling.WindowInvalid
 
 	// ProfilerBusy refuses a CPU capture while the process's one CPU profiler is
 	// running, whoever started it (409).
-	ProfilerBusy = svcprof.ProfilerBusy
+	ProfilerBusy = coreprofiling.ProfilerBusy
 
 	// CaptureCanceled is a CPU capture whose context ended before the window
 	// (503); errors.Is still finds the context's error.
-	CaptureCanceled = svcprof.CaptureCanceled
+	CaptureCanceled = coreprofiling.CaptureCanceled
 
 	// CaptureFailed wraps an error runtime/pprof returned while writing a
 	// profile.
-	CaptureFailed = svcprof.CaptureFailed
+	CaptureFailed = coreprofiling.CaptureFailed
 
 	// ProfileMalformed refuses bytes that are not a well-formed pprof profile —
 	// the field names the part, the input is never quoted — and a nil profile or
 	// a sample short of values handed to Fold.
-	ProfileMalformed = svcprof.ProfileMalformed
+	ProfileMalformed = coreprofiling.ProfileMalformed
 
 	// ProfileTooLarge refuses a profile over MaxProfileBytes, compressed or
 	// inflated, or whose stacks would take more than MaxFrames frames.
-	ProfileTooLarge = svcprof.ProfileTooLarge
+	ProfileTooLarge = coreprofiling.ProfileTooLarge
 
 	// SampleTypeMissing refuses a fold asked for a sample type the profile does
 	// not measure.
-	SampleTypeMissing = svcprof.SampleTypeMissing
+	SampleTypeMissing = coreprofiling.SampleTypeMissing
 )
 
 // Profile is a decoded pprof profile.
-type Profile = svcprof.ProfileValue
+type Profile = coreprofiling.ProfileValue
 
 // SampleType names what a value measures and its unit.
-type SampleType = svcprof.SampleTypeValue
+type SampleType = coreprofiling.SampleTypeValue
 
 // Sample is one sample: a stack, a value per sample type, and labels.
-type Sample = svcprof.SampleValue
+type Sample = coreprofiling.SampleValue
 
 // Frame is one frame of a stack.
-type Frame = svcprof.FrameValue
+type Frame = coreprofiling.FrameValue
 
 // FoldConfig says how Fold reads a profile; every zero field has a default.
 type FoldConfig = svcprof.FoldConfig
 
 // Folded is a profile folded, in the sample type's own unit.
-type Folded = svcprof.FoldedValue
+type Folded = coreprofiling.FoldedValue
 
 // OwnerCost is what one owner cost.
-type OwnerCost = svcprof.OwnerCostValue
+type OwnerCost = coreprofiling.OwnerCostValue
 
 // FunctionCost is what one function cost.
-type FunctionCost = svcprof.FunctionCostValue
+type FunctionCost = coreprofiling.FunctionCostValue
 
 // FlameNode is one frame of a flame graph.
-type FlameNode = svcprof.FlameNodeValue
+type FlameNode = coreprofiling.FlameNodeValue
 
 // Goroutine is one goroutine, as the runtime's dump describes it.
-type Goroutine = svcprof.GoroutineValue
+type Goroutine = coreprofiling.GoroutineValue
 
 // GroupConfig says how GroupGoroutines groups.
 type GroupConfig = svcprof.GroupConfig
 
 // GoroutineGroup is goroutines sharing their labels, state and top frame.
-type GoroutineGroup = svcprof.GoroutineGroupValue
+type GoroutineGroup = coreprofiling.GoroutineGroupValue
 
 // CaptureCPU samples the process's CPU for window and returns the profile.
 func CaptureCPU(ctx context.Context, window time.Duration) (*Profile, error) {

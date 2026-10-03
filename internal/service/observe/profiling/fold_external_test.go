@@ -7,22 +7,23 @@ import (
 	"slices"
 	"testing"
 
+	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
 
 // stack builds a stack from function names, innermost first.
-func stack(names ...string) []profiling.FrameValue {
-	out := make([]profiling.FrameValue, len(names))
+func stack(names ...string) []coreprofiling.FrameValue {
+	out := make([]coreprofiling.FrameValue, len(names))
 	for i, n := range names {
-		out[i] = profiling.FrameValue{Function: n, File: "/src/" + n + ".go", StartLine: 10 + i}
+		out[i] = coreprofiling.FrameValue{Function: n, File: "/src/" + n + ".go", StartLine: 10 + i}
 	}
 	return out
 }
 
 // sample builds a CPU sample: a count and nanoseconds, with a node label.
-func sample(node string, ns int64, names ...string) profiling.SampleValue {
-	s := profiling.SampleValue{Stack: stack(names...), Values: []int64{1, ns}}
+func sample(node string, ns int64, names ...string) coreprofiling.SampleValue {
+	s := coreprofiling.SampleValue{Stack: stack(names...), Values: []int64{1, ns}}
 	if node != "" {
 		s.Labels = map[string][]string{"node": {node}}
 	}
@@ -30,15 +31,15 @@ func sample(node string, ns int64, names ...string) profiling.SampleValue {
 }
 
 // cpuProfile is a CPU profile with the samples given.
-func cpuProfile(samples ...profiling.SampleValue) *profiling.ProfileValue {
-	return &profiling.ProfileValue{
-		SampleTypes: []profiling.SampleTypeValue{{Type: "samples", Unit: "count"}, {Type: "cpu", Unit: "nanoseconds"}},
+func cpuProfile(samples ...coreprofiling.SampleValue) *coreprofiling.ProfileValue {
+	return &coreprofiling.ProfileValue{
+		SampleTypes: []coreprofiling.SampleTypeValue{{Type: "samples", Unit: "count"}, {Type: "cpu", Unit: "nanoseconds"}},
 		Samples:     samples,
 	}
 }
 
 // byNode charges a sample to its node label.
-func byNode(s profiling.SampleValue) string {
+func byNode(s coreprofiling.SampleValue) string {
 	if v := s.Labels["node"]; len(v) > 0 {
 		return v[0]
 	}
@@ -71,13 +72,13 @@ func TestFoldAddsUpExactly(t *testing.T) {
 	if shopTop[0].Function != "shop.burn" || shopTop[0].Flat != 50 || shopTop[1].Function != "shop.recurse" || shopTop[1].Cum != 30 {
 		t.Errorf("shop's top: %+v", shopTop)
 	}
-	if i := slices.IndexFunc(f.Top, func(c profiling.FunctionCostValue) bool { return c.Function == "main.main" }); i < 0 || f.Top[i].Cum != 95 || f.Top[i].Flat != 0 {
+	if i := slices.IndexFunc(f.Top, func(c coreprofiling.FunctionCostValue) bool { return c.Function == "main.main" }); i < 0 || f.Top[i].Cum != 95 || f.Top[i].Flat != 0 {
 		t.Errorf("main.main in the top: %+v", f.Top)
 	}
 	if f.Top[0].File != "/src/shop.burn.go" || f.Top[0].StartLine != 10 {
 		t.Errorf("the top function's source: %+v", f.Top[0])
 	}
-	if slices.ContainsFunc(f.Top, func(c profiling.FunctionCostValue) bool { return c.Function == "shop.never" }) {
+	if slices.ContainsFunc(f.Top, func(c coreprofiling.FunctionCostValue) bool { return c.Function == "shop.never" }) {
 		t.Error("a zero sample was folded")
 	}
 }
@@ -102,7 +103,7 @@ func TestTheFlameIsRootedPrunedAndBounded(t *testing.T) {
 		t.Fatal(err)
 	}
 	root := f.Flame
-	if root.Name != profiling.FlameRoot || root.Value != 1100 || len(root.Children) != 2 || root.Children[0].Name != "main.main" {
+	if root.Name != coreprofiling.FlameRoot || root.Value != 1100 || len(root.Children) != 2 || root.Children[0].Name != "main.main" {
 		t.Fatalf("root: %+v", root)
 	}
 	mainKids := root.Children[0].Children
@@ -134,7 +135,7 @@ func TestFoldPicksItsSampleType(t *testing.T) {
 	if f, err := profiling.Fold(p, profiling.FoldConfig{}); err != nil || f.SampleType.Type != "samples" {
 		t.Errorf("the profile's default: %+v, %v", f, err)
 	}
-	if _, err := profiling.Fold(p, profiling.FoldConfig{SampleType: "inuse_space"}); !errs.HasCode(err, profiling.CodeSampleTypeMissing) {
+	if _, err := profiling.Fold(p, profiling.FoldConfig{SampleType: "inuse_space"}); !errs.HasCode(err, coreprofiling.CodeSampleTypeMissing) {
 		t.Errorf("a missing type = %v", err)
 	}
 }
@@ -147,7 +148,7 @@ func TestFoldRefusesWhatParseNeverBuilds(t *testing.T) {
 	short.Values = short.Values[:1]
 	type tc struct {
 		name string
-		p    *profiling.ProfileValue
+		p    *coreprofiling.ProfileValue
 	}
 	cases := []tc{
 		{"a nil profile", nil},
@@ -155,7 +156,7 @@ func TestFoldRefusesWhatParseNeverBuilds(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		if f, err := profiling.Fold(c.p, profiling.FoldConfig{SampleType: "cpu"}); !errs.HasCode(err, profiling.CodeProfileMalformed) {
+		if f, err := profiling.Fold(c.p, profiling.FoldConfig{SampleType: "cpu"}); !errs.HasCode(err, coreprofiling.CodeProfileMalformed) {
 			t.Fatalf("Fold() = %+v, %v; want PROFILE_MALFORMED", f, err)
 		}
 	}
@@ -173,7 +174,7 @@ func TestFoldRefusesWhatParseNeverBuilds(t *testing.T) {
 func TestFoldWithoutAttributionAndWithOddConfig(t *testing.T) {
 	t.Parallel()
 	s := sample("x", 10, "main.f")
-	s.Stack = append([]profiling.FrameValue{{Address: 0xdead}}, s.Stack...)
+	s.Stack = append([]coreprofiling.FrameValue{{Address: 0xdead}}, s.Stack...)
 	f, err := profiling.Fold(cpuProfile(s), profiling.FoldConfig{FlameMinShare: math.NaN(), TopFunctions: -1, TopPerOwner: -1, FlameMaxDepth: -1})
 	if err != nil {
 		t.Fatal(err)
