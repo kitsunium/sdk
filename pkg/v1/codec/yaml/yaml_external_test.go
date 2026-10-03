@@ -17,8 +17,9 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/config"
 )
 
-// foreignModules are the libraries of the formats this package must not link.
-var foreignModules = []string{"go.mongodb.org/", "github.com/fxamacker/cbor", "github.com/vmihailenco/msgpack", "github.com/pelletier/go-toml"}
+// foreignModules are the libraries this package must not link: another
+// format's, and — since the codec is native — any YAML library.
+var foreignModules = []string{"go.mongodb.org/", "github.com/fxamacker/cbor", "github.com/vmihailenco/msgpack", "github.com/pelletier/go-toml", "gopkg.in/yaml"}
 
 // TestItReadsItsFormatThroughTheRegistry decodes a YAML document through
 // config.FSSource — the path a framework reading its embedded configuration

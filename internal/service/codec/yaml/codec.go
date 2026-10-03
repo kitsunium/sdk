@@ -1,45 +1,85 @@
-// Package yaml wraps gopkg.in/yaml.v3 as a codec.Codec implementation.
-// Streaming is supported: yaml.v3 exposes Encoder/Decoder types that can
-// serialise a sequence of documents separated by `---` markers.
+// Package yaml is the SDK's YAML codec: a native, standard-library-only
+// reader and writer of a NAMED SUBSET of YAML 1.2.2, sized for configuration.
+//
+// # The subset
+//
+// Read: block mappings and sequences (by indentation, including a sequence
+// at its key's own indentation and the compact "- key: value" form), flow
+// mappings and sequences across lines, plain, single-quoted and double-quoted
+// scalars with every YAML escape, literal (|) and folded (>) block scalars
+// with their chomping and indentation indicators, comments, and one document
+// with an optional "---" start and "..." end. Plain scalars resolve by the
+// YAML 1.2 core schema: null and ~, true and false — never yes, no, on or off
+// — decimal, 0o octal and 0x hexadecimal integers, floats with .inf and .nan.
+//
+// Refused BY NAME, each with its own code and the line and column it starts
+// at: anchors (&), aliases (*), tags (! and !!), merge keys (<<), a second
+// document, complex keys (?, or a collection as a key), directives (%YAML,
+// %TAG), and a mapping holding the same key twice. An integer written with a
+// leading zero (0644) is octal to YAML 1.1 and decimal to YAML 1.2; it reads
+// as text into a string, and is refused by name wherever its value matters.
+//
+// A refusal never quotes the document: it carries a line, a column, a
+// constant detail and, for a value its Go target cannot hold, the Go type.
+//
+// # Bounds
+//
+// A document holds at most 10 MiB, 1 048 576 nodes and 100 levels of nesting;
+// an implicit key at most 1024 characters, as YAML itself bounds it. Nothing
+// the decoder is given can make it panic.
+//
+// # Go values
+//
+// Struct fields use the yaml tag as gopkg.in/yaml.v3 does: a field's key is
+// its tag's name or its own name in lower case, "-" leaves it out, and the
+// flags are omitempty, flow (write the collection inline) and inline (merge a
+// struct's fields, or collect the remaining keys into a map with string
+// keys). An unknown key is ignored. A type may implement MarshalYAML() (any,
+// error), UnmarshalYAML(func(any) error) error, encoding.TextMarshaler and
+// encoding.TextUnmarshaler; time.Time and time.Duration are written and read
+// as text. An untyped target receives nil, bool, int, int64 or uint64,
+// float64, string, []any and map[string]any — a mapping keyed by each key's
+// text.
+//
+// # Writing
+//
+// The encoder writes deterministic block style, indented by two spaces: struct
+// fields in declaration order, map keys sorted. A string is written plain only
+// when every YAML reader — the core schema, YAML 1.1, a timestamp parser —
+// reads it back as the same string; otherwise it is double-quoted, and a
+// multi-line string is a literal block. A float always carries its dot.
+//
+// # Streams
+//
+// Unmarshal reads exactly one document and refuses a second by name, where
+// gopkg.in/yaml.v3 silently ignored it. NewDecoder reads a stream of
+// "---"-separated documents, each one read by the same subset and bounded at
+// 10 MiB; NewEncoder writes one.
+//
+// The whole of YAML — every construct this package refuses — remains
+// available through the opt-in third-party/codec/yaml package, registered as
+// "yaml-full".
 package yaml
 
 import (
 	"io"
 	"slices"
 
-	goyaml "gopkg.in/yaml.v3"
-
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// maxYAMLBytes caps the byte size Unmarshal accepts from untrusted input.
-// gopkg.in/yaml.v3 caps alias-expansion internally (since v3.0.0), but a
-// single very large YAML document still forces the whole buffer into
-// memory before any structural check. 10 MiB comfortably covers every
-// realistic configuration document while preventing memory-exhaustion
-// DoS on attacker-controlled payloads (CWE-400 / CWE-776). Streaming
-// callers that legitimately need larger inputs use NewDecoder with
-// their own io.LimitReader sizing.
-const maxYAMLBytes int = 10 << 20
-
-// yamlEncoderIndent is the number of spaces yaml.v3 inserts per
-// nesting level on the wire. yaml.v3 defaults to 4; the YAML spec
-// accepts any value ≥ 1 so 2 is wire-compatible with every decoder
-// and shrinks output by ~50% on deeply-nested configs.
-const yamlEncoderIndent int = 2
-
-// Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables + the Marshal-side buffer pool.
+// Package-level state: the codec singleton plus the hoisted MIME and
+// extension tables.
 var (
-	//: register the singleton and expose it as a typed package var.
+	// Codec is the registered YAML singleton.
 	Codec codec.Codec = codec.Register(&yamlCodec{})
 
-	//: MIME table hoisted.
+	// mimeTypes is hoisted so MIMETypes does not allocate the literal per call.
 	mimeTypes = []string{"application/yaml", "text/yaml", "application/x-yaml"}
 
-	//: extension table hoisted for the same reason.
+	// extensions is hoisted for the same reason.
 	extensions = []string{".yaml", ".yml"}
 )
 
@@ -60,146 +100,76 @@ func (*yamlCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*yamlCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
+	//: a copy of the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
 func (*yamlCodec) Extensions() []string {
-	//: hand back the package-level slice.
+	//: a copy of the package-level slice.
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as YAML bytes. Routes through a pooled
-// *bytes.Buffer + goyaml.NewEncoder so the per-call bytes.Buffer
-// allocation goyaml.Marshal pays internally is amortised across calls.
+// Marshal writes v as one YAML document.
 func (*yamlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
-	//: yaml.v3 Encoder has no Reset(w) — fresh one per call.
-	enc := goyaml.NewEncoder(buf)
-	//: 2-space indent is wire-compatible (YAML spec accepts any ≥1)
-	//: and shrinks output by ~50% on nested configs vs the lib default
-	//: of 4. Less buffer growth + less I/O per call.
-	enc.SetIndent(yamlEncoderIndent)
+	enc := encoder{buf: buf}
 	//: encode into the pooled buffer.
-	if merr := enc.Encode(v); merr != nil {
-		//: drop the buffer back to the pool if not oversized.
+	if err := enc.encodeDocument(v); err != nil {
 		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeYAMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "YAML encoding failed",
-			Private: "service/codec/yaml.Marshal: gopkg.in/yaml.v3 returned an error",
-		})
+		//: refused.
+		return nil, err
 	}
-	//: yaml.v3 requires Close to flush the trailing document marker
-	//: + any pending state before the encoded bytes are complete.
-	if cerr := enc.Close(); cerr != nil {
-		//: drop the buffer back to the pool if not oversized.
-		scratch.ReleaseBuffer(buf)
-		//: surface the close failure as a marshal error.
-		return nil, errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeYAMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "YAML encoding failed",
-			Private: "service/codec/yaml.Marshal: encoder.Close returned an error",
-		})
-	}
-	//: detach: clone the buffer's bytes so the returned slice does not
-	//: alias the pooled buffer (next caller would overwrite it).
+	//: detach: the returned slice must not alias the pooled buffer.
 	out := slices.Clone(buf.Bytes())
-	//: cap-discard release.
 	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
+	//: the caller's bytes.
 	return out, nil
 }
 
-// Unmarshal parses data as YAML into v.
+// Unmarshal reads data as exactly one YAML document of the subset into v,
+// which must be a non-nil pointer. An empty document leaves v unchanged.
 func (*yamlCodec) Unmarshal(data []byte, v any) error {
-	//: cap input size so attacker-controlled payloads cannot exhaust RAM; yaml.v3 caps alias expansion internally but has no upstream byte
-	//: budget, so 10 MiB is the project-wide safe default.
+	//: the byte bound, before a byte is read.
 	if len(data) > maxYAMLBytes {
-		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
-		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeYAMLUnmarshalFailed,
-			Reason:  "UNMARSHAL_FAILED",
-			Public:  "YAML input exceeds size limit",
-			Private: "service/codec/yaml.Unmarshal: len(data) exceeds maxYAMLBytes",
-		}, errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes))
+		//: refused, with the sizes.
+		return errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes),
+			errs.String("detail", "the document is larger than the decoder accepts"))
 	}
-	//: delegate to yaml.v3 for the actual decoding.
-	uerr := goyaml.Unmarshal(data, v)
-	//: success fast-path.
-	if uerr == nil {
-		//: nothing to wrap.
-		return nil
-	}
-	//: wrap the library error.
-	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeYAMLUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "YAML decoding failed",
-		Private: "service/codec/yaml.Unmarshal: gopkg.in/yaml.v3 returned an error",
-	})
+	//: one document, from line 1.
+	return decodeDocument(data, v, 1)
 }
 
-// Append encodes v as YAML and appends the bytes to dst. Implements the
-// optional codec.Appender interface so hot-path callers can stream
-// records into a recycled buffer. Avoids the double-copy the Marshal
-// delegation shape paid (slices.Clone inside Marshal → append into dst)
-// by encoding directly into a pooled *bytes.Buffer and appending its
-// contents onto dst in a single copy step.
+// Append encodes v as YAML and appends the bytes to dst, leaving dst
+// untouched on error. It implements codec.Appender.
 func (*yamlCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
-	//: yaml.v3 Encoder has no Reset(w) — fresh one per call.
-	enc := goyaml.NewEncoder(buf)
-	//: 2-space indent — same justification as Marshal (wire-compatible
-	//: smaller output).
-	enc.SetIndent(yamlEncoderIndent)
+	enc := encoder{buf: buf}
 	//: encode into the pooled buffer.
-	if merr := enc.Encode(v); merr != nil {
-		//: cap-discard release; leave dst pristine, surface the wrapped error.
+	if err := enc.encodeDocument(v); err != nil {
 		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return dst, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeYAMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "YAML encoding failed",
-			Private: "service/codec/yaml.Append: gopkg.in/yaml.v3 returned an error",
-		})
+		//: dst pristine.
+		return dst, err
 	}
-	//: yaml.v3 requires Close to flush the trailing document marker
-	//: + any pending state before the encoded bytes are complete.
-	if cerr := enc.Close(); cerr != nil {
-		//: cap-discard release; dst pristine on close failure too.
-		scratch.ReleaseBuffer(buf)
-		//: surface the close failure as a marshal error.
-		return dst, errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeYAMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "YAML encoding failed",
-			Private: "service/codec/yaml.Append: encoder.Close returned an error",
-		})
-	}
-	//: append the encoded bytes onto the caller's buffer (1 copy total).
+	//: one copy onto the caller's buffer.
 	dst = append(dst, buf.Bytes()...)
-	//: cap-discard release.
 	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
+	//: the caller's bytes.
 	return dst, nil
 }
 
-// NewEncoder wraps w in a streaming codec.Encoder.
+// NewEncoder returns a codec.Encoder writing one document per Encode to w,
+// separated by "---".
 func (*yamlCodec) NewEncoder(w io.Writer) codec.Encoder {
-	//: wrap the yaml.v3 encoder to expose our Close contract.
-	return &yamlEncoder{inner: goyaml.NewEncoder(w)}
+	//: nothing is written before the first Encode.
+	return &yamlEncoder{w: w}
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder.
+// NewDecoder returns a codec.Decoder reading one document per Decode from r.
 func (*yamlCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: wrap the yaml.v3 decoder to expose More on our interface.
-	return &yamlDecoder{inner: goyaml.NewDecoder(r)}
+	//: documents are read line by line, each bounded.
+	return newStreamDecoder(r)
 }

@@ -1178,6 +1178,42 @@ codes:
     const: CodeYAMLUnmarshalFailed
     hex: "0x00_03_04_02"
     package: internal/service/codec/yaml
+  - code: "0.3.4.3"
+    const: CodeYAMLAnchorRefused
+    hex: "0x00_03_04_03"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.4"
+    const: CodeYAMLAliasRefused
+    hex: "0x00_03_04_04"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.5"
+    const: CodeYAMLTagRefused
+    hex: "0x00_03_04_05"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.6"
+    const: CodeYAMLMergeKeyRefused
+    hex: "0x00_03_04_06"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.7"
+    const: CodeYAMLMultiDocRefused
+    hex: "0x00_03_04_07"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.8"
+    const: CodeYAMLComplexKeyRefused
+    hex: "0x00_03_04_08"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.9"
+    const: CodeYAMLDirectiveRefused
+    hex: "0x00_03_04_09"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.10"
+    const: CodeYAMLDuplicateKey
+    hex: "0x00_03_04_0A"
+    package: internal/service/codec/yaml
+  - code: "0.3.4.11"
+    const: CodeYAMLLeadingZeroRefused
+    hex: "0x00_03_04_0B"
+    package: internal/service/codec/yaml
   - code: "0.3.5.1"
     const: CodeTOMLMarshalFailed
     hex: "0x00_03_05_01"

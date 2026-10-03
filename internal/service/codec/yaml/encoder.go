@@ -1,49 +1,75 @@
-// Package yaml — adapts yaml.v3's *Encoder to codec.Encoder.
+// Package yaml — the streaming encoder: one document per Encode.
 package yaml
 
 import (
-	goyaml "gopkg.in/yaml.v3"
+	"io"
 
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// yamlEncoder wraps *yaml.Encoder so it satisfies codec.Encoder.
+// documentSeparator opens every document after the first.
+const documentSeparator string = "---\n"
+
+// yamlEncoder writes a stream of documents to w. A failed write is sticky:
+// every later Encode, and Close, return it, so a caller who checks only Close
+// still learns the stream is incomplete.
 type yamlEncoder struct {
-	inner *goyaml.Encoder
+	// w receives the documents.
+	w io.Writer
+	// err is the first write failure.
+	err error
+	// written counts the documents written.
+	written int
+	// closed refuses an Encode after Close.
+	closed bool
 }
 
-// Encode serialises v through the wrapped yaml.v3 encoder.
+// Encode writes v as the next document. A value the encoder cannot write is
+// refused before anything reaches w, and does not end the stream.
 func (e *yamlEncoder) Encode(v any) error {
-	//: delegate and wrap on error.
-	yerr := e.inner.Encode(v)
-	//: success fast-path.
-	if yerr == nil {
-		//: nothing to wrap.
-		return nil
+	//: a previous write failed.
+	if e.err != nil {
+		//: the same failure.
+		return e.err
 	}
-	//: wrap the library error.
-	return errs.Wrap(yerr, errs.WrapParams{
-		Code:    CodeYAMLMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "YAML encoding failed",
-		Private: "service/codec/yaml.Encoder.Encode: gopkg.in/yaml.v3 returned an error",
-	})
+	//: the stream is closed.
+	if e.closed {
+		//: refused.
+		return marshalError("the encoder is closed", "")
+	}
+	buf := scratch.AcquireBuffer()
+	defer scratch.ReleaseBuffer(buf)
+	//: every document after the first opens with its marker.
+	if e.written > 0 {
+		buf.WriteString(documentSeparator)
+	}
+	enc := encoder{buf: buf}
+	//: the value, refused whole before a byte is written.
+	if err := enc.encodeDocument(v); err != nil {
+		//: refused.
+		return err
+	}
+	//: the document, in one write.
+	if _, err := e.w.Write(buf.Bytes()); err != nil {
+		e.err = errs.Wrap(err, errs.WrapParams{
+			Code:    CodeYAMLMarshalFailed,
+			Reason:  "MARSHAL_FAILED",
+			Public:  "YAML encoding failed",
+			Private: "service/codec/yaml.Encoder: the writer failed",
+		})
+		//: sticky.
+		return e.err
+	}
+	e.written++
+	//: written.
+	return nil
 }
 
-// Close flushes the underlying encoder; yaml.v3 requires it for stream output.
+// Close ends the stream. Every document is written whole by Encode, so there
+// is nothing to flush; Close reports a write that failed.
 func (e *yamlEncoder) Close() error {
-	//: delegate to the library; terminal '---' is emitted on flush.
-	cerr := e.inner.Close()
-	//: success fast-path.
-	if cerr == nil {
-		//: nothing to wrap.
-		return nil
-	}
-	//: wrap the library error.
-	return errs.Wrap(cerr, errs.WrapParams{
-		Code:    CodeYAMLMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "YAML encoding failed",
-		Private: "service/codec/yaml.Encoder.Close: gopkg.in/yaml.v3 returned an error",
-	})
+	e.closed = true
+	//: nil, or the first write failure.
+	return e.err
 }
