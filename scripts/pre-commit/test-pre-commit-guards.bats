@@ -282,7 +282,7 @@ internal/
 # sub-contract beneath a domain owning only a range the core allocated
 # (app/widget/level), a core member with no engine and no code (observe/otel),
 # a re-export of a core code in a service, a Define in a service test, and a
-# comment naming errs.Define in a service file.
+# comment calling Define under the file's own import name.
 mksymroot() {
   mkdir -p internal/kernel/errs \
     internal/service/app/widget internal/service/net/client \
@@ -340,7 +340,7 @@ import (
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// The sentinel is declared with errs.Define(...) in the core, never here.
+// The sentinel is declared with kerrs.Define(...) in the core, never here.
 const CodeWidgetBroken kerrs.Code = corewidget.CodeWidgetBroken
 
 func Fail(err error) error { return kerrs.Wrap(err, kerrs.WrapParams{Code: CodeWidgetBroken}) }
