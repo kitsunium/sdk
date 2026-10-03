@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "snapshot",
+    srcs = ["snapshot.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/concur/snapshot",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/concur/snapshot"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":snapshot",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "snapshot_test",
+    srcs = ["snapshot_external_test.go"],
+    deps = [":snapshot"],
+)

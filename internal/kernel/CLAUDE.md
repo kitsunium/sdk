@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:20:00Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/
 
 ## Purpose
@@ -35,21 +35,21 @@ internal/kernel/
 
 | Package | Purpose | Code range |
 |---|---|---|
-| `concur/batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014); the `FlushEvery` ticker runs on `Config.Clock` (`clock.System` when nil) | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
+| `concur/batcher/` | generic `Batcher[T]` coalesce/flush/ticker buffer (ADR 0014); the `FlushEvery` ticker runs on `Config.Clock` (`clock.System` when nil); published as `pkg/v1/concur/batcher` | `0.1.5.*` (BATCHER_CLOSED / BATCHER_DELIVER_FAILED) |
 | `concur/buffer/` | `sync.Pool` of `[]byte` — a `recycler.CappedPool[*[]byte]` specialisation | `0.1.1.*` (reserved) |
-| `concur/group/` | generic structured concurrency (`Group`, `Go`/`Wait`/`Collect`, `Unlimited`); first error — or every error joined in submission order (`NewJoined`) — bounded parallelism, and a child panic delivered to the waiter | (none — forwards the task's error; a panic is re-raised, not coded) |
-| `concur/recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010) | (none — panics on programmer error) |
-| `concur/singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
-| `concur/snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011) | (none — never returns errors) |
-| `concur/worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`); `Every` ticks on an injectable clock (`WithClock`) and can end with its owner (`WithDone`) | (none — emits no codes) |
+| `concur/group/` | generic structured concurrency (`Group`, `Go`/`Wait`/`Collect`, `Unlimited`); first error — or every error joined in submission order (`NewJoined`) — bounded parallelism, and a child panic delivered to the waiter; published as `pkg/v1/concur/group` | (none — forwards the task's error; a panic is re-raised, not coded) |
+| `concur/recycler/` | generic `Pool[T]` + `CappedPool[T]` object pools (ADR 0010); published as `pkg/v1/concur/recycler` | (none — panics on programmer error) |
+| `concur/singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive; published as `pkg/v1/concur/singleflight` | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
+| `concur/snapshot/` | generic `Value[T]` copy-on-write container (ADR 0011); published as `pkg/v1/concur/snapshot` | (none — never returns errors) |
+| `concur/worker/` | generic goroutine-lifecycle daemon (`LoopDaemon`, `Start`/`Every`/`Stop`); `Every` ticks on an injectable clock (`WithClock`) and can end with its owner (`WithDone`); published as `pkg/v1/concur/worker` | (none — emits no codes) |
 
 ### `collections/` — generic containers: values kept in an order, within a bound, or within a bound and an age (see `collections/CLAUDE.md`)
 
 | Package | Purpose | Code range |
 |---|---|---|
 | `collections/cache/` | generic `Cache[K,V]` LRU + TTL cache (ADR 0025); reuses `clock` for testable expiry | (none — `Fetch` returns `(V, bool)`) |
-| `collections/heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
-| `collections/ring/` | SPSC lock-free bounded queue (ADR 0006) | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
+| `collections/heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison; published as `pkg/v1/collections/heap` | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
+| `collections/ring/` | SPSC lock-free bounded queue (ADR 0006); published as `pkg/v1/collections/ring` — single-producer, ahead of the multi-producer mode ADR 0159 §2 plans | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 
 ### `fs/` — what the filesystem says about a path, measured rather than decided (see `fs/CLAUDE.md`)
 

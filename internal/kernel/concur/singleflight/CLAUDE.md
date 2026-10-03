@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/singleflight/
 
 ## Purpose
@@ -9,6 +9,8 @@ to all N. A kernel primitive (stdlib-only AND generic — `Group` / `Do` /
 `Forget`, no domain word appears in any signature). Admitted by **ADR 0049**.
 Emits **no error codes**: it is transparent to whatever `fn` returns, and its
 only failure of its own is a programming fault, which panics.
+
+**Published as `pkg/v1/concur/singleflight`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Contents
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:20:00Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/
 
 ## Purpose
@@ -27,13 +27,19 @@ byte-slice threshold, so it sits beside the primitive it specialises.
 
 | Package | What it is | In `pkg/v1` |
 |---|---|---|
-| `batcher/` | `Batcher[T]` — coalesce, then flush on size or on a ticker that runs on the injected `Config.Clock` (ADR 0014) | `pkg/v1/concur/batcher`, an alias, once ADR 0159 §4 lands |
+| `batcher/` | `Batcher[T]` — coalesce, then flush on size or on a ticker that runs on the injected `Config.Clock` (ADR 0014) | `pkg/v1/concur/batcher`, an alias (ADR 0159 §4) |
 | `buffer/` | the pooled `*[]byte` the logger and the network server format into — `recycler.CappedPool` specialised for bytes (ADR 0010) | not on its own (ADR 0159 §4): reached through the domains that use it |
-| `group/` | structured concurrency — `Go` / `Wait` / `Collect`, the first error or every error joined (`NewJoined`), a bounded parallelism, a child's panic delivered to the waiter | `pkg/v1/concur/group`, once ADR 0159 §4 lands |
-| `recycler/` | `Pool[T]` and `CappedPool[T]` over `sync.Pool` — reuse, reset, and a capacity past which an object is dropped (ADR 0010) | `pkg/v1/concur/recycler`, once ADR 0159 §4 lands |
-| `singleflight/` | `Group[K, V]` — one execution per key however many callers arrive, a panic re-raised in every waiter (ADR 0049) | `pkg/v1/concur/singleflight`, once ADR 0159 §4 lands |
-| `snapshot/` | `Value[T]` — copy-on-write: lock-free reads, serialised writers (ADR 0011) | `pkg/v1/concur/snapshot`, once ADR 0159 §4 lands |
-| `worker/` | `LoopDaemon` — a goroutine started and stopped; `Every` ticks it on an injected clock (`WithClock`) and can end it with its owner (`WithDone`) | `pkg/v1/concur/worker`, once ADR 0159 §4 lands |
+| `group/` | structured concurrency — `Go` / `Wait` / `Collect`, the first error or every error joined (`NewJoined`), a bounded parallelism, a child's panic delivered to the waiter | `pkg/v1/concur/group`, an alias (ADR 0159 §4) |
+| `recycler/` | `Pool[T]` and `CappedPool[T]` over `sync.Pool` — reuse, reset, and a capacity past which an object is dropped (ADR 0010) | `pkg/v1/concur/recycler`, an alias (ADR 0159 §4) |
+| `singleflight/` | `Group[K, V]` — one execution per key however many callers arrive, a panic re-raised in every waiter (ADR 0049) | `pkg/v1/concur/singleflight`, an alias (ADR 0159 §4) |
+| `snapshot/` | `Value[T]` — copy-on-write: lock-free reads, serialised writers (ADR 0011) | `pkg/v1/concur/snapshot`, an alias (ADR 0159 §4) |
+| `worker/` | `LoopDaemon` — a goroutine started and stopped; `Every` ticks it on an injected clock (`WithClock`) and can end it with its owner (`WithDone`) | `pkg/v1/concur/worker`, an alias (ADR 0159 §4) |
+
+A published member's exported shape is part of the public API: a
+`pkg/v1/concur/<name>` alias names the very type declared here, so renaming a
+field, changing a signature or adding a method to an exported interface breaks
+a consumer at compile time. While the module is v0 such a change is allowed
+and said out loud (ADR 0040); past v1 it is not (ADR 0159 §5).
 
 ## Do NOT
 

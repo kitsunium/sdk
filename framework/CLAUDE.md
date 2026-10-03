@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # framework/ — the SDK's framework module
 
 ## Purpose
@@ -30,8 +30,12 @@ the analyzer, the generator, `kit check`.
 1. **Imports.** `pkg/v1/*`, the standard library, and `internal/kernel/errs`
    to define sentinels — nothing else under `internal/`, nothing under
    `third-party/`. A mechanism the framework needs and `pkg/v1` lacks lands
-   in `pkg/v1` first. `scripts/check-layer-deps.sh` asserts it on the build
-   graph, and asserts that nothing below imports the framework.
+   in `pkg/v1` first — the kernel's concurrency primitives and containers
+   did, as `pkg/v1/concur/*` and `pkg/v1/collections/*` (ADR 0159 §4), so a
+   fan-out is `concur/group` and a copy-on-write value `concur/snapshot`,
+   never a `sync.WaitGroup` or an `atomic.Pointer` whose writer clones by
+   hand. `scripts/check-layer-deps.sh` asserts it on the build graph, and
+   asserts that nothing below imports the framework.
 2. **Codes.** Layer `4`: `0.4.PP.*`, one `PP` per package, recorded in
    `codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
    in the change that introduces the codes; every package with codes is in

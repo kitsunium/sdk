@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:20:00Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/collections/
 
 ## Purpose
@@ -23,8 +23,13 @@ them is in `concur/`.
 | Package | What it is | In `pkg/v1` |
 |---|---|---|
 | `cache/` | `Cache[K, V]` — LRU and TTL on the kernel clock, `Fetch` because a hit mutates (ADR 0025) | `pkg/v1/data/cache`, beside the cache domain it underlies (ADR 0049) |
-| `heap/` | `Heap[T]` — a binary heap ordered by the caller's comparison, no `container/heap` interface | `pkg/v1/collections/heap`, an alias, once ADR 0159 §4 lands |
-| `ring/` | a single-producer single-consumer lock-free bounded queue (ADR 0006); the only member with codes, `0.1.3.*` | `pkg/v1/collections/ring`, once ADR 0159 §4 lands |
+| `heap/` | `Heap[T]` — a binary heap ordered by the caller's comparison, no `container/heap` interface | `pkg/v1/collections/heap`, an alias (ADR 0159 §4) |
+| `ring/` | a single-producer single-consumer lock-free bounded queue (ADR 0006); the only member with codes, `0.1.3.*` | `pkg/v1/collections/ring`, an alias (ADR 0159 §4) — single-producer still: published ahead of the multi-producer mode §2 plans, which arrives as another constructor returning the same, now frozen, `Queue` |
+
+A published member's exported shape is part of the public API: a
+`pkg/v1/collections/<name>` alias names the very type declared here, and
+`ring.Queue` is an interface, so a fifth method would break every consumer's
+implementation at compile time — it grows by a sibling interface (ADR 0039).
 
 ## Do NOT
 

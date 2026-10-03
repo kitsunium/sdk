@@ -2668,7 +2668,7 @@ type PasswordPolicyService[T any] struct {
 ```
 
 <a name="PasswordPolicyService[T].Change"></a>
-### func \(\*PasswordPolicyService\[T\]\) [Change](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L85>)
+### func \(\*PasswordPolicyService\[T\]\) [Change](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L86>)
 
 ```go
 func (p *PasswordPolicyService[T]) Change(ctx context.Context, key string, current, next []byte) error
@@ -2677,7 +2677,7 @@ func (p *PasswordPolicyService[T]) Change(ctx context.Context, key string, curre
 Change changes the password of the record under key: it verifies the current password first, as Symfony's UserPassword does — a wrong one is an [Invalid](<#Invalid>) error —, then sets next as Set does.
 
 <a name="PasswordPolicyService[T].Set"></a>
-### func \(\*PasswordPolicyService\[T\]\) [Set](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L76>)
+### func \(\*PasswordPolicyService\[T\]\) [Set](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L77>)
 
 ```go
 func (p *PasswordPolicyService[T]) Set(ctx context.Context, key string, password []byte) error
@@ -2686,7 +2686,7 @@ func (p *PasswordPolicyService[T]) Set(ctx context.Context, key string, password
 Set sets the password of the record under key — a reset flow, behind a reset token: it checks the policy — the length, the most common passwords, and with NotReused the former passwords —, hashes the password with the SDK's password.Hash and stores the hash; the hash it replaces goes to the field's history. A password the policy refuses is an [Invalid](<#Invalid>) error, which says it was used recently, never which one; a missing record is a [NotFound](<#NotFound>).
 
 <a name="PasswordPolicyService[T].Verify"></a>
-### func \(\*PasswordPolicyService\[T\]\) [Verify](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L104>)
+### func \(\*PasswordPolicyService\[T\]\) [Verify](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/passwords_use.go#L105>)
 
 ```go
 func (p *PasswordPolicyService[T]) Verify(ctx context.Context, key string, password []byte) (bool, error)
@@ -3317,7 +3317,7 @@ func (s *Service) Static(name, prefix string, fsys fs.FS, opts ...StaticConfigur
 Static declares a frontend serving fsys under prefix, which must end with '/'. A path with no file extension that matches no file serves index.html, so client\-side routing works; a missing file with an extension — a script, a stylesheet — stays a 404. A directory is never listed. The SDK's static handler serves it; kit draws it and observes every request.
 
 <a name="Service.Store"></a>
-### func \(\*Service\) [Store](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L126>)
+### func \(\*Service\) [Store](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L128>)
 
 ```go
 func (s *Service) Store[T any](name string, key func(T) string, opts ...StoreConfigurer) *StoreService[T]
@@ -3476,7 +3476,7 @@ type StdioValue struct {
 ```
 
 <a name="StoreConfigurer"></a>
-## type [StoreConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L95-L97>)
+## type [StoreConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L97-L99>)
 
 StoreConfigurer configures a store.
 
@@ -3568,7 +3568,7 @@ func Purpose(text string) StoreConfigurer
 Purpose says why the store keeps its records \(GDPR art. 30\(1\)\(b\)\): the register lists it, and a person's export carries it.
 
 <a name="ReadModel"></a>
-### func [ReadModel](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L157>)
+### func [ReadModel](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L159>)
 
 ```go
 func ReadModel() StoreConfigurer
@@ -3626,7 +3626,7 @@ var Accounts = Service.Store("accounts", Account.Key,
 ```
 
 <a name="StoreService"></a>
-## type [StoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L40-L80>)
+## type [StoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L40-L82>)
 
 StoreService is a typed, keyed collection of entities. Every read returns a copy and every write stores one: an entity is kept as its JSON encoding, so what a handler holds can never alias what the store holds, and the memory and file backends behave identically.
 
@@ -3639,7 +3639,7 @@ type StoreService[T any] struct {
 ```
 
 <a name="NewStoreService"></a>
-### func [NewStoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L775>)
+### func [NewStoreService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L777>)
 
 ```go
 func NewStoreService[T any](key func(T) string) *StoreService[T]
@@ -3648,7 +3648,7 @@ func NewStoreService[T any](key func(T) string) *StoreService[T]
 NewStoreService is a store no service declares yet, keying its entities with key: [Service.Store](<#Service.Store>) makes one and declares it, which is how a product gets one.
 
 <a name="StoreService[T].Count"></a>
-### func \(\*StoreService\[T\]\) [Count](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L186>)
+### func \(\*StoreService\[T\]\) [Count](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L188>)
 
 ```go
 func (s *StoreService[T]) Count(ctx context.Context) (int, error)
@@ -3657,7 +3657,7 @@ func (s *StoreService[T]) Count(ctx context.Context) (int, error)
 Count returns how many entities the store holds.
 
 <a name="StoreService[T].Delete"></a>
-### func \(\*StoreService\[T\]\) [Delete](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L226>)
+### func \(\*StoreService\[T\]\) [Delete](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L228>)
 
 ```go
 func (s *StoreService[T]) Delete(ctx context.Context, key string) error
@@ -3711,7 +3711,7 @@ func (s *StoreService[T]) Former(ctx context.Context, key, pointer string) ([]Fo
 Former returns the former values of the field at pointer — its JSON pointer \(RFC 6901\), "/email" — in the record under key, newest first: each with when it was replaced and by whom. A secret field's former values say when they changed, never what they were: their Value is empty. A field that keeps no former values is an [Invalid](<#Invalid>) error, a missing record a [NotFound](<#NotFound>).
 
 <a name="StoreService[T].Get"></a>
-### func \(\*StoreService\[T\]\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L176>)
+### func \(\*StoreService\[T\]\) [Get](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L178>)
 
 ```go
 func (s *StoreService[T]) Get(ctx context.Context, key string) (T, error)
@@ -3729,7 +3729,7 @@ func (s *StoreService[T]) Hold(ctx context.Context, key, reason string) error
 Hold places a legal hold on the record under key: neither the retention, nor a person's erasure, nor Delete touches it until [StoreService.Release](<#StoreService.Release>) lifts it. reason says why — an authority's request, a case under litigation — and is kept for whoever runs the product, never shown in the Studio. Holding a held record again replaces its reason.
 
 <a name="StoreService[T].Insert"></a>
-### func \(\*StoreService\[T\]\) [Insert](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L209>)
+### func \(\*StoreService\[T\]\) [Insert](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L211>)
 
 ```go
 func (s *StoreService[T]) Insert(ctx context.Context, v T) error
@@ -3738,7 +3738,7 @@ func (s *StoreService[T]) Insert(ctx context.Context, v T) error
 Insert stores a new entity; it is a [Conflict](<#Conflict>) error when the key exists.
 
 <a name="StoreService[T].List"></a>
-### func \(\*StoreService\[T\]\) [List](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L181>)
+### func \(\*StoreService\[T\]\) [List](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L183>)
 
 ```go
 func (s *StoreService[T]) List(ctx context.Context) ([]T, error)
@@ -3765,7 +3765,7 @@ func (s *StoreService[T]) Passwords(field func(*T) *string, opts ...PasswordConf
 Passwords declares the password policy of one secret field of the store's entity; field names it — kit calls it on a zero entity to find which. The field then only ever holds the password's hash, a PHC string, or nothing before a first password; a write that puts anything else in it is refused. A field that is not secret refuses the start, as does a second policy on the same field.
 
 <a name="StoreService[T].Put"></a>
-### func \(\*StoreService\[T\]\) [Put](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L204>)
+### func \(\*StoreService\[T\]\) [Put](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L206>)
 
 ```go
 func (s *StoreService[T]) Put(ctx context.Context, v T) error
@@ -3810,7 +3810,7 @@ func (s *StoreService[T]) Revisions(ctx context.Context, key string) ([]Revision
 Revisions returns the versions the store keeps of the record under key, newest first: the record as it is now, then the former ones — n at most, more while a legal hold keeps the record. A secret member is zeroed in each: a former password hash never reaches the product. A missing record is a [NotFound](<#NotFound>), a store that keeps no revisions an [Invalid](<#Invalid>).
 
 <a name="StoreService[T].Update"></a>
-### func \(\*StoreService\[T\]\) [Update](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L221>)
+### func \(\*StoreService\[T\]\) [Update](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/store.go#L223>)
 
 ```go
 func (s *StoreService[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error)

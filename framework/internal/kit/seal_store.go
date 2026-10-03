@@ -12,6 +12,7 @@ import (
 	"sync"
 	"sync/atomic"
 
+	"github.com/kitsunium/sdk/pkg/v1/concur/snapshot"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -77,8 +78,11 @@ type sealedEngine[T any] struct {
 	a     *App
 	z     *sealer
 	// clear are the members, by pointer, that the store's key reads: kept
-	// in clear from the write that found them on.
-	clear atomic.Pointer[map[string]bool]
+	// in clear from the write that found them on. Copy-on-write, the SDK's
+	// snapshot.Value: a seal reads them with no lock, and learn adds to them
+	// in one serialised read-modify-write, so two writes learning at once
+	// both keep what they found.
+	clear snapshot.Value[map[string]bool]
 	// warned says the store said so.
 	warned atomic.Bool
 	// loadErr is the first record the document store's load could not
@@ -408,14 +412,19 @@ func (e *sealedEngine[T]) keepsKey(raw []byte, key string, pointers []string) bo
 
 // learn keeps pointers in clear from now on, and says it once.
 func (e *sealedEngine[T]) learn(pointers []string) {
-	next := maps.Clone(e.clearNow())
-	if next == nil {
-		next = map[string]bool{}
-	}
-	for _, p := range pointers {
-		next[p] = true
-	}
-	e.clear.Store(&next)
+	e.clear.Update(func(cur *map[string]bool) *map[string]bool {
+		var next map[string]bool
+		if cur != nil {
+			next = maps.Clone(*cur)
+		}
+		if next == nil {
+			next = map[string]bool{}
+		}
+		for _, p := range pointers {
+			next[p] = true
+		}
+		return &next
+	})
 	if e.warned.CompareAndSwap(false, true) {
 		fields := strings.Join(pointers, ", ")
 		if pointers == nil {

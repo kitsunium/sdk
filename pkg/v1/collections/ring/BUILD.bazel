@@ -1,0 +1,26 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "ring",
+    srcs = ["ring.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/collections/ring",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/collections/ring"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":ring",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "ring_test",
+    srcs = ["ring_external_test.go"],
+    deps = [
+        ":ring",
+        "//pkg/v1/errs",
+    ],
+)

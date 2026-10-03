@@ -1,0 +1,27 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "batcher",
+    srcs = ["batcher.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/concur/batcher",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/concur/batcher"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":batcher",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "batcher_test",
+    srcs = ["batcher_external_test.go"],
+    deps = [
+        ":batcher",
+        "//pkg/v1/clock",
+        "//pkg/v1/errs",
+    ],
+)

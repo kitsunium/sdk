@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:54:25Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/recycler/
 
 ## Purpose
@@ -10,6 +10,8 @@ Get/Put. The byte-slice pool (`internal/kernel/concur/buffer`) and the codec scr
 buffer pool (`internal/core/data/codec/scratch`) are built ON this primitive — the
 mechanism lives here, the capacity thresholds stay with the consumers
 (ADR 0010).
+
+**Published as `pkg/v1/concur/recycler`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Contents
 
