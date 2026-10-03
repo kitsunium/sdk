@@ -429,6 +429,15 @@ jobs:
           modules="$(bash scripts/ci/go-modules.sh)"
           for mod in $modules; do
             echo "::group::$mod ($GOOS/$GOARCH)"
+            # The root module is the workspace's anchor and holds no package
+            # (ADR 0157 §5), and `go vet ./...` exits 1 on a pattern that
+            # matches nothing. It is skipped by name, and only while `go list`
+            # says it is empty: a package added there is built again.
+            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
+              echo "skip: the root module holds no package"
+              echo "::endgroup::"
+              continue
+            fi
             if (cd "$mod" && go build ./... && go vet ./...); then
               echo "ok"
             else
@@ -486,6 +495,15 @@ jobs:
           modules="$(bash scripts/ci/go-modules.sh)"
           for mod in $modules; do
             echo "::group::$mod (linux/386)"
+            # The root module is the workspace's anchor and holds no package
+            # (ADR 0157 §5), and `go test ./...` exits 1 on a pattern that
+            # matches nothing. It is skipped by name, and only while `go list`
+            # says it is empty: a package added there is tested again.
+            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
+              echo "skip: the root module holds no package"
+              echo "::endgroup::"
+              continue
+            fi
             if (cd "$mod" && go test ./...); then
               echo "ok"
             else

@@ -1,5 +1,5 @@
-<!-- updated: 2026-10-02T19:57:17Z -->
-# framework/connectors — the engines a database runs on
+<!-- updated: 2026-10-03T03:30:00Z -->
+# framework/connectors — the engines a database runs on, and the ssh identity
 
 The platform's ADR 0004: a store is the port, a database's engine the adapter the app plugs
 in. Each engine is its own Go module, requiring kit and one driver, and the
@@ -13,6 +13,14 @@ graph and `go.sum`.
 | `postgres` | `github.com/jackc/pgx/v5` (`stdlib`) | libpq's: `postgres://…?sslmode=…` or `key=value` pairs |
 | `mysql` | `github.com/go-sql-driver/mysql` | `mysql://` / `mariadb://` URL, or the driver's DSN; its `tls` parameter |
 | `sqlite` | `modernc.org/sqlite` (no cgo) | the file's path or a `file:` URI; WAL, busy timeout, `_txlock=immediate` by default |
+
+One connector is not a database engine: `ssh` (ADR 0158 §3) is the
+`golang.org/x/crypto/ssh` implementation of `framework/entitlement.Identity`,
+plus enrolment. It has the same shape for the same reason — the one vendor
+dependency (and the `golang.org/x/sys` it brings) in a module of its own, so the
+framework's `go.mod` never requires it — and the rules below that are about
+`kit.Engine`, URLs and drivers do not apply to it; its own CLAUDE.md has its
+rules. It was `third-party/entitlement`, in the root module.
 
 Rules:
 
@@ -29,7 +37,9 @@ Rules:
   `framework/vX.Y.Z`, which the release commit pins. In development its
   `go.mod` replaces the framework and the SDK with this tree.
 - Its codes are layer 4, one `PP` each: `0.4.16.*` postgres, `0.4.17.*`
-  mysql, `0.4.18.*` sqlite (`URL_MALFORMED`, `.1`).
+  mysql, `0.4.18.*` sqlite (`URL_MALFORMED`, `.1`). `ssh` keeps the range it
+  had as `third-party/entitlement`, `0.3.65.*` (`ENROLMENT_FAILED`, `.1`): a
+  code keeps its value when it moves (ADR 0160).
 
 ## Test
 

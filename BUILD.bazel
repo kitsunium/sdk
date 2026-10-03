@@ -9,8 +9,8 @@ load("@gazelle//:def.bzl", "gazelle")
 gazelle(name = "gazelle")
 
 # audit_sources lists every file the internal/kernel/errs AST audit reads
-# at runtime. The audit walks internal/, pkg/, and third-party/ looking for
-# errs.Define call sites + reads go.work for the workspace sentinel. Under Bazel the
+# at runtime. The audit walks internal/, pkg/, third-party/ and framework/
+# looking for errs.Define call sites + reads go.work for the workspace sentinel. Under Bazel the
 # test sandbox strips the source-tree relationship, so the test target
 # ships this filegroup as runfiles and resolves the root via TEST_SRCDIR
 # + TEST_WORKSPACE. Filegroup stays in the root BUILD so all layers can
@@ -22,7 +22,14 @@ filegroup(
         "//framework/connectors/mysql:audit_srcs",
         "//framework/connectors/postgres:audit_srcs",
         "//framework/connectors/sqlite:audit_srcs",
+        "//framework/connectors/ssh:audit_srcs",
+        "//framework/internal/core/entitlement:audit_srcs",
+        "//framework/internal/core/gate:audit_srcs",
+        "//framework/internal/core/git:audit_srcs",
+        "//framework/internal/core/selfupdate:audit_srcs",
         "//framework/internal/kit:audit_srcs",
+        "//framework/internal/service/entitlement:audit_srcs",
+        "//framework/internal/service/selfupdate:audit_srcs",
         "//framework/kit/storetest:audit_srcs",
         "//framework/model:audit_srcs",
         "//framework/model/internal/core:audit_srcs",
@@ -33,9 +40,7 @@ filegroup(
         "//internal/core/codec:audit_srcs",
         "//internal/core/config:audit_srcs",
         "//internal/core/crypto:audit_srcs",
-        "//internal/core/entitlement:audit_srcs",
         "//internal/core/events:audit_srcs",
-        "//internal/core/gate:audit_srcs",
         "//internal/core/health:audit_srcs",
         "//internal/core/i18n:audit_srcs",
         "//internal/core/id:audit_srcs",
@@ -51,7 +56,6 @@ filegroup(
         "//internal/core/resilience:audit_srcs",
         "//internal/core/scheduler:audit_srcs",
         "//internal/core/secret:audit_srcs",
-        "//internal/core/selfupdate:audit_srcs",
         "//internal/core/session:audit_srcs",
         "//internal/core/sql:audit_srcs",
         "//internal/core/statemachine:audit_srcs",
@@ -59,7 +63,6 @@ filegroup(
         "//internal/core/trace:audit_srcs",
         "//internal/core/transform:audit_srcs",
         "//internal/core/validation:audit_srcs",
-        "//internal/core/vcs:audit_srcs",
         "//internal/core/vfs:audit_srcs",
         "//internal/core/view:audit_srcs",
         "//internal/core/writer:audit_srcs",
@@ -94,7 +97,6 @@ filegroup(
         "//internal/service/config:audit_srcs",
         "//internal/service/crypto/jwk:audit_srcs",
         "//internal/service/docstore:audit_srcs",
-        "//internal/service/entitlement:audit_srcs",
         "//internal/service/events:audit_srcs",
         "//internal/service/health:audit_srcs",
         "//internal/service/i18n:audit_srcs",
@@ -128,7 +130,6 @@ filegroup(
         "//internal/service/resilience:audit_srcs",
         "//internal/service/scheduler:audit_srcs",
         "//internal/service/secret:audit_srcs",
-        "//internal/service/selfupdate:audit_srcs",
         "//internal/service/session:audit_srcs",
         "//internal/service/sql:audit_srcs",
         "//internal/service/statemachine:audit_srcs",
@@ -173,7 +174,6 @@ filegroup(
         "//third-party/db/writer/clickhouse:audit_srcs",
         "//third-party/db/writer/mysql:audit_srcs",
         "//third-party/db/writer/redis:audit_srcs",
-        "//third-party/entitlement:audit_srcs",
         "//third-party/transform:audit_srcs",
     ],
     visibility = ["//visibility:public"],

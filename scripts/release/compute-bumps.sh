@@ -185,10 +185,10 @@ done
 # A glob and not the list go.work names, on purpose: lib/release-scope.sh's
 # rs_releasable sizes a release with the same `third-party/` prefix, and the
 # half that decides WHETHER and the half that decides HOW BIG must read one
-# notion of a path that counts (ADR 0089). The one package under third-party/
-# that is not a chain module — entitlement's ssh Identity, still in the
-# untagged root module — therefore cuts a release of a chain that does not
-# contain it: a release with nothing new in it, which is noise and not harm.
+# notion of a path that counts (ADR 0089). Every package under third-party/ is
+# in a chain module: entitlement's ssh Identity, the last one the untagged root
+# module held, is the framework's connector framework/connectors/ssh since ADR
+# 0158, so rule 1b's `framework` token releases it.
 for path in ${counting[@]+"${counting[@]}"}; do
   case "$path" in
     third-party/*) need_third_party=1; explain "rule 1c: $path is a vendor-module change -> bump third-party"; break ;;

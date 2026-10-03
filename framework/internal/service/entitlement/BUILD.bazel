@@ -1,0 +1,106 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "entitlement",
+    srcs = [
+        "anchors.go",
+        "bundle.go",
+        "cache.go",
+        "cache_lock.go",
+        "cache_lock_unix.go",
+        "cache_lock_windows.go",
+        "ci.go",
+        "ciseat.go",
+        "crypto.go",
+        "errors.go",
+        "jsonnames.go",
+        "jwks.go",
+        "oidc.go",
+        "product.go",
+        "roster_parse.go",
+        "roughtime.go",
+        "roughtime_verify.go",
+        "roughtime_wire.go",
+        "service.go",
+        "version.go",
+        "wrap.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/service/entitlement",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/core/entitlement",
+        "//internal/kernel/errs",
+        "//pkg/v1/hash",
+        "//pkg/v1/lock",
+        "//pkg/v1/sign",
+        "@org_golang_x_mod//semver",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":entitlement",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "entitlement_test",
+    srcs = [
+        "anchors_internal_test.go",
+        "bundle_external_test.go",
+        "bundle_internal_test.go",
+        "cache_concurrency_internal_test.go",
+        "cache_internal_test.go",
+        "cache_replay_internal_test.go",
+        "cache_unix_internal_test.go",
+        "cache_windows_internal_test.go",
+        "ci_external_test.go",
+        "ci_internal_test.go",
+        "ciseat_internal_test.go",
+        "crypto_internal_test.go",
+        "fifo_mkfifo_internal_test.go",
+        "fifo_mknod_internal_test.go",
+        "fixtures_external_test.go",
+        "identity_external_test.go",
+        "identity_internal_test.go",
+        "jsonnames_internal_test.go",
+        "jwks_external_test.go",
+        "jwks_internal_test.go",
+        "jwks_rotation_internal_test.go",
+        "oidc_external_test.go",
+        "oidc_internal_test.go",
+        "possession_internal_test.go",
+        "product_internal_test.go",
+        "roster_parse_internal_test.go",
+        "roughtime_external_test.go",
+        "roughtime_internal_test.go",
+        "roughtime_verify_internal_test.go",
+        "roughtime_wire_fuzz_internal_test.go",
+        "roughtime_wire_internal_test.go",
+        "service_internal_test.go",
+        "version_internal_test.go",
+        "wrap_internal_test.go",
+    ],
+    embed = [":entitlement"],
+    deps = [
+        "//framework/internal/core/entitlement",
+        "//internal/kernel/errs",
+        "//pkg/v1/lock",
+        "//pkg/v1/proc",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

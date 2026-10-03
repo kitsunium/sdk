@@ -60,7 +60,7 @@ import (
 // An acceptance that rests on a verdict and an acceptance that rests on a
 // failed inspection are indistinguishable from the return value — there is
 // only one nil — so the second one LOGS. That is the same channel
-// internal/service/entitlement uses for the same shape of degradation ("cannot
+// framework/internal/service/entitlement uses for the same shape of degradation ("cannot
 // guard the roster cache … concurrent refreshes on this machine are not
 // serialised"), and it fires only when the platform API refused to answer.
 //

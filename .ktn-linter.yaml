@@ -54,7 +54,7 @@ vocabulary:
     # GetWithBearer, which is not a word". A func type is not available here,
     # because the engine reaches this contract by type assertion on a value it
     # holds as an Identity.
-    - github.com/kitsunium/sdk/internal/core/entitlement.BoundProver
+    - github.com/kitsunium/sdk/framework/internal/core/entitlement.BoundProver
     # core/mail.Transport and core/mail.BatchSender (ADR 0064). "Transport" is a
     # NOMINAL role, the word this domain is discussed in — "the SMTP transport",
     # "the in-memory transport" — and the -er form the rule would impose,
@@ -701,11 +701,11 @@ rules:
       # the six functions taking *coreent.RosterValue, and only because they
       # happen to read ONE method; ciSeat, authorise, ciRefusalIsFinal and
       # rememberRoster cross the same boundary and are not flagged.
-      - "**/internal/service/entitlement/ci.go"
-      - "internal/service/entitlement/ci.go"
-      - "**/internal/service/entitlement/service.go"
-      - "internal/service/entitlement/service.go"
-      # The enrolment writer, GenerateKeyPair (third-party/entitlement). It
+      - "**/framework/internal/service/entitlement/ci.go"
+      - "framework/internal/service/entitlement/ci.go"
+      - "**/framework/internal/service/entitlement/service.go"
+      - "framework/internal/service/entitlement/service.go"
+      # The enrolment writer, GenerateKeyPair (framework/connectors/ssh). It
       # reads one method off the product, and the suggested `interface{
       # Label() string }` would silently DELETE a documented contract: every
       # ProductValue method tolerates a nil receiver, so GenerateKeyPair(nil,
@@ -716,8 +716,8 @@ rules:
       # panic; narrowing the type would reintroduce it under a different
       # spelling. The sibling call in the same flow, IssueURL, keeps the same
       # parameter and is not flagged only because it reads a FIELD.
-      - "**/third-party/entitlement/enroll.go"
-      - "third-party/entitlement/enroll.go"
+      - "**/framework/connectors/ssh/enroll.go"
+      - "framework/connectors/ssh/enroll.go"
 
   # KTN-VAR-NILSLICE (info) — "prefer a nil slice to an empty one".
   #

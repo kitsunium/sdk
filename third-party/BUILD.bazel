@@ -6,7 +6,7 @@
 # and third-party/x-crypto, each with its own go.mod and released in the
 # lockstep chain. Everything here is publicly visible — consumers blank-import
 # these packages to activate the matching writer, codec or scheme. The ssh
-# Identity of entitlement (third-party/entitlement) is still a package of the
-# root module, which nothing requires.
+# Identity of entitlement is no longer here: it is the framework's connector
+# module framework/connectors/ssh (ADR 0158).
 
 package(default_visibility = ["//visibility:public"])

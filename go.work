@@ -5,6 +5,7 @@ use (
 	./framework
 	./framework/connectors/mysql
 	./framework/connectors/postgres
+	./framework/connectors/ssh
 	./framework/connectors/sqlite
 	./internal/core
 	./internal/kernel

@@ -20,6 +20,13 @@
 #      module that does not load) — FAILS too, under its own name, because a
 #      scan that did not run is not a clean scan.
 #
+# One exception, by name: the ROOT module is the workspace's anchor and holds no
+# package (ADR 0157 §5), and govulncheck answers a module with nothing to load
+# with exit 2 and "no packages matched the provided patterns". For `.`, and
+# for that answer only, the module is reported as holding no package rather
+# than as an incomplete scan. Any other module saying the same still FAILS: a
+# member of the chain that lost its packages is a defect, not a clean tree.
+#
 # Every module is scanned even after one fails, so one run reports them all.
 # The standard library is part of the scan: its version is the toolchain's, and
 # a reachable finding there is settled by moving the `go` line and MODULE.bazel's
@@ -72,17 +79,30 @@ else
   done <<<"$census"
 fi
 
+# The one answer that, for the root module alone, is not an incomplete scan.
+nothing_to_scan="no packages matched the provided patterns"
+
 vulnerable=()
 incomplete=()
+empty=()
 for mod in "${modules[@]}"; do
   echo "::group::govulncheck $mod"
   rc=0
-  (cd "$root/$mod" && GOWORK=off "$scanner" ./...) || rc=$?
+  out=""
+  out="$(cd "$root/$mod" && GOWORK=off "$scanner" ./... 2>&1)" || rc=$?
+  [ -n "$out" ] && printf '%s\n' "$out"
   echo "::endgroup::"
   case "$rc" in
     0) echo "vuln-check: $mod — no reachable vulnerability" ;;
     3) vulnerable+=("$mod") ;;
-    *) incomplete+=("$mod (exit $rc)") ;;
+    *)
+      if [ "$mod" = "." ] && [[ "$out" == *"$nothing_to_scan"* ]]; then
+        empty+=("$mod")
+        echo "vuln-check: $mod holds no package — nothing to scan (ADR 0157 §5)"
+      else
+        incomplete+=("$mod (exit $rc)")
+      fi
+      ;;
   esac
 done
 
@@ -102,4 +122,4 @@ fi
 if [ "$fail" -ne 0 ]; then
   exit 1
 fi
-echo "vuln-check: ${#modules[@]} module(s) scanned, no reachable vulnerability"
+echo "vuln-check: $((${#modules[@]} - ${#empty[@]})) module(s) scanned, no reachable vulnerability"

@@ -51,7 +51,7 @@ binary without build information.
 
 A `Module` keeps apart what a recorded version conflates: a release
 (`Version`), a commit (`Revision`, `Time`) and a local directory (`Local`,
-`Dir`). What that directory holds NOW is `pkg/v1/git`'s `Head`.
+`Dir`). What that directory holds NOW is `framework/git`'s `Head`.
 
 ## Do / Do-not
 

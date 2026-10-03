@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:00:02Z -->
+<!-- updated: 2026-10-03T03:30:00Z -->
 # internal/service/
 
 ## Purpose
@@ -52,10 +52,11 @@ Concrete implementations of the contracts declared in `internal/core/*`. This is
 | `writer/` | the log-transport writers behind the `core/writer` registry (ADR 0012, ADR 0015): `console`, `file`, `rotfile`, `journald` and `nettransport` register a factory; `dbsink` is the driver-agnostic database sink shell; `levelgate` is the severity floor a writer's sink is wrapped in (ADR 0132) | rotfile `0.3.27.*`, nettransport `0.3.30.*`, journald `0.3.31.*`; the others own none |
 | `net/` | the network domain's engines (ADR 0029): `client` (the policy-enforcing outbound transport), `server` (one listener engine for TCP, Unix, TLS and mutual TLS), `sse` (Server-Sent Events), `websocket` (RFC 6455, ADR 0047), `tlsid` (reads TLS material from disk and nothing else) and `static` (its own row above) | (emit core sentinels `0.2.11.*`) |
 | `proc/` | OS process supervision (ADR 0016): `exec` (spawn under explicit credentials, in its own process group), `childwait` (a child's status handed to the `Process` that owns it — ADR 0093), `reaper`, `signal`, `rlimit`, `cgroup`, `memlimit` (ADR 0075), `sdnotify`, `sdlisten`, and `self` (its own row above) | (emit core sentinels `0.2.6.*`) |
-| `vcs/git/` | the `core/vcs` contract by shelling out to the git binary — no VCS library, hardened invocations (ADR 0076, ADR 0087, ADR 0100) | (emits core sentinels `0.2.33.*`) |
-| `selfupdate/` | fetch a release, authenticate it, and replace the running binary, implementing `core/selfupdate` (ADR 0077) | `0.3.66.*`; core sentinels `0.2.34.*` |
-| `entitlement/` | fetch a vendor-signed roster, authenticate it, decide whether this machine is entitled, and keep deciding offline, implementing `core/entitlement` (ADR 0079) | `0.3.67.*`; core sentinels `0.2.35.*` |
-| `gate/` | `Decide` — reads a policy, a command path and the caller's verifier result and says what to do; it performs no effect (ADR 0080) | (none — `Decide` returns a value) |
+
+The distribution domains' engines — `entitlement`, `selfupdate`, `gate` and
+`vcs/git` — left this layer for the framework (ADR 0158):
+`framework/internal/service/<domain>`, over `pkg/v1` alone. Their ranges
+`0.3.66.*` and `0.3.67.*` kept their values there (ADR 0160).
 
 ## Module
 
@@ -119,10 +120,6 @@ Single module `github.com/kitsunium/sdk/internal/service` — one `go.mod` share
 - `proc/self/` — see `internal/service/proc/self/CLAUDE.md` (build and runtime state of the running process — ADR 0100)
 - `health/` — see `internal/service/health/CLAUDE.md` (the registry, the drain latch, the handler and `Ask` — ADR 0060, ADR 0131)
 - `transform/` — see `internal/service/transform/CLAUDE.md` (the three stdlib compressors and the bounded decompression — ADR 0014)
-- `vcs/git/` — see `internal/service/vcs/git/CLAUDE.md` (the hardened git invocations — ADR 0076, ADR 0087, ADR 0100)
-- `selfupdate/` — see `internal/service/selfupdate/CLAUDE.md` (signature, then digest, then disk — ADR 0077)
-- `entitlement/` — see `internal/service/entitlement/CLAUDE.md` (roster, grant, offline cache and anti-rollback ratchet — ADR 0079)
-- `gate/` — see `internal/service/gate/CLAUDE.md` (the classifier that performs nothing — ADR 0080)
 - `net/{client,server,sse,tlsid,websocket}/`, `proc/{cgroup,childwait,exec,memlimit,reaper,rlimit,sdlisten,sdnotify,signal}/`, `writer/{console,dbsink,file,journald,levelgate,nettransport,rotfile}/` — each directory's own `CLAUDE.md`
 
 ## Verification

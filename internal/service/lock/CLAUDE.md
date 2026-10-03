@@ -205,7 +205,7 @@ come back empty, indistinguishable from a verdict; ADR 0095 named them so the
 queue, which asks the same reader, can refuse where the lock accepts.
 `TestEveryAnswerWithoutAVerdictIsNamed` drives the two a test can cause (a NUL
 in the path, a directory that is not there) against a list read to the end. Same channel
-`internal/service/entitlement` uses for the same shape of degradation, and it
+`framework/internal/service/entitlement` uses for the same shape of degradation, and it
 fires only when the platform API refused to answer.
 
 ## The directory rule never reached the lock file's NAME

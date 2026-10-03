@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/git"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/git"
 )
 
 func TestBuildOfATodoOnALocalKit(t *testing.T) {
