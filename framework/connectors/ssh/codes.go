@@ -1,10 +1,10 @@
 // Package ssh — the one error-code range this package owns.
 //
-// Everything it says about VERIFICATION is said in framework/internal/core/entitlement's
-// vocabulary (0.2.35.*): a missing key, a mismatched fingerprint and an
-// unproven possession are the contract's situations, and an ssh implementation
-// reporting them in its own dialect would make every caller learn a second set
-// for the same three answers.
+// Everything it says about VERIFICATION is said in the entitlement contract's
+// vocabulary — framework/entitlement's sentinels, 0.2.35.*: a missing key, a
+// mismatched fingerprint and an unproven possession are the contract's
+// situations, and an ssh implementation reporting them in its own dialect would
+// make every caller learn a second set for the same three answers.
 //
 // ENROLMENT is not in that contract. Minting a pair is something this package
 // does and the port does not describe, so its failures have nowhere to borrow a
