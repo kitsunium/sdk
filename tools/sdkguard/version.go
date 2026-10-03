@@ -199,9 +199,10 @@ func checkVersion(dir string, p probe) (string, bool) {
 }
 
 // mergedRequirement finds a requirement of a module ADR 0162 merged into the
-// SDK module, through the same go.mod or go.work the SDK requirement was read
-// from, and reports whether there is one. A merged module the build replaces
-// locally is someone's checkout, and does not count.
+// SDK module, read the way requirementOf reads the SDK's — the nearest go.mod,
+// then the modules go.work lists, whose requirements share one build list in
+// workspace mode — and reports whether there is one. A merged module the build
+// replaces locally is someone's checkout, and does not count.
 func mergedRequirement(dir string) (moduleRef, bool) {
 	//: in the order the migration command drops them, so the notice names the
 	//: first one a reader finds in the command too.
