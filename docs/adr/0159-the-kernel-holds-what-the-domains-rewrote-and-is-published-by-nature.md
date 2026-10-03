@@ -147,6 +147,17 @@ published, which is why §2 comes first.
     whenever its slot count is not a power of two — the async logger's
     default ring, 1 025 slots, read as empty while holding 1 009 records —
     fixed in the kernel before the alias.
+  - The framework, as touched: of its 17 `atomic.Pointer` values, two were
+    copy-on-write containers — a store's watch list, written under the
+    store's lock, and a sealing store's members kept in clear, whose writer
+    cloned the map with no lock at all, so two writers could drop each
+    other's members — and both run on `concur/snapshot` now. The other
+    fifteen publish one pointer — set at start, swapped at stop, or
+    compare-and-swapped to claim it — for which `sync/atomic` is the
+    primitive and `snapshot.Value` would add a writer lock and take the
+    compare-and-swap away. Its fan-out, the password policy's verification
+    of former hashes, is `concur/group.Collect`. Its observer set stays, as
+    §1 said, and so does its multi-producer ring until `ring` has the mode.
   - Not yet: `ring`'s multi-producer mode and `flock`.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.

@@ -8,11 +8,12 @@ import (
 	"errors"
 	"fmt"
 	"runtime"
+	"slices"
 	"sync"
-	"sync/atomic"
 	"unicode/utf8"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/concur/group"
 	"github.com/kitsunium/sdk/pkg/v1/crypto/password"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -279,22 +280,22 @@ func (p *PasswordPolicyService[T]) rehash(ctx context.Context, key string, passw
 
 // verifyAll reports whether password matches any of hashes. It verifies
 // every one — whichever matched, all are, so the time says nothing of
-// which —, concurrently, at most GOMAXPROCS at once.
+// which —, concurrently, at most GOMAXPROCS at once: the SDK's
+// group.Collect, whose bound is taken before each goroutine starts. No
+// check fails — a hash that does not verify, or cannot be read, is not a
+// match — so no check cancels another; and a verification that panics is
+// re-raised here, on the caller's goroutine, rather than ending the process
+// from one of its own.
 func verifyAll(password []byte, hashes []string) bool {
-	var matched atomic.Bool
-	var wg sync.WaitGroup
-	slots := make(chan struct{}, max(1, runtime.GOMAXPROCS(0)))
-	for _, hash := range hashes {
-		slots <- struct{}{}
-		wg.Go(func() {
-			defer func() { <-slots }()
-			if ok, err := verifyPassword(password, hash); ok && err == nil {
-				matched.Store(true)
-			}
-		})
+	checks := make([]func(context.Context) (bool, error), len(hashes))
+	for i, hash := range hashes {
+		checks[i] = func(context.Context) (bool, error) {
+			ok, err := verifyPassword(password, hash)
+			return ok && err == nil, nil
+		}
 	}
-	wg.Wait()
-	return matched.Load()
+	matches, err := group.Collect(context.Background(), runtime.GOMAXPROCS(0), checks)
+	return err == nil && slices.Contains(matches, true)
 }
 
 // dummyHash is the hash a missing record is verified against.
