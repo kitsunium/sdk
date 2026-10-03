@@ -1,36 +1,53 @@
-// Package cbor wraps github.com/fxamacker/cbor/v2 as a codec.Codec
-// implementation. fxamacker exposes an Encoder and Decoder that stream
-// individual CBOR items, so this codec also implements StreamingCodec.
+// Package cbor is the SDK's CBOR codec (RFC 8949), written on the standard
+// library alone. It encodes any Go value the reflection rules below can
+// read, decodes into any Go value they can fill, and streams one data item
+// per Encode or Decode.
+//
+// # What is written
+//
+// Integers, lengths and tag numbers take their shortest head; a float64 is a
+// double and a float32 a single, NaN is written 0xf97e00 and the infinities
+// as half-precision floats; a string is a text string, a []byte or [N]byte a
+// byte string; a nil slice, map, pointer or interface is null; a struct is a
+// map keyed by field (or an array with toarray); a time.Time is its integer
+// Unix seconds, null when zero; a big.Int an integer or a bignum (tag 2 or 3).
+// Map pairs are sorted by encoded key (RFC 8949 §4.2.1), so equal values
+// encode to equal bytes. Nothing is written that the decoder would refuse:
+// not a string that is not UTF-8, not a map with two keys that encode alike,
+// nothing nested deeper than 32 arrays, maps and tags.
+//
+// # What is read
+//
+// Exactly one well-formed, valid data item — definite and indefinite
+// lengths, half, single and double floats, every major type — checked in
+// full, against the bounds (a million elements per array or pairs per map,
+// thirty-two levels, a million chunks per string), before anything is
+// decoded: malformed input never touches the target. A text string must be
+// UTF-8 wherever it sits; tags 0 to 3 must enclose the type RFC 8949 gives
+// them. A tag the codec does not interpret is transparent.
+//
+// # Struct tags
+//
+// A field's key is the name in its `cbor` tag, or in its `json` tag when it
+// has no `cbor` tag, or its Go name; the options are omitempty, omitzero and
+// keyasint, and a blank field `_ struct{}` tagged `cbor:",toarray"` encodes
+// a struct as an array. Embedded structs follow encoding/json's rules. A
+// type implementing encoding.BinaryMarshaler is written as a byte string,
+// and one implementing encoding.BinaryUnmarshaler reads one; a type with
+// MarshalCBOR or UnmarshalCBOR writes or reads its own item.
 package cbor
 
 import (
+	"bytes"
 	"io"
 	"slices"
 
-	gocbor "github.com/fxamacker/cbor/v2"
-
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-)
-
-// Security caps for hardened decoding. The library's default Unmarshal
-// uses package defaults that allow up to INT32_MAX array elements —
-// attacker-controlled input can trigger memory exhaustion before any
-// sanity check. Values here match the library's own "security tips"
-// README section.
-const (
-	// maxCBORArrayElements caps the slot count in any single CBOR array.
-	maxCBORArrayElements int = 1 << 20
-	// maxCBORMapPairs caps the key/value pair count in any single CBOR map.
-	maxCBORMapPairs int = 1 << 20
-	// maxCBORNestedLevels caps CBOR container nesting depth to defuse
-	// deeply-nested-structure DoS attempts.
-	maxCBORNestedLevels int = 32
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
-// extension tables (hoisted).
+// extension tables.
 var (
 	//: register the singleton and expose it as a typed package var.
 	Codec codec.Codec = codec.Register(&cborCodec{})
@@ -40,78 +57,7 @@ var (
 
 	//: extension table hoisted for the same reason.
 	extensions = []string{".cbor"}
-
-	//: decMode is the reusable hardened decoder used by every Unmarshal
-	//: call; built eagerly via mustHardenedDecMode so a mis-configuration
-	//: crashes at package load rather than silently passing through.
-	decMode gocbor.DecMode = mustHardenedDecMode()
-
-	//: encMode is the reusable encoder mode. fxamacker amortises the
-	//: per-call EncOptions resolution into one immutable EncMode value
-	//: so every Marshal hits the cached resolver instead of rebuilding
-	//: it. Default options (no sorting override, no float shortening)
-	//: keep wire bytes byte-identical to gocbor.Marshal.
-	encMode gocbor.EncMode = mustEncMode()
-
-	//: userBufferEncMode extends encMode with MarshalToBuffer(v, *buf)
-	//: so Append can encode directly into a caller-pool'd bytes.Buffer
-	//: without the intermediate alloc + copy that Marshal's API forces.
-	userBufferEncMode gocbor.UserBufferEncMode = mustUserBufferEncMode()
 )
-
-// mustEncMode builds the reusable EncMode with default options.
-// gocbor.EncOptions{}.EncMode() only fails on self-contradictory options;
-// the defaults are always valid so the panic guards a future library
-// upgrade that tightens validation.
-func mustEncMode() gocbor.EncMode {
-	//: default EncOptions preserve gocbor.Marshal's wire format byte-for-byte.
-	m, err := gocbor.EncOptions{}.EncMode()
-	//: EncMode only fails on self-contradictory options — fail loud.
-	if err != nil {
-		//: crash at package load so a misconfigured default never reaches runtime.
-		panic("service/codec/cbor: EncMode construction failed: " + err.Error())
-	}
-	//: publish the reusable encoder.
-	return m
-}
-
-// mustUserBufferEncMode builds the reusable UserBufferEncMode whose
-// MarshalToBuffer lets Append encode directly into a pooled buffer.
-// Same default options as encMode so wire bytes are identical.
-func mustUserBufferEncMode() gocbor.UserBufferEncMode {
-	//: default EncOptions match encMode so output is byte-identical.
-	m, err := gocbor.EncOptions{}.UserBufferEncMode()
-	//: UserBufferEncMode only fails on self-contradictory options — fail loud.
-	if err != nil {
-		//: crash at package load so a misconfigured default never reaches runtime.
-		panic("service/codec/cbor: UserBufferEncMode construction failed: " + err.Error())
-	}
-	//: publish for Append.
-	return m
-}
-
-// mustHardenedDecMode builds the reusable DecMode with security caps and
-// panics on the defensive error path. DecOptions.DecMode() only fails when
-// the options themselves are self-contradictory — caps here are within the
-// library's accepted range so the panic is practically unreachable, but
-// guards a future library upgrade that tightens validation.
-func mustHardenedDecMode() gocbor.DecMode {
-	//: caps chosen per the fxamacker/cbor README Security Tips section.
-	opts := gocbor.DecOptions{
-		MaxArrayElements: maxCBORArrayElements,
-		MaxMapPairs:      maxCBORMapPairs,
-		MaxNestedLevels:  maxCBORNestedLevels,
-	}
-	//: build the reusable decoder; panic on the defensive error branch.
-	m, err := opts.DecMode()
-	//: DecMode only fails on self-contradictory options — fail loud.
-	if err != nil {
-		//: crash at package load so a misconfigured default never reaches runtime.
-		panic("service/codec/cbor: hardened DecMode construction failed: " + err.Error())
-	}
-	//: publish the hardened decoder for cborCodec.Unmarshal.
-	return m
-}
 
 // cborCodec is the concrete Codec implementation for CBOR.
 type cborCodec struct{}
@@ -130,97 +76,88 @@ func (*cborCodec) Name() string {
 
 // MIMETypes lists every MIME alias.
 func (*cborCodec) MIMETypes() []string {
-	//: hand back the package-level slice.
+	//: hand back a copy of the package-level slice.
 	return slices.Clone(mimeTypes)
 }
 
 // Extensions lists every file extension.
 func (*cborCodec) Extensions() []string {
-	//: hand back the package-level slice.
+	//: hand back a copy of the package-level slice.
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as CBOR bytes.
+// Marshal serialises v as CBOR bytes. The encoding is built in a pooled
+// scratch buffer and copied once into a slice of exactly its length.
 func (*cborCodec) Marshal(v any) (encoded []byte, err error) {
-	//: route through the hoisted encMode so fxamacker reuses the cached
-	//: resolver instead of rebuilding default EncOptions on every call.
-	out, merr := encMode.Marshal(v)
-	//: success fast-path.
-	if merr == nil {
-		//: return the encoded bytes verbatim.
-		return out, nil
-	}
-	//: wrap the library error for reason-based matching.
-	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeCBORMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "CBOR encoding failed",
-		Private: "service/codec/cbor.Marshal: fxamacker/cbor/v2 returned an error",
-	})
-}
-
-// Unmarshal parses data as CBOR into v.
-func (*cborCodec) Unmarshal(data []byte, v any) error {
-	//: route through the hardened DecMode so attacker-controlled input
-	//: cannot trigger memory exhaustion via huge arrays, huge maps, or
-	//: deeply-nested structures.
-	uerr := decMode.Unmarshal(data, v)
-	//: success fast-path.
-	if uerr == nil {
-		//: nothing to wrap.
-		return nil
-	}
-	//: wrap the library error.
-	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeCBORUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "CBOR decoding failed",
-		Private: "service/codec/cbor.Unmarshal: fxamacker/cbor/v2 returned an error",
-	})
-}
-
-// Append encodes v as CBOR and appends the bytes to dst. Implements
-// the optional codec.Appender interface so hot-path callers can stream
-// records into a recycled buffer. Routes through fxamacker's
-// UserBufferEncMode.MarshalToBuffer + a pooled *bytes.Buffer to avoid
-// the intermediate alloc+copy the Marshal API forces.
-func (*cborCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
-	//: encode directly into the pooled buffer; UserBufferEncMode
-	//: bypasses the lib-internal alloc + copy gocbor.Marshal pays.
-	if merr := userBufferEncMode.MarshalToBuffer(v, buf); merr != nil {
-		//: drop the buffer back to the pool if not oversized.
-		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return dst, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeCBORMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "CBOR encoding failed",
-			Private: "service/codec/cbor.Append: fxamacker/cbor/v2 returned an error",
-		})
+	b, err := appendValue(buf.AvailableBuffer(), v, walkDepth{})
+	//: the result is the caller's, sized to the encoding.
+	if err == nil {
+		encoded = bytes.Clone(b)
 	}
-	//: append the encoded bytes onto the caller's buffer (1 copy total).
-	dst = append(dst, buf.Bytes()...)
-	//: cap-discard release.
-	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
-	return dst, nil
+	keepScratch(buf, b)
+	//: MARSHAL_FAILED, or the cause's own code when it is an SDK error.
+	return encoded, err
 }
 
-// NewEncoder wraps w in a streaming codec.Encoder. Routes through the
-// hoisted encMode so fxamacker reuses the cached resolver.
+// Unmarshal parses data as exactly one CBOR data item into v, which must be
+// a non-nil pointer. The whole of data is validated before v is touched.
+func (*cborCodec) Unmarshal(data []byte, v any) error {
+	//: nothing at all is not a data item.
+	if len(data) == 0 {
+		//: refused.
+		return malformed(0, "the input is empty")
+	}
+	n, err := validateItem(data, maxCBORNestedLevels)
+	//: not well-formed, not valid, or past a bound.
+	if err != nil {
+		//: refused before decoding.
+		return err
+	}
+	//: one item and nothing after it.
+	if n != len(data) {
+		//: refused before decoding.
+		return malformed(n, "bytes follow the data item")
+	}
+	//: the validated item into v.
+	return unmarshalItem(data, v)
+}
+
+// Append encodes v and appends the bytes to dst. Implements the optional
+// codec.Appender interface: the encoding is written straight into dst, with
+// no intermediate buffer. On failure dst is returned at its original length.
+func (*cborCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	out, err := appendValue(dst, v, walkDepth{})
+	//: a failed encoding leaves dst as it was.
+	if err != nil {
+		//: the prior contents only.
+		return dst, err
+	}
+	//: dst followed by the encoding.
+	return out, nil
+}
+
+// NewEncoder wraps w in a streaming codec.Encoder writing one data item per
+// Encode.
 func (*cborCodec) NewEncoder(w io.Writer) codec.Encoder {
-	//: encMode.NewEncoder reuses the cached resolver — matches Marshal.
-	return &cborEncoder{inner: encMode.NewEncoder(w)}
+	//: one Write per item.
+	return &cborEncoder{w: w}
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder. Routes through the
-// hardened decMode so the security caps apply to streaming Unmarshal too
-// — fixes the streaming-decode hardening gap where the package-level
-// gocbor.NewDecoder bypassed maxCBORArrayElements / maxCBORMapPairs /
-// maxCBORNestedLevels.
+// NewDecoder wraps r in a streaming codec.Decoder reading one data item per
+// Decode, validated under the same bounds as Unmarshal.
 func (*cborCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: decMode.NewDecoder applies the same caps as Unmarshal.
-	return &cborDecoder{inner: decMode.NewDecoder(r)}
+	//: the validator resumes across reads.
+	return &cborDecoder{r: r, walk: validator{limit: maxCBORNestedLevels}}
+}
+
+// keepScratch returns buf to the shared pool, keeping the larger backing
+// array the encoding may have grown into; the pool's cap-discard rule then
+// drops it when it is oversized, as it drops any buffer.
+func keepScratch(buf *bytes.Buffer, encoded []byte) {
+	//: the encoding outgrew the buffer: let the buffer adopt the new array.
+	if cap(encoded) > buf.Cap() {
+		*buf = *bytes.NewBuffer(encoded[:0])
+	}
+	scratch.ReleaseBuffer(buf)
 }

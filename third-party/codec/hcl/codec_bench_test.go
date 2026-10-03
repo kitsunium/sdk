@@ -2,7 +2,7 @@
 // codecs a consumer gets by default, JSON and CBOR (internal/service/codec/*).
 // All three implement the same core/codec.Codec port, and every row below
 // encodes the SAME Go value — the fixtures carry `hcl` and `json` struct tags
-// side by side, and fxamacker/cbor falls back to the `json` tag — so the
+// side by side, and the cbor codec falls back to the `json` tag — so the
 // comparison is format against format with the data held constant. HCL is a
 // configuration language, so the fixtures are configuration documents rather
 // than the record shapes pkg/v1/codec/BENCH.md uses.

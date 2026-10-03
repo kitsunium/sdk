@@ -1,37 +1,47 @@
-// Package cbor — adapts fxamacker's *Encoder to codec.Encoder.
+// Package cbor — the streaming encoder: one data item per Encode, written in
+// one Write once it is completely encoded, so a value that cannot be encoded
+// writes nothing.
 package cbor
 
 import (
-	gocbor "github.com/fxamacker/cbor/v2"
+	"io"
 
-	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
-// cborEncoder wraps *gocbor.Encoder so it satisfies codec.Encoder.
+// cborEncoder writes CBOR data items to a writer, one per Encode.
 type cborEncoder struct {
-	inner *gocbor.Encoder
+	// w receives each encoded item.
+	w io.Writer
 }
 
-// Encode serialises v through the wrapped encoder.
+// Encode encodes v and writes it as one data item.
 func (e *cborEncoder) Encode(v any) error {
-	//: delegate and wrap on error.
-	cerr := e.inner.Encode(v)
-	//: success fast-path.
-	if cerr == nil {
-		//: nothing to wrap.
-		return nil
+	buf := scratch.AcquireBuffer()
+	b, err := appendValue(buf.AvailableBuffer(), v, walkDepth{})
+	//: only a complete item is written.
+	if err == nil {
+		err = e.write(b)
 	}
-	//: wrap the library error.
-	return errs.Wrap(cerr, errs.WrapParams{
-		Code:    CodeCBORMarshalFailed,
-		Reason:  "MARSHAL_FAILED",
-		Public:  "CBOR encoding failed",
-		Private: "service/codec/cbor.Encoder.Encode: fxamacker/cbor/v2 returned an error",
-	})
+	keepScratch(buf, b)
+	//: MARSHAL_FAILED, or the cause's own code when it is an SDK error.
+	return err
 }
 
-// Close is a no-op because the fxamacker encoder does not own the writer.
+// write hands one encoded item to the writer.
+func (e *cborEncoder) write(b []byte) error {
+	_, err := e.w.Write(b)
+	//: a short write is reported by the writer as an error.
+	if err != nil {
+		//: the writer's failure, kept as the cause.
+		return encodeCause(err, "writing an encoded item failed")
+	}
+	//: written.
+	return nil
+}
+
+// Close is a no-op: the encoder owns no state and does not own the writer.
 func (*cborEncoder) Close() error {
-	//: fxamacker's encoder owns no writer-level state.
+	//: the writer is the caller's to close.
 	return nil
 }

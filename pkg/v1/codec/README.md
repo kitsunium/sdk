@@ -386,7 +386,8 @@ const (
     YAML Format = "yaml"
     // TOML denotes the pelletier/go-toml/v2 wire format.
     TOML Format = "toml"
-    // CBOR denotes the fxamacker/cbor/v2 wire format (RFC 8949).
+    // CBOR denotes the RFC 8949 wire format, encoded and decoded on the
+    // standard library alone.
     CBOR Format = "cbor"
     // MsgPack denotes the MessagePack wire format (msgpack.org specification),
     // implemented natively on the standard library.
