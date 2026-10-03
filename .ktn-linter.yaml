@@ -1686,6 +1686,19 @@ rules:
       # branch that returns empty SQL. Scoped to the one file.
       - "**/internal/service/sql/dialect_sql.go"
       - "internal/service/sql/dialect_sql.go"
+      # The trace class again, on the native MessagePack codec's FUNC port.
+      # Every encoder there has the signature of its encodeFunc type,
+      # func(b []byte, v reflect.Value, depth int), because one plan cached
+      # per Go type has to call a string's encoder and a struct's the same
+      # way. depth is what a container, a pointer or an interface checks
+      # before going one level deeper (the CWE-674 bound); a bool, a number,
+      # a string, a time or a marshaler method nests nothing and has no level
+      # to check, and `_` says so in the signature. The element writers of
+      # the direct map[string]V encoders, and the omitempty test of a kind
+      # that is never empty, follow the same ports. Naming the parameter
+      # would trade this finding for an unused-parameter one.
+      - "**/internal/service/codec/msgpack/**"
+      - "internal/service/codec/msgpack/**"
 
   # KTN-ITER-YIELD / KTN-STRUCT-ACCESSOR — false positives in the framework
   # module (kodflow/ktn-linter#692, #693). TEMPORARY.

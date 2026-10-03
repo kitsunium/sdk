@@ -206,7 +206,8 @@ const (
 	TOML Format = "toml"
 	// CBOR denotes the fxamacker/cbor/v2 wire format (RFC 8949).
 	CBOR Format = "cbor"
-	// MsgPack denotes the vmihailenco/msgpack/v5 wire format.
+	// MsgPack denotes the MessagePack wire format (msgpack.org specification),
+	// implemented natively on the standard library.
 	MsgPack Format = "msgpack"
 
 	// TLV denotes the self-describing Type-Length-Value reflection
