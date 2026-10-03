@@ -4,8 +4,8 @@
 ## Purpose
 
 The TOML codec, written natively against TOML v1.0.0 with the standard library
-alone — no third-party module, so that the public `pkg` module moves toward
-depending on the standard library and the SDK only. It replaced a wrapper around
+alone — no third-party module, so that the SDK module links the standard
+library and nothing else (ADR 0156, ADR 0162). It replaced a wrapper around
 `github.com/pelletier/go-toml/v2` v2.4.3 and keeps its observable behaviour:
 same package, API, `Format` name and error codes; the same decoded values —
 differentially fuzzed against it, 19.7 M inputs into `map[string]any` with no

@@ -98,13 +98,22 @@ and in the pull request.
   the newest `pkg/vX.Y.Z`, bumped by the size a maintainer's label set
   (ADR 0135). The range the size is read over opens at that tag's first
   parent, as before (ADR 0085).
-- **The first root tag is a bootstrap.** It is the first release of the SDK
-  module's content, and the proxy and the checksum database keep a version
-  forever — the path itself is known to them only at `v0.0.0`, a 2024 tag of an
-  earlier history that the repository no longer holds — so it is held like ADR
-  0009's very first release: an automatic run exits 3 and publishes nothing,
-  and a maintainer's dispatch of SDK Release — which passes `--allow-bootstrap`
-  — cuts it once the module zip and a clean-room `go get` are validated.
+- **The first root tag is held while its base is a `pkg/vX.Y.Z` tag.** It is
+  the first release of the SDK module's content, and the proxy and the checksum
+  database keep a version forever — the path itself is known to them only at
+  `v0.0.0`, a 2024 tag of an earlier history that the repository no longer
+  holds, whose zip is a LICENSE — so it is held like ADR 0009's very first
+  release: an automatic run exits 3 and publishes nothing, and a maintainer's
+  dispatch of SDK Release — which passes `--allow-bootstrap` — cuts it once the
+  module zip and a clean-room `go get` are validated. The hold asks what the
+  base is, not whether a root tag exists: a stray stable root tag below the
+  pkg history, that `v0.0.0` among them, must not lift it.
+- **The first root tag is never a patch.** It moves every consumer's
+  requirement to another module, a change v0 says with a minor at least, and a
+  v0.17.1 would stay in the proxy for good. From a `pkg/` base a patch is
+  refused — exit 65, the refusal of a size nobody decided (ADR 0135) — naming
+  `release:minor` and `bump=minor`; the refusal comes before the hold, so an
+  unlabelled merge is told at once rather than held at the wrong version.
 - **Which vendor modules**: each one `go.work` names beside `.`, measured from
   the FIRST PARENT of its own last tag — the release commit rewrote its go.mod,
   so measured from the tag every module would always look changed —, with the
@@ -141,7 +150,30 @@ leaves them in the build list beside the SDK module, which provides the same
 packages. Measured in a consumer outside the repository: `ambiguous import:
 found package github.com/kitsunium/sdk/internal/kernel/errs in multiple
 modules`. With them, the go.mod is reduced to one requirement and the build
-passes (§As built).
+passes (§As built). `sdkguard` names a go.mod left that way: the SDK module
+required beside a module it merged.
+
+**A library migrates before the modules that require it.** `@none` takes a
+module out of the build list together with every module whose version requires
+it, so a dependency still on `…/pkg` — a library of the consumer's own that
+has not migrated yet — goes with it in the same command, and `go get` says so:
+`go: removed <module> <version>`, or `go: downgraded <module> <version> =>
+<older>` when an older version of it did not require the SDK. Measured on two
+modules outside the repository, a product requiring a library through a
+`replace` (§As built): run in the product first, the command printed
+`go: removed` for the library and dropped its requirement; run in the library
+first, then in the product, it kept it. A `removed` or `downgraded` line naming
+a module that is not the SDK's means that module still requires a retired one:
+migrate it, or upgrade it to a version that requires
+`github.com/kitsunium/sdk`, then run the command again. Afterwards
+
+```sh
+go mod graph | grep -E 'kitsunium/sdk/(pkg|framework|internal/[a-z]+)@'
+```
+
+prints nothing — the `@` matters: without it a connector module,
+`…/framework/connectors/<engine>@…`, matches too, and a migrated consumer of
+`connectors/postgres` read its nine edges as retired modules (measured).
 
 ## Consequences
 
@@ -161,14 +193,23 @@ passes (§As built).
   module boundaries used to refuse a wrong-way import in a `GOWORK=off` build
   too — `internal/kernel`'s go.mod required nothing —; in workspace mode and
   under Bazel they never did, and the graph check runs in `make lint` and in
-  the required CI job.
+  the required CI job. It covers the tests as well: a pattern such as
+  `//internal/kernel/...` takes in the `go_test` targets, `manual` ones
+  included, so a test importing a layer above is reached like a library —
+  measured by giving a kernel test a dependency on `//internal/core/crypto`,
+  which the check named and failed on.
 - **A new consumer must require the module before it tidies.** Go resolves an
-  import that nothing in go.mod provides to the module with the LONGEST path
-  that provides it at its latest version, and the retired `…/pkg` and
-  `…/framework` keep providing `…/pkg/v1/*` and `…/framework/*` at v0.17.0 —
-  measured against a proxy serving both: a fresh module importing them, after a
-  bare `go mod tidy`, requires `…/pkg` and `…/framework` v0.17.0 and the three
-  internal modules, not the SDK at v0.18.0. `go get github.com/kitsunium/sdk@latest`
+  import that nothing in go.mod provides by querying every prefix of its path
+  at latest, longest first, and taking the longest module that provides the
+  package (`queryPrefixModules` and `queryImport` in `cmd/go/internal/modload`,
+  Go 1.27.1) — and the retired `…/pkg` and `…/framework` keep providing
+  `…/pkg/v1/*` and `…/framework/*` at v0.17.0. On a proxy that serves both —
+  the public one will — a fresh module importing them requires, after a bare
+  `go mod tidy`, `…/pkg` and `…/framework` v0.17.0 and the three internal
+  modules, not the SDK at v0.18.0 — every time, not by chance: a query for
+  `…/pkg` that fails other than as "not found" fails the tidy rather than
+  falling back to the root. Only a proxy list whose first answering proxy has
+  never fetched `…/pkg` resolves to the root. `go get github.com/kitsunium/sdk@latest`
   first makes the SDK module the one provider in the build list, and the
   install documentation says so. The cure Go offers — a last version of each
   retired module that provides no package, or retracts the others — is a
@@ -178,14 +219,28 @@ passes (§As built).
   §5 put in `cross-build`, `test-386`, `e2e-cross` and `vuln-check.sh` are
   gone, and govulncheck answering "no packages" for the root fails like any
   other module.
+- A vendor or connector module is measured on its own directory alone. A fix
+  under `internal/` that one of them uses cuts a release — rule 2 counts
+  `//third-party/...` — but does not re-tag the module, whose last tag still
+  requires the SDK release it was cut with; its consumer takes the fix by
+  requiring the newer SDK (`go get github.com/kitsunium/sdk@latest`), which
+  minimum version selection then gives the vendor module too. In lockstep the
+  module's own upgrade carried it; now the SDK requirement does.
 - `framework/kit` describes a build's kit and SDK from one module: both say
-  `github.com/kitsunium/sdk`, at the same version. Positions in the SDK's own
-  tests are relative to the repository root (`framework/internal/kit/...`),
-  and the tests that needed a second Go module of the build simulate one,
-  since the test binary links none.
+  `github.com/kitsunium/sdk`, at the same version. The shape of the build
+  description is unchanged and two of its values change: `Build.Kit.Module`
+  (`kit.module` on the wire) was `github.com/kitsunium/sdk/framework` and
+  `Build.SDK.Module` (`sdk.module`) `github.com/kitsunium/sdk/pkg`, and a tool
+  that compares them reads the difference. Positions in the SDK's own tests
+  are relative to the repository root (`framework/internal/kit/...`), and the
+  tests that needed a second Go module of the build simulate one, since the
+  test binary links none.
 - `tools/sdkguard`'s freshness probe reads `github.com/kitsunium/sdk`; a
   go.mod still on `…/pkg` is told the migration command once the SDK module
-  has a release.
+  has a release, and a go.mod that requires the SDK module beside a module it
+  merged is told the removals. Its candidates start at v0.18.0: the proxy
+  lists the root path at the empty `v0.0.0`, which read as a release told
+  every `…/pkg` consumer to migrate onto it.
 - The docs site's version list reads the root tags beside the `pkg/vX.Y.Z`
   history, as one list.
 
@@ -195,11 +250,12 @@ For a consumer, the requirement changes, not an import path: the command
 above. Until v0.18.0 is published nothing changes for anyone. After it, a
 go.mod that keeps `…/pkg` v0.17.0 keeps building at v0.17.0, and one that
 requires both the SDK module and a module it replaced fails with an ambiguous
-import — the command removes them together. A new consumer that runs
-`go mod tidy` before requiring the SDK module gets the retired modules at
-v0.17.0 (§Consequences): the install is `go get github.com/kitsunium/sdk@latest`.
-In `framework/kit`'s graph, the build's `kit` and `sdk` both name
-`github.com/kitsunium/sdk`.
+import — the command removes them together. A library still on `…/pkg` is
+removed from its consumer's go.mod by that command, so a library migrates
+first (§Consumer migration). A new consumer that runs `go mod tidy` before
+requiring the SDK module gets the retired modules at v0.17.0 (§Consequences):
+the install is `go get github.com/kitsunium/sdk@latest`. In `framework/kit`'s
+graph, the build's `kit` and `sdk` both name `github.com/kitsunium/sdk`.
 
 ## Alternatives considered
 
@@ -257,20 +313,34 @@ change.
   `./pkg`, `./framework` or an `internal/` directory again. `cut-tags.sh` runs
   its publication subshell under its own `set -e`: under `( … ) || rc=$?` bash
   ignored errexit, so a refused go.mod printed its refusal and was released
-  anyway — seen red in the new suite before the fix. SDK Release makes one
-  GitHub release and lists the vendor tags in its notes.
+  anyway — seen red in the new suite before the fix. The first root tag is held
+  when the base is a `pkg/` tag and refused as a patch from it (§4); the first
+  draft held it only while no `vX.Y.Z` existed, and a stray `v0.0.0` beside
+  `pkg/v0.17.0` let an automatic run push v0.18.0 — both cases seen red against
+  that draft. SDK Release makes one GitHub release and lists the vendor tags in
+  its notes.
+- **sdkguard.** The freshness probe reads the SDK module from v0.18.0 up —
+  against the real proxy, whose list for the root path is `v0.0.0`, the first
+  draft printed `go get github.com/kitsunium/sdk@v0.0.0 …/pkg@none …` to a
+  consumer on `…/pkg` — and names a go.mod left half-migrated.
 - **Measured**, in consumers outside the repository. One requiring
   `github.com/kitsunium/sdk` through a `replace` builds and links nothing but
   the standard library and the SDK. Then against a file proxy serving the
-  v0.17.0 modules as published and the SDK module at v0.18.0 — its zip built
-  from this tree by `golang.org/x/mod/zip`, 5 256 files, none refused —, with
-  no `replace` at all: a consumer on `pkg` and `framework` v0.17.0 fails with an
-  ambiguous import after `go get github.com/kitsunium/sdk@v0.18.0` alone, and
-  after the command without the internal modules; with the command above it
-  builds, its go.mod holding one requirement. A fresh module importing the
-  packages resolves to `…/pkg` and `…/framework` v0.17.0 under a bare
-  `go mod tidy`, and to the SDK module at v0.18.0 once
-  `go get github.com/kitsunium/sdk@latest` ran first. A consumer of
+  v0.17.0 modules as published, the root path's `v0.0.0` as the proxy holds it,
+  and the release `cut-tags.sh` cut from this tree into a scratch repository —
+  14 tags on one release commit, the SDK module's zip built from it by
+  `golang.org/x/mod/zip`, 5 256 files, none refused —, with no `replace` at
+  all: a consumer on `pkg` and `framework` v0.17.0 fails with an ambiguous
+  import after `go get github.com/kitsunium/sdk@v0.18.0` alone, and after the
+  command without the internal modules, which `sdkguard` then names; with the
+  command above it builds, its go.mod holding one requirement, and a second run
+  changes nothing. A fresh module importing the packages resolves to `…/pkg`
+  and `…/framework` v0.17.0 under a bare `go mod tidy`, and to the SDK module
+  at v0.18.0 once `go get github.com/kitsunium/sdk@latest` ran first. A product
+  requiring a library through a `replace`, both on v0.17.0: the command run in
+  the product first printed `go: removed example.com/lib v0.0.0` and dropped
+  it; run in the library first, then in the product, it kept it, and the
+  product built on the library and the SDK alone. A consumer of
   `framework/connectors/postgres` v0.17.0 migrates with the same command, the
   connector upgraded in it.
 

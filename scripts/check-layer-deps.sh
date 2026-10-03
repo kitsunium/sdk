@@ -15,6 +15,13 @@
 # wired into `make lint` and CI rather than into the per-commit hook, whose
 # guards run without it.
 #
+# The tests are in it too. A pattern such as //internal/kernel/... takes in the
+# layer's go_test targets — `manual` ones included — and deps() walks theirs,
+# so a test that imports a layer above is reached like a library is. Since ADR
+# 0162 this is the only check of that: the module boundaries that used to
+# refuse it in a GOWORK=off build are gone. Measured: a kernel test given a
+# dependency on //internal/core/crypto failed "kernel depends on kernel only".
+#
 # It fails CLOSED: a query that cannot be answered stops it, because a
 # firewall check that passes on an unreadable graph checks nothing.
 set -euo pipefail

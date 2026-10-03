@@ -137,8 +137,23 @@ go mod tidy
 
 Add `github.com/kitsunium/sdk/<module>@v0.18.0` to the same `go get` for each
 vendor or connector module your go.mod requires (`third-party/aws`,
-`framework/connectors/postgres`…). `sdkguard` prints this command when it finds
-a go.mod still on `…/pkg` (ADR 0162).
+`framework/connectors/postgres`…).
+
+Migrate from the bottom up: a library before the modules that require it. The
+`@none` takes out, with the old modules, every module that still requires
+them — a library of yours still on `…/pkg` leaves your go.mod in the same
+command, and `go get` says so with `go: removed <module>` (or
+`go: downgraded <module>` when an older version of it did not use the SDK).
+Such a line for a module that is not the SDK's means: migrate that module
+first, then run the command again. When it is done,
+
+```bash
+go mod graph | grep -E 'kitsunium/sdk/(pkg|framework|internal/[a-z]+)@'
+```
+
+prints nothing. `sdkguard` prints the command when it finds a go.mod still on
+`…/pkg`, and the removals when it finds one that requires the SDK module
+beside an old one (ADR 0162).
 
 ## Quick example
 

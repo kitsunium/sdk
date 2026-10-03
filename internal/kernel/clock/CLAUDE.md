@@ -68,7 +68,7 @@ only producer of — splitting them left three files nothing else referenced.
 `Clock` is a **published port**, not an internal detail. `pkg/v1/clock`
 publishes it as an alias (ADR 0090), and `pkg/v1/data/cache.Config` is a *type
 alias* for `internal/kernel/collections/cache.Config[K,V]`, whose `Clock` field carries this
-exact interface — so any consumer of the released `pkg` module can write a
+exact interface — so any consumer of the released SDK module can write a
 two-method double and pass it in. Go interfaces are structural: a double
 satisfies `clock.Clock` whether or not it names it, and adding a method breaks
 it at compile time with no deprecation window.

@@ -6,7 +6,7 @@
 The proc family's two systemd facades (ADR 0155). This directory holds no Go
 code: it is a prefix, not a package, and there is no
 `github.com/kitsunium/sdk/pkg/v1/proc/systemd` to import. Each member is a
-package of the `pkg` module with its own `CLAUDE.md` and `README.md` (generated
+package of the SDK module with its own `CLAUDE.md` and `README.md` (generated
 by gomarkdoc from its doc comment, ADR 0008), imported by its full path —
 `github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify` — and linking what it
 imports and never this directory or `pkg/v1/proc` above it.
