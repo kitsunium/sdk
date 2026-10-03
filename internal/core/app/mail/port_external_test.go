@@ -50,15 +50,3 @@ func TestCapabilitiesAreSiblingsAndNotMembers(t *testing.T) {
 		t.Fatalf("FullTransport has %d methods, want 4 (Send + SendBatch + Sent + Reset)", got)
 	}
 }
-
-// TestEnvelopeValidatesBeforeItDerives pins that a caller cannot obtain an
-// envelope from a message the domain would refuse — which is what lets a
-// transport call Envelope() first and trust what it gets back.
-func TestEnvelopeValidatesBeforeItDerives(t *testing.T) {
-	t.Parallel()
-	msg := validMessage()
-	msg.Subject = "x\r\nBcc: attacker@evil.example"
-	if _, err := msg.Envelope(); err == nil {
-		t.Fatal("Envelope() succeeded on a message carrying an injected header")
-	}
-}

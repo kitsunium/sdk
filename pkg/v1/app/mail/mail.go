@@ -47,8 +47,8 @@
 //
 // RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes
 // the only one that cannot leak: the addresses become RCPT TO commands and no
-// header names them. [Message].Envelope is where that happens, and the
-// composed bytes are asserted not to contain a blind recipient.
+// header names them. [EnvelopeOf] is where that happens, and the composed
+// bytes are asserted not to contain a blind recipient.
 //
 // # The MIME structure follows from the fields
 //
@@ -505,5 +505,18 @@ func Compose(msg Message) (raw []byte, err error) {
 // way.
 func Validate(msg Message) error {
 	//: the same guard both transports run.
-	return coremail.Validate(msg)
+	return svcmail.Validate(msg)
+}
+
+// EnvelopeOf validates msg and derives the SMTP envelope a transport would
+// issue for it: the From addr-spec as the return path, and every recipient —
+// To, then Cc, then Bcc — as a RCPT TO. A blind recipient reaches the envelope
+// and no header; that is the whole of Bcc in this package.
+//
+// It returns the first typed refusal [Validate] would, and the zero [Envelope]
+// with it: an envelope built from an unvalidated message is a list of strings
+// that may each carry a CRLF.
+func EnvelopeOf(msg Message) (envelope Envelope, err error) {
+	//: the same derivation both transports use.
+	return svcmail.Envelope(msg)
 }

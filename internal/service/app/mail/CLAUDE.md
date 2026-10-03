@@ -6,6 +6,10 @@
 The two halves the `mail` port needs: **MIME composition** (a `Message` value
 in, the RFC 5322 wire form out) and **two transports** — SMTP over `net/smtp`, and an
 in-memory double (unbounded, or bounded as the capture transport). ADR 0064.
+Both run the domain's **guards**, which live here too since ADR 0160: the
+header injection gate, the addr-spec subset, the attachment checks, the
+whole-message `Validate`, and `Envelope`, which validates a message before it
+derives the RCPT TO list.
 The durable outbox that retries a transport and dead-letters is the `spool/`
 subpackage (ADR 0111), with its own code range `0.3.81.*`.
 
@@ -17,6 +21,11 @@ This package declares no code and raises the core's.
 
 | File | What lives there |
 |---|---|
+| `validate.go` | `Validate` — the one whole-message guard both transports and the spool run; it stops at the first refusal |
+| `header.go` | the reserved set and `IsReservedHeader`, and the INJECTION GATE — `ValidateHeaderName`, `ValidateHeaderValue`, and `ValidateHeader`, which runs both and refuses a reserved name |
+| `address.go` | `ValidateAddress`, `NeedsQuotedDisplayName`, and `IsDotAtom` — the dot-atom grammar, exported because a Message-ID's id-left is written in it too (the spool checks its identifiers with it) — plus the octet bounds the grammars are written in |
+| `attachment.go` | `ValidateAttachment` and its three sub-guards |
+| `envelope.go` | `Envelope` — validates, then derives the envelope: Bcc becomes RCPT TO and nothing else |
 | `composer.go` | `Composer`, `NewComposer`, `Compose`, and the message header block |
 | `composer_config.go` | `ComposerConfig` — the clock and the randomness source, both clamping |
 | `composition.go` | the per-message build state, the boundary generator, and the structure table |
@@ -72,7 +81,7 @@ That is a reasonable contract for a package whose callers control their own
 headers, and a trap for one whose callers do not. So this package emits the
 `--boundary` framing itself (twenty lines, RFC 2046 §5.1.1) and every header —
 message-level and part-level — goes through `writeHeader`, which re-runs
-`coremail.ValidateHeaderValue` at the point of writing.
+`ValidateHeaderValue` at the point of writing.
 
 `mime/multipart.Reader` is used and always will be: it is what the tests reparse
 with, because a test that decodes with the code that encoded preserves exactly

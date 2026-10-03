@@ -40,7 +40,7 @@ The error names the FIELD and never the value — the value is by construction t
 
 ### Bcc reaches the envelope and never a header
 
-RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes the only one that cannot leak: the addresses become RCPT TO commands and no header names them. [Message](<#Message>).Envelope is where that happens, and the composed bytes are asserted not to contain a blind recipient.
+RFC 5322 §3.6.3 permits three treatments of a Bcc field. This package takes the only one that cannot leak: the addresses become RCPT TO commands and no header names them. [EnvelopeOf](<#EnvelopeOf>) is where that happens, and the composed bytes are asserted not to contain a blind recipient.
 
 ### The MIME structure follows from the fields
 
@@ -143,6 +143,7 @@ sent := box.Sent()                // envelope + composed the RFC 5322 wire form
 - [type ComposerConfig](<#ComposerConfig>)
 - [type Delivery](<#Delivery>)
 - [type Envelope](<#Envelope>)
+  - [func EnvelopeOf\(msg Message\) \(envelope Envelope, err error\)](<#EnvelopeOf>)
 - [type FullTransport](<#FullTransport>)
   - [func NewCapture\(keep int\) FullTransport](<#NewCapture>)
   - [func NewMemory\(\) FullTransport](<#NewMemory>)
@@ -370,6 +371,17 @@ Envelope is the public alias for the SMTP envelope: one MAIL FROM and every RCPT
 ```go
 type Envelope = coremail.EnvelopeValue
 ```
+
+<a name="EnvelopeOf"></a>
+### func [EnvelopeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/mail.go#L519>)
+
+```go
+func EnvelopeOf(msg Message) (envelope Envelope, err error)
+```
+
+EnvelopeOf validates msg and derives the SMTP envelope a transport would issue for it: the From addr\-spec as the return path, and every recipient — To, then Cc, then Bcc — as a RCPT TO. A blind recipient reaches the envelope and no header; that is the whole of Bcc in this package.
+
+It returns the first typed refusal [Validate](<#Validate>) would, and the zero [Envelope](<#Envelope>) with it: an envelope built from an unvalidated message is a list of strings that may each carry a CRLF.
 
 <a name="FullTransport"></a>
 ## type [FullTransport](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/mail/mail.go#L309>)

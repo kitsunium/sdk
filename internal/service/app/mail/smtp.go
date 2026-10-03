@@ -97,7 +97,7 @@ func (t *smtpTransport) prepare(
 	failures = make([]error, 0, len(msgs))
 	//: one verdict per message, and a refusal never stops the others.
 	for _, msg := range msgs {
-		envelope, envelopeErr := msg.Envelope()
+		envelope, envelopeErr := Envelope(msg)
 		//: refused message: recorded and skipped, never fatal to the batch.
 		if envelopeErr != nil {
 			failures = append(failures, envelopeErr)

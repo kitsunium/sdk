@@ -74,7 +74,7 @@ func (t *memoryTransport) Send(ctx context.Context, msg coremail.MessageValue) e
 		//: DialFailed: nothing was sent, and the reason is the caller's.
 		return wrapAs(coremail.DialFailed, ctxErr)
 	}
-	envelope, envelopeErr := msg.Envelope()
+	envelope, envelopeErr := Envelope(msg)
 	//: the core verdict, which also runs Validate.
 	if envelopeErr != nil {
 		//: nothing recorded.

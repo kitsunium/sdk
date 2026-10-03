@@ -4,6 +4,7 @@ package mail
 import (
 	"strings"
 
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -13,17 +14,17 @@ import (
 const pathSeparators string = `/\`
 
 // ValidateAttachment reports whether a can be composed into a body part, and
-// returns [InvalidAttachment] naming the position when it cannot.
+// returns [coremail.InvalidAttachment] naming the position when it cannot.
 //
 // The filename faces the injection gate like any other header value, because
 // it lands in Content-Disposition. mime.FormatMediaType would silently
 // percent-escape a CRLF there — the same "repair the caller never hears about"
 // this domain refuses everywhere else.
-func ValidateAttachment(field string, a *AttachmentValue) error {
+func ValidateAttachment(field string, a *coremail.AttachmentValue) error {
 	//: an unnamed attachment shows as "noname"; naming it is the caller's job.
 	if a.Filename == "" {
 		//: the position is what the caller must fix.
-		return errs.Wrap(InvalidAttachment, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
 			errs.String("field", field), errs.String("problem", "empty filename"))
 	}
 	//: the filename reaches Content-Disposition, so it faces the same gate.
@@ -35,7 +36,7 @@ func ValidateAttachment(field string, a *AttachmentValue) error {
 	//: sees without telling anyone.
 	if strings.ContainsAny(a.Filename, pathSeparators) {
 		//: InvalidAttachment.
-		return errs.Wrap(InvalidAttachment, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
 			errs.String("field", field), errs.String("problem", "path separator in filename"))
 	}
 	//: a declared media type must be spellable as one.
@@ -67,7 +68,7 @@ func validateMediaType(field, declared string) error {
 	//: a subtype must follow, and only one slash may separate them.
 	if slash <= 0 || slash == len(declared)-1 {
 		//: the media type is the caller's own literal, not attacker data.
-		return errs.Wrap(InvalidAttachment, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
 			errs.String("field", field), errs.String("problem", "media type is not type/subtype"))
 	}
 	//: spellable.
@@ -86,15 +87,15 @@ func validateContentID(field, id string) error {
 	//: the HTML's cid: reference resolves to.
 	if strings.ContainsAny(id, "<>") {
 		//: InvalidAttachment.
-		return errs.Wrap(InvalidAttachment, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
 			errs.String("field", field), errs.String("problem", "content id carries angle brackets"))
 	}
 	//: RFC 2392 §2 borrows the addr-spec grammar for cid:, so the same guard
 	//: applies to the value that resolves it.
-	if idErr := ValidateAddress(field+".ContentID", AddressValue{Addr: id}); idErr != nil {
+	if idErr := ValidateAddress(field+".ContentID", coremail.AddressValue{Addr: id}); idErr != nil {
 		//: relabel: the caller's problem is the attachment, not an address —
 		//: but the address verdict stays reachable as a log-only field.
-		return errs.Wrap(InvalidAttachment, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAttachment, errs.WrapParams{},
 			errs.String("field", field), errs.String("problem", "content id is not an addr-spec"),
 			errs.String("cause", idErr.Error()))
 	}

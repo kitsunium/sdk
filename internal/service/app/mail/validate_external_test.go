@@ -5,8 +5,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/app/mail"
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 )
 
 // injectionPayload is a syntactically PERFECT second header, not merely
@@ -18,13 +19,13 @@ const injectionPayload = "legit\r\nBcc: attacker@evil.example"
 // failure reports.
 type breakCase struct {
 	name    string
-	breakIt func(m *mail.MessageValue)
+	breakIt func(m *coremail.MessageValue)
 }
 
 // emptyCase is one zero this domain declines to guess a value for.
 type emptyCase struct {
 	name   string
-	mutate func(m *mail.MessageValue)
+	mutate func(m *coremail.MessageValue)
 	want   errs.Code
 }
 
@@ -38,10 +39,10 @@ type addressCase struct {
 
 // validMessage returns the smallest message the domain accepts, so a test can
 // break exactly one thing about it.
-func validMessage() mail.MessageValue {
-	return mail.MessageValue{
-		From: mail.AddressValue{Name: "Ops", Addr: "ops@example.com"},
-		To:   []mail.AddressValue{{Addr: "user@example.net"}},
+func validMessage() coremail.MessageValue {
+	return coremail.MessageValue{
+		From: coremail.AddressValue{Name: "Ops", Addr: "ops@example.com"},
+		To:   []coremail.AddressValue{{Addr: "user@example.net"}},
 		Text: "hello",
 	}
 }
@@ -53,32 +54,32 @@ func validMessage() mail.MessageValue {
 func TestHeaderInjectionIsRefusedOnEveryCallerControlledField(t *testing.T) {
 	t.Parallel()
 	cases := []breakCase{
-		{"subject", func(m *mail.MessageValue) { m.Subject = injectionPayload }},
-		{"from display name", func(m *mail.MessageValue) { m.From.Name = injectionPayload }},
-		{"from addr-spec", func(m *mail.MessageValue) { m.From.Addr = "ops@a.example" + injectionPayload }},
-		{"to display name", func(m *mail.MessageValue) { m.To[0].Name = injectionPayload }},
-		{"to addr-spec", func(m *mail.MessageValue) { m.To[0].Addr = "user@a.example" + injectionPayload }},
-		{"cc addr-spec", func(m *mail.MessageValue) {
-			m.Cc = []mail.AddressValue{{Addr: "c@a.example" + injectionPayload}}
+		{"subject", func(m *coremail.MessageValue) { m.Subject = injectionPayload }},
+		{"from display name", func(m *coremail.MessageValue) { m.From.Name = injectionPayload }},
+		{"from addr-spec", func(m *coremail.MessageValue) { m.From.Addr = "ops@a.example" + injectionPayload }},
+		{"to display name", func(m *coremail.MessageValue) { m.To[0].Name = injectionPayload }},
+		{"to addr-spec", func(m *coremail.MessageValue) { m.To[0].Addr = "user@a.example" + injectionPayload }},
+		{"cc addr-spec", func(m *coremail.MessageValue) {
+			m.Cc = []coremail.AddressValue{{Addr: "c@a.example" + injectionPayload}}
 		}},
-		{"bcc addr-spec", func(m *mail.MessageValue) {
-			m.Bcc = []mail.AddressValue{{Addr: "b@a.example" + injectionPayload}}
+		{"bcc addr-spec", func(m *coremail.MessageValue) {
+			m.Bcc = []coremail.AddressValue{{Addr: "b@a.example" + injectionPayload}}
 		}},
-		{"reply-to addr-spec", func(m *mail.MessageValue) {
-			m.ReplyTo = []mail.AddressValue{{Addr: "r@a.example" + injectionPayload}}
+		{"reply-to addr-spec", func(m *coremail.MessageValue) {
+			m.ReplyTo = []coremail.AddressValue{{Addr: "r@a.example" + injectionPayload}}
 		}},
-		{"message id", func(m *mail.MessageValue) { m.MessageID = injectionPayload }},
-		{"extra header value", func(m *mail.MessageValue) {
-			m.Headers = []mail.HeaderFieldValue{{Name: "X-Tag", Value: injectionPayload}}
+		{"message id", func(m *coremail.MessageValue) { m.MessageID = injectionPayload }},
+		{"extra header value", func(m *coremail.MessageValue) {
+			m.Headers = []coremail.HeaderFieldValue{{Name: "X-Tag", Value: injectionPayload}}
 		}},
-		{"extra header name", func(m *mail.MessageValue) {
-			m.Headers = []mail.HeaderFieldValue{{Name: "X-Tag" + injectionPayload, Value: "v"}}
+		{"extra header name", func(m *coremail.MessageValue) {
+			m.Headers = []coremail.HeaderFieldValue{{Name: "X-Tag" + injectionPayload, Value: "v"}}
 		}},
-		{"attachment name", func(m *mail.MessageValue) {
-			m.Attachments = []mail.AttachmentValue{{Filename: "a" + injectionPayload, Content: []byte("x")}}
+		{"attachment name", func(m *coremail.MessageValue) {
+			m.Attachments = []coremail.AttachmentValue{{Filename: "a" + injectionPayload, Content: []byte("x")}}
 		}},
-		{"attachment type", func(m *mail.MessageValue) {
-			m.Attachments = []mail.AttachmentValue{
+		{"attachment type", func(m *coremail.MessageValue) {
+			m.Attachments = []coremail.AttachmentValue{
 				{Filename: "a.txt", ContentType: "text/plain" + injectionPayload, Content: []byte("x")},
 			}
 		}},
@@ -88,11 +89,11 @@ func TestHeaderInjectionIsRefusedOnEveryCallerControlledField(t *testing.T) {
 			t.Parallel()
 			msg := validMessage()
 			tc.breakIt(&msg)
-			err := mail.Validate(msg)
+			err := svcmail.Validate(msg)
 			if err == nil {
 				t.Fatalf("Validate accepted a CRLF payload in %s — the composed message would carry an injected blind copy", tc.name)
 			}
-			if !errs.HasCode(err, mail.CodeHeaderInjection) {
+			if !errs.HasCode(err, coremail.CodeHeaderInjection) {
 				t.Fatalf("Validate(%s) = %v, want CodeHeaderInjection", tc.name, err)
 			}
 		})
@@ -112,12 +113,12 @@ func TestHeaderInjectionRefusesBareCRAndBareLF(t *testing.T) {
 		"a\n",
 	}
 	for _, payload := range payloads {
-		if err := mail.ValidateHeaderValue("Subject", payload); !errs.HasCode(err, mail.CodeHeaderInjection) {
+		if err := svcmail.ValidateHeaderValue("Subject", payload); !errs.HasCode(err, coremail.CodeHeaderInjection) {
 			t.Fatalf("ValidateHeaderValue(%q) = %v, want CodeHeaderInjection", payload, err)
 		}
 	}
 	//: the negative control: a value with none of the three passes.
-	if err := mail.ValidateHeaderValue("Subject", "a perfectly ordinary subject"); err != nil {
+	if err := svcmail.ValidateHeaderValue("Subject", "a perfectly ordinary subject"); err != nil {
 		t.Fatalf("ValidateHeaderValue(clean) = %v, want nil", err)
 	}
 }
@@ -132,7 +133,7 @@ func TestHeaderInjectionErrorNeverDisclosesTheValue(t *testing.T) {
 	const secret = "attacker@evil.example"
 	msg := validMessage()
 	msg.Subject = "hello\r\nBcc: " + secret
-	err := mail.Validate(msg)
+	err := svcmail.Validate(msg)
 	if err == nil {
 		t.Fatal("Validate accepted an injected subject")
 	}
@@ -165,9 +166,9 @@ func TestHeaderInjectionErrorNeverDisclosesTheValue(t *testing.T) {
 func TestBccNeverBecomesAHeaderAndAlwaysBecomesARecipient(t *testing.T) {
 	t.Parallel()
 	msg := validMessage()
-	msg.Cc = []mail.AddressValue{{Addr: "cc@example.org"}}
-	msg.Bcc = []mail.AddressValue{{Addr: "blind@example.org"}}
-	envelope, err := msg.Envelope()
+	msg.Cc = []coremail.AddressValue{{Addr: "cc@example.org"}}
+	msg.Bcc = []coremail.AddressValue{{Addr: "blind@example.org"}}
+	envelope, err := svcmail.Envelope(msg)
 	if err != nil {
 		t.Fatalf("Envelope() = %v, want nil", err)
 	}
@@ -185,29 +186,29 @@ func TestBccNeverBecomesAHeaderAndAlwaysBecomesARecipient(t *testing.T) {
 func TestValidateRefusesTheEmptyShapes(t *testing.T) {
 	t.Parallel()
 	cases := []emptyCase{
-		{"no sender", func(m *mail.MessageValue) { m.From = mail.AddressValue{} }, mail.CodeMissingSender},
-		{"no recipients", func(m *mail.MessageValue) { m.To = nil }, mail.CodeNoRecipients},
-		{"no body", func(m *mail.MessageValue) { m.Text = "" }, mail.CodeEmptyBody},
-		{"inline with no body", func(m *mail.MessageValue) {
+		{"no sender", func(m *coremail.MessageValue) { m.From = coremail.AddressValue{} }, coremail.CodeMissingSender},
+		{"no recipients", func(m *coremail.MessageValue) { m.To = nil }, coremail.CodeNoRecipients},
+		{"no body", func(m *coremail.MessageValue) { m.Text = "" }, coremail.CodeEmptyBody},
+		{"inline with no body", func(m *coremail.MessageValue) {
 			m.Text = ""
-			m.Attachments = []mail.AttachmentValue{{Filename: "l.png", ContentID: "l@x.example", Content: []byte("x")}}
-		}, mail.CodeInvalidAttachment},
-		{"unnamed attachment", func(m *mail.MessageValue) {
-			m.Attachments = []mail.AttachmentValue{{Content: []byte("x")}}
-		}, mail.CodeInvalidAttachment},
-		{"filename with a path separator", func(m *mail.MessageValue) {
-			m.Attachments = []mail.AttachmentValue{{Filename: "../../etc/passwd", Content: []byte("x")}}
-		}, mail.CodeInvalidAttachment},
-		{"unspellable media type", func(m *mail.MessageValue) {
-			m.Attachments = []mail.AttachmentValue{{Filename: "a.bin", ContentType: "pdf", Content: []byte("x")}}
-		}, mail.CodeInvalidAttachment},
+			m.Attachments = []coremail.AttachmentValue{{Filename: "l.png", ContentID: "l@x.example", Content: []byte("x")}}
+		}, coremail.CodeInvalidAttachment},
+		{"unnamed attachment", func(m *coremail.MessageValue) {
+			m.Attachments = []coremail.AttachmentValue{{Content: []byte("x")}}
+		}, coremail.CodeInvalidAttachment},
+		{"filename with a path separator", func(m *coremail.MessageValue) {
+			m.Attachments = []coremail.AttachmentValue{{Filename: "../../etc/passwd", Content: []byte("x")}}
+		}, coremail.CodeInvalidAttachment},
+		{"unspellable media type", func(m *coremail.MessageValue) {
+			m.Attachments = []coremail.AttachmentValue{{Filename: "a.bin", ContentType: "pdf", Content: []byte("x")}}
+		}, coremail.CodeInvalidAttachment},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			msg := validMessage()
 			tc.mutate(&msg)
-			if err := mail.Validate(msg); !errs.HasCode(err, tc.want) {
+			if err := svcmail.Validate(msg); !errs.HasCode(err, tc.want) {
 				t.Fatalf("Validate(%s) = %v, want %v", tc.name, err, tc.want)
 			}
 		})
@@ -223,15 +224,15 @@ func TestReservedHeadersAreRefusedCaseInsensitively(t *testing.T) {
 	reserved := []string{"Bcc", "bcc", "bCc", "BCC", "From", "subject", "Content-Type", "MIME-Version"}
 	for _, name := range reserved {
 		msg := validMessage()
-		msg.Headers = []mail.HeaderFieldValue{{Name: name, Value: "attacker@evil.example"}}
-		if err := mail.Validate(msg); !errs.HasCode(err, mail.CodeReservedHeader) {
+		msg.Headers = []coremail.HeaderFieldValue{{Name: name, Value: "attacker@evil.example"}}
+		if err := svcmail.Validate(msg); !errs.HasCode(err, coremail.CodeReservedHeader) {
 			t.Fatalf("Validate(Headers[%q]) = %v, want CodeReservedHeader", name, err)
 		}
 	}
 	//: and a field the composer does not own is accepted.
 	msg := validMessage()
-	msg.Headers = []mail.HeaderFieldValue{{Name: "X-Campaign", Value: "spring"}}
-	if err := mail.Validate(msg); err != nil {
+	msg.Headers = []coremail.HeaderFieldValue{{Name: "X-Campaign", Value: "spring"}}
+	if err := svcmail.Validate(msg); err != nil {
 		t.Fatalf("Validate(X-Campaign) = %v, want nil", err)
 	}
 }
@@ -244,25 +245,25 @@ func TestAddressGrammar(t *testing.T) {
 		{"plain", "user@example.com", 0},
 		{"dotted", "first.last@sub.example.com", 0},
 		{"plus tag", "user+tag@example.com", 0},
-		{"no at", "userexample.com", mail.CodeInvalidAddress},
-		{"two at", "user@a@example.com", mail.CodeInvalidAddress},
-		{"empty local", "@example.com", mail.CodeInvalidAddress},
-		{"empty domain", "user@", mail.CodeInvalidAddress},
-		{"leading dot", ".user@example.com", mail.CodeInvalidAddress},
-		{"doubled dot", "user..name@example.com", mail.CodeInvalidAddress},
-		{"space", "us er@example.com", mail.CodeInvalidAddress},
-		{"angle bracket", "user<@example.com", mail.CodeInvalidAddress},
-		{"comma", "user,other@example.com", mail.CodeInvalidAddress},
-		{"local too long", strings.Repeat("a", 65) + "@example.com", mail.CodeInvalidAddress},
-		{"domain too long", "user@" + strings.Repeat("a", 250) + ".example.com", mail.CodeInvalidAddress},
-		{"non-ascii local (SMTPUTF8)", "réunion@example.com", mail.CodeUnsupportedAddress},
-		{"non-ascii domain", "user@exämple.com", mail.CodeUnsupportedAddress},
-		{"quoted local part", `"john doe"@example.com`, mail.CodeUnsupportedAddress},
+		{"no at", "userexample.com", coremail.CodeInvalidAddress},
+		{"two at", "user@a@example.com", coremail.CodeInvalidAddress},
+		{"empty local", "@example.com", coremail.CodeInvalidAddress},
+		{"empty domain", "user@", coremail.CodeInvalidAddress},
+		{"leading dot", ".user@example.com", coremail.CodeInvalidAddress},
+		{"doubled dot", "user..name@example.com", coremail.CodeInvalidAddress},
+		{"space", "us er@example.com", coremail.CodeInvalidAddress},
+		{"angle bracket", "user<@example.com", coremail.CodeInvalidAddress},
+		{"comma", "user,other@example.com", coremail.CodeInvalidAddress},
+		{"local too long", strings.Repeat("a", 65) + "@example.com", coremail.CodeInvalidAddress},
+		{"domain too long", "user@" + strings.Repeat("a", 250) + ".example.com", coremail.CodeInvalidAddress},
+		{"non-ascii local (SMTPUTF8)", "réunion@example.com", coremail.CodeUnsupportedAddress},
+		{"non-ascii domain", "user@exämple.com", coremail.CodeUnsupportedAddress},
+		{"quoted local part", `"john doe"@example.com`, coremail.CodeUnsupportedAddress},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			err := mail.ValidateAddress("To[0]", mail.AddressValue{Addr: tc.addr})
+			err := svcmail.ValidateAddress("To[0]", coremail.AddressValue{Addr: tc.addr})
 			if tc.want == 0 {
 				if err != nil {
 					t.Fatalf("ValidateAddress(%q) = %v, want nil", tc.addr, err)
@@ -291,7 +292,7 @@ func TestIsDotAtom(t *testing.T) {
 		"!#$%&'*+-/=?^_`{|}~",
 	}
 	for _, s := range in {
-		if !mail.IsDotAtom(s) {
+		if !svcmail.IsDotAtom(s) {
 			t.Errorf("IsDotAtom(%q) = false, want true", s)
 		}
 	}
@@ -300,7 +301,7 @@ func TestIsDotAtom(t *testing.T) {
 		"a,b", `a"b`, "a:b", "a;b", "a(b", "a[b", `a\b`, "réunion", "a\xffb", "a\x7fb",
 	}
 	for _, s := range out {
-		if mail.IsDotAtom(s) {
+		if svcmail.IsDotAtom(s) {
 			t.Errorf("IsDotAtom(%q) = true, want false", s)
 		}
 	}
@@ -313,13 +314,13 @@ func TestNeedsQuotedDisplayName(t *testing.T) {
 	t.Parallel()
 	bare := []string{"", "Ops", "Ops Team"}
 	for _, name := range bare {
-		if mail.NeedsQuotedDisplayName(name) {
+		if svcmail.NeedsQuotedDisplayName(name) {
 			t.Fatalf("NeedsQuotedDisplayName(%q) = true, want false", name)
 		}
 	}
 	quoted := []string{"Doe, John", "a@b", `say "hi"`, " leading", "trailing ", "semi;colon", "paren(thesis)"}
 	for _, name := range quoted {
-		if !mail.NeedsQuotedDisplayName(name) {
+		if !svcmail.NeedsQuotedDisplayName(name) {
 			t.Fatalf("NeedsQuotedDisplayName(%q) = false, want true", name)
 		}
 	}
@@ -332,13 +333,25 @@ func TestValidMessagePasses(t *testing.T) {
 	msg := validMessage()
 	msg.Subject = "Réunion à 9h"
 	msg.HTML = "<p>hello</p>"
-	msg.Cc = []mail.AddressValue{{Name: "Doe, John", Addr: "john@example.org"}}
-	msg.Headers = []mail.HeaderFieldValue{{Name: "X-Campaign", Value: "spring"}}
-	msg.Attachments = []mail.AttachmentValue{
+	msg.Cc = []coremail.AddressValue{{Name: "Doe, John", Addr: "john@example.org"}}
+	msg.Headers = []coremail.HeaderFieldValue{{Name: "X-Campaign", Value: "spring"}}
+	msg.Attachments = []coremail.AttachmentValue{
 		{Filename: "report.pdf", Content: []byte("%PDF")},
 		{Filename: "logo.png", ContentID: "logo@example.com", Content: []byte("\x89PNG")},
 	}
-	if err := mail.Validate(msg); err != nil {
+	if err := svcmail.Validate(msg); err != nil {
 		t.Fatalf("Validate(a fully populated valid message) = %v, want nil", err)
+	}
+}
+
+// TestEnvelopeValidatesBeforeItDerives pins that a caller cannot obtain an
+// envelope from a message the domain would refuse — which is what lets a
+// transport derive the Envelope first and trust what it gets back.
+func TestEnvelopeValidatesBeforeItDerives(t *testing.T) {
+	t.Parallel()
+	msg := validMessage()
+	msg.Subject = "x\r\nBcc: attacker@evil.example"
+	if _, err := svcmail.Envelope(msg); err == nil {
+		t.Fatal("Envelope succeeded on a message carrying an injected header")
 	}
 }

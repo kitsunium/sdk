@@ -55,7 +55,7 @@ raises the core's.
   and an empty string meaning "mint one" would give the zero a second
   reading. Every identifier becomes the left half of a Message-ID, so every
   one — the caller's, and `Config.NewID`'s since ADR 0141 — is non-empty, at
-  most `MaxIDBytes` and a dot-atom (`core/app/mail.IsDotAtom`, the grammar's one
+  most `MaxIDBytes` and a dot-atom (`service/app/mail.IsDotAtom`, the grammar's one
   home). A caller's that breaks it is `INVALID_MAIL_ID`, which names the rule
   and never the identifier; a generator's is `SPOOL_MISCONFIGURED`.
 - **A repeated identifier is not refused; the ledger meets it.** The spool

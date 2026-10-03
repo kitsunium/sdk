@@ -74,6 +74,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcid "github.com/kitsunium/sdk/internal/service/app/id"
+	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 )
 
@@ -438,7 +439,7 @@ func (s *Spool) stamp(ctx context.Context, id string, msg coremail.MessageValue)
 		msg.MessageID = id + "@" + domainOf(msg.From.Addr)
 	}
 	//: everything the transport would refuse, refused here.
-	if validErr := coremail.Validate(msg); validErr != nil {
+	if validErr := svcmail.Validate(msg); validErr != nil {
 		//: the mail domain's own verdict.
 		return spooledValue{}, validErr
 	}
