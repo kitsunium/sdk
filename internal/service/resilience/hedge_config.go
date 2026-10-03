@@ -1,13 +1,18 @@
 // Package resilience — hedging policy configuration.
 package resilience
 
-import "time"
+import (
+	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/clock"
+)
 
 // HedgeConfig parameterises NewHedge. Three of its four knobs have no default:
 // Idempotent, Delay and MaxInFlight are refused when unset, because every value
 // the SDK could pick for them is either a guess at the caller's requirement or
 // a licence to duplicate load the caller never agreed to (ADR 0031). MaxHedges
-// is the one with an obvious floor and clamps to 1.
+// is the one with an obvious floor and clamps to 1. A nil Clock measures the
+// delay on the wall clock.
 type HedgeConfig struct {
 	// Idempotent asserts that the guarded Operation is safe to run more than
 	// once, concurrently, with at most one of the copies being observed. It
@@ -75,4 +80,12 @@ type HedgeConfig struct {
 	// the amplifier. The number is a capacity decision about the caller's
 	// downstream, and only they hold it.
 	MaxInFlight int
+	// Clock is what Delay is measured on. Nil means clock.System.
+	//
+	// It exists so a test drives the race with a ManualClock — advancing past
+	// Delay to issue the duplicate instead of sleeping through it, and
+	// asserting that no duplicate is issued a nanosecond earlier. The retry,
+	// the breaker and the rate limiters already take one; the hedge, the other
+	// policy that measures a wait, did not.
+	Clock clock.Timed
 }

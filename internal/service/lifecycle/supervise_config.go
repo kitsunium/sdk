@@ -6,16 +6,16 @@ import (
 	"context"
 	"time"
 
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // DefaultRestartBase and DefaultRestartMax bound the restart backoff when
 // [SupervisorConfig].Backoff is the zero value: one second after the first
 // failure, doubling, never more than a minute.
 //
-// A zero BackoffValue retries at once, which is what a retry around a single
+// A zero backoff.Value retries at once, which is what a retry around a single
 // call means by it — and for a supervised loop it is a hot loop: a function
 // that fails on entry would be restarted as fast as a core can run it. The
 // zero is therefore CLAMPED to a curve a reader accepts without being told
@@ -51,7 +51,7 @@ type SupervisorConfig struct {
 	// value is the [DefaultRestartBase]–[DefaultRestartMax] curve, and a curve
 	// without a positive BaseDelay starts from [DefaultRestartBase] under its
 	// own ceiling: a supervisor never restarts at once.
-	Backoff svcres.BackoffValue
+	Backoff kbackoff.Value
 	// HealthyAfter is how long a run must last for its end to reset the
 	// consecutive-failure count. Not positive means [DefaultHealthyRun].
 	HealthyAfter time.Duration
@@ -75,15 +75,15 @@ func validateSupervisor(name string, run func(ctx context.Context) error) error 
 }
 
 // resolved applies the documented clamps.
-func (c *SupervisorConfig) resolved() (clk clock.Timed, backoff svcres.BackoffValue, healthy time.Duration) {
+func (c *SupervisorConfig) resolved() (clk clock.Timed, backoff kbackoff.Value, healthy time.Duration) {
 	clk, backoff, healthy = c.Clock, c.Backoff, c.HealthyAfter
 	//: the wall clock is the only non-arbitrary default.
 	if clk == nil {
 		clk = clock.System
 	}
 	//: a zero curve would be a hot loop.
-	if backoff == (svcres.BackoffValue{}) {
-		backoff = svcres.BackoffValue{BaseDelay: DefaultRestartBase, MaxDelay: DefaultRestartMax}
+	if backoff == (kbackoff.Value{}) {
+		backoff = kbackoff.Value{BaseDelay: DefaultRestartBase, MaxDelay: DefaultRestartMax}
 	}
 	//: so would a curve without a base, whatever else it sets: it restarts at
 	//: once. The caller's ceiling, factor and jitter are kept.

@@ -12,8 +12,9 @@ record per entity, and fires timers and guards from its own loop, which sleeps
 until the next transition due and wakes on a write. Public facade:
 `pkg/v1/statemachine`.
 
-Stdlib plus `core/statemachine`, `kernel/{clock,errs,heap}` and
-`service/resilience` (the backoff curve). Code range `0.3.88.*`.
+Stdlib plus `core/statemachine` and `kernel/{backoff,clock,errs,heap}` —
+`kernel/backoff` is the one backoff curve (ADR 0103), so the engine depends on
+no other service domain. Code range `0.3.88.*`.
 
 ## Contents
 

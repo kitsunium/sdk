@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 // causeNonPositiveInterval / causeNilOnChange are what Watch's input guards
@@ -23,6 +24,10 @@ const (
 type pollWatcher struct {
 	path     string
 	interval time.Duration
+	// clk is what the interval ticks on. Nil — every watcher PollWatcher
+	// builds — is the wall clock; a white-box test sets a ManualClock so a
+	// poll happens when it advances the clock rather than when it sleeps.
+	clk clock.Waiter
 }
 
 // PollWatcher returns a Watcher that polls path every interval and invokes the
@@ -34,7 +39,7 @@ func PollWatcher(path string, interval time.Duration) coreconfig.Watcher {
 
 // Watch polls until ctx is cancelled, firing onChange on each detected change.
 func (w pollWatcher) Watch(ctx context.Context, onChange func()) error {
-	//: time.NewTicker PANICS on a non-positive interval, and onChange is
+	//: the ticker PANICS on a non-positive interval, and onChange is
 	//: invoked unchecked below — both are reachable from caller input and
 	//: would crash the process instead of failing the watch. Validate first so
 	//: a bad Watch call returns CONFIG_WATCH_FAILED like any other watch fault.
@@ -62,9 +67,11 @@ func (w pollWatcher) Watch(ctx context.Context, onChange func()) error {
 // receives from it.
 func (w pollWatcher) poll(ctx context.Context, onChange func(), lastMod, lastSize int64) error {
 	//: poll on the configured interval; validateInputs already proved it > 0.
-	ticker := time.NewTicker(w.interval)
+	ticker := w.waiter().NewTicker(w.interval)
 	//: always release the ticker.
 	defer ticker.Stop()
+	//: bound once: the ticker's channel is never closed (clock.Ticker).
+	ticks := ticker.C()
 	//: loop until cancellation.
 	for {
 		//: race the tick against context cancellation.
@@ -72,7 +79,7 @@ func (w pollWatcher) poll(ctx context.Context, onChange func(), lastMod, lastSiz
 		case <-ctx.Done():
 			//: cancellation is a clean stop, not an error.
 			return nil
-		case <-ticker.C:
+		case <-ticks:
 			//: re-stat and compare against the baseline.
 			mod, size, statErr := w.stat()
 			//: a stat failure mid-watch aborts.
@@ -90,8 +97,20 @@ func (w pollWatcher) poll(ctx context.Context, onChange func(), lastMod, lastSiz
 	}
 }
 
+// waiter returns the clock the watch ticks on: the injected one, or the wall
+// clock when none was set.
+func (w pollWatcher) waiter() clock.Waiter {
+	//: PollWatcher sets none; only a white-box test does.
+	if w.clk == nil {
+		//: production polls on real time.
+		return clock.System
+	}
+	//: the test's ManualClock.
+	return w.clk
+}
+
 // validateInputs rejects the two Watch arguments that would otherwise panic:
-// a non-positive interval (time.NewTicker panics) and a nil onChange (invoked
+// a non-positive interval (the ticker panics) and a nil onChange (invoked
 // unchecked on the first detected change). Kept out of Watch so the polling
 // loop stays within the cyclomatic budget.
 func (w pollWatcher) validateInputs(onChange func()) error {

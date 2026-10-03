@@ -14,6 +14,7 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -31,6 +32,10 @@ type handle struct {
 	waitVal  coreproc.ExitValue
 	waitErr  error
 	done     chan struct{}
+
+	// clk is what Stop's grace window is measured on: clock.System from
+	// newHandle.
+	clk clock.Waiter
 }
 
 // newHandle wraps a freshly started *os.Process. setpgid records whether the
@@ -39,7 +44,10 @@ type handle struct {
 // is reaped.
 func newHandle(p *os.Process, setpgid bool, stdio *stdioState, job *jobLimit) *handle {
 	//: capture the pid once; Windows reuses pids only after the handle closes.
-	return &handle{proc: p, pid: p.Pid, setpgid: setpgid, stdio: stdio, job: job, done: make(chan struct{})}
+	return &handle{
+		proc: p, pid: p.Pid, setpgid: setpgid, stdio: stdio, job: job,
+		done: make(chan struct{}), clk: clock.System,
+	}
 }
 
 // PID reports the process identifier.
@@ -149,7 +157,8 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 		//: the memoised Wait closes done; a second call here is harmless.
 		_, _ = h.Wait()
 	}()
-	timer := time.NewTimer(grace)
+	//: the grace window runs on the handle's clock, as on Unix.
+	timer := h.clk.NewTimer(grace)
 	defer timer.Stop()
 	//: race exit against the grace deadline and context cancellation.
 	select {
@@ -158,7 +167,7 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 		//: settled cleanly — no forced terminate needed.
 		return true, nil
 	//: the grace window elapsed without exit.
-	case <-timer.C:
+	case <-timer.C():
 		//: not settled — the caller escalates to a forced terminate.
 		return false, nil
 	//: the caller cancelled the stop.

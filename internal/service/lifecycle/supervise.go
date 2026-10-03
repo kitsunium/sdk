@@ -7,7 +7,7 @@
 // an error nobody reads, or panics and takes the process with it. The
 // supervisor is the other half of the component: it runs the loop on its own
 // goroutine, recovers a panic, restarts after an early end on a backoff
-// (resilience.BackoffValue, the one curve the SDK computes), tells an
+// (kernel/backoff.Value, the one curve the SDK computes), tells an
 // observer about every run, and on Stop cancels the loop's context and waits
 // for it — which a Lifecycle then budgets like any other Stop.
 package lifecycle
@@ -21,9 +21,9 @@ import (
 	"time"
 
 	corelc "github.com/kitsunium/sdk/internal/core/lifecycle"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // Supervisor runs one function until it is stopped, restarting it after
@@ -43,7 +43,7 @@ type Supervisor struct {
 	// name identifies the supervisor.
 	name string
 	// backoff is the restart curve.
-	backoff svcres.BackoffValue
+	backoff kbackoff.Value
 	// healthy is how long a run lasts before its end is a first failure.
 	healthy time.Duration
 	// mu guards cancel and done.

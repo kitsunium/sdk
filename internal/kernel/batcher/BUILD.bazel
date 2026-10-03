@@ -15,7 +15,10 @@ go_library(
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(
@@ -35,7 +38,10 @@ go_test(
         "batcher_internal_test.go",
     ],
     embed = [":batcher"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST

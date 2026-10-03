@@ -22,11 +22,11 @@ go_library(
     deps = [
         "//internal/core/mail",
         "//internal/core/queue",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/service/id",
         "//internal/service/queue",
-        "//internal/service/resilience",
     ],
 )
 
@@ -53,11 +53,11 @@ go_test(
         "//internal/core/mail",
         "//internal/core/proc",
         "//internal/core/queue",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/service/mail",
         "//internal/service/queue",
-        "//internal/service/resilience",
     ],
 )
 

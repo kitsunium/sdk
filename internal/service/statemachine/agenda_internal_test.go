@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/service/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 )
 
 // t0 is the instant the agenda tests schedule from.
@@ -85,9 +85,9 @@ func TestTakeHandsOutDueKeysInOrderThenDirtyOnesEachOnce(t *testing.T) {
 func TestAFailureHoldsItsKeyBackUntilTheBackoffEnds(t *testing.T) {
 	t.Parallel()
 	a := newAgenda()
-	backoff := resilience.BackoffValue{BaseDelay: time.Second, MaxDelay: time.Minute}
-	a.failed("k", t0, backoff)
-	a.failed("k", t0, backoff)
+	backoff := kbackoff.Value{BaseDelay: time.Second, MaxDelay: time.Minute}
+	a.failed("k", t0, backoff.Delay)
+	a.failed("k", t0, backoff.Delay)
 	if !a.heldBack("k", t0.Add(time.Second)) || a.heldBack("k", t0.Add(2*time.Second)) {
 		t.Error("two failures must hold the key back two seconds")
 	}

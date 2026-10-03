@@ -69,11 +69,11 @@ import (
 
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcid "github.com/kitsunium/sdk/internal/service/id"
 	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // spooledValue is one mail as the spool writes it into the queue.
@@ -117,7 +117,7 @@ type Spool struct {
 	// from is the default sender.
 	from coremail.AddressValue
 	// backoff is the retry curve.
-	backoff svcres.BackoffValue
+	backoff kbackoff.Value
 	// announcing maps the identifier of a mail a Send published and has not
 	// yet told the observer about to the Sends of that identifier still in
 	// that window: a delivery of that identifier waits until none is before
@@ -187,8 +187,8 @@ func resolve(cfg *Config) *Spool {
 		s.newID = svcid.ULID.New
 	}
 	//: a zero curve would redial a dead relay as fast as the queue leases.
-	if s.backoff == (svcres.BackoffValue{}) {
-		s.backoff = svcres.BackoffValue{BaseDelay: DefaultRetryBase, MaxDelay: DefaultRetryMax}
+	if s.backoff == (kbackoff.Value{}) {
+		s.backoff = kbackoff.Value{BaseDelay: DefaultRetryBase, MaxDelay: DefaultRetryMax}
 	}
 	//: so would a curve without a base, whatever else it sets. The caller's
 	//: ceiling, factor and jitter are kept.

@@ -20,7 +20,10 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 | `NewLoopDaemon` | `NewLoopDaemon(loop Loop) *LoopDaemon` | `New`-prefixed alias of `Start` (lint) |
 | `LoopDaemon.Stop` | `Stop()` | idempotent: `close(stop)` once, then `<-done` |
 | `LoopDaemon.Done` | `Done() <-chan struct{}` | closed when the loop has returned |
-| `Every` | `Every(interval time.Duration, tick func()) *LoopDaemon` | ticker loop; `Stop` joins |
+| `Every` | `Every(interval time.Duration, tick func(), opts ...EveryOption) *LoopDaemon` | ticker loop; `Stop` joins |
+| `EveryOption` | `func(everyConfig) everyConfig` | tunes `Every`; applied in order, a nil one skipped; by value, so the option set never escapes to the heap |
+| `WithClock` | `WithClock(w clock.Waiter) EveryOption` | tick on `w` instead of the wall clock — a `ManualClock` in a test; nil is the wall clock |
+| `WithDone` | `WithDone(done <-chan struct{}) EveryOption` | also end the loop when `done` closes — the owner's own end, without waiting for `Stop` |
 
 > Naming note: ADR 0014 §D6 names the type `Daemon`, but `KTN-STRUCT-ROLE`
 > requires a recognized role *suffix* (a bare role noun is rejected), so the
@@ -32,7 +35,7 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 
 - **The Loop MUST return promptly on `stop`.** A `Loop` that ignores its `stop`
   channel deadlocks `Stop`, which blocks on the join. Loops `select` on `stop`
-  (see the `net/sse` and `net/websocket` watchers and pingers) and exit their
+  (see the `net/sse` and `net/websocket` watchers) and exit their
   work loop when it is closed. A loop that ends by other means must be ended
   before `Stop`, or joined through `Done`: the async drainer exits on its
   sink's own stop channel, which `Close` closes before it calls `Stop`, and
@@ -46,8 +49,17 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 - **The Loop MUST NOT panic.** It runs in a bare goroutine — a panic crashes the
   process. `worker` adds NO `recover()` by deliberate choice (keep it minimal);
   callers running risky work recover inside their own `Loop`.
-- **`Every` owns its `time.Ticker`** and stops it when the loop exits, so `Stop`
-  both ends the ticking and joins the goroutine.
+- **`Every` owns its ticker** and stops it when the loop exits, so `Stop` both
+  ends the ticking and joins the goroutine. The ticker is a `clock.Ticker` built
+  on `clock.System` unless `WithClock` names another clock, so a consumer's
+  cadence is testable by advancing a `ManualClock` instead of sleeping; the
+  loop arms it on its own goroutine, so a test calls `BlockUntil` before its
+  first `Advance`. A tick that comes due while the previous one still runs is
+  dropped, never queued — the `clock.Ticker` contract, which is `time.Ticker`'s.
+- **`WithDone` is an early end, not a replacement for `Stop`.** An owner whose
+  work can finish on its own — a stream the peer closed, a connection a tick
+  found dead — hands its end channel over, so the ticking stops at that end;
+  `Stop` remains the join and returns at once on a loop that already left.
 
 ## Consumers it collapses
 
@@ -58,7 +70,9 @@ three real consumers each hand-rolled (ADR 0014 §D6).
   in the same commit that introduced this package, as the proving consumer).
 - `internal/service/net/server` — the goroutine running `http.Server.Serve`.
 - `internal/service/net/sse` and `internal/service/net/websocket` — each
-  stream's or connection's drain watcher and keep-alive pinger.
+  stream's or connection's drain watcher (`Start`) and its keep-alive /
+  heartbeat (`Every`, on the stream's or connection's clock, ended early by
+  `WithDone` on the stream's own end).
 - `internal/service/writer/rotfile` — interval rotation, through `Every`.
 
 The s3 / cloudwatch batching sinks under `third-party/aws/writer/*` do not use
@@ -75,6 +89,8 @@ it: they are built on `kernel/batcher`, which drives its own `time.Ticker`
   `LoopDaemon` lives in `worker.go`; `Every` is a func and shares `every.go`.
 - **Emits NO codes.** Pure goroutine control, like `recycler` / `snapshot`. No
   `codes.go` / `errors.go`, no `audit_srcs` filegroup.
+- **Imports only `kernel/clock`** besides the stdlib — the time port the ticker
+  is built on.
 
 ## Do NOT
 

@@ -25,7 +25,10 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(
@@ -41,6 +44,7 @@ go_test(
     name = "profiling_test",
     srcs = [
         "capture_external_test.go",
+        "capture_internal_test.go",
         "fold_external_test.go",
         "goroutine_external_test.go",
         "group_external_test.go",
@@ -48,7 +52,10 @@ go_test(
         "parse_external_test.go",
     ],
     embed = [":profiling"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

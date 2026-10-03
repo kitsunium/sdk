@@ -242,8 +242,8 @@ second on Linux by a review of a downstream framework, and N cores with N shards
 `acceptLoop` now waits first (ADR 0130):
 
 - **The curve is net/http's**: 5 ms, doubling, held at 1 s, started over by the
-  next accepted connection — drawn from `service/resilience`'s published
-  `BackoffValue` (ADR 0103), not a fourth hand-written copy. Temporary or not,
+  next accepted connection — drawn from the SDK's one curve,
+  `kernel/backoff.Value` (ADR 0103), not a fourth hand-written copy. Temporary or not,
   every failure but `net.ErrClosed` waits.
 - **The wait is on the engine's clock** — `Server.clk`, `clock.System` unless an
   internal test sets a manual one — so `TestAFailingAcceptWaitsOnTheEnginesClock`

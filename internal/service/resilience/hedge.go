@@ -6,6 +6,7 @@ import (
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 // minHedges is the floor on the duplicate budget of a single call: a hedging
@@ -18,11 +19,13 @@ const minInFlight int = 1
 
 // hedge races duplicate copies of an Operation against the original once it has
 // been outstanding for delay, and returns the first success. slots bounds the
-// number of duplicates in flight across every concurrent call.
+// number of duplicates in flight across every concurrent call; clk is what the
+// delay is measured on.
 type hedge struct {
 	delay     time.Duration
 	maxHedges int
 	slots     chan struct{}
+	clk       clock.Timed
 }
 
 // NewHedge returns a Runner that guards tail latency by DUPLICATING a slow
@@ -75,6 +78,9 @@ type hedge struct {
 // was found or the caller went away — is recovered and dropped; it never
 // reaches the caller and never ends the process.
 //
+// The delay is measured on cfg.Clock — the wall clock when nil — so a test
+// issues a duplicate by advancing a clock.ManualClock past cfg.Delay.
+//
 // Run costs one goroutine per attempt (including the first, so the delay stays
 // observable) and one ticker per call: this is the one policy in the package
 // that is not allocation-trivial, which is the price of racing. Neither cost
@@ -108,8 +114,12 @@ func NewHedge(cfg HedgeConfig) coreres.Runner {
 	//: unlike the three above, "issue at least one duplicate" is an obvious
 	//: floor — a zero budget would make the policy inert, so it clamps.
 	maxHedges := max(cfg.MaxHedges, minHedges)
-	//: the buffered channel's capacity is the in-flight duplicate bound.
-	return &hedge{delay: cfg.Delay, maxHedges: maxHedges, slots: make(chan struct{}, cfg.MaxInFlight)}
+	//: the buffered channel's capacity is the in-flight duplicate bound; the
+	//: clock is resolved once, so every call measures its delay on the same one.
+	return &hedge{
+		delay: cfg.Delay, maxHedges: maxHedges,
+		slots: make(chan struct{}, cfg.MaxInFlight), clk: timedOrSystem(cfg.Clock),
+	}
 }
 
 // Run races duplicate attempts and returns the first success, or — when every
@@ -143,8 +153,12 @@ func (h *hedge) Run(ctx context.Context, op coreres.Operation) error {
 	go h.attempt(actx, op, results)
 	//: one tick per delay: a duplicate is issued only while nothing has come
 	//: back, which is what keeps the added load proportional to the slowness.
-	ticker := time.NewTicker(h.delay)
+	//: The ticker is the injected clock's, so a test advances it; a nil one —
+	//: a hedge built without NewHedge — is the wall clock, as in the retry.
+	ticker := timedOrSystem(h.clk).NewTicker(h.delay)
 	defer ticker.Stop()
+	//: bound once: the ticker's channel is never closed (clock.Ticker).
+	ticks := ticker.C()
 	//: the first attempt is already in the race.
 	race := hedgeRace{launched: 1}
 	//: run until a winner, a total failure, or the caller's cancellation.
@@ -166,7 +180,7 @@ func (h *hedge) Run(ctx context.Context, op coreres.Operation) error {
 				//: the race is over.
 				return verdict
 			}
-		case <-ticker.C:
+		case <-ticks:
 			//: the attempt has been slow enough to be worth duplicating — if
 			//: this call still has budget and the Runner-wide cap has room.
 			if !h.claimHedge(race.launched) {

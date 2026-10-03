@@ -257,7 +257,13 @@ matched.
 Two goroutines per connection are the `Conn`'s own, both joined by `Close`:
 
 - the **watcher**, which turns the drain signal into a closing handshake;
-- the **heartbeat**, which is not started at all when it is disabled.
+- the **heartbeat**, which is not started at all when it is disabled. It is a
+  `worker.Every` loop whose tick, `heartbeat`, keeps its two-field state on the
+  `Conn` (written by that goroutine only); it ticks on the connection's clock
+  (`clock.System`; only `Test_Conn_heartbeatOnInjectedClock` hands it a
+  `ManualClock`, through the unexported option field — there is no public clock
+  option) and ends on `done` through `worker.WithDone`, so a terminated
+  connection stops it at once.
 
 The reading goroutine above is the CALLER's, and needs no joining: once the
 connection ends — `Close` included — its `Receive` returns the terminal error.
@@ -293,7 +299,7 @@ is a test rather than a claim — `websocket_alloc_internal_test.go`, `!race`,
 gated by `//internal/service/net/websocket:websocket_test` in
 `tools/alloc-lane-targets.txt` (rule 12). Both guards are mutation-checked and
 carry the observed failure in their doc comments. The first message on a
-connection legitimately costs 4 885 ns and 4 672 B — that is the reassembly
+connection legitimately costs 4 885 ns and 4 704 B — that is the reassembly
 buffer being allocated once, which is exactly what makes every later message
 free and why a `Receive` result is valid only until the next call.
 

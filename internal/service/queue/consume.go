@@ -4,13 +4,12 @@ package queue
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"runtime/debug"
-	"sync"
 	"time"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/group"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 )
@@ -39,28 +38,25 @@ func Consume(ctx context.Context, broker corequeue.Broker, cfg ConsumerConfig) e
 	}
 	resolved := cfg.normalized()
 	//: a worker that fails for a STORAGE reason takes the others down with
-	//: it, because they are all polling the same broken medium.
-	stop, cancel := context.WithCancel(ctx)
-	defer cancel()
-	failures := make([]error, resolved.Parallelism)
-	//: WaitGroup.Go owns the Add/Done pairing, so a worker cannot leak the
-	//: counter by returning down a path that forgot it.
-	var running sync.WaitGroup
+	//: it, because they are all polling the same broken medium — the group
+	//: cancels its context on the first failure. It is a JOINED group because
+	//: each worker's failure is its own fact about that medium, not an echo
+	//: of the first: every one reaches the caller, in worker order.
+	workers, _ := group.NewJoined(ctx, resolved.Parallelism)
 	//: one independent pull loop per worker; they coordinate only through the
 	//: broker, which is the thing that already arbitrates.
-	for worker := range resolved.Parallelism {
-		running.Go(func() {
-			failures[worker] = pump(stop, broker, resolved)
-			//: a storage failure stops every sibling, not just this one.
-			if failures[worker] != nil {
-				cancel()
-			}
+	for range resolved.Parallelism {
+		workers.Go(func(stop context.Context) error {
+			//: nil for a stopped worker, the broker's error for a failed one.
+			return pump(stop, broker, resolved)
 		})
 	}
-	running.Wait()
 	//: nil unless a worker hit the storage; a cancelled consumer is a stopped
-	//: one, not a failed one.
-	return errors.Join(failures...)
+	//: one, not a failed one. A worker's panic outside the handler — the
+	//: handler's own is recovered into a nack — is re-raised here, after its
+	//: siblings have stopped, rather than ending the process from a goroutine
+	//: nobody can recover.
+	return workers.Wait()
 }
 
 // pump is one worker: lease, process, acknowledge, repeat. It returns only

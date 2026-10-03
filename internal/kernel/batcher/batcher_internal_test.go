@@ -8,6 +8,8 @@ import (
 	"sync/atomic"
 	"testing"
 	"time"
+
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
 func Test_Batcher_weigh(t *testing.T) {
@@ -146,6 +148,59 @@ func Test_Batcher_loop(t *testing.T) {
 		}
 		if delivered.Load() == 0 {
 			t.Errorf("loop ticker did not deliver within the deadline")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_Batcher_loopOnInjectedClock pins that the FlushEvery ticker is built on
+// Config.Clock: the pending batch is delivered when a manual clock passes the
+// interval — an hour of it, and no wall-clock time at all — which is what lets
+// a consumer's test flush without sleeping.
+func Test_Batcher_loopOnInjectedClock(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name  string
+		every time.Duration
+	}
+	tests := []tc{
+		{"an hourly flush, driven by advancing the clock", time.Hour},
+		{"a one-nanosecond flush is still one Advance away", time.Nanosecond},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		mc := clock.NewManualClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+		flushed := make(chan []int, 1)
+		deliver := func(_ context.Context, batch []int) error {
+			//: copy: the batch slice belongs to the batcher.
+			flushed <- slices.Clone(batch)
+			return nil
+		}
+		b := NewBatcher(deliver, Config[int]{FlushEvery: c.every, Clock: mc})
+		t.Cleanup(func() {
+			if err := b.Close(context.Background()); err != nil {
+				t.Errorf("Close: %v", err)
+			}
+		})
+		if err := b.Add(t.Context(), 7); err != nil {
+			t.Fatalf("Add: %v", err)
+		}
+		//: the loop arms its ticker on its own goroutine; advancing before it
+		//: has would be a lost wake rather than a missed flush.
+		mc.BlockUntil(1)
+		mc.Advance(c.every)
+		select {
+		case got := <-flushed:
+			if len(got) != 1 || got[0] != 7 {
+				t.Errorf("flushed %v, want [7]", got)
+			}
+		case <-time.After(5 * time.Second):
+			t.Fatal("advancing the injected clock past FlushEvery delivered nothing")
 		}
 	}
 	for _, c := range tests {

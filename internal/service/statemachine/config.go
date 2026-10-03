@@ -9,9 +9,9 @@ import (
 	"time"
 
 	corestm "github.com/kitsunium/sdk/internal/core/statemachine"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // DefaultMinGap is the least time between the end of one run of a machine's
@@ -91,7 +91,7 @@ type Config[E any, S comparable] struct {
 	// Backoff is how long an entity whose automatic transition failed waits
 	// before it is tried again, by consecutive failures. A zero BaseDelay
 	// means 1s doubling to a minute.
-	Backoff resilience.BackoffValue
+	Backoff kbackoff.Value
 	// MaxHistory is how many transitions each record keeps. Not positive
 	// means DefaultMaxHistory.
 	MaxHistory int
@@ -104,7 +104,7 @@ type settings[E any, S comparable] struct {
 	observe func(context.Context, FiringValue[S]) (context.Context, func(error))
 	report  func(context.Context, error)
 	onLoop  func(LoopEvent)
-	backoff resilience.BackoffValue
+	backoff kbackoff.Value
 	minGap  time.Duration
 	history int
 }
@@ -125,7 +125,7 @@ func resolve[E any, S comparable](cfg *Config[E, S]) settings[E, S] {
 	}
 	//: an immediate retry of a failing transition hammers what failed.
 	if s.backoff.BaseDelay <= 0 {
-		s.backoff = resilience.BackoffValue{BaseDelay: defaultBackoffBase, MaxDelay: defaultBackoffMax}
+		s.backoff = kbackoff.Value{BaseDelay: defaultBackoffBase, MaxDelay: defaultBackoffMax}
 	}
 	//: a record with no history would say nothing a reader could use.
 	if s.history <= 0 {

@@ -10,7 +10,7 @@ pruned flame graph; `Goroutines` / `ParseGoroutines`, the runtime's dump read
 into goroutines, and `GroupGoroutines`; `CanonicalName`. Public facade:
 `pkg/v1/profiling`.
 
-Stdlib only (plus `kernel/errs`). Code range `0.3.89.*`.
+Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.System` from `CaptureCPU`, a `ManualClock` in `Test_captureCPU` — and `kernel/errs`). Code range `0.3.89.*`.
 
 ## Contents
 

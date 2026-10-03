@@ -5,10 +5,10 @@ package health
 
 import (
 	"context"
-	"sync"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/group"
 )
 
 // phase is the process's own position in its life, derived from state rather
@@ -175,21 +175,35 @@ func (h *health) unknown(probe corehealth.Probe) corehealth.ReportValue {
 // not their sum. Serialising them would make the endpoint's worst case grow
 // with the number of dependencies — and an endpoint an orchestrator polls on a
 // fixed period must not get slower every time somebody registers a check.
+//
+// They run through kernel/group's Collect: the results come back in
+// REGISTRATION order rather than completion order — two identical probes must
+// render identically — and a fault in the evaluation path itself is re-raised
+// here, on the probing goroutine, after every sibling check has returned,
+// instead of crashing the process from a goroutine nobody can recover. A
+// check's own panic never gets that far: invoke recovers it into a result.
 func (h *health) evaluateAll(ctx context.Context, probe corehealth.Probe) corehealth.ReportValue {
 	entries := h.entriesFor(probe)
-	results := make([]corehealth.ResultValue, len(entries))
-	var wg sync.WaitGroup
-	//: index-addressed, so results stay in REGISTRATION order rather than
-	//: completion order — two identical probes must render identically. Each
-	//: goroutine owns one slot and writes it once, so the slice needs no lock.
+	checks := make([]func(context.Context) (corehealth.ResultValue, error), len(entries))
+	//: one task per check; a failing check is a RESULT, never an error, so no
+	//: task ever cancels its siblings.
 	for i, e := range entries {
-		wg.Go(func() {
-			results[i] = h.evaluate(ctx, e)
-		})
+		checks[i] = func(ctx context.Context) (corehealth.ResultValue, error) {
+			//: the verdict, whatever it is, is this check's answer.
+			return h.evaluate(ctx, e), nil
+		}
 	}
 	//: every check has either answered or been abandoned at its own budget;
-	//: neither outcome can outlive this wait.
-	wg.Wait()
+	//: neither outcome can outlive this call.
+	results, err := group.Collect(ctx, group.Unlimited, checks)
+	//: unreachable — no task returns an error — and still not a report: a probe
+	//: that could not collect its checks says so rather than answering healthy.
+	if err != nil {
+		//: the conservative answer, under the domain's own code; the cause
+		//: travels as a field, never as the public text.
+		return h.shortCircuit(probe, "collect", corehealth.StatusUnhealthy,
+			kerrs.Wrap(CheckFailed, kerrs.WrapParams{}, kerrs.String("cause", err.Error())))
+	}
 	//: no checks at all is healthy: the process answering IS the evidence
 	//: (ADR 0031). That is also the seed the fold starts from.
 	status := corehealth.StatusHealthy

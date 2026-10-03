@@ -6,21 +6,12 @@ import (
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
-const (
-	// defaultMultiplier is the backoff growth factor when none is configured.
-	defaultMultiplier float64 = 2
-	// minAttempts is the floor on the attempt budget.
-	minAttempts int = 1
-	// maxJitter is the ceiling on RetryConfig.Jitter. Above 1 the random
-	// component would exceed the delay it widens, which is a different policy
-	// (randomised wait) wearing this one's name.
-	maxJitter float64 = 1
-	// noJitter is the deterministic backoff, and the zero value.
-	noJitter float64 = 0
-)
+// minAttempts is the floor on the attempt budget.
+const minAttempts int = 1
 
 // retryRunner retries op with capped exponential backoff between attempts.
 type retryRunner struct {
@@ -41,14 +32,14 @@ func NewRetry(cfg RetryConfig) coreres.Runner {
 	}
 	//: a sub-1 multiplier would shrink the delay, and a NaN one would poison
 	//: every product — both default to doubling, through the same
-	//: normalisation the public BackoffValue applies.
-	cfg.Multiplier = normalMultiplier(cfg.Multiplier)
-	//: NaN FIRST, inside normalJitter: Go's min/max propagate it, so
+	//: normalisation the kernel curve applies.
+	cfg.Multiplier = kbackoff.NormalMultiplier(cfg.Multiplier)
+	//: NaN FIRST, inside NormalJitter: Go's min/max propagate it, so
 	//: min(max(NaN, 0), 1) is NaN, and NaN <= 0 is false — it would sail past
 	//: every later guard into a float-to-int conversion Go leaves
 	//: implementation-defined. A jitter wider than the delay is a different
 	//: policy, so the rest is clamped into [0, 1].
-	cfg.Jitter = normalJitter(cfg.Jitter)
+	cfg.Jitter = kbackoff.NormalJitter(cfg.Jitter)
 	//: resolved once, so every wait reads the same clock.
 	cfg.Clock = timedOrSystem(cfg.Clock)
 	//: stateless config holder — safe to share.
@@ -112,12 +103,13 @@ func (r *retryRunner) wait(ctx context.Context, attempt int) error {
 }
 
 // backoff computes the capped exponential delay for attempt (1-based growth).
-// It is the public BackoffValue's curve, built from this policy's four fields, so
-// the two cannot drift apart.
+// It is the deterministic half of the kernel curve (kernel/backoff.Grow — the
+// curve BackoffValue publishes), built from this policy's four fields, so the
+// two cannot drift apart.
 func (r *retryRunner) backoff(attempt int) time.Duration {
-	//: the multiplier NewRetry already normalised is normalised again here,
-	//: which is idempotent and covers a runner built without NewRetry.
-	return grow(r.cfg.BaseDelay, r.cfg.MaxDelay, normalMultiplier(r.cfg.Multiplier), attempt)
+	//: Grow normalises the multiplier NewRetry already normalised, which is
+	//: idempotent and covers a runner built without NewRetry.
+	return kbackoff.Grow(r.cfg.BaseDelay, r.cfg.MaxDelay, r.cfg.Multiplier, attempt)
 }
 
 // jittered widens delay by a uniform random fraction of itself, or returns it
@@ -128,9 +120,9 @@ func (r *retryRunner) backoff(attempt int) time.Duration {
 // claims, and a suite that cannot assert the first without the second can
 // assert neither precisely.
 func (r *retryRunner) jittered(delay time.Duration) time.Duration {
-	//: NewRetry normalises NaN and clamps the range; normalJitter repeats it
-	//: for a runner built without NewRetry.
-	return widen(delay, normalJitter(r.cfg.Jitter))
+	//: NewRetry normalises NaN and clamps the range; Widen repeats it for a
+	//: runner built without NewRetry.
+	return kbackoff.Widen(delay, r.cfg.Jitter)
 }
 
 // timedOrSystem resolves a nil clock to the wall clock.

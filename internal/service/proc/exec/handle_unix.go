@@ -16,6 +16,7 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/proc/childwait"
 )
@@ -52,6 +53,10 @@ type handle struct {
 	waitVal  coreproc.ExitValue
 	waitErr  error
 	done     chan struct{}
+
+	// clk is what Stop's grace window is measured on: clock.System from
+	// newHandle, a ManualClock in a white-box test.
+	clk clock.Waiter
 }
 
 // newHandle wraps a freshly started *os.Process and the claim on its exit
@@ -62,7 +67,10 @@ type handle struct {
 func newHandle(p *os.Process, claim *childwait.Claim, setpgid bool, stdio *stdioState) *handle {
 	//: with Setpgid the leader pid IS the group id; without it there is no private
 	//: group and group operations degrade to the leader (see groupTarget).
-	return &handle{proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio, done: make(chan struct{})}
+	return &handle{
+		proc: p, claim: claim, pid: p.Pid, pgid: p.Pid, setpgid: setpgid, stdio: stdio,
+		done: make(chan struct{}), clk: clock.System,
+	}
 }
 
 // groupTarget returns the kill(2) target for group-directed operations: the
@@ -330,7 +338,9 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 		}
 	}
 
-	timer := time.NewTimer(grace)
+	//: the grace window runs on the handle's clock, so a test closes it by
+	//: advancing a ManualClock rather than by sleeping through it.
+	timer := h.clk.NewTimer(grace)
 	defer timer.Stop()
 	//: race exit against ctx and the grace deadline.
 	select {
@@ -340,7 +350,7 @@ func (h *handle) awaitExit(ctx context.Context, grace time.Duration) (settled bo
 	case <-ctx.Done():
 		//: ctx cancelled before the process exited — terminal.
 		return true, ctx.Err()
-	case <-timer.C:
+	case <-timer.C():
 		//: grace elapsed without exit — not settled; caller must escalate.
 		return false, nil
 	}

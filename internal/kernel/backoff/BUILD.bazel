@@ -3,24 +3,18 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 package(default_visibility = ["//internal/kernel:kernel_consumers"])
 
 go_library(
-    name = "topic",
-    srcs = [
-        "delivery.go",
-        "listener.go",
-        "state.go",
-        "topic.go",
-    ],
-    importpath = "github.com/kitsunium/sdk/internal/kernel/topic",
+    name = "backoff",
+    srcs = ["backoff.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/backoff",
     visibility = [
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
     ],
-    deps = ["//internal/kernel/snapshot"],
 )
 
 alias(
     name = "go_default_library",
-    actual = ":topic",
+    actual = ":backoff",
     visibility = [
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
@@ -28,12 +22,11 @@ alias(
 )
 
 go_test(
-    name = "topic_test",
+    name = "backoff_test",
     size = "small",
     srcs = [
-        "topic_bench_test.go",
-        "topic_external_test.go",
-        "topic_internal_test.go",
+        "backoff_external_test.go",
+        "backoff_internal_test.go",
     ],
-    embed = [":topic"],
+    embed = [":backoff"],
 )

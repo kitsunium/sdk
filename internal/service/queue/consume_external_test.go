@@ -280,3 +280,64 @@ func runEngine(t *testing.T, broker corequeue.Broker, cfg svcqueue.ConsumerConfi
 		t.Fatalf("Consume() = %v, want nil", result)
 	}
 }
+
+// refusingBroker is a broker whose storage refuses every Receive: the shape a
+// worker cannot poll its way out of, and the one failure Consume returns.
+type refusingBroker struct {
+	corequeue.Broker
+}
+
+// Receive refuses, as a durable broker does when its medium is gone.
+func (refusingBroker) Receive(context.Context, int) ([]corequeue.DeliveryValue, error) {
+	//: the code a durable broker's storage refusal carries.
+	return nil, errs.Wrap(svcqueue.QueueBackendFailed, errs.WrapParams{}, errs.String("op", "receive"))
+}
+
+// TestAStorageFailureStopsEveryWorkerAndIsReturned pins the one error Consume
+// returns. A worker whose Receive the storage refuses stops, its siblings are
+// cancelled with it — they all poll the same broken medium — and Consume
+// returns only once every worker has, with the failure each worker saw:
+// matchable by its code through the join, and never a cancellation.
+//
+// GOROUTINE LIFECYCLE: one goroutine runs Consume per case; the storage
+// refusal ends it, and the case receives its result before returning, or
+// fails at engineBudget — in which case the test's own context ends it.
+func TestAStorageFailureStopsEveryWorkerAndIsReturned(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name        string
+		parallelism int
+	}
+	tests := []tc{
+		{"one worker", 1},
+		{"four workers on one broken medium", 4},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		broker := refusingBroker{Broker: makeMemory(t, clock.System, defaultPolicy())}
+		done := make(chan error, 1)
+		go func() {
+			done <- svcqueue.Consume(t.Context(), broker, svcqueue.ConsumerConfig{
+				Handler:             func(context.Context, corequeue.DeliveryValue) error { return nil },
+				HandlerIsIdempotent: true, PollInterval: fastPoll, Parallelism: c.parallelism,
+			})
+		}()
+		select {
+		case err := <-done:
+			if !errs.HasCode(err, svcqueue.CodeQueueBackendFailed) {
+				t.Fatalf("Consume() = %v, want the storage's QUEUE_BACKEND_FAILED", err)
+			}
+			if errors.Is(err, context.Canceled) {
+				t.Errorf("Consume() = %v — a sibling's cancellation leaked into the report", err)
+			}
+		case <-time.After(engineBudget):
+			t.Fatal("Consume did not stop on a storage failure")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}

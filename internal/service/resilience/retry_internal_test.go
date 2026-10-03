@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coreres "github.com/kitsunium/sdk/internal/core/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -58,6 +59,22 @@ func Test_retryRunner_backoff(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_retryRunner_backoffOverflow pins that the retry policy inherits the
+// overflow fix through the shared curve rather than keeping its own copy: a
+// runner built WITHOUT NewRetry still gets a finite, non-negative wait.
+func Test_retryRunner_backoffOverflow(t *testing.T) {
+	t.Parallel()
+	r := &retryRunner{cfg: RetryConfig{BaseDelay: time.Second, MaxDelay: time.Hour}}
+	//: attempt 80 is past 2^63 nanoseconds at ×2 from one second.
+	if got := r.backoff(80); got != time.Hour {
+		t.Errorf("backoff(80) = %v, want the one-hour ceiling", got)
+	}
+	unbounded := &retryRunner{cfg: RetryConfig{BaseDelay: time.Second}}
+	if got := unbounded.backoff(80); got != math.MaxInt64 {
+		t.Errorf("backoff(80) without a ceiling = %v, want the longest time.Duration", got)
 	}
 }
 
@@ -352,8 +369,9 @@ func Test_retryRunner_jittered(t *testing.T) {
 // clampJitterForTest mirrors the clamp NewRetry applies, so these cases exercise
 // jittered() with the value a real construction would have handed it.
 func clampJitterForTest(j float64) float64 {
-	//: same clamp as NewRetry — the runner never sees an out-of-range value.
-	return min(max(j, noJitter), maxJitter)
+	//: the very normalisation NewRetry applies — the runner never sees an
+	//: out-of-range value.
+	return kbackoff.NormalJitter(j)
 }
 
 // Test_retryRunner_jitterSpreadsCallers is the claim the field exists FOR, and

@@ -27,18 +27,26 @@ comparison is against calling the tasks directly.
 ## Results
 
 ```
-BenchmarkGoWait_OneTask-8                   487167     2087 ns/op     312 B/op    5 allocs/op
-BenchmarkGoWait_EightTasks_Unlimited-8      142622     7813 ns/op     480 B/op   12 allocs/op
-BenchmarkGoWait_EightTasks_Limit2-8         111837    10410 ns/op     480 B/op   12 allocs/op
-BenchmarkGoWait_EightTasks_Serial-8         129490     8661 ns/op     480 B/op   12 allocs/op
-BenchmarkCollect_EightTasks-8               149168     9367 ns/op    1056 B/op   21 allocs/op
+BenchmarkGoWait_OneTask-8                   487167     2087 ns/op     328 B/op    5 allocs/op
+BenchmarkGoWait_EightTasks_Unlimited-8      142622     7813 ns/op     496 B/op   12 allocs/op
+BenchmarkGoWait_EightTasks_Limit2-8         111837    10410 ns/op     496 B/op   12 allocs/op
+BenchmarkGoWait_EightTasks_Serial-8         129490     8661 ns/op     496 B/op   12 allocs/op
+BenchmarkCollect_EightTasks-8               149168     9367 ns/op    1072 B/op   21 allocs/op
 BenchmarkBaseline_EightDirectCalls-8     177795363        6.538 ns/op   0 B/op    0 allocs/op
 ```
+
+> **B/op re-measured 2026-10**, when `NewJoined` landed: every group carries one
+> pointer more (the joined mode's failure list, nil in a first-error group), so
+> each row's group allocation moved up one size class — **+16 B per group**,
+> nothing per task, and the same allocation counts. Re-measured on darwin/arm64
+> (Apple M1 Pro, go1.27.1), where the previous code reproduces the published
+> 312 / 480 / 1056 B exactly; ns/op were not re-measured. The joined mode's own
+> cost is §"What `NewJoined` adds" below.
 
 ## The number that decides whether to use this
 
 **A one-task group costs ≈ 2.1 µs.** That is `BenchmarkGoWait_OneTask`: one
-submission, one wait, a task that returns immediately. Only 312 B and five
+submission, one wait, a task that returns immediately. Only 328 B and five
 allocations of it are memory (the group, the cancel-cause context, the semaphore
 channel, the goroutine's initial frame); the rest is a **goroutine
 park/unpark round trip** — the caller hands off, blocks on a `WaitGroup`, and is
@@ -80,7 +88,7 @@ Two things are worth stating out loud.
   submissions, so the fan-out is paid for in two extra park/unpark cycles rather
   than in memory. A bound is not free; it is bought.
 
-Allocations are identical across all three (480 B, 12 allocs) because the
+Allocations are identical across all three (496 B, 12 allocs) because the
 semaphore is a `chan struct{}` — a zero-size element type, so its buffer costs
 nothing at any capacity. That is also what lets `Unlimited` be `math.MaxInt`
 rather than a sentinel the code has to branch on, and
@@ -88,12 +96,32 @@ rather than a sentinel the code has to branch on, and
 
 ## What `Collect` adds
 
-`BenchmarkCollect_EightTasks` (9367 ns, 1056 B, 21 allocs) against
-`BenchmarkGoWait_EightTasks_Unlimited` (7813 ns, 480 B, 12 allocs): **+20 % time
+`BenchmarkCollect_EightTasks` (9367 ns, 1072 B, 21 allocs) against
+`BenchmarkGoWait_EightTasks_Unlimited` (7813 ns, 496 B, 12 allocs): **+20 % time
 and +576 B** for the result slice and the eight closures that write into it.
 That is the price of the typed fan-out, and it is small enough that the choice
 between `Collect` and a hand-written `Group` should be made on readability
 rather than on this table.
+
+## What `NewJoined` adds
+
+`BenchmarkGoWait_EightTasks_Joined` is the unlimited eight-task fan-out from
+`NewJoined`, where nothing fails. Measured beside its first-error twin on the
+same box (darwin/arm64, Apple M1 Pro, go1.27.1, `-benchtime=1s -count=3`, all
+three runs agreeing on both columns):
+
+| Benchmark | B/op | allocs/op |
+|---|---:|---:|
+| `GoWait_EightTasks_Unlimited` | 496 | 12 |
+| `GoWait_EightTasks_Joined` | 824 | 17 |
+
+**+328 B and five allocations**: the failure list's header, and the four times
+`append` grows it to eight slots. It is paid at SUBMISSION, under the group's
+lock, because that is where the slot is claimed — which is what lets the join
+come back in submission order whatever order the tasks fail in. The per-task
+wrapper that files a failure into its slot does not escape and allocates
+nothing. A first-error group pays none of this: the list hangs off one pointer
+that stays nil.
 
 ## What is deliberately not measured
 

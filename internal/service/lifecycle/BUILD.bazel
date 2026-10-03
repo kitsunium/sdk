@@ -24,11 +24,11 @@ go_library(
     deps = [
         "//internal/core/lifecycle",
         "//internal/core/proc",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/service/proc/sdnotify",
         "//internal/service/proc/signal",
-        "//internal/service/resilience",
     ],
 )
 
@@ -62,9 +62,9 @@ go_test(
         ":lifecycle",
         "//internal/core/lifecycle",
         "//internal/core/proc",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-        "//internal/service/resilience",
     ],
 )
 

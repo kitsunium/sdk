@@ -8,9 +8,9 @@ subreaper zombie collector. On Unix it installs an `os/signal` SIGCHLD handler
 and drains every reapable child with a non-blocking `childwait.ReapAny()` loop
 until `ECHILD` — on illumos and Solaris also once a second, because a child's
 exit posts no SIGCHLD there (ADR 0144). Off Unix it degrades to a no-op so the package links and runs
-everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`, and `time`
-for the illumos/Solaris ticker) +
-`internal/core/proc` + `internal/kernel/errs` +
+everywhere. **Stdlib-only** (`os`, `os/signal`, `sync`, `syscall`, `time`) +
+`internal/core/proc` + `internal/kernel/clock` (the ticker the illumos/Solaris
+sweep runs on) + `internal/kernel/errs` +
 `internal/service/proc/childwait` — no `golang.org/x/sys`.
 
 ## Who owns `wait4`
@@ -35,7 +35,7 @@ anywhere in the process, and every `Process.Wait` collects its own child.
 | File | Build tag | Role |
 |---|---|---|
 | `reaper.go` | (all) | `Option`/`config` surface; `WithOnReap`; `resolve` |
-| `reaper_unix.go` | `unix` | `unixReaper`, `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
+| `reaper_unix.go` | `unix` | `unixReaper` (its timer sweep's `clk` and `sweepEvery` set by `New` to `clock.System` and `timerSweepEvery`), `New`, `Start`/`Stop`/`loop`, `ReapOnce`, `drain`/`drainResult` (over `childwait.ReapAny`)/`classifyWaitErr`, `LastError`, `IsPID1` |
 | `subreaper_linux.go` | `linux` | `SetChildSubreaper` via `prctl(PR_SET_CHILD_SUBREAPER, 1)` |
 | `subreaper_bsd.go` | `freebsd \|\| dragonfly` | `SetChildSubreaper` via `procctl(P_PID, 0, PROC_REAP_ACQUIRE, NULL)`, a raw `syscall.Syscall6` |
 | `subreaper_freebsd.go` / `subreaper_dragonfly.go` | `freebsd` / `dragonfly` | the `procctl(2)` ABI constants each kernel numbers differently (`sysProcctl`, `procReapAcquire`) |
@@ -69,7 +69,10 @@ disjoint, so exactly one definition of each exported symbol compiles per GOOS.
   the loop: the Go runtime forks every child there with
   `forkx(FORK_NOSIGCHLD)`, so the exit of a child this process spawned posts
   no SIGCHLD and would otherwise wait for its own `Wait`, another signal or
-  `Stop`. Orphans re-parented here still signal (ADR 0144).
+  `Stop`. Orphans re-parented here still signal (ADR 0144). The ticker is
+  built on the reaper's clock (`clock.System`); `Test_unixReaper_timerSweep`
+  hands a reaper that period and a `ManualClock`, so the path the two kernels
+  take is exercised on every Unix, to the nanosecond.
 - **Stop** — closes `done` (guarded by a per-cycle `sync.Once`), the loop runs a
   final drain, detaches the handler, and closes `stopped`; Stop blocks on
   `stopped` so no goroutine and no zombie outlives it. Safe without a prior

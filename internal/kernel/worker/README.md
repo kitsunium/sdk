@@ -30,6 +30,11 @@ d := worker.Every(time.Second, func() { /* fires each interval */ })
 d.Stop() // stops the ticker and joins the goroutine
 ```
 
+Two options: `worker.WithClock(w)` ticks on another clock — a
+`clock.ManualClock` in a test, so the cadence is asserted by advancing time —
+and `worker.WithDone(done)` also ends the loop when the owner's own `done`
+channel closes, without waiting for `Stop`.
+
 It collapses the `stop/stopOnce/done/doneOnce` scaffold the async drainer and
 the s3/cloudwatch batching sinks each hand-rolled. Emits no errors.
 

@@ -15,6 +15,7 @@ go_library(
     ],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/worker",
     ],
@@ -40,6 +41,7 @@ go_test(
     embed = [":sse"],
     deps = [
         "//internal/core/net",
+        "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
 )

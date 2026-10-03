@@ -6,7 +6,7 @@ import (
 	"time"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 )
 
 // retryDelay is how long a message nacked on its deliveries-th delivery stays
@@ -28,5 +28,5 @@ func retryDelay(policy corequeue.PolicyValue, deliveries int) time.Duration {
 		return policy.RetryDelay
 	}
 	//: RetryDelay × 2^(deliveries−1), held at the ceiling.
-	return svcres.BackoffValue{BaseDelay: policy.RetryDelay, MaxDelay: policy.MaxRetryDelay}.Delay(deliveries)
+	return kbackoff.Value{BaseDelay: policy.RetryDelay, MaxDelay: policy.MaxRetryDelay}.Delay(deliveries)
 }

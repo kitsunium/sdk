@@ -370,7 +370,8 @@ func (s *Stream) watch(ctx context.Context) {
 //
 // Goroutine lifecycle: at most one per stream, owned by the Stream and joined
 // by Close. It exits on the stream's own end, so it cannot outlive the response
-// it writes to.
+// it writes to: worker.Every's loop leaves when done closes (WithDone), and a
+// keep-alive that finds the peer gone ends the stream itself, which closes done.
 func (s *Stream) startKeepAlive(cfg config) {
 	//: an explicitly disabled keep-alive starts no goroutine at all, so it
 	//: costs nothing rather than costing a parked ticker.
@@ -378,35 +379,14 @@ func (s *Stream) startKeepAlive(cfg config) {
 		//: nothing to start.
 		return
 	}
-	s.pinger = worker.Start(func(stop <-chan struct{}) {
-		//: the loop owns the ticker so it stops exactly when the loop returns.
-		ticker := time.NewTicker(cfg.keepAlive)
-		//: release the ticker once the loop returns.
-		defer ticker.Stop()
-		//: comment until the stream ends or Close joins us.
-		for {
-			select {
-			//: Close is joining us.
-			case <-stop:
-				//: nothing more to send.
-				return
-			//: the stream ended; the response is no longer ours to write to.
-			case <-s.done:
-				//: nothing more to send.
-				return
-			case <-ticker.C:
-				//: a failed keep-alive means the peer is gone — Comment has
-				//: already ended the stream, so there is nothing left to do
-				//: but exit. end is called rather than Close: Close joins this
-				//: very goroutine.
-				if err := s.Comment(keepAliveComment); err != nil {
-					s.end()
-					//: the stream is over.
-					return
-				}
-			}
+	s.pinger = worker.Every(cfg.keepAlive, func() {
+		//: a failed keep-alive means the peer is gone — Comment has already
+		//: ended the stream, so there is nothing left to do but stop ticking.
+		//: end is called rather than Close: Close joins this very goroutine.
+		if err := s.Comment(keepAliveComment); err != nil {
+			s.end()
 		}
-	})
+	}, worker.WithClock(cfg.clock), worker.WithDone(s.done))
 }
 
 // setStreamHeaders puts the response in event-stream mode.

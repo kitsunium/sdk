@@ -12,7 +12,8 @@ process that already exists.
 - Imports: stdlib (`os`, `os/exec`, `os/user`, `syscall`, `context`, `sync`,
   `time`, `strconv`, `strings`, `errors`, `io`, `io/fs`, `path/filepath`, and
   `unsafe` in `joblimits_windows.go`) + `internal/core/proc` +
-  `internal/kernel/errs` + `internal/service/proc/childwait` (Unix files only).
+  `internal/kernel/errs` + `internal/kernel/clock` (the handles' grace timer,
+  Unix and Windows) + `internal/service/proc/childwait` (Unix files only).
   No `golang.org/x/sys`, no `pkg/*`.
 - Returns `coreproc.Process` (the port interface); the concrete `handle` type is
   unexported.
@@ -80,6 +81,11 @@ returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
 A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
+
+The grace window is a timer on the handle's clock — `clock.System` from
+`newHandle`, on Unix and on Windows alike — so `Test_handle_graceOnInjectedClock`
+closes an hour of grace by advancing a `ManualClock` and pins that neither
+`awaitExit` nor `Stop` returns a nanosecond earlier.
 
 ## Exit status ownership (ADR 0093)
 

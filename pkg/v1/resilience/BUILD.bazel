@@ -9,6 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/resilience",
+        "//internal/kernel/backoff",
         "//internal/service/resilience",
     ],
 )

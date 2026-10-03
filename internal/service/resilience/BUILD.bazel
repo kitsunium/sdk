@@ -34,6 +34,7 @@ go_library(
     ],
     deps = [
         "//internal/core/resilience",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
@@ -52,13 +53,13 @@ go_test(
     name = "resilience_test",
     srcs = [
         "backoff_external_test.go",
-        "backoff_internal_test.go",
         "breaker_external_test.go",
         "breaker_internal_test.go",
         "bulkhead_external_test.go",
         "bulkhead_internal_test.go",
         "fallback_external_test.go",
         "fallback_internal_test.go",
+        "hedge_clock_external_test.go",
         "hedge_external_test.go",
         "hedge_internal_test.go",
         "keyed_ratelimit_external_test.go",
@@ -77,6 +78,7 @@ go_test(
     embed = [":resilience"],
     deps = [
         "//internal/core/resilience",
+        "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],

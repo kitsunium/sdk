@@ -10,6 +10,7 @@ import (
 	"runtime/pprof"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -27,6 +28,14 @@ import (
 // or pprof.SetGoroutineLabels — which is how [Fold] can charge CPU to whoever
 // was doing the work.
 func CaptureCPU(ctx context.Context, window time.Duration) (*ProfileValue, error) {
+	//: the window is measured on the wall clock.
+	return captureCPU(ctx, clock.System, window)
+}
+
+// captureCPU is CaptureCPU with the clock the window is measured on, which a
+// white-box test sets to a ManualClock so a window ends when the test advances
+// it rather than after the test has slept through it.
+func captureCPU(ctx context.Context, clk clock.Waiter, window time.Duration) (*ProfileValue, error) {
 	//: a window with no length, or one that would hold the profiler too long.
 	if window <= 0 || window > MaxCPUWindow {
 		//: the window is a field; the bound is in the Public text.
@@ -38,12 +47,12 @@ func CaptureCPU(ctx context.Context, window time.Duration) (*ProfileValue, error
 		//: the runtime's own sentence goes to the chain, not to Public.
 		return nil, errors.Join(ProfilerBusy, err)
 	}
-	timer := time.NewTimer(window)
+	timer := clk.NewTimer(window)
 	defer timer.Stop()
 	//: the window, or the caller's end.
 	select {
 	//: the window is complete.
-	case <-timer.C:
+	case <-timer.C():
 	//: the caller stopped waiting: no partial profile.
 	case <-ctx.Done():
 		pprof.StopCPUProfile()

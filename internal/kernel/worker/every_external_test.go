@@ -5,8 +5,24 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
+
+// tickWait bounds how long a test waits for a tick the clock has already
+// delivered: generous, because it only has to cover a goroutine being
+// scheduled, never a wall-clock interval elapsing.
+const tickWait time.Duration = 5 * time.Second
+
+// awaitTick fails the test unless fired delivers within tickWait.
+func awaitTick(t *testing.T, fired <-chan struct{}, what string) {
+	t.Helper()
+	select {
+	case <-fired:
+	case <-time.After(tickWait):
+		t.Fatalf("%s: no tick", what)
+	}
+}
 
 // TestEvery validates the ticker helper: it fires tick repeatedly and Stop
 // both ends the ticking and joins the goroutine; nil tick / bad interval panic.
@@ -42,6 +58,60 @@ func TestEvery(t *testing.T) {
 					}
 				}()
 				worker.Every(0, func() {})
+			},
+		},
+		{
+			name: "ticks on the injected clock, once per interval it passes",
+			runner: func(t *testing.T) {
+				mc := clock.NewManualClock(time.Date(2026, 1, 1, 0, 0, 0, 0, time.UTC))
+				fired := make(chan struct{}, 1)
+				d := worker.Every(time.Minute, func() { fired <- struct{}{} }, worker.WithClock(mc))
+				defer d.Stop()
+				//: the loop arms its ticker on its own goroutine; advancing
+				//: before it has would be a lost wake, not a missing tick.
+				mc.BlockUntil(1)
+				//: a minute of manual time, no wall-clock time at all.
+				mc.Advance(time.Minute)
+				awaitTick(t, fired, "after one interval")
+				mc.Advance(time.Minute)
+				awaitTick(t, fired, "after the second interval")
+				//: Stop releases the ticker, so the clock holds nothing armed.
+				d.Stop()
+				if pending := mc.Pending(); pending != 0 {
+					t.Errorf("after Stop the clock holds %d armed waits, want 0", pending)
+				}
+			},
+		},
+		{
+			name: "a nil clock and a nil option are the wall clock",
+			runner: func(t *testing.T) {
+				fired := make(chan struct{}, 1)
+				d := worker.Every(time.Millisecond, func() {
+					//: non-blocking: one pending tick is all the assertion needs.
+					select {
+					case fired <- struct{}{}:
+					default:
+					}
+				}, worker.WithClock(nil), nil)
+				defer d.Stop()
+				awaitTick(t, fired, "on the wall clock")
+			},
+		},
+		{
+			name: "WithDone ends the loop without Stop",
+			runner: func(t *testing.T) {
+				done := make(chan struct{})
+				d := worker.Every(time.Hour, func() {}, worker.WithDone(done))
+				//: the owner's own end, before anybody calls Stop.
+				close(done)
+				select {
+				case <-d.Done():
+					//: the loop left on its own.
+				case <-time.After(tickWait):
+					t.Fatal("closing the WithDone channel did not end the loop")
+				}
+				//: Stop is still the join, and returns at once on a loop that left.
+				d.Stop()
 			},
 		},
 		{

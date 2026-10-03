@@ -76,8 +76,8 @@ construction; a change to `events` that moves it right is wrong the same way.
 
 - **`MaxRetryDelay` makes the retry delay grow.** Positive, the message nacked
   on its n-th delivery waits `RetryDelay × 2^(n−1)`, held at the ceiling —
-  `resilience.Backoff`'s curve (ADR 0103), which the brokers call; this package
-  cannot import it and only holds the numbers. Zero keeps the constant delay
+  the `kernel/backoff` curve (ADR 0103, published as `resilience.Backoff`),
+  which the brokers call; this package only holds the numbers. Zero keeps the constant delay
   every policy had, which is the zero's one reading and what keeps the field
   backward compatible. A ceiling that is no ceiling is refused by field and
   problem: negative, past `MaxDeadlineOffset`, above no `RetryDelay` (growth

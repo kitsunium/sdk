@@ -1,9 +1,19 @@
 // Package group runs a set of tasks concurrently and gives their caller one
-// place to wait: one first error, one bounded degree of parallelism, and — the
-// part the familiar shape leaves out — the panic that a child goroutine would
-// otherwise take the whole process down with. It is a kernel primitive
-// (stdlib-only, fully domain-neutral: Group, Go, Wait, Collect; no Job, no
-// Task, no Worker appears in a signature).
+// place to wait: one first error — or, from [NewJoined], every error — one
+// bounded degree of parallelism, and — the part the familiar shape leaves out —
+// the panic that a child goroutine would otherwise take the whole process down
+// with. It is a kernel primitive (stdlib-only, fully domain-neutral: Group, Go,
+// Wait, Collect; no Job, no Task, no Worker appears in a signature).
+//
+// # One error, or every error
+//
+// A group from [New] reports the FIRST error, because almost every error after
+// it is a consequence of the cancellation the first one caused. A group from
+// [NewJoined] reports EVERY task's error, joined with errors.Join in submission
+// order — for tasks whose failures are independent facts, such as workers
+// polling one medium, where the second failure is not an echo of the first.
+// Both cancel the siblings on the first failure, and in both the first failure
+// is the context's cause.
 //
 // # A panic in a child is delivered, not fatal
 //
@@ -42,6 +52,7 @@ package group
 
 import (
 	"context"
+	"errors"
 	"math"
 	"sync"
 )
@@ -58,8 +69,8 @@ const Unlimited int = math.MaxInt
 
 // Group runs tasks concurrently under one context and one wait point.
 //
-// The zero value is NOT usable — construct with [New], which hands back the
-// context the tasks receive alongside it. A Group is used once: after
+// The zero value is NOT usable — construct with [New] or [NewJoined], which
+// hand back the context the tasks receive alongside it. A Group is used once: after
 // [Group.Wait] has returned, submit to a new one.
 //
 // [Group.Go] may be called from any goroutine. [Group.Wait] may not run
@@ -80,13 +91,18 @@ type Group struct {
 	// wg reaches zero exactly when every started task has returned.
 	wg sync.WaitGroup
 
-	// mu guards the two outcome fields below, which any task may write and
-	// Wait reads.
+	// mu guards the outcome fields below, which any task may write and Wait
+	// reads.
 	mu sync.Mutex
 	// err is the first non-nil error a task returned.
 	err error
 	// panicked is the first panic a task raised, with its originating stack.
 	panicked *PanicValue
+	// failures is non-nil exactly in a group from NewJoined, whose Wait
+	// reports every error: one slot per submitted task, in submission order,
+	// nil until that task fails. A pointer, so a first-error group pays one
+	// word for the mode it does not use and nothing per task.
+	failures *[]error
 }
 
 // New returns a Group and the context every task submitted to it receives.
@@ -119,6 +135,29 @@ func New(parent context.Context, limit int) (*Group, context.Context) {
 	return runner, ctx
 }
 
+// NewJoined returns a Group whose [Group.Wait] reports EVERY task's error,
+// joined with errors.Join in the order the tasks were submitted, rather than
+// the first one. Everything else is [New]'s: the limit and its clamp, the
+// returned context, the siblings cancelled on the first failure — whose error
+// is still the context's [context.Cause] — and a panic re-raised in Wait,
+// which still outranks every error.
+//
+// It is for tasks whose failures are independent facts: N workers polling one
+// broken medium each report their own failure, and dropping all but one would
+// hide which of them saw what. When later failures are mostly the echo of the
+// cancellation the first one caused, [New] is the right group.
+//
+// The joined error is matchable as each of its parts — errors.Is, errors.As,
+// and the SDK's errs.HasCode all walk Unwrap() []error — and Wait returns nil,
+// not an empty join, when no task failed.
+func NewJoined(parent context.Context, limit int) (*Group, context.Context) {
+	runner, ctx := New(parent, limit)
+	//: set before the group is handed out, so no submission can race it.
+	runner.failures = new([]error)
+	//: the same context New derived.
+	return runner, ctx
+}
+
 // Go starts fn on a goroutine of its own, blocking while the group already has
 // its limit of tasks running.
 //
@@ -135,11 +174,48 @@ func (g *Group) Go(fn func(ctx context.Context) error) {
 	//: registered before the goroutine starts, so Wait cannot observe zero
 	//: between the submission and the first line of the task.
 	g.wg.Add(1)
+	//: a joined group claims the task's failure slot HERE, on the submitting
+	//: goroutine, so the join keeps submission order whatever order the
+	//: tasks fail in.
+	if g.failures != nil {
+		go g.runJoined(fn, g.reserve())
+		//: submitted.
+		return
+	}
 	go g.run(fn)
 }
 
+// reserve claims the next slot of a joined group's failure list and returns
+// its index: the task's position among the submissions.
+func (g *Group) reserve() int {
+	g.mu.Lock()
+	defer g.mu.Unlock()
+	//: one nil slot per submission, filled only if that task fails.
+	*g.failures = append(*g.failures, nil)
+	//: its index.
+	return len(*g.failures) - 1
+}
+
+// runJoined runs fn as run does, keeping its error in the failure slot the
+// submission reserved. It is a separate path so a first-error group's
+// goroutine carries no slot it would never use.
+func (g *Group) runJoined(fn func(ctx context.Context) error, slot int) {
+	//: the same run — and so the same panic capture — around a task that
+	//: files its own failure before reporting it.
+	g.run(func(ctx context.Context) error {
+		err := fn(ctx)
+		//: a success leaves its slot nil, which errors.Join drops.
+		if err != nil {
+			g.record(slot, err)
+		}
+		//: run still cancels the siblings on the first failure.
+		return err
+	})
+}
+
 // Wait blocks until every task started by [Group.Go] has returned, releases the
-// group context, and returns the first error any task reported.
+// group context, and returns the first error any task reported — or, for a
+// group from [NewJoined], every one of them, joined in submission order.
 //
 // If a task panicked, Wait re-raises it as a [PanicValue] carrying the stack of
 // the goroutine that failed — after every other task has finished, so no task
@@ -161,6 +237,12 @@ func (g *Group) Wait() error {
 	if panicked != nil {
 		//: the value carries fn's own stack — see PanicValue.
 		panic(*panicked)
+	}
+	//: a joined group reports every failure, in submission order; Join drops
+	//: the nil slots and returns nil when every one is nil.
+	if g.failures != nil {
+		//: no task can write a slot any more: they have all returned.
+		return errors.Join(*g.failures...)
 	}
 	//: the first failure, or nil when every task succeeded.
 	return err
@@ -188,11 +270,22 @@ func (g *Group) run(fn func(ctx context.Context) error) {
 	}
 }
 
+// record stores err in a joined group's failure list at slot.
+func (g *Group) record(slot int, err error) {
+	g.mu.Lock()
+	//: each task owns its slot; the lock orders the write before Wait's read,
+	//: and keeps it apart from a reserve growing the list.
+	(*g.failures)[slot] = err
+	g.mu.Unlock()
+}
+
 // fail records the first error and cancels the group so its siblings can stop.
 //
-// Later errors are dropped on purpose: the group reports the failure that
-// STARTED the shutdown, and almost every error after it is a consequence of the
-// cancellation the first one caused. Reporting a cascade would bury the cause.
+// In a first-error group later errors are dropped on purpose: the group
+// reports the failure that STARTED the shutdown, and almost every error after
+// it is a consequence of the cancellation the first one caused. Reporting a
+// cascade would bury the cause. A joined group has already kept each of them
+// in its failure list (record); here it only decides the cause, like any other.
 //
 // Only the call that records the first error cancels. Recording and cancelling
 // are two steps, and the first cancel is the one whose cause sticks, so if

@@ -144,16 +144,20 @@ Two goroutines per stream, both owned by the `Stream` and both joined by
 
 - the **watcher**, which turns `r.Context().Done()` and the drain signal into
   `done`;
-- the **keep-alive**, which is not started at all when it is disabled.
+- the **keep-alive**, which is not started at all when it is disabled. It is
+  a `worker.Every` loop: it ticks on the stream's clock (`clock.System`; only
+  `Test_Stream_keepAliveOnInjectedClock` hands it a `ManualClock`, through the
+  unexported option field — there is no public clock option) and ends on
+  `done` through `worker.WithDone`, so it stops at the stream's own end.
 
 `end()` (close `done` once) is separate from `Close()` (end, then join) on
 purpose: the keep-alive goroutine calls `end` when its own write fails, and
 calling `Close` there would make it join itself.
 
 **The two goroutines are not merged, and the reason is measured on both sides.**
-Merging them would save one `worker.LoopDaemon`, its channels and a
-`time.Ticker` — 8 allocations, 594 B of heap and 2 687 B of stack per stream,
-or 34.1 MB per 10 000 streams, which is 42 % of what an idle stream costs. It is
+Merging them would save one `worker.LoopDaemon`, its channels, its ticker and
+the tick closure — 9 allocations, about 610 B of heap and 2 687 B of stack per
+stream, or 34.1 MB per 10 000 streams, which is 42 % of what an idle stream costs. It is
 refused because the keep-alive calls `Comment`, which takes `mu`: a merged
 goroutine parked on that mutex behind a slow `Send` is not in its `select`, so
 it does not observe the drain — for up to `WriteTimeout`, ten seconds by

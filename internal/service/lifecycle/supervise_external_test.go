@@ -10,10 +10,10 @@ import (
 	"testing"
 	"time"
 
+	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svclc "github.com/kitsunium/sdk/internal/service/lifecycle"
-	svcres "github.com/kitsunium/sdk/internal/service/resilience"
 )
 
 // errFlap is what a scripted run returns when it fails.
@@ -371,7 +371,7 @@ func TestACustomBackoffIsTheCurve(t *testing.T) {
 	t.Parallel()
 	s := newScript("error", "error", "error")
 	sup, clk, log := newSupervisor(t, s.run, svclc.SupervisorConfig{
-		Backoff: svcres.BackoffValue{BaseDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
+		Backoff: kbackoff.Value{BaseDelay: 10 * time.Millisecond, MaxDelay: 20 * time.Millisecond},
 	})
 	if err := sup.Start(context.Background()); err != nil {
 		t.Fatalf("Start() = %v", err)
@@ -394,7 +394,7 @@ func TestACurveWithoutABaseNeverRestartsAtOnce(t *testing.T) {
 	t.Parallel()
 	s := newScript("error", "error")
 	sup, clk, _ := newSupervisor(t, s.run, svclc.SupervisorConfig{
-		Backoff: svcres.BackoffValue{MaxDelay: time.Hour, Multiplier: 3},
+		Backoff: kbackoff.Value{MaxDelay: time.Hour, Multiplier: 3},
 	})
 	if err := sup.Start(context.Background()); err != nil {
 		t.Fatalf("Start() = %v", err)
