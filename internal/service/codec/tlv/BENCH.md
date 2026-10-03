@@ -323,7 +323,7 @@ jobs shared it, so its figures come from interleaved runs. `before` is
 | Architecture       | arm64 |
 | Go toolchain       | go1.27.1 darwin/arm64 |
 | Git branch         | `refactor/sdk-tree-reorg--p1-s4-tlv` |
-| Git commit         | `b8fc1d08` (before) and its successor (after, pre-commit) |
+| Git commit         | `b8fc1d08` (before) and `3ac1cf0f` (after) |
 | Generated (UTC)    | 2026-10-03 |
 | Bench wall-clock   | interleaved rounds as above, machine under heavy load |
 

@@ -10,7 +10,10 @@ import (
 	"github.com/kitsunium/sdk/internal/service/codec/tlv"
 )
 
-// allocSink defeats dead-code elimination in the AllocsPerRun probes.
+// allocSink defeats dead-code elimination in the AllocsPerRun probes. Storing
+// a []byte in it boxes the slice header, so the marshal and append ceilings
+// carry that one allocation on top of the codec's own: Marshal of the scalar
+// below is 2 allocations by itself, and Append into the sized dst is 0.
 var allocSink any
 
 // TestAllocBudget pins TLV's per-call allocation ceilings for Marshal,

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T01:02:40Z -->
+<!-- updated: 2026-10-03T01:08:46Z -->
 # internal/service/codec/tlv/
 
 ## Purpose
@@ -85,12 +85,18 @@ process; and the hit path is 26.23 ns serial, 3.71 ns aggregate across 8 P, so
 there is no contention to relieve either. Wrapping it would make the worst case
 slower in wall time to save ~16 µs of CPU, once, for the life of the process.
 
-The encode path writes into a pre-sized pooled scratch buffer, so the
-`-gcflags=-m=2` "escapes to heap" annotations on `encodeInt`/`encodeUint`'s
-`append` calls are benign — the buffer has capacity, so no allocation
-occurs at runtime (Marshal of a scalar is 3 allocs / 48 B, none from those
-functions). Splitting them to satisfy the inline budget is churn with no
-measurable win. A `decodeString` `unsafe.String` fast-path is also unsafe
+The `-gcflags=-m=2` "escapes to heap" annotations on `encodeInt`/`encodeUint`'s
+`append` calls are benign where the buffer already has capacity — `Append`
+into a sized destination and the streaming `Encoder`'s pooled scratch, both
+0 allocations (`BENCH.md` §1, §7). `Marshal` is the exception, and what it
+pays is exactly those appends: it hands `Append` a nil destination, so a
+scalar `int64` costs **2 allocations, 24 B** — `appendTagLen` allocating the
+first 8 bytes and `AppendUint64` growing them to 16. (`TestAllocBudget` reads
+3 and 48 B for the same call because its probe also boxes the result into an
+`any` sink.) Splitting the two functions to fit the inline budget would remove
+neither: inlining does not change whether an `append` onto a nil slice
+allocates, and the result escapes to the caller either way. It stays churn
+with no measurable win. A `decodeString` `unsafe.String` fast-path is also unsafe
 here: decoded values outlive the `Unmarshal` call while the caller may
 reuse the input `data`, so aliasing it risks a use-after-free — the
 `string(rest[:length])` copy is correct and stays. The realised wins are
