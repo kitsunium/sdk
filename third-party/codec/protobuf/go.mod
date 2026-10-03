@@ -9,11 +9,6 @@ require (
 	google.golang.org/protobuf v1.36.12
 )
 
-require (
-	github.com/fxamacker/cbor/v2 v2.9.3 // indirect
-	github.com/x448/float16 v0.8.4 // indirect
-)
-
 replace github.com/kitsunium/sdk/internal/core => ../../../internal/core
 
 replace github.com/kitsunium/sdk/internal/kernel => ../../../internal/kernel
