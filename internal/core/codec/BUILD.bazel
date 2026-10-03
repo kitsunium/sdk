@@ -8,6 +8,7 @@ go_library(
         "appender.go",
         "codec_interface.go",
         "codes.go",
+        "errors.go",
         "format.go",
         "registry.go",
     ],
@@ -37,7 +38,10 @@ go_test(
         "registry_internal_test.go",
     ],
     embed = [":codec"],
-    deps = ["//internal/kernel/snapshot"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/kernel/snapshot",
+    ],
 )
 
 filegroup(

@@ -99,7 +99,7 @@ The variable name dictates the Reason — change one, change the other; the AST 
 
 ## Do NOT
 
-- Use `fmt.Errorf` / `errors.New` in production code — every SDK error MUST route through `Define` or `Wrap`.
+- Use `fmt.Errorf` / `errors.New` in production code — every SDK error MUST route through `Define` or `Wrap`. `make guard` (sdkguard's SDK002, run by `make lint` and CI's lint gate) fails on either call anywhere under `internal/`, `pkg/`, `third-party/` and `framework/`, this package included: its bootstrap errors are `newValidationError` struct literals (`error.go`), so it needs no exemption and has none. The AST audits in this package do not check this rule.
 - Put sensitive values in `Public`. That string lands on the wire.
 - Pass a non-literal `public` to `Define` — the AST audit fails the build.
 - Use `errors.Is(err, sentinel)` for code-only matching; use `errs.HasCode(err, code)` or a `NewPrefixMatcher` target for that. (`Is` does semantic match by (Code, Reason), which is fine — but the intent is clearer with `HasCode`.)

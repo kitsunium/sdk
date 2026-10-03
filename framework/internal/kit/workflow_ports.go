@@ -389,7 +389,8 @@ func engineTrigger(t string) statemachine.Trigger {
 
 // errNotInPlace ends a transition's write in place: it changes more than the
 // state, and makes a version.
-var errNotInPlace = errors.New("kit: the transition changes more than the state")
+var errNotInPlace = errs.New(CodeWorkflowNotInPlace, "WORKFLOW_NOT_IN_PLACE", "the transition changes more than the state",
+	"kit: a transition's write in place changes more than the state, so it is written as a change and makes a version")
 
 // stateOnly writes v over the record under key in place — no version — when
 // it changes nothing but the member state names, checked under the store's

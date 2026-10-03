@@ -4,10 +4,10 @@
 package crypto
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
@@ -19,13 +19,6 @@ import (
 var (
 	aeads   = schemeRegistry[AEAD]{verb: "Register"}
 	idIndex snapshot.Value[map[byte]AEAD]
-
-	//: errDuplicateRegistration is the wrappable sentinel for boot-time
-	//: duplicate-scheme panics, shared by every registry (the generic
-	//: schemeRegistry + the AEAD wire-id index). Wrapping via %w keeps the
-	//: chain inspectable while the message retains the dotted-quad code for
-	//: grep-friendly logs. Lowercase per Go style guide (KTN-FUNC-ERRFMT).
-	errDuplicateRegistration = errors.New("duplicate registration")
 )
 
 // Register inserts a into the registry under a.Algorithm() + a.ID() and returns
@@ -50,13 +43,13 @@ func Register(a AEAD) AEAD {
 	//: publish under the scheme name first via the shared registry; either
 	//: conflict turns into a boot-time panic with the doc code.
 	if err := aeads.publish(a.Algorithm(), a); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		//: the typed conflict's dotted-quad header, then what collided.
+		panic(conflictText(err))
 	}
 	//: index the wire id second so Open can dispatch from the box header.
 	if err := indexID(a.ID(), a); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		//: the typed conflict's dotted-quad header, then what collided.
+		panic(conflictText(err))
 	}
 	//: returning the scheme lets callers bind it to a typed singleton var.
 	return a
@@ -77,8 +70,10 @@ func indexID(id byte, a AEAD) error {
 					//: nothing changes; keep the current snapshot.
 					return current
 				}
-				//: a DISTINCT scheme under a taken id is the hard conflict.
-				dupErr = fmt.Errorf("crypto.Register [%s %w]: duplicate wire id 0x%02x", CodeDuplicateRegistration, errDuplicateRegistration, id)
+				//: a DISTINCT scheme under a taken id is the hard conflict: the
+				//: typed sentinel, the fields naming the registrar and the id.
+				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+					errs.String("registrar", "crypto.Register"), errs.String("wire_id", fmt.Sprintf("0x%02x", id)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

@@ -7,10 +7,10 @@
 package crypto
 
 import (
-	"fmt"
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
@@ -42,8 +42,10 @@ func (r *schemeRegistry[V]) publish(name Algorithm, v V) error {
 					//: nothing changes; keep the current snapshot.
 					return current
 				}
-				//: a DISTINCT value under a taken name is the hard conflict.
-				dupErr = fmt.Errorf("crypto.%s [%s %w]: duplicate Algorithm %q", r.verb, CodeDuplicateRegistration, errDuplicateRegistration, name)
+				//: a DISTINCT value under a taken name is the hard conflict: the
+				//: typed sentinel, the fields naming the registrar and the name.
+				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+					errs.String("registrar", "crypto."+r.verb), errs.String("algorithm", string(name)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

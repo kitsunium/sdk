@@ -33,7 +33,7 @@ func RegisterAgreement(a Agreement) Agreement {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := agreements.publish(a.Algorithm(), a); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the scheme lets callers bind it to a typed singleton var.
 	return a

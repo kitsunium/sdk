@@ -5,9 +5,9 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // range: 0.2.4.0 - 0.2.4.255
 
-// CodeDuplicateRegistration identifies an init-time collision on the AEAD
+// CodeDuplicateRegistration identifies an init-time collision on a scheme
 // registry; two distinct schemes tried to claim the same Algorithm or wire id.
-// Surfaced via panic at boot (see registry.go), not as an *Error sentinel.
+// Surfaced via panic at boot through the DuplicateRegistration sentinel.
 const CodeDuplicateRegistration errs.Code = 0x00_02_04_01 // 0.2.4.1
 
 // CodeUnknownAlgorithm identifies a Seal/SealAs call naming an Algorithm that no

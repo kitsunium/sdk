@@ -31,6 +31,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
 const (
@@ -58,9 +59,16 @@ const (
 	pollEvery time.Duration = 10 * time.Millisecond
 )
 
+// CodeRolledBack is the code of the error a case returns from a transaction's
+// function to roll it back — the suite's own, in the framework's range: layer
+// 4, PP 4 this package (ADR 0147 §3). A store never returns it; the case that
+// returned it expects kit.Transact to hand it back.
+const CodeRolledBack errs.Code = 0x00_04_04_01 // 0.4.4.1
+
 var (
 	// errRolled rolls a transaction back.
-	errRolled = errors.New("storetest: rolled back")
+	errRolled = errs.New(CodeRolledBack, "ROLLED_BACK", "the case rolled its transaction back",
+		"storetest: a case returned this error from a transaction's function to roll it back")
 
 	// cases are the suite's, in order.
 	cases = []struct {
@@ -294,14 +302,14 @@ func writeModes(t *testing.T, s *suite) {
 // oneInsertWins runs 32 inserts of one key at once: one wins, the others
 // are refused.
 func oneInsertWins(t *testing.T, s *suite) {
-	errs := make([]error, writers)
+	results := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
-		wg.Go(func() { errs[i] = s.docs.Insert(context.Background(), doc{ID: "one", N: i}) })
+		wg.Go(func() { results[i] = s.docs.Insert(context.Background(), doc{ID: "one", N: i}) })
 	}
 	wg.Wait()
 	won := 0
-	for _, err := range errs {
+	for _, err := range results {
 		switch code(err) {
 		case "":
 			won++
@@ -319,15 +327,15 @@ func oneInsertWins(t *testing.T, s *suite) {
 // before.
 func updateIsAtomic(t *testing.T, s *suite) {
 	must(t, s.docs.Put(t.Context(), doc{ID: "counter"}))
-	errs := make([]error, writers)
+	results := make([]error, writers)
 	var wg sync.WaitGroup
 	for i := range writers {
 		wg.Go(func() {
-			_, errs[i] = s.docs.Update(context.Background(), "counter", func(d *doc) error { d.N++; return nil })
+			_, results[i] = s.docs.Update(context.Background(), "counter", func(d *doc) error { d.N++; return nil })
 		})
 	}
 	wg.Wait()
-	must(t, errors.Join(errs...))
+	must(t, errors.Join(results...))
 	if got, err := s.docs.Get(t.Context(), "counter"); err != nil || got.N != writers {
 		t.Errorf("after %d updates: %+v %v", writers, got, err)
 	}

@@ -27,7 +27,7 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 | `schema_reject.go` | how a refusal is spelled — keys and rules, never a value |
 | `schema_source.go` | the default layer seen as an ordinary `Source` — a fresh deep copy on every `Load`, arrays and the tables inside them included, so a caller's edit never reaches the compiled schema; `Describe` answers `"default"` |
 | `poll_watcher.go` | `PollWatcher(path, interval)` — mtime+size poll (cross-OS) |
-| `wrap.go` | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause field |
+| `wrap.go` | `wrapAs(sentinel, cause)` — sentinel origin-wins + cause field; `withCause(sentinel, text)` — the same for a refusal this package states itself (the poll watcher's input guards), so no stdlib error is minted to carry a sentence (rule 2) |
 | `BENCH.md` | the numbers, and one optimisation profiled, recorded and refused |
 
 ## Conventions
@@ -86,7 +86,7 @@ ADR 0028 + ADR 0061 + ADR 0097. Emits the core sentinels `0.2.10.*`.
 
 ## Do NOT
 
-- Use `errors.New`/`fmt.Errorf` — the unknown-format cause wraps the sentinel + a `format` field.
+- Use `errors.New`/`fmt.Errorf` — the unknown-format cause wraps the sentinel + a `format` field, and a sentence of this package's own rides in `withCause` (`make guard` fails on either call).
 - Add a native file-watch backend without an ADR note (deferred).
 - Echo a configuration VALUE in any message. Keys and rule names only — it is a
   security property with its own tests on both the construction and the load

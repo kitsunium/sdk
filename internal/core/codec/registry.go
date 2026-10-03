@@ -4,18 +4,18 @@
 package codec
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"mime"
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
-// Package-level indexes + the duplicate-registration sentinel.
+// Package-level indexes.
 //
 // snapshot.Value[map[K]V] is the deliberate choice here over sync.Map:
 // codec packages register themselves exactly ONCE at package import time
@@ -35,13 +35,6 @@ var (
 	registry  snapshot.Value[map[Format]Codec]
 	mimeIndex snapshot.Value[map[string]Format]
 	extIndex  snapshot.Value[map[string]Format]
-
-	//: errDuplicateRegistration is the wrappable sentinel for boot-time
-	//: duplicate-codec panics. Wrapping via %w keeps the error chain
-	//: inspectable (errors.Is can match the sentinel) while the message
-	//: retains the dotted-quad code for grep-friendly logs. Lowercase
-	//: per Go style guide (KTN-FUNC-ERRFMT enforces).
-	errDuplicateRegistration = errors.New("duplicate registration")
 )
 
 // loadRegistry returns the current registry snapshot, or nil when no codec
@@ -99,8 +92,8 @@ func Register(c Codec) Codec {
 	name := Format(c.Name())
 	//: publish the codec under the writer lock; duplicate Name is a hard conflict.
 	if err := publishCodec(name, c); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		//: the typed conflict's dotted-quad header, then the name that collided.
+		panic(conflictText(err))
 	}
 	//: split alias indexing into a helper so Register stays linear; otherwise
 	//: the conflict-detection branches push the cyclomatic complexity past budget.
@@ -129,8 +122,10 @@ func publishCodec(name Format, c Codec) error {
 		if current != nil {
 			//: any prior registration of name is a hard conflict.
 			if _, dup := (*current)[name]; dup {
-				//: wrap the sentinel so errors.Is finds the chain, then abort.
-				dupErr = fmt.Errorf("codec.Register [%s %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				//: the typed sentinel is the origin; the fields say who refused
+				//: what, since Error() renders none of them (rule 4).
+				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+					errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}
@@ -179,8 +174,9 @@ func indexAliases(dst *snapshot.Value[map[string]Format], aliases []string, name
 		key := normalize(alias)
 		//: publishAlias handles the conflict + atomic publish semantics.
 		if err := publishAlias(dst, key, name, kind, alias); err != nil {
-			//: distinct codec conflict — loud failure at boot.
-			panic(err.Error())
+			//: distinct codec conflict — loud failure at boot, naming the alias,
+			//: the codec holding it and the codec asking.
+			panic(conflictText(err))
 		}
 	}
 }
@@ -220,9 +216,12 @@ func publishAlias(dst *snapshot.Value[map[string]Format], key string, name Forma
 					//: no-op publish — alias already points at us.
 					return current
 				}
-				//: distinct-codec conflict — wrap the sentinel, then abort.
-				conflictErr = fmt.Errorf("codec.Register [%s %w]: %s %q already registered by %q (requested by %q)",
-					CodeDuplicateRegistration, errDuplicateRegistration, kind, alias, prev, name)
+				//: distinct-codec conflict — the typed sentinel, carrying the
+				//: alias, the codec holding it and the codec asking.
+				conflictErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+					errs.String("registrar", "codec.Register"), errs.String("kind", kind),
+					errs.String("alias", alias), errs.String("owner", string(prev)),
+					errs.String("requester", string(name)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

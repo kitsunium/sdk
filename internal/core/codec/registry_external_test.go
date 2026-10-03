@@ -440,3 +440,59 @@ func TestRegister_PanicsRenderDottedQuad(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
 	}
 }
+
+// TestRegister_ConflictPanicNamesTheKey pins what the typed conflict keeps. The
+// panic carries rule 4's canonical header — DUPLICATE_REGISTRATION, where the
+// former fmt.Errorf("%w") spelling wrote "duplicate registration", which the
+// log-parser regex cannot match — and every key that collided, which the
+// sentinel's Error() alone would drop.
+func TestRegister_ConflictPanicNamesTheKey(t *testing.T) {
+	type tc struct {
+		name string
+		run  func()
+		want []string
+	}
+	tests := []tc{
+		{
+			name: "duplicate Name",
+			run: func() {
+				dup := &mockCodec{name: "rule2-dup", mime: []string{"m/rule2"}, ext: []string{".rule2"}}
+				codec.Register(dup)
+				codec.Register(dup)
+			},
+			want: []string{`registrar="codec.Register"`, `name="rule2-dup"`},
+		},
+		{
+			name: "alias conflict",
+			run: func() {
+				codec.Register(&mockCodec{name: "rule2-a", mime: []string{"application/x-rule2"}})
+				codec.Register(&mockCodec{name: "rule2-b", mime: []string{"application/x-rule2"}})
+			},
+			want: []string{
+				`kind="MIME"`, `alias="application/x-rule2"`,
+				`owner="rule2-a"`, `requester="rule2-b"`,
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		//: each case mutates the process-wide registry — reset for isolation.
+		codec.ResetForTest()
+		msg := recoverPanicMessage(t, c.run)
+		if msg == "" {
+			t.Fatalf("%s: expected a panic, got none", c.name)
+		}
+		if !bracketed.MatchString(msg) || !strings.Contains(msg, "DUPLICATE_REGISTRATION") {
+			t.Errorf("%s: panic %q carries no canonical DUPLICATE_REGISTRATION header", c.name, msg)
+		}
+		for _, w := range c.want {
+			if !strings.Contains(msg, w) {
+				t.Errorf("%s: panic %q does not name %s", c.name, msg, w)
+			}
+		}
+	}
+	for _, c := range tests {
+		//: sequential — Register mutates the process-wide registry.
+		t.Run(c.name, func(t *testing.T) { runCase(t, c) })
+	}
+}

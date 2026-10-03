@@ -18,8 +18,18 @@ func wrapAs(sentinel *kerrs.Error, cause error) error {
 		//: the bare typed sentinel.
 		return sentinel
 	}
-	//: wrap the sentinel (origin-wins keeps its code) + carry the cause message.
-	return kerrs.Wrap(sentinel, kerrs.WrapParams{}, kerrs.String("cause", cause.Error()))
+	//: the cause's message rides in the same field a stated refusal uses.
+	return withCause(sentinel, cause.Error())
+}
+
+// withCause returns the given config sentinel as the error origin with cause as
+// its `cause` field — wrapAs for a refusal this package states itself. An input
+// guard has a sentence to say and no error to wrap, and minting a stdlib error
+// only to have its Error() copied into the field would be the untyped error
+// rule 2 bans.
+func withCause(sentinel *kerrs.Error, cause string) error {
+	//: wrap the sentinel (origin-wins keeps its code) + carry the cause text.
+	return kerrs.Wrap(sentinel, kerrs.WrapParams{}, kerrs.String("cause", cause))
 }
 
 // keep the core import referenced even if a source file is built alone.

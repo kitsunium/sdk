@@ -70,7 +70,7 @@ func Test_derivers(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a distinct value under %q published without conflict", clash)
 	}
-	if !strings.Contains(err.Error(), "RegisterDeriver") {
-		t.Errorf("the conflict on %q reads %q, want it to name RegisterDeriver", clash, err.Error())
+	if !strings.Contains(conflictText(err), "RegisterDeriver") {
+		t.Errorf("the conflict on %q reads %q, want it to name RegisterDeriver", clash, conflictText(err))
 	}
 }

@@ -211,6 +211,13 @@ func (fc *fileCtx) bridgeBoundNames(file *ast.File) map[string]bool {
 // matching in that file: the cost is a missed finding where a file both
 // shadows the name AND violates the rule, which is rarer than the false
 // positive it prevents.
+//
+// A struct field and an interface method are NOT shadows. They live in their
+// type's own namespace and are only ever reached through a selector —
+// `r.errors`, never a bare `errors` — so `type report struct{ errors []error }`
+// leaves errors.New in the same file a call to the package. Counting them, as
+// this did, silenced every rule for the whole file on a field name as common
+// as `logger` or `errors`, and it let an errors.New through the SDK's own gate.
 func shadowedNames(file *ast.File, byPath map[string]string) map[string]bool {
 	locals := make(map[string]bool, len(byPath))
 	//: index the import names so the walk below is a lookup, not a scan.
@@ -226,13 +233,51 @@ func shadowedNames(file *ast.File, byPath map[string]string) map[string]bool {
 			out[ident.Name] = true
 		}
 	}
+	members := memberFields(file)
 	ast.Inspect(file, func(n ast.Node) bool {
+		//: a member binds no name in any scope, so it shadows nothing.
+		if field, isField := n.(*ast.Field); isField && members[field] {
+			//: keep walking: its type may hold a func literal's parameters.
+			return true
+		}
 		//: collect from every construct that binds a name.
 		markDeclared(n, mark)
 		//: walk the whole file: a shadow anywhere disables the package here.
 		return true
 	})
 	//: the set of import names this file also declares.
+	return out
+}
+
+// memberFields collects the fields of every struct type and the methods of
+// every interface type in file — the names that live in a type's own
+// namespace and can never be written bare.
+func memberFields(file *ast.File) map[*ast.Field]bool {
+	//: a member or so per top-level declaration; the hint avoids the first
+	//: growths, and a file declaring no type fills nothing.
+	out := make(map[*ast.Field]bool, len(file.Decls))
+	ast.Inspect(file, func(n ast.Node) bool {
+		var list *ast.FieldList
+		//: only these two types declare members.
+		switch typ := n.(type) {
+		//: a struct's fields.
+		case *ast.StructType:
+			list = typ.Fields
+		//: an interface's methods (and embedded interfaces, which name none).
+		case *ast.InterfaceType:
+			list = typ.Methods
+		}
+		//: a nil list is any other node, or a type with no members.
+		if list != nil {
+			//: every member of this type; nested types are reached by the walk.
+			for _, field := range list.List {
+				out[field] = true
+			}
+		}
+		//: walk the whole file: a struct type can sit inside a function.
+		return true
+	})
+	//: the members, by node, so shadowedNames skips exactly these.
 	return out
 }
 
@@ -267,7 +312,9 @@ func markNameLists(n ast.Node, mark func(ast.Expr)) {
 		for _, name := range decl.Names {
 			mark(name)
 		}
-	//: parameters, named results and struct fields.
+	//: parameters, named results, receivers and type parameters — the
+	//: fields that bind a name in a scope. shadowedNames never hands this a
+	//: struct field or an interface method (memberFields).
 	case *ast.Field:
 		//: one field can name several identifiers of the same type.
 		for _, name := range decl.Names {

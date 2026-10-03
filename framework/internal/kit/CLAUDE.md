@@ -403,6 +403,7 @@ has the map): before writing something generic here, look for it there.
 | `61`–`65` | sealing at rest (`CodeSealKey`, `CodeSealWrite`, `CodeSealOpen`, `CodeSealRewrap`, `CodeSealShred`) |
 | `66` | transactions (`CodeTransactionSpan`: a transaction wrote a store of a second database) |
 | `67`–`69` | revisions (`CodeRevisionRead`, `CodeRevisionWrite`: an erasure's, a hold's or a rollback's rewrite of the versions, `CodeRevisionDecode`: a version the type no longer decodes) |
+| `70`–`75` | the signals kit ends one of its own steps with and catches itself, typed when `make guard` made rule 2 a gate — no caller receives one: `SEAL_ERASED` (`errErased`), `SEAL_KEY_MOVED` (`errNotCurrent`), `RESEAL_IN_PLACE` (`errReseal`), `RESEAL_MOVED` (`errRestMoved`), `WORKFLOW_NOT_IN_PLACE` (`errNotInPlace`), and `CodeTransactionPanic` with two reasons, `TRANSACTION_PANICKED` (`errTransactionPanicked`) and `TRANSACTION_HELD_PANICKED` (`errHeldPanicked`, `transact_sql.go`). `TestKitSignalsAreTyped` (`signals_internal_test.go`) pins each code and reason: `errs.New` answers a malformed declaration with a validation error, not a panic |
 
 ## Test
 

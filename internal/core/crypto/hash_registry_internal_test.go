@@ -70,7 +70,7 @@ func Test_hashers(t *testing.T) {
 	if err == nil {
 		t.Fatalf("a distinct value under %q published without conflict", clash)
 	}
-	if !strings.Contains(err.Error(), "RegisterHasher") {
-		t.Errorf("the conflict on %q reads %q, want it to name RegisterHasher", clash, err.Error())
+	if !strings.Contains(conflictText(err), "RegisterHasher") {
+		t.Errorf("the conflict on %q reads %q, want it to name RegisterHasher", clash, conflictText(err))
 	}
 }

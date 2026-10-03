@@ -38,7 +38,7 @@ func RegisterPasswordHasher(p PasswordHasher) PasswordHasher {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := passwordHashers.publish(p.Algorithm(), p); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the hasher lets callers bind it to a typed singleton var.
 	return p

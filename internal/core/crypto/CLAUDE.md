@@ -43,7 +43,7 @@ Code range: `0.2.4.*` (ADR 0013).
 | `stream.go`    | `StreamSealer` interface (`Algorithm` / `Writer` / `Reader`) — the **chunked streaming-AEAD** port with the hold-back contract; truncation surfaces as `StreamTruncated` |
 | `stream_registry.go` | eighth `schemeRegistry`-backed registry mapping an `Algorithm` to a `StreamSealer`: `RegisterStreamSealer` / `LookupStreamSealer` / `AvailableStreamSealers` + `SealStream` / `OpenStream` dispatch (a lookup miss reuses the AEAD `UnknownAlgorithm` sentinel — streaming extends the AEAD domain) |
 | `codes.go`     | `Code*` constants — range 0.2.4.\* |
-| `errors.go`    | `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18), `InvalidKeyEnvelope` (0.2.4.19), `DigestMismatch` (0.2.4.20) |
+| `errors.go`    | `DuplicateRegistration` (0.2.4.1, the boot-time conflict every registrar panics with — never returned) + `conflictText` (its panic line: header, Public, then the `registrar` and the colliding `algorithm` / `wire_id` fields), `UnknownAlgorithm`, `InvalidKey`, `DecryptionFailed`, `EntropyFailed`, `UnknownHashAlgorithm` (0.2.4.6), `UnknownSignatureAlgorithm` (0.2.4.7), `SigningFailed` (0.2.4.8), `KeyGenerationFailed` (0.2.4.9), `UnknownKDFAlgorithm` (0.2.4.10), `DerivationFailed` (0.2.4.11), `UnknownPasswordAlgorithm` (0.2.4.12), `PasswordHashFailed` (0.2.4.13), `InvalidPasswordHash` (0.2.4.14), `UnknownMACAlgorithm` (0.2.4.15), `UnknownAgreementAlgorithm` (0.2.4.16), `AgreementFailed` (0.2.4.17), `StreamTruncated` (0.2.4.18), `InvalidKeyEnvelope` (0.2.4.19), `DigestMismatch` (0.2.4.20) |
 
 Eight **independent** registries live here, all on one `Algorithm` keyspace: the
 **AEAD** (`registry.go`, keyed encryption), **Hasher** (`hash_registry.go`,
@@ -86,8 +86,10 @@ known from the alg-id, so the reader strips it without a length prefix. Each
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var AEAD = crypto.Register(aesGCM{})` in each scheme package.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme
-  claiming a taken `Algorithm` **or** wire id **panics at boot** with the
-  dotted-quad code. So does an unusable scheme — a nil, a typed nil or a
+  claiming a taken `Algorithm` **or** wire id **panics at boot**: the conflict is
+  the typed `DuplicateRegistration` (rule 2 — no `fmt.Errorf`), rendered by
+  `conflictText` with the registrar and the key, since `Error()` renders no
+  field. So does an unusable scheme — a nil, a typed nil or a
   non-comparable value (`plugin.Unusable`, ADR 0071) — in all eight
   registries, before anything is published.
 - **`Algorithm("")` is the reserved invalid zero value** — `Known()` is false.

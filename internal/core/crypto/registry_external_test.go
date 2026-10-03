@@ -1,6 +1,8 @@
 package crypto_test
 
 import (
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/crypto"
@@ -94,9 +96,13 @@ func TestRegisterPanics(t *testing.T) {
 	type tc struct {
 		name string
 		run  func()
+		// want are what the panic must say: the canonical reason, and the key
+		// that collided — the typed conflict renders its fields (rule 2), where
+		// the sentinel's Error() alone would drop them.
+		want []string
 	}
 	tests := []tc{
-		{"nil scheme panics", func() { crypto.Register(nil) }},
+		{"nil scheme panics", func() { crypto.Register(nil) }, []string{"DUPLICATE_REGISTRATION"}},
 		{
 			"duplicate Algorithm panics",
 			func() {
@@ -104,6 +110,7 @@ func TestRegisterPanics(t *testing.T) {
 				//: a DISTINCT scheme (different id) under the same name conflicts.
 				crypto.Register(fakeAEAD{name: "dup-name", id: 0x11})
 			},
+			[]string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.Register"`, `algorithm="dup-name"`},
 		},
 		{
 			"duplicate wire id panics",
@@ -112,14 +119,22 @@ func TestRegisterPanics(t *testing.T) {
 				//: a DISTINCT scheme under a taken wire id conflicts.
 				crypto.Register(fakeAEAD{name: "id-b", id: 0x20})
 			},
+			[]string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.Register"`, `wire_id="0x20"`},
 		},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
 			defer func() {
+				r := recover()
 				//: a missing panic means Register failed to guard the case.
-				if r := recover(); r == nil {
-					t.Errorf("%s: expected panic, got none", c.name)
+				if r == nil {
+					t.Fatalf("%s: expected panic, got none", c.name)
+				}
+				msg := fmt.Sprint(r)
+				for _, w := range c.want {
+					if !strings.Contains(msg, w) {
+						t.Errorf("%s: panic %q does not say %s", c.name, msg, w)
+					}
 				}
 			}()
 			c.run()

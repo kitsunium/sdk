@@ -627,6 +627,25 @@ const (
 
     // CodeRetentionPanic is CodeRetentionPanic.
     CodeRetentionPanic errs.Code = ikit.CodeRetentionPanic
+
+    // The signals kit ends one of its own steps with and catches itself — a
+    // caller never receives one —, typed when the SDK made rule 2 a gate.
+    CodeSealErased errs.Code = ikit.CodeSealErased
+
+    // CodeSealKeyMoved is CodeSealKeyMoved.
+    CodeSealKeyMoved errs.Code = ikit.CodeSealKeyMoved
+
+    // CodeResealInPlace is CodeResealInPlace.
+    CodeResealInPlace errs.Code = ikit.CodeResealInPlace
+
+    // CodeResealMoved is CodeResealMoved.
+    CodeResealMoved errs.Code = ikit.CodeResealMoved
+
+    // CodeWorkflowNotInPlace is CodeWorkflowNotInPlace.
+    CodeWorkflowNotInPlace errs.Code = ikit.CodeWorkflowNotInPlace
+
+    // CodeTransactionPanic is CodeTransactionPanic.
+    CodeTransactionPanic errs.Code = ikit.CodeTransactionPanic
 )
 ```
 
@@ -1461,7 +1480,7 @@ Erase erases every record whose subject is one of ids, in every store of the app
 Once sealing lands \(ADR 0006, step 3\), an erasure also moves the held records under keys of their own and destroys the subject's data key, so that it reaches every copy kit sealed.
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L255>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L274>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error](<#Error>).Wrap is logged and never sent.
 
@@ -1472,7 +1491,7 @@ type Error = ikit.Error
 ```
 
 <a name="Conflict"></a>
-### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L274>)
+### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L293>)
 
 ```go
 func Conflict(message string) *Error
@@ -1481,7 +1500,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses \(409\).
 
 <a name="Forbidden"></a>
-### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L286>)
+### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L305>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1490,7 +1509,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this \(403\).
 
 <a name="Invalid"></a>
-### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L262>)
+### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L281>)
 
 ```go
 func Invalid(message string) *Error
@@ -1499,7 +1518,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying \(400\).
 
 <a name="NotFound"></a>
-### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L268>)
+### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L287>)
 
 ```go
 func NotFound(message string) *Error
@@ -1508,7 +1527,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist \(404\).
 
 <a name="Unauthenticated"></a>
-### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L280>)
+### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L299>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -1517,7 +1536,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are \(401\).
 
 <a name="Unavailable"></a>
-### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L292>)
+### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L311>)
 
 ```go
 func Unavailable(message string) *Error
@@ -2517,7 +2536,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in\-process [Endpoint](<#Endpoint>).Call carries its caller's user along.
 
 <a name="Violation"></a>
-## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L259>)
+## type [Violation](<https://github.com/kitsunium/sdk/blob/main/framework/kit/errors.go#L278>)
 
 Violation is one validation rule a request failed: where, which rule, and why — never the value.
 

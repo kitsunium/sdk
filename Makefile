@@ -57,9 +57,11 @@ build:
 	gofumpt -l -w internal pkg third-party framework
 	bazel build //...
 
-# `test` is the race-on suite. Always runs //... so the AST audit in
-# //internal/kernel/errs:errs_test (no fmt.Errorf / errors.New leaks)
-# is part of every run — no separate audit target needed.
+# `test` is the race-on suite. Always runs //... so the errs AST audits in
+# //internal/kernel/errs:errs_test — every errs.Define well-formed, no two codes
+# equal, every PP range owned (rules 3 and 4) — are part of every run, with no
+# separate audit target. The ban on fmt.Errorf / errors.New (rule 2) is not one
+# of them: it is `guard`'s SDK002 pass, run by `make lint` and CI's lint gate.
 test:
 	bazel test --config=race //...
 
@@ -155,8 +157,9 @@ lint-check:
 		echo "gofumpt drift in the following files (run 'make build' to fix):"; \
 		echo "$$drift"; exit 1; \
 	fi
-	# The SDK is bound by the invariants it imposes on consumers. Running the
-	# guard here is what keeps ADR 0033 from being a tool nobody executes.
+	# The SDK is bound by the invariants it imposes on consumers, and by its own
+	# rule 2 (SDK002) besides. Running the guard here is what keeps ADR 0033 from
+	# being a tool nobody executes, and rule 2 from being a sentence.
 	$(MAKE) --no-print-directory guard
 	# Every same-package doc link resolves (ADR 0138).
 	$(MAKE) --no-print-directory doclinks
@@ -178,22 +181,50 @@ lint-ktn-check:
 doclinks:
 	cd tools/genindex && GOWORK=off go run . -check-doclinks $(CURDIR)
 
-# `guard` runs tools/sdkguard over the SDK's own tree at the invariant level.
+# `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #
 # sdkguard is the consumer-facing enforcement of the SDK's ADRs (0033). It is a
 # stdlib-only module OUTSIDE go.work, so it is invoked with GOWORK=off from its
 # own directory with absolute path arguments — the same treatment genindex gets.
 #
-# Only invariants run here. The conventions (SDK002 untyped errors, SDK005 the
-# legacy log package) have legitimate exceptions inside the SDK itself: the errs
-# package cannot construct its own bootstrap-validation errors through itself.
-# Consumers choose their own level; see tools/sdkguard/CLAUDE.md.
+# The first pass runs every invariant over every tree the SDK writes Go in.
+#
+# The second is rule 2 of CLAUDE.md made a gate: SDK002 alone — no fmt.Errorf,
+# no errors.New — over the SDK's production code: internal/, pkg/, third-party/
+# and framework/, _test.go files left out as sdkguard leaves them by default (a
+# fixture mints throwaway errors). The rule stated an AST audit that never
+# existed, and 22 calls had passed CI. For a consumer SDK002 stays a convention
+# (ADR 0033 §4: the SDK offers its error model and obliges nobody); the SDK
+# holds itself to it. tools/ and e2e/ are outside rule 2: stdlib-only modules,
+# they cannot import the errs package it sends a caller to. errors.Is, As,
+# AsType, Join and Unwrap stay allowed, and so does errors.ErrUnsupported: none
+# of them writes a message of its own — Join groups errors that keep their
+# codes, which errs.HasCode walks — and a stdlib protocol may ask for the last.
+#
+# The SDK grants itself no exemption: a `//sdkguard:allow SDK002 <reason>`
+# directive, honoured for a consumer, fails this target, and the scan fails
+# closed when grep cannot read the tree. An exemption the SDK ever needs is
+# granted by editing this recipe — where a reviewer sees it — never by a
+# comment in a diff.
+#
+# SDK005 (the legacy log package) does not run on the SDK: the tree still calls
+# log.Printf, and adopting that rule is its own change. Consumers choose their
+# own level; see tools/sdkguard/CLAUDE.md.
 # -version-check=off: the freshness probe reaches a module proxy, and `make
 # lint` must not depend on network egress. The probe is for consumers, and the
 # SDK is not a consumer of itself.
 guard:
 	cd tools/sdkguard && GOWORK=off go run . -level=invariant -version-check=off \
 	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/framework/... $(CURDIR)/tools/...
+	cd tools/sdkguard && GOWORK=off go run . -rules=SDK002 -version-check=off \
+	  $(CURDIR)/internal/... $(CURDIR)/pkg/... $(CURDIR)/third-party/... $(CURDIR)/framework/...
+	@status=0; grep -rniE --include='*.go' 'sdkguard:allow[[:space:]]+sdk002' \
+	  internal pkg third-party framework || status=$$?; \
+	case $$status in \
+	  0) echo "guard: rule 2 has no exemption — remove the //sdkguard:allow SDK002 directive(s) above"; exit 1 ;; \
+	  1) ;; \
+	  *) echo "guard: could not scan internal/ pkg/ third-party/ framework/ for SDK002 exemptions"; exit 1 ;; \
+	esac
 
 # The two gates below are shell-only: no Bazel, no Go, seconds to run. They are
 # invoked by name from bazel-ci.yml, which is what makes them gates rather than

@@ -6,7 +6,8 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // range: 0.2.3.0 - 0.2.3.255
 
 // CodeDuplicateRegistration identifies an init-time collision on the writer
-// registry; two distinct factories tried to claim the same Name.
+// registry; two distinct factories tried to claim the same Name. Surfaced via
+// panic at boot through the DuplicateRegistration sentinel.
 const CodeDuplicateRegistration errs.Code = 0x00_02_03_01 // 0.2.3.1
 
 // CodeWriterUnknownName identifies an Open call for a Name that no imported

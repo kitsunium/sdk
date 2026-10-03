@@ -32,7 +32,7 @@ func RegisterSigner(s Signer) Signer {
 	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
 	if err := signers.publish(s.Algorithm(), s); err != nil {
 		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		panic(conflictText(err))
 	}
 	//: returning the signer lets callers bind it to a typed singleton var.
 	return s

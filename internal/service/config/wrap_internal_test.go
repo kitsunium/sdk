@@ -4,6 +4,7 @@ package config
 import (
 	"errors"
 	"testing"
+	"time"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -33,7 +34,7 @@ func Test_wrapAs(t *testing.T) {
 		{"a source failure with a typed cause", coreconfig.ConfigSourceFailed, foreign, true},
 		{"a decode failure", coreconfig.ConfigDecodeFailed, errors.New("bad json"), true},
 		{"a validation failure", coreconfig.ConfigValidationFailed, errors.New("port required"), true},
-		{"a watch failure", coreconfig.ConfigWatchFailed, errNonPositiveInterval, true},
+		{"a watch failure", coreconfig.ConfigWatchFailed, errors.New("poll interval must be > 0"), true},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -67,6 +68,55 @@ func Test_wrapAs(t *testing.T) {
 		//: compare it by identity.
 		if c.cause == nil && got != error(c.sentinel) {
 			t.Error("wrapAs with a nil cause did not return the bare sentinel")
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// Test_withCause pins the refusals this package states itself: the sentinel
+// stays the typed origin and the sentence rides in the same `cause` field
+// wrapAs fills. The poll watcher's two input guards are the callers — their
+// sentence must survive the move off the stdlib errors rule 2 bans.
+func Test_withCause(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		got       error
+		wantCode  kerrs.Code
+		wantCause string
+	}
+	tests := []tc{
+		{
+			"a stated refusal", withCause(coreconfig.ConfigSourceFailed, "a sentence"),
+			coreconfig.CodeConfigSourceFailed, "a sentence",
+		},
+		{
+			"a non-positive poll interval", pollWatcher{interval: 0}.validateInputs(func() {}),
+			coreconfig.CodeConfigWatchFailed, causeNonPositiveInterval,
+		},
+		{
+			"a nil onChange", pollWatcher{interval: time.Second}.validateInputs(nil),
+			coreconfig.CodeConfigWatchFailed, causeNilOnChange,
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if !kerrs.HasCode(c.got, c.wantCode) {
+			t.Fatalf("%s = %v, want code %v", c.name, c.got, c.wantCode)
+		}
+		cause := ""
+		for _, f := range kerrs.FieldsOf(c.got) {
+			if f.Key() == "cause" {
+				cause = f.StringValue()
+			}
+		}
+		if cause != c.wantCause {
+			t.Errorf("%s: cause field = %q, want %q", c.name, cause, c.wantCause)
 		}
 	}
 	for _, c := range tests {

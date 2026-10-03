@@ -4,12 +4,12 @@
 package writer
 
 import (
-	"errors"
 	"fmt"
 	"maps"
 	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
@@ -21,15 +21,7 @@ import (
 // is a lock-free Load (ADR 0011) — the same read-mostly shape that justifies
 // it for the codec registry. Update serialises writers on a mutex so Register's
 // read-modify-write publish is race-free; Lookup stays lock-free.
-var (
-	registry snapshot.Value[map[Name]Factory]
-
-	//: errDuplicateRegistration is the wrappable sentinel for boot-time
-	//: duplicate-factory panics. Wrapping via %w keeps the chain inspectable
-	//: while the message retains the dotted-quad code for grep-friendly logs.
-	//: Lowercase per Go style guide (KTN-FUNC-ERRFMT enforces).
-	errDuplicateRegistration = errors.New("duplicate registration")
-)
+var registry snapshot.Value[map[Name]Factory]
 
 // loadRegistry returns the current registry snapshot, or nil when no writer
 // has registered yet.
@@ -74,8 +66,8 @@ func Register(f Factory) Factory {
 	}
 	//: publish the factory under the writer lock; duplicate Name is a hard conflict.
 	if err := publishFactory(name, f); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(err.Error())
+		//: the typed conflict's dotted-quad header, then the Name that collided.
+		panic(conflictText(err))
 	}
 	//: returning the factory lets callers bind it to a typed singleton var.
 	return f
@@ -100,9 +92,10 @@ func publishFactory(name Name, f Factory) error {
 					//: nothing changes; keep the current snapshot.
 					return current
 				}
-				//: a DISTINCT factory under a taken Name is the hard conflict;
-				//: wrap the sentinel so errors.Is finds the chain, then abort.
-				dupErr = fmt.Errorf("writer.Register [%s %w]: duplicate Name %q", CodeDuplicateRegistration, errDuplicateRegistration, name)
+				//: a DISTINCT factory under a taken Name is the hard conflict:
+				//: the typed sentinel, the fields naming the registrar and Name.
+				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+					errs.String("registrar", "writer.Register"), errs.String("name", string(name)))
 				//: no-op publish — republish the current snapshot unchanged.
 				return current
 			}

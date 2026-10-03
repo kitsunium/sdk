@@ -722,6 +722,16 @@ const (
     CodeMigrateRefused errs.Code = 0x00_04_02_37 // 0.4.2.55 — the migrate command cannot do what it was asked
     CodeCatalogue      errs.Code = 0x00_04_02_38 // 0.4.2.56 — the framework's own message catalogues disagree
     CodeRetentionPanic errs.Code = 0x00_04_02_39 // 0.4.2.57 — a store's retention function panicked
+
+    // The signals kit ends one of its own steps with and catches itself — a
+    // caller never receives one —, typed when the SDK made rule 2 a gate
+    // (make guard), where they had been stdlib errors.
+    CodeSealErased         errs.Code = 0x00_04_02_46 // 0.4.2.70 — a sealed value's data key is destroyed: kit reads the value as its zero value
+    CodeSealKeyMoved       errs.Code = 0x00_04_02_47 // 0.4.2.71 — a data key's replacement ended: another write changed the wrapped key since
+    CodeResealInPlace      errs.Code = 0x00_04_02_48 // 0.4.2.72 — a write that changed nothing ended, for the record to be sealed again in place: no version
+    CodeResealMoved        errs.Code = 0x00_04_02_49 // 0.4.2.73 — a reseal in place ended: another write changed the record since
+    CodeWorkflowNotInPlace errs.Code = 0x00_04_02_4A // 0.4.2.74 — a transition's write in place ended: it changes more than the state, so it makes a version
+    CodeTransactionPanic   errs.Code = 0x00_04_02_4B // 0.4.2.75 — a transaction's function, or a function held until its commit, panicked: the panic continues
 )
 ```
 
@@ -1928,7 +1938,7 @@ Erase erases every record whose subject is one of ids, in every store of the app
 What kit seals at rest, it erases cryptographically too \(ADR 0006 §4\): a held record is moved under a data key of its own, then the data key of each identity, and every data key the erased records were sealed under, is destroyed — every copy of what they sealed stops opening: a store's former values, a dead letter, a backup. An erasure that failed in a store destroys nothing: its retry does.
 
 <a name="Error"></a>
-## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L156-L167>)
+## type [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L166-L177>)
 
 Error is an error a product returns to its callers. Message travels on the wire; the cause attached with [Error.Wrap](<#Error.Wrap>) is logged and never sent.
 
@@ -1949,7 +1959,7 @@ type Error struct {
 ```
 
 <a name="Conflict"></a>
-### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L215>)
+### func [Conflict](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L225>)
 
 ```go
 func Conflict(message string) *Error
@@ -1958,7 +1968,7 @@ func Conflict(message string) *Error
 Conflict reports a request the resource's current state refuses \(409\).
 
 <a name="Forbidden"></a>
-### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L225>)
+### func [Forbidden](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L235>)
 
 ```go
 func Forbidden(message string) *Error
@@ -1967,7 +1977,7 @@ func Forbidden(message string) *Error
 Forbidden reports a caller who may not do this \(403\).
 
 <a name="Invalid"></a>
-### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L205>)
+### func [Invalid](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L215>)
 
 ```go
 func Invalid(message string) *Error
@@ -1976,7 +1986,7 @@ func Invalid(message string) *Error
 Invalid reports a request the caller must change before retrying \(400\).
 
 <a name="NewError"></a>
-### func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L305>)
+### func [NewError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L315>)
 
 ```go
 func NewError(status int, code, message string) *Error
@@ -1985,7 +1995,7 @@ func NewError(status int, code, message string) *Error
 NewError is an error answered with the HTTP status, carrying the wire code and the message a caller reads.
 
 <a name="NotFound"></a>
-### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L210>)
+### func [NotFound](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L220>)
 
 ```go
 func NotFound(message string) *Error
@@ -1994,7 +2004,7 @@ func NotFound(message string) *Error
 NotFound reports that the addressed resource does not exist \(404\).
 
 <a name="Unauthenticated"></a>
-### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L220>)
+### func [Unauthenticated](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L230>)
 
 ```go
 func Unauthenticated(message string) *Error
@@ -2003,7 +2013,7 @@ func Unauthenticated(message string) *Error
 Unauthenticated reports a caller who did not prove who they are \(401\).
 
 <a name="Unavailable"></a>
-### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L230>)
+### func [Unavailable](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L240>)
 
 ```go
 func Unavailable(message string) *Error
@@ -2012,7 +2022,7 @@ func Unavailable(message string) *Error
 Unavailable reports a transient failure worth retrying later \(503\).
 
 <a name="Error.Error"></a>
-### func \(\*Error\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L192>)
+### func \(\*Error\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L202>)
 
 ```go
 func (e *Error) Error() string
@@ -2021,7 +2031,7 @@ func (e *Error) Error() string
 Error renders the code and the message. It never renders the cause.
 
 <a name="Error.Unwrap"></a>
-### func \(\*Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L195>)
+### func \(\*Error\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L205>)
 
 ```go
 func (e *Error) Unwrap() error
@@ -2030,7 +2040,7 @@ func (e *Error) Unwrap() error
 Unwrap returns the cause, so errors.Is and errors.As see through an Error.
 
 <a name="Error.Wrap"></a>
-### func \(\*Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L198>)
+### func \(\*Error\) [Wrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L208>)
 
 ```go
 func (e *Error) Wrap(cause error) *Error
@@ -3889,7 +3899,7 @@ func UserID(ctx context.Context) (UID, bool)
 UserID returns the authenticated caller of the request ctx serves, and whether there is one. An in\-process [EndpointService.Call](<#EndpointService.Call>) carries its caller's user along.
 
 <a name="ViolationMessage"></a>
-## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L171-L178>)
+## type [ViolationMessage](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/errors.go#L181-L188>)
 
 ViolationMessage is one validation rule a request failed: where, which rule, and why — never the value.
 
