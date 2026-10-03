@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T03:00:00Z -->
 # internal/service/session/
 
 ## Purpose
@@ -6,8 +6,8 @@
 The concrete half of the session domain (ADR 0045): two stores implementing
 `internal/core/session.Store` — one in process memory, one on disk — and the
 AEAD `Sealer` that renders an identifier as a cookie value. Composes
-`internal/core/crypto` (AES-256-GCM) and `internal/kernel/clock`; it does not
-reimplement either.
+`internal/core/crypto` (AES-256-GCM), `internal/kernel/clock` and
+`internal/kernel/pathchain`; it reimplements none of them.
 
 Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 `0.2.14.*`, and the file store reuses `internal/core/proc.UnsupportedPlatform`
@@ -26,10 +26,12 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | `mint.go` | `mintID` — `io.ReadFull` over the injected random source |
 | `compare.go` | `digestsEqual` — `crypto/subtle` |
 | `memory_store.go` / `memory_write.go` | `memoryStore` |
-| `file_store.go` / `file_ops.go` / `file_write.go` / `file_publish.go` | `fileStore` |
-| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), and the honest refusal |
+| `file_store.go` / `file_ops.go` / `file_write.go` / `file_publish.go` | `fileStore`: construction (`openStoreDir` → the held `os.Root`, `assertHeldDir`, `openLockFile`), the record path, publication |
+| `chain.go` | `checkChain` — the components ABOVE the store directory, audited through `pathchain` before anything is created (§The location) |
+| `file_entry.go` | `openEntry` / `readEntry` — the look before every open and the proof after it, so nothing is read or locked through a link (§The location) |
+| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), `plantable` (the mode rule, Unix only), and the honest refusal |
 | `sealer.go` | `sealer` + `NewSealer` |
-| `codes.go` / `errors.go` | `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` |
+| `codes.go` / `errors.go` | `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` (`0.3.46.6`) |
 
 ## The two stores
 
@@ -40,6 +42,7 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | Records sealed at rest | no — see below | yes, AES-256-GCM |
 | Honours `ctx` | no — it never blocks | yes, and BOTH waits can be left (ADR 0073) |
 | Cross-process safe | n/a | yes, one exclusive `flock` per operation |
+| Bound to the directory it checked | n/a | yes — audited for planted links, then HELD as an `os.Root` (§The location) |
 | Available everywhere | yes | linux/darwin/freebsd/openbsd/netbsd/dragonfly only |
 
 The memory store does **not** seal its records, and that is not an oversight:
@@ -54,7 +57,8 @@ rest on operating-system mechanics, and only one of those is portable:
 | Mechanic | Needed for | Portable? |
 |---|---|---|
 | `rename(2)` / `MoveFileEx` | atomic publication | **yes**, everywhere Go runs |
-| enforced Unix permissions | owner-only records | no |
+| `os.Root` | one directory held for the store's lifetime | **yes** — the standard library's own `openat` walk |
+| enforced Unix permissions | owner-only records, and the `plantable` verdict on a link in `Dir`'s path | no |
 | `flock(2)` | serialised read-modify-write | no |
 | `fsync(2)` on the directory | a rename or unlink that survives a power cut | no — Windows has no directory flush (ADR 0056 D10), and the store is already refused there |
 
@@ -79,20 +83,22 @@ solaris, illumos, android and ios.
 Every permission the store depends on is **narrowed and then asserted**, because
 three different things can silently widen it:
 
-- a **default POSIX ACL** on the parent makes `MkdirAll(0700)` and
-  `CreateTemp`'s `0600` come back wider — this happens on this repository's own
+- a **default POSIX ACL** on the parent makes `MkdirAll(0700)` and the record
+  temporary's `0600` come back wider — this happens on this repository's own
   devcontainer, where `t.TempDir()` yields `0775`;
 - a **filesystem that does not implement Unix permissions** (exFAT, SMB, a
   container mount with a blanket `file_mode=`) accepts the `chmod` and changes
   nothing;
 - an operator's **pre-existing directory** may simply be `0755`.
 
-So: `chmod` what we created, refuse what we did not, and `stat` either way. A
-directory the store creates is narrowed to `0700`; a directory that already
-existed is **refused** with `DirectoryUnsafe` rather than chmod'ed, because
-narrowing an operator's directory — possibly shared with another service — is
-not the SDK's decision to make. Records are created, chmod'ed to `0600`, and
-stat'ed before a byte is written to them.
+So: `chmod` what we created, refuse what we did not, and `stat` either way —
+both through the handle of the directory the store HOLDS, so the directory
+narrowed and judged is the one every later operation uses. A directory the
+store creates is narrowed to `0700`; a directory that already existed is
+**refused** with `DirectoryUnsafe` rather than chmod'ed, because narrowing an
+operator's directory — possibly shared with another service — is not the SDK's
+decision to make. Records are created, chmod'ed to `0600`, and stat'ed before a
+byte is written to them.
 
 ### Why one store-wide lock
 
@@ -135,9 +141,90 @@ Three rules come with it:
 - **A sweep flushes once per pass**, not once per record: it unlinks every dead
   record under the lock (`unlinkLocked`) and then flushes the directory a single
   time, so a large sweep costs one device round trip instead of one per session.
-- **The flush is a field** (`fileStore.syncDir`, `flushDirectory` in production)
+- **The flush is a field** (`fileStore.syncDir`, `flushHeld` over the held root in production)
   so `dirsync_internal_test.go` can observe *when* it runs and make it fail. A
   failing directory `fsync` cannot be provoked on a real filesystem.
+
+## The location is a path, and other accounts may write parts of it
+
+Four attacks, each first run against the store as it shipped (darwin/arm64,
+`390aa80f`) and each now refused. The mechanisms are the lock domain's and
+`vfs`'s, not new ones:
+
+| Planted | Before | Now | Mechanism |
+|---|---|---|---|
+| a link at a record's name, to a copy kept elsewhere | `Load` served the copy (`where="outside"`) | `RecordCorrupt`, never read; a sweep unlinks the LINK, never its target | look first, prove the handle (`file_entry.go`) |
+| a dangling link at `.lock` | store built; the link's target created and flocked | `PathRedirected` (`kind=symlink`); nothing created | the same, at construction |
+| a link at a component of `Dir`, in a 1777 directory | store built; every record under the planter's tree | `PathRedirected`, naming the component and its target; nothing created | `pathchain` before `MkdirAll`, with lock's rule (`chain.go`) |
+| `Dir` renamed away after construction and replaced (a 0777 parent, no link anywhere) | records followed the path into the replacement | records stay in the directory the store checked | the directory is HELD as an `os.Root` |
+
+Writes were never redirected: `rename(2)` replaces a link at its destination
+rather than following it, and the temporary is created `O_EXCL`, which never
+follows.
+
+- **The parent-chain rule is ADR 0083's**, read off the same
+  `pathchain.StepValue.Container`: an indirection is refused when the directory
+  holding it is world-writable, and the sticky bit exempts nothing, because
+  planting creates an entry. A link in a directory only its owner (or its
+  group) can write is honoured — `/tmp` on macOS, `/var/run` on Linux, and every
+  macOS `t.TempDir()` (`/var -> /private/var`) are links like that. Both halves
+  are pinned by one table.
+- **Held, not re-resolved.** The audit sees the path once; the handle keeps it
+  true afterwards. Every name — records, temporaries, the lock file, the sweep's
+  listing, the directory flush — resolves against the `os.Root` opened at
+  construction, after `assertHeldDir` proved the held directory is owner-only
+  and is still the one `Dir` names. That is the half the lock domain leaves open
+  (it re-resolves its path at every open, so a component replaced after
+  `checkChain` is not seen, as ADR 0083 says); here it moves nothing.
+- **Look, then prove — because `os.Root` has no `O_NOFOLLOW`.** It ORs the flag
+  in itself and then resolves the link on the caller's behalf, inside the root
+  (go1.27 `src/os/root_unix.go`), and `syscall.Openat` exists for linux, aix and
+  wasip1 only (ADR 0083). So `openEntry` `Lstat`s the name through the held
+  directory and refuses a link — or anything that is not a regular file —
+  before any open, then compares the opened handle with what the name was
+  (`os.SameFile` on its `fstat`). Nothing is read from, or locked on, a handle
+  that fails. What remains is a follow INSIDE the store directory during that
+  race, by an account that can already write a 0700 directory it does not own.
+- **A link at a record's name is `RecordCorrupt`**, the one verdict for every
+  record this store did not write: no oracle, and the 401 that lets a client
+  start over. A directory or a FIFO there is `StoreUnavailable`
+  (`kind=not-regular`), as reading a directory always answered — but it is
+  never opened, so a FIFO cannot park a `Load` inside the store-wide lock.
+
+### What is NOT closed
+
+- **Ownership is not checked, and neither is an ACL.** `assertHeldDir` reads
+  mode bits, as the check it replaced did. A store running as root over a
+  `0700` directory another account owns is accepted, and so is one whose
+  extended ACL (macOS, NFSv4) grants another account what the mode bits do not
+  show; either account can then plant, rename and restore entries. An owner
+  check would close the first, and is not part of this change because it would
+  also refuse a root process over a service account's directory — a deployment
+  shape nobody has measured.
+- **A world-writable, non-sticky ancestor that holds no link** is accepted, as
+  the lock domain accepts it. With the directory held, a rename there after
+  construction no longer matters. Before construction its planter can create
+  `Dir` itself: refused when its mode shows another account, unopenable when it
+  is the planter's `0700` — unless the store runs as root or an ACL lets it in
+  (the bullet above).
+
+### Why publication is not `vfs.WriteAtomic`
+
+The audit that found this asked whether the publication copy here could be
+`internal/service/vfs`'s, which `internal/service/secret` uses. Not without
+dropping what §Do NOT forbids dropping:
+
+| This store needs | `vfs` offers |
+|---|---|
+| the record temporary narrowed and `stat`'ed **before its first byte** (`DirectoryUnsafe`) | `WriteAtomic` creates with the mode and asserts nothing |
+| a directory flush after every **unlink**, which is what makes `Destroy` durable | `Remove` does not flush, and the port has no flush verb |
+| an `Lstat`, and a handle on the directory, for the lock file and the record reads | `FullFS` has neither (`fs.ReadLinkFS` is not implemented) |
+| the flush observed and made to fail (`dirsync_internal_test.go`) | `atomicOps` is unexported |
+
+So the five steps stay here, now over the held root. What would let them go is
+a change to `vfs` itself — the mode assertion in `WriteAtomic`, a durable
+remove or flush sibling (ADR 0039), and `fs.ReadLinkFS` — which changes `vfs`
+for every caller and is not this change.
 
 ## Conventions
 
@@ -235,6 +322,23 @@ Two more rules sit on the same call:
 - **Recognise a record file by anything looser than `isDigest`, or decode a
   base64url value without `Strict()`.** Sweep deletes what it recognises, and a
   lenient decoder gives one session several spellings.
+- **Open anything by `fileStore.dir` after construction.** Every name resolves
+  against `fileStore.root`; a path re-resolved later is one a renamed parent
+  can move — measured, before the root was held.
+- **Read a record or open the lock file with `os.Root.Open`/`ReadFile` alone.**
+  `os.Root` follows a link inside the directory on the caller's behalf. Go
+  through `openEntry`/`readEntry`, which look first and prove the handle after.
+- **Move `checkChain` after `os.MkdirAll`.** `MkdirAll` follows a planted
+  parent, so the audit would refuse the directory only after creating it inside
+  the planter's tree.
+- **Refuse every link in `Dir`'s path.** It refuses every macOS `t.TempDir()`
+  and `/var/run` on Linux — ADR 0018 §(a)'s failure mode, blaming the operator
+  for the operating system's layout. The rule is the CONTAINER's mode.
+- **Run `plantable`'s mode rule on Windows.** `os.Stat` synthesises `0777` for
+  every writable directory there; the `_other` variant fails closed and stays
+  unreachable behind the platform refusal.
+- **Give a link at a record's name its own code.** It is tampering, and it gets
+  tampering's one verdict, `RecordCorrupt`.
 
 ## Verification
 
@@ -253,6 +357,8 @@ cd internal/service && GOWORK=off go test -race -cover ./session
 | `file_cancel_external_test.go` | both waits being left: a cancelled caller parked on the lock poll, the poll ending in ACQUISITION once the holder goes (so "cancellable" is not satisfied by a store that never acquires), and a goroutine cancelled while parked on the in-process gate — in a `synctest` bubble, because the cancel has to happen after it is parked there or the context check at the top of `withLock` answers instead; and a caller gone by the time both are held never running the section (`TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection`) |
 | `withlock_internal_test.go` | the in-process gate excluding goroutines that share the store's one `flock` descriptor — which `flock` itself does not, a re-lock of one open file description being a conversion rather than a wait — asserted on observed occupancy, not on a final counter |
 | `file_store_external_test.go` | directory and record modes on disk, the operator-owned refusal, no identifier anywhere on disk, filename binding via AAD, tamper/truncation/foreign-key refusal, survival across a reopen, the failed-publish invariant checked byte-for-byte (a failure at temp creation), a sweep that leaves foreign `*.session` files alone, and context cancellation. The rename-onto-a-directory test fails at `Save`'s read and never reaches the rename — its doc says so |
+| `pathsafety_external_test.go` | the four planted-path attacks of §The location, each refused: a link at a record's name inside and outside the directory (`RecordCorrupt`, never read, the LINK swept), a link at the lock file dangling or not, inside or out (`PathRedirected`, nothing created through it), a link at a component of `Dir` over the whole container table — 1777, 0777, at a parent and at `Dir` itself refused, 0770 and 0755 honoured — and a parent swapped after construction moving nothing; plus a FIFO or a directory at a record's or the lock file's name, reported and never opened. Tagged like the store; every mutation named in its doc comments was run |
+| `pathsafety_internal_test.go` | the branches only a race reaches, driven with the swap already made: `assertHeldDir` against a swapped and a vanished `Dir` and a wide held directory; `sameEntry` against a swapped name, a created name that became a link or vanished, and a handle on a directory; `isLinkNow` after `os.Root` refuses an escaping link |
 | `dirsync_internal_test.go` | the directory flush after every rename and unlink, observed through `syncDir` (after the change, once per sweep, again on a retried `Destroy`); a failed flush reported and not rolled back; a failed rotation withdrawing the record it published when the old record's unlink fails, and undoing nothing when only the flush after it does; and the orphan cleanup behind a rename that really fails, over a temporary that was written, synced and closed |
 | `sealer_external_test.go` | round trip, cookie-safety, nonce freshness, the seven non-oracle failures, one spelling per sealed value, the empty-purpose refusal, and that opening is not authorising |
 | `entropy_internal_test.go` | the collision guard on `New` **and** on `Regenerate`, and the refusal to mint from partial entropy |

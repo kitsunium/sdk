@@ -4,7 +4,7 @@
 
 Public facade for the SDK's server-side session domain (ADR 0045). Aliases the
 `Store` / `Sweeper` / `Sealer` ports and the `ID` / `Session` / `State` value
-types, and re-exports the six constructors and all fifteen sentinels.
+types, and re-exports the six constructors and all sixteen sentinels.
 Stdlib-only → dep-light; the memory store is cross-OS, the file store refuses
 honestly where its mechanics do not exist.
 
@@ -18,12 +18,12 @@ honestly where its mechanics do not exist.
 | `ID` / `IDLen` | opaque 256-bit identifier; redacts itself, `Reveal` is the only exit, `Equal` is constant-time, `Digest` is what you log |
 | `Session` / `State` | short aliases for `SessionValue` / `StateValue` |
 | `Config` / `FileConfig` | aliases onto `service/session`. `FileConfig.Key` takes a `pkg/v1/crypto.Key` |
-| `NewMemoryStore` / `NewFileStore` | refuse an unusable policy at construction; `NewFileStore` also refuses an unsafe directory and an unsupported platform |
+| `NewMemoryStore` / `NewFileStore` | refuse an unusable policy at construction; `NewFileStore` also refuses an unsafe directory, a location reached through a link anybody could have planted (`PathRedirected`), and an unsupported platform |
 | `NewSealer` | binds a key and a REQUIRED purpose |
 | `ParseID` / `NewID` | the inbound path from a cookie, and the raw-bytes path a third-party store needs |
 | `NewSession` | builds a `Session` from a `State` — for a framework implementing its own `Store` |
 | `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused` | core sentinels (`0.2.14.*`) |
-| `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` | store sentinels (`0.3.46.*`) |
+| `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` | store sentinels (`0.3.46.*`). `PathRedirected` (`0.3.46.6`) is the file store refusing to be led through a link — at its lock file, or at a component of `Dir` planted in a world-writable directory — see `internal/service/session/CLAUDE.md` §The location |
 | `UnsupportedPlatform` | the SDK-wide sentinel, shared with `pkg/v1/proc` (ADR 0018) |
 
 ## Conventions

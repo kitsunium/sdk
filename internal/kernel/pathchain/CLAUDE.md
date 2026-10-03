@@ -12,6 +12,9 @@ parent is traversed by every open whatever flags it carries (ADR 0083).
 `internal/service/lock` is its first consumer: ADR 0082 closed the final
 component and named the parents as deferred, on the grounds that closing them
 "needs a directory-handle API the SDK does not have". This is that API.
+`internal/service/session` is the second: its file store audits `Dir` with the
+lock domain's rule before creating anything, then holds the directory as an
+`os.Root`, so a component replaced after the audit moves nothing.
 
 ## Contents
 

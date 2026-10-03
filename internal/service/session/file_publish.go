@@ -32,14 +32,12 @@ type tempRecord interface {
 	Sync() error
 	// Close releases the descriptor.
 	Close() error
-	// Name reports the path, which is what gets renamed or removed.
-	Name() string
 }
 
 // assertPrivateFile narrows a freshly created file to owner-only and then
 // CHECKS that the narrowing took.
 //
-// Both halves are load-bearing. os.CreateTemp asks for 0600, and a parent
+// Both halves are load-bearing. The create asks for 0600, and a parent
 // carrying a default POSIX ACL can hand back something wider, so the chmod is
 // what makes the request true on an ordinary Linux box. And on a filesystem
 // that does not implement Unix permissions at all — an exFAT stick, an SMB
@@ -93,14 +91,17 @@ func writeAndSync(file tempRecord, payload []byte) error {
 	return nil
 }
 
-// flushDirectory fsyncs a directory, so the renames and unlinks inside it
-// survive a power loss. It is the production value of fileStore.syncDir.
+// flushHeld fsyncs the held store directory, so the renames and unlinks
+// inside it survive a power loss. It is the production value of
+// fileStore.syncDir.
 //
 // It flushes the directory's ENTRIES, not the files they name: a record's
 // bytes were synced before its rename, and this is the step that makes the
-// rename — or the unlink — itself durable.
-func flushDirectory(dir string) (err error) {
-	handle, openErr := os.Open(dir)
+// rename — or the unlink — itself durable. The directory is opened through the
+// held root rather than by path, so the directory flushed is the one the
+// renames happened in, even if a component of the configured path has moved.
+func flushHeld(root *os.Root) (err error) {
+	handle, openErr := root.Open(".")
 	//: a directory that cannot be opened cannot be flushed.
 	if openErr != nil {
 		//: the caller reports StoreUnavailable.
@@ -123,9 +124,9 @@ func flushDirectory(dir string) (err error) {
 // The removal is CHECKED rather than discarded, and then deliberately
 // subordinate to cause: replacing "the disk is full" with "the orphan would not
 // unlink" would report the consequence instead of the problem.
-func removeTemp(name string, cause error) error {
+func removeTemp(root *os.Root, name string, cause error) error {
 	//: an already-absent file is success; nothing was left behind either way.
-	if removeErr := os.Remove(name); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
+	if removeErr := root.Remove(name); removeErr != nil && !errors.Is(removeErr, fs.ErrNotExist) {
 		//: a real removal failure, still subordinate to cause.
 		return firstFailure(cause, removeErr, "remove-temp")
 	}

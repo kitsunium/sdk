@@ -99,7 +99,9 @@ func flushObservedStore(t *testing.T, clk clock.Timed, rec *flushRecorder) *file
 	if !ok {
 		t.Fatalf("NewFileStore returned %T, want *fileStore", store)
 	}
-	concrete.syncDir = rec.flush
+	//: the held directory is the configured one in every test here, so the
+	//: recorder can list it by path.
+	concrete.syncDir = func() error { return rec.flush(concrete.dir) }
 	return concrete
 }
 
@@ -407,7 +409,7 @@ func publishedBeside(t *testing.T, seen [][]string, oldName string) string {
 // every failure AFTER its temporary exists — which, it turned out, no test in
 // this package did. TestAFailedPublishLeavesThePreviousRecord fails before the
 // temporary is created, and TestARenameOntoADirectoryLeavesNothingBehind fails
-// at Save's READ of the directory ("is a directory", op=read), never reaching
+// at Save's READ of the directory (op=read, kind=not-regular), never reaching
 // the rename it is named after; both assert "no orphan" over a publication
 // that never made one. Here publish is called directly, so the temporary is
 // created, narrowed, written, synced and closed, and only the switch fails.
@@ -418,14 +420,15 @@ func TestAFailedRenameLeavesNoOrphan(t *testing.T) {
 	t.Parallel()
 	store := flushObservedStore(t, clock.NewManualClock(time.Date(2031, 3, 7, 4, 5, 6, 0, time.UTC)), &flushRecorder{})
 	//: rename(2) refuses to replace a directory with a file, on every Unix.
-	target := filepath.Join(store.dir, strings.Repeat("ab", 32)+recordSuffix)
+	name := strings.Repeat("ab", 32) + recordSuffix
+	target := filepath.Join(store.dir, name)
 	if err := os.Mkdir(target, 0o700); err != nil {
 		t.Fatalf("Mkdir: %v", err)
 	}
 	if err := os.WriteFile(filepath.Join(target, "occupied"), []byte("prior"), 0o600); err != nil {
 		t.Fatalf("WriteFile: %v", err)
 	}
-	publishErr := store.publish(target, []byte("a sealed record"))
+	publishErr := store.publish(name, []byte("a sealed record"))
 	if !errs.HasCode(publishErr, coresession.CodeStoreUnavailable) || fieldOf(publishErr, "op") != "rename" {
 		t.Fatalf("publish onto a directory = %v (op %q), want CodeStoreUnavailable from the rename",
 			publishErr, fieldOf(publishErr, "op"))

@@ -2,6 +2,7 @@ package session_test
 
 import (
 	"fmt"
+	"os"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -153,6 +154,40 @@ func TestTheFileStoreRefusesOrWorks(t *testing.T) {
 	//: assertion — the published Store method set stays five wide (ADR 0039).
 	if _, ok := store.(session.Sweeper); !ok {
 		t.Error("the file store does not implement Sweeper")
+	}
+}
+
+// TestAPlantedLockLinkIsTheReexportedPathRedirected pins that PathRedirected,
+// as the facade re-exports it, is the sentinel the file store emits when a
+// symbolic link stands at its lock file's name. An alias that had drifted to a
+// copy would leave a consumer's errs.HasCode silently false on the one refusal
+// that says "a human must look at this path".
+func TestAPlantedLockLinkIsTheReexportedPathRedirected(t *testing.T) {
+	t.Parallel()
+	dir := filepath.Join(t.TempDir(), "sessions")
+	if err := os.Mkdir(dir, 0o700); err != nil {
+		t.Fatalf("Mkdir: %v", err)
+	}
+	//: defeat any default ACL, so the directory is refused for the link and
+	//: not for its mode.
+	if err := os.Chmod(dir, 0o700); err != nil {
+		t.Fatalf("Chmod: %v", err)
+	}
+	if err := os.Symlink(filepath.Join(t.TempDir(), "planted"), filepath.Join(dir, ".lock")); err != nil {
+		t.Skipf("this account cannot create a symbolic link here: %v", err)
+	}
+	store, err := session.NewFileStore(session.FileConfig{
+		IdleTimeout: time.Minute, AbsoluteTimeout: time.Hour, Dir: dir, Key: testKey(t),
+	})
+	if errs.HasReason(err, "UNSUPPORTED_PLATFORM") {
+		//: refused before any path is looked at, which is the platform's answer.
+		return
+	}
+	if !errs.HasCode(err, mustCode(t, session.PathRedirected)) || !errs.HasReason(err, "PATH_REDIRECTED") {
+		t.Fatalf("NewFileStore over a planted lock link = %v, want the re-exported PathRedirected", err)
+	}
+	if store != nil {
+		t.Error("PathRedirected came back with a store attached")
 	}
 }
 

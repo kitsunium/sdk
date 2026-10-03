@@ -28,3 +28,9 @@ const CodePayloadTooLarge errs.Code = 0x00_03_2E_04 // 0.3.46.4
 // would silently drop the domain separation between two things sealed under one
 // key.
 const CodeInvalidPurpose errs.Code = 0x00_03_2E_05 // 0.3.46.5
+
+// CodePathRedirected identifies a store location reached through an
+// indirection the file store refuses to follow: a link at the lock file's
+// name, a link at a component of Dir planted where any account could have
+// planted it, or a Dir that stopped naming the directory the store opened.
+const CodePathRedirected errs.Code = 0x00_03_2E_06 // 0.3.46.6

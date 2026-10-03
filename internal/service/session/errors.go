@@ -86,4 +86,24 @@ var (
 		"A sealer needs a non-empty purpose",
 		"service/session: NewSealer needs a purpose string to bind as additional authenticated data; an empty one would drop domain separation silently",
 		errs.WithExitCode(exitConfig))
+
+	// PathRedirected is returned by NewFileStore when the store's location is
+	// reached through an indirection it refuses to follow.
+	//
+	// Three shapes, one remedy — a human looks at the directory, and no retry
+	// helps, which is why it is not StoreUnavailable: a symbolic link at the
+	// lock file's name, which would put the store-wide lock — and, when it
+	// dangles, a file the store creates — wherever the link points; a link at
+	// a component of Dir planted in a directory any account can write, which
+	// would move every record into a tree its planter chose; and a Dir that no
+	// longer names the directory the store opened, because it was swapped
+	// between the check and the open.
+	//
+	// A link at a RECORD's name is not this: that one is RecordCorrupt, the
+	// single verdict for every record this store did not write, so a planted
+	// link reads exactly like any other tampering.
+	PathRedirected = errs.Define(CodePathRedirected, "PATH_REDIRECTED",
+		"The session store location is reached through a link",
+		"service/session: an indirection the store refuses — a link at the lock file, a link at a component of Dir planted where any account could, or Dir swapped while opening; the fields name the component, the kind and the target",
+		errs.WithExitCode(exitConfig))
 )

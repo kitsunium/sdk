@@ -3,6 +3,7 @@ package session
 
 import (
 	"context"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
@@ -168,7 +169,7 @@ func (f *fileStore) Destroy(ctx context.Context, id coresession.ID) error {
 // reached by type assertion, never by a wider Store.
 func (f *fileStore) Sweep(ctx context.Context) (removed int, err error) {
 	lockErr := f.withLock(ctx, func() error {
-		entries, readErr := os.ReadDir(f.dir)
+		entries, readErr := fs.ReadDir(f.root.FS(), ".")
 		//: a directory that cannot be listed is a backend fault.
 		if readErr != nil {
 			//: StoreUnavailable.
@@ -245,6 +246,6 @@ func recordDigest(entry os.DirEntry) (digest string, ok bool) {
 	//: a file with the right suffix and the wrong stem is not one of ours
 	//: either — and since Sweep deletes whatever it recognises and cannot
 	//: read, recognising by length alone deleted any foreign file that merely
-	//: had 64 characters. Recognition is recordPath's own test, exactly.
+	//: had 64 characters. Recognition is recordName's own test, exactly.
 	return digest, isDigest(digest)
 }
