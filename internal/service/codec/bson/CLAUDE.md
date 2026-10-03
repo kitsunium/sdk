@@ -32,6 +32,8 @@ decode-error cases are refused.
 | Code range | `0.3.36.*` (ADR 0021) |
 | Value types | `D`, `E`, `M`, `A`, `ObjectID` (+ `NilObjectID`, `ObjectIDFromHex`), `DateTime` (+ `NewDateTimeFromTime`), `Decimal128` (+ `NewDecimal128`, `ParseDecimal128`), `Binary` (+ the `Binary*` subtype constants), `Regex`, `Timestamp`, `DBPointer`, `JavaScript`, `Symbol`, `CodeWithScope`, `MinKey`, `MaxKey`, `Undefined`, `Null` |
 
+`pkg/v1/codec/bson` aliases the value types; nothing else is public.
+
 ## Contents
 
 ```

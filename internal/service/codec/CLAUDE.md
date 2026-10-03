@@ -42,12 +42,13 @@ writes and the value it replaces. Documents are read strictly with
 exactly; arrays are aligned before they are paired. It owns `0.3.90.*` and is
 reached through `pkg/v1/codec/jsonpatch`.
 
-Three of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
-`pkg/v1/codec/yaml` and `pkg/v1/codec/toml` each blank-import their own package
-here and nothing else (ADR 0134), so a program reading YAML configuration links
-`yaml.v3` and no other codec's library. A codec package registers itself in its own
-initialisation, which Go runs once, so being imported by both a per-format
-facade and `pkg/v1/codec` registers it once.
+Four of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
+`pkg/v1/codec/yaml`, `pkg/v1/codec/toml` and `pkg/v1/codec/bson` each import
+their own package here and nothing else (ADR 0134), so a program reading YAML
+configuration links `yaml.v3` and no other codec's library. `pkg/v1/codec/bson`
+also aliases BSON's value types, which `bson/` owns. A codec package registers
+itself in its own initialisation, which Go runs once, so being imported by both
+a per-format facade and `pkg/v1/codec` registers it once.
 
 `strictjson/` sits in this tree and is deliberately NOT a codec (ADR 0102): it
 registers no Format and implements no `core/codec.Codec`, because what it adds —

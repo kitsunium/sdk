@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/codec"
+	codecbson "github.com/kitsunium/sdk/pkg/v1/codec/bson"
 	codecjson "github.com/kitsunium/sdk/pkg/v1/codec/json"
 	codectoml "github.com/kitsunium/sdk/pkg/v1/codec/toml"
 	codecyaml "github.com/kitsunium/sdk/pkg/v1/codec/yaml"
@@ -14,14 +15,14 @@ import (
 
 // TestAFormatImportedTwiceIsRegisteredOnce pins that the per-format packages
 // and this one can be imported together: registering a duplicate panics, and
-// this test binary imports all four, so reaching this test at all is half the
+// this test binary imports all five, so reaching this test at all is half the
 // proof. The other half is the registry, which lists each format once and
 // under the name each per-format package publishes.
 func TestAFormatImportedTwiceIsRegisteredOnce(t *testing.T) {
 	t.Parallel()
 	available := codec.Available()
 	//: each per-format package's name, registered exactly once.
-	for _, name := range []string{codecjson.Format, codecyaml.Format, codectoml.Format} {
+	for _, name := range []string{codecjson.Format, codecyaml.Format, codectoml.Format, codecbson.Format} {
 		//: counted in the registry.
 		if count := countFormat(available, codec.Format(name)); count != 1 {
 			t.Errorf("%q is registered %d times", name, count)

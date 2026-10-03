@@ -111,8 +111,11 @@ configuration through `config.FSSource` imports `pkg/v1/codec/yaml` and links
 `string` or a `codec.Format` parameter without a conversion. Registration happens
 in the service codec's own initialisation, which Go runs once, so importing a
 per-format facade beside this package registers the format once —
-`TestAFormatImportedTwiceIsRegisteredOnce`. The other thirteen codecs follow
-the same pattern when a consumer needs one of them alone.
+`TestAFormatImportedTwiceIsRegisteredOnce`. `bson/` is the fourth, and the one
+that is more than a registration: it also carries BSON's value types (`ObjectID`,
+`D`, `DateTime`, `Decimal128`…) and its own `Marshal` / `Append` / `Unmarshal`,
+because a program reading BSON holds those values. The other twelve codecs
+follow the same pattern when a consumer needs one of them alone.
 
 ## Conventions
 
@@ -130,7 +133,7 @@ the same pattern when a consumer needs one of them alone.
 
 - Add a new `Format` constant without registering its service codec under the same name and updating `MODULE.bazel` if a new external dependency is needed.
 - Re-export `corecodec.Register` here — registration happens in each service package's package-level `var` initialisation (none of the 16 uses `init()`); consumers do not register codecs.
-- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/codec`, or on a per-format facade (`json/`, `yaml/`, `toml/`) to link one format.
+- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/codec`, or on a per-format facade (`json/`, `yaml/`, `toml/`, `bson/`) to link one format.
 - Rename an existing `Format` string value — it's part of the frozen public contract.
 - Surface `errs.PrivateOf` output from codec errors to end users; the Private field names internal package paths.
 
@@ -152,3 +155,4 @@ Every codec lives under `internal/service/codec/*` and is reached via the univer
 - `jsonshape/` — a Go type's wire shape under encoding/json — see `jsonshape/CLAUDE.md` (ADR 0133)
 - `jsonpatch/` — two JSON documents' difference as RFC 6902 operations — see `jsonpatch/CLAUDE.md` (ADR 0143)
 - `json/`, `yaml/`, `toml/` — one format registered alone — see their `CLAUDE.md` (ADR 0134)
+- `bson/` — BSON registered alone, with its value types and verbs — see `bson/CLAUDE.md` (ADR 0134)
