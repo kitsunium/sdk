@@ -1,9 +1,11 @@
-<!-- updated: 2026-10-03T10:30:00Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/collections/ring/
 
 ## Purpose
 
 Lock-free single-producer / single-consumer (SPSC) bounded queue built on `sync/atomic`. Admitted to the kernel by ADR 0006 — domain-neutral by construction (any future metrics batcher, codec stream, event bus, or hot-path FIFO can plug in). Today the only consumer is `internal/service/observe/logger/middleware/async`; the surface is generic so other domains can adopt without a refactor. Code range `0x00_01_03_*` (`0.1.3.*`).
+
+**Published as `pkg/v1/collections/ring`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Surface
 

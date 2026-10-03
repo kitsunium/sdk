@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/batcher/
 
 ## Purpose
@@ -11,6 +11,8 @@ of difference between the s3 (byte-weighted) and cloudwatch (event-counted)
 sinks is captured by `WeightOf`, and every other sink-specific concern
 (chronological reorder, per-batch key) rides inside the caller's deliver
 closure. Code range `0x00_01_05_*` (0.1.5).
+
+**Published as `pkg/v1/concur/batcher`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Surface
 

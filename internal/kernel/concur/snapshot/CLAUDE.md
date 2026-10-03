@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:54:25Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/snapshot/
 
 ## Purpose
@@ -9,6 +9,8 @@ lock-free and allocation-free, while writers (`Store` / `Swap` / `Update`)
 serialise on a mutex for a race-free read-modify-write publish. The codec
 registry (`internal/core/data/codec`) is built ON this primitive — the mechanism
 lives here, the domain clone logic stays with the consumer (ADR 0011).
+
+**Published as `pkg/v1/concur/snapshot`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Contents
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/worker/
 
 ## Purpose
@@ -9,6 +9,8 @@ The SDK's generic goroutine-lifecycle primitive. Stdlib-only, domain-neutral.
 `Done` channel closed once the loop has returned. `Every` layers a ticker loop
 on top. Collapses the byte-identical `stop/stopOnce/done/doneOnce` scaffold that
 three real consumers each hand-rolled (ADR 0014 §D6).
+
+**Published as `pkg/v1/concur/worker`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 ## Surface
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T11:00:00Z -->
 # internal/kernel/concur/group/
 
 ## Purpose
@@ -12,6 +12,8 @@ no `Job`, `Task` or `Worker` in a signature). Admitted on **SDK rule 1**, the
 only admission criterion there is: stdlib-only AND domain-neutral. The
 precedent is ADR 0025, which admitted `kernel/collections/cache` on that rule with **zero**
 consumers.
+
+**Published as `pkg/v1/concur/group`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
 
 Emits **no error codes**: it forwards whatever a task returns and owns no
 failure of its own except a programming fault, which panics.

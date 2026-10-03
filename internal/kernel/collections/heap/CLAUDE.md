@@ -9,6 +9,8 @@ generic — one type parameter and one comparison, with **no `Job`, no `Task`, n
 admission criterion there is; the precedent is ADR 0025, which admitted
 `kernel/collections/cache` on that rule with **zero** consumers.
 
+**Published as `pkg/v1/collections/heap`** (ADR 0159 §4): a pure alias, so every exported shape here is public API — a renamed field, a changed signature or a new method on an exported interface breaks a consumer at compile time, allowed only while the module is v0 and said out loud (ADR 0040).
+
 Emits **no error codes**: an empty heap returns `(zero, false)`, and the one
 programmer error it can detect panics.
 

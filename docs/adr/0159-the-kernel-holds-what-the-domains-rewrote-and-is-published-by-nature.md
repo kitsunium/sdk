@@ -124,7 +124,7 @@ published, which is why §2 comes first.
     construction: the registrar asks `Unusable` before publishing and refuses
     with its own code, so the kernel table builds no error. The codec, writer,
     crypto, transform, id and view registries are still their own copies.
-  - `semver` landed in the kernel and is published as `pkg/v1/semver`.
+  - `semver` landed in the kernel and is published as `pkg/v1/data/semver`.
   - The kernel's families, as moved: `concur/{batcher, buffer, group,
     recycler, singleflight, snapshot, worker}`, `collections/{cache, heap,
     ring}` and `fs/{pathchain}`, with `errs`, `clock`, `backoff`, `semver` and
@@ -133,8 +133,21 @@ published, which is why §2 comes first.
     like `heap` and `ring`, and `pathchain` heads a third family, `fs`, of
     filesystem measurements. Publication is unchanged: those three stay
     unpublished on their own.
-  - Not yet: `ring`'s multi-producer mode, `flock`, and the `pkg/v1` aliases
-    of §4 other than `semver`.
+  - The §4 aliases landed: `pkg/v1/concur/{group, singleflight, worker,
+    batcher, snapshot, recycler}` and `pkg/v1/collections/{heap, ring}`, each
+    the kernel package's exported surface as type aliases, forwarding
+    functions — so the generated README shows each signature, where a `var`
+    would show a variable of function type — and the sentinels; the `Code*`
+    constants are reached through a sentinel, as in every facade. `ring` is
+    published single-producer, AHEAD of its multi-producer mode: what
+    publication freezes is `Queue`'s four methods, which a multi-producer ring
+    answers too, so that mode arrives as another constructor: publishing first
+    froze nothing it must change, which is what §5's order protects.
+    Publishing it found a defect: `ring.Len` counted a wrapped ring wrong
+    whenever its slot count is not a power of two — the async logger's
+    default ring, 1 025 slots, read as empty while holding 1 009 records —
+    fixed in the kernel before the alias.
+  - Not yet: `ring`'s multi-producer mode and `flock`.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
 - Five service-to-service edges disappear from the dependency graph; the

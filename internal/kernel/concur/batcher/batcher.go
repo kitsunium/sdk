@@ -143,9 +143,10 @@ func (b *Batcher[T]) Flush(ctx context.Context) error {
 	return b.flushOnce(ctx)
 }
 
-// Close stops the ticker (if any), delivers the final batch under a background
-// context, and marks the batcher closed. It is idempotent: a second Close
-// returns nil after the first has drained the buffer.
+// Close stops the ticker (if any), delivers the final batch with ctx — the
+// caller's context, which bounds that last delivery — and marks the batcher
+// closed. It is idempotent: a second Close returns nil after the first has
+// drained the buffer.
 func (b *Batcher[T]) Close(ctx context.Context) error {
 	//: join the ticker goroutine first so it cannot race the final flush.
 	if b.ticking {
