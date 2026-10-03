@@ -9,8 +9,8 @@ import (
 	corelc "github.com/kitsunium/sdk/internal/core/lifecycle"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/proc/sdnotify"
 	"github.com/kitsunium/sdk/internal/service/proc/signal"
+	"github.com/kitsunium/sdk/internal/service/proc/systemd/notify"
 )
 
 // RunConfig parameterises [Run]. Its zero value wires NOTHING: no signal
@@ -58,14 +58,14 @@ func Run(ctx context.Context, lc corelc.Lifecycle, cfg RunConfig) error {
 	//: a readiness that cannot be delivered is not cosmetic: the supervisor
 	//: will kill a unit that never reports ready, so take the components back
 	//: down rather than leaving a process nobody believes is running.
-	if err := announce(cfg.Notify, sdnotify.Ready, "READY"); err != nil {
+	if err := announce(cfg.Notify, notify.Ready, "READY"); err != nil {
 		//: the stop error joins the readiness error; neither hides the other.
 		return errors.Join(err, lc.Stop(ctx))
 	}
 	waitForStop(ctx, cfg.Signals)
 	//: announce BEFORE the shutdown, so the supervisor knows the process is
 	//: going down while it is still draining rather than after.
-	notifyErr := announce(cfg.Notify, sdnotify.Stopping, "STOPPING")
+	notifyErr := announce(cfg.Notify, notify.Stopping, "STOPPING")
 	//: ctx is very likely cancelled by now; Stop detaches from it on purpose.
 	return errors.Join(notifyErr, lc.Stop(ctx))
 }
@@ -107,7 +107,7 @@ func announce(enabled bool, send func() error, state string) error {
 		return nil
 	}
 	//: side by side rather than wrapped: origin-wins would relabel
-	//: READINESS_FAILED with whatever sdnotify reported.
+	//: READINESS_FAILED with whatever systemd/notify reported.
 	return errors.Join(kerrs.Wrap(ReadinessFailed, kerrs.WrapParams{},
 		kerrs.String("state", state)), err)
 }

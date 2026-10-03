@@ -155,7 +155,7 @@ func TestResolveReportsAnIndirectionAndWhereItWent(t *testing.T) {
 
 // TestResolveCarriesEachComponentsOwnLstat pins StepValue.Info: the lstat of
 // the component ITSELF — the link and never its target — which is what a
-// policy reads an owner from (internal/service/ipc refuses a component another
+// policy reads an owner from (internal/service/proc/ipc refuses a component another
 // account created where anybody could create one).
 //
 // It is compared with os.SameFile against an independent os.Lstat, so a step

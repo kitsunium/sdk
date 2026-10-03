@@ -2,7 +2,7 @@
 
 What the running process can say about itself: what it was built from, and what
 it is doing right now. Internal service implementation behind the public
-`pkg/v1/process` facade (`Self`, `Build`, `ParseBuild`) — consumers import the
+`pkg/v1/proc/process` facade (`Self`, `Build`, `ParseBuild`) — consumers import the
 facade, not this package.
 
 ## API

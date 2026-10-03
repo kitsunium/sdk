@@ -5,7 +5,7 @@ package telemetry
 import (
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // Emitter is where a product reports: the telemetry port. Emit copies e and

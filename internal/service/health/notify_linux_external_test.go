@@ -4,7 +4,7 @@
 // datagram socket.
 //
 // It is constrained to linux because that is where internal/service/proc/
-// sdnotify can stand a listener up: the credential-verified receive path needs
+// systemd/notify can stand a listener up: the credential-verified receive path needs
 // SO_PASSCRED, which is a Linux mechanism. Elsewhere the wiring is still
 // COMPILED and its silence is covered by the portable file next to this one
 // (ADR 0018 — the runtime bar is met where the mechanism exists, not pretended
@@ -21,7 +21,7 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svchealth "github.com/kitsunium/sdk/internal/service/health"
-	svcsdnotify "github.com/kitsunium/sdk/internal/service/proc/sdnotify"
+	svcnotify "github.com/kitsunium/sdk/internal/service/proc/systemd/notify"
 )
 
 // TestReadyIsAnnouncedOnceWhenTheReplicaCanFirstServe pins the whole opt-in
@@ -38,7 +38,7 @@ import (
 // that cannot serve it.
 func TestReadyIsAnnouncedOnceWhenTheReplicaCanFirstServe(t *testing.T) {
 	//: not parallel — $NOTIFY_SOCKET is process-wide.
-	listener, socketPath, err := svcsdnotify.Listen()
+	listener, socketPath, err := svcnotify.Listen()
 	if err != nil {
 		t.Fatalf("Listen = %v, want nil", err)
 	}
@@ -83,7 +83,7 @@ func TestReadyIsAnnouncedOnceWhenTheReplicaCanFirstServe(t *testing.T) {
 	}
 	//: the second serving probe must have sent nothing, so the NEXT datagram
 	//: on this socket is the one this test sends by hand.
-	if err := svcsdnotify.Status("sentinel"); err != nil {
+	if err := svcnotify.Status("sentinel"); err != nil {
 		t.Fatalf("Status = %v, want nil", err)
 	}
 	if got := recvOne(t, listener); got.Status != "sentinel" {
@@ -109,7 +109,7 @@ func recvOne(tb testing.TB, listener coreproc.Listener) coreproc.NotificationVal
 // returns it with the $NOTIFY_SOCKET value that reaches it.
 func supervisorSocket(tb testing.TB) (coreproc.Listener, string) {
 	tb.Helper()
-	listener, socketPath, err := svcsdnotify.Listen()
+	listener, socketPath, err := svcnotify.Listen()
 	if err != nil {
 		tb.Fatalf("Listen = %v, want nil", err)
 	}
@@ -183,7 +183,7 @@ func TestAFailedReadyIsSentAgain(t *testing.T) {
 	serving.Store(true)
 	registry.Probe(ctx, corehealth.ProbeReadiness)
 	registry.Probe(ctx, corehealth.ProbeReadiness)
-	if err := svcsdnotify.Status("sentinel"); err != nil {
+	if err := svcnotify.Status("sentinel"); err != nil {
 		t.Fatalf("Status = %v, want nil", err)
 	}
 	if got := recvOne(t, listener); !got.Ready() {
@@ -230,7 +230,7 @@ func TestAFailedStatusIsSentAgain(t *testing.T) {
 	//: reachable again, same aggregate: the failed line is still owed.
 	t.Setenv("NOTIFY_SOCKET", socketPath)
 	registry.Probe(ctx, corehealth.ProbeReadiness)
-	if err := svcsdnotify.Status("sentinel"); err != nil {
+	if err := svcnotify.Status("sentinel"); err != nil {
 		t.Fatalf("Status = %v, want nil", err)
 	}
 	if got := recvOne(t, listener); !got.Ready() {
@@ -296,7 +296,7 @@ func TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt(t *testing.T) {
 	//: the stale probe finishes, healthy, after the drain was announced.
 	close(release)
 	<-stale
-	if err := svcsdnotify.Status("sentinel"); err != nil {
+	if err := svcnotify.Status("sentinel"); err != nil {
 		t.Fatalf("Status = %v, want nil", err)
 	}
 	if got := recvOne(t, listener); !got.Ready() {
@@ -330,7 +330,7 @@ func TestDrainingIsAnnouncedToTheSupervisor(t *testing.T) {
 	//: two polls during the drain: one change, so one datagram.
 	registry.Probe(ctx, corehealth.ProbeReadiness)
 	registry.Probe(ctx, corehealth.ProbeReadiness)
-	if err := svcsdnotify.Status("sentinel"); err != nil {
+	if err := svcnotify.Status("sentinel"); err != nil {
 		t.Fatalf("Status = %v, want nil", err)
 	}
 	if got := recvOne(t, listener); !got.Ready() {

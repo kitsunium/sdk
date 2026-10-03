@@ -1,6 +1,6 @@
 # signal (service)
 
-Typed signal toolbox backing `pkg/v1/signal`. Subscribe to OS signals on a
+Typed signal toolbox backing `pkg/v1/proc/signal`. Subscribe to OS signals on a
 leak-free typed channel (`Notify`) and forward received signals to a process or
 process group (`Relay`).
 

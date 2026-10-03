@@ -92,7 +92,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `pathchain` admitted on rule 1: stdlib-only, and its signatures name a path
   and its components — no lock, no directory role, no policy. It shipped with
   one in-tree consumer, `internal/service/lock`, and that was stated rather than
-  dressed up; `internal/service/ipc` is the second (its socket directory's
+  dressed up; `internal/service/proc/ipc` is the second (its socket directory's
   parents); three neighbours ask a related question with hand-rolled checks
   today (`internal/service/queue`'s symlinked state directory,
   `internal/core/vfs`'s `PathEscaped`, `internal/service/writer/rotfile`'s

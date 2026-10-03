@@ -14,7 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // NewExporter checks cfg and builds an exporter that listens nowhere yet:

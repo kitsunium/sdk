@@ -335,8 +335,11 @@ connection is lost and no bind races.
   outgoing one still held.
 - **Datagram adoption goes through the raw descriptors.** `sdlisten.Listeners`
   only wraps stream sockets, so `adoptPacket` uses `WithNames` and
-  `net.FilePacketConn`. This is done here rather than by widening `sdlisten`,
-  which is another domain and would need another ADR.
+  `net.FilePacketConn`. This is done here rather than by widening
+  `internal/service/proc/systemd/listen`, which is another domain and would
+  need another ADR. This package imports it as `sdlisten`, the name the
+  comments here use: it declares its own `listen` (`listen.go`), and an import
+  may not share a name with a package-level declaration.
 - **`unsetEnv` is false.** A group may adopt several names; clearing the
   environment on the first lookup would make every later one come back empty.
 - **The end-to-end test runs across a real exec.** It cannot be staged

@@ -70,7 +70,7 @@ func TestRunReportsAFailedStartWithoutTryingToCleanUpTwice(t *testing.T) {
 // about to be killed with them still up.
 //
 // It is not t.Parallel: t.Setenv forbids it, and NOTIFY_SOCKET is
-// process-wide. The env var is what makes sdnotify attempt a datagram at all —
+// process-wide. The env var is what makes systemd/notify attempt a datagram at all —
 // unset, every notifier call is a documented no-op that returns nil.
 func TestAnUndeliverableReadinessTakesTheComponentsBackDown(t *testing.T) {
 	t.Setenv("NOTIFY_SOCKET", "/nonexistent/kitsunium-sdk-lifecycle/notify.sock")

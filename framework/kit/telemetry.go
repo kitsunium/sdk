@@ -7,7 +7,7 @@ import (
 )
 
 // Telemetry exports the app's telemetry on the private socket at path —
-// absolute, and short enough for a Unix socket (pkg/v1/ipc) — admitting the groups gids besides the
+// absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
 // product's own account. It wins over KIT_TELEMETRY.
 func Telemetry(path string, gids ...int) AppOption {
 	//: the implementation is framework/internal/kit's; this facade only forwards.

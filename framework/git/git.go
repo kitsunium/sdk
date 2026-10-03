@@ -6,7 +6,7 @@
 // It is the framework's public package over framework/internal/service/git (ADR
 // 0158): the value types are aliases of the core git contract's types and the
 // functions delegate straight to the service implementation. What a running
-// program was BUILT from is not here — that is pkg/v1/process's Build and Self,
+// program was BUILT from is not here — that is pkg/v1/proc/process's Build and Self,
 // which stay in the SDK; this package asks git about a working tree.
 //
 // # Usage

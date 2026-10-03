@@ -49,7 +49,7 @@ env:
   # real kernel. Pure-Go packages (codec/crypto/logger/errs) behave identically
   # everywhere and are covered by the Linux Bazel lane, so they are excluded.
   PROC_PKGS_CORE: "./proc"
-  PROC_PKGS_SERVICE: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/signal ./logger/sink/file ./writer/rotfile"
+  PROC_PKGS_SERVICE: "./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/systemd/listen ./proc/systemd/notify ./proc/signal ./logger/sink/file ./writer/rotfile"
 
 jobs:
   e2e:

@@ -60,7 +60,7 @@ go_library(
         "//internal/kernel/concur/recycler",
         "//internal/kernel/concur/worker",
         "//internal/kernel/errs",
-        "//internal/service/proc/sdlisten",
+        "//internal/service/proc/systemd/listen",
     ],
 )
 

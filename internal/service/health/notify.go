@@ -8,7 +8,7 @@ import (
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/proc/sdnotify"
+	"github.com/kitsunium/sdk/internal/service/proc/systemd/notify"
 )
 
 // readyState is the sd_notify state name used in a NotifyFailed field. It is
@@ -57,7 +57,7 @@ func (h *health) announce(ctx context.Context, status corehealth.Status) {
 		return
 	}
 	//: side by side rather than wrapped: origin-wins would relabel
-	//: NOTIFY_FAILED with whatever sdnotify reported, and the hook is the
+	//: NOTIFY_FAILED with whatever systemd/notify reported, and the hook is the
 	//: caller's own log, where both halves belong. It is called after the lock
 	//: is released, so a hook that probes again cannot deadlock on it.
 	h.cfg.OnNotifyError(errors.Join(kerrs.Wrap(NotifyFailed, kerrs.WrapParams{},
@@ -128,7 +128,7 @@ func (h *health) notify(ctx context.Context, status corehealth.Status) (state st
 //
 // The probe's own deadline wins whenever it has one: the announcement belongs
 // to that answer and must not outlive it, and a deadline the caller set needs
-// no machinery at all — sdnotify hands it to the kernel as the socket's write
+// no machinery at all — systemd/notify hands it to the kernel as the socket's write
 // deadline. Without one it takes the budget a check would get, because an
 // unreadable notify socket and an unresponsive dependency are the same kind of
 // wait and the registry already states how long it tolerates one.
@@ -180,7 +180,7 @@ func (h *health) owed(status corehealth.Status) (state string, send func(ctx con
 			return "", nil
 		}
 		//: READY=1, owed until it is delivered once.
-		return readyState, sdnotify.ReadyContext
+		return readyState, notify.ReadyContext
 	}
 	//: after READY, only a change is worth a datagram.
 	if status == h.lastNotified {
@@ -192,6 +192,6 @@ func (h *health) owed(status corehealth.Status) (state string, send func(ctx con
 	//: `systemctl status`, which is at least as public as a probe body.
 	return statusState, func(ctx context.Context) error {
 		//: the aggregate's own words, bounded by the probe that measured it.
-		return sdnotify.StatusContext(ctx, "health: "+status.String())
+		return notify.StatusContext(ctx, "health: "+status.String())
 	}
 }

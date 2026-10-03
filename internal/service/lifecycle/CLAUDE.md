@@ -139,7 +139,7 @@ net is not the mechanism under test.
   and step aside.
 - **Sleep.** Not in production, not in a test. The audit will say so.
 - **Reimplement signal handling or sd_notify here.** `internal/service/proc/
-  {signal,sdnotify}` own those; this file wires them.
+  {signal,systemd/notify}` own those; this file wires them.
 - **Read `Stop`'s context for cancellation.** It carries values only.
 
 ## Verification

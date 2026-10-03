@@ -28,8 +28,8 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/metrics"
+	"github.com/kitsunium/sdk/pkg/v1/proc/signal"
 	"github.com/kitsunium/sdk/pkg/v1/scheduler"
-	"github.com/kitsunium/sdk/pkg/v1/signal"
 	"github.com/kitsunium/sdk/pkg/v1/trace"
 	"github.com/kitsunium/sdk/pkg/v1/vfs"
 )

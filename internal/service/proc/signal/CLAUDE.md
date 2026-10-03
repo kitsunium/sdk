@@ -2,7 +2,7 @@
 # internal/service/proc/signal
 
 Service implementation of the typed **signal toolbox** for the process-supervision
-domain (ADR 0016). It backs the `pkg/v1/signal` facade and depends only on
+domain (ADR 0016). It backs the `pkg/v1/proc/signal` facade and depends only on
 stdlib + `internal/core/proc` + `internal/kernel/errs` (never `pkg/*`).
 
 ## What lives here

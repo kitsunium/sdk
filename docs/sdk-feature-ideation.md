@@ -113,7 +113,7 @@ signaux. C'est la vraie valeur de `uber-go/fx` (7,7k) une fois la DI mise de
 côté, et c'est le pendant de `HttpKernel` côté cycle de vie.
 
 Le SDK a déjà **toutes les pièces** et aucun assemblage : `proc/signal`,
-`proc/sdnotify`, `net/server` (drain), `kernel/clock`. Un framework ne peut pas
+`proc/systemd/notify`, `net/server` (drain), `kernel/clock`. Un framework ne peut pas
 exister sans cette couche, et chaque consommateur la réécrit mal.
 → core `0.2.12`. Aucune dépendance.
 

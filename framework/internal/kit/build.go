@@ -13,7 +13,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/git"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/process"
 )
 
 // The modules a build is described by, besides the product's own.

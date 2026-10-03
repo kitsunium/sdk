@@ -8,7 +8,7 @@ import (
 
 // ListenHandler serves one connection of a [Listener] until it returns; the
 // connection is closed after it. conn.Peer says who connected, as the kernel
-// says where it can (pkg/v1/ipc).
+// says where it can (pkg/v1/proc/ipc).
 type ListenHandler = ikit.ListenHandler
 
 // Listener is an inbound port that is not HTTP: a private socket on this

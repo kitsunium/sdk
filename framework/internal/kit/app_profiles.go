@@ -12,8 +12,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
 	"github.com/kitsunium/sdk/pkg/v1/lock"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // CodeSingletonHeld reports a start refused because another process of the

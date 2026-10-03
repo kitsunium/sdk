@@ -16,9 +16,9 @@ import (
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	perrs "github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/process"
-	"github.com/kitsunium/sdk/pkg/v1/rlimit"
-	"github.com/kitsunium/sdk/pkg/v1/signal"
+	"github.com/kitsunium/sdk/pkg/v1/proc/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/rlimit"
+	"github.com/kitsunium/sdk/pkg/v1/proc/signal"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 )

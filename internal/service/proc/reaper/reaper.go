@@ -1,4 +1,4 @@
-// Package reaper — the PID1 / subreaper zombie collector backing pkg/v1/reaper.
+// Package reaper — the PID1 / subreaper zombie collector backing pkg/v1/proc/reaper.
 //
 // New returns a coreproc.Reaper whose concrete behaviour is selected at build
 // time: a real SIGCHLD-driven waitpid loop on Unix (reaper_unix.go) and a

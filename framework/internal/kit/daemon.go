@@ -12,7 +12,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/signal"
+	"github.com/kitsunium/sdk/pkg/v1/proc/signal"
 )
 
 // maxPhaseHistory caps the phase changes kept; the oldest go first.

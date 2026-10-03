@@ -19,7 +19,7 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // cliApp is an app whose one product command records the arguments it got

@@ -1219,7 +1219,7 @@ rules:
 
   # KTN-VAR-BIGSTRUCT (phase 4, warning) — contract-required value type.
   #
-  # The pkg/v1/process facade's exported entry point is, by ADR 0016 design,
+  # The pkg/v1/proc/process facade's exported entry point is, by ADR 0016 design,
   # `func Start(ctx, spec Spec)` where Spec is a TYPE ALIAS of the core port's
   # immutable coreproc.Spec (176 bytes). The public surface is deliberately an
   # alias of the port value type — pointers would (a) diverge the public API
@@ -1235,7 +1235,7 @@ rules:
       # core/cli.CommandValue is 88 bytes — Name + Summary + Description (16
       # each) + Flags + Run (8 each) + Commands (24) — and none of the six is
       # removable: they are the whole declaration. Value semantics are the
-      # contract, exactly as for pkg/v1/process.Spec below: a command tree is
+      # contract, exactly as for pkg/v1/proc/process.Spec below: a command tree is
       # written as a nested composite LITERAL at a call site, so
       # `cli.New(cfg, cli.Command{…})` is the spelling the domain is designed
       # around, and taking *Command would force every child in every
@@ -1256,8 +1256,8 @@ rules:
       - "internal/core/cli/**"
       - "**/pkg/v1/cli/**"
       - "pkg/v1/cli/**"
-      - "**/pkg/v1/process/**"
-      - "pkg/v1/process/**"
+      - "**/pkg/v1/proc/process/**"
+      - "pkg/v1/proc/process/**"
       # service/sql.Config is 72 bytes — eight over the threshold — and the
       # eight are not removable: *sql.DB (8) + Dialect (1, padded to 8) +
       # PoolConfig (32) + clock.Timed (16) + CheckTimeout (8). Every field is
@@ -1266,7 +1266,7 @@ rules:
       # field or boxing PoolConfig behind a pointer, which trades eight bytes
       # once per PORT for a nil check on every read.
       #
-      # Value semantics are the contract, exactly as for pkg/v1/process.Spec
+      # Value semantics are the contract, exactly as for pkg/v1/proc/process.Spec
       # above: a constructor must not be able to observe a later mutation of
       # the caller's struct, and taking *Config would let a caller change the
       # dialect or the pool ceiling after NewTransactor returned. The copy
@@ -1687,8 +1687,8 @@ rules:
   #
   #   • applyOptions          (proc/cgroup/option.go)  ← cgroup_linux.go
   #   • wrapCgroupUnavailable (proc/exec/wrap.go)      ← cgroup_placement_linux.go
-  #   • parsePayload          (proc/sdnotify/…)        ← listen_linux.go
-  #   • exitNoPerm            (proc/sdnotify/…)        ← listen_linux.go
+  #   • parsePayload          (proc/systemd/notify/…)  ← listen_linux.go
+  #   • exitNoPerm            (proc/systemd/notify/…)  ← listen_linux.go
   #
   # Without this block `make lint` cannot pass on macOS at all, on a pristine
   # tree, so the repo is only developable from Linux. Moving
@@ -1706,8 +1706,8 @@ rules:
       - "internal/service/proc/cgroup/option.go"
       - "**/internal/service/proc/exec/wrap.go"
       - "internal/service/proc/exec/wrap.go"
-      - "**/internal/service/proc/sdnotify/sdnotify.go"
-      - "internal/service/proc/sdnotify/sdnotify.go"
+      - "**/internal/service/proc/systemd/notify/sdnotify.go"
+      - "internal/service/proc/systemd/notify/sdnotify.go"
       # TEMPORARY — kodflow/ktn-linter#691: DEADCODE fires on methods of generic
       # receivers and on promoted methods (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
@@ -1717,8 +1717,8 @@ rules:
 
   KTN-CONST-UNUSED:
     exclude:
-      - "**/internal/service/proc/sdnotify/sdnotify.go"
-      - "internal/service/proc/sdnotify/sdnotify.go"
+      - "**/internal/service/proc/systemd/notify/sdnotify.go"
+      - "internal/service/proc/systemd/notify/sdnotify.go"
 
   # KTN-FUNC-BLANKPARAM (info) — same build-tag blind spot, other direction.
   #

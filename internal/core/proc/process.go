@@ -9,7 +9,7 @@ import (
 // Process is a handle to a spawned process. It exposes only lifetime control —
 // observe completion, deliver a signal to the leader or its whole group, and
 // stop it gracefully. Implementations live in internal/service/proc/*; the
-// pkg/v1/process facade returns this interface.
+// pkg/v1/proc/process facade returns this interface.
 type Process interface {
 	// PID reports the process identifier of the leader.
 	PID() int

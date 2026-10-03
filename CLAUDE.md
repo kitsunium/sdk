@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:40:00Z -->
+<!-- updated: 2026-10-03T04:55:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -114,8 +114,15 @@ internal/
                    queue  (file, SQL and memory brokers + Consume loop
                            waiting on the Waker sibling; the SQL broker
                            joins the context's transaction — ADR 0151)
-                   proc   (cgroup, childwait, exec, memlimit, reaper,
-                           rlimit, sdlisten, sdnotify, self, signal)
+                   proc   (the family — ADR 0155; a directory, no Go code:
+                           cgroup, childwait, exec, memlimit, reaper,
+                           rlimit, self, signal — process supervision,
+                           ADR 0016; systemd/{listen, notify} — socket
+                           activation and sd_notify; ipc — a private socket
+                           between processes of one machine: the directory
+                           gates, the path above it audited with pathchain
+                           (PATH_UNSAFE), SO_PEERCRED on Linux, a named pipe
+                           with its own DACL on Windows — ADR 0148)
                    i18n   (CLDR plural table + catalogue + negotiator + printer)
                    profiling (CPU/heap capture + a stdlib pprof decoder +
                            fold onto owners + goroutine dumps, grouped)
@@ -144,11 +151,6 @@ internal/
                    validation (constraints + combinators + struct-tag plan)
                    view   (html/template engine + trust scan + parse-once)
                    vfs    (os.Root-confined FS + memory FS + atomic publish)
-                   ipc    (a private socket between processes of one machine:
-                           the directory gates, the path above it audited
-                           with pathchain (PATH_UNSAFE), SO_PEERCRED on
-                           Linux, a named pipe with its own DACL on
-                           Windows — ADR 0148)
                    internal (otlp — the OTLP/HTTP + JSON transport metrics
                            and trace share; logfile — the hardened open both
                            file sinks share)
@@ -197,9 +199,13 @@ pkg/
     │                 the same store over SQL, OpenSQL — ADR 0139;
     │                 a document's versions, in its own write — ADR 0143)
     ├── lock/      (Locker/Lease/Deadliner + memory & file lockers — ADR 0052, ADR 0081, ADR 0082, ADR 0083)
-    ├── proc/      (its facades are siblings: cgroup, memlimit, process, reaper, rlimit,
-    │                 sdlisten, sdnotify, signal; process also reads the process itself
-    │                 — Self, Build — ADR 0100)
+    ├── proc/      (the capability preflight at the family's root — ADR 0016, ADR 0144;
+    │                 its facades are its children — a child never links its parent,
+    │                 ADR 0155: process/ — spawn, wait, stop, and the process itself,
+    │                 Self and Build — ADR 0100; signal/, reaper/, rlimit/, cgroup/;
+    │                 memlimit/ — the cap already bounding this process — ADR 0075;
+    │                 systemd/{notify, listen}/ — sd_notify and socket activation;
+    │                 ipc/ — a private socket, the peer the kernel names — ADR 0148)
     ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
     └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
     └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
@@ -214,7 +220,6 @@ pkg/
     └── sql/        (ports over database/sql, no driver, no ORM — ADR 0055;
                      Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140)
     └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
-    └── ipc/         (a private socket, the peer the kernel names — ADR 0148)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:

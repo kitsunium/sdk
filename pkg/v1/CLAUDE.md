@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:40:00Z -->
+<!-- updated: 2026-10-03T04:55:00Z -->
 # pkg/v1/
 
 ## Purpose
@@ -38,7 +38,6 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `validation/` | Value validation (ADR 0046): `Constraint`/`Violation`/`Report` aliases + `All`/`First`/`Field`/`Each`/`Check`/`Must`, the built-ins (`Required`/`AtLeast`/`AtMost`/`Between`/`Length`/`Count`/`OneOf`/`Matches`) and `Struct[T]` — the struct-tag front end whose plan is cached per type. A violation says WHERE in one path grammar (`JoinField`/`JoinIndex`, json-tag member names); every violation is collected by default; neither `Violation` nor `Report` is an `error` (`Report.Err()` converts and returns a genuine nil); a message never echoes the value. Feeds `config.Validator` without replacing it. stdlib-only | `pkg/v1/validation/README.md` |
 | `vfs/` | Filesystem (ADR 0056): `NewOS` → a tree-confined filesystem, `NewMem` → a double that needs no temporary directory. `FS`/`WritableFS`/`AtomicWriter`/`FullFS` aliases plus the ten sentinels. Reading is `io/fs` unchanged, so `fs.WalkDir`, `fs.Glob` and `fs.ReadFile` work with no adapter. `WriteAtomic` publishes via a temporary + `rename(2)` + two flushes: on failure the previous bytes are byte-for-byte intact and no temporary survives. A refusal carries BOTH identities — `errors.Is(err, vfs.ReadFailed)` and `errors.Is(err, fs.ErrNotExist)` both answer — so the package can be adopted one call at a time. A zero mode is refused, never defaulted. stdlib-only; `NewOS` refuses at construction off its native platforms | `pkg/v1/vfs/README.md` |
 | `security/redact/` | Display redaction (ADR 0101): `New(Config)` → a `Redactor` whose `Value` / `JSON` / `Text` / `Attrs` replace every secret it recognises — a NAME carrying one of its `Words`, a field DECLARED secret by its `Tag` (`redact:"secret"` by default, a framework's own by configuration) or its `Field` rule, a URL's credentials — within an EXACT byte bound (the writer counts every byte before writing it), scrubbing credentials before cutting a text, never mutating its input; `Document` (`JSON` + `Truncated`), `DefaultWords`, `Placeholder`/`Ellipsis`/`MinBytes`/`Unencodable`, `DocumentInvalid`/`ValueUnencodable`. A display filter, not an access control, and the package doc lists what it does NOT recognise. stdlib-only | `pkg/v1/security/redact/README.md` |
-| `ipc/` | A private socket (ADR 0148): `Listen(Config)` / `Dial(ctx, Config)` over a `0700` directory, `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the eight codes re-exported |
 | `statemachine/` | State machines over stored entities (ADR 0120): `Define` → a `Definition` (`Initial` / `On` / `After` / `At` / `When` / `OnEnter` / `OnTransition`, every mistake refused at once by `New`), `New(ctx, def, &Config{Store: …})` → a `Machine` you `Start` / `Fire` and tell about foreign writes with `Changed` / `Deleted`, whose `Run` fires timers, deadlines and guards — one heap entry per entity, so it sleeps until the next transition due or a write and finds it in O(log N). Your `Store` (frozen at five, absence an answer) is the source of truth and `Replace` never resurrects; a `Journal` (frozen at three) keeps each `Record` across restarts. One transition per entity at a time, nothing locked across a panic, an OnEnter hook firing its own machine refused (`Reentrant`), a failing entity backed off alone. `Store`/`Journal`/`Record`/`Step`/`Trigger` alias core; `Definition`/`Machine` alias the engine's `MachineSpec`/`StateMachine` | `pkg/v1/statemachine/README.md` |
 | `profiling/` | The process's own profiles (ADR 0121): `CaptureCPU` (one CPU profiler per process: `ProfilerBusy`, never queued; no partial profile on cancellation) and `CaptureHeap`, `Parse` (pprof decoded with the standard library, strict and bounded), `Fold` onto owners your `Attribute` names — per-owner costs, top functions, a pruned flame graph, sums exact in the profile's own unit — `Goroutines` / `ParseGoroutines` (a dump read into goroutines: state, minutes waited, labels, stacks; never failing) and `GroupGoroutines`, `CanonicalName`. A heap profile is sampled: ask where, not how much. stdlib-only | `pkg/v1/profiling/README.md` |
 | `docstore/` | Typed, keyed JSON documents (ADR 0110): `Open(Config, indexes...)` → a `Store[T]` with `Put` / `Insert` / `Replace` / `Update` / `Delete`, `Unique` and `Index` read by `Lookup` / `Find`, hooks after every durable write; persisted through a `vfs.FullFS` as one overlay entry per write folded into one `{key: document}` snapshot, so a write's cost does not grow with the store; and `OpenSQL(SQLConfig, indexes...)` → a `SQLStore[T]`, the same contract in two tables of a PostgreSQL, MySQL or SQLite database, every call taking a context and running on the transaction it carries, with `SQLMigration` for its tables and `Reindex` for its rows (ADR 0139); `Versions` keeps the last versions of each document in the same durable write, stamped by `PutStamped` and its siblings, read by `Versions` / `Version`, held by `Held`, rewritten by `RewriteVersions` (ADR 0143) | `pkg/v1/docstore/README.md` |
@@ -63,14 +62,15 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `net/sse/` | Server-Sent Events (ADR 0029, ADR 0043): `New(w, r, opts…)` → a `Stream` with keep-alive, `Retry` and a write timeout; `DrainSignal` | `pkg/v1/net/sse/README.md` |
 | `net/websocket/` | WebSocket, RFC 6455 in the stdlib (ADR 0047): `Upgrade` → a `Conn`, the origin checked by default (`AllowOrigins` / `AllowAnyOrigin` widen it), frame and message ceilings, ping; `DrainSignal` | `pkg/v1/net/websocket/README.md` |
 | `proc/` | Capability preflight for the process domain (ADR 0016, ADR 0018): `Supported` / `MissingCapabilities` / `MustSupport` over `Capability`, and the `UnsupportedPlatform` a primitive returns where its OS has no secure mechanism | `pkg/v1/proc/README.md` |
-| `process/` | Spawn a child under explicit credentials in its own process group and session (ADR 0016): `Start` / `MustStart(ctx, Spec)` → a `Process` to wait on, signal and stop with a SIGTERM→SIGKILL escalation; and the running program itself — `Build` / `ParseBuild`, `Self` (ADR 0100) | `pkg/v1/process/README.md` |
-| `cgroup/` | Control groups (ADR 0016): `Create` / `MustCreate` → a `Group` (`WithRoot`), `Available` | `pkg/v1/cgroup/README.md` |
-| `memlimit/` | `Apply` derives the runtime soft memory limit from the control-group allowance governing this process and installs it, returning a `Limit` that names the allowance read, the limit applied and the `Source` that decided it (ADR 0075) | `pkg/v1/memlimit/README.md` |
-| `reaper/` | PID 1 / subreaper zombie collection (ADR 0016, ADR 0093): `New` → a `Reaper` (`WithOnReap`), `IsPID1`, `SetChildSubreaper` | `pkg/v1/reaper/README.md` |
-| `rlimit/` | Resource limits (ADR 0016): `Apply(pid, limits)` and `PrepareSysProcAttr` over `Resource` → `Limit`, `LimitInfinity` | `pkg/v1/rlimit/README.md` |
-| `sdlisten/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/sdlisten/README.md` |
-| `sdnotify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/sdnotify/README.md` |
-| `signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/signal/README.md` |
+| `proc/process/` | Spawn a child under explicit credentials in its own process group and session (ADR 0016): `Start` / `MustStart(ctx, Spec)` → a `Process` to wait on, signal and stop with a SIGTERM→SIGKILL escalation; and the running program itself — `Build` / `ParseBuild`, `Self` (ADR 0100) | `pkg/v1/proc/process/README.md` |
+| `proc/cgroup/` | Control groups (ADR 0016): `Create` / `MustCreate` → a `Group` (`WithRoot`), `Available` | `pkg/v1/proc/cgroup/README.md` |
+| `proc/memlimit/` | `Apply` derives the runtime soft memory limit from the control-group allowance governing this process and installs it, returning a `Limit` that names the allowance read, the limit applied and the `Source` that decided it (ADR 0075) | `pkg/v1/proc/memlimit/README.md` |
+| `proc/reaper/` | PID 1 / subreaper zombie collection (ADR 0016, ADR 0093): `New` → a `Reaper` (`WithOnReap`), `IsPID1`, `SetChildSubreaper` | `pkg/v1/proc/reaper/README.md` |
+| `proc/rlimit/` | Resource limits (ADR 0016): `Apply(pid, limits)` and `PrepareSysProcAttr` over `Resource` → `Limit`, `LimitInfinity` | `pkg/v1/proc/rlimit/README.md` |
+| `proc/systemd/listen/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/proc/systemd/listen/README.md` |
+| `proc/systemd/notify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/proc/systemd/notify/README.md` |
+| `proc/signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/proc/signal/README.md` |
+| `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` / `Dial(ctx, Config)` over a `0700` directory, `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the eight codes re-exported |
 
 The distribution packages — `git`, `selfupdate`, `entitlement` and `gate` — are
 the framework's since ADR 0158: `github.com/kitsunium/sdk/framework/<name>`,
@@ -86,6 +86,16 @@ The network facades — `server`, `client`, `tlsid`, `sse`, `websocket` and
 own (ADR 0155): `github.com/kitsunium/sdk/pkg/v1/net/<name>`. The first three
 moved from the root of `pkg/v1` and the last three from under the `server`
 facade, with no alias left behind, under the same v0 licence.
+
+The process facades — `process`, `signal`, `reaper`, `rlimit`, `cgroup`,
+`memlimit`, `ipc`, and the two systemd protocols `systemd/notify` and
+`systemd/listen` — are children of `proc/`, the capability preflight that stays
+at the family's root (ADR 0155): `github.com/kitsunium/sdk/pkg/v1/proc/<name>`.
+`systemd/` itself is a directory with no Go code. They moved from the root of
+`pkg/v1` with no alias left behind, under the same v0 licence, and `sdnotify`
+and `sdlisten` were renamed for the path they now sit at: package `notify` and
+package `listen`. A child never links its parent, so importing one does not link
+the preflight.
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -182,7 +192,6 @@ GOWORK=off go test -race -cover ./v1/...
 - `sql/` — see `pkg/v1/sql/CLAUDE.md`
 - `docstore/` — see `pkg/v1/docstore/CLAUDE.md`
 - `security/redact/` — see `pkg/v1/security/redact/CLAUDE.md`
-- `ipc/` — see `pkg/v1/ipc/CLAUDE.md`
 - `statemachine/` — see `pkg/v1/statemachine/CLAUDE.md`
 - `profiling/` — see `pkg/v1/profiling/CLAUDE.md`
 - `codec/strictjson/` — see `pkg/v1/codec/strictjson/CLAUDE.md`
@@ -206,15 +215,17 @@ GOWORK=off go test -race -cover ./v1/...
 - `net/server/` — see `pkg/v1/net/server/CLAUDE.md`
 - `net/sse/` — see `pkg/v1/net/sse/CLAUDE.md`
 - `net/websocket/` — see `pkg/v1/net/websocket/CLAUDE.md`
-- `proc/` — see `pkg/v1/proc/CLAUDE.md`
-- `process/` — see `pkg/v1/process/CLAUDE.md`
-- `cgroup/` — see `pkg/v1/cgroup/CLAUDE.md`
-- `memlimit/` — see `pkg/v1/memlimit/CLAUDE.md`
-- `reaper/` — see `pkg/v1/reaper/CLAUDE.md`
-- `rlimit/` — see `pkg/v1/rlimit/CLAUDE.md`
-- `sdlisten/` — see `pkg/v1/sdlisten/CLAUDE.md`
-- `sdnotify/` — see `pkg/v1/sdnotify/CLAUDE.md`
-- `signal/` — see `pkg/v1/signal/CLAUDE.md`
+- `proc/` — see `pkg/v1/proc/CLAUDE.md` (the capability preflight at the family's root, and its children — `process`, `signal`, `reaper`, `rlimit`, `cgroup`, `memlimit`, `systemd/notify`, `systemd/listen`, `ipc` — with the rule that put them together)
+- `proc/process/` — see `pkg/v1/proc/process/CLAUDE.md`
+- `proc/cgroup/` — see `pkg/v1/proc/cgroup/CLAUDE.md`
+- `proc/memlimit/` — see `pkg/v1/proc/memlimit/CLAUDE.md`
+- `proc/reaper/` — see `pkg/v1/proc/reaper/CLAUDE.md`
+- `proc/rlimit/` — see `pkg/v1/proc/rlimit/CLAUDE.md`
+- `proc/systemd/` — see `pkg/v1/proc/systemd/CLAUDE.md` (the two systemd protocols, `notify` and `listen`; a directory with no Go code, so there is no `pkg/v1/proc/systemd` to import)
+- `proc/systemd/listen/` — see `pkg/v1/proc/systemd/listen/CLAUDE.md`
+- `proc/systemd/notify/` — see `pkg/v1/proc/systemd/notify/CLAUDE.md`
+- `proc/signal/` — see `pkg/v1/proc/signal/CLAUDE.md`
+- `proc/ipc/` — see `pkg/v1/proc/ipc/CLAUDE.md`
 - `health/` — see `pkg/v1/health/CLAUDE.md`
 - `lock/` — see `pkg/v1/lock/CLAUDE.md`
 

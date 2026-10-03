@@ -1,7 +1,7 @@
 # rlimit (internal/service/proc/rlimit)
 
 Per-process resource ceilings via `setrlimit(2)` / `prlimit64(2)`. Internal
-service implementation behind the public `pkg/v1/rlimit` facade — consumers
+service implementation behind the public `pkg/v1/proc/rlimit` facade — consumers
 import the facade, not this package.
 
 ## API

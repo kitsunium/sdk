@@ -4,13 +4,15 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 38 at the top level, plus twenty-six nested
+`pkg/v1` ships **64 packages**: 29 at the top level, plus thirty-five nested
 ones (`logger/writer`, `logger/slogbridge`, `codec/strictjson`,
 `codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`,
 `codec/bson`, the six scheme facades under `crypto/` — `agree`, `hash`, `kdf`,
 `mac`, `password`, `sign` — the five under `security/` — `authz`, `redact`,
-`secret`, `session`, `token` — and the six under `net/` — `server`, `client`,
-`tlsid`, `sse`, `websocket`, `static`), and links the standard library and
+`secret`, `session`, `token` — the six under `net/` — `server`, `client`,
+`tlsid`, `sse`, `websocket`, `static` — and the nine under `proc/` —
+`process`, `signal`, `reaper`, `rlimit`, `cgroup`, `memlimit`, `ipc`,
+`systemd/notify`, `systemd/listen`), and links the standard library and
 nothing else (ADR 0156). They are grouped below by the job they do, and each
 links to its own generated `README.md`. The distribution mechanisms that close
 the list are the framework's packages, imported from
@@ -76,8 +78,9 @@ the list are the framework's packages, imported from
 
 | Package | What it does |
 |---|---|
-| [`proc`](./pkg/v1/proc) + [`process`](./pkg/v1/process), [`signal`](./pkg/v1/signal), [`reaper`](./pkg/v1/reaper), [`rlimit`](./pkg/v1/rlimit), [`cgroup`](./pkg/v1/cgroup), [`sdnotify`](./pkg/v1/sdnotify), [`sdlisten`](./pkg/v1/sdlisten) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups, systemd. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism. `process` also reads the process itself: its runtime state and the build it came from, a module's release, commit and local directory kept apart. |
-| [`memlimit`](./pkg/v1/memlimit) | Reads the cgroup cap that already bounds **this** process — which the Go runtime does not — so a service in a 512 MiB container gets a soft limit instead of a SIGKILL. |
+| [`proc`](./pkg/v1/proc) + [`process`](./pkg/v1/proc/process), [`signal`](./pkg/v1/proc/signal), [`reaper`](./pkg/v1/proc/reaper), [`rlimit`](./pkg/v1/proc/rlimit), [`cgroup`](./pkg/v1/proc/cgroup), [`systemd/notify`](./pkg/v1/proc/systemd/notify), [`systemd/listen`](./pkg/v1/proc/systemd/listen) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups, systemd readiness and socket activation. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism. `process` also reads the process itself: its runtime state and the build it came from, a module's release, commit and local directory kept apart. |
+| [`memlimit`](./pkg/v1/proc/memlimit) | Reads the cgroup cap that already bounds **this** process — which the Go runtime does not — so a service in a 512 MiB container gets a soft limit instead of a SIGKILL. |
+| [`ipc`](./pkg/v1/proc/ipc) | A private socket between processes of one machine: its directory gates it and the path above that directory is refused where another account could steer it; the kernel names the peer where it can (`SO_PEERCRED` on Linux; on Windows a named pipe whose own DACL names the account, each end's account read from the other's token). |
 | [`git`](./framework/git) (framework) | What a branch changed, as a value that can say it does not know: "nothing changed" and "I could not tell" are opposite instructions, so the resolver degrades rather than answering with an empty set. And what a working tree is at — its commit, that commit's time, whether a tracked file differs — through the same hardened invocations. |
 | [`selfupdate`](./framework/selfupdate) (framework) | Signature **then** digest **then** disk. Comparing an archive against a checksum file fetched beside it verifies nothing; a build with no vendor key installs nothing. |
 | [`entitlement`](./framework/entitlement) (framework) | Vendor-signed roster → grant, with an offline cache, an anti-rollback ratchet and a CI seat. Bring your own `Identity`: three methods, and none of them says "ssh". |

@@ -108,7 +108,7 @@ Children spawned OUTSIDE the SDK — `os/exec`, `syscall.ForkExec`, a C library 
 are never claimed. A running reaper collects them too, and their own `Wait` then
 fails with ECHILD (`os/exec` reports `waitid: no child processes`). The SDK
 cannot route another package's wait: a program that runs the reaper must spawn
-what it waits for through `pkg/v1/process`.
+what it waits for through `pkg/v1/proc/process`.
 
 Off pidfd (everything but Linux ≥ 5.4) a window remains between reading an empty
 claim and the handle's own `wait4(pid)`: hitting it needs a sweep to take the

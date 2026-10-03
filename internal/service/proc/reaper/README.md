@@ -1,7 +1,7 @@
 # reaper (internal/service/proc)
 
 OS implementation of the `core/proc.Reaper` port — a PID1 / subreaper zombie
-collector. Consumers use the `pkg/v1/reaper` facade; this package is internal.
+collector. Consumers use the `pkg/v1/proc/reaper` facade; this package is internal.
 
 ## What it does
 
@@ -11,7 +11,7 @@ it, or they pile up as zombies and exhaust the pid space. This package wraps the
 kernel mechanics:
 
 - a SIGCHLD handler driving a non-blocking `Wait4(-1, …, WNOHANG, …)` drain loop,
-  through `childwait.ReapAny` so that a child spawned by `pkg/v1/process` has
+  through `childwait.ReapAny` so that a child spawned by `pkg/v1/proc/process` has
   its exit status handed to its own `Wait` rather than lost (ADR 0093);
 - `prctl(PR_SET_CHILD_SUBREAPER, 1)` to opt a non-init supervisor into receiving
   orphaned grandchildren (Linux only);

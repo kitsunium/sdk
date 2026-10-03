@@ -26,7 +26,7 @@ machine is the proc family's (`ipc`, ADR 0148).
 
 | Package | What it is | Implements | Code range | Facade |
 |---|---|---|---|---|
-| `server/` | one listener engine for TCP, Unix, TLS and mutual TLS, handler groups behind shared middlewares, a bounded drain announced to the handler (ADR 0029, ADR 0043), a failing accept that waits on `kernel/backoff` (ADR 0130); adopts a passed socket through `internal/service/proc/sdlisten` | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/server` |
+| `server/` | one listener engine for TCP, Unix, TLS and mutual TLS, handler groups behind shared middlewares, a bounded drain announced to the handler (ADR 0029, ADR 0043), a failing accept that waits on `kernel/backoff` (ADR 0130); adopts a passed socket through `internal/service/proc/systemd/listen` | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/server` |
 | `client/` | the policy-enforcing HTTP transport: the guarded `RoundTripper`, per-phase timeouts, the response size cap, the concrete policies and the `Client` (ADR 0029) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/client` |
 | `tlsid/` | reads PEM material from disk and nothing else; every validation rule is `core/net.NewIdentityValue`'s (ADR 0029) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/tlsid` |
 | `sse/` | an HTTP response held open and written one `text/event-stream` frame at a time, on `net/http`'s own interfaces (ADR 0029, ADR 0043) | `core/net` | none (core `0.2.11.*`) | `pkg/v1/net/sse` |
@@ -35,7 +35,7 @@ machine is the proc family's (`ipc`, ADR 0148).
 
 No member imports another: each composes `internal/core/net` and the kernel,
 and `server` alone reaches another family — `proc`, for socket activation
-(`internal/core/proc`, `internal/service/proc/sdlisten`).
+(`internal/core/proc`, `internal/service/proc/systemd/listen`).
 `//:audit_sources` lists `client`, `server`, `sse`, `tlsid` and `websocket`
 under their labels here, and `codeRangeOwners` gives `0x00_02_0B_00` to
 `internal/core/net` alone.

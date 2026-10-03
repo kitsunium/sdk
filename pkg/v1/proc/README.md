@@ -109,9 +109,9 @@ const (
     CapReaper
     // CapSignalRelay is forwarding signals to a pid / process group (signal.Relay).
     CapSignalRelay
-    // CapSdNotify is the service-manager readiness/watchdog protocol (sdnotify).
+    // CapSdNotify is the service-manager readiness/watchdog protocol (systemd/notify).
     CapSdNotify
-    // CapSocketActivation is inheriting a pre-opened listening socket (sdlisten).
+    // CapSocketActivation is inheriting a pre-opened listening socket (systemd/listen).
     CapSocketActivation
 )
 ```

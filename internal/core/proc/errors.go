@@ -148,28 +148,28 @@ var (
 	// $NOTIFY_SOCKET — distinct from the no-op when the variable is unset.
 	NotifyFailed = errs.Define(CodeNotifyFailed, "NOTIFY_FAILED",
 		"Could not send the sd_notify datagram",
-		"service/proc/sdnotify: writing to $NOTIFY_SOCKET failed",
+		"service/proc/systemd/notify: writing to $NOTIFY_SOCKET failed",
 		errs.WithExitCode(exitOSErr))
 
 	// ListenFailed is returned when the supervisor-side sd_notify datagram socket
 	// cannot be created or bound.
 	ListenFailed = errs.Define(CodeListenFailed, "LISTEN_FAILED",
 		"Could not create the sd_notify listener socket",
-		"service/proc/sdnotify.Listen: creating or binding the AF_UNIX datagram socket failed",
+		"service/proc/systemd/notify.Listen: creating or binding the AF_UNIX datagram socket failed",
 		errs.WithExitCode(exitOSErr))
 
 	// InvalidNotification is returned when a received sd_notify datagram cannot
 	// be parsed into NAME=value fields.
 	InvalidNotification = errs.Define(CodeInvalidNotification, "INVALID_NOTIFICATION",
 		"Received sd_notify datagram is malformed",
-		"service/proc/sdnotify.Recv: datagram did not parse into NAME=value fields",
+		"service/proc/systemd/notify.Recv: datagram did not parse into NAME=value fields",
 		errs.WithExitCode(exitDataErr))
 
 	// CredentialMismatch is returned when a received datagram's kernel-verified
 	// sender credentials do not match the expected supervised process.
 	CredentialMismatch = errs.Define(CodeCredentialMismatch, "CREDENTIAL_MISMATCH",
 		"Datagram sender credentials did not match",
-		"service/proc/sdnotify.Recv: SO_PASSCRED sender pid is not the expected supervised process",
+		"service/proc/systemd/notify.Recv: SO_PASSCRED sender pid is not the expected supervised process",
 		errs.WithExitCode(exitNoPerm))
 
 	// StdioCaptureFailed is returned from Wait when a StdioCapture copier could

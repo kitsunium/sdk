@@ -1431,7 +1431,7 @@ Studio switches the Studio on or off in dev. It is always off in production.
 func Telemetry(path string, gids ...int) AppConfigurer
 ```
 
-Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
+Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/proc/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
 
 <a name="AttrsProvider"></a>
 ## type [AttrsProvider](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/access.go#L33-L35>)
@@ -2155,7 +2155,7 @@ type Keeper interface {
 <a name="ListenHandler"></a>
 ## type [ListenHandler](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/listener.go#L25>)
 
-ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/ipc\).
+ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/proc/ipc\).
 
 ```go
 type ListenHandler func(ctx context.Context, conn *ipc.Conn) error

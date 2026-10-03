@@ -18,7 +18,7 @@ and stops waiting. It never kills the goroutine and never closes anything the
 component owns.
 
 `Run` adds the opt-in wiring: signals through `internal/service/proc/signal`,
-readiness through `internal/service/proc/sdnotify`. Its zero config wires
+readiness through `internal/service/proc/systemd/notify`. Its zero config wires
 neither.
 
 Every wait goes through `kernel/clock.Timed`; a named AST test fails the build

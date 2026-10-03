@@ -300,7 +300,7 @@ field framing. At 4 KiB: 296.3 + ≈ 120 = 416 against 430.8, a 3 % gap.
 `Validate` moved for a second, smaller reason. It calls `validateSSELine` for
 `id` and for `event` on EVERY frame, present or not, and `strings.ContainsAny`
 is `IndexAny` again. The substitution is the same one
-`internal/service/proc/sdnotify` already documents ("two byte searches, not
+`internal/service/proc/systemd/notify` already documents ("two byte searches, not
 ContainsAny … 24 % of this function"). One extra guard earned its place there:
 on the EMPTY string `ContainsAny` returns without looking at anything while two
 `IndexByte` calls still happen, so the naive substitution made a data-only
