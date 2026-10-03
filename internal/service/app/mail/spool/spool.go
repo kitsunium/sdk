@@ -68,6 +68,7 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
@@ -229,7 +230,7 @@ func (s *Spool) Send(ctx context.Context, msg coremail.MessageValue) (id string,
 	//: a closed spool takes nothing, and mints nothing for it.
 	if s.isClosed() {
 		//: SpoolClosed.
-		return "", kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
+		return "", kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})
 	}
 	id, mintErr := s.mint()
 	//: no identifier, no mail.
@@ -277,13 +278,13 @@ func (s *Spool) SendWithID(ctx context.Context, id string, msg coremail.MessageV
 	//: a closed spool takes nothing.
 	if s.isClosed() {
 		//: SpoolClosed.
-		return kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
+		return kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})
 	}
 	//: the rule every identifier keeps, whoever minted it.
 	if problem, ok := checkID(id); !ok {
 		//: InvalidMailID, naming the rule and the length — never the
 		//: identifier, which may carry the very bytes it was refused for.
-		return kerrs.Wrap(InvalidMailID, kerrs.WrapParams{},
+		return kerrs.Wrap(corespool.InvalidMailID, kerrs.WrapParams{},
 			kerrs.String("problem", problem), kerrs.Int("bytes", len(id)))
 	}
 	//: queued under it, or refused with nothing queued.
@@ -323,7 +324,7 @@ func (s *Spool) queue(ctx context.Context, id string, msg coremail.MessageValue)
 	//: a Date encoding/json refuses.
 	if encodeErr != nil {
 		//: MessageUnencodable.
-		return kerrs.Wrap(MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
+		return kerrs.Wrap(corespool.MessageUnencodable, kerrs.WrapParams{}, kerrs.String("mail", record.ID))
 	}
 	//: the consumer may deliver the mail before Publish returns here: its
 	//: delivery waits until the observer has heard it was queued.
@@ -356,7 +357,7 @@ func (s *Spool) publish(ctx context.Context, payload []byte) error {
 	//: Close won the race.
 	if s.closed {
 		//: SpoolClosed.
-		return kerrs.Wrap(SpoolClosed, kerrs.WrapParams{})
+		return kerrs.Wrap(corespool.SpoolClosed, kerrs.WrapParams{})
 	}
 	_, publishErr := s.broker.Publish(ctx, payload)
 	//: nil once the mail is in the queue; the queue's verdict otherwise.

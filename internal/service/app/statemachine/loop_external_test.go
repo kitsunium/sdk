@@ -161,7 +161,7 @@ func TestAFailingTransitionIsRetriedAfterItsBackoffAndDelaysNobodyElse(t *testin
 	if got := store.read(t, "bad"); got.State != Expired {
 		t.Fatalf("after its backoff the failing entity is %s", got.State)
 	}
-	if reported := r.all(); len(reported) != 2 || !errs.HasCode(reported[0], svcstm.CodeHookFailed) {
+	if reported := r.all(); len(reported) != 2 || !errs.HasCode(reported[0], corestm.CodeHookFailed) {
 		t.Errorf("reported %v", reported)
 	}
 }
@@ -235,7 +235,7 @@ func TestAJournalFailureIsLoudWhereItMatters(t *testing.T) {
 	t.Parallel()
 	journal := newMemJournal()
 	journal.failLoad = errBoom
-	if _, err := svcstm.NewStateMachine(t.Context(), lifecycle(), &svcstm.Config[Item, State]{Store: newMemStore(), Journal: journal}); !errs.HasCode(err, svcstm.CodeJournalFailed) {
+	if _, err := svcstm.NewStateMachine(t.Context(), lifecycle(), &svcstm.Config[Item, State]{Store: newMemStore(), Journal: journal}); !errs.HasCode(err, corestm.CodeJournalFailed) {
 		t.Fatalf("NewStateMachine over an unreadable journal = %v", err)
 	}
 	journal.failLoad, journal.failSave = nil, errBoom
@@ -245,7 +245,7 @@ func TestAJournalFailureIsLoudWhereItMatters(t *testing.T) {
 	if _, err := m.Start(t.Context(), Item{ID: "a"}); err != nil {
 		t.Fatalf("Start() = %v; a journal failure must not fail the transition", err)
 	}
-	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], svcstm.CodeJournalFailed) || !errors.Is(reported[0], errBoom) {
+	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], corestm.CodeJournalFailed) || !errors.Is(reported[0], errBoom) {
 		t.Errorf("reported %v", reported)
 	}
 }
@@ -261,10 +261,10 @@ func TestRunAndStepAreOneAtATime(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- m.Run(ctx) }()
 	awaitRun(t, clk, events, "the first run", func(e svcstm.LoopEvent) bool { return e.Wake == svcstm.WakeStart })
-	if _, err := m.Step(t.Context()); !errs.HasCode(err, svcstm.CodeLoopRunning) {
+	if _, err := m.Step(t.Context()); !errs.HasCode(err, corestm.CodeLoopRunning) {
 		t.Errorf("Step during Run = %v", err)
 	}
-	if err := m.Run(t.Context()); !errs.HasCode(err, svcstm.CodeLoopRunning) {
+	if err := m.Run(t.Context()); !errs.HasCode(err, corestm.CodeLoopRunning) {
 		t.Errorf("a second Run = %v", err)
 	}
 	cancel()
@@ -346,7 +346,7 @@ func TestAPanickingGuardIsRetriedAndReported(t *testing.T) {
 	if _, err := m.Start(t.Context(), Item{ID: "a", Stock: 1}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Step(t.Context()); !errs.HasCode(err, svcstm.CodeFunctionPanicked) {
+	if _, err := m.Step(t.Context()); !errs.HasCode(err, corestm.CodeFunctionPanicked) {
 		t.Fatalf("Step() = %v; want FUNCTION_PANICKED", err)
 	}
 	clk.Advance(time.Second)

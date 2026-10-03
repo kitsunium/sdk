@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	corelc "github.com/kitsunium/sdk/internal/core/app/lifecycle"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -166,7 +167,7 @@ func TestTheSupervisorRestartsAfterEveryEarlyEnd(t *testing.T) {
 	if !errors.Is(ended[0].Err, errFlap) {
 		t.Errorf("run 1 ended with %v, want the function's own error", ended[0].Err)
 	}
-	if !kerrs.HasCode(ended[1].Err, svclc.CodeRunPanicked) {
+	if !kerrs.HasCode(ended[1].Err, corelc.CodeRunPanicked) {
 		t.Errorf("run 2 ended with %v, want RunPanicked", ended[1].Err)
 	}
 	if public := kerrs.PublicOf(ended[1].Err); public != "The supervised function panicked and was recovered" {
@@ -288,10 +289,10 @@ func TestStopThatOverrunsAbandonsNothing(t *testing.T) {
 	<-entered
 	budget, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := sup.Stop(budget); !kerrs.HasCode(err, svclc.CodeStopTimeout) {
+	if err := sup.Stop(budget); !kerrs.HasCode(err, corelc.CodeStopTimeout) {
 		t.Fatalf("Stop() past its budget = %v, want StopTimeout", err)
 	}
-	if err := sup.Start(context.Background()); !kerrs.HasCode(err, svclc.CodeSupervisorRunning) {
+	if err := sup.Start(context.Background()); !kerrs.HasCode(err, corelc.CodeSupervisorRunning) {
 		t.Fatalf("Start() while the abandoned run is still going = %v, want SupervisorRunning", err)
 	}
 	close(release)
@@ -325,7 +326,7 @@ func TestStartsStopsAndStartsAgain(t *testing.T) {
 		t.Fatalf("the run saw %v", got)
 	}
 	endStart() // the START's context ends; the supervision must not
-	if err := sup.Start(context.Background()); !kerrs.HasCode(err, svclc.CodeSupervisorRunning) {
+	if err := sup.Start(context.Background()); !kerrs.HasCode(err, corelc.CodeSupervisorRunning) {
 		t.Fatalf("a second Start = %v, want SupervisorRunning", err)
 	}
 	stop(t, sup)
@@ -415,7 +416,7 @@ func TestNewSupervisorRefuses(t *testing.T) {
 		{name: "", run: func(context.Context) error { return nil }},
 		{name: "nothing", run: nil},
 	} {
-		if sup, err := svclc.NewSupervisor(c.name, c.run, svclc.SupervisorConfig{}); !kerrs.HasCode(err, svclc.CodeSupervisorMisconfigured) || sup != nil {
+		if sup, err := svclc.NewSupervisor(c.name, c.run, svclc.SupervisorConfig{}); !kerrs.HasCode(err, corelc.CodeSupervisorMisconfigured) || sup != nil {
 			t.Errorf("NewSupervisor(%q) = %v, %v", c.name, sup, err)
 		}
 	}

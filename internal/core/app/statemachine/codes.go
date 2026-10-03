@@ -1,9 +1,22 @@
-// Package statemachine — range 0.3.88.* (ADR 0120 service/app/statemachine block).
+// Package statemachine — ranges 0.2.56.* (ADR 0120 core/app/statemachine
+// block) and 0.3.88.* (ADR 0120 service/app/statemachine block, declared here
+// since ADR 0160).
 package statemachine
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
+// range: 0.2.56.0 - 0.2.56.255
+
+// CodeTriggerUnknown identifies a name ParseTrigger does not know.
+const CodeTriggerUnknown errs.Code = 0x00_02_38_01 // 0.2.56.1
+
 // range: 0.3.88.0 - 0.3.88.255
+//
+// The engine's outcomes. The range was allocated to
+// internal/service/app/statemachine, which raises these codes, and it is
+// declared here with the contract's own so that every code of the domain is
+// in one place (ADR 0160). A code keeps the value its allocation gave it
+// whichever layer declares it, so the layer byte still reads 3.
 
 // CodeTransitionRefused identifies an event no declared transition takes from
 // the entity's current state.

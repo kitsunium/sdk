@@ -140,7 +140,7 @@ type verdict[E any, S comparable] struct {
 // evaluate asks every automatic transition leaving state whether it is due
 // for e at now. The FIRST declared transition that is due is the one to fire;
 // otherwise the verdict holds the earliest instant one falls due. A guard or
-// an instant function that panics is recovered as [FunctionPanicked].
+// an instant function that panics is recovered as [corestm.FunctionPanicked].
 func (b *blueprint[E, S]) evaluate(e E, state S, entered, now time.Time) (due verdict[E, S], err error) {
 	asking := ""
 	defer func() {
@@ -152,7 +152,7 @@ func (b *blueprint[E, S]) evaluate(e E, state S, entered, now time.Time) (due ve
 		}
 		due = verdict[E, S]{}
 		//: the value travels as a field, never as the wrap origin.
-		err = errs.Wrap(FunctionPanicked, errs.WrapParams{}, errs.String("event", asking),
+		err = errs.Wrap(corestm.FunctionPanicked, errs.WrapParams{}, errs.String("event", asking),
 			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
 	}()
 	//: declaration order: the first declared among those due fires.

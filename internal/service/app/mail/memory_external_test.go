@@ -152,7 +152,7 @@ func TestMemoryTransportHonoursACancelledContext(t *testing.T) {
 	transport := svcmail.NewMemory()
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
-	if err := transport.Send(ctx, simpleMessage()); !errs.HasCode(err, svcmail.CodeDialFailed) {
+	if err := transport.Send(ctx, simpleMessage()); !errs.HasCode(err, coremail.CodeDialFailed) {
 		t.Fatalf("Send(cancelled) = %v, want CodeDialFailed", err)
 	}
 }

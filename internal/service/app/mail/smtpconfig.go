@@ -5,6 +5,7 @@ import (
 	"cmp"
 	"time"
 
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -44,7 +45,7 @@ const (
 	TLSUnset TLSMode = iota
 	// TLSStartTLS connects in the clear, sends EHLO, and REQUIRES the server
 	// to advertise STARTTLS (RFC 3207). A server that does not is refused with
-	// [TLSRequired] — the session is never continued unencrypted. This is the
+	// [coremail.TLSRequired] — the session is never continued unencrypted. This is the
 	// submission port 587 shape.
 	TLSStartTLS
 	// TLSImplicit negotiates TLS before the SMTP greeting, which RFC 8314 §3.3
@@ -143,12 +144,12 @@ func (c SMTPConfig) validateEndpoint() error {
 	//: a transport with no server is a transport that cannot be wired later.
 	if c.Host == "" {
 		//: InvalidConfig, at construction.
-		return errs.Wrap(InvalidConfig, errs.WrapParams{}, errs.String("problem", "empty host"))
+		return errs.Wrap(coremail.InvalidConfig, errs.WrapParams{}, errs.String("problem", "empty host"))
 	}
 	//: a port outside the protocol's range is a typo, not a policy.
 	if c.Port <= 0 || c.Port > maxPort {
 		//: the port is the caller's own literal and is safe to report.
-		return errs.Wrap(InvalidConfig, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
 			errs.String("problem", "port out of range"), errs.Int("port", c.Port))
 	}
 	//: dialable.
@@ -161,26 +162,26 @@ func (c SMTPConfig) validateSecurity() error {
 	//: the zero TLS mode — the refusal this type exists for.
 	if c.TLS == TLSUnset {
 		//: refused rather than guessed (ADR 0031).
-		return errs.Wrap(InvalidConfig, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
 			errs.String("problem", "TLS mode is unset; choose TLSStartTLS, TLSImplicit or TLSDisabled explicitly"))
 	}
 	//: an invented enum value is not a mode this package implements.
 	if c.TLS > TLSDisabled {
 		//: refused; the numeric value is diagnostic and carries no secret.
-		return errs.Wrap(InvalidConfig, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
 			errs.String("problem", "unknown TLS mode"), errs.Int("tls_mode", int(c.TLS)))
 	}
 	//: credentials over a session that is unencrypted BY CONFIGURATION are
 	//: refused here, where the fix is one line, rather than at send time.
 	if c.Username != "" && c.TLS == TLSDisabled {
 		//: AuthInsecure, and the password is not in the error.
-		return errs.Wrap(AuthInsecure, errs.WrapParams{},
+		return errs.Wrap(coremail.AuthInsecure, errs.WrapParams{},
 			errs.String("problem", "Username is set and TLS is disabled"))
 	}
 	//: a password with no identity to present it as cannot be sent.
 	if c.Username == "" && c.Password != "" {
 		//: InvalidConfig; the password itself never appears.
-		return errs.Wrap(InvalidConfig, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidConfig, errs.WrapParams{},
 			errs.String("problem", "Password is set without a Username"))
 	}
 	//: honourable as written.

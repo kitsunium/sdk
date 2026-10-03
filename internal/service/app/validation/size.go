@@ -47,7 +47,7 @@ func Length(minRunes, maxRunes int) (constraint corevalidation.Constraint[string
 			return nil
 		}
 		//: outside the interval.
-		return one(path, ruleLength, message, CodeLengthOutOfRange)
+		return one(path, ruleLength, message, corevalidation.CodeLengthOutOfRange)
 	}, nil
 }
 
@@ -73,7 +73,7 @@ func Count[E any](minLen, maxLen int) (constraint corevalidation.Constraint[[]E]
 			return nil
 		}
 		//: outside the interval.
-		return one(path, ruleCount, message, CodeLengthOutOfRange)
+		return one(path, ruleCount, message, corevalidation.CodeLengthOutOfRange)
 	}, nil
 }
 

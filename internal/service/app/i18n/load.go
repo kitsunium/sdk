@@ -25,7 +25,7 @@ const expectedCatalogueKeys int = 64
 // of the other formats internal/service/data/codec registers, and this package
 // contains no parser. The codec must be registered: blank-import pkg/v1/data/codec,
 // exactly as internal/service/app/config.FileSource requires. An unregistered
-// format is [CatalogLoadFailed] rather than a panic or a silent empty
+// format is [corei18n.CatalogLoadFailed] rather than a panic or a silent empty
 // catalogue.
 //
 // # It invents no filesystem either
@@ -47,7 +47,7 @@ const expectedCatalogueKeys int = 64
 // files nobody meant as catalogues.
 //
 // Two files that canonicalise to one tag ("EN.json" and "en.json") are
-// [CatalogInvalid]: one would win, the choice would depend on directory order,
+// [corei18n.CatalogInvalid]: one would win, the choice would depend on directory order,
 // and half the strings would vanish.
 func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback corei18n.TagValue) (store *Store, err error) {
 	//: resolve the codec before touching the filesystem, so an unregistered
@@ -57,7 +57,7 @@ func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback corei18n.TagVa
 	//: an unregistered format cannot decode anything.
 	if !ok {
 		//: name the format; the fix is a blank import.
-		return nil, errs.Wrap(CatalogLoadFailed, errs.WrapParams{},
+		return nil, errs.Wrap(corei18n.CatalogLoadFailed, errs.WrapParams{},
 			errs.String("format", string(format)), errs.String("detail", "no codec registered for this format — blank-import pkg/v1/data/codec"))
 	}
 	//: list the directory.
@@ -102,7 +102,7 @@ func readCatalogues(fsys fs.FS, dir string, entries []fs.DirEntry, decoder codec
 		//: two files for one language would silently drop half the strings.
 		if _, duplicate := catalogues[tag]; duplicate {
 			//: refuse rather than let directory order decide.
-			return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{},
+			return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
 				errs.String("tag", tag.String()), errs.String("file", entry.Name()), errs.String("detail", "two files resolve to the same language tag"))
 		}
 		//: read and decode it.
@@ -206,7 +206,7 @@ func entryFrom(file, key string, value any) (entry EntryValue, err error) {
 		return PluralForms(forms), nil
 	}
 	//: neither shape — the TYPE is named, the value never is.
-	return EntryValue{}, errs.Wrap(CatalogInvalid, errs.WrapParams{},
+	return EntryValue{}, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
 		errs.String("file", file), errs.String("key", key),
 		errs.String("detail", "entry is neither a pattern nor a map of CLDR forms"))
 }
@@ -222,7 +222,7 @@ func countedEntry(file, key string, forms map[string]any) (entry EntryValue, err
 		//: refuse.
 		if !ok {
 			//: name the key and the category, never the value.
-			return EntryValue{}, errs.Wrap(CatalogInvalid, errs.WrapParams{},
+			return EntryValue{}, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
 				errs.String("file", file), errs.String("key", key), errs.String("form", name),
 				errs.String("detail", "a plural form must be a pattern string"))
 		}

@@ -120,7 +120,7 @@ func TestARefusalTruncatesTheEchoedExpression(t *testing.T) {
 	//: a single out-of-range minute item, far longer than the echo budget.
 	long := strings.Repeat("9", 200)
 	_, err := svcsched.Parse(long + " * * * *")
-	if !kerrs.HasCode(err, svcsched.CodeInvalidExpression) {
+	if !kerrs.HasCode(err, coresched.CodeInvalidExpression) {
 		t.Fatalf("Parse = %v, want INVALID_EXPRESSION", err)
 	}
 	var typed *kerrs.Error

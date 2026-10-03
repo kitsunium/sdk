@@ -5,9 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "id",
     srcs = [
-        "codes.go",
         "common.go",
-        "errors.go",
         "ksuid.go",
         "nanoid.go",
         "snowflake.go",
@@ -61,11 +59,4 @@ go_test(
         "//internal/core/app/id",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

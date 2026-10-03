@@ -5,11 +5,15 @@
 Declares the **command-line port**: `Action` (what a command does), `Binder`
 (what declares its flags, onto the stdlib's own `*flag.FlagSet`), and
 `Executor` (resolve an argument vector against a tree and run it), plus the
-`CommandValue` / `InvocationValue` domain values and the typed declaration
-sentinels. Admitted by **ADR 0065**. The engine, the help renderer and the
+`CommandValue` / `InvocationValue` domain values and every typed sentinel of
+the domain — the declaration refusals, and the engine's verdicts on a command
+line. Admitted by **ADR 0065**. The engine, the help renderer and the
 `config` adapter are concrete and live in `internal/service/app/cli`.
 
-Code range: `0.2.32.*` (ADR 0065).
+Code ranges: `0.2.32.*` (ADR 0065) for the declaration refusals, and
+`0.3.62.*` for the engine's verdicts — allocated to the service, which raises
+them, and declared here since ADR 0160. A code keeps its value when its
+declaration moves.
 
 ## Contents
 
@@ -18,8 +22,8 @@ Code range: `0.2.32.*` (ADR 0065).
 | `cli.go` | `Action func(ctx, InvocationValue) error`, `Binder func(*flag.FlagSet)`, `Executor interface { Execute(ctx, []string) error }` |
 | `cli_command.go` | `CommandValue` — `Name` / `Summary` / `Description` / `Flags` / `Run` / `Commands` + `IsGroup()` |
 | `cli_invocation.go` | `InvocationValue` — `Path` / `Args` / `Flags` / `Output` + `Leaf()` |
-| `codes.go` | `Code*` constants — range 0.2.32.* |
-| `errors.go` | `InvalidCommand` / `AmbiguousCommand` / `DuplicateCommand` / `ReservedFlag` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.32.* and 0.3.62.* |
+| `errors.go` | `InvalidCommand` / `AmbiguousCommand` / `DuplicateCommand` / `ReservedFlag` (EX_CONFIG) and `UnknownCommand` / `MissingCommand` / `InvalidFlags` (EX_USAGE) / `CommandPanicked` / `HelpWriteFailed` (EX_IOERR) (`errs.Define`) |
 
 ## Conventions
 

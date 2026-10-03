@@ -140,11 +140,11 @@ var (
 
     // TemplateSourceFailed is returned when the template FS could not be READ
     // — usually an embed pattern that matched nothing.
-    TemplateSourceFailed = svcview.TemplateSourceFailed
+    TemplateSourceFailed = coreview.TemplateSourceFailed
 
     // TemplateParseFailed is returned for a file html/template refused to
     // parse or could not build an escaping plan for.
-    TemplateParseFailed = svcview.TemplateParseFailed
+    TemplateParseFailed = coreview.TemplateParseFailed
 )
 ```
 

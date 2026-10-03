@@ -4,6 +4,7 @@ import (
 	"context"
 	"testing"
 
+	corelc "github.com/kitsunium/sdk/internal/core/app/lifecycle"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svclc "github.com/kitsunium/sdk/internal/service/app/lifecycle"
 )
@@ -60,7 +61,7 @@ func TestRunReportsAFailedStartWithoutTryingToCleanUpTwice(t *testing.T) {
 	add(t, lc, rec.ok("db"), rec.failing("http", errAddrInUse))
 
 	err := svclc.Run(context.Background(), lc, svclc.RunConfig{})
-	assertHasCode(t, err, svclc.CodeStartFailed, "a failed start under Run")
+	assertHasCode(t, err, corelc.CodeStartFailed, "a failed start under Run")
 	assertCalls(t, rec.snapshot(), []string{"start:db", "start:http", "stop:db"})
 }
 
@@ -79,7 +80,7 @@ func TestAnUndeliverableReadinessTakesTheComponentsBackDown(t *testing.T) {
 	add(t, lc, rec.ok("db"), rec.ok("http"))
 
 	err := svclc.Run(context.Background(), lc, svclc.RunConfig{Notify: true})
-	assertHasCode(t, err, svclc.CodeReadinessFailed, "an undeliverable READY=1")
+	assertHasCode(t, err, corelc.CodeReadinessFailed, "an undeliverable READY=1")
 	assertCalls(t, rec.snapshot(), []string{
 		"start:db", "start:http", "stop:http", "stop:db",
 	})

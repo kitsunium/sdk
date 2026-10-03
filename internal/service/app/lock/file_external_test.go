@@ -196,7 +196,7 @@ func TestACorruptFenceLedgerIsRefused(t *testing.T) {
 	if lease != nil {
 		t.Fatal("a lease was granted over a ledger whose monotonicity cannot be proved")
 	}
-	if !errs.HasCode(err, svclock.CodeLockFenceCorrupt) {
+	if !errs.HasCode(err, corelock.CodeLockFenceCorrupt) {
 		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
 	}
 	//: and the refusal must not leave the name held: the gate is given back.
@@ -208,7 +208,7 @@ func TestACorruptFenceLedgerIsRefused(t *testing.T) {
 	if held {
 		t.Fatal("the failed acquisition left the lock held")
 	}
-	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+	if !errs.HasCode(tryErr, corelock.CodeLockFenceCorrupt) {
 		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
 	}
 }
@@ -245,7 +245,7 @@ func TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped(t *testing.T) {
 	if lease != nil {
 		t.Fatalf("a lease was granted with fence %d over an exhausted ledger — the counter wrapped and is now reissuing tokens the protected resource has already accepted", lease.Fence())
 	}
-	if !errs.HasCode(err, svclock.CodeLockFenceCorrupt) {
+	if !errs.HasCode(err, corelock.CodeLockFenceCorrupt) {
 		t.Fatalf("Acquire = %v, want LOCK_FENCE_CORRUPT", err)
 	}
 	//: and the ledger is left alone: refusing must not be a write, or the
@@ -266,7 +266,7 @@ func TestAnExhaustedFenceLedgerIsRefusedRatherThanWrapped(t *testing.T) {
 	if held {
 		t.Fatal("the failed acquisition left the lock held")
 	}
-	if !errs.HasCode(tryErr, svclock.CodeLockFenceCorrupt) {
+	if !errs.HasCode(tryErr, corelock.CodeLockFenceCorrupt) {
 		t.Fatalf("TryAcquire after a refused acquisition = %v, want LOCK_FENCE_CORRUPT — the refusal leaked its gate, so this attempt never reached the ledger", tryErr)
 	}
 }

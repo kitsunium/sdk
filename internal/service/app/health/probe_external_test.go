@@ -93,7 +93,7 @@ func TestStartupWithholdsReadiness(t *testing.T) {
 			"answer does not depend on any dependency", got)
 	}
 	result := resultFor(t, report, "starting")
-	if !errs.HasCode(result.Err, svchealth.CodeStartupPending) {
+	if !errs.HasCode(result.Err, corehealth.CodeStartupPending) {
 		t.Errorf("the short-circuit carries %v, want STARTUP_PENDING", result.Err)
 	}
 }
@@ -167,7 +167,7 @@ func TestDrainWithdrawsRoutingButKeepsAnswering(t *testing.T) {
 	if got := readyCalls.Load(); got != 0 {
 		t.Errorf("a readiness check ran %d times while draining, want 0", got)
 	}
-	if !errs.HasCode(resultFor(t, ready, "draining").Err, svchealth.CodeDraining) {
+	if !errs.HasCode(resultFor(t, ready, "draining").Err, corehealth.CodeDraining) {
 		t.Error("the readiness short-circuit does not carry DRAINING")
 	}
 	live := registry.Probe(context.Background(), corehealth.ProbeLiveness)
@@ -292,7 +292,7 @@ func TestRegistrationRefusals(t *testing.T) {
 				Name: "slow", Check: func(context.Context) error { return nil },
 				MaxAge: svchealth.MaxCacheAge + time.Second,
 			})
-		}, svchealth.CodeStaleCacheWindow},
+		}, corehealth.CodeStaleCacheWindow},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

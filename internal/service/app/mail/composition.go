@@ -34,7 +34,7 @@ func (c *Composer) newComposition() (builder *composition, err error) {
 	if _, readErr := io.ReadFull(c.random, token[:]); readErr != nil {
 		//: a randomness source that cannot produce its bytes is not one this
 		//: composer will guess around.
-		return nil, wrapAs(ComposeFailed, readErr, errs.String("stage", "boundary"))
+		return nil, wrapAs(coremail.ComposeFailed, readErr, errs.String("stage", "boundary"))
 	}
 	//: ready to build.
 	return &composition{Composer: c, token: hex.EncodeToString(token[:])}, nil

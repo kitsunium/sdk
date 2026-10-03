@@ -121,7 +121,7 @@ func NewMachineSpec[E any, S comparable](state func(*E) *S) *MachineSpec[E, S] {
 	d := &MachineSpec[E, S]{state: state, enter: make(map[S][]func(context.Context, *E) error)}
 	//: a nil accessor is a problem to report, not a panic at package init.
 	if state == nil {
-		d.problem(FunctionMissing, errs.String("function", "state"))
+		d.problem(corestm.FunctionMissing, errs.String("function", "state"))
 	}
 	//: the definition is ready for its declarations.
 	return d
@@ -151,7 +151,7 @@ func (d *MachineSpec[E, S]) On(event string, from, to S) *MachineSpec[E, S] {
 func (d *MachineSpec[E, S]) After(event string, delay time.Duration, from, to S) *MachineSpec[E, S] {
 	//: a timer due the instant its state is entered reads as a mistake.
 	if delay <= 0 {
-		d.problem(DelayInvalid, errs.String("event", event))
+		d.problem(corestm.DelayInvalid, errs.String("event", event))
 	}
 	//: kept even when refused, so a drawing of the declaration stays whole.
 	return d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerDelay, delay: delay})
@@ -164,7 +164,7 @@ func (d *MachineSpec[E, S]) After(event string, delay time.Duration, from, to S)
 func (d *MachineSpec[E, S]) At(event string, from, to S, instant func(E) (time.Time, bool)) *MachineSpec[E, S] {
 	//: a deadline transition with no deadline function can never fire.
 	if instant == nil {
-		d.problem(FunctionMissing, errs.String("function", "instant"), errs.String("event", event))
+		d.problem(corestm.FunctionMissing, errs.String("function", "instant"), errs.String("event", event))
 	}
 	//: kept even when refused, so a drawing of the declaration stays whole.
 	return d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerDeadline, instant: instant})
@@ -176,7 +176,7 @@ func (d *MachineSpec[E, S]) At(event string, from, to S, instant func(E) (time.T
 func (d *MachineSpec[E, S]) When(event string, from, to S, guard func(E) bool) *MachineSpec[E, S] {
 	//: a guard transition with no guard can never fire.
 	if guard == nil {
-		d.problem(FunctionMissing, errs.String("function", "guard"), errs.String("event", event))
+		d.problem(corestm.FunctionMissing, errs.String("function", "guard"), errs.String("event", event))
 	}
 	//: kept even when refused, so a drawing of the declaration stays whole.
 	return d.add(arrow[E, S]{event: event, from: from, to: to, trigger: corestm.TriggerGuard, guard: guard})
@@ -186,15 +186,15 @@ func (d *MachineSpec[E, S]) When(event string, from, to S, guard func(E) bool) *
 // Hooks of one state run in declaration order.
 //
 // An error cancels the transition, and so does a panic — recovered as
-// [HookPanicked], with the entity's lock released on the way out. A hook may
-// change the entity but not its state nor its key ([HookChangedState],
-// [HookChangedKey]), and must not fire its own machine: it runs under the
-// entity's lock, so the call is refused with [Reentrant] rather than waiting
+// [corestm.HookPanicked], with the entity's lock released on the way out. A hook may
+// change the entity but not its state nor its key ([corestm.HookChangedState],
+// [corestm.HookChangedKey]), and must not fire its own machine: it runs under the
+// entity's lock, so the call is refused with [corestm.Reentrant] rather than waiting
 // for itself.
 func (d *MachineSpec[E, S]) OnEnter(state S, hook func(context.Context, *E) error) *MachineSpec[E, S] {
 	//: a nil hook would panic inside every transition into state.
 	if hook == nil {
-		d.problem(FunctionMissing, errs.String("function", "on-enter"), errs.String("state", fmt.Sprint(state)))
+		d.problem(corestm.FunctionMissing, errs.String("function", "on-enter"), errs.String("state", fmt.Sprint(state)))
 		//: not recorded: there is nothing to run.
 		return d
 	}
@@ -212,7 +212,7 @@ func (d *MachineSpec[E, S]) OnEnter(state S, hook func(context.Context, *E) erro
 func (d *MachineSpec[E, S]) OnTransition(hook func(context.Context, ChangeValue[E, S]) error) *MachineSpec[E, S] {
 	//: a nil hook would panic after every transition.
 	if hook == nil {
-		d.problem(FunctionMissing, errs.String("function", "on-transition"))
+		d.problem(corestm.FunctionMissing, errs.String("function", "on-transition"))
 		//: not recorded: there is nothing to run.
 		return d
 	}
@@ -225,7 +225,7 @@ func (d *MachineSpec[E, S]) OnTransition(hook func(context.Context, ChangeValue[
 // made, each an error carrying a code of this package and log-only fields
 // naming the event, the state or the function concerned. A missing Initial is
 // not among them — it is only a mistake once the declaration is complete, and
-// NewStateMachine reports it as [InitialMissing].
+// NewStateMachine reports it as [corestm.InitialMissing].
 func (d *MachineSpec[E, S]) Problems() []error {
 	//: a copy: the caller may keep it while the declaration goes on.
 	return slices.Clone(d.problems)
@@ -278,13 +278,13 @@ func (d *MachineSpec[E, S]) Can(entity E, event string) bool {
 func (d *MachineSpec[E, S]) add(a arrow[E, S]) *MachineSpec[E, S] {
 	//: an empty name cannot be fired, and the creation's name is the history's.
 	if a.event == "" || a.event == corestm.CreateEvent {
-		d.problem(EventInvalid, errs.String("event", a.event))
+		d.problem(corestm.EventInvalid, errs.String("event", a.event))
 		//: not recorded: nothing could ever address it.
 		return d
 	}
 	//: one transition per event and state, or Fire would have two answers.
 	if slices.ContainsFunc(d.arrows, func(x arrow[E, S]) bool { return x.event == a.event && x.from == a.from }) {
-		d.problem(TransitionDuplicate, errs.String("event", a.event), errs.String("state", fmt.Sprint(a.from)))
+		d.problem(corestm.TransitionDuplicate, errs.String("event", a.event), errs.String("state", fmt.Sprint(a.from)))
 		//: the first declaration stands.
 		return d
 	}

@@ -72,7 +72,7 @@ func (t *memoryTransport) Send(ctx context.Context, msg coremail.MessageValue) e
 	//: the same cancellation contract as a transport that dials.
 	if ctxErr := ctx.Err(); ctxErr != nil {
 		//: DialFailed: nothing was sent, and the reason is the caller's.
-		return wrapAs(DialFailed, ctxErr)
+		return wrapAs(coremail.DialFailed, ctxErr)
 	}
 	envelope, envelopeErr := msg.Envelope()
 	//: the core verdict, which also runs Validate.

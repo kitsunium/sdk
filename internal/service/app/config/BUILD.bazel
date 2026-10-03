@@ -74,15 +74,7 @@ go_test(
         "//internal/core/security/secret",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-        "//internal/service/app/validation",
         "//internal/service/data/codec/json",
         "//internal/service/data/codec/yaml",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

@@ -9,6 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/app/mail",
+        "//internal/core/app/mail/spool",
         "//internal/service/app/mail",
         "//internal/service/app/mail/spool",
     ],

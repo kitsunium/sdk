@@ -6,7 +6,6 @@ go_library(
     name = "i18n",
     srcs = [
         "accept.go",
-        "codes.go",
         "entry_value.go",
         "errors.go",
         "load.go",
@@ -57,11 +56,4 @@ go_test(
         "//internal/kernel/errs",
         "//internal/service/data/codec/json",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

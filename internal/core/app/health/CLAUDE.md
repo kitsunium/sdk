@@ -54,6 +54,23 @@ subject mutator: the mistake is made unwritable rather than forbidden.
 | `0.2.29.3` | `UNKNOWN_PROBE` | a `Probe` value outside the three |
 | `0.2.29.4` | `CHECK_PANICKED` | a check panicked; recovered, never propagated to the handler |
 
+The engine's verdicts are declared here too, in the `0.3.59.*` range that was
+allocated to `internal/service/app/health`, which raises them (ADR 0160 — a
+code keeps its value when its declaration moves):
+
+| Code | Reason | When |
+|---|---|---|
+| `0.3.59.1` | `CHECK_FAILED` | a check returned a plain error |
+| `0.3.59.2` | `CHECK_TIMEOUT` | a check had not answered when its budget expired |
+| `0.3.59.3` | `STALE_CACHE_WINDOW` | a readiness `MaxAge` above the service's `MaxCacheAge` |
+| `0.3.59.4` | `STARTUP_PENDING` | readiness asked while a startup check has yet to pass |
+| `0.3.59.5` | `DRAINING` | readiness asked after `Drain` |
+| `0.3.59.6` | `NOTIFY_FAILED` | an opt-in `sd_notify` datagram was not delivered |
+| `0.3.59.7` | `ASK_MISCONFIGURED` | an `Ask` refused before anything was dialled |
+| `0.3.59.8` | `ASK_UNREACHABLE` | an `Ask` got no answer: the connection or the request failed |
+| `0.3.59.9` | `ASK_TIMEOUT` | an `Ask` whose budget or caller ended first |
+| `0.3.59.10` | `ASK_NOT_READY` | an `Ask` answered with a status other than 200 |
+
 ## Do NOT
 
 - Register a dependency check on liveness. It is possible — through a closure

@@ -5,8 +5,6 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "events",
     srcs = [
-        "codes.go",
-        "errors.go",
         "events.go",
         "on.go",
         "publish.go",
@@ -48,11 +46,4 @@ go_test(
         "//internal/core/app/events",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

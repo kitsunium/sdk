@@ -27,27 +27,27 @@ type Negotiator struct {
 // NewNegotiator returns a [Negotiator] over supported, falling back to
 // fallback, or refuses.
 //
-// Refused: an empty supported set ([NegotiationEmpty] — ADR 0031's refuse
+// Refused: an empty supported set ([corei18n.NegotiationEmpty] — ADR 0031's refuse
 // half, since an empty set is an unfinished wiring rather than "accept
-// anything"), a zero fallback ([CatalogInvalid] — the SDK does not pick a
-// language), and a fallback outside the supported set ([CatalogInvalid] —
+// anything"), a zero fallback ([corei18n.CatalogInvalid] — the SDK does not pick a
+// language), and a fallback outside the supported set ([corei18n.CatalogInvalid] —
 // otherwise every unmatched request resolves to a language the caller declared
 // it does not serve).
 func NewNegotiator(supported []corei18n.TagValue, fallback corei18n.TagValue) (negotiator *Negotiator, err error) {
 	//: an empty set can only ever return the default.
 	if len(supported) == 0 {
 		//: refuse the wiring rather than hide it behind a working program.
-		return nil, errs.Wrap(NegotiationEmpty, errs.WrapParams{})
+		return nil, errs.Wrap(corei18n.NegotiationEmpty, errs.WrapParams{})
 	}
 	//: a fallback is mandatory and is never guessed.
 	if fallback.IsZero() {
 		//: ADR 0031: refuse where any SDK-chosen value would be arbitrary.
-		return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the negotiation fallback tag is unset"))
+		return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the negotiation fallback tag is unset"))
 	}
 	//: the fallback must be answerable.
 	if !slices.Contains(supported, fallback) {
 		//: otherwise the common path returns a language nobody supports.
-		return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{},
+		return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
 			errs.String("tag", fallback.String()), errs.String("detail", "the negotiation fallback is not in the supported set"))
 	}
 	//: clone in — the caller's slice must not be able to change the set that

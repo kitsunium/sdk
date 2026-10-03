@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	corehealth "github.com/kitsunium/sdk/internal/core/app/health"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -92,14 +93,14 @@ type askRequest struct {
 //
 // Otherwise the error says why, by code:
 //
-//   - [AskMisconfigured]: cfg cannot reach anything; nothing was dialled.
-//   - [AskUnreachable]: the connection or the request failed; the
+//   - [corehealth.AskMisconfigured]: cfg cannot reach anything; nothing was dialled.
+//   - [corehealth.AskUnreachable]: the connection or the request failed; the
 //     transport's error is the cause.
-//   - [AskTimeout]: the budget, or the caller's context, ended before an
+//   - [corehealth.AskTimeout]: the budget, or the caller's context, ended before an
 //     answer — or while its body was still arriving: a process that sends
 //     200 and then stalls has not answered within the bound. A caller's own
 //     context error stays in the chain.
-//   - [AskNotReady]: the process answered another status, carried by the
+//   - [corehealth.AskNotReady]: the process answered another status, carried by the
 //     status field. A redirect is such an answer: none is followed, so a
 //     probe cannot be sent elsewhere.
 //
@@ -243,7 +244,7 @@ func armAsk(clk clock.Timed, budget time.Duration, cancel context.CancelCauseFun
 		//: no answer within the budget.
 		case <-timer.C():
 			//: end the exchange, and say why.
-			cancel(AskTimeout)
+			cancel(corehealth.AskTimeout)
 		//: the Ask returned first.
 		case <-released:
 			//: nothing to end.
@@ -303,7 +304,7 @@ func (r askRequest) exchange(ctx context.Context, client *http.Client) (status i
 	//: 200 is ready, and only 200.
 	if response.StatusCode != http.StatusOK {
 		//: AskNotReady, carrying the status and nothing of the body.
-		return response.StatusCode, kerrs.Wrap(AskNotReady, kerrs.WrapParams{},
+		return response.StatusCode, kerrs.Wrap(corehealth.AskNotReady, kerrs.WrapParams{},
 			kerrs.String(fieldTarget, r.target), kerrs.Int(fieldStatus, response.StatusCode))
 	}
 	//: ready.
@@ -340,24 +341,24 @@ func discard(body io.ReadCloser) error {
 func (r askRequest) unanswered(ctx context.Context, doErr error) error {
 	target := kerrs.String(fieldTarget, r.target)
 	//: this Ask's own budget ended it.
-	if errors.Is(context.Cause(ctx), AskTimeout) {
+	if errors.Is(context.Cause(ctx), corehealth.AskTimeout) {
 		//: AskTimeout, with the budget it ran out of.
-		return kerrs.Wrap(AskTimeout, kerrs.WrapParams{}, target, kerrs.String(fieldBudget, r.budget.String()))
+		return kerrs.Wrap(corehealth.AskTimeout, kerrs.WrapParams{}, target, kerrs.String(fieldBudget, r.budget.String()))
 	}
 	//: the caller's own context ended first: its error stays in the chain.
 	if ctx.Err() != nil {
 		//: AskTimeout, caused by the caller's context.
-		return kerrs.Wrap(context.Cause(ctx), paramsOf(AskTimeout,
+		return kerrs.Wrap(context.Cause(ctx), paramsOf(corehealth.AskTimeout,
 			"service/app/health: the caller's context ended before the process answered"), target)
 	}
 	//: the network's own timeout — a dial the kernel gave up on.
 	if netErr, isNet := errors.AsType[net.Error](doErr); isNet && netErr.Timeout() {
 		//: AskTimeout, caused by the transport's error.
-		return kerrs.Wrap(doErr, paramsOf(AskTimeout,
+		return kerrs.Wrap(doErr, paramsOf(corehealth.AskTimeout,
 			"service/app/health: the network timed out before the process answered"), target)
 	}
 	//: refused, reset, unroutable, unresolvable.
-	return kerrs.Wrap(doErr, paramsOf(AskUnreachable, AskUnreachable.Private()), target)
+	return kerrs.Wrap(doErr, paramsOf(corehealth.AskUnreachable, corehealth.AskUnreachable.Private()), target)
 }
 
 // sentinelIdentity is what paramsOf reads from a sentinel: everything but its
@@ -385,5 +386,5 @@ func paramsOf(sentinel sentinelIdentity, private string) kerrs.WrapParams {
 // askMisconfigured refuses an Ask before anything is dialled.
 func askMisconfigured(argument string) error {
 	//: the argument's name, never its value.
-	return kerrs.Wrap(AskMisconfigured, kerrs.WrapParams{}, kerrs.String(fieldArgument, argument))
+	return kerrs.Wrap(corehealth.AskMisconfigured, kerrs.WrapParams{}, kerrs.String(fieldArgument, argument))
 }

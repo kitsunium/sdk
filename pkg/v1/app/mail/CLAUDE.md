@@ -25,7 +25,7 @@ maintainer's half.
 | `FullTransport` | alias | the union `NewMemory` returns |
 | `SMTPConfig`, `TLSMode`, `ComposerConfig`, `Composer` | aliases | service-layer types |
 | `TLSUnset`/`TLSStartTLS`/`TLSImplicit`/`TLSDisabled` | constants | the zero is refused |
-| 19 sentinels | vars | 9 from core, 10 from service — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
+| 19 sentinels | vars | all aliases of `core/app/mail`'s (ADR 0160): the 9 message refusals and the 10 outcomes of composition and the SMTP session — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
 | `NewSMTP`, `NewMemory`, `NewComposer`, `Compose`, `Validate`, `ParseURL` | funcs | `ParseURL` reads `smtp://…?tls=…` / `smtps://…` into a config `NewSMTP` accepts, and never quotes the URL in a refusal |
 | `NewCapture(keep)` / `DefaultCaptureKeep` | func / const | `NewMemory`'s double keeping the last `keep` deliveries (200 when not positive) — the development server's transport |
 | `NewSpool`, `SpoolAttemptFrom` | funcs | the durable outbox and the attempt a delivery context carries (ADR 0111) |

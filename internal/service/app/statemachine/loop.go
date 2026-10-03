@@ -10,6 +10,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	corestm "github.com/kitsunium/sdk/internal/core/app/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -126,7 +127,7 @@ type stepResult struct {
 
 // Run is the machine's own loop: it fires the timer and guard transitions as
 // they fall due, until ctx ends, and returns nil then. It returns
-// [LoopRunning] at once when another Run or a Step of this machine is going.
+// [corestm.LoopRunning] at once when another Run or a Step of this machine is going.
 //
 // It never polls. A run fires what is due — per entity, the first declared
 // transition due, one per entity per run — and the loop then sleeps until the
@@ -144,7 +145,7 @@ func (m *StateMachine[E, S]) Run(ctx context.Context) error {
 	//: one loop per machine.
 	if !m.running.CompareAndSwap(false, true) {
 		//: the other one keeps going.
-		return LoopRunning
+		return corestm.LoopRunning
 	}
 	defer m.running.Store(false)
 	//: nothing moves an entity by itself: there is no run to make.
@@ -179,13 +180,13 @@ func (m *StateMachine[E, S]) Run(ctx context.Context) error {
 // nothing is scheduled; and the failures joined.
 //
 // It is for a caller that drives the machine itself instead of Run — a test,
-// another scheduler. It returns [LoopRunning] when Run or another Step is
+// another scheduler. It returns [corestm.LoopRunning] when Run or another Step is
 // going.
 func (m *StateMachine[E, S]) Step(ctx context.Context) (time.Time, error) {
 	//: one pass at a time, and never beside Run.
 	if !m.running.CompareAndSwap(false, true) {
 		//: nothing was done.
-		return time.Time{}, LoopRunning
+		return time.Time{}, corestm.LoopRunning
 	}
 	defer m.running.Store(false)
 	out := m.step(ctx)
@@ -360,7 +361,7 @@ func (m *StateMachine[E, S]) guarded(ctx context.Context, key string, now time.T
 			return
 		}
 		//: the value travels as a field, never as the wrap origin.
-		looked = pass{failed: m.failure(key, now, errs.Wrap(LoopPanicked, errs.WrapParams{}, errs.String("key", key),
+		looked = pass{failed: m.failure(key, now, errs.Wrap(corestm.LoopPanicked, errs.WrapParams{}, errs.String("key", key),
 			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack()))))}
 	}()
 	//: the entity's pass, unguarded.

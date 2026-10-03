@@ -214,29 +214,29 @@ var (
 	ComponentPanicked = corelc.ComponentPanicked
 	// StartFailed is joined with the component's own error when a Start
 	// aborts the sequence. The components already up were stopped first.
-	StartFailed = svclc.StartFailed
+	StartFailed = corelc.StartFailed
 	// StopFailed is joined with the component's own error when its Stop
 	// returns one. The shutdown continued with the remaining components.
-	StopFailed = svclc.StopFailed
+	StopFailed = corelc.StopFailed
 	// StopTimeout reports a component whose Stop had not returned when its
 	// budget expired. Its context was cancelled and it was abandoned — never
 	// killed, and nothing it owns was closed on its behalf.
-	StopTimeout = svclc.StopTimeout
+	StopTimeout = corelc.StopTimeout
 	// UnwindFailed marks a failure DURING the cleanup of a partial start. It
 	// travels alongside the start failure, never instead of it.
-	UnwindFailed = svclc.UnwindFailed
+	UnwindFailed = corelc.UnwindFailed
 	// ReadinessFailed is returned when an opt-in sd_notify datagram could not
 	// be delivered.
-	ReadinessFailed = svclc.ReadinessFailed
+	ReadinessFailed = corelc.ReadinessFailed
 	// RunPanicked is the failure of a supervised run that panicked. It was
 	// recovered and the run restarted; the panic value and the stack travel
 	// as fields, never in the Public text.
-	RunPanicked = svclc.RunPanicked
+	RunPanicked = corelc.RunPanicked
 	// SupervisorMisconfigured refuses a supervisor without a name or a
 	// function.
-	SupervisorMisconfigured = svclc.SupervisorMisconfigured
+	SupervisorMisconfigured = corelc.SupervisorMisconfigured
 	// SupervisorRunning refuses a second Start while a supervision runs.
-	SupervisorRunning = svclc.SupervisorRunning
+	SupervisorRunning = corelc.SupervisorRunning
 )
 
 // New returns a Lifecycle. It cannot fail: a nil cfg.Clock falls back to the

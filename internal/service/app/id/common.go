@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"strings"
 
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -86,7 +87,7 @@ func readRandom(b []byte) error {
 	}
 	//: wrap the CSPRNG fault with the dotted-quad entropy code.
 	return errs.Wrap(err, errs.WrapParams{
-		Code:    CodeIDEntropyFailed,
+		Code:    coreid.CodeIDEntropyFailed,
 		Reason:  "ID_ENTROPY_FAILED",
 		Public:  "Identifier generation failed to read secure random bytes",
 		Private: "service/app/id: crypto/rand.Read returned an error",
@@ -169,7 +170,7 @@ func crockford32Decode(s, alphabet string) (raw [uuidRawLen]byte, err error) {
 	//: the rendering is fixed-width; anything else is not this encoding.
 	if len(s) != crockfordChars {
 		//: name the rule that rejected it without echoing the input.
-		return raw, errs.Wrap(Malformed, errs.WrapParams{},
+		return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "length"), errs.Int("length", len(s)))
 	}
 	//: walk each character, most-significant group first.
@@ -179,13 +180,13 @@ func crockford32Decode(s, alphabet string) (raw [uuidRawLen]byte, err error) {
 		//: a character outside the alphabet disqualifies the whole string.
 		if v < 0 {
 			//: name the rule and the offset, never the character itself.
-			return raw, errs.Wrap(Malformed, errs.WrapParams{},
+			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "alphabet"), errs.Int("offset", i))
 		}
 		//: the leading group carries the pad bits, which the encoder zeroes.
 		if i == 0 && v >= crockfordFirstCharLimit {
 			//: a set pad bit means the string encodes more than 128 bits.
-			return raw, errs.Wrap(Malformed, errs.WrapParams{},
+			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "overflow"))
 		}
 		//: scatter the 5 bits of this group back into the byte array.
@@ -215,7 +216,7 @@ func parseUUID(s string) (raw [uuidRawLen]byte, err error) {
 	//: the canonical form is fixed-width.
 	if len(s) != dashedUUIDLen {
 		//: name the rule that rejected it without echoing the input.
-		return raw, errs.Wrap(Malformed, errs.WrapParams{},
+		return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "uuid_length"), errs.Int("length", len(s)))
 	}
 	//: the compacted hex digits, separators removed.
@@ -229,7 +230,7 @@ func parseUUID(s string) (raw [uuidRawLen]byte, err error) {
 			//: a missing dash means the grouping is wrong.
 			if s[i] != '-' {
 				//: name the rule and the offset that failed.
-				return raw, errs.Wrap(Malformed, errs.WrapParams{},
+				return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 					errs.String("rule", "uuid_separator"), errs.Int("offset", i))
 			}
 			//: separators carry no payload.
@@ -244,7 +245,7 @@ func parseUUID(s string) (raw [uuidRawLen]byte, err error) {
 	if _, decErr := hex.Decode(raw[:], packed[:]); decErr != nil {
 		//: a non-hex digit is the only failure hex.Decode can report here.
 		return raw, errs.Wrap(decErr, errs.WrapParams{
-			Code:    CodeIDMalformed,
+			Code:    coreid.CodeIDMalformed,
 			Reason:  "ID_MALFORMED",
 			Public:  "The identifier is not well formed for its scheme",
 			Private: "service/app/id: parseUUID found a non-hexadecimal digit in the dashed form",

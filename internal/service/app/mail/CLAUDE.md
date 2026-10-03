@@ -9,7 +9,9 @@ in-memory double (unbounded, or bounded as the capture transport). ADR 0064.
 The durable outbox that retries a transport and dead-letters is the `spool/`
 subpackage (ADR 0111), with its own code range `0.3.81.*`.
 
-Code range: `0.3.61.*`.
+Code range: `0.3.61.*` (`INVALID_URL` is `0.3.61.10`), declared with its
+sentinels in `internal/core/app/mail` beside the message refusals (ADR 0160).
+This package declares no code and raises the core's.
 
 ## Contents
 
@@ -29,7 +31,7 @@ Code range: `0.3.61.*`.
 | `smtpurl.go` | `ParseURL` — `smtp://…?tls=starttls\|implicit\|none` / `smtps://…` into a config `validate` accepts; a refusal is `INVALID_URL` with a clause and never the URL |
 | `smtp_compliance.go` | the compile-time port conformance assertions |
 | `memory.go` | the in-memory transport — a DOUBLE, because it composes — `NewMemory` (keeps every delivery) and `NewCapture(keep)` (keeps the last `keep`, `DefaultCaptureKeep` = 200 when not positive: the transport a development server and a test deliver through, ADR 0111) |
-| `codes.go` / `errors.go` | the ten `0.3.61.*` codes (`INVALID_URL` is `0.3.61.10`), their sentinels, and `wrapAs` |
+| `errors.go` | `wrapAs` — a core sentinel raised over a cause carried as a log-only field |
 | `BENCH.md` | composition cost, cost per MiB of attachment, and the one measured optimisation |
 
 ## The MIME structure is a function of the populated fields

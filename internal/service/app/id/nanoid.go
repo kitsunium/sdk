@@ -44,7 +44,7 @@ func NewNanoID(size int) (g coreid.Generator, err error) {
 	//: the default; refuse at construction so nothing degraded is ever minted.
 	if size <= 0 {
 		//: name the offending knob; the size is a bounded int, safe to echo.
-		return nil, errs.Wrap(InvalidSize, errs.WrapParams{}, errs.Int("size", size))
+		return nil, errs.Wrap(coreid.InvalidSize, errs.WrapParams{}, errs.Int("size", size))
 	}
 	//: a validated length yields a plain value generator.
 	return nanoIDGen{size: size}, nil

@@ -71,7 +71,7 @@ func (c KeepaliveConfig) clockOrSystem() clock.Timed {
 // is currently calling it. The caller that needs the news is the one already
 // running inside the critical section — and the only channel that reaches
 // work in progress is its context. So a failed renewal cancels the derived
-// context with [LockKeepaliveLost] as its cause, and the protected operation
+// context with [corelock.LockKeepaliveLost] as its cause, and the protected operation
 // finds out through the mechanism it is already selecting on.
 //
 // This is the opposite of the drain signal in ADR 0043, and deliberately so.
@@ -164,7 +164,7 @@ func keepaliveLost(cause error, fence uint64) error {
 	//: cause is already an *errs.Error — LOCK_NOT_HELD, normally — origin wins
 	//: and this code joins the wrap trail, so both are recoverable.
 	return kerrs.Wrap(cause, kerrs.WrapParams{
-		Code:    CodeLockKeepaliveLost,
+		Code:    corelock.CodeLockKeepaliveLost,
 		Reason:  "LOCK_KEEPALIVE_LOST",
 		Public:  "The lease could not be renewed and is no longer held",
 		Private: "service/app/lock: a background Extend failed, so the derived context was cancelled with this cause; the fields name the fencing token that was lost",

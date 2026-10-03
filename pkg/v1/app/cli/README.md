@@ -131,24 +131,24 @@ var (
 
     // UnknownCommand is returned when a token names no sub-command of the
     // group it was typed under. EX_USAGE (64).
-    UnknownCommand = svccli.UnknownCommand
+    UnknownCommand = corecli.UnknownCommand
     // MissingCommand is returned when a group is invoked with no sub-command.
     // EX_USAGE (64).
-    MissingCommand = svccli.MissingCommand
+    MissingCommand = corecli.MissingCommand
     // InvalidFlags is returned when package flag refused the vector. EX_USAGE
     // (64).
-    InvalidFlags = svccli.InvalidFlags
+    InvalidFlags = corecli.InvalidFlags
     // CommandPanicked is returned when an [Action] panicked. The recovered
     // value and the originating stack travel as fields; the status stays
     // EX_SOFTWARE (70).
-    CommandPanicked = svccli.CommandPanicked
+    CommandPanicked = corecli.CommandPanicked
     // HelpWriteFailed is returned when -h asked for the help and the stream it
     // goes to did not take the page — a closed pipe, a full disk. The
     // stream's own error stays matchable beneath it, or rides in a field when
     // it is itself an SDK error, so the code and EX_IOERR (74) are always this
     // one's. A bad command line keeps its EX_USAGE even when its help could
     // not be written.
-    HelpWriteFailed = svccli.HelpWriteFailed
+    HelpWriteFailed = corecli.HelpWriteFailed
 )
 ```
 

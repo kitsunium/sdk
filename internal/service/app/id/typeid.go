@@ -73,7 +73,7 @@ func (g typeIDGen) New() (newID string, err error) {
 	//: than mint "_01h2…" (ADR 0031).
 	if g.prefix == "" {
 		//: the same sentinel the constructor returns, for the same reason.
-		return "", InvalidPrefix
+		return "", coreid.InvalidPrefix
 	}
 	//: 16 raw bytes back the 128-bit UUIDv7 payload.
 	var b [uuidRawLen]byte
@@ -121,7 +121,7 @@ func ParseTypeID(s string) (prefix, uuid string, err error) {
 	//: the rendering has a fixed-width suffix and at least one prefix char.
 	if len(s) < typeIDMinLen {
 		//: name the rule that rejected it without echoing the input.
-		return "", "", errs.Wrap(Malformed, errs.WrapParams{},
+		return "", "", errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "length"), errs.Int("length", len(s)))
 	}
 	//: the suffix is fixed-width, so the split point is counted from the END.
@@ -132,7 +132,7 @@ func ParseTypeID(s string) (prefix, uuid string, err error) {
 	//: the separator must sit exactly there or the shape is wrong.
 	if s[cut:cut+len(typeIDSeparator)] != typeIDSeparator {
 		//: name the rule and the offset that failed.
-		return "", "", errs.Wrap(Malformed, errs.WrapParams{},
+		return "", "", errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "separator"), errs.Int("offset", cut))
 	}
 	//: everything before the cut is the type prefix.
@@ -167,12 +167,12 @@ func validateTypePrefix(prefix string) error {
 	//: already has a scheme for that.
 	if prefix == "" {
 		//: name the clause; there is nothing to echo.
-		return errs.Wrap(InvalidPrefix, errs.WrapParams{}, errs.String("rule", "empty"))
+		return errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{}, errs.String("rule", "empty"))
 	}
 	//: a prefix longer than the payload it labels is not an identifier.
 	if len(prefix) > typeIDMaxPrefix {
 		//: the length is a bounded int, safe to echo; the prefix is not.
-		return errs.Wrap(InvalidPrefix, errs.WrapParams{},
+		return errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{},
 			errs.String("rule", "too_long"), errs.Int("length", len(prefix)))
 	}
 	//: vet every byte against its position-dependent rule.
@@ -183,7 +183,7 @@ func validateTypePrefix(prefix string) error {
 			continue
 		}
 		//: uppercase, digits, punctuation, non-ASCII, or a misplaced underscore.
-		return errs.Wrap(InvalidPrefix, errs.WrapParams{},
+		return errs.Wrap(coreid.InvalidPrefix, errs.WrapParams{},
 			errs.String("rule", "charset"), errs.Int("offset", i))
 	}
 	//: every clause passed.

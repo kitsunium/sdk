@@ -68,7 +68,7 @@ func (ksuidGen) New() (newID string, err error) {
 	//: anyway would wrap the prefix and silently destroy the sort order.
 	if secs < 0 || secs > math.MaxUint32 {
 		//: refuse rather than mint an id whose timestamp lies.
-		return "", TimestampRange
+		return "", coreid.TimestampRange
 	}
 	//: the leading 4 bytes carry the epoch-relative seconds (big-endian).
 	binary.BigEndian.PutUint32(b[:ksuidTimeBytes], uint32(secs))
@@ -146,7 +146,7 @@ func base62Decode(s string) (raw [ksuidRawLen]byte, err error) {
 	//: the rendering is fixed-width; anything else is not this encoding.
 	if len(s) != ksuidChars {
 		//: name the rule that rejected it without echoing the input.
-		return raw, errs.Wrap(Malformed, errs.WrapParams{},
+		return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 			errs.String("rule", "length"), errs.Int("length", len(s)))
 	}
 	//: accumulate raw = raw*62 + digit, most-significant digit first.
@@ -161,7 +161,7 @@ func base62Decode(s string) (raw [ksuidRawLen]byte, err error) {
 		//: a character outside the alphabet disqualifies the whole string.
 		if digit < 0 {
 			//: name the rule and the offset, never the character itself.
-			return raw, errs.Wrap(Malformed, errs.WrapParams{},
+			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "alphabet"), errs.Int("offset", i))
 		}
 		//: the incoming digit is the carry into the least-significant byte.
@@ -178,7 +178,7 @@ func base62Decode(s string) (raw [ksuidRawLen]byte, err error) {
 		//: a carry out of the top byte means the value exceeds 160 bits.
 		if carry != 0 {
 			//: refuse rather than truncate — truncation would alias two inputs.
-			return raw, errs.Wrap(Malformed, errs.WrapParams{},
+			return raw, errs.Wrap(coreid.Malformed, errs.WrapParams{},
 				errs.String("rule", "overflow"))
 		}
 	}

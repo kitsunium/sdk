@@ -97,7 +97,7 @@ func (e *executor) reportParse(cmd corecli.CommandValue, path []string, set *fla
 	werr := e.writeHelp(cmd, path, set)
 	//: flag's own text quotes the operator's value, so it travels as a field
 	//: and never as Public.
-	return kerrs.Wrap(InvalidFlags, kerrs.WrapParams{}, withHelpFailure(werr,
+	return kerrs.Wrap(corecli.InvalidFlags, kerrs.WrapParams{}, withHelpFailure(werr,
 		kerrs.String("command", joined), kerrs.String("flag_error", cause.Error()))...)
 }
 
@@ -114,7 +114,7 @@ func helpWriteFailure(werr error, command string) error {
 	if typedErr, typed := errors.AsType[*kerrs.Error](werr); typed {
 		//: the sentinel is the origin; the stream's refusal and its own code
 		//: are diagnostic.
-		return kerrs.Wrap(HelpWriteFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(corecli.HelpWriteFailed, kerrs.WrapParams{},
 			kerrs.String("command", command), kerrs.String("cause", werr.Error()),
 			kerrs.String("cause_code", typedErr.Code().String()))
 	}
@@ -148,7 +148,7 @@ func (e *executor) resolveChild(
 		//: the help is secondary here; MissingCommand stays the verdict.
 		werr := e.writeHelp(cmd, path, set)
 		//: an incomplete command line, never a successful no-op.
-		return corecli.CommandValue{}, kerrs.Wrap(MissingCommand, kerrs.WrapParams{},
+		return corecli.CommandValue{}, kerrs.Wrap(corecli.MissingCommand, kerrs.WrapParams{},
 			withHelpFailure(werr, kerrs.String("command", joined))...)
 	}
 	name := rest[0]
@@ -169,7 +169,7 @@ func (e *executor) resolveChild(
 	//: here too: UnknownCommand stays the verdict.
 	werr := e.writeHelp(cmd, path, set)
 	//: the mistyped token is echoed in a field, never in Public.
-	return corecli.CommandValue{}, kerrs.Wrap(UnknownCommand, kerrs.WrapParams{},
+	return corecli.CommandValue{}, kerrs.Wrap(corecli.UnknownCommand, kerrs.WrapParams{},
 		withHelpFailure(werr, kerrs.String("command", joined), kerrs.String("token", name))...)
 }
 
@@ -212,7 +212,7 @@ func guard(ctx context.Context, run corecli.Action, invocation corecli.Invocatio
 		//: so a panic carrying an *errs.Error cannot hijack COMMAND_PANICKED.
 		//: The stack is captured HERE, inside the deferred function, so it is
 		//: the stack of the goroutine that actually failed.
-		err = kerrs.Wrap(CommandPanicked, kerrs.WrapParams{},
+		err = kerrs.Wrap(corecli.CommandPanicked, kerrs.WrapParams{},
 			kerrs.String("command", strings.Join(invocation.Path, " ")),
 			kerrs.String("panic", fmt.Sprint(value)),
 			kerrs.String("stack", string(debug.Stack())))

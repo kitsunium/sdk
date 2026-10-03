@@ -1,17 +1,14 @@
-load("@rules_go//go:def.bzl", "go_library", "go_test")
+load("@rules_go//go:def.bzl", "go_library")
 
 package(default_visibility = ["//internal/core:core_consumers"])
 
 go_library(
-    name = "statemachine",
+    name = "spool",
     srcs = [
         "codes.go",
         "errors.go",
-        "record.go",
-        "statemachine.go",
-        "trigger.go",
     ],
-    importpath = "github.com/kitsunium/sdk/internal/core/app/statemachine",
+    importpath = "github.com/kitsunium/sdk/internal/core/app/mail/spool",
     visibility = [
         "//:__subpackages__",
         "//internal/core:core_consumers",
@@ -21,19 +18,10 @@ go_library(
 
 alias(
     name = "go_default_library",
-    actual = ":statemachine",
+    actual = ":spool",
     visibility = [
         "//:__subpackages__",
         "//internal/core:core_consumers",
-    ],
-)
-
-go_test(
-    name = "statemachine_test",
-    srcs = ["statemachine_external_test.go"],
-    deps = [
-        ":statemachine",
-        "//internal/kernel/errs",
     ],
 )
 

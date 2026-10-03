@@ -71,7 +71,7 @@ func (l *fileLease) Fence() uint64 {
 // outlives its name. The next acquisition then creates a different file, locks
 // that, and both processes are inside the section. Extend is the only call a
 // holder makes DURING the section, so it is where that is noticed:
-// [LockFileReplaced], which a Keepalive publishes as the protected context's
+// [corelock.LockFileReplaced], which a Keepalive publishes as the protected context's
 // cause. See identity.go for what this detects and what it does not prevent.
 //
 // It still returns [corelock.LockNotHeld] after Release, because at that point

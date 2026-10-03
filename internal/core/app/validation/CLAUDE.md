@@ -9,7 +9,11 @@ two domain values it produces — `ViolationValue` (one located failure) and
 15th core sibling, admitted by **ADR 0046**. The concrete constraints, the
 combinators and the struct-tag front end live in `internal/service/app/validation`.
 
-Code range: `0.2.15.*` (ADR 0046).
+Code ranges: `0.2.15.*` (ADR 0046) for the port, and `0.3.47.*` for the
+built-in rules' identities (`0.3.47.1`–`0.3.47.5`) and the tag compiler's
+refusals (`InvalidRule`, `0.3.47.6`; `UnsupportedTarget`, `0.3.47.7`) —
+allocated to `internal/service/app/validation`, which uses them, and declared
+here since ADR 0160. A code keeps its value when its declaration moves.
 
 ## Contents
 
@@ -19,8 +23,8 @@ Code range: `0.2.15.*` (ADR 0046).
 | `violation.go` | `ViolationValue` — `Path` / `Rule` / `Message` / `Code` |
 | `report.go` | `ReportValue []ViolationValue` + `OK` / `First` / `Paths` / `Err` |
 | `path.go` | `RootPath`, `JoinField`, `JoinIndex` — the path grammar |
-| `codes.go` | `Code*` constants — range 0.2.15.* |
-| `errors.go` | `ValidationFailed` / `ConstraintMisconfigured` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.15.* and 0.3.47.* (the five violation codes carry no sentinel: a violation is not an error) |
+| `errors.go` | `ValidationFailed` / `ConstraintMisconfigured`, and the tag compiler's `InvalidRule` / `UnsupportedTarget` (`errs.Define`) |
 
 ## Conventions
 

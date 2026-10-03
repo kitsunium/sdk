@@ -98,7 +98,7 @@ func signedBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (chec
 			return nil
 		}
 		//: outside the bound.
-		return one(path, spec.rule, spec.message, CodeOutOfRange)
+		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
 	}, nil
 }
 
@@ -119,7 +119,7 @@ func unsignedBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (ch
 			return nil
 		}
 		//: outside the bound.
-		return one(path, spec.rule, spec.message, CodeOutOfRange)
+		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
 	}, nil
 }
 
@@ -143,7 +143,7 @@ func floatBound(name, rule, arg string, typ reflect.Type, spec boundSpec) (check
 			return nil
 		}
 		//: outside the bound.
-		return one(path, spec.rule, spec.message, CodeOutOfRange)
+		return one(path, spec.rule, spec.message, corevalidation.CodeOutOfRange)
 	}, nil
 }
 
@@ -244,7 +244,7 @@ func buildLength(name string, typ reflect.Type, rule, arg string, hasArg bool) (
 			return nil
 		}
 		//: outside the bound.
-		return one(path, ruleLength, message, CodeLengthOutOfRange)
+		return one(path, ruleLength, message, corevalidation.CodeLengthOutOfRange)
 	}, nil
 }
 
@@ -282,7 +282,7 @@ func buildCount(name string, typ reflect.Type, rule, arg string, hasArg bool) (c
 			return nil
 		}
 		//: outside the bound.
-		return one(path, ruleCount, message, CodeLengthOutOfRange)
+		return one(path, ruleCount, message, corevalidation.CodeLengthOutOfRange)
 	}, nil
 }
 

@@ -6,14 +6,12 @@ go_library(
     name = "lock",
     srcs = [
         "chain.go",
-        "codes.go",
         "config.go",
         "dacl_shared_windows.go",
         "dacl_tokens_windows.go",
         "dacl_windows.go",
         "dirsafety_posix.go",
         "dirsafety_windows.go",
-        "errors.go",
         "fence.go",
         "file.go",
         "file_config.go",
@@ -94,7 +92,10 @@ go_test(
     ],
 )
 
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+# audit_srcs ships this package's .go files through //:audit_sources. The package
+# declares no error code (ADR 0160: they are in its core mirror); it stays listed
+# because this package's own test reads its sources at runtime, and under Bazel
+# they reach it only as those runfiles.
 filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),

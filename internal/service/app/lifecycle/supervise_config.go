@@ -6,6 +6,7 @@ import (
 	"context"
 	"time"
 
+	corelc "github.com/kitsunium/sdk/internal/core/app/lifecycle"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -62,12 +63,12 @@ func validateSupervisor(name string, run func(ctx context.Context) error) error 
 	//: an event nobody can attribute is not worth emitting.
 	if name == "" {
 		//: SupervisorMisconfigured, naming the argument.
-		return kerrs.Wrap(SupervisorMisconfigured, kerrs.WrapParams{}, kerrs.String("argument", "name"))
+		return kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{}, kerrs.String("argument", "name"))
 	}
 	//: nothing to supervise.
 	if run == nil {
 		//: SupervisorMisconfigured, naming the argument.
-		return kerrs.Wrap(SupervisorMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(corelc.SupervisorMisconfigured, kerrs.WrapParams{},
 			kerrs.String("argument", "run"), kerrs.String("supervisor", name))
 	}
 	//: runnable.

@@ -115,6 +115,6 @@ func requiredCheck() fieldCheck {
 			return nil
 		}
 		//: absent.
-		return one(path, ruleRequired, requiredMessage, CodeRequired)
+		return one(path, ruleRequired, requiredMessage, corevalidation.CodeRequired)
 	}
 }

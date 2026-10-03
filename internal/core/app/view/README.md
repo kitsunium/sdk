@@ -24,4 +24,5 @@ here at all. Read `CLAUDE.md` §Why this shape and ADR 0058 §D4 for what that
 buys and, more importantly, what it does not: a `Trusted` the caller built
 wrongly is an XSS the SDK cannot see.
 
-Error range `0.2.27.*`. Maintainer rationale lives in `CLAUDE.md`.
+Error ranges `0.2.27.*`, and `0.3.57.*` — the engine's construction failures,
+declared here since ADR 0160. Maintainer rationale lives in `CLAUDE.md`.

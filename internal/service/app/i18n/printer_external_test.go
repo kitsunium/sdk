@@ -210,13 +210,13 @@ func TestNewPrinterRefusesAnUnusableLanguage(t *testing.T) {
 	store, _, _ := twoLanguageStore(t)
 
 	var unset corei18n.TagValue
-	if _, err := svci18n.NewPrinter(store, unset); !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if _, err := svci18n.NewPrinter(store, unset); !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Errorf("NewPrinter with an unset tag = %v, want CodeCatalogInvalid", err)
 	}
 
 	// A language with no reviewed rule is refused at construction, so the
 	// render path has no language it cannot plural.
-	if _, err := svci18n.NewPrinter(store, mustTag(t, "cs")); !errs.HasCode(err, svci18n.CodeUnsupportedLanguage) {
+	if _, err := svci18n.NewPrinter(store, mustTag(t, "cs")); !errs.HasCode(err, corei18n.CodeUnsupportedLanguage) {
 		t.Errorf("NewPrinter(cs) = %v, want CodeUnsupportedLanguage", err)
 	}
 }

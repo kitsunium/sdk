@@ -5,8 +5,8 @@ import (
 	"encoding/json"
 	"testing"
 
+	corevalidation "github.com/kitsunium/sdk/internal/core/app/validation"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svcvalidation "github.com/kitsunium/sdk/internal/service/app/validation"
 )
 
 // ZipA and ZipB each promote a "zip" key, tagged, at the same depth.
@@ -173,7 +173,7 @@ func TestARuleIsRefusedExactlyWhenNoJSONKeyReachesItsField(t *testing.T) {
 			}
 			return
 		}
-		if !errs.HasCode(err, svcvalidation.CodeInvalidRule) {
+		if !errs.HasCode(err, corevalidation.CodeInvalidRule) {
 			t.Fatalf("err = %v, want INVALID_RULE: encoding/json never decodes %q into the field with the rule", err, c.key)
 		}
 		if field := renderFields(err)["field"]; field != c.key {

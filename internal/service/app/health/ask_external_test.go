@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	corehealth "github.com/kitsunium/sdk/internal/core/app/health"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/app/health"
@@ -117,7 +118,7 @@ func TestAskIsReadyOnlyOnTwoHundred(t *testing.T) {
 			return
 		}
 		//: every other status is AskNotReady.
-		if !errors.Is(err, health.AskNotReady) {
+		if !errors.Is(err, corehealth.AskNotReady) {
 			t.Fatalf("Ask() error = %v, want ASK_NOT_READY", err)
 		}
 		//: the status travels in the error too.
@@ -158,7 +159,7 @@ func TestAskFollowsNoRedirect(t *testing.T) {
 	port := serveOnLoopback(t, mux)
 	status, err := health.Ask(t.Context(), health.AskConfig{Addr: "127.0.0.1:" + port, Path: "/readyz", Clock: frozen()})
 	//: the redirect itself is the answer.
-	if status != http.StatusFound || !errors.Is(err, health.AskNotReady) {
+	if status != http.StatusFound || !errors.Is(err, corehealth.AskNotReady) {
 		t.Fatalf("Ask() = %d, %v; want 302 and ASK_NOT_READY", status, err)
 	}
 	//: and its target was never asked.
@@ -185,7 +186,7 @@ func TestAskIsUnreachableWhenNothingListens(t *testing.T) {
 	}
 	status, err := health.Ask(t.Context(), health.AskConfig{Addr: address, Path: "/readyz", Clock: frozen()})
 	//: no answer, and why.
-	if status != 0 || !errors.Is(err, health.AskUnreachable) {
+	if status != 0 || !errors.Is(err, corehealth.AskUnreachable) {
 		t.Fatalf("Ask() = %d, %v; want 0 and ASK_UNREACHABLE", status, err)
 	}
 	//: the dial's own error is kept for whoever logs the chain.
@@ -229,7 +230,7 @@ func TestAskTimesOutOnItsOwnBudget(t *testing.T) {
 	clk.Advance(askBudget)
 	got := <-done
 	//: no answer, because of the budget.
-	if got.status != 0 || !errors.Is(got.err, health.AskTimeout) {
+	if got.status != 0 || !errors.Is(got.err, corehealth.AskTimeout) {
 		t.Fatalf("Ask() = %d, %v; want 0 and ASK_TIMEOUT", got.status, got.err)
 	}
 	//: the budget it ran out of is named.
@@ -260,7 +261,7 @@ func TestAskEndsWithItsCallersContext(t *testing.T) {
 	cancel()
 	err := <-done
 	//: a timeout, as a departed caller's check is.
-	if !errors.Is(err, health.AskTimeout) {
+	if !errors.Is(err, corehealth.AskTimeout) {
 		t.Fatalf("Ask() error = %v, want ASK_TIMEOUT", err)
 	}
 	//: caused by the caller's own context.
@@ -283,7 +284,7 @@ func TestAskWithAnExpiredDeadlineAsksNothing(t *testing.T) {
 	defer cancel()
 	_, err := health.Ask(ctx, health.AskConfig{Addr: "127.0.0.1:" + port, Path: "/readyz", Clock: frozen()})
 	//: a timeout caused by the deadline.
-	if !errors.Is(err, health.AskTimeout) || !errors.Is(err, context.DeadlineExceeded) {
+	if !errors.Is(err, corehealth.AskTimeout) || !errors.Is(err, context.DeadlineExceeded) {
 		t.Fatalf("Ask() error = %v, want ASK_TIMEOUT caused by DeadlineExceeded", err)
 	}
 	//: nothing was asked.
@@ -389,7 +390,7 @@ func TestAskRefusesAConfigurationBeforeDialling(t *testing.T) {
 		t.Helper()
 		status, err := health.Ask(t.Context(), c.cfg)
 		//: refused, with no status.
-		if status != 0 || !errors.Is(err, health.AskMisconfigured) {
+		if status != 0 || !errors.Is(err, corehealth.AskMisconfigured) {
 			t.Fatalf("Ask() = %d, %v; want 0 and ASK_MISCONFIGURED", status, err)
 		}
 		//: naming what is wrong, never its value.

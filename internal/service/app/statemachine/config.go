@@ -176,7 +176,7 @@ func (s *settings[E, S]) finish(done func(error), key string, err error) (failed
 			return
 		}
 		//: the value travels as a field, never as the wrap origin.
-		failed = errs.Wrap(LoopPanicked, errs.WrapParams{}, errs.String("key", key), errs.String("call", "observe-end"),
+		failed = errs.Wrap(corestm.LoopPanicked, errs.WrapParams{}, errs.String("key", key), errs.String("call", "observe-end"),
 			errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
 	}()
 	done(err)

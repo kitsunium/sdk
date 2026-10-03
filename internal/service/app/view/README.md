@@ -27,5 +27,6 @@ What the engine adds over calling `html/template` directly:
   before the template runs, naming the path that carries them;
 - typed errors whose wire-safe half names no template, path, line or value.
 
-Error range `0.3.57.*`. Numbers in `BENCH.md`; maintainer rationale — including
+Error range `0.3.57.*`, declared in `internal/core/app/view` (ADR 0160).
+Numbers in `BENCH.md`; maintainer rationale — including
 the parse-once rule and the two profiled optimisations — in `CLAUDE.md`.

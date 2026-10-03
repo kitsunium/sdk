@@ -5,7 +5,6 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "mail",
     srcs = [
-        "codes.go",
         "compose.go",
         "composer.go",
         "composer_config.go",
@@ -65,11 +64,4 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

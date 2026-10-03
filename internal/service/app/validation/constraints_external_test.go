@@ -30,7 +30,7 @@ func TestRequiredRefusesTheZeroValue(t *testing.T) {
 	if violation.Path != "name" || violation.Rule != "required" {
 		t.Errorf("violation = %+v, want path=name rule=required", violation)
 	}
-	if violation.Code != svcvalidation.CodeRequired {
+	if violation.Code != corevalidation.CodeRequired {
 		t.Errorf("code = %v, want CodeRequired", violation.Code)
 	}
 	//: an explicit zero is indistinguishable from an absent one; the doc says
@@ -144,7 +144,7 @@ func TestMatchesCompilesAtConstruction(t *testing.T) {
 	if report.OK() {
 		t.Fatal("a non-matching value must be refused")
 	}
-	if report[0].Code != svcvalidation.CodePatternMismatch {
+	if report[0].Code != corevalidation.CodePatternMismatch {
 		t.Errorf("code = %v, want CodePatternMismatch", report[0].Code)
 	}
 	if _, err := svcvalidation.Matches("[unclosed"); err == nil {

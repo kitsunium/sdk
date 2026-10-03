@@ -8,6 +8,7 @@ import (
 	"errors"
 	"sync"
 
+	corestm "github.com/kitsunium/sdk/internal/core/app/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -34,7 +35,7 @@ func newKeyLocks() *keyLocks {
 }
 
 // acquire takes key's lock, waiting until it is free or ctx ends, and returns
-// the function that releases it. A context that ends first is [WaitAbandoned].
+// the function that releases it. A context that ends first is [corestm.WaitAbandoned].
 //
 // The release is idempotent — a second call does nothing — so a caller can
 // defer it for the panicking path and still hand it over to be called early:
@@ -90,12 +91,12 @@ func (l *keyLocks) drop(key string, lock *keyLock) {
 	}
 }
 
-// abandoned is [WaitAbandoned] joined with the context's error, so the
+// abandoned is [corestm.WaitAbandoned] joined with the context's error, so the
 // verdict keeps its 503 and errors.Is still finds context.Canceled or
 // context.DeadlineExceeded.
 func abandoned(cause error) error {
 	//: verdict first, cause second — the order errors.Join renders them in.
-	return errors.Join(errs.Wrap(WaitAbandoned, errs.WrapParams{}), cause)
+	return errors.Join(errs.Wrap(corestm.WaitAbandoned, errs.WrapParams{}), cause)
 }
 
 // hookScope marks a context handed to an OnEnter hook with the lock table of

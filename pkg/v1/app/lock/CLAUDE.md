@@ -18,8 +18,8 @@ and the keepalive helper, so consumers depend only on `pkg/v1`.
 | `NewFileLocker(cfg)` | one machine, via `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081); leases **never expire**; does NOT implement `Deadliner`; a symbolic link or reparse point at the lock path is REFUSED, never followed (ADR 0082), and so is one at a PARENT component where anybody could have planted it (ADR 0083). "Anybody" is a mode bit on Unix and the directory's DACL on Windows, where "may add an entry" without "may delete a child" is the sticky shape and is accepted (ADR 0084, ADR 0086) |
 | `Keepalive(ctx, lease, cfg)` | background renewal → a context cancelled when the lease is lost |
 | `LockMisconfigured` / `LockNotHeld` / `LockBackendFailed` / `LockNameRejected` | core sentinels |
-| `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` / `LockPathRedirected` | service sentinels |
-| `LockFileReplaced` | service sentinel, and the only one this domain DETECTS rather than prevents: the file a lease holds was unlinked or replaced while held, so the exclusion is gone and the holder is told (ADR 0083) |
+| `LockFenceCorrupt` / `LockDirectoryUnsafe` / `LockKeepaliveLost` / `LockPathRedirected` | the lockers' sentinels (`0.3.51.*`), declared in `core/app/lock` |
+| `LockFileReplaced` | the lockers' fifth sentinel, and the only one this domain DETECTS rather than prevents: the file a lease holds was unlinked or replaced while held, so the exclusion is gone and the holder is told (ADR 0083) |
 
 ## Conventions
 

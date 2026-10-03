@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"strings"
 
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -62,10 +63,10 @@ var (
 // password with reserved characters is written %40 for "@".
 //
 // The result is checked exactly as NewSMTP checks a configuration, so a URL
-// with credentials and tls=none fails here with [AuthInsecure] rather than at
+// with credentials and tls=none fails here with [coremail.AuthInsecure] rather than at
 // construction. On any failure it returns the zero SMTPConfig.
 //
-// A refusal is [InvalidURL] with a clause, and it NEVER quotes the URL or any
+// A refusal is [coremail.InvalidURL] with a clause, and it NEVER quotes the URL or any
 // part of it — the userinfo is the password, and a URL that failed to parse is
 // the one whose parts are not where they should be. url.Parse's own message
 // quotes its input and is therefore dropped.
@@ -191,5 +192,5 @@ func portOf(host, written string, mode TLSMode) (port int, err error) {
 // invalidURL is the InvalidURL verdict with its clause.
 func invalidURL(problem string) error {
 	//: the clause, and nothing from the URL.
-	return errs.Wrap(InvalidURL, errs.WrapParams{}, errs.String("problem", problem))
+	return errs.Wrap(coremail.InvalidURL, errs.WrapParams{}, errs.String("problem", problem))
 }

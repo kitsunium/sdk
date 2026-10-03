@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -109,7 +110,7 @@ func TestASendRacingCloseLandsOrIsRefused(t *testing.T) {
 		t.Fatalf("Close() = %v", closeErr)
 	}
 	for err := range refusals {
-		if !errs.HasCode(err, spool.CodeSpoolClosed) {
+		if !errs.HasCode(err, corespool.CodeSpoolClosed) {
 			t.Errorf("a Send racing Close = %v, want nil or SpoolClosed", err)
 		}
 	}

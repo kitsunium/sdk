@@ -52,8 +52,8 @@ type Printer struct {
 
 // NewPrinter returns a [Printer] rendering tag out of catalog, or refuses.
 //
-// Refused: a zero tag ([CatalogInvalid]) and a language with no reviewed CLDR
-// rule ([UnsupportedLanguage]). Both are wiring faults — a request never
+// Refused: a zero tag ([corei18n.CatalogInvalid]) and a language with no reviewed CLDR
+// rule ([corei18n.UnsupportedLanguage]). Both are wiring faults — a request never
 // reaches here with an arbitrary tag, because negotiation returns one of the
 // supported set — so refusing at construction costs a startup failure and buys
 // a render path with no language it cannot plural.
@@ -66,7 +66,7 @@ func NewPrinter(catalog corei18n.Catalog, tag corei18n.TagValue) (printer *Print
 	//: a renderer with no language cannot be built.
 	if tag.IsZero() {
 		//: ADR 0031: refuse rather than default to a language the SDK picked.
-		return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the printer tag is unset"))
+		return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the printer tag is unset"))
 	}
 	//: build the chain, refusing any step whose language has no rules.
 	chain, err := buildChain(catalog, tag)

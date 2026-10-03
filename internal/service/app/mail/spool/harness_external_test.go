@@ -13,7 +13,6 @@ import (
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 	"github.com/kitsunium/sdk/internal/service/app/mail/spool"
 )
 
@@ -98,7 +97,7 @@ func (s *scripted) seen() ([]coremail.MessageValue, []spool.AttemptValue) {
 
 // relayDown is the failure of a relay nobody listens on.
 func relayDown(int) error {
-	return errs.Wrap(svcmail.DialFailed, errs.WrapParams{}, errs.String("host", "relay.test"))
+	return errs.Wrap(coremail.DialFailed, errs.WrapParams{}, errs.String("host", "relay.test"))
 }
 
 // newSpool builds a spool over cfg's transport with a manual clock and a

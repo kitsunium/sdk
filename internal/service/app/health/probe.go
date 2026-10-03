@@ -94,13 +94,13 @@ func (h *health) readiness(ctx context.Context, current phase) corehealth.Report
 		//: no check is run — dialling a dependency to reconfirm a decision
 		//: already taken would only add load to a shutdown.
 		return h.shortCircuit(corehealth.ProbeReadiness, "draining",
-			corehealth.StatusUnhealthy, Draining)
+			corehealth.StatusUnhealthy, corehealth.Draining)
 	}
 	//: still coming up: not ready, and not for a reason a dependency knows.
 	if current == phaseStarting {
 		//: no check is run, for the same reason.
 		return h.shortCircuit(corehealth.ProbeReadiness, "starting",
-			corehealth.StatusUnhealthy, StartupPending)
+			corehealth.StatusUnhealthy, corehealth.StartupPending)
 	}
 	report := h.evaluateAll(ctx, corehealth.ProbeReadiness)
 	h.announce(ctx, report.Status)
@@ -202,7 +202,7 @@ func (h *health) evaluateAll(ctx context.Context, probe corehealth.Probe) corehe
 		//: the conservative answer, under the domain's own code; the cause
 		//: travels as a field, never as the public text.
 		return h.shortCircuit(probe, "collect", corehealth.StatusUnhealthy,
-			kerrs.Wrap(CheckFailed, kerrs.WrapParams{}, kerrs.String("cause", err.Error())))
+			kerrs.Wrap(corehealth.CheckFailed, kerrs.WrapParams{}, kerrs.String("cause", err.Error())))
 	}
 	//: no checks at all is healthy: the process answering IS the evidence
 	//: (ADR 0031). That is also the seed the fold starts from.

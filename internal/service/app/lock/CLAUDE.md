@@ -12,7 +12,9 @@ The concrete lockers implementing `internal/core/app/lock` (**ADR 0052**):
 - **`Keepalive`** — renews a lease in the background and **cancels a derived
   context** the instant the lease is lost.
 
-Stdlib-only. Code range: `0.3.51.*`, plus the core sentinels `0.2.21.*`.
+Stdlib-only. Code range: `0.3.51.*`, plus the core sentinels `0.2.21.*` —
+both declared in `internal/core/app/lock` (ADR 0160); this package declares no
+code and raises the core's.
 
 ## The two backends are not two speeds
 
@@ -98,7 +100,6 @@ process pass the gate and then block on a `flock` its own process holds.
 | `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/data/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 | `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/app/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner` |
-| `codes.go` / `errors.go` | the `0.3.51.*` codes and their five sentinels — see §Sentinels |
 
 ## Platform matrix (ADR 0018)
 
@@ -318,6 +319,9 @@ there is nothing to race.
 
 ## Sentinels
 
+The lockers' five, declared with their codes in `internal/core/app/lock`
+(ADR 0160) and raised here:
+
 | Sentinel | Code | When |
 |---|---|---|
 | `LockFenceCorrupt` | `0.3.51.1` | no next token can be issued: the lock file is not a decimal counter (`condition=unparseable`), or it holds `2^64-1` and `previous+1` would wrap to zero (`condition=exhausted`). **Refused, never reset** — a restarted fence, and a wrapped one, both reissue numbers the resource already accepted |
@@ -326,8 +330,8 @@ there is nothing to race.
 | `LockPathRedirected` | `0.3.51.4` | the lock path is a symbolic link (Unix) or a reparse point (Windows), so the lock and its ledger would land on a file whoever planted it chose. **Not** `LOCK_BACKEND_FAILED`: nothing failed, and that code invites the one wrong response — a retry. Since ADR 0083 it also covers an indirection at a PARENT component planted where anybody could have planted it, with the component, the configured directory and the target in its fields |
 | `LockFileReplaced` | `0.3.51.5` | the file a lease holds is no longer the file its name leads to — unlinked, or replaced, while held. Reported at `Acquire` (the window between the open and the `flock`) and at `Extend` (the only call a holder makes during the section). **Detection, never prevention**: the split still happens and the holder is told |
 
-Plus the core sentinels `0.2.21.*`, restated through `errs.Wrap` and never
-re-`Define`d here.
+Plus the port's sentinels `0.2.21.*`, restated through `errs.Wrap`. No
+sentinel is `Define`d here.
 
 ## Conventions
 

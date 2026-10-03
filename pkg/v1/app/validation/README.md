@@ -104,15 +104,15 @@ const (
     // Unbounded is the [Length] / [Count] upper bound that means "no ceiling".
     Unbounded int = svcvalidation.Unbounded
     // CodeRequired identifies an absent value.
-    CodeRequired errs.Code = svcvalidation.CodeRequired
+    CodeRequired errs.Code = corevalidation.CodeRequired
     // CodeOutOfRange identifies an ordered value outside its bounds.
-    CodeOutOfRange errs.Code = svcvalidation.CodeOutOfRange
+    CodeOutOfRange errs.Code = corevalidation.CodeOutOfRange
     // CodeLengthOutOfRange identifies a size outside its bounds.
-    CodeLengthOutOfRange errs.Code = svcvalidation.CodeLengthOutOfRange
+    CodeLengthOutOfRange errs.Code = corevalidation.CodeLengthOutOfRange
     // CodeNotInSet identifies a value outside its allowed set.
-    CodeNotInSet errs.Code = svcvalidation.CodeNotInSet
+    CodeNotInSet errs.Code = corevalidation.CodeNotInSet
     // CodePatternMismatch identifies a string that did not match its pattern.
-    CodePatternMismatch errs.Code = svcvalidation.CodePatternMismatch
+    CodePatternMismatch errs.Code = corevalidation.CodePatternMismatch
 )
 ```
 
@@ -130,9 +130,9 @@ var (
     // cannot honour — an inverted interval, an empty set, a bad pattern.
     Misconfigured = corevalidation.ConstraintMisconfigured
     // InvalidRule is returned by Struct when a validate tag cannot be compiled.
-    InvalidRule = svcvalidation.InvalidRule
+    InvalidRule = corevalidation.InvalidRule
     // UnsupportedTarget is returned by Struct when T is not a struct type.
-    UnsupportedTarget = svcvalidation.UnsupportedTarget
+    UnsupportedTarget = corevalidation.UnsupportedTarget
 )
 ```
 

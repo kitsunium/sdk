@@ -67,12 +67,12 @@ func TestPartialStartUnwindsTheStartedPrefixInReverse(t *testing.T) {
 		"stop:three", "stop:two", "stop:one",
 	})
 	//: the aggregate answers both questions a caller can ask.
-	assertHasCode(t, err, svclc.CodeStartFailed, "the SDK's own verdict")
+	assertHasCode(t, err, corelc.CodeStartFailed, "the SDK's own verdict")
 	if !errors.Is(err, errDial) {
 		t.Fatalf("the component's own error did not survive: %v", err)
 	}
 	//: a clean unwind adds no second verdict.
-	if kerrs.HasCode(err, svclc.CodeUnwindFailed) {
+	if kerrs.HasCode(err, corelc.CodeUnwindFailed) {
 		t.Fatalf("a clean unwind reported UNWIND_FAILED: %v", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestAPanickingStartIsRecoveredAndStillUnwinds(t *testing.T) {
 	}
 	assertCalls(t, rec.snapshot(), []string{"start:db", "stop:db"})
 	assertHasCode(t, err, corelc.CodeComponentPanicked, "a recovered panic")
-	assertHasCode(t, err, svclc.CodeStartFailed, "the start verdict")
+	assertHasCode(t, err, corelc.CodeStartFailed, "the start verdict")
 }
 
 // TestABrokenUnwindNeverHidesTheStartFailure. A teardown that also fails is a
@@ -151,9 +151,9 @@ func TestABrokenUnwindNeverHidesTheStartFailure(t *testing.T) {
 	if err == nil {
 		t.Fatalf("Start succeeded despite a failing component")
 	}
-	assertHasCode(t, err, svclc.CodeStartFailed, "the start verdict")
-	assertHasCode(t, err, svclc.CodeUnwindFailed, "the unwind verdict")
-	assertHasCode(t, err, svclc.CodeStopFailed, "the component's stop verdict")
+	assertHasCode(t, err, corelc.CodeStartFailed, "the start verdict")
+	assertHasCode(t, err, corelc.CodeUnwindFailed, "the unwind verdict")
+	assertHasCode(t, err, corelc.CodeStopFailed, "the component's stop verdict")
 	//: and BOTH original errors survive, so neither investigation is lost.
 	if !errors.Is(err, errDirtySchema) || !errors.Is(err, errFlushShort) {
 		t.Fatalf("an original error was swallowed: %v", err)

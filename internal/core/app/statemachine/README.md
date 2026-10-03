@@ -18,7 +18,8 @@ func (o *orders) All(ctx context.Context) iter.Seq2[Order, error]          { …
 `RecordValue` is an entity's state, since when, and its latest `StepValue`s;
 a `Trigger` — start, event, delay, deadline, guard — says what fired a step,
 with stable values and `ParseTrigger` for its name. `TriggerUnknown`
-(`0.2.56.1`) refuses a name that is none of the five.
+(`0.2.56.1`) refuses a name that is none of the five. The engine's twenty-one
+codes (`0.3.88.*`) and their sentinels are declared here too (ADR 0160).
 
 The engine — declarations, per-entity locks, hooks, the agenda and the loop —
 is `internal/service/app/statemachine`. Public facade: `pkg/v1/app/statemachine`. See

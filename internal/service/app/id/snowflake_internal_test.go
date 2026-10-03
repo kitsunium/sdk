@@ -5,6 +5,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 )
 
 // steppedClock is a scripted Clock: each Now() consumes the next instant in
@@ -58,11 +60,11 @@ func Test_snowflakeGen_tillNext(t *testing.T) {
 		//: the clock ticks forward — normal overflow wait, returns the new ms.
 		{"advances past prev", []int64{100, 100, 101}, 100, nil, 101},
 		//: the clock regresses below prev — unwaitable, must fail fast.
-		{"regresses below prev", []int64{100, 99}, 100, ClockBackwards, 0},
+		{"regresses below prev", []int64{100, 99}, 100, coreid.ClockBackwards, 0},
 		//: a regression on the very first read is caught immediately.
-		{"regresses immediately", []int64{50}, 100, ClockBackwards, 0},
+		{"regresses immediately", []int64{50}, 100, coreid.ClockBackwards, 0},
 		//: the clock STALLS at prev forever — the spin budget must end the wait.
-		{"stalls at prev", []int64{100}, 100, ClockStalled, 0},
+		{"stalls at prev", []int64{100}, 100, coreid.ClockStalled, 0},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -110,12 +112,12 @@ func Test_snowflakeGen_New(t *testing.T) {
 		wantSentinel  error
 	}
 	tests := []tc{
-		{"a clock that regresses during the wait", 500, 499, ClockBackwards},
-		{"a clock that regresses far during the wait", 500, 0, ClockBackwards},
+		{"a clock that regresses during the wait", 500, 499, coreid.ClockBackwards},
+		{"a clock that regresses far during the wait", 500, 0, coreid.ClockBackwards},
 		//: a clock pinned at the exhausted millisecond is indistinguishable
 		//: from a normal sub-millisecond remainder for a while, so the wait
 		//: only gives up once the spin budget is exhausted.
-		{"a clock stalled at the exhausted millisecond", 500, 500, ClockStalled},
+		{"a clock stalled at the exhausted millisecond", 500, 500, coreid.ClockStalled},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

@@ -62,8 +62,8 @@ internal/
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, net, proc,
 │                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
-│                       mail, resilience, scheduler, statemachine, validation,
-│                       view},
+│                       mail, mail/spool, resilience, scheduler, statemachine,
+│                       validation, view},
 │                  data/{cache, codec, codec/scratch, queue, sql, transform,
 │                        vfs},
 │                  observe/{logger, logger/{level, writer}, metrics, otel,

@@ -157,7 +157,7 @@ func (t *smtpTransport) deliver(ctx context.Context, deliveries []coremail.Deliv
 	if clientErr != nil {
 		//: the greeting verdict wins; the socket's own close error is reported
 		//: only if there is no verdict to report instead.
-		return cmp.Or[error](wrapAs(GreetingFailed, clientErr, errs.String("stage", "greeting")), conn.Close())
+		return cmp.Or[error](wrapAs(coremail.GreetingFailed, clientErr, errs.String("stage", "greeting")), conn.Close())
 	}
 	current := &session{transport: t, cfg: t.cfg, client: client}
 	runErr := current.run(deliveries)
@@ -193,7 +193,7 @@ func (s *session) run(deliveries []coremail.DeliveryValue) error {
 	if quitErr := s.client.Quit(); quitErr != nil {
 		//: GreetingFailed — every message was accepted, and the caller still
 		//: hears that the close was not clean.
-		return wrapAs(GreetingFailed, quitErr, errs.String("stage", "quit"))
+		return wrapAs(coremail.GreetingFailed, quitErr, errs.String("stage", "quit"))
 	}
 	//: accepted by the next hop. Not delivered — see coremail.Transport.
 	return nil
@@ -205,7 +205,7 @@ func (s *session) negotiate() error {
 	//: EHLO before anything, so the extension list is populated.
 	if helloErr := s.client.Hello(s.cfg.resolvedLocalName()); helloErr != nil {
 		//: GreetingFailed.
-		return wrapAs(GreetingFailed, helloErr, errs.String("stage", "ehlo"))
+		return wrapAs(coremail.GreetingFailed, helloErr, errs.String("stage", "ehlo"))
 	}
 	//: STARTTLS, when that is the configured mode.
 	if s.cfg.TLS == TLSStartTLS {
@@ -227,14 +227,14 @@ func (s *session) startTLS() error {
 	if offered, _ := s.client.Extension(extensionStartTLS); !offered {
 		//: TLSRequired. This is the branch an active attacker aims for by
 		//: stripping one line from the EHLO response — and it ends the session.
-		return errs.Wrap(TLSRequired, errs.WrapParams{}, errs.String("host", s.cfg.Host))
+		return errs.Wrap(coremail.TLSRequired, errs.WrapParams{}, errs.String("host", s.cfg.Host))
 	}
 	//: net/smtp.StartTLS passes the config to tls.Client UNCHANGED — it does
 	//: not fill ServerName — so an unnamed config would fail the handshake
 	//: outright, and an InsecureSkipVerify one would succeed against anybody.
 	if tlsErr := s.client.StartTLS(s.transport.tlsConfig()); tlsErr != nil {
 		//: TLSFailed: a refused command, an untrusted chain or a name mismatch.
-		return wrapAs(TLSFailed, tlsErr, errs.String("host", s.cfg.Host))
+		return wrapAs(coremail.TLSFailed, tlsErr, errs.String("host", s.cfg.Host))
 	}
 	//: encrypted from here on.
 	return nil
@@ -253,13 +253,13 @@ func (s *session) authenticate() error {
 	//: container is every relay one hop away.
 	if _, encrypted := s.client.TLSConnectionState(); !encrypted {
 		//: AuthInsecure, before a single credential octet is written.
-		return errs.Wrap(AuthInsecure, errs.WrapParams{},
+		return errs.Wrap(coremail.AuthInsecure, errs.WrapParams{},
 			errs.String("host", s.cfg.Host), errs.String("tls_mode", s.cfg.TLS.String()))
 	}
 	//: a server that advertises no AUTH has nothing to offer the credential to.
 	if offered, _ := s.client.Extension(extensionAuth); !offered {
 		//: AuthFailed, again before anything is written.
-		return errs.Wrap(AuthFailed, errs.WrapParams{},
+		return errs.Wrap(coremail.AuthFailed, errs.WrapParams{},
 			errs.String("host", s.cfg.Host), errs.String("problem", "server advertised no AUTH extension"))
 	}
 	//: PLAIN over an encrypted session (RFC 4954 §4). The identity is empty:
@@ -268,7 +268,7 @@ func (s *session) authenticate() error {
 	if authErr := s.client.Auth(smtp.PlainAuth("", s.cfg.Username, s.cfg.Password, s.cfg.Host)); authErr != nil {
 		//: AuthFailed. The cause is the server's reply; the password is not in
 		//: it, because net/smtp does not echo the credential it sent.
-		return wrapAs(AuthFailed, authErr, errs.String("host", s.cfg.Host))
+		return wrapAs(coremail.AuthFailed, authErr, errs.String("host", s.cfg.Host))
 	}
 	//: authenticated.
 	return nil
@@ -279,7 +279,7 @@ func (s *session) sendOne(delivery coremail.DeliveryValue) error {
 	//: the return path first (RFC 5321 §3.3).
 	if mailErr := s.client.Mail(delivery.Envelope.From); mailErr != nil {
 		//: SendRefused; the address is the caller's own and travels as a field.
-		return wrapAs(SendRefused, mailErr, errs.String("command", "MAIL"))
+		return wrapAs(coremail.SendRefused, mailErr, errs.String("command", "MAIL"))
 	}
 	//: one RCPT per recipient, Bcc included — this is where a blind recipient
 	//: exists, and it exists nowhere in the bytes that follow.
@@ -288,25 +288,25 @@ func (s *session) sendOne(delivery coremail.DeliveryValue) error {
 		//: Public, because a Bcc recipient is a secret of the message.
 		if rcptErr := s.client.Rcpt(recipient); rcptErr != nil {
 			//: refused.
-			return wrapAs(SendRefused, rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
+			return wrapAs(coremail.SendRefused, rcptErr, errs.String("command", "RCPT"), errs.Int("recipient", index))
 		}
 	}
 	writer, dataErr := s.client.Data()
 	//: SendRefused.
 	if dataErr != nil {
 		//: the server declined the DATA phase.
-		return wrapAs(SendRefused, dataErr, errs.String("command", "DATA"))
+		return wrapAs(coremail.SendRefused, dataErr, errs.String("command", "DATA"))
 	}
 	//: net/smtp's dataCloser dot-stuffs, so a body line of "." cannot end the
 	//: message early (RFC 5321 §4.5.2).
 	if _, writeErr := writer.Write(delivery.Raw); writeErr != nil {
 		//: SendRefused: the write failed mid-message.
-		return wrapAs(SendRefused, writeErr, errs.String("command", "DATA"))
+		return wrapAs(coremail.SendRefused, writeErr, errs.String("command", "DATA"))
 	}
 	//: Close sends the terminating dot and reads the server's verdict.
 	if closeErr := writer.Close(); closeErr != nil {
 		//: SendRefused: this is where a size limit or a content filter speaks.
-		return wrapAs(SendRefused, closeErr, errs.String("command", "DATA-END"))
+		return wrapAs(coremail.SendRefused, closeErr, errs.String("command", "DATA-END"))
 	}
 	//: accepted by this hop.
 	return nil
@@ -320,7 +320,7 @@ func (t *smtpTransport) dial(ctx context.Context) (conn net.Conn, err error) {
 	//: DialFailed.
 	if dialErr != nil {
 		//: the host is the caller's own configuration and is safe to report.
-		return nil, wrapAs(DialFailed, dialErr, errs.String("address", t.address))
+		return nil, wrapAs(coremail.DialFailed, dialErr, errs.String("address", t.address))
 	}
 	//: STARTTLS and cleartext both continue on the raw socket.
 	if t.cfg.TLS != TLSImplicit {
@@ -335,7 +335,7 @@ func (t *smtpTransport) dial(ctx context.Context) (conn net.Conn, err error) {
 		//: the socket is closed here because no client owns it yet; the
 		//: handshake verdict wins, and the close error is reported only if
 		//: there is somehow no handshake error to report instead.
-		closed := cmp.Or[error](wrapAs(TLSFailed, handshakeErr, errs.String("address", t.address)), raw.Close())
+		closed := cmp.Or[error](wrapAs(coremail.TLSFailed, handshakeErr, errs.String("address", t.address)), raw.Close())
 		//: TLSFailed.
 		return nil, closed
 	}

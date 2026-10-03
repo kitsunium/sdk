@@ -111,7 +111,7 @@ func classify(
 	//: the sentinel from a listener that never declared the authority.
 	if !sub.MayHalt {
 		report.Failed++
-		*failures = append(*failures, kerrs.Wrap(HaltNotPermitted, kerrs.WrapParams{},
+		*failures = append(*failures, kerrs.Wrap(corev.HaltNotPermitted, kerrs.WrapParams{},
 			kerrs.String("listener", sub.Name), kerrs.String("event", eventType.String())))
 		//: the permission means something: propagation continues.
 		return false
@@ -131,7 +131,7 @@ func classify(
 // CodeListenerFailed) and the caller's own errors.Is both answer.
 func joinListenerFailure(name string, eventType corev.EventType, err error) error {
 	//: verdict first, cause second — the order errors.Join renders them in.
-	return errors.Join(kerrs.Wrap(ListenerFailed, kerrs.WrapParams{},
+	return errors.Join(kerrs.Wrap(corev.ListenerFailed, kerrs.WrapParams{},
 		kerrs.String("listener", name), kerrs.String("event", eventType.String())), err)
 }
 

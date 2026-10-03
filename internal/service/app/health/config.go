@@ -24,7 +24,7 @@ import (
 const DefaultCheckTimeout time.Duration = time.Second
 
 // MaxCacheAge is the ceiling on [corehealth.ReadinessCheckValue.MaxAge]. A
-// registration above it is REFUSED ([StaleCacheWindow]), never clamped.
+// registration above it is REFUSED ([corehealth.StaleCacheWindow]), never clamped.
 //
 // Thirty seconds is three conventional poll periods. Past that, at most three
 // consecutive probes could replay one measurement — which is already longer
@@ -93,7 +93,7 @@ type Config struct {
 	// returns nil, so an unsupervised binary stays silent rather than
 	// failing.
 	Notify bool
-	// OnNotifyError receives a [NotifyFailed] when an opt-in sd_notify
+	// OnNotifyError receives a [corehealth.NotifyFailed] when an opt-in sd_notify
 	// datagram could not be delivered.
 	//
 	// It is a second hook rather than a second argument to OnReport because

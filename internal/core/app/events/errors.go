@@ -1,12 +1,16 @@
-// Package events — declares the sentinel *errs.Error port outcomes. Each
-// var's name equals its errs.Define Reason in SCREAMING_SNAKE form.
+// Package events — declares the sentinel *errs.Error outcomes of the domain:
+// the registration refusals, the control sentinel, and the bus's verdicts on
+// a dispatch. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+// form.
 package events
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // exitConfig matches sysexits EX_CONFIG (78). A refused registration is a
 // permanent wiring fault: the same Subscribe will be refused forever, and the
-// fix is a code change at the call site, never a retry.
+// fix is a code change at the call site, never a retry. A listener that halts
+// without the authority to is one too: the same dispatch will refuse it
+// identically forever, and the fix is a field at the registration site.
 const exitConfig int = 78
 
 var (
@@ -73,9 +77,37 @@ var (
 	// "stop", matched with errors.Is, never rendered to a user.
 	//
 	// Only a subscription with MayHalt set may return it. From any other
-	// listener it is a HALT_NOT_PERMITTED failure (internal/service/app/events) and the
-	// dispatch continues.
+	// listener it is a [HaltNotPermitted] failure and the dispatch continues.
 	Halt = errs.Define(CodeHalt, "HALT",
 		"A listener stopped the event dispatch",
 		"core/app/events: control sentinel consumed by the bus and reported through DispatchValue; never returned to a publisher")
+
+	// The bus's verdicts on a dispatch, raised by internal/service/app/events as it
+	// publishes. They are declared here, with the registration refusals, so that
+	// the domain's codes and sentinels are in one place (ADR 0160).
+
+	// ListenerFailed is joined with the listener's own error when that
+	// listener returns one. It is a SEPARATE error in an errors.Join rather
+	// than a wrapper around the listener's error on purpose: errs.Wrap would
+	// hit the origin-wins rule (CLAUDE.md rule 6) and inherit the listener's
+	// code, so a caller could no longer ask "did any listener fail?" without
+	// first knowing every code any listener might produce. Side by side, both
+	// errs.HasCode(err, CodeListenerFailed) and the caller's own errors.Is
+	// answer — the shape service/app/lifecycle already uses for the same reason.
+	ListenerFailed = errs.Define(CodeListenerFailed, "LISTENER_FAILED",
+		"An event listener reported an error",
+		"service/app/events: listener returned an error and the dispatch continued; the fields name the listener and the event type")
+
+	// HaltNotPermitted is returned for a listener that returned the Halt
+	// control sentinel without SubscriptionValue.MayHalt.
+	//
+	// The dispatch is NOT stopped. Honouring the halt anyway would make the
+	// permission decorative, and silently swallowing it would leave a
+	// listener convinced it had vetoed an event that every one of its
+	// siblings then saw — the more expensive of the two silences, because it
+	// is invisible until the consequences diverge.
+	HaltNotPermitted = errs.Define(CodeHaltNotPermitted, "HALT_NOT_PERMITTED",
+		"A listener tried to stop the dispatch without the authority to",
+		"service/app/events: listener returned Halt but its subscription has MayHalt false; propagation continued",
+		errs.WithExitCode(exitConfig))
 )

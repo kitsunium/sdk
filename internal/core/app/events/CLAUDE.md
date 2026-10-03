@@ -5,11 +5,14 @@
 Declares the **in-process event bus port**: `Listener` (react to one event),
 `Bus` (dispatch a published event to the listeners registered for its type),
 the `SubscriptionValue` / `DispatchValue` domain values, the `Priority` that
-orders them, and the typed sentinels. Admitted by **ADR 0053**. The engine, the
-ordered insert, the panic guard and the typed `On[E]` front end are concrete
-and live in `internal/service/app/events`.
+orders them, and every typed sentinel of the domain. Admitted by **ADR 0053**.
+The engine, the ordered insert, the panic guard and the typed `On[E]` front end
+are concrete and live in `internal/service/app/events`.
 
-Code range: `0.2.22.*` (ADR 0053).
+Code ranges: `0.2.22.*` (ADR 0053) for the registration refusals and the
+`Halt` control sentinel, and `0.3.52.*` for the bus's verdicts on a dispatch —
+allocated to the service, which raises them, and declared here since ADR 0160.
+A code keeps its value when its declaration moves.
 
 ## The frontier — `events` is not `queue`
 
@@ -40,8 +43,8 @@ are different statements about different guarantees.
 | `events.go` | `EventType = reflect.Type`, `Listener func(ctx, any) error`, `Bus interface { Subscribe(EventType, SubscriptionValue) error; Unsubscribe(EventType, string) error; Publish(ctx, any) (DispatchValue, error) }` |
 | `events_subscription.go` | `Priority` + `PriorityNormal`, `SubscriptionValue` — `Name` / `Priority` / `MayHalt` / `Listener` |
 | `events_dispatch.go` | `DispatchValue` — `Delivered` / `Failed` / `Halted` / `HaltedBy` / `Skipped` |
-| `codes.go` | `Code*` constants — range 0.2.22.* |
-| `errors.go` | `InvalidSubscription` / `DuplicateListener` / `UnknownListener` / `InvalidEventType` / `ListenerPanicked` / `Halt` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.22.* and 0.3.52.* |
+| `errors.go` | `InvalidSubscription` / `DuplicateListener` / `UnknownListener` / `InvalidEventType` / `ListenerPanicked` / `Halt`, and the dispatch verdicts `ListenerFailed` / `HaltNotPermitted` (`errs.Define`) |
 
 ## Conventions
 

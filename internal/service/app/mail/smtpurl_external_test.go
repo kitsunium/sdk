@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 )
@@ -98,23 +99,23 @@ func TestParseURLRefusesWithoutQuotingTheURL(t *testing.T) {
 	}
 	credentials := "bob:" + urlPassword + "@"
 	tests := []tc{
-		{"not a URL", "%zz" + urlPassword, svcmail.CodeInvalidURL},
-		{"an opaque URL", "smtp:" + urlPassword, svcmail.CodeInvalidURL},
-		{"another scheme", "https://" + credentials + "relay.example", svcmail.CodeInvalidURL},
-		{"a path", "smtp://" + credentials + "relay.example/inbox", svcmail.CodeInvalidURL},
-		{"a fragment", "smtp://" + credentials + "relay.example#x", svcmail.CodeInvalidURL},
-		{"an unknown parameter", "smtp://" + credentials + "relay.example?tsl=none", svcmail.CodeInvalidURL},
-		{"a parameter named like the password", "smtp://relay.example?" + urlPassword, svcmail.CodeInvalidURL},
-		{"tls twice", "smtp://" + credentials + "relay.example?tls=starttls&tls=starttls", svcmail.CodeInvalidURL},
-		{"an unknown tls mode", "smtp://" + credentials + "relay.example?tls=opportunistic", svcmail.CodeInvalidURL},
-		{"smtps asking for STARTTLS", "smtps://" + credentials + "relay.example?tls=starttls", svcmail.CodeInvalidURL},
-		{"smtps asking for plaintext", "smtps://" + credentials + "relay.example?tls=none", svcmail.CodeInvalidURL},
-		{"no host", "smtp://" + credentials + ":587", svcmail.CodeInvalidURL},
-		{"port zero", "smtp://" + credentials + "relay.example:0", svcmail.CodeInvalidURL},
-		{"a port past the range", "smtp://" + credentials + "relay.example:70000", svcmail.CodeInvalidURL},
-		{"a port that is not a number", "smtp://" + credentials + "relay.example:x", svcmail.CodeInvalidURL},
-		{"credentials in the clear", "smtp://" + credentials + "relay.example?tls=none", svcmail.CodeAuthInsecure},
-		{"a password without a user", "smtp://:" + urlPassword + "@relay.example", svcmail.CodeInvalidConfig},
+		{"not a URL", "%zz" + urlPassword, coremail.CodeInvalidURL},
+		{"an opaque URL", "smtp:" + urlPassword, coremail.CodeInvalidURL},
+		{"another scheme", "https://" + credentials + "relay.example", coremail.CodeInvalidURL},
+		{"a path", "smtp://" + credentials + "relay.example/inbox", coremail.CodeInvalidURL},
+		{"a fragment", "smtp://" + credentials + "relay.example#x", coremail.CodeInvalidURL},
+		{"an unknown parameter", "smtp://" + credentials + "relay.example?tsl=none", coremail.CodeInvalidURL},
+		{"a parameter named like the password", "smtp://relay.example?" + urlPassword, coremail.CodeInvalidURL},
+		{"tls twice", "smtp://" + credentials + "relay.example?tls=starttls&tls=starttls", coremail.CodeInvalidURL},
+		{"an unknown tls mode", "smtp://" + credentials + "relay.example?tls=opportunistic", coremail.CodeInvalidURL},
+		{"smtps asking for STARTTLS", "smtps://" + credentials + "relay.example?tls=starttls", coremail.CodeInvalidURL},
+		{"smtps asking for plaintext", "smtps://" + credentials + "relay.example?tls=none", coremail.CodeInvalidURL},
+		{"no host", "smtp://" + credentials + ":587", coremail.CodeInvalidURL},
+		{"port zero", "smtp://" + credentials + "relay.example:0", coremail.CodeInvalidURL},
+		{"a port past the range", "smtp://" + credentials + "relay.example:70000", coremail.CodeInvalidURL},
+		{"a port that is not a number", "smtp://" + credentials + "relay.example:x", coremail.CodeInvalidURL},
+		{"credentials in the clear", "smtp://" + credentials + "relay.example?tls=none", coremail.CodeAuthInsecure},
+		{"a password without a user", "smtp://:" + urlPassword + "@relay.example", coremail.CodeInvalidConfig},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

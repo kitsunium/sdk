@@ -205,6 +205,7 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 	svcspool "github.com/kitsunium/sdk/internal/service/app/mail/spool"
 )
@@ -376,52 +377,52 @@ var (
 	// rather than truncated.
 	HeaderTooLong = coremail.HeaderTooLong
 	// ComposeFailed is returned when the MIME body could not be assembled.
-	ComposeFailed = svcmail.ComposeFailed
+	ComposeFailed = coremail.ComposeFailed
 	// InvalidConfig is returned by [NewSMTP] for a configuration that cannot be
 	// honoured as written — including a [TLSUnset] mode.
-	InvalidConfig = svcmail.InvalidConfig
+	InvalidConfig = coremail.InvalidConfig
 	// DialFailed is returned when the server could not be reached, or the
 	// context ended before the greeting.
-	DialFailed = svcmail.DialFailed
+	DialFailed = coremail.DialFailed
 	// GreetingFailed is returned when the connection opened and the SMTP
 	// conversation did not.
-	GreetingFailed = svcmail.GreetingFailed
+	GreetingFailed = coremail.GreetingFailed
 	// TLSRequired is returned when STARTTLS was required and the server never
 	// offered it. The session is ended, never downgraded.
-	TLSRequired = svcmail.TLSRequired
+	TLSRequired = coremail.TLSRequired
 	// TLSFailed is returned when the handshake or the STARTTLS command failed.
-	TLSFailed = svcmail.TLSFailed
+	TLSFailed = coremail.TLSFailed
 	// AuthInsecure is returned when credentials would have travelled over an
 	// unencrypted session — at construction, and again before AUTH.
-	AuthInsecure = svcmail.AuthInsecure
+	AuthInsecure = coremail.AuthInsecure
 	// AuthFailed is returned when the server rejected the credentials or
 	// advertised no AUTH mechanism.
-	AuthFailed = svcmail.AuthFailed
+	AuthFailed = coremail.AuthFailed
 	// SendRefused is returned when MAIL, RCPT or DATA was answered with a
 	// failure reply. The server's own text travels as a log-only field.
-	SendRefused = svcmail.SendRefused
+	SendRefused = coremail.SendRefused
 	// InvalidURL is returned by [ParseURL] for a URL it cannot read. It names
 	// the clause and never the URL, which carries the password.
-	InvalidURL = svcmail.InvalidURL
+	InvalidURL = coremail.InvalidURL
 
 	// The spool's own sentinels (0.3.81.*). As for every sentinel of this
 	// package, errors.Is matches one and errs.CodeOf reads its code.
 
 	// SpoolMisconfigured refuses a spool that could never deliver, and a Send
 	// whose SpoolConfig.NewID minted an identifier no mail can keep.
-	SpoolMisconfigured = svcspool.SpoolMisconfigured
+	SpoolMisconfigured = corespool.SpoolMisconfigured
 	// SpoolClosed refuses a Send or a SendWithID after Close.
-	SpoolClosed = svcspool.SpoolClosed
+	SpoolClosed = corespool.SpoolClosed
 	// SpooledMailUndecodable reports a spooled record that is not a mail.
-	SpooledMailUndecodable = svcspool.MessageUndecodable
+	SpooledMailUndecodable = corespool.MessageUndecodable
 	// SpooledMailUnencodable refuses a mail Send could not write.
-	SpooledMailUnencodable = svcspool.MessageUnencodable
+	SpooledMailUnencodable = corespool.MessageUnencodable
 	// TransportPanicked is the failure of an attempt whose transport panicked.
-	TransportPanicked = svcspool.TransportPanicked
+	TransportPanicked = corespool.TransportPanicked
 	// InvalidMailID refuses an identifier Spool.SendWithID was given that is
 	// empty, longer than SpoolMaxIDBytes or not an RFC 5322 dot-atom. It names
 	// the rule broken and never the identifier.
-	InvalidMailID = svcspool.InvalidMailID
+	InvalidMailID = corespool.InvalidMailID
 )
 
 // NewSpool builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or

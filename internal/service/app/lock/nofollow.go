@@ -30,7 +30,7 @@
 //
 // # It is one gap with two spellings, so it closes on both kernels
 //
-// The refusal is the same sentinel everywhere, [LockPathRedirected], but the
+// The refusal is the same sentinel everywhere, [corelock.LockPathRedirected], but the
 // mechanism is not, because the two kernels refuse in opposite places:
 //
 //   - Unix asks the kernel not to traverse, and the OPEN fails —
@@ -44,10 +44,11 @@
 package lock
 
 import (
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// pathRedirected builds the [LockPathRedirected] refusal.
+// pathRedirected builds the [corelock.LockPathRedirected] refusal.
 //
 // kind says which indirection was found — "symlink" on Unix, "reparse_point"
 // on Windows, the latter covering a symbolic link and a junction alike since
@@ -65,7 +66,7 @@ import (
 func pathRedirected(path, kind, observed string) error {
 	//: the path is the SDK's own derived filename, never the caller's lock
 	//: name, so naming it in full leaks nothing a directory listing does not.
-	return kerrs.Wrap(LockPathRedirected, kerrs.WrapParams{},
+	return kerrs.Wrap(corelock.LockPathRedirected, kerrs.WrapParams{},
 		kerrs.String("path", path),
 		kerrs.String("kind", kind),
 		kerrs.String("observed", observed))

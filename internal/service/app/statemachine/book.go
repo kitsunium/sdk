@@ -430,6 +430,6 @@ func journalFailure(err error, operation string) error {
 	}
 	//: origin wins when the journal's error is already an SDK error.
 	return errs.Wrap(err, errs.WrapParams{
-		Code: CodeJournalFailed, Reason: "JOURNAL_FAILED", Public: JournalFailed.Public(), Private: JournalFailed.Private(),
+		Code: corestm.CodeJournalFailed, Reason: "JOURNAL_FAILED", Public: corestm.JournalFailed.Public(), Private: corestm.JournalFailed.Private(),
 	}, errs.String("operation", operation))
 }

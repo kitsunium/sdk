@@ -92,7 +92,7 @@ func (g *snowflakeGen) New() (newID string, err error) {
 	//: a regressed clock would break monotonicity — refuse honestly.
 	if now < g.lastMS {
 		//: surface the typed clock-backwards sentinel.
-		return "", ClockBackwards
+		return "", coreid.ClockBackwards
 	}
 	//: same millisecond → advance the sequence; spin to next ms on overflow.
 	if now == g.lastMS {
@@ -157,7 +157,7 @@ func (g *snowflakeGen) tillNext(prev int64) (next int64, err error) {
 		//: a regression below the exhausted millisecond is unrecoverable here.
 		if now < prev {
 			//: fail honestly instead of holding g.mu forever.
-			return 0, ClockBackwards
+			return 0, coreid.ClockBackwards
 		}
 		//: yield periodically so a single-P runtime still makes progress.
 		if spins%goschedEvery == goschedEvery-1 {
@@ -166,7 +166,7 @@ func (g *snowflakeGen) tillNext(prev int64) (next int64, err error) {
 		}
 	}
 	//: budget exhausted with the clock pinned at prev — give the mutex back.
-	return 0, ClockStalled
+	return 0, coreid.ClockStalled
 }
 
 // defaultNode derives a stable 10-bit node id from the hostname and pid via an

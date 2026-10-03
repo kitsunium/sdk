@@ -1,4 +1,5 @@
-// Package view — declares the sentinel *errs.Error port outcomes. Each var's
+// Package view — declares the sentinel *errs.Error outcomes of the domain: the
+// port's, and the html/template engine's construction failures. Each var's
 // name equals its errs.Define Reason in SCREAMING_SNAKE form.
 //
 // No Public string in this package names a template, a path, a line, a data key
@@ -120,5 +121,25 @@ var (
 	DuplicateEngine = errs.Define(CodeDuplicateEngine, "DUPLICATE_ENGINE",
 		"Two view engines claim the same name",
 		"core/app/view: a second, distinct Factory registered under an Engine name already taken; refused at boot rather than resolved, since one of the two would silently decide how every value in the program is escaped",
+		errs.WithExitCode(exitConfig))
+
+	// The html/template engine's construction failures, raised by
+	// internal/service/app/view. They are declared here, with the port's, so that
+	// the domain's codes and sentinels are in one place (ADR 0160). Each carries
+	// exitConfig: a tree that will not parse is refused forever, and the fix is an
+	// edit to a template, never a retry.
+
+	// TemplateSourceFailed is returned by the constructor when the template FS
+	// could not be read.
+	TemplateSourceFailed = errs.Define(CodeTemplateSourceFailed, "TEMPLATE_SOURCE_FAILED",
+		"The view templates could not be read",
+		"service/app/view: walking or reading Config.FS failed; the fields carry the path that failed and the underlying error, and the usual cause is an embed pattern that matched nothing",
+		errs.WithExitCode(exitConfig))
+
+	// TemplateParseFailed is returned by the constructor for a file
+	// html/template refused to parse or could not build an escaping plan for.
+	TemplateParseFailed = errs.Define(CodeTemplateParseFailed, "TEMPLATE_PARSE_FAILED",
+		"A view template is not valid",
+		"service/app/view: html/template refused a template at parse time or could not resolve its contextual escaping context; the fields carry the template name and the engine's own diagnostic",
 		errs.WithExitCode(exitConfig))
 )

@@ -89,8 +89,8 @@ func TestUnknownAndMissingSubCommandsAreUsageErrors(t *testing.T) {
 		args []string
 		code kerrs.Code
 	}{
-		{"a token that names nothing", []string{"stat"}, svccli.CodeUnknownCommand},
-		{"no sub-command at all", nil, svccli.CodeMissingCommand},
+		{"a token that names nothing", []string{"stat"}, corecli.CodeUnknownCommand},
+		{"no sub-command at all", nil, corecli.CodeMissingCommand},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -134,7 +134,7 @@ func TestExactMatchOnly(t *testing.T) {
 			t.Parallel()
 			var h harness
 			err := h.run(t, group("tool", leaf("status", noop)), token)
-			if !kerrs.HasCode(err, svccli.CodeUnknownCommand) {
+			if !kerrs.HasCode(err, corecli.CodeUnknownCommand) {
 				t.Errorf("%q resolved to status; names are compared by exact byte equality", token)
 			}
 		})
@@ -158,7 +158,7 @@ func TestABadFlagIsAUsageErrorAndNeverFlagsOwnReport(t *testing.T) {
 		Name: "tool", Summary: "s", Flags: intBinder(&target, "n", 0), Run: noop,
 	}
 	err := h.run(t, root, "-n", "not-a-number")
-	if !kerrs.HasCode(err, svccli.CodeInvalidFlags) {
+	if !kerrs.HasCode(err, corecli.CodeInvalidFlags) {
 		t.Fatalf("err = %v, want INVALID_FLAGS", err)
 	}
 	if got := kerrs.ExitCodeOf(err); got != exitUsage {
@@ -267,7 +267,7 @@ func TestAPanickingActionBecomesATypedFailure(t *testing.T) {
 		panic("nil map write")
 	})
 	err := h.run(t, root)
-	if !kerrs.HasCode(err, svccli.CodeCommandPanicked) {
+	if !kerrs.HasCode(err, corecli.CodeCommandPanicked) {
 		t.Fatalf("err = %v, want COMMAND_PANICKED", err)
 	}
 	if got := kerrs.ExitCodeOf(err); got != exitSoftware {
@@ -288,7 +288,7 @@ func TestAPanicCarryingAnErrsErrorCannotHijackTheCode(t *testing.T) {
 	hijack := kerrs.Define(0x40_01_02_01, "LOOKS_FINE", "looks fine", "private", kerrs.WithExitCode(0))
 	root := leaf("tool", func(context.Context, corecli.InvocationValue) error { panic(hijack) })
 	err := h.run(t, root)
-	if !kerrs.HasCode(err, svccli.CodeCommandPanicked) {
+	if !kerrs.HasCode(err, corecli.CodeCommandPanicked) {
 		t.Fatalf("a panic value hijacked the code: %v", err)
 	}
 	if kerrs.ExitCodeOf(err) == 0 {

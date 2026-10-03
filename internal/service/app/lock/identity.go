@@ -61,6 +61,7 @@ package lock
 import (
 	"os"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -132,7 +133,7 @@ func sameEntry(file statter, path string) (same bool, observed string) {
 	return true, ""
 }
 
-// fileReplaced builds the [LockFileReplaced] refusal.
+// fileReplaced builds the [corelock.LockFileReplaced] refusal.
 //
 // fence is the token the lease was still handing out, because that is the
 // number the protected resource has been accepting and the one an operator has
@@ -142,7 +143,7 @@ func sameEntry(file statter, path string) (same bool, observed string) {
 func fileReplaced(op, path, name string, fence uint64, observed string) error {
 	//: the path is this package's derived filename, so naming it in full
 	//: leaks nothing a directory listing does not.
-	return kerrs.Wrap(LockFileReplaced, kerrs.WrapParams{},
+	return kerrs.Wrap(corelock.LockFileReplaced, kerrs.WrapParams{},
 		kerrs.String("op", op),
 		kerrs.String("path", path),
 		kerrs.String("lock", name),

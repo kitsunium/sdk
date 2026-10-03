@@ -10,7 +10,10 @@ registration sentinels. Admitted by **ADR 0050**. The engine, the shutdown
 budget and the opt-in signal / sd_notify wiring are concrete and live in
 `internal/service/app/lifecycle`.
 
-Code range: `0.2.19.*` (ADR 0050).
+Code ranges: `0.2.19.*` (ADR 0050) for the registration refusals, and
+`0.3.49.*` for the run outcomes and the supervisor's — allocated to
+`internal/service/app/lifecycle`, which raises them, and declared here since
+ADR 0160. A code keeps its value when its declaration moves.
 
 ## Contents
 
@@ -19,8 +22,8 @@ Code range: `0.2.19.*` (ADR 0050).
 | `lifecycle.go` | `Start func(ctx) error`, `Stop func(ctx) error`, `Lifecycle interface { Add(ComponentValue) error; Start(ctx) error; Stop(ctx) error }` |
 | `lifecycle_component.go` | `ComponentValue` — `Name` / `Start` / `Stop` |
 | `lifecycle_phase.go` | `Phase` + `PhaseStart` / `PhaseStop` + `String()`, and `TransitionValue` — `Name` / `Phase` / `Begun` / `Ended` / `TimedOut` / `Err` |
-| `codes.go` | `Code*` constants — range 0.2.19.* |
-| `errors.go` | `InvalidComponent` / `DuplicateComponent` / `LifecycleRunning` / `ComponentPanicked` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.19.* and 0.3.49.* |
+| `errors.go` | `InvalidComponent` / `DuplicateComponent` / `LifecycleRunning` / `ComponentPanicked`; the run outcomes `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed`; the supervisor's `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` (`errs.Define`) |
 
 ## Conventions
 

@@ -124,7 +124,7 @@ func Rules(tag corei18n.TagValue) (plural PluralValue, ok bool) {
 
 // SupportedTags returns every tag [Rules] resolves exactly, sorted.
 //
-// It is what [UnsupportedLanguage] names beside the refused tag, so the
+// It is what [corei18n.UnsupportedLanguage] names beside the refused tag, so the
 // message a maintainer reads is "pl is not supported; ar de en es fr it ja nl
 // pt pt-PT ru zh are" rather than a bare refusal.
 func SupportedTags() []corei18n.TagValue {
@@ -167,7 +167,7 @@ func supportedList() string {
 	return strings.Join(spellings, chainSeparator)
 }
 
-// requireRules resolves tag or returns [UnsupportedLanguage] naming it and the
+// requireRules resolves tag or returns [corei18n.UnsupportedLanguage] naming it and the
 // supported set.
 func requireRules(tag corei18n.TagValue) (plural PluralValue, err error) {
 	//: the table lookup.
@@ -175,7 +175,7 @@ func requireRules(tag corei18n.TagValue) (plural PluralValue, err error) {
 	//: an unsupported language is refused, never approximated.
 	if !ok {
 		//: the tag and the whole supported set travel as fields.
-		return PluralValue{}, errs.Wrap(UnsupportedLanguage, errs.WrapParams{},
+		return PluralValue{}, errs.Wrap(corei18n.UnsupportedLanguage, errs.WrapParams{},
 			errs.String("tag", tag.String()), errs.String("supported", supportedList()))
 	}
 	//: the language's rules.

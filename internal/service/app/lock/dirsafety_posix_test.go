@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -97,7 +98,7 @@ func TestTheDirectoryRuleIsOtherWriteAndNotSticky(t *testing.T) {
 			//: and the code matters as much as the refusal: an operator acts
 			//: on LOCK_DIRECTORY_UNSAFE by changing a mode, and on anything
 			//: else by filing a bug against this package.
-			if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+			if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 				t.Fatalf("NewFileLocker on %v = %v, want LOCK_DIRECTORY_UNSAFE", c.mode, err)
 			}
 			//: verdict pinned.
@@ -136,7 +137,7 @@ func TestNewFileLockerRefusesAWorldWritableDirectory(t *testing.T) {
 	if locker != nil {
 		t.Fatal("a world-writable, non-sticky lock directory was accepted")
 	}
-	if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+	if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 		t.Fatalf("NewFileLocker = %v, want LOCK_DIRECTORY_UNSAFE", err)
 	}
 }

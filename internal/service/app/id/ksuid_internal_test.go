@@ -7,6 +7,7 @@ import (
 	"testing"
 	"time"
 
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -245,8 +246,8 @@ func Test_base62Decode_rejects(t *testing.T) {
 		if err == nil {
 			t.Fatalf("base62Decode(%q) = nil error, want ID_MALFORMED", c.in)
 		}
-		if !errs.HasCode(err, CodeIDMalformed) {
-			t.Errorf("base62Decode(%q) = %v, want code %s", c.in, err, CodeIDMalformed)
+		if !errs.HasCode(err, coreid.CodeIDMalformed) {
+			t.Errorf("base62Decode(%q) = %v, want code %s", c.in, err, coreid.CodeIDMalformed)
 		}
 		//: the rule field is what tells an operator which check fired without
 		//: the input ever reaching a log line.
@@ -278,7 +279,7 @@ func Test_base62Decode_rejects(t *testing.T) {
 		t.Fatalf("the maximum rendering already starts at the top symbol (%q); the overflow probe is void", maxValid)
 	}
 	overflow := topSymbol + maxValid[1:]
-	if _, err := base62Decode(overflow); !errs.HasCode(err, CodeIDMalformed) {
+	if _, err := base62Decode(overflow); !errs.HasCode(err, coreid.CodeIDMalformed) {
 		t.Errorf("base62Decode(%q) = %v, want ID_MALFORMED", overflow, err)
 	}
 }

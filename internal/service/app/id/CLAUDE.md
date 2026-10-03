@@ -5,7 +5,11 @@
 Concrete `core/app/id.Generator` implementations over stdlib `crypto/rand` + the
 kernel `clock`. Blank-importing self-registers every scheme that needs no
 configuration; snowflake, NanoID and TypeID also offer explicit constructors.
-**No vendor deps** (stdlib only). ADR 0024. Code range: `0.3.39.*`.
+**No vendor deps** (stdlib only). ADR 0024. Code range: `0.3.39.*`
+(ID_ENTROPY_FAILED, ID_CLOCK_BACKWARDS, ID_CLOCK_STALLED, ID_INVALID_SIZE,
+ID_INVALID_PREFIX, ID_MALFORMED, ID_TIMESTAMP_RANGE), declared with its
+sentinels in `internal/core/app/id` (ADR 0160); this package declares no code
+and raises the core's.
 
 ## Contents
 
@@ -19,8 +23,6 @@ configuration; snowflake, NanoID and TypeID also offer explicit constructors.
 | `nanoid.go` | `nanoid` | 21 URL-safe chars by default, no timestamp; `NewNanoID(size)`; rejection sampling, never `%` |
 | `ksuid.go` | `ksuid` | 32-bit second prefix + 128-bit payload → 27 base62 chars; decodes via `ParseKSUID` |
 | `typeid.go` | `typeid` **(unregistered)** | type prefix + `_` + UUIDv7 in LOWERCASE Crockford base32; `NewTypeID(prefix)`, `ParseTypeID`, `FormatTypeID` |
-| `codes.go` | — | `0.3.39.*` (ID_ENTROPY_FAILED, ID_CLOCK_BACKWARDS, ID_CLOCK_STALLED, ID_INVALID_SIZE, ID_INVALID_PREFIX, ID_MALFORMED, ID_TIMESTAMP_RANGE) |
-| `errors.go` | — | sentinels |
 
 ## Conventions
 

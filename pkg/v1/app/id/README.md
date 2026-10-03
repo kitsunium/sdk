@@ -67,20 +67,20 @@ var (
     // requested Scheme. Matchable via errs.HasReason(err, "UNKNOWN_SCHEME").
     UnknownScheme = coreid.UnknownScheme
     // EntropyFailed wraps a crypto/rand failure while drawing id bytes.
-    EntropyFailed = svcid.EntropyFailed
+    EntropyFailed = coreid.EntropyFailed
     // ClockBackwards is returned when a snowflake observes a backwards clock.
-    ClockBackwards = svcid.ClockBackwards
+    ClockBackwards = coreid.ClockBackwards
     // InvalidSize is returned by NewNanoID for a non-positive identifier length.
-    InvalidSize = svcid.InvalidSize
+    InvalidSize = coreid.InvalidSize
     // InvalidPrefix is returned by NewTypeID, ParseTypeID and FormatTypeID for a
     // type prefix that is empty or outside lowercase ASCII.
-    InvalidPrefix = svcid.InvalidPrefix
+    InvalidPrefix = coreid.InvalidPrefix
     // Malformed is returned by ParseKSUID, ParseTypeID and FormatTypeID when the
     // input is not a well-formed rendering for its scheme.
-    Malformed = svcid.Malformed
+    Malformed = coreid.Malformed
     // TimestampRange is returned when the clock sits outside the window a
     // scheme's timestamp field can represent.
-    TimestampRange = svcid.TimestampRange
+    TimestampRange = coreid.TimestampRange
 )
 ```
 

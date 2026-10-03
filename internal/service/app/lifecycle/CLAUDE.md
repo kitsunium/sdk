@@ -11,8 +11,10 @@ function run until stopped, restarted after every early end on the published
 backoff curve, observed run by run, joined on stop — and a `Component`, so a
 `Lifecycle` starts it and budgets its stop.
 
-Code range: `0.3.49.*` (run outcomes and the supervisor's three). Registration
-refusals come from `core/app/lifecycle` (`0.2.19.*`).
+Code range: `0.3.49.*` (run outcomes and the supervisor's three). Like the
+registration refusals (`0.2.19.*`), those codes and their sentinels are
+declared in `core/app/lifecycle` (ADR 0160); this package declares none and
+raises the core's.
 
 ## Contents
 
@@ -26,7 +28,6 @@ refusals come from `core/app/lifecycle` (`0.2.19.*`).
 | `supervise.go` | `Supervisor`, `NewSupervisor`, `Start` / `Stop` / `Component`, the supervision loop (`supervise`, `once` — panic recovery — `wait`, `emit`, `wayOut`) |
 | `supervise_config.go` | `SupervisorConfig` (`Clock`, `Observe`, `Backoff`, `HealthyAfter`), `DefaultRestartBase` / `DefaultRestartMax` / `DefaultHealthyRun`, the refusal and the clamps |
 | `supervise_event.go` | `SupervisionPhase` (four), `SupervisionEventValue` |
-| `codes.go` / `errors.go` | `StartFailed` / `StopFailed` / `StopTimeout` / `UnwindFailed` / `ReadinessFailed`; `RunPanicked` / `SupervisorMisconfigured` / `SupervisorRunning` |
 
 ## How the partial-start cleanup is guaranteed
 

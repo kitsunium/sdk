@@ -7,7 +7,9 @@ The one engine the SDK ships for the ADR 0058 rendering port: a
 `coreview.HTML`, that parses a whole template tree eagerly and renders each
 request into a bounded buffer it owns.
 
-Code range: `0.3.57.*` (ADR 0058).
+Code range: `0.3.57.*` (ADR 0058), declared with its sentinels in
+`internal/core/app/view` beside the port's (ADR 0160). This package declares
+no code and raises the core's.
 
 ## Why this shape
 
@@ -55,7 +57,7 @@ half-built set.
 | `limit.go` | the writer that stops execution AT the ceiling |
 | `scan.go` | the trust-type scan that runs BEFORE the template does |
 | `cycles.go` | the pointer bookkeeping that stops a self-referential model |
-| `codes.go` / `errors.go` | `0.3.57.*` and the `raise` helper |
+| `errors.go` | the `raise` helper — a core sentinel with the engine's diagnostic attached as a field |
 
 ## Conventions
 

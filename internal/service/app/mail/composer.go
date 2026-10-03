@@ -96,7 +96,7 @@ func (c *Composer) Compose(msg coremail.MessageValue) (raw []byte, err error) {
 	//: and the body itself.
 	if bodyErr := body.writeBody(&buf); bodyErr != nil {
 		//: wrapped so a caller can tell a composition defect from a refusal.
-		return nil, wrapAs(ComposeFailed, bodyErr)
+		return nil, wrapAs(coremail.ComposeFailed, bodyErr)
 	}
 	//: the complete message.
 	return buf.Bytes(), nil

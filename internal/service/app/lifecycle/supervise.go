@@ -89,7 +89,7 @@ func (s *Supervisor) Start(ctx context.Context) error {
 	//: one supervision at a time.
 	if s.running() {
 		//: SupervisorRunning, naming the supervisor.
-		return kerrs.Wrap(SupervisorRunning, kerrs.WrapParams{}, kerrs.String("supervisor", s.name))
+		return kerrs.Wrap(corelc.SupervisorRunning, kerrs.WrapParams{}, kerrs.String("supervisor", s.name))
 	}
 	runCtx, cancel := context.WithCancel(context.WithoutCancel(ctx))
 	done := make(chan struct{})
@@ -124,7 +124,7 @@ func (s *Supervisor) Stop(ctx context.Context) error {
 	//: the caller stopped waiting first.
 	case <-ctx.Done():
 		//: StopTimeout, the lifecycle's verdict for a Stop that overran.
-		return kerrs.Wrap(StopTimeout, kerrs.WrapParams{}, kerrs.String("component", s.name))
+		return kerrs.Wrap(corelc.StopTimeout, kerrs.WrapParams{}, kerrs.String("component", s.name))
 	}
 }
 
@@ -202,7 +202,7 @@ func (s *Supervisor) once(ctx context.Context) (err error) {
 		}
 		//: the value and the stack as fields, never the origin and never the
 		//: Public text.
-		err = kerrs.Wrap(RunPanicked, kerrs.WrapParams{},
+		err = kerrs.Wrap(corelc.RunPanicked, kerrs.WrapParams{},
 			kerrs.String("supervisor", s.name), kerrs.String("panic", fmt.Sprint(recovered)),
 			kerrs.String("stack", string(debug.Stack())))
 	}()

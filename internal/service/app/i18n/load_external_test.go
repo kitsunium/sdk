@@ -119,7 +119,7 @@ func TestLoadFSRefusesTwoFilesForOneLanguage(t *testing.T) {
 	}
 
 	_, err := svci18n.LoadFS(dir, "locales", jsonFormat, mustTag(t, "en"))
-	if !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Fatalf("LoadFS = %v, want CodeCatalogInvalid", err)
 	}
 }
@@ -132,7 +132,7 @@ func TestLoadFSRefusesAnUnregisteredFormatBeforeTouchingTheFilesystem(t *testing
 	dir := fstest.MapFS{"locales/en.json": {Data: []byte(englishJSON)}}
 
 	_, err := svci18n.LoadFS(dir, "locales", "not-a-registered-format", mustTag(t, "en"))
-	if !errs.HasCode(err, svci18n.CodeCatalogLoadFailed) {
+	if !errs.HasCode(err, corei18n.CodeCatalogLoadFailed) {
 		t.Fatalf("LoadFS = %v, want CodeCatalogLoadFailed", err)
 	}
 }
@@ -145,7 +145,7 @@ func TestLoadFSKeepsTheFilesystemCauseInTheChain(t *testing.T) {
 	// answering and a caller can tell "no catalogue directory" from "a
 	// catalogue that will not compile".
 	_, err := svci18n.LoadFS(fstest.MapFS{}, "absent", jsonFormat, mustTag(t, "en"))
-	if !errs.HasCode(err, svci18n.CodeCatalogLoadFailed) {
+	if !errs.HasCode(err, corei18n.CodeCatalogLoadFailed) {
 		t.Fatalf("LoadFS = %v, want CodeCatalogLoadFailed", err)
 	}
 	if !errors.Is(err, fs.ErrNotExist) {
@@ -174,7 +174,7 @@ func TestLoadFSRefusesAnEntryThatIsNeitherShape(t *testing.T) {
 
 			dir := fstest.MapFS{"locales/en.json": {Data: []byte(body)}}
 			_, err := svci18n.LoadFS(dir, "locales", jsonFormat, mustTag(t, "en"))
-			if !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+			if !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 				t.Errorf("LoadFS with %s = %v, want CodeCatalogInvalid", name, err)
 			}
 		})
@@ -187,7 +187,7 @@ func TestLoadFSRefusesUndecodableBytes(t *testing.T) {
 	dir := fstest.MapFS{"locales/en.json": {Data: []byte("{ this is not json")}}
 
 	_, err := svci18n.LoadFS(dir, "locales", jsonFormat, mustTag(t, "en"))
-	if !errs.HasCode(err, svci18n.CodeCatalogLoadFailed) {
+	if !errs.HasCode(err, corei18n.CodeCatalogLoadFailed) {
 		t.Fatalf("LoadFS = %v, want CodeCatalogLoadFailed", err)
 	}
 }
@@ -207,7 +207,7 @@ func TestAnIncompleteTranslationFailsAtLoadNotAtRender(t *testing.T) {
 	}
 
 	_, err := svci18n.LoadFS(dir, "locales", jsonFormat, mustTag(t, "en"))
-	if !errs.HasCode(err, svci18n.CodeTranslationIncomplete) {
+	if !errs.HasCode(err, corei18n.CodeTranslationIncomplete) {
 		t.Fatalf("LoadFS = %v, want CodeTranslationIncomplete", err)
 	}
 }

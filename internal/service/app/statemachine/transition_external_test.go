@@ -48,7 +48,7 @@ func TestEventsMoveAnEntityAndTheMachineRecordsEachStep(t *testing.T) {
 		t.Fatalf("Start() = %+v, %v", created, err)
 	}
 	refused, err := m.Fire(ctx, "chair", "sell")
-	if !errs.HasCode(err, svcstm.CodeTransitionRefused) || refused.State != Draft || errs.HTTPStatusOf(err) != 409 {
+	if !errs.HasCode(err, corestm.CodeTransitionRefused) || refused.State != Draft || errs.HTTPStatusOf(err) != 409 {
 		t.Fatalf("selling a draft = %+v, %v; want TRANSITION_REFUSED with the draft", refused, err)
 	}
 	for _, event := range []string{"publish", "sell"} {
@@ -84,7 +84,7 @@ func TestFireOnAKeyTheStoreDoesNotHoldIsEntityMissing(t *testing.T) {
 	t.Parallel()
 	m := open(t, lifecycle(), &svcstm.Config[Item, State]{Store: newMemStore()})
 	_, err := m.Fire(t.Context(), "nobody", "publish")
-	if !errs.HasCode(err, svcstm.CodeEntityMissing) || errs.HTTPStatusOf(err) != 404 {
+	if !errs.HasCode(err, corestm.CodeEntityMissing) || errs.HTTPStatusOf(err) != 404 {
 		t.Fatalf("Fire(nobody) = %v; want ENTITY_MISSING and 404", err)
 	}
 }
@@ -97,10 +97,10 @@ func TestStartRefusesATakenKeyAndAnEmptyOne(t *testing.T) {
 	if _, err := m.Start(t.Context(), Item{ID: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Start(t.Context(), Item{ID: "a"}); !errs.HasCode(err, svcstm.CodeEntityExists) || errs.HTTPStatusOf(err) != 409 {
+	if _, err := m.Start(t.Context(), Item{ID: "a"}); !errs.HasCode(err, corestm.CodeEntityExists) || errs.HTTPStatusOf(err) != 409 {
 		t.Errorf("a second Start of one key = %v", err)
 	}
-	if _, err := m.Start(t.Context(), Item{}); !errs.HasCode(err, svcstm.CodeKeyEmpty) {
+	if _, err := m.Start(t.Context(), Item{}); !errs.HasCode(err, corestm.CodeKeyEmpty) {
 		t.Errorf("Start with no key = %v", err)
 	}
 	if census := m.Census(); census[Draft] != 1 {
@@ -128,7 +128,7 @@ func TestAPanickingOnEnterHookFailsItsTransitionAndFreesTheEntity(t *testing.T) 
 		}
 	}
 	_, err := fireWithin(t, m, "boom", "do")
-	if !errs.HasCode(err, svcstm.CodeHookPanicked) {
+	if !errs.HasCode(err, corestm.CodeHookPanicked) {
 		t.Fatalf("the panicking transition = %v; want HOOK_PANICKED", err)
 	}
 	if got := store.read(t, "boom"); got.State != Draft {
@@ -177,7 +177,7 @@ func TestAPanickingOnTransitionHookLeavesTheTransitionStanding(t *testing.T) {
 	if event := <-ran; event != "do" {
 		t.Errorf("the hook after the panicking one saw %q", event)
 	}
-	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], svcstm.CodeHookPanicked) {
+	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], corestm.CodeHookPanicked) {
 		t.Errorf("Report received %v", reported)
 	}
 }
@@ -194,7 +194,7 @@ func TestAHookErrorKeepsItsOwnIdentity(t *testing.T) {
 		t.Fatal(err)
 	}
 	got, err := m.Fire(t.Context(), "a", "do")
-	if !errors.Is(err, errBoom) || !errs.HasCode(err, svcstm.CodeHookFailed) || got.State != Draft {
+	if !errors.Is(err, errBoom) || !errs.HasCode(err, corestm.CodeHookFailed) || got.State != Draft {
 		t.Fatalf("Fire() = %+v, %v", got, err)
 	}
 	if rec, _ := m.Record("a"); rec.State != Draft || len(rec.History) != 1 {
@@ -214,10 +214,10 @@ func TestAHookMayChangeTheEntityButNotItsStateNorItsKey(t *testing.T) {
 	if _, err := m.Start(t.Context(), Item{ID: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Fire(t.Context(), "a", "state"); !errs.HasCode(err, svcstm.CodeHookChangedState) {
+	if _, err := m.Fire(t.Context(), "a", "state"); !errs.HasCode(err, corestm.CodeHookChangedState) {
 		t.Errorf("a hook changing the state = %v", err)
 	}
-	if _, err := m.Fire(t.Context(), "a", "key"); !errs.HasCode(err, svcstm.CodeHookChangedKey) {
+	if _, err := m.Fire(t.Context(), "a", "key"); !errs.HasCode(err, corestm.CodeHookChangedKey) {
 		t.Errorf("a hook changing the key = %v", err)
 	}
 	if _, ok, err := store.Get(t.Context(), "other"); err != nil || ok || store.read(t, "a").State != Draft {
@@ -256,7 +256,7 @@ func TestAnOnEnterHookFiringItsOwnMachineIsRefusedNotDeadlocked(t *testing.T) {
 	if _, err := fireWithin(t, m, "a", "do"); err != nil {
 		t.Fatal(err)
 	}
-	if err := <-inner; !errs.HasCode(err, svcstm.CodeReentrant) {
+	if err := <-inner; !errs.HasCode(err, corestm.CodeReentrant) {
 		t.Errorf("an OnEnter hook firing its machine = %v; want REENTRANT", err)
 	}
 	if got := store.read(t, "a"); got.State != Sold {
@@ -285,7 +285,7 @@ func TestATransitionNeverResurrects(t *testing.T) {
 		t.Fatal(err)
 	}
 	_, err := fireWithin(t, m, "doomed", "retire")
-	if !errs.HasCode(err, svcstm.CodeEntityMissing) {
+	if !errs.HasCode(err, corestm.CodeEntityMissing) {
 		t.Fatalf("retire = %v; want ENTITY_MISSING", err)
 	}
 	if _, ok, err := store.Get(t.Context(), "doomed"); err != nil || ok {
@@ -343,14 +343,14 @@ func TestAStoreFailureIsTheStoresAndNothingIsRecorded(t *testing.T) {
 	store := newMemStore()
 	m := open(t, lifecycle(), &svcstm.Config[Item, State]{Store: store})
 	store.failWith(errBoom)
-	if _, err := m.Start(t.Context(), Item{ID: "a"}); !errs.HasCode(err, svcstm.CodeStoreFailed) || !errors.Is(err, errBoom) {
+	if _, err := m.Start(t.Context(), Item{ID: "a"}); !errs.HasCode(err, corestm.CodeStoreFailed) || !errors.Is(err, errBoom) {
 		t.Errorf("a failed insert = %v", err)
 	}
 	if _, err := m.Start(t.Context(), Item{ID: "a"}); err != nil {
 		t.Fatal(err)
 	}
 	store.failWith(errBoom)
-	if _, err := m.Fire(t.Context(), "a", "publish"); !errs.HasCode(err, svcstm.CodeStoreFailed) {
+	if _, err := m.Fire(t.Context(), "a", "publish"); !errs.HasCode(err, corestm.CodeStoreFailed) {
 		t.Errorf("a failed read = %v", err)
 	}
 	if rec, _ := m.Record("a"); rec.State != Draft || len(rec.History) != 1 {
@@ -383,7 +383,7 @@ func TestAWaitForABusyEntityEndsWithItsContext(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
 	_, err := m.Fire(ctx, "a", "fast")
-	if !errs.HasCode(err, svcstm.CodeWaitAbandoned) || !errors.Is(err, context.Canceled) || errs.HTTPStatusOf(err) != 503 {
+	if !errs.HasCode(err, corestm.CodeWaitAbandoned) || !errors.Is(err, context.Canceled) || errs.HTTPStatusOf(err) != 503 {
 		t.Errorf("Fire with an ended context = %v", err)
 	}
 	close(leave)
@@ -410,7 +410,7 @@ func TestTransitionsOfManyEntitiesRunConcurrently(t *testing.T) {
 			var inner sync.WaitGroup
 			for range racers {
 				inner.Go(func() {
-					if _, err := m.Fire(context.Background(), key, "publish"); err != nil && !errs.HasCode(err, svcstm.CodeTransitionRefused) {
+					if _, err := m.Fire(context.Background(), key, "publish"); err != nil && !errs.HasCode(err, corestm.CodeTransitionRefused) {
 						t.Error(err)
 					}
 				})

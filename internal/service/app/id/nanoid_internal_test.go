@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -281,8 +282,8 @@ func Test_NewNanoID_refuses(t *testing.T) {
 		if gen != nil {
 			t.Errorf("NewNanoID(%d) handed back a generator alongside its refusal", c.size)
 		}
-		if !errs.HasCode(err, CodeIDInvalidSize) {
-			t.Errorf("NewNanoID(%d) = %v, want code %s", c.size, err, CodeIDInvalidSize)
+		if !errs.HasCode(err, coreid.CodeIDInvalidSize) {
+			t.Errorf("NewNanoID(%d) = %v, want code %s", c.size, err, coreid.CodeIDInvalidSize)
 		}
 	}
 	for _, c := range tests {

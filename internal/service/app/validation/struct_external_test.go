@@ -156,7 +156,7 @@ func TestStructBuildsTheDocumentedPath(t *testing.T) {
 	if report[0].Path != "addresses[2].zip" {
 		t.Errorf("path = %q, want %q", report[0].Path, "addresses[2].zip")
 	}
-	if report[0].Rule != "length" || report[0].Code != svcvalidation.CodeLengthOutOfRange {
+	if report[0].Rule != "length" || report[0].Code != corevalidation.CodeLengthOutOfRange {
 		t.Errorf("violation = %+v, want the length rule", report[0])
 	}
 }
@@ -576,7 +576,7 @@ func TestADiamondCompilesButACycleIsRefused(t *testing.T) {
 	if err == nil {
 		t.Fatal("a recursive type must be refused at compile time")
 	}
-	if !errs.HasCode(err, svcvalidation.CodeInvalidRule) {
+	if !errs.HasCode(err, corevalidation.CodeInvalidRule) {
 		t.Errorf("err = %v, want INVALID_RULE", err)
 	}
 }
@@ -588,7 +588,7 @@ func TestStructRefusesANonStructTarget(t *testing.T) {
 	if err == nil {
 		t.Fatal("a non-struct T must be refused")
 	}
-	if !errs.HasCode(err, svcvalidation.CodeUnsupportedTarget) {
+	if !errs.HasCode(err, corevalidation.CodeUnsupportedTarget) {
 		t.Errorf("err = %v, want UNSUPPORTED_TARGET", err)
 	}
 	if !strings.Contains(err.Error(), "struct") {

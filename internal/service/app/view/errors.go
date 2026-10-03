@@ -1,39 +1,19 @@
-// Package view — declares this package's own sentinels, plus the one helper
-// through which every core/app/view port sentinel is raised.
+// Package view — the one helper through which every core/app/view sentinel is
+// raised. The domain's codes and sentinels — the port's, and this engine's
+// construction failures — are declared in internal/core/app/view (ADR 0160).
 //
-// No Public string here names a template, a path, a line or a fragment of
-// template source. html/template's diagnostics are unusually rich — a parse
-// failure carries the file path and the offending function name, an escaping
-// failure carries the escaper's internal state machine, and an execution
-// failure carries the path, the line, the column, a fragment of the template's
-// own source and a Go type name. Every one of those is useful to an operator
-// and every one of them is reconnaissance to a stranger, so all of it travels
-// as Fields and Private and none of it reaches a Public.
+// No Public string the engine raises names a template, a path, a line or a
+// fragment of template source. html/template's diagnostics are unusually rich
+// — a parse failure carries the file path and the offending function name, an
+// escaping failure carries the escaper's internal state machine, and an
+// execution failure carries the path, the line, the column, a fragment of the
+// template's own source and a Go type name. Every one of those is useful to an
+// operator and every one of them is reconnaissance to a stranger, so all of it
+// travels as Fields and Private and none of it reaches a Public.
 package view
 
 import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-)
-
-// exitConfig matches sysexits EX_CONFIG (78). A tree that will not parse is a
-// permanent fault: the same files will be refused forever, and the fix is an
-// edit to a template, never a retry.
-const exitConfig int = 78
-
-var (
-	// TemplateSourceFailed is returned by the constructor when the template FS
-	// could not be read.
-	TemplateSourceFailed = errs.Define(CodeTemplateSourceFailed, "TEMPLATE_SOURCE_FAILED",
-		"The view templates could not be read",
-		"service/app/view: walking or reading Config.FS failed; the fields carry the path that failed and the underlying error, and the usual cause is an embed pattern that matched nothing",
-		errs.WithExitCode(exitConfig))
-
-	// TemplateParseFailed is returned by the constructor for a file
-	// html/template refused to parse or could not build an escaping plan for.
-	TemplateParseFailed = errs.Define(CodeTemplateParseFailed, "TEMPLATE_PARSE_FAILED",
-		"A view template is not valid",
-		"service/app/view: html/template refused a template at parse time or could not resolve its contextual escaping context; the fields carry the template name and the engine's own diagnostic",
-		errs.WithExitCode(exitConfig))
 )
 
 // raise wraps a port or package sentinel, attaching fields without relabelling

@@ -266,39 +266,39 @@ var (
 	CheckPanicked = corehealth.CheckPanicked
 	// CheckFailed is the identity a PLAIN error from a check is given. An
 	// error that already carries an SDK Code keeps its own.
-	CheckFailed = svchealth.CheckFailed
+	CheckFailed = corehealth.CheckFailed
 	// CheckTimeout reports a check that had not answered when its budget
 	// expired. A failure, not an unknown — Result.TimedOut is what
 	// distinguishes it.
-	CheckTimeout = svchealth.CheckTimeout
+	CheckTimeout = corehealth.CheckTimeout
 	// StaleCacheWindow is returned by AddReadiness for a MaxAge above
 	// MaxCacheAge.
-	StaleCacheWindow = svchealth.StaleCacheWindow
+	StaleCacheWindow = corehealth.StaleCacheWindow
 	// StartupPending is the synthetic result of a readiness probe answered
 	// while the process is still starting. No readiness check was run.
-	StartupPending = svchealth.StartupPending
+	StartupPending = corehealth.StartupPending
 	// Draining is the synthetic result of a readiness probe answered after
 	// Drain. No readiness check was run, and no later probe will say anything
 	// else.
-	Draining = svchealth.Draining
+	Draining = corehealth.Draining
 	// NotifyFailed reaches Config.OnNotifyError when an opt-in sd_notify
 	// datagram could not be delivered.
-	NotifyFailed = svchealth.NotifyFailed
+	NotifyFailed = corehealth.NotifyFailed
 	// AskMisconfigured refuses an Ask no answer could satisfy — an address
 	// with no usable port, a path that is not absolute, a negative timeout —
 	// before anything is dialled. The "argument" field names which.
-	AskMisconfigured = svchealth.AskMisconfigured
+	AskMisconfigured = corehealth.AskMisconfigured
 	// AskUnreachable reports an Ask the process never answered because the
 	// connection or the request failed; the transport's error is the cause.
-	AskUnreachable = svchealth.AskUnreachable
+	AskUnreachable = corehealth.AskUnreachable
 	// AskTimeout reports an Ask with no answer when its budget, or the
 	// caller's context, ended. A caller's own context error stays in the
 	// chain, so errors.Is answers context.Canceled or DeadlineExceeded too.
-	AskTimeout = svchealth.AskTimeout
+	AskTimeout = corehealth.AskTimeout
 	// AskNotReady reports an Ask the process answered with a status other
 	// than 200 — a redirect included, since none is followed. The "status"
 	// field carries it; the body never does.
-	AskNotReady = svchealth.AskNotReady
+	AskNotReady = corehealth.AskNotReady
 )
 
 // New returns a Health. It cannot fail: a nil cfg.Clock falls back to the wall

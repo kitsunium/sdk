@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	corestm "github.com/kitsunium/sdk/internal/core/app/statemachine"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcstm "github.com/kitsunium/sdk/internal/service/app/statemachine"
@@ -45,7 +46,7 @@ func TestWhatIsDueAtOpeningFiresOnTheFirstPass(t *testing.T) {
 	store2 := newMemStore()
 	store2.put(t, Item{ID: "a", State: Draft})
 	m2 := open(t, panicky, &svcstm.Config[Item, State]{Store: store2, Clock: clk})
-	if _, err := m2.Step(t.Context()); !errs.HasCode(err, svcstm.CodeFunctionPanicked) {
+	if _, err := m2.Step(t.Context()); !errs.HasCode(err, corestm.CodeFunctionPanicked) {
 		t.Errorf("a guard panicking at opening, then in the loop = %v", err)
 	}
 }
@@ -96,7 +97,7 @@ func TestAStoreThatFailsUnderTheLoopIsRetriedAfterItsBackoff(t *testing.T) {
 	}
 	clk.Set(start.Add(time.Hour))
 	store.failWith(errBoom)
-	if _, err := m.Step(t.Context()); !errs.HasCode(err, svcstm.CodeStoreFailed) {
+	if _, err := m.Step(t.Context()); !errs.HasCode(err, corestm.CodeStoreFailed) {
 		t.Fatalf("a pass over a failing store = %v", err)
 	}
 	if _, err := m.Step(t.Context()); err != nil || store.read(t, "a").State != Live {
@@ -128,7 +129,7 @@ func TestAStorePanickingUnderTheLoopIsOneEntitysFailure(t *testing.T) {
 	}
 	clk.Set(start.Add(time.Hour))
 	store.panicOnce()
-	if _, err := m.Step(t.Context()); !errs.HasCode(err, svcstm.CodeLoopPanicked) {
+	if _, err := m.Step(t.Context()); !errs.HasCode(err, corestm.CodeLoopPanicked) {
 		t.Fatalf("a pass over a panicking store = %v", err)
 	}
 	if store.read(t, "a").State != Live || store.read(t, "b").State != Expired {
@@ -138,7 +139,7 @@ func TestAStorePanickingUnderTheLoopIsOneEntitysFailure(t *testing.T) {
 	if _, err := m.Step(t.Context()); err != nil || store.read(t, "a").State != Expired {
 		t.Fatalf("after the backoff: %v, a %s", err, store.read(t, "a").State)
 	}
-	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], svcstm.CodeLoopPanicked) {
+	if reported := r.all(); len(reported) != 1 || !errs.HasCode(reported[0], corestm.CodeLoopPanicked) {
 		t.Errorf("reported %v", reported)
 	}
 }
@@ -194,7 +195,7 @@ func TestANotificationGivenUpOnIsLeftForTheLoop(t *testing.T) {
 	update(t, store, "a", func(i *Item) { i.Stock = 0 })
 	stopped, cancel := context.WithCancel(t.Context())
 	cancel()
-	if err := m.Changed(stopped, "a"); !errs.HasCode(err, svcstm.CodeWaitAbandoned) {
+	if err := m.Changed(stopped, "a"); !errs.HasCode(err, corestm.CodeWaitAbandoned) {
 		t.Fatalf("Changed with an ended context = %v", err)
 	}
 	if _, err := m.Step(t.Context()); err != nil || store.read(t, "a").State != Sold {
@@ -271,7 +272,7 @@ func TestReportMayCallTheMachine(t *testing.T) {
 		t.Fatalf("Fire: %v; a journal failure is reported, not returned", err)
 	}
 	clk.Set(start.Add(time.Hour))
-	if err := within(t, "Step", func() error { _, err := m.Step(context.Background()); return err }); !errs.HasCode(err, svcstm.CodeHookFailed) {
+	if err := within(t, "Step", func() error { _, err := m.Step(context.Background()); return err }); !errs.HasCode(err, corestm.CodeHookFailed) {
 		t.Fatalf("Step: %v; want the OnEnter hook's failure", err)
 	}
 	if len(reported) < 3 {
@@ -392,7 +393,7 @@ func TestAnObserversEndThatPanicsChangesNothing(t *testing.T) {
 		t.Errorf("next = %v; want nothing scheduled — a stored transition is not retried", next)
 	}
 	reported := r.all()
-	if len(reported) != 1 || !errs.HasCode(reported[0], svcstm.CodeLoopPanicked) || !hasField(reported[0], "call", "observe-end") {
+	if len(reported) != 1 || !errs.HasCode(reported[0], corestm.CodeLoopPanicked) || !hasField(reported[0], "call", "observe-end") {
 		t.Fatalf("reported %v; want the observer's panic, once", reported)
 	}
 	if rec, _ := m.Record("a"); len(rec.History) != 3 {
@@ -505,7 +506,7 @@ func TestAHookErrorCarryingEntityMissingIsAFailure(t *testing.T) {
 	t.Parallel()
 	clk := clock.NewManualClock(start)
 	store := newMemStore()
-	elsewhere := errs.Wrap(svcstm.EntityMissing, errs.WrapParams{}, errs.String("key", "elsewhere"))
+	elsewhere := errs.Wrap(corestm.EntityMissing, errs.WrapParams{}, errs.String("key", "elsewhere"))
 	def := lifecycle().OnEnter(Expired, func(context.Context, *Item) error { return elsewhere })
 	m := open(t, def, &svcstm.Config[Item, State]{Store: store, Clock: clk})
 	goLive(t, m, Item{ID: "a", Stock: 1})
@@ -514,7 +515,7 @@ func TestAHookErrorCarryingEntityMissingIsAFailure(t *testing.T) {
 	}
 	clk.Set(start.Add(time.Hour))
 	next, err := m.Step(t.Context())
-	if !errs.HasCode(err, svcstm.CodeHookFailed) {
+	if !errs.HasCode(err, corestm.CodeHookFailed) {
 		t.Fatalf("Step() = %v; want the hook's failure", err)
 	}
 	if _, known := m.Record("a"); !known || store.read(t, "a").State != Live {
