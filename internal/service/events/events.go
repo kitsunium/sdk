@@ -20,7 +20,7 @@ type bus struct {
 	// copy-on-write snapshot. Publish reads it with a single atomic load and
 	// no allocation; Subscribe and Unsubscribe rebuild it — the right trade
 	// for an index written at wiring time and read once per published event.
-	// The kernel/topic precedent, and the same primitive.
+	// The primitive a copy-on-write membership list always takes (ADR 0011).
 	members snapshot.Value[state]
 }
 

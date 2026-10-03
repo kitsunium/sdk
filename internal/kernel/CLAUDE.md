@@ -22,7 +22,6 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `singleflight/` | generic `Group[K,V]` call deduplication (ADR 0049); one execution per key however many callers arrive | (none — transparent to `fn`'s error; a panic is re-raised, not coded) |
 | `group/` | generic structured concurrency (`Group`, `Go`/`Wait`/`Collect`, `Unlimited`); first error — or every error joined in submission order (`NewJoined`) — bounded parallelism, and a child panic delivered to the waiter | (none — forwards the task's error; a panic is re-raised, not coded) |
 | `heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
-| `topic/` | generic `Topic[T]` in-process broadcast + `Listener[T]`; per-subscriber delivery policy chosen at the call site | (none — `Publish` returns a delivered count; an unset policy panics) |
 | `pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because the two callers in view want opposite verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
 | `plugin/` | `Unusable(v)` — the one question every process-wide registry asks before publishing: a typed nil and a non-comparable value both satisfy a port and neither can serve (ADR 0071) | (none — returns a reason string the registrar puts behind its own code) |
 
@@ -68,19 +67,26 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   no verdict: `/var/run` being a symbolic link is a distribution's decision and
   `/tmp/myapp` being one may be an attack, so the primitive measures and the
   domain decides.
-- `group`, `heap` and `topic` admitted on **rule 1 alone**, which is the only
+- `group` and `heap` admitted on **rule 1 alone**, which is the only
   admission criterion there has ever been: stdlib-only AND generic. Each is
   domain-neutral down to its signatures — `Go`/`Wait`/`Collect` with no `Job` or
-  `Worker`; a `T` and a `func(a, b T) int` with no `Priority`; `Publish`/
-  `Subscribe` with no `Event` or `Handler`. **No consumer count was required,
-  and none is claimed.** The "≥2 concrete consumers" line sometimes attributed
+  `Worker`; a `T` and a `func(a, b T) int` with no `Priority`. **No consumer
+  count was required.** The "≥2 concrete consumers" line sometimes attributed
   to ADR 0010 is not a kernel rule: it sits in that ADR's *Deferred* section and
   concerns exactly one primitive (`worker`). The governing precedent is the row
   above it — **ADR 0025 admitted `cache` with ZERO consumers** — and ADR 0010's
   "three copies already existed" was a *consolidation* argument, not a gate.
-  `topic` consumes another kernel package (`snapshot`, for a copy-on-write
-  membership list), as `ring` and `batcher` consume `errs`, `buffer`
-  `recycler`, and `cache` `clock`.
+  Both have consumers now: `group` in `service/health` (through `Collect`) and
+  `service/queue` (through `NewJoined`, which was added for it), `heap` in
+  `service/queue`'s lease expiry and `service/statemachine`'s agenda.
+- `topic` — a typed in-process broadcast admitted on the same rule — was
+  **deleted** (2026-10). Its only candidate consumer, `service/events`, read it
+  and refused it in writing (ADR 0053 §D9: a per-subscriber buffer makes
+  `Publish` return before the listeners have run and puts `Halt` on the wrong
+  side of a channel), and nothing else ever imported it. Admission needs no
+  consumer count; keeping a primitive nobody can use still costs a package, a
+  `CLAUDE.md`, a `BENCH.md`, linter exemptions and a reader's attention. If a
+  fan-out to independent readers is ever needed, the history holds it.
 
 ## Conventions unique to kernel
 
@@ -122,6 +128,5 @@ GOWORK=off go test -race -cover ./...
 - `singleflight/` — see `internal/kernel/singleflight/CLAUDE.md` (call deduplication, ADR 0049 — and the ~2 µs threshold below which it costs more than it saves)
 - `group/` — see `internal/kernel/group/CLAUDE.md` (structured concurrency — what `Wait` guarantees, and why a task that ignores cancellation blocks it)
 - `heap/` — see `internal/kernel/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
-- `topic/` — see `internal/kernel/topic/CLAUDE.md` (typed broadcast — why the delivery policy has no default, and why the value channel is never closed)
 - `plugin/` — see `internal/kernel/plugin/CLAUDE.md` (the registry entry guard — why it returns a reason string and not an error)
 - `pathchain/` — see `internal/kernel/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)

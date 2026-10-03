@@ -50,26 +50,30 @@ and an interface `E` is refused). It is still written, because a comma-ok that
 is never false costs nothing while a silent zero value would cost a listener
 firing on an event it never received.
 
-## Why `kernel/snapshot` and NOT `kernel/topic`
+## Why `kernel/snapshot` and NOT a broadcast topic
 
-`topic` was read and deliberately not used. It is the right primitive for a
-different problem: every subscriber owns a **buffered channel** and a delivery
-policy, so a publish is asynchronous by construction and returns a delivered
-count. That shape cannot express this domain's two headline promises —
+The kernel once carried `topic`, a typed in-process broadcast, which this
+domain read and deliberately did not use (ADR 0053 §D9); with no other
+consumer ever appearing, it has since been deleted from the kernel. The
+reasoning is kept because it holds for ANY channel-based broadcast someone
+might reach for here: every subscriber owns a **buffered channel** and a
+delivery policy, so a publish is asynchronous by construction and returns a
+delivered count. That shape cannot express this domain's two headline
+promises —
 
 - **Synchronous completion.** `Publish` here must return when the last listener
-  has returned. Over `topic`, `Publish` returns when the last value has been
+  has returned. Over a topic, `Publish` returns when the last value has been
   *handed to a buffer*, which is a different fact.
 - **Propagation stop.** A listener's decision has to be observed BEFORE the
   next listener is called. Across a channel there is no "before": listener 2's
   copy is already in its buffer while listener 1 is still deciding.
 
-Everything `events` actually needs from `topic` is the copy-on-write membership
-underneath it, and that is `kernel/snapshot` — which `topic` itself is built
-on. So this package takes the same primitive by the same reasoning and skips
-the layer that would have to be defeated. Using `topic` here would have meant a
-delivery policy nobody chose, a buffer per listener nobody reads, and a `Halt`
-that arrives too late to mean anything.
+Everything `events` actually needs from such a topic is the copy-on-write
+membership underneath it, and that is `kernel/snapshot` — which `topic` itself
+was built on. So this package takes the same primitive by the same reasoning
+and skips the layer that would have to be defeated. Using a topic here would
+mean a delivery policy nobody chose, a buffer per listener nobody reads, and a
+`Halt` that arrives too late to mean anything.
 
 ## Conventions
 

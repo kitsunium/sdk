@@ -166,6 +166,11 @@ et `EventDispatcher`. Deux domaines distincts : `events` = bus in-process typé
 `Broker`/`Handler`/`Middleware`, impls mémoire et fichier en service, Redis/PG
 en `third-party/`.
 
+> **Suite (2026-10)** : `kernel/topic` a été livré (T30) puis supprimé du
+> kernel. `events` ne s'est pas construit dessus mais sur `kernel/snapshot`
+> (ADR 0053 §D9 : un tampon par abonné fait rendre la main à `Publish` avant
+> que les listeners aient tourné), et aucun autre consommateur n'est apparu.
+
 ### B10. `vfs`
 
 `spf13/afero` **6,7k** ; SF `Filesystem` + `Finder`. `io/fs` couvre la lecture
@@ -321,7 +326,7 @@ ADR. **T02 les pré-alloue tous ; rien ne part en parallèle avant son merge.**
 ### V3 — 4 pistes
 | Piste | Tâches |
 |---|---|
-| A — messagerie | T30 `kernel/topic` → T31 `events` → T32 `queue` |
+| A — messagerie | T30 `kernel/topic` (livré, puis supprimé — voir B9) → T31 `events` → T32 `queue` |
 | B — trace | T33 `trace` → T34 corrélation logger |
 | C — données | T35 `sql` (ports + tx) → T36 migrations |
 | D — système | T37 `vfs` · T38 `lock` |
