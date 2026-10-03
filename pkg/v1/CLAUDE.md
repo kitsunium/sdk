@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T11:00:00Z -->
+<!-- updated: 2026-10-03T20:30:02Z -->
 # pkg/v1/
 
 ## Purpose
@@ -162,6 +162,7 @@ A directory of the one SDK module, `github.com/kitsunium/sdk`, whose `go.mod` is
 
 - **Stable identifiers.** Every exported name / type / const in `pkg/v1/*` is frozen until `pkg/v2` cuts. New helpers can be added; existing signatures cannot move.
 - **Aliases, not new types.** Public types are `type X = internalPkg.X` so consumers and SDK code share the type identity (a `pkg/v1/observe/logger.Attr` passes anywhere `corelogger.AttrValue` is expected).
+- **Forwarders, not function variables.** A public function is `func F(…) … { return internalPkg.F(…) }`, never `var F = internalPkg.F`. A variable can be reassigned for the whole process by any consumer, and a call through it is indirect, which hides the callee from the inliner, escape analysis and constant folding; a forwarder small enough to inline costs nothing at all, the call compiling to the callee's own body or a direct call to it. Values — sentinels, constants, `clock.System` — are still re-exported as values. Of the 22 function variables `pkg/v1` published (18 in `errs`, 4 in `observe/trace`), 21 became forwarders in one v0 change, each decided by measurement (`pkg/v1/errs/CLAUDE.md`, both `BENCH.md` files); `errs.ReasonOf` stayed a variable, its forwarder measured slower than the 3 % the rule allows, so a go/types scan of the 87 packages finds exactly one exported variable of function type, and it is that one.
 - **Error model is constructable; other internal types are not.** Since ADR 0019, `pkg/v1/errs` exposes `New` / `Wrap` (+ `WrapParams`) and the `Field` helpers alongside the `Of`-accessors. Consumers receive `error`, introspect it, AND mint their own typed errors in the same model — but the concrete `*errs.Error` stays unexported, so they cannot forge one by struct literal; construction routes through the runtime-validated constructors (which return a typed `CodeInvalid*` error, never panic). The kernel `errs.Define` (panic-at-init, AST-audited) stays internal; the public path is the non-panicking `New`/`Wrap`. This exception is `errs`-only — logger/codec internals keep their constructors private.
 - **`FieldValue` is passed through** (as the `Field` alias) since ADR 0019, so consumers attach structured metadata at construction, and **`FieldsOf` is re-exported** so they read it back: a `Field` answers `Key()` and `StringValue()`. The re-export is verbatim, like every other accessor; the `FieldsOfAsMap(err) map[string]string` shape is still not offered: a key can appear at several depths of a chain, and a map would pick one silently.
 
@@ -173,6 +174,7 @@ A directory of the one SDK module, `github.com/kitsunium/sdk`, whose `go.mod` is
   2. PR #25 (`refactor!: drive ktn-linter phases 1-7 to zero issues`) — `baseenc.Encoding` migrated from untyped `string` constants to a typed `int` + `iota` block with `EncodingUnknown` as the zero-value sentinel. Caller code that compared `Encoding` to a string literal stopped compiling; the typed form makes typos catchable at the call site.
   3. PR #27 deleted the byte-level `codec/baseenc/` package itself (and `EncodingUnknown` with it) in favour of `codec.Marshal` dispatch — see Contents above.
   4. ADR 0044 re-shaped the published `metrics` types onto the OpenTelemetry data model, citing ADR 0040.
+  5. The forwarders change turned 21 function variables of `errs` (`CodeOf`, `PublicOf`, `PrivateOf`, `HTTPStatusOf`, `ExitCodeOf`, `FieldsOf`, `HasCode`, `HasReason`, `NewPrefixMatcher`, `Pack`, `ParseCode`, `String`, `Int`, `Int64`, `Bool`, `Float`, `NewFieldValue`) and `observe/trace` (`String`, `Bool`, `Int64`, `Float64`) into functions, citing ADR 0040 — `errs.ReasonOf` stayed a variable by measurement: a consumer that assigned to one of the 21 or took its address stops compiling; every call and every use as a function value compiles unchanged.
 - All of them shipped before `v1.0.0`. **After v1.0.0 the policy hardens: no breaking changes in `pkg/v1`** — any further migrations go to `pkg/v2`. The pre-1.0 precedent does not authorise post-1.0 breakage.
 - Security fixes in `internal/*` ship in the SDK module's next release without touching `pkg/v1` — the facade re-exports, it does not duplicate.
 

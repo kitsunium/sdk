@@ -20,7 +20,7 @@ Consumers receive \[error\] values from the SDK and query them via the Of\-famil
 
 ### What's shipped
 
-Seven accessors, four predicates, two code helpers, four mask presets, one matcher constructor, and the two methods that read a [Field](<#Field>). All are re\-exported over internal/kernel/errs; HasAnyCode and HasAnyReason are composed here from HasCode and HasReason.
+Seven accessors, four predicates, two code helpers, four mask presets, one matcher constructor, and the two methods that read a [Field](<#Field>). Each function forwards to internal/kernel/errs — a function, never a variable a consumer could reassign for the whole process — and HasAnyCode and HasAnyReason are composed here from HasCode and HasReason. One exception: [ReasonOf](<#ReasonOf>) is still a variable bound to the kernel accessor, because its forwarder measured slower; never assign to it.
 
 ```
 | Symbol                                | Kind       | Returns / role                                            |
@@ -59,11 +59,11 @@ func PrivateOf(err error)    string          // "" if none — DIAGNOSTIC ONLY
 func HTTPStatusOf(err error) int             // 500 default
 func ExitCodeOf(err error)   int             // 70 (EX_SOFTWARE) default
 func FieldsOf(err error)     []Field         // nil if none — oldest cause first
-func HasCode(err error, c Code) bool
+func HasCode(err error, code Code) bool
 func HasReason(err error, reason string) bool
 ```
 
-Octets are reached on the typed [Code](<#Code>) itself: code.Major\(\), code.Layer\(\), code.Package\(\), code.Serial\(\). No separate LayerOf accessor exists — the kernel exports exactly one accessor per field and this package re\-exports it verbatim.
+Octets are reached on the typed [Code](<#Code>) itself: code.Major\(\), code.Layer\(\), code.Package\(\), code.Serial\(\). No separate LayerOf accessor exists — the kernel exports exactly one accessor per field and this package forwards it unchanged.
 
 ### Quick start
 
@@ -87,13 +87,13 @@ fmt.Println("HTTP status:", errs.HTTPStatusOf(err))
 
 ### The Public/Private split
 
-[PublicOf](<#CodeOf>) returns the wire\-safe message \(≤120 runes, literal, no interpolation\). Send it in HTTP/gRPC responses, error pages, and user\-facing surfaces.
+[PublicOf](<#PublicOf>) returns the wire\-safe message \(≤120 runes, literal, no interpolation\). Send it in HTTP/gRPC responses, error pages, and user\-facing surfaces.
 
-[PrivateOf](<#CodeOf>) returns the detailed log\-only message. DIAGNOSTIC ONLY. Never put it in a response, an error page, or anything the end user can see. It exists so observability tooling can correlate a request ID with a detailed server\-side explanation in the log backend without re\-logging the entire chain.
+[PrivateOf](<#PrivateOf>) returns the detailed log\-only message. DIAGNOSTIC ONLY. Never put it in a response, an error page, or anything the end user can see. It exists so observability tooling can correlate a request ID with a detailed server\-side explanation in the log backend without re\-logging the entire chain.
 
 ### Reading the fields an error carries
 
-[FieldsOf](<#CodeOf>) returns the structured clauses the emitters along the chain attached, oldest cause first and newest wrapper last, as a copy the caller owns. Each is read with Key and StringValue — the value as text: a string verbatim, a number in decimal, a bool as true or false. A key may appear at more than one depth of a chain, which is why no map\-shaped accessor exists: the caller decides which depth it wants.
+[FieldsOf](<#FieldsOf>) returns the structured clauses the emitters along the chain attached, oldest cause first and newest wrapper last, as a copy the caller owns. Each is read with Key and StringValue — the value as text: a string verbatim, a number in decimal, a bool as true or false. A key may appear at more than one depth of a chain, which is why no map\-shaped accessor exists: the caller decides which depth it wants.
 
 ```
 _, err := mail.ParseURL(raw)
@@ -106,21 +106,21 @@ for _, field := range errs.FieldsOf(err) {
 
 A field value is a clause an emitter CHOSE to attach — a name, a position, a reason — and no SDK emitter attaches a value it was given to protect: mail.ParseURL says which part of a URL is wrong and never quotes the URL, whose userinfo is the password; the secret domain names a secret and never its value. That rule is what makes the fields safe to read, and a consumer minting its own errors with [New](<#New>) and [Wrap](<#Wrap>) owes its readers the same. The one field whose text the SDK does not write is "cause", which carries a foreign error's message as its library wrote it.
 
-Safe to read is not safe to publish: fields are diagnostics, like [PrivateOf](<#CodeOf>) — authz attaches the subject, the action and the resource — so they belong in a log line or an operator's report, never in an HTTP response or an error page.
+Safe to read is not safe to publish: fields are diagnostics, like [PrivateOf](<#PrivateOf>) — authz attaches the subject, the action and the resource — so they belong in a log line or an operator's report, never in an HTTP response or an error page.
 
 ### HTTP status policy
 
-[HTTPStatusOf](<#CodeOf>) defaults to 500 when the error does not carry an explicit override. That default is deliberate for internal failures but it is a leak\-by\-default anti\-pattern for domain errors that are really 4xx \(validation, not\-found, conflict, authorisation\). Such errors MUST pass errs.WithHTTPStatus\(4xx\) at Define time so the accessor surfaces the correct status.
+[HTTPStatusOf](<#HTTPStatusOf>) defaults to 500 when the error does not carry an explicit override. That default is deliberate for internal failures but it is a leak\-by\-default anti\-pattern for domain errors that are really 4xx \(validation, not\-found, conflict, authorisation\). Such errors MUST pass errs.WithHTTPStatus\(4xx\) at Define time so the accessor surfaces the correct status.
 
 ### Semantics reminders
 
 - Origin wins on wrap. An error born in service/observe/logger \(code 31xx\) and observed through pkg/v1/observe/logger keeps its 31xx code — the Code describes the origin, never the observation surface.
-- errors.Is keeps stdlib semantics. For code / reason matching use the explicit [HasCode](<#CodeOf>) / [HasReason](<#CodeOf>) helpers; errors.Is\(err, context.Canceled\) still walks the chain through errs.Wrap.
+- errors.Is keeps stdlib semantics. For code / reason matching use the explicit [HasCode](<#HasCode>) / [HasReason](<#HasReason>) helpers; errors.Is\(err, context.Canceled\) still walks the chain through errs.Wrap.
 - Default HTTP / exit codes are global \(500 / 70\). Per\-error overrides come from errs.WithHTTPStatus / WithExitCode inside the emitter package.
 
 ### PrefixMatcher routing
 
-[NewPrefixMatcher](<#CodeOf>) returns a sentinel that classifies any wrapped error by Code prefix when used through errors.Is. Combine with [MaskByMajor](<#MaskByMajor>) / [MaskByLayer](<#MaskByMajor>) / [MaskByPackage](<#MaskByMajor>) / [MaskExact](<#MaskByMajor>) for CIDR\-style code routing in dashboards / middleware. Single\-code matching uses [HasCode](<#CodeOf>) which is cheaper.
+[NewPrefixMatcher](<#NewPrefixMatcher>) returns a sentinel that classifies any wrapped error by Code prefix when used through errors.Is. Combine with [MaskByMajor](<#MaskByMajor>) / [MaskByLayer](<#MaskByMajor>) / [MaskByPackage](<#MaskByMajor>) / [MaskExact](<#MaskByMajor>) for CIDR\-style code routing in dashboards / middleware. Single\-code matching uses [HasCode](<#HasCode>) which is cheaper.
 
 Package errs — construction half of the public error API.
 
@@ -150,106 +150,75 @@ The Major ceiling is 0x7F because every Code must round\-trip through a positive
 ## Index
 
 - [Variables](<#variables>)
+- [func ExitCodeOf\(err error\) int](<#ExitCodeOf>)
+- [func HTTPStatusOf\(err error\) int](<#HTTPStatusOf>)
 - [func HasAnyCode\(err error, codes ...Code\) bool](<#HasAnyCode>)
 - [func HasAnyReason\(err error, reasons ...string\) bool](<#HasAnyReason>)
+- [func HasCode\(err error, code Code\) bool](<#HasCode>)
+- [func HasReason\(err error, reason string\) bool](<#HasReason>)
 - [func New\(code Code, reason, public, private string, fields ...Field\) error](<#New>)
+- [func PrivateOf\(err error\) string](<#PrivateOf>)
+- [func PublicOf\(err error\) string](<#PublicOf>)
 - [func Wrap\(cause error, params WrapParams, fields ...Field\) error](<#Wrap>)
 - [type Code](<#Code>)
+  - [func CodeOf\(err error\) \(code Code, ok bool\)](<#CodeOf>)
+  - [func Pack\(major Major, layer Layer, pkg PkgCode, serial Serial\) Code](<#Pack>)
+  - [func ParseCode\(text string\) \(code Code, err error\)](<#ParseCode>)
 - [type Field](<#Field>)
+  - [func Bool\(key string, val bool\) Field](<#Bool>)
+  - [func FieldsOf\(err error\) \[\]Field](<#FieldsOf>)
+  - [func Float\(key string, val float64\) Field](<#Float>)
+  - [func Int\(key string, val int\) Field](<#Int>)
+  - [func Int64\(key string, val int64\) Field](<#Int64>)
+  - [func NewFieldValue\(key, val string\) Field](<#NewFieldValue>)
+  - [func String\(key, val string\) Field](<#String>)
 - [type Layer](<#Layer>)
 - [type Major](<#Major>)
 - [type PkgCode](<#PkgCode>)
 - [type PrefixMatcher](<#PrefixMatcher>)
+  - [func NewPrefixMatcher\(prefix, mask Code\) \*PrefixMatcher](<#NewPrefixMatcher>)
 - [type Serial](<#Serial>)
 - [type WrapParams](<#WrapParams>)
 
 
 ## Variables
 
-<a name="CodeOf"></a>Re\-exports of the internal accessors. Grouped to satisfy the repo\-wide var\-grouping convention while keeping each helper's godoc on its own line.
+<a name="ReasonOf"></a>The one function this package still holds in a variable.
 
 ```go
 var (
-    // CodeOf returns the deepest *errs.Error's typed Code in err's chain,
-    // or (0, false) when no *errs.Error is present.
-    CodeOf = kerrs.CodeOf
-
     // ReasonOf returns the deepest *errs.Error reason in err's chain, or ("", false).
-    ReasonOf = kerrs.ReasonOf
-
-    // PublicOf returns the deepest *errs.Error Public message, or "" when no
-    // *errs.Error is in the chain.
-    PublicOf = kerrs.PublicOf
-
-    // PrivateOf returns the deepest *errs.Error Private message. DIAGNOSTIC-ONLY.
-    PrivateOf = kerrs.PrivateOf
-
-    // HTTPStatusOf returns the HTTP status mapped from the deepest *errs.Error,
-    // defaulting to 500 when no *errs.Error is present.
-    HTTPStatusOf = kerrs.HTTPStatusOf
-
-    // ExitCodeOf returns the sysexits code mapped from the deepest *errs.Error,
-    // defaulting to 70 (EX_SOFTWARE) when no *errs.Error is present.
-    ExitCodeOf = kerrs.ExitCodeOf
-
-    // FieldsOf returns every Field attached along err's chain, oldest cause
-    // first and newest wrapper last, as a copy the caller owns — nil when no
-    // *errs.Error is present. Read each with Key and StringValue.
     //
-    // The values are clauses the emitters chose to attach — names, positions,
-    // reasons — never secrets: no SDK emitter attaches a value it was given to
-    // protect (mail.ParseURL never quotes the URL), which is what makes reading
-    // them safe. They are diagnostics nonetheless, like PrivateOf — keep them
-    // off the wire.
-    FieldsOf = kerrs.FieldsOf
-
-    // HasCode walks the chain (including errors.Join subtrees) and reports
-    // whether any *errs.Error carries code (origin or trail entry).
-    HasCode = kerrs.HasCode
-
-    // HasReason walks the chain and reports whether any *errs.Error carries reason.
-    HasReason = kerrs.HasReason
-
-    // NewPrefixMatcher builds an errors.Is target for CIDR-style Code matching.
-    NewPrefixMatcher = kerrs.NewPrefixMatcher
-
-    // Pack constructs a Code from its four octets. Runtime only — sentinel
-    // constants in caller code MUST use hex literals to stay const-expressible.
-    Pack = kerrs.Pack
-
-    // ParseCode parses the canonical "M.L.P.S" textual form.
-    ParseCode = kerrs.ParseCode
+    // It is a variable bound to the kernel accessor rather than a forwarder like
+    // its siblings: the forwarder cannot inline — the accessor it would inline
+    // already costs 75 of the inliner's 80 — and in two of four measured runs it
+    // was slower than the indirect call through this variable by more than the
+    // 3 % a forwarder may cost (BENCH.md). Assigning to it would change it for
+    // every caller in the process: never do.
+    ReasonOf = kerrs.ReasonOf
 )
 ```
 
-<a name="String"></a>Re\-exported construction helpers. Grouped to satisfy the repo var\-grouping convention while keeping each helper's godoc on its own line.
+<a name="ExitCodeOf"></a>
+## func [ExitCodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L263>)
 
 ```go
-var (
-    // String builds a Field holding a string value.
-    String = kerrs.String
-
-    // Int builds a Field from a plain int (widened to int64 internally),
-    // matching the slog / zap Int(key, int) convention.
-    Int = kerrs.Int
-
-    // Int64 builds a Field from a 64-bit integer (no upcast at the call site).
-    Int64 = kerrs.Int64
-
-    // Bool builds a Field holding a boolean value.
-    Bool = kerrs.Bool
-
-    // Float builds a Field holding a float64 value (shortest round-trip render).
-    Float = kerrs.Float
-
-    // NewFieldValue builds a string-typed Field. Provided for tooling that
-    // expects a New-prefixed factory; prefer String for the common case.
-    NewFieldValue = kerrs.NewFieldValue
-)
+func ExitCodeOf(err error) int
 ```
+
+ExitCodeOf returns the sysexits code mapped from the deepest \*errs.Error, defaulting to 70 \(EX\_SOFTWARE\) when no \*errs.Error is present.
+
+<a name="HTTPStatusOf"></a>
+## func [HTTPStatusOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L256>)
+
+```go
+func HTTPStatusOf(err error) int
+```
+
+HTTPStatusOf returns the HTTP status mapped from the deepest \*errs.Error, defaulting to 500 when no \*errs.Error is present.
 
 <a name="HasAnyCode"></a>
-## func [HasAnyCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L285>)
+## func [HasAnyCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L327>)
 
 ```go
 func HasAnyCode(err error, codes ...Code) bool
@@ -268,7 +237,7 @@ retryable := errs.HasAnyCode(err,
 ```
 
 <a name="HasAnyReason"></a>
-## func [HasAnyReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L308>)
+## func [HasAnyReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L350>)
 
 ```go
 func HasAnyReason(err error, reasons ...string) bool
@@ -284,8 +253,26 @@ if errs.HasAnyReason(err, "UNKNOWN_FORMAT", "STREAMING_UNSUPPORTED") {
 }
 ```
 
+<a name="HasCode"></a>
+## func [HasCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L284>)
+
+```go
+func HasCode(err error, code Code) bool
+```
+
+HasCode walks the chain \(including errors.Join subtrees\) and reports whether any \*errs.Error carries code \(origin or trail entry\).
+
+<a name="HasReason"></a>
+## func [HasReason](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L290>)
+
+```go
+func HasReason(err error, reason string) bool
+```
+
+HasReason walks the chain and reports whether any \*errs.Error carries reason.
+
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L119>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L133>)
 
 ```go
 func New(code Code, reason, public, private string, fields ...Field) error
@@ -303,8 +290,26 @@ Arguments mirror the kernel sentinel contract:
 
 HTTP status defaults to 500 and exit code to 70 \(EX\_SOFTWARE\); a per\-error exit override is available through Wrap's WrapParams.ExitCode.
 
+<a name="PrivateOf"></a>
+## func [PrivateOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L249>)
+
+```go
+func PrivateOf(err error) string
+```
+
+PrivateOf returns the deepest \*errs.Error Private message. DIAGNOSTIC\-ONLY.
+
+<a name="PublicOf"></a>
+## func [PublicOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L243>)
+
+```go
+func PublicOf(err error) string
+```
+
+PublicOf returns the deepest \*errs.Error Public message, or "" when no \*errs.Error is in the chain.
+
 <a name="Wrap"></a>
-## func [Wrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L135>)
+## func [Wrap](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L149>)
 
 ```go
 func Wrap(cause error, params WrapParams, fields ...Field) error
@@ -315,7 +320,7 @@ Wrap attaches a cause to a new error with origin\-wins semantics and preserves t
 Declared as a function \(not a var alias over the kernel Wrap\) so the public signature returns error: the concrete \*errs.Error stays unexported, never leaking through the facade.
 
 <a name="Code"></a>
-## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L188>)
+## type [Code](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L191>)
 
 Code is the dotted\-quad error identifier packed into uint32. See ADR 0005 for the registry and layout.
 
@@ -338,19 +343,111 @@ const (
 )
 ```
 
+<a name="CodeOf"></a>
+### func [CodeOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L223>)
+
+```go
+func CodeOf(err error) (code Code, ok bool)
+```
+
+CodeOf returns the deepest \*errs.Error's typed Code in err's chain, or \(0, false\) when no \*errs.Error is present.
+
+<a name="Pack"></a>
+### func [Pack](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L303>)
+
+```go
+func Pack(major Major, layer Layer, pkg PkgCode, serial Serial) Code
+```
+
+Pack constructs a Code from its four octets. Runtime only — sentinel constants in caller code MUST use hex literals to stay const\-expressible.
+
+<a name="ParseCode"></a>
+### func [ParseCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L309>)
+
+```go
+func ParseCode(text string) (code Code, err error)
+```
+
+ParseCode parses the canonical "M.L.P.S" textual form.
+
 <a name="Field"></a>
 ## type [Field](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L69>)
 
 Field is a single typed key/value pair attached to an error. Build one with String / Int / Int64 / Bool / Float \(or NewFieldValue\); the zero value is invalid and must never be passed across the API.
 
-A Field read back from an error — see [FieldsOf](<#CodeOf>) — answers two methods: Key\(\), the name the emitter chose, and StringValue\(\), the value as text \(a string verbatim, a number in decimal, a bool as true or false, "" for the zero Field\). The rendering is for reading, not for parsing back into a type.
+A Field read back from an error — see [FieldsOf](<#FieldsOf>) — answers two methods: Key\(\), the name the emitter chose, and StringValue\(\), the value as text \(a string verbatim, a number in decimal, a bool as true or false, "" for the zero Field\). The rendering is for reading, not for parsing back into a type.
 
 ```go
 type Field = kerrs.FieldValue
 ```
 
+<a name="Bool"></a>
+### func [Bool](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L97>)
+
+```go
+func Bool(key string, val bool) Field
+```
+
+Bool builds a Field holding a boolean value.
+
+<a name="FieldsOf"></a>
+### func [FieldsOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L277>)
+
+```go
+func FieldsOf(err error) []Field
+```
+
+FieldsOf returns every Field attached along err's chain, oldest cause first and newest wrapper last, as a copy the caller owns — nil when no \*errs.Error is present. Read each with Key and StringValue.
+
+The values are clauses the emitters chose to attach — names, positions, reasons — never secrets: no SDK emitter attaches a value it was given to protect \(mail.ParseURL never quotes the URL\), which is what makes reading them safe. They are diagnostics nonetheless, like PrivateOf — keep them off the wire.
+
+<a name="Float"></a>
+### func [Float](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L103>)
+
+```go
+func Float(key string, val float64) Field
+```
+
+Float builds a Field holding a float64 value \(shortest round\-trip render\).
+
+<a name="Int"></a>
+### func [Int](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L85>)
+
+```go
+func Int(key string, val int) Field
+```
+
+Int builds a Field from a plain int \(widened to int64 internally\), matching the slog / zap Int\(key, int\) convention.
+
+<a name="Int64"></a>
+### func [Int64](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L91>)
+
+```go
+func Int64(key string, val int64) Field
+```
+
+Int64 builds a Field from a 64\-bit integer \(no upcast at the call site\).
+
+<a name="NewFieldValue"></a>
+### func [NewFieldValue](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L110>)
+
+```go
+func NewFieldValue(key, val string) Field
+```
+
+NewFieldValue builds a string\-typed Field. Provided for tooling that expects a New\-prefixed factory; prefer String for the common case.
+
+<a name="String"></a>
+### func [String](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/construct.go#L78>)
+
+```go
+func String(key, val string) Field
+```
+
+String builds a Field holding a string value.
+
 <a name="Layer"></a>
-## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L195>)
+## type [Layer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L198>)
 
 Layer is the second octet of Code — SDK layer \(0 = meta, 1 = kernel, 2 = core, 3 = service,...\). See ADR 0005.
 
@@ -359,7 +456,7 @@ type Layer = kerrs.Layer
 ```
 
 <a name="Major"></a>
-## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L192>)
+## type [Major](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L195>)
 
 Major is the top octet of Code — SemVer major version \(0 = internal, 1 = v1,...\). See ADR 0005.
 
@@ -380,7 +477,7 @@ const MinAppMajor Major = 0x40 // 64
 ```
 
 <a name="PkgCode"></a>
-## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L197>)
+## type [PkgCode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L200>)
 
 PkgCode is the third octet of Code — per\-layer package slot. See ADR 0005 / 0006.
 
@@ -389,7 +486,7 @@ type PkgCode = kerrs.PkgCode
 ```
 
 <a name="PrefixMatcher"></a>
-## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L203>)
+## type [PrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L206>)
 
 PrefixMatcher is the errors.Is target for CIDR\-style Code matching. Construct via NewPrefixMatcher.
 
@@ -397,8 +494,17 @@ PrefixMatcher is the errors.Is target for CIDR\-style Code matching. Construct v
 type PrefixMatcher = kerrs.PrefixMatcher
 ```
 
+<a name="NewPrefixMatcher"></a>
+### func [NewPrefixMatcher](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L296>)
+
+```go
+func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher
+```
+
+NewPrefixMatcher builds an errors.Is target for CIDR\-style Code matching.
+
 <a name="Serial"></a>
-## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L199>)
+## type [Serial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/errs/accessors.go#L202>)
 
 Serial is the low octet of Code — per\-package serial. See ADR 0005.
 

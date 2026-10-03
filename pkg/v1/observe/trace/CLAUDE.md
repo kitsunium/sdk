@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T19:30:00Z -->
+<!-- updated: 2026-10-03T20:30:02Z -->
 # pkg/v1/observe/trace/
 
 ## Purpose
@@ -28,7 +28,7 @@ alphabetical order.
 | Propagation | `Inject`, `Extract`, `ParseTraceParent`, `FormatTraceParent`, `ParseTraceState` — forwarding to `internal/service/observe/trace`, where reading and writing the headers moved (ADR 0160 §4); `ParseTraceID`, `ParseSpanID`, `ContextWithSpanContext`, `SpanContextFromContext` — the core's |
 | Instrumentation | `RecordError`, `ServerMiddleware`, `ClientMiddleware` |
 | Export | `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`, `RegisterExporter`, `LookupExporter`, `AvailableExporters`, `Export` |
-| Attributes | `String`, `Bool`, `Int64`, `Float64` |
+| Attributes | `String`, `Bool`, `Int64`, `Float64` — forwarders onto the shared model's constructors in `internal/core/observe/otel`, as `pkg/v1/observe/metrics`'s are; function variables until the v0 change below |
 | Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported` (the engine's, beside its parser) and `MaxTraceStateMembers` (the core's, a bound of the list); the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
 | Sentinels | all aliased from `internal/core/observe/trace` (ADR 0074): its own `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `InvalidAttribute`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`, and the engine's `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess`, declared there since ADR 0160 |
 
@@ -52,6 +52,20 @@ travelled with the type. And `Resource` / `Scope` no longer carry a
 `Normalized()` method — the tracer normalises them itself, with this signal's
 code and this signal's `DefaultScopeName` (the old `Scope.Normalized()` stamped
 the METRICS package's name). A v0 published-shape change (ADR 0040).
+
+## Every function is a forwarder, never a variable
+
+`String`, `Bool`, `Int64` and `Float64` were `var String = coreotel.String`
+and its three siblings until the forwarders change (ADR 0040: a published
+shape changed while v0, the commit says so). A function variable has two
+costs a forwarder does not: any consumer can reassign it for the whole
+process, and every call through it is indirect, so the compiler can neither
+inline it nor let escape analysis and constant folding see the callee. Each
+forwarder inlines (`go build -gcflags=-m=2`: cost 13, 21, 14 and 18 against a
+budget of 80), so a call compiles to the shared model's own body at the call
+site. `BENCH.md` §"The attribute constructors" has the before and after; the
+same four are forwarders in `pkg/v1/observe/metrics`, which is why one rule
+covers both packages.
 
 ## `SDKTracer` is what `NewTracer` returns, and `Tracer` stays the port
 
@@ -95,6 +109,10 @@ still hands it to the port, from the `_test` package alone.
 - **Do NOT re-export a concrete service type as a named type.** The aliases are
   deliberate: `Recorder = svctrace.Recorder` keeps one type, so a value built by
   either path is the same value.
+- **Do NOT re-export a function through a variable.** Write a forwarder —
+  `func String(key, value string) Attr { return coreotel.String(key, value) }`
+  — never `var String = coreotel.String`: see §"Every function is a forwarder".
+  A value (a sentinel, a constant) is still re-exported as one.
 
 ## Verification
 
@@ -106,4 +124,5 @@ still hands it to the port, from the `_test` package alone.
 | `TestPublicAttributeIsTheMetricsAttribute` | `trace.Attr` and `metrics.Attr` are one type |
 | `TestFacadeRefusesTheAmbiguousRatio` | the ADR 0031 answer, at the public edge |
 | `TestAConsumerCanNameTheTracerNewTracerReturns` | what `NewTracer` returns has a public name, and is still the port |
-| `cd pkg && GOWORK=off go test -run='^$' -bench=Facade -count=10 ./v1/observe/trace` | the four attribute constructors, one call each (`facade_bench_test.go`, BENCH.md) |
+| `cd pkg && GOWORK=off go build -gcflags=-m ./v1/observe/trace` | `can inline` for `String`, `Bool`, `Int64` and `Float64` |
+| `cd pkg && GOWORK=off go test -run='^$' -bench=Facade -count=10 ./v1/observe/trace` | the four constructors, one call each (`facade_bench_test.go`) |
