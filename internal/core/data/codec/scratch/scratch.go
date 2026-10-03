@@ -18,6 +18,7 @@ package scratch
 
 import (
 	"bytes"
+	"slices"
 
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
@@ -71,6 +72,35 @@ func ReleaseBuffer(buf *bytes.Buffer) {
 	}
 	//: cap-discard + reset run inside the recycler (discard-before-reset).
 	bufferPool.Put(buf)
+}
+
+// DetachBuffer hands the caller the bytes encoded into buf and ends the
+// caller's ownership of buf, by the cheaper of two releases for its size. A
+// buffer within MaxRetainedBufBytes is cloned and repooled: the clone is small,
+// and the next encode reuses the buffer. An over-cap buffer would pay a full
+// copy of a large payload AND be dropped by the pool anyway, so it is orphaned
+// instead: the returned slice IS its storage, now the caller's, and buf is left
+// for the GC without a reset — a reset would not zero the bytes, but a later
+// write through buf would overwrite them. Either way, buf must not be used
+// after the call. A nil buf yields nil.
+func DetachBuffer(buf *bytes.Buffer) []byte {
+	//: nil-safe, like ReleaseBuffer: nothing encoded, nothing to hand over.
+	if buf == nil {
+		//: no bytes and no buffer to release.
+		return nil
+	}
+	//: an over-cap buffer: hand its storage over rather than clone it.
+	if buf.Cap() > MaxRetainedBufBytes {
+		//: caller-owned now — never reset, never repooled.
+		return buf.Bytes()
+	}
+	//: clone first, so the caller's slice does not alias a pooled buffer the
+	//: next caller would overwrite.
+	out := slices.Clone(buf.Bytes())
+	//: reset + repool (the cap is under the threshold).
+	ReleaseBuffer(buf)
+	//: the caller's own copy.
+	return out
 }
 
 // AcquireReader returns a *bytes.Reader from the shared pool, reset to read

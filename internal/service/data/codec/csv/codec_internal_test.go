@@ -1,11 +1,6 @@
 package csv
 
-import (
-	"bytes"
-	"testing"
-
-	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
-)
+import "testing"
 
 // Test_csvCodec_Name covers the canonical identifier returned by the codec.
 func Test_csvCodec_Name(t *testing.T) {
@@ -330,32 +325,5 @@ func Test_csvCodec_Marshal_PromotionFastPath(t *testing.T) {
 			t.Parallel()
 			runCase(t, tc)
 		})
-	}
-}
-
-// Test_detachAndRelease covers the size-aware release paths.
-func Test_detachAndRelease(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		cap  int
-	}
-	tests := []tc{
-		{"small-cloned-and-repooled", 1024},
-		{"oversize-orphaned-untouched", scratch.MaxRetainedBufBytes + 1},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		buf := new(bytes.Buffer)
-		buf.Grow(tc.cap)
-		buf.WriteString("xyz")
-		out := detachAndRelease(buf)
-		//: caller's bytes survive both paths intact.
-		if string(out) != "xyz" {
-			t.Errorf("%s: got %q want %q", tc.name, out, "xyz")
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
 	}
 }

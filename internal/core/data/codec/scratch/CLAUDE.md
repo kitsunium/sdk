@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T01:02:40Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/data/codec/scratch/
 
 ## Purpose
@@ -28,6 +28,7 @@ mechanism was duplicated, the thresholds drifted.)
 | `MaxRetainedBufBytes` | `const = 256 << 10`. Buffers larger than this are dropped on release, never re-pooled. |
 | `AcquireBuffer() *bytes.Buffer` | Returns an **already-Reset** buffer from the shared pool. Caller owns it until `ReleaseBuffer`. |
 | `ReleaseBuffer(*bytes.Buffer)` | Repools the buffer unless `Cap() > MaxRetainedBufBytes` (then orphaned for the GC). |
+| `DetachBuffer(*bytes.Buffer) []byte` | Hands the caller the encoded bytes and ends its ownership of the buffer: within the cap, a clone and a `ReleaseBuffer`; over it, the buffer's own storage, orphaned without a copy or a reset. Nil-safe. |
 | `AcquireReader(src []byte) *bytes.Reader` | Returns a `*bytes.Reader` positioned at `src`. Caller owns it until `ReleaseReader`; `src` must stay alive + unmodified while the reader is used. |
 | `ReleaseReader(*bytes.Reader)` | Repools the reader. No cap-discard — a `bytes.Reader` is a fixed-size struct. |
 
@@ -36,9 +37,10 @@ mechanism was duplicated, the thresholds drifted.)
 A value from `AcquireBuffer` is caller-owned until the matching
 `ReleaseBuffer`. After release, the buffer **and any slice aliasing
 `buf.Bytes()`** must not be used. If the encoded bytes must outlive the
-release, clone them first (`slices.Clone(buf.Bytes())`) or use the
-size-aware detach pattern the codecs already implement (clone on the small
-path, orphan-without-clone on the over-cap path).
+release, clone them first (`slices.Clone(buf.Bytes())`) or call
+`DetachBuffer`, the size-aware release the codecs share (clone on the small
+path, orphan-without-clone on the over-cap path) — `csv`, `multipart`, `ndjson`
+and `pem` each carried a copy of it before it moved here.
 
 ## Why one shared pool
 
@@ -51,7 +53,9 @@ are unchanged.
 ## Consumers
 
 `AcquireBuffer` / `ReleaseBuffer`: `service/data/codec/{cbor,csv,json,msgpack,multipart,ndjson,pem,toml,xml,yaml}`
-plus the `baseenc` JSON-mediation buffer — eleven consumers. `AcquireReader` /
+plus the `baseenc` JSON-mediation buffer — eleven consumers. `DetachBuffer`:
+`service/data/codec/{csv,multipart,ndjson,pem}`, whose `Marshal` returns the
+bytes it encoded into a pooled buffer. `AcquireReader` /
 `ReleaseReader`: `service/data/codec/{csv,msgpack}` (their `Unmarshal` wraps the input `[]byte` in
 a recyclable `*bytes.Reader`). The `≥2-consumer` rule for a shared primitive
 is satisfied many times over.
