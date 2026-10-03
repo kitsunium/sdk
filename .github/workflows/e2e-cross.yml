@@ -48,7 +48,9 @@ env:
   # destination another handle holds open — which is exactly what that cache's
   # own reader does from a second process. The defect was deferred twice (ADR
   # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
-  # this CI matrix". Listing one more package here is what made that false.
+  # this CI matrix". Listing one more package here is what made that false. It
+  # is a package of the framework module now (ADR 0158), so it is listed in
+  # FRAMEWORK_PKGS and run from framework/ rather than from internal/service.
   #
   # `proc/childwait` joins them because the one wait4(-1) in the SDK lives
   # there, and which waiter a kernel hands a zombie to is exactly the per-kernel
@@ -69,7 +71,7 @@ env:
   # Windows (ADR 0148).
   KERNEL_PKGS: "./pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./entitlement ./ipc ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
+  SERVICE_PKGS: "./ipc ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. They run
   # here on the Unix lanes (the BSDs compile them below as well); on Windows
@@ -79,6 +81,9 @@ env:
   # would only run them twice. ACL hardening of the Windows file sinks — a
   # security descriptor at creation — is named in their CLAUDE.md, not done.
   SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile"
+  # Framework packages whose runtime is a kernel question — see `entitlement`
+  # above. Relative to framework/, the module they belong to.
+  FRAMEWORK_PKGS: "./internal/service/entitlement"
 
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
@@ -122,6 +127,9 @@ jobs:
           echo "::endgroup::"
           echo "::group::internal/service $SERVICE_PKGS"
           (cd internal/service && go test -count=1 -short $SERVICE_PKGS) || fail=1
+          echo "::endgroup::"
+          echo "::group::framework $FRAMEWORK_PKGS"
+          (cd framework && go test -count=1 -short $FRAMEWORK_PKGS) || fail=1
           echo "::endgroup::"
           # Unix-only file-security packages (see SERVICE_FILE_PKGS comment).
           if [ "${{ matrix.name }}" != "windows" ]; then
@@ -307,6 +315,7 @@ jobs:
           compile internal/service $SERVICE_PKGS
           # BSD is Unix, so the file-security suites apply here too.
           compile internal/service $SERVICE_FILE_PKGS
+          compile framework        $FRAMEWORK_PKGS
           # Conformance is a real program (not a -c suite): build it normally.
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
           ls -la bins/
@@ -436,6 +445,7 @@ jobs:
           compile internal/core    $CORE_PKGS
           compile internal/service $SERVICE_PKGS
           compile internal/service $SERVICE_FILE_PKGS
+          compile framework        $FRAMEWORK_PKGS
           compile pkg              ./v1/proc
           (cd e2e && go build -o "$GITHUB_WORKSPACE/bins/conformance.run" .)
           # One copy of what the guest runs, for both guest steps below (a

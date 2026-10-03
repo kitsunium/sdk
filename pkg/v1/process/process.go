@@ -120,7 +120,7 @@
 // apart: a RELEASE in Version, a COMMIT in Revision and Time (a pseudo-version
 // names one, and so does the main module's version-control stamp), and a
 // DIRECTORY in Local and Dir (a replace, a workspace module). What is in a
-// local directory NOW is a question for pkg/v1/git's Head.
+// local directory NOW is a question for the framework's git.Head (ADR 0158).
 package process
 
 import (

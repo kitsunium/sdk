@@ -18,9 +18,10 @@ package, `go get` names the module.
 | `third-party/transform` | the module root (zstd + s2) | `github.com/klauspost/compress` | `0.3.63.*` |
 | `third-party/x-crypto` | `argon2id`, `xchacha` | `golang.org/x/crypto` | none — the shared `core/crypto` sentinels |
 
-`third-party/entitlement` is the exception: entitlement's ssh `Identity`
-(ADR 0079) is still a package of the ROOT module, which nothing requires and
-the release chain leaves untagged.
+Entitlement's ssh `Identity` (ADR 0079), `third-party/entitlement` until ADR
+0158, is not here any more: it is the framework's connector module
+`framework/connectors/ssh`, beside the database engines. The root module holds
+no package (ADR 0157 §5).
 
 ## Rules
 
@@ -63,10 +64,9 @@ bazel test //third-party/...                            # every vendor module un
 ```
 
 A pattern never crosses a module boundary: from the root, `./third-party/...`
-reaches only the root module's package (entitlement), and with `GOWORK=off`
-`./third-party/aws/...` reaches nothing at all, because the root module no
-longer contains it. Loop over `bash scripts/ci/go-modules.sh` to reach every
-module (ADR 0137).
+reaches nothing, because the root module holds no package, and with `GOWORK=off`
+`./third-party/aws/...` reaches nothing either. Loop over
+`bash scripts/ci/go-modules.sh` to reach every module (ADR 0137).
 
 The opt-in suites behind a build tag keep the run procedure their package
 `CLAUDE.md` gives (rule 12). The AWS writers' `localstack` suites stay in

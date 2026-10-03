@@ -11,8 +11,8 @@ import (
 	"sync"
 	"time"
 
+	"github.com/kitsunium/sdk/framework/git"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/git"
 	"github.com/kitsunium/sdk/pkg/v1/process"
 )
 

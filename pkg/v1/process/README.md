@@ -82,7 +82,7 @@ sdk, found := build.Module("github.com/kitsunium/sdk/pkg")
 
 CPUTime is the kernel's count \(getrusage\) where the platform has one and the Go runtime's estimate elsewhere — refreshed only at a garbage collection; Stats.CPUEstimated says which. The distributions and every counter are cumulative since the process started — subtract two snapshots for a window.
 
-A module's recorded version conflates three things, and [Module](<#Module>) keeps them apart: a RELEASE in Version, a COMMIT in Revision and Time \(a pseudo\-version names one, and so does the main module's version\-control stamp\), and a DIRECTORY in Local and Dir \(a replace, a workspace module\). What is in a local directory NOW is a question for pkg/v1/git's Head.
+A module's recorded version conflates three things, and [Module](<#Module>) keeps them apart: a RELEASE in Version, a COMMIT in Revision and Time \(a pseudo\-version names one, and so does the main module's version\-control stamp\), and a DIRECTORY in Local and Dir \(a replace, a workspace module\). What is in a local directory NOW is a question for the framework's git.Head \(ADR 0158\).
 
 Package process — the running process itself: what it was built from and what it is doing.
 

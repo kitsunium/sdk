@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T03:30:00Z -->
 # pkg/v1/
 
 ## Purpose
@@ -69,10 +69,10 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `sdlisten/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/sdlisten/README.md` |
 | `sdnotify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/sdnotify/README.md` |
 | `signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/signal/README.md` |
-| `git/` | What a branch changed and what a working tree is at (ADR 0076, ADR 0087, ADR 0100): `Resolve(ctx, Config)` → a `Resolution` that can say it does not know, `Head` → a `HeadState`, `GitDir`, `ShowFile` | `pkg/v1/git/README.md` |
-| `selfupdate/` | Replace the running binary with a newer signed release (ADR 0077): `New(version, Source)` → a `Service` that verifies the signature, THEN the digest, THEN writes to disk; no vendor key, no install (`NoVendorKey`) | `pkg/v1/selfupdate/README.md` |
-| `entitlement/` | A vendor-signed roster → a `Grant` (ADR 0079): `New` / `NewWithAnchors` / `NewWithGetter` → a `Service` over an `Identity` the caller brings (the ssh one is `third-party/entitlement`), anchors that are a list (ADR 0091), `BoundProver` (ADR 0092), `RequiresUpdate` / `UpdateRefusal`, and `RoughtimeServer` / `BearerFetch`, what `Service.WithTimeServers` / `WithBearerFetch` take | `pkg/v1/entitlement/README.md` |
-| `gate/` | May this invocation run? (ADR 0080): `Decide(policy, path, verify)` → a `Decision` (`OutcomeAllow` / `OutcomeRefuse` / `OutcomeUpgrade`) from a `Policy`; it verifies nothing and exits nothing | `pkg/v1/gate/README.md` |
+
+The distribution packages — `git`, `selfupdate`, `entitlement` and `gate` — are
+the framework's since ADR 0158: `github.com/kitsunium/sdk/framework/<name>`,
+with the same surface, under the v0 licence for import paths (ADR 0155 §4).
 
 The `codec/` sub-package was added since the original CLAUDE.md. The legacy `codec/baseenc/` byte-level package was removed in favour of uniform `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)` dispatch — every encoding format now goes through the same verb.
 
@@ -183,10 +183,6 @@ GOWORK=off go test -race -cover ./v1/...
 - `sdlisten/` — see `pkg/v1/sdlisten/CLAUDE.md`
 - `sdnotify/` — see `pkg/v1/sdnotify/CLAUDE.md`
 - `signal/` — see `pkg/v1/signal/CLAUDE.md`
-- `git/` — see `pkg/v1/git/CLAUDE.md`
-- `selfupdate/` — see `pkg/v1/selfupdate/CLAUDE.md`
-- `entitlement/` — see `pkg/v1/entitlement/CLAUDE.md`
-- `gate/` — see `pkg/v1/gate/CLAUDE.md`
 - `health/` — see `pkg/v1/health/CLAUDE.md`
 - `lock/` — see `pkg/v1/lock/CLAUDE.md`
 

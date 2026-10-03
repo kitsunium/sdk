@@ -1,0 +1,63 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "git",
+    srcs = [
+        "changed_set.go",
+        "changed_set_compliance.go",
+        "config.go",
+        "diff_parse.go",
+        "exec.go",
+        "gitdir.go",
+        "head.go",
+        "resolve.go",
+        "show.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/framework/internal/service/git",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+    deps = [
+        "//framework/internal/core/git",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":git",
+    visibility = [
+        "//framework:__subpackages__",
+        "//visibility:public",
+    ],
+)
+
+go_test(
+    name = "git_test",
+    srcs = [
+        "changed_set_external_test.go",
+        "changed_set_internal_test.go",
+        "diff_parse_bench_test.go",
+        "diff_parse_internal_test.go",
+        "exec_internal_test.go",
+        "fsfixture_internal_test.go",
+        "gitdir_deferred_external_test.go",
+        "gitdir_external_test.go",
+        "gitdir_internal_test.go",
+        "head_external_test.go",
+        "head_internal_test.go",
+        "resolve_deferred_external_test.go",
+        "resolve_external_test.go",
+        "resolve_internal_test.go",
+        "shallow_probe_posix_test.go",
+        "show_external_test.go",
+    ],
+    embed = [":git"],
+    deps = [
+        "//framework/internal/core/git",
+        "//internal/kernel/errs",
+    ],
+)

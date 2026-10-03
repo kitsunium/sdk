@@ -1,0 +1,700 @@
+package ssh_test
+
+import (
+	"crypto/ed25519"
+	"encoding/pem"
+	"errors"
+	"io"
+	"io/fs"
+	"os"
+	"path/filepath"
+	"strings"
+	"testing"
+
+	sshid "github.com/kitsunium/sdk/framework/connectors/ssh"
+	"golang.org/x/crypto/ssh"
+
+	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// ownerOnly is the permission a private key must carry; anything looser means
+// the secret is machine-wide and the possession proof is theatre.
+const ownerOnly os.FileMode = 0o600
+
+// splitSubject is a canonical v4 UUID the public/private split assertions mint
+// under.
+const splitSubject string = "22222222-3333-4444-8555-666666666666"
+
+// canonicalSubject is a syntactically valid UUID; validSubject refuses anything
+// else before the file is ever read, which would short-circuit these tests.
+const canonicalSubject string = "3f2504e0-4f89-11d3-9a0c-0305e82c3301"
+
+// writeKeyPair drops an ed25519 pair into dir under uuid, in the layout the
+// license command produces.
+func writeKeyPair(t *testing.T, dir, uuid string, mode os.FileMode) (pub ssh.PublicKey, signer ssh.Signer) {
+	t.Helper()
+
+	_, priv, err := ed25519.GenerateKey(nil)
+	//: A failure here is an environment problem, not a test outcome.
+	if err != nil {
+		t.Fatalf("generating key: %v", err)
+	}
+	block, err := ssh.MarshalPrivateKey(priv, "")
+	//: A failure here is an environment problem, not a test outcome.
+	if err != nil {
+		t.Fatalf("marshalling private key: %v", err)
+	}
+	if writeErr := os.WriteFile(sshid.PrivateKeyPath(dir, uuid), pem.EncodeToMemory(block), mode); writeErr != nil {
+		t.Fatalf("writing private key: %v", writeErr)
+	}
+	signer, err = ssh.NewSignerFromKey(priv)
+	//: A failure here is an environment problem, not a test outcome.
+	if err != nil {
+		t.Fatalf("building signer: %v", err)
+	}
+	pub = signer.PublicKey()
+	if writeErr := os.WriteFile(sshid.PublicKeyPath(dir, uuid), ssh.MarshalAuthorizedKey(pub), 0o644); writeErr != nil {
+		t.Fatalf("writing public key: %v", writeErr)
+	}
+	//: Return both halves so a test can prove or fail possession.
+	return pub, signer
+}
+
+// TestPublicKeyPath pins that the UUID alone addresses the published half,
+// which is what lets the roster hold no index.
+func TestPublicKeyPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		dir  string
+		uuid string
+		want string
+	}{
+		{name: "plain uuid", dir: "/home/u/.ssh", uuid: "abc", want: "/home/u/.ssh/abc.pub"},
+		{name: "nested dir", dir: "/a/b", uuid: "x-1", want: "/a/b/x-1.pub"},
+		{name: "empty dir stays relative", dir: "", uuid: "id", want: "id.pub"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := sshid.PublicKeyPath(tt.dir, tt.uuid); got != filepath.Clean(tt.want) {
+				t.Errorf("sshid.PublicKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestPrivateKeyPath pins that the private half sits beside the public one
+// under the same UUID name.
+func TestPrivateKeyPath(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		dir  string
+		uuid string
+		want string
+	}{
+		{name: "plain uuid", dir: "/home/u/.ssh", uuid: "abc", want: "/home/u/.ssh/abc"},
+		{name: "nested dir", dir: "/a/b", uuid: "x-1", want: "/a/b/x-1"},
+		{name: "empty dir stays relative", dir: "", uuid: "id", want: "id"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			if got := sshid.PrivateKeyPath(tt.dir, tt.uuid); got != filepath.Clean(tt.want) {
+				t.Errorf("sshid.PrivateKeyPath(%q, %q) = %q, want %q", tt.dir, tt.uuid, got, tt.want)
+			}
+		})
+	}
+}
+
+// TestProvePossession pins the property that makes publishing the public keys
+// safe: holding the published half is never enough.
+func TestProvePossession(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		foreign bool
+		wantErr error
+	}{
+		{name: "the matching private half proves possession", foreign: false},
+		{name: "a different key cannot answer for this identity", foreign: true, wantErr: coreent.ErrKeyMismatch},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			pub, signer := writeKeyPair(t, t.TempDir(), "aaaaaaaa-1111-4111-8111-111111111111", ownerOnly)
+			//: Copying a published .pub and signing with your own key is
+			//: exactly the attack a public roster invites.
+			if tt.foreign {
+				_, signer = writeKeyPair(t, t.TempDir(), "bbbbbbbb-2222-4222-8222-222222222222", ownerOnly)
+			}
+
+			err := sshid.ProvePossession(signer, pub)
+			//: Error cases assert the sentinel, not the wording.
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("sshid.ProvePossession() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("sshid.ProvePossession() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestSignerFromFile covers enrolment state.
+//
+// The permission guard is asserted per platform instead of here, because it
+// cannot be stated once: key_unix_external_test.go pins that a loose key is
+// refused, key_windows_external_test.go pins that the synthesised mode is
+// ignored. Keeping a shared case meant skipping it on Windows, and this
+// project forbids t.Skip — a test that does not run is not a test.
+func TestSignerFromFile(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		mode    os.FileMode
+		absent  bool
+		corrupt bool
+		wantErr error
+	}{
+		{name: "an owner-only key loads", mode: ownerOnly},
+		{name: "a missing key is the never-enrolled case", absent: true, wantErr: coreent.ErrNoLicense},
+		{name: "a corrupt key is refused, not treated as absent", corrupt: true, wantErr: coreent.ErrNoPossession},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			uuid := "aaaaaaaa-1111-4111-8111-111111111111"
+			//: An absent key must not be manufactured by the fixture.
+			switch {
+			case tt.absent:
+				uuid = "cccccccc-9999-4999-8999-999999999999"
+			case tt.corrupt:
+				if err := os.WriteFile(sshid.PrivateKeyPath(dir, uuid), []byte("not a key"), ownerOnly); err != nil {
+					t.Fatalf("writing junk: %v", err)
+				}
+			default:
+				writeKeyPair(t, dir, uuid, tt.mode)
+			}
+
+			_, err := sshid.SignerFromFile(dir, uuid)
+			//: Error cases assert the sentinel, not the wording.
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("sshid.SignerFromFile() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Errorf("sshid.SignerFromFile() error = %v, want nil", err)
+			}
+		})
+	}
+}
+
+// TestLoadPublicKey covers enrolment state on the published half.
+func TestLoadPublicKey(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		absent  bool
+		wantErr error
+	}{
+		{name: "an enrolled key loads"},
+		{name: "a missing key is the never-enrolled case", absent: true, wantErr: coreent.ErrNoLicense},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			writeKeyPair(t, dir, "eeeeeeee-5555-4555-8555-555555555555", ownerOnly)
+			uuid := "eeeeeeee-5555-4555-8555-555555555555"
+			//: Point at a key that was deliberately never written.
+			if tt.absent {
+				uuid = "dddddddd-0000-4000-8000-000000000000"
+			}
+
+			loaded, err := sshid.LoadPublicKey(dir, uuid)
+			//: Error cases assert the sentinel, not the wording.
+			if tt.wantErr != nil {
+				if !errors.Is(err, tt.wantErr) {
+					t.Errorf("sshid.LoadPublicKey() error = %v, want %v", err, tt.wantErr)
+				}
+				return
+			}
+			if err != nil {
+				t.Fatalf("sshid.LoadPublicKey() error = %v, want nil", err)
+			}
+			if loaded == nil {
+				t.Error("sshid.LoadPublicKey() returned no key on the success path")
+			}
+		})
+	}
+}
+
+// TestFingerprint pins that the value compared against the roster is stable
+// across a write/read round trip — a mismatch here would revoke everyone.
+func TestFingerprint(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		uuid string
+	}{
+		{name: "round trip is stable", uuid: "eeeeeeee-5555-4555-8555-555555555555"},
+		{name: "a second identity fingerprints differently", uuid: "bbbbbbbb-2222-4222-8222-222222222222"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			pub, _ := writeKeyPair(t, dir, tt.uuid, ownerOnly)
+			loaded, err := sshid.LoadPublicKey(dir, tt.uuid)
+			if err != nil {
+				t.Fatalf("sshid.LoadPublicKey() error = %v, want nil", err)
+			}
+			if sshid.Fingerprint(loaded) != sshid.Fingerprint(pub) {
+				t.Errorf("sshid.Fingerprint() = %q, want %q", sshid.Fingerprint(loaded), sshid.Fingerprint(pub))
+			}
+		})
+	}
+}
+
+// TestSubjectValidation pins that an identifier which could escape the key
+// directory is refused before any path is composed. The subject reaches us
+// from a roster and from directory listings, so treating it as a trusted path
+// component would turn the licence name into a traversal lever.
+func TestSubjectValidation(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name    string
+		uuid    string
+		wantErr error
+	}{
+		{name: "parent traversal is refused", uuid: "../../etc/passwd", wantErr: coreent.ErrKeyMismatch},
+		{name: "a nested path is refused", uuid: "a/b", wantErr: coreent.ErrKeyMismatch},
+		{name: "an absolute path is refused", uuid: "/etc/shadow", wantErr: coreent.ErrKeyMismatch},
+		{name: "a plain word is not a subject", uuid: "id_ed25519", wantErr: coreent.ErrKeyMismatch},
+		{name: "an empty identifier is refused", uuid: "", wantErr: coreent.ErrKeyMismatch},
+		{name: "a canonical subject is accepted as far as the filesystem", uuid: sampleUUID, wantErr: coreent.ErrNoLicense},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			dir := t.TempDir()
+			//: Both entry points compose a path from the identifier, so both
+			//: must reject before touching the filesystem.
+			if _, err := sshid.LoadPublicKey(dir, tt.uuid); !errors.Is(err, tt.wantErr) {
+				t.Errorf("sshid.LoadPublicKey(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
+			}
+			if _, err := sshid.SignerFromFile(dir, tt.uuid); !errors.Is(err, tt.wantErr) {
+				t.Errorf("sshid.SignerFromFile(%q) error = %v, want %v", tt.uuid, err, tt.wantErr)
+			}
+		})
+	}
+}
+
+// probeReadCause asks the operating system what os.ReadFile produces for path,
+// and returns the syscall-level cause underneath its *fs.PathError.
+//
+// Naming the errno directly would bind the test to one platform. Probing binds
+// it to the property under test — that sshid.LoadPublicKey preserves whatever cause
+// the read produced — which is true everywhere and is what the fix restored.
+//
+// Parameters:
+//   - t: the test handle, used to fail on a fixture that does not error.
+//   - path: the path to read.
+//
+// Returns:
+//   - cause: the unwrapped cause, suitable as an errors.Is target.
+func probeReadCause(t *testing.T, path string) (cause error) {
+	t.Helper()
+
+	_, probeErr := os.ReadFile(path)
+	//: A fixture that reads cleanly cannot exercise the wrapping at all.
+	if probeErr == nil {
+		t.Fatalf("reading %s succeeded; the fixture must make ReadFile fail", path)
+	}
+
+	var pathErr *fs.PathError
+	//: os.ReadFile always reports through *fs.PathError; anything else means
+	//: the probe and the code under test are not on the same path.
+	if !errors.As(probeErr, &pathErr) {
+		t.Fatalf("probe error is not a *fs.PathError: %v", probeErr)
+	}
+	//: Return the syscall-level cause, which is what sshid.LoadPublicKey must carry.
+	return pathErr.Err
+}
+
+// TestLoadPublicKeyPreservesTheUnderlyingCause pins that this package no longer
+// flattens the real cause out of its error chains.
+//
+// Every wrap in pkg/license used the shape
+//
+//	fmt.Errorf("%w: context: %v", ErrSentinel, cause)
+//
+// which wraps the SENTINEL and renders the CAUSE as text. errors.Is against the
+// sentinel worked, so nothing looked broken — but errors.Is against the actual
+// cause could never succeed, and the repository contains zero production
+// errors.As, which is what you would expect when As can never return anything.
+//
+// Go 1.20 made multiple %w legal in one Errorf, so both can be wrapped. This
+// test is what keeps it fixed: the sentinel must STILL match, because callers
+// branch on it, and the underlying cause must match too.
+//
+// The fixture is a DIRECTORY where a key file is expected. That reaches the
+// "reading" branch rather than the absent-file branch, which returns a
+// different sentinel and deliberately wraps no cause.
+//
+// The expected cause is PROBED rather than named. On unix, reading a directory
+// fails with EISDIR; on windows the open succeeds (Go opens directories with
+// FILE_FLAG_BACKUP_SEMANTICS) and the read fails with something else entirely,
+// so a hardcoded syscall.EISDIR would have made the [windows] pkg/license CI
+// lane red for a platform difference this test is not about. Asking the OS what
+// it produces keeps the assertion the one that matters: whatever the cause IS,
+// it must be reachable through the chain.
+func TestLoadPublicKeyPreservesTheUnderlyingCause(t *testing.T) {
+	t.Parallel()
+
+	sshDir := t.TempDir()
+	keyPath := filepath.Join(sshDir, canonicalSubject+".pub")
+	//: A directory at the key path makes ReadFile fail.
+	if err := os.Mkdir(keyPath, 0o750); err != nil {
+		t.Fatalf("preparing fixture: %v", err)
+	}
+
+	wantCause := probeReadCause(t, keyPath)
+
+	_, err := sshid.LoadPublicKey(sshDir, canonicalSubject)
+	//: A nil error would make every assertion below vacuous.
+	if err == nil {
+		t.Fatal("sshid.LoadPublicKey over a directory returned nil error")
+	}
+
+	tests := []struct {
+		name   string
+		target error
+		want   bool
+		why    string
+	}{
+		{
+			name:   "sentinel still matches",
+			target: coreent.ErrNoPossession,
+			want:   true,
+			why:    "callers branch on the sentinel; that contract must not change",
+		},
+		{
+			name:   "underlying cause now matches",
+			target: wantCause,
+			want:   true,
+			why:    "the %v that flattened this cause is now a %w",
+		},
+		{
+			name:   "an unrelated error still does not match",
+			target: fs.ErrPermission,
+			want:   false,
+			why:    "wrapping more must not make errors.Is promiscuous",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			//: errors.Is must see the whole chain, not just its head.
+			if got := errors.Is(err, tt.target); got != tt.want {
+				t.Errorf("errors.Is(err, %v) = %v, want %v (%s)\nerr = %v", tt.target, got, tt.want, tt.why, err)
+			}
+		})
+	}
+}
+
+// TestErrorsAsReachesTheConcreteCause is the other half: errors.As must recover
+// the concrete error type, which is impossible once a cause has been rendered
+// to text.
+//
+// The negative row is what keeps the positive one honest. `errors.As` returning
+// true for *fs.PathError proves the chain reaches a wrapped value; it does not
+// prove the chain is DISCRIMINATING. A wrapper that answered every As query
+// affirmatively would satisfy the first row and be worse than the flattening it
+// replaced, because callers would branch on types the error never carried.
+func TestErrorsAsReachesTheConcreteCause(t *testing.T) {
+	t.Parallel()
+
+	sshDir := t.TempDir()
+	keyPath := filepath.Join(sshDir, canonicalSubject+".pub")
+	//: Same fixture: a directory where a file is expected.
+	if err := os.Mkdir(keyPath, 0o750); err != nil {
+		t.Fatalf("preparing fixture: %v", err)
+	}
+
+	_, err := sshid.LoadPublicKey(sshDir, canonicalSubject)
+	//: Without an error there is nothing to unwrap.
+	if err == nil {
+		t.Fatal("sshid.LoadPublicKey over a directory returned nil error")
+	}
+
+	tests := []struct {
+		name     string
+		recovers func(error) bool
+		want     bool
+		why      string
+	}{
+		{
+			name: "the concrete *fs.PathError is recovered",
+			recovers: func(e error) bool {
+				var target *fs.PathError
+				return errors.As(e, &target)
+			},
+			want: true,
+			why:  "a cause rendered with %v is text; As can never reach it at any depth",
+		},
+		{
+			name: "an unrelated concrete type is not",
+			recovers: func(e error) bool {
+				var target *os.LinkError
+				return errors.As(e, &target)
+			},
+			want: false,
+			why:  "wrapping the cause must not make As promiscuous",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+			//: As must reach the real value, and only the real value.
+			if got := tt.recovers(err); got != tt.want {
+				t.Errorf("errors.As(%s) = %v, want %v (%s)\nerr = %v", tt.name, got, tt.want, tt.why, err)
+			}
+		})
+	}
+
+	var pathErr *fs.PathError
+	//: A flattened cause cannot be recovered by As at any depth.
+	if !errors.As(err, &pathErr) {
+		t.Fatalf("errors.As could not recover *fs.PathError from: %v", err)
+	}
+	//: The recovered error must carry the real operand, not a copy of the text.
+	if pathErr.Path != keyPath {
+		t.Errorf("recovered *fs.PathError.Path = %q, want %q", pathErr.Path, keyPath)
+	}
+}
+
+// TestNoParticularReachesThePublicSentence is the assertion this package's
+// conversion to errs.Wrap exists for, and it runs in BOTH directions.
+//
+// The mechanical half of that conversion passes every other test here while
+// putting a key directory, a subject and a filesystem path straight back into
+// the half documented safe for a response body. What the split is about is
+// where each fact landed: the sentence says WHAT happened, the fields say
+// WHERE and WHY.
+//
+// Leaking a particular and losing it are both defects, and only one of them is
+// the one everybody remembers.
+func TestNoParticularReachesThePublicSentence(t *testing.T) {
+	t.Parallel()
+
+	tests := []struct {
+		name string
+		// build produces the refusal under test.
+		build func(t *testing.T) error
+		// particular is the fact that must be in the fields and out of the
+		// sentence.
+		particular string
+		reason     string
+	}{
+		{
+			name: "an absent published half names its path",
+			build: func(t *testing.T) error {
+				t.Helper()
+				_, err := sshid.LoadPublicKey(t.TempDir(), splitSubject)
+				return err
+			},
+			particular: splitSubject + ".pub",
+			reason:     "a path on somebody's disk says where their key lives",
+		},
+		{
+			name: "an unusable subject names the subject",
+			build: func(t *testing.T) error {
+				_, err := sshid.SignerFromFile("/nowhere", "../authorized_keys")
+				return err
+			},
+			particular: "../authorized_keys",
+			reason:     "the subject is the identifier the vendor's roster keys on, and here it is attacker-supplied",
+		},
+		{
+			name: "an empty key directory names the directory",
+			build: func(t *testing.T) error {
+				t.Helper()
+				_, err := sshid.DiscoverSubject(t.TempDir())
+				return err
+			},
+			particular: os.TempDir(),
+			reason:     "a key directory is a location on somebody's disk",
+		},
+		{
+			name: "a bound proof over the wrong key names the subject",
+			build: func(t *testing.T) error {
+				t.Helper()
+				dir := t.TempDir()
+				writeKeyPair(t, dir, splitSubject, ownerOnly)
+				//: A value no key in this directory renders to, so the bind
+				//: refuses — and the value itself must not come back either,
+				//: since it is what the roster published.
+				return sshid.NewSSHIdentity(dir).
+					ProvePossessionFor(splitSubject, "SHA256:a-value-the-roster-published")
+			},
+			particular: splitSubject,
+			reason:     "the bound refusal is reachable by anyone who can write the key directory, which is the worst place to echo a subject back",
+		},
+		{
+			name: "a failed enrolment names what the filesystem said",
+			build: func(t *testing.T) error {
+				t.Helper()
+				dir := t.TempDir()
+				if err := os.Mkdir(sshid.PrivateKeyPath(dir, splitSubject), 0o700); err != nil {
+					t.Fatalf("creating blocker: %v", err)
+				}
+				_, err := sshid.GenerateKeyPair(nil, dir, splitSubject)
+				return err
+			},
+			particular: "is a directory",
+			reason:     "the operator acts on the syscall's own words, and nothing else can restate them",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			t.Parallel()
+
+			err := tt.build(t)
+			if err == nil {
+				t.Fatalf("build() error = nil, want a refusal (%s)", tt.reason)
+			}
+			//: The half documented safe for a response body must not carry it.
+			if strings.Contains(err.Error(), tt.particular) {
+				t.Errorf("err.Error() = %q, want %q OUT of it (%s)", err, tt.particular, tt.reason)
+			}
+			//: ...and the diagnostic half must, or the split lost it instead
+			//: of moving it, which is the other defect and the quieter one.
+			if diagnosis := splitDiagnosis(err); !strings.Contains(diagnosis, tt.particular) {
+				t.Errorf("fields+cause = %q, want %q IN it (%s)", diagnosis, tt.particular, tt.reason)
+			}
+		})
+	}
+}
+
+// splitDiagnosis renders the non-wire-safe half of an error: every field, then
+// the first cause this SDK did not build.
+func splitDiagnosis(err error) string {
+	parts := []string{"fields:"}
+	//: Every particular the public sentence deliberately left out.
+	for _, field := range errs.FieldsOf(err) {
+		parts = append(parts, field.Key()+"="+field.StringValue())
+	}
+	//: And what the world outside this package actually said.
+	for current := err; current != nil; current = errors.Unwrap(current) {
+		//: One of ours — its Public is the sentence already checked above.
+		if _, ours := current.(*errs.Error); ours {
+			continue
+		}
+		parts = append(parts, "cause="+current.Error())
+
+		break
+	}
+	//: One rendered line, in the order the error was built.
+	return strings.Join(parts, " ")
+}
+
+// consumerSigner answers Sign with an errs-typed error of the CALLER's own,
+// which is what an agent, a hardware token or a custom ssh.Signer may return.
+type consumerSigner struct {
+	// pub is the published half this signer claims.
+	pub ssh.PublicKey
+}
+
+// PublicKey reports the half this signer answers for.
+func (c consumerSigner) PublicKey() ssh.PublicKey {
+	//: The same key, so the mismatch gate passes and signing is reached.
+	return c.pub
+}
+
+// Sign refuses with an error from a code range this SDK does not own.
+func (c consumerSigner) Sign(io.Reader, []byte) (*ssh.Signature, error) {
+	//: A locked agent's own vocabulary, typed.
+	return nil, consumerFailure
+}
+
+// consumerFailure is an errs-typed error from a range this SDK does not own.
+var consumerFailure = errs.Wrap(nil, errs.WrapParams{
+	Code:    0x00_03_30_01,
+	Reason:  "AGENT_LOCKED",
+	Public:  "the agent refused to sign",
+	Private: "consumer: the agent is locked",
+})
+
+// TestProvePossessionKeepsItsSentinelAgainstACallersSigner pins the seam where
+// origin-wins is the wrong rule.
+//
+// ProvePossession is exported and takes an ssh.Signer the CALLER supplies.
+// Plain classify let an errs-typed error from that signer become the identity
+// of the refusal, so errors.Is stopped finding ErrNoPossession and a caller's
+// exit-code table followed a number nobody here allocated. The fmt.Errorf this
+// replaced put the sentinel behind the first %w, so it won whatever the cause
+// was — this was a regression, not a pre-existing hole.
+func TestProvePossessionKeepsItsSentinelAgainstACallersSigner(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	if _, err := sshid.GenerateKeyPair(nil, dir, splitSubject); err != nil {
+		t.Fatalf("GenerateKeyPair: %v", err)
+	}
+	pub, loadErr := sshid.LoadPublicKey(dir, splitSubject)
+	if loadErr != nil {
+		t.Fatalf("LoadPublicKey: %v", loadErr)
+	}
+
+	err := sshid.ProvePossession(consumerSigner{pub: pub}, pub)
+	reason := "a possession failure is a possession failure whoever's signer reported it"
+	if !errors.Is(err, coreent.ErrNoPossession) {
+		t.Errorf("ProvePossession() error = %v, want it to carry ErrNoPossession (%s)", err, reason)
+	}
+	if code, _ := errs.CodeOf(err); code != coreent.CodeNoPossession {
+		t.Errorf("CodeOf(ProvePossession()) = %v, want %v (%s)", code, coreent.CodeNoPossession, reason)
+	}
+	//: The caller's own error stays reachable, which is what separates this
+	//: from simply dropping the chain.
+	if !errors.Is(err, consumerFailure) {
+		t.Errorf("ProvePossession() error = %v, want the signer's own error still matchable (%s)", err, reason)
+	}
+	//: And its words still render, in the half that is not wire-safe.
+	if diagnosis := splitDiagnosis(err); !strings.Contains(diagnosis, "the agent refused to sign") {
+		t.Errorf("fields+cause = %q, want the signer's message in it (%s)", diagnosis, reason)
+	}
+}

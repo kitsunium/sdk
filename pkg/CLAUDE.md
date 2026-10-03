@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T03:30:00Z -->
 # pkg/
 
 ## Purpose
@@ -11,7 +11,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 | Major | Purpose | State |
 |---|---|---|
-| `v1/` | Stable public API — **66 packages** (55 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`, `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`, `profiling`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `statemachine`, `cache`, `clock`, `resilience`, `lock`, `ipc`, `id`), network and web (`server` + `sse`/`websocket`/`static`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec` + `strictjson`/`jsonshape`/`jsonpatch`/`json`/`yaml`/`toml`, `errs`, `crypto` + the six scheme facades, `token`, `secret`, `session`, `authz`, `validation`, `sql`, `docstore`, `vfs`, `redact`), and process/platform/distribution (`proc` + the seven OS facades, `memlimit`, `git`, `selfupdate`, `entitlement`, `gate`) | Shipping |
+| `v1/` | Stable public API — **62 packages** (51 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`, `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`, `profiling`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `statemachine`, `cache`, `clock`, `resilience`, `lock`, `ipc`, `id`), network and web (`server` + `sse`/`websocket`/`static`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec` + `strictjson`/`jsonshape`/`jsonpatch`/`json`/`yaml`/`toml`, `errs`, `crypto` + the six scheme facades, `token`, `secret`, `session`, `authz`, `validation`, `sql`, `docstore`, `vfs`, `redact`), and process and platform (`proc` + the seven OS facades, `memlimit`); the distribution packages (`git`, `selfupdate`, `entitlement`, `gate`) are the framework's since ADR 0158 | Shipping |
 
 ## Versioning policy
 

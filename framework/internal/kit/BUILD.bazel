@@ -150,6 +150,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/framework/internal/kit",
     visibility = ["//visibility:public"],
     deps = [
+        "//framework/git",
         "//framework/internal/kit/plug",
         "//framework/model",
         "//framework/telemetry",
@@ -163,7 +164,6 @@ go_library(
         "//pkg/v1/crypto",
         "//pkg/v1/docstore",
         "//pkg/v1/errs",
-        "//pkg/v1/git",
         "//pkg/v1/hash",
         "//pkg/v1/health",
         "//pkg/v1/i18n",
@@ -318,6 +318,7 @@ go_test(
     embed = [":kit"],
     tags = ["manual"],  # keep
     deps = [
+        "//framework/git",
         "//framework/kit/config/toml",
         "//framework/kit/config/yaml",
         "//framework/kit/server",
@@ -328,7 +329,6 @@ go_test(
         "//pkg/v1/clock",
         "//pkg/v1/docstore",
         "//pkg/v1/errs",
-        "//pkg/v1/git",
         "//pkg/v1/logger",
         "//pkg/v1/mail",
         "//pkg/v1/profiling",

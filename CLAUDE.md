@@ -17,13 +17,12 @@ internal/
 │                  snapshot, topic, worker
 ├── core/          domain interfaces + domain values
 │                  authz, cache, cli, codec (+ scratch), config, crypto,
-│                  entitlement, events,
-│                  gate,
+│                  events,
 │                  health, i18n, id, lifecycle, lock, logger, logger/level,
 │                  mail, metrics, net, proc, queue, resilience, scheduler,
-│                  secret, selfupdate, session, sql, statemachine, token,
+│                  secret, session, sql, statemachine, token,
 │                  trace, transform,
-│                  validation, vcs,
+│                  validation,
 │                  vfs,
 │                  view, writer
 └── service/       concrete implementations

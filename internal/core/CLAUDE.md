@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:54:55Z -->
+<!-- updated: 2026-10-03T03:30:00Z -->
 # internal/core/
 
 ## Purpose
@@ -41,10 +41,11 @@ Domain **interfaces** and immutable domain **value types** for the SDK's domains
 | `session/` | server-side session contract: a `Store` port FROZEN at five methods with `Sweeper` as its first type-asserted sibling, the `Sealer` that renders an identifier as a cookie value, the opaque redacting `ID`, and the immutable `SessionValue`; **no registry**. `Regenerate` is the only call that binds a subject and always rotates the identifier, so session fixation is prevented by absence rather than by a step (ADR 0045) | `0.2.14.*` |
 | `sql/` | relational-database ports above `database/sql`: `Executor` (frozen at three methods, none of which ends a transaction) + its ADR 0039 sibling `Preparer`, `Transactor` + its two ADR 0039 siblings `Joiner` (the executor of the transaction a context carries, else the pool) and `Deferrer` (a function held until that transaction commits — ADR 0139), `Checker`, `Migrator`, plus `TxOptionsValue` / `MigrationValue` / `Dialect` and the `TxFunc` / `Step` FUNC ports. The ports speak the stdlib's own `*sql.Rows` / `*sql.Row` / `sql.Result` and never re-declare them (ADR 0055 §D1); `Dialect` is a CLOSED set with two distinct refusals, and **no registry** (ADR 0055) | `0.2.24.*` |
 | `trace/` | distributed-tracing contract: the `Tracer` (1 method) / `Span` (5 methods) ports, both FROZEN, the immutable `SpanContextValue` that travels between processes, the W3C **Trace Context** `traceparent`/`tracestate` format implemented from the ABNF, the OTel span model (`SpanKind` / `StatusValue` / `EventValue` / `LinkValue` / `SpanValue` / `SpansValue`), the `Sampler` + `SpanSink` FUNC ports, the two-method `Carrier` that `http.Header` satisfies with no adapter, and the `SpanExporter` registry. Attributes, `ResourceValue` and `ScopeValue` are `core/metrics`' own types, used directly rather than redeclared — they are `common.proto`/`resource.proto`, shared by every signal — while `DefaultScopeName` deliberately is not. The sampling decision is taken ONCE, at the root, and travels in the `sampled` bit (ADR 0051) | `0.2.20.*` |
-| `vcs/` | version-control contract: what "the set a branch changed" is and what a resolution of it reports — a value that can say it does not know (ADR 0076); the engine shells out to git in `internal/service/vcs/git` | `0.2.33.*` |
-| `selfupdate/` | a binary that replaces itself: the three ports it needs from its environment, the values it reports, eighteen sentinels (ADR 0077) | `0.2.34.*` |
-| `entitlement/` | whether this machine is entitled to run this build: the one port the decision needs (`Identity`, and its `BoundProver` sibling — ADR 0092), the values a vendor-signed roster carries, fourteen sentinels (ADR 0079) | `0.2.35.*` |
-| `gate/` | whether one invocation of a distributed binary may run: the policy value, the decision value and two enums whose zero is unclaimed; no ports (ADR 0080) | `0.2.36.*` |
+
+The distribution domains — `entitlement`, `selfupdate`, `gate` and `vcs` (now
+`git`) — left this layer for the framework (ADR 0158): their contracts are
+`framework/internal/core/<domain>`, and their ranges `0.2.33.*`–`0.2.36.*` kept
+their values there (ADR 0160).
 
 `Major=0` (internal), `Layer=2` (core). Each package owns the slot in the last column of the table; `docs/error-codes.yaml` lists every code they declare. `logger/` is the one package whose slot is reserved and holds no code.
 
@@ -112,8 +113,4 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `mail/` — see `internal/core/mail/CLAUDE.md` (the frozen Transport, Bcc in the envelope, and the injection gate — ADR 0064)
 - `logger/level/` — see `internal/core/logger/level/CLAUDE.md`
 - `health/` — see `internal/core/health/CLAUDE.md` (startup, readiness and liveness as three types, ADR 0060)
-- `vcs/` — see `internal/core/vcs/CLAUDE.md` (what a branch changed, as a value that can say it does not know — ADR 0076)
-- `selfupdate/` — see `internal/core/selfupdate/CLAUDE.md` (a binary that replaces itself, ADR 0077)
-- `entitlement/` — see `internal/core/entitlement/CLAUDE.md` (the roster, the grant and the one port the decision needs, ADR 0079)
-- `gate/` — see `internal/core/gate/CLAUDE.md` (may this invocation run — values only, ADR 0080)
 - `codec/scratch/` — see `internal/core/codec/scratch/CLAUDE.md`
