@@ -9,7 +9,7 @@
 // and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and
 // the codec package's Marshal and Unmarshal. Importing
 // github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK
-// ships — BSON with the MongoDB driver, CBOR, MessagePack and the rest — which
+// ships — BSON, CBOR, MessagePack and the rest, with their libraries — which
 // a program that only reads TOML does not need to link. This package links
 // the TOML codec and github.com/pelletier/go-toml/v2, and nothing else.
 //

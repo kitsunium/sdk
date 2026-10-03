@@ -12,7 +12,7 @@ Package toml registers the TOML codec with the SDK's codec registry — and no o
 import _ "github.com/kitsunium/sdk/pkg/v1/codec/toml"
 ```
 
-Everything that dispatches through the registry by format name then reads and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON with the MongoDB driver, CBOR, MessagePack and the rest — which a program that only reads TOML does not need to link. This package links the TOML codec and github.com/pelletier/go\-toml/v2, and nothing else.
+Everything that dispatches through the registry by format name then reads and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest, with their libraries — which a program that only reads TOML does not need to link. This package links the TOML codec and github.com/pelletier/go\-toml/v2, and nothing else.
 
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 

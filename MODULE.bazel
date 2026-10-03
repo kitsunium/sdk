@@ -61,5 +61,4 @@ use_repo(
     "org_golang_x_crypto",
     "org_golang_x_mod",
     "org_modernc_sqlite",
-    "org_mongodb_go_mongo_driver",
 )

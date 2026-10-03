@@ -51,9 +51,9 @@
 //
 // # What it deliberately does not do
 //
-// It does not decode. Depending on the codec registry would pull mongo-driver,
-// msgpack and cbor into the module graph of every consumer that only wanted a
-// guarded GET, so decoding belongs above this layer.
+// It does not decode. Depending on the codec registry would pull msgpack and
+// cbor into the module graph of every consumer that only wanted a guarded GET,
+// so decoding belongs above this layer.
 //
 // It does not truncate an oversized body — it fails with [ResponseTooLarge]. A
 // silent truncation does not stay silent; it resurfaces several layers away as

@@ -74,6 +74,7 @@ go_test(
         "//internal/core/transform",
         "//internal/kernel/errs",
         "//internal/service/codec/flatbuffers",
+        "//pkg/v1/codec/bson",
         "//pkg/v1/codec/json",
         "//pkg/v1/codec/toml",
         "//pkg/v1/codec/yaml",

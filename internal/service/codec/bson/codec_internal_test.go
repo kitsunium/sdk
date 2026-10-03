@@ -110,10 +110,10 @@ func Test_bsonCodec_Extensions(t *testing.T) {
 	}
 }
 
-// Test_bsonCodec_Marshal pins that a library failure comes back under the
+// Test_bsonCodec_Marshal pins that a refused value comes back under the
 // domain's own code. BSON documents are maps at the wire level, so a top-level
-// scalar has nowhere to go — and the library error alone would leave the caller
-// unable to tell it apart from a decode fault.
+// scalar has nowhere to go — and an untyped error would leave the caller unable
+// to tell it apart from a decode fault.
 func Test_bsonCodec_Marshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -155,11 +155,11 @@ func Test_bsonCodec_Marshal(t *testing.T) {
 	}
 }
 
-// Test_bsonCodec_Unmarshal pins the size cap and the library wrapping. The cap
-// is the primary memory-exhaustion defence (CWE-400): a BSON document declares
-// its own length, so the decoder pre-allocates from a number the attacker
-// controls. It has to fire BEFORE the decoder runs, which is why it is asserted
-// on a buffer that is only oversized, not valid BSON.
+// Test_bsonCodec_Unmarshal pins the size cap and the refusal code. The cap
+// bounds what one call can make the decoder allocate (CWE-400): a BSON document
+// declares its own lengths, numbers the attacker controls. It has to fire
+// BEFORE anything is read, which is why it is asserted on a buffer that is
+// only oversized, not valid BSON.
 func Test_bsonCodec_Unmarshal(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -173,7 +173,7 @@ func Test_bsonCodec_Unmarshal(t *testing.T) {
 		{name: "junk", data: []byte("definitely not bson"), wantCode: CodeBSONUnmarshalFailed},
 		{
 			//: one byte past the cap, so the refusal cannot be attributed to
-			//: the decoder choking on the content.
+			//: the validator refusing the content.
 			name:     "one byte over the size cap",
 			data:     make([]byte, maxBSONBytes+1),
 			wantCode: CodeBSONSizeExceeded,

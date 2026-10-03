@@ -11,7 +11,7 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 |---|---|---|---|---|
 | `asn1/`        | ASN.1 DER (BER accepted on Unmarshal)         | `0.3.9.*`  | no  | yes |
 | `baseenc/`     | base64, base64url, base32, base16, hex, ascii85, base45, base58, base62 — 9 Format names, JSON-mediated pipeline | `0.3.24.*` | yes | yes |
-| `bson/`        | BSON (MongoDB) — go.mongodb.org/mongo-driver/bson | `0.3.36.*` | no  | yes |
+| `bson/`        | BSON 1.1 (MongoDB) — native, standard library only | `0.3.36.*` | no  | yes |
 | `cbor/`        | CBOR (RFC 8949) — native, standard library    | `0.3.6.*`  | yes | yes |
 | `csv/`         | CSV (RFC 4180) — `[][]string`                 | `0.3.8.*`  | no  | yes |
 | `flatbuffers/` | FlatBuffers passthrough (already-encoded `[]byte`) | `0.3.23.*` | no  | yes |
@@ -42,12 +42,13 @@ writes and the value it replaces. Documents are read strictly with
 exactly; arrays are aligned before they are paired. It owns `0.3.90.*` and is
 reached through `pkg/v1/codec/jsonpatch`.
 
-Three of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
-`pkg/v1/codec/yaml` and `pkg/v1/codec/toml` each blank-import their own package
-here and nothing else (ADR 0134), so a program reading YAML configuration links
-`yaml.v3` and not the MongoDB driver. A codec package registers itself in its own
-initialisation, which Go runs once, so being imported by both a per-format
-facade and `pkg/v1/codec` registers it once.
+Four of the codecs above are also reachable ONE AT A TIME: `pkg/v1/codec/json`,
+`pkg/v1/codec/yaml`, `pkg/v1/codec/toml` and `pkg/v1/codec/bson` each import
+their own package here and nothing else (ADR 0134), so a program reading YAML
+configuration links `yaml.v3` and no other codec's library. `pkg/v1/codec/bson`
+also aliases BSON's value types, which `bson/` owns. A codec package registers
+itself in its own initialisation, which Go runs once, so being imported by both
+a per-format facade and `pkg/v1/codec` registers it once.
 
 `strictjson/` sits in this tree and is deliberately NOT a codec (ADR 0102): it
 registers no Format and implements no `core/codec.Codec`, because what it adds —
@@ -69,7 +70,7 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 ├── failed.go                     # codes + sentinels in one file, in place of the two above (asn1, msgpack, yaml)
 ├── codec_internal_test.go        # white-box (per-codec quirks)
 ├── codec_external_test.go        # black-box (interface contract)
-├── codec_integration_test.go     # //go:build !race AllocsPerRun budgets, run by the race-off alloc lane (all but bson, multipart)
+├── codec_integration_test.go     # //go:build !race AllocsPerRun budgets, run by the race-off alloc lane (all but multipart)
 ├── encoder_internal_test.go      # only when streaming
 ├── decoder_internal_test.go      # only when streaming
 └── BUILD.bazel                   # gazelle-managed
@@ -80,7 +81,7 @@ the sixteen codecs `pkg/v1/codec` blank-imports. `json/` is unchanged.
 - **Registration without `init()`**: each codec exposes `var Codec codec.Codec = codec.Register(&xxxCodec{})`. Initialiser order is deterministic, and ktn-linter's `KTN-FUNC-NOINIT` reports any `init()` — active everywhere, with no exclusion in `.ktn-linter.yaml`.
 - **Stateless singletons**: `New()` returns the same `Codec` singleton; the two opt-in modes — `csv.NewWithEscape(bool)` and `multipart.NewWithLimits(LimitsConfig)` — each return a fresh instance not added to the registry.
 - **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns a slice the caller owns — `slices.Clone(table)`, or a fresh literal in `asn1`, `csv` and `json` — so callers cannot mutate a package-level slice.
-- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `maxCBORStringChunks`, `form.maxFormPairs`, `msgpack.maxDepth`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
+- **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `maxBSONBytes`, `scannerMaxCapacity`, `form.maxFormBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `maxCBORStringChunks`, `maxBSONNestedLevels`, `form.maxFormPairs`, `msgpack.maxDepth`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
 - **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go` (`failed.go` in `asn1`, `msgpack` and `yaml`). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 
