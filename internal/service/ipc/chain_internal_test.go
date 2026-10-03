@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/kernel/pathchain"
+	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 )
 
 // componentInfo is an lstat answer as a Unix kernel gives one — naming the

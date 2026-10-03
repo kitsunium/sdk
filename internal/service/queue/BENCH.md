@@ -120,7 +120,7 @@ A `Receive` reads and sorts the whole queued directory, so a deep backlog costs
 more per lease than a shallow one — roughly linearly once the directory stops
 fitting comfortably in the cache. **The memory broker is flat** (1 827 / 1 848 /
 1 682 ns across a 100× range, which is noise), because its ready list is ordered
-at insertion and its lease deadlines live in a `kernel/heap` min-heap.
+at insertion and its lease deadlines live in a `kernel/collections/heap` min-heap.
 
 Read plainly: **this is a durable queue for a backlog of hundreds to low
 thousands.** At 1 000 queued messages a lease already costs as much as a
@@ -177,7 +177,7 @@ measured **105 µs**, for a verb that is a few hundred nanoseconds of actual
 work. The file broker never had the defect, because its in-flight directory
 sorts by deadline and its scan breaks at the first lease still held.
 
-The fix is `internal/kernel/heap` — the primitive was already in the SDK —
+The fix is `internal/kernel/collections/heap` — the primitive was already in the SDK —
 keyed on the lease deadline, with lazy deletion so an `Ack` stays O(1) and a
 stale entry is discarded when it is popped. **105 µs → 1.83 µs**, and the
 backlog column above is flat as a result.

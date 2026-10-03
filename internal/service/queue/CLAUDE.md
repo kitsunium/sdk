@@ -35,7 +35,7 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
 | `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/sql` migration the caller numbers |
-| `consume.go` | `Consume` (its workers in a `kernel/group` joined group), the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
+| `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group), the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
 | `codes.go` / `errors.go` | the five `0.3.53.*` codes and their sentinels |
@@ -284,7 +284,7 @@ a codebase where somebody promised it.
 `Parallelism`, `BatchSize` and `PollInterval` are all CLAMPED, because each has
 one sensible reading at zero and none of them is dangerous.
 
-The `Parallelism` workers run in a `kernel/group` JOINED group
+The `Parallelism` workers run in a `kernel/concur/group` JOINED group
 (`group.NewJoined`): the first worker the storage refuses cancels the others —
 they all poll the same broken medium — and `Consume` returns once every worker
 has, with each worker's own failure joined in worker order (a sibling that was
@@ -433,7 +433,7 @@ delivery count incremented. That is a contract now: a broker that answered
 - Optimise `Publish/file`'s 41 allocations. They sit next to 3 ms of `fsync`;
   see `BENCH.md`.
 - Range over the in-flight map in `memory.go` looking for expiries. That was
-  the original code and it measured 105 µs per lease; the `kernel/heap` min-heap
+  the original code and it measured 105 µs per lease; the `kernel/collections/heap` min-heap
   that replaced it measures 1.83 µs. `BENCH.md` has both numbers.
 
 ## Reference

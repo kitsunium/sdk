@@ -107,10 +107,10 @@ Every test stayed green, including the round-trip and malformed-name suites.
 ## 4. The `singleflight` question, answered: no
 
 The repository carries an open note that `cachedStructTypeInfo` (the function
-`typeInfoFor` in that note) is a candidate for `internal/kernel/singleflight`.
+`typeInfoFor` in that note) is a candidate for `internal/kernel/concur/singleflight`.
 Three measurements settle it, and none of them is close.
 
-**What the protection would cost.** `internal/kernel/singleflight/BENCH.md`
+**What the protection would cost.** `internal/kernel/concur/singleflight/BENCH.md`
 measures a leading `Do` at **2 007 ns** uncontended and **2 879 ns** per caller
 on a contended shared key. That is a goroutine park/unpark round trip and it is
 not negotiable — it is what the primitive *is*.
@@ -250,9 +250,9 @@ run by run with the order alternating, so the machine's load fell on each alike.
   goes: `CappedPool.Put` is too large to inline (cost 196) and makes its
   `capOf` check and its `reset` as calls through function values, and `Get`
   reaches the `sync.Pool` through a generic `Pool.Get` that misses the inline
-  budget by one (81 against 80). `internal/kernel/recycler/BENCH.md` §4 prices
+  budget by one (81 against 80). `internal/kernel/concur/recycler/BENCH.md` §4 prices
   the same indirection as what discard-before-reset costs on the happy path,
-  and every other `CappedPool` consumer — `kernel/buffer`, `scratch` — already
+  and every other `CappedPool` consumer — `kernel/concur/buffer`, `scratch` — already
   pays it. An `Encode` makes exactly one round trip.
 - **On a whole `Encode` the difference is below what this machine could
   resolve.** Thirty further rounds put the medians at 60.98 → 72.41 ns for
@@ -279,7 +279,7 @@ the allocation columns, and the isolated pool comparison, are claims.
 > columns are invariant** and did not vary at all — every before/after claim in
 > §3 rests on them, not on the nanoseconds.
 >
-> The §4 verdict compares against `internal/kernel/singleflight/BENCH.md`,
+> The §4 verdict compares against `internal/kernel/concur/singleflight/BENCH.md`,
 > taken on this same machine and toolchain.
 
 | Dimension | Value |

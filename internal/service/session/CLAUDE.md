@@ -7,7 +7,7 @@ The concrete half of the session domain (ADR 0045): two stores implementing
 `internal/core/session.Store` — one in process memory, one on disk — and the
 AEAD `Sealer` that renders an identifier as a cookie value. Composes
 `internal/core/crypto` (AES-256-GCM), `internal/kernel/clock` and
-`internal/kernel/pathchain`; it reimplements none of them.
+`internal/kernel/fs/pathchain`; it reimplements none of them.
 
 Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 `0.2.14.*`, and the file store reuses `internal/core/proc.UnsupportedPlatform`

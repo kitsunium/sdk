@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // Encoder sizing.

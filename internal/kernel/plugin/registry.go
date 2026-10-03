@@ -7,7 +7,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 )
 
 // Registry is a process-wide table of plug-ins keyed by name: written at import

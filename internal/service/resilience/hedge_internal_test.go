@@ -327,7 +327,7 @@ func Test_hedge_release(t *testing.T) {
 //	created by …resilience.(*hedge).Run in goroutine M
 //
 // and re-raising a wrapper instead — panic(struct{ Raised any }{…}) in Run,
-// the kernel/group shape — fails all three cases, the first with:
+// the kernel/concur/group shape — fails all three cases, the first with:
 //
 //	Run re-raised struct { Raised interface {} }{Raised:(*errors.errorString)(0x…)}, want the original value &errors.errorString{s:"the operation panicked"}
 func Test_hedge_RunReRaisesAPanicWithItsOriginalValue(t *testing.T) {

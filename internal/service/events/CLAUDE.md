@@ -50,7 +50,7 @@ and an interface `E` is refused). It is still written, because a comma-ok that
 is never false costs nothing while a silent zero value would cost a listener
 firing on an event it never received.
 
-## Why `kernel/snapshot` and NOT a broadcast topic
+## Why `kernel/concur/snapshot` and NOT a broadcast topic
 
 The kernel once carried `topic`, a typed in-process broadcast, which this
 domain read and deliberately did not use (ADR 0053 §D9); with no other
@@ -69,7 +69,7 @@ promises —
   copy is already in its buffer while listener 1 is still deciding.
 
 Everything `events` actually needs from such a topic is the copy-on-write
-membership underneath it, and that is `kernel/snapshot` — which `topic` itself
+membership underneath it, and that is `kernel/concur/snapshot` — which `topic` itself
 was built on. So this package takes the same primitive by the same reasoning
 and skips the layer that would have to be defeated. Using a topic here would
 mean a delivery policy nobody chose, a buffer per listener nobody reads, and a
@@ -93,7 +93,7 @@ mean a delivery policy nobody chose, a buffer per listener nobody reads, and a
 - **A panic is classified BEFORE a halt.** A crash is not a decision, so a
   listener that panicked never stops its siblings even when it holds `MayHalt`.
 - **The panic's stack is captured in the deferred recover**, on the publisher's
-  own goroutine. `kernel/group` needs a `PanicValue` type because it crosses a
+  own goroutine. `kernel/concur/group` needs a `PanicValue` type because it crosses a
   goroutine boundary; there is no boundary here, so the stack goes straight
   into an error field.
 - **The recovered value is a FIELD, never the wrap origin**, so a

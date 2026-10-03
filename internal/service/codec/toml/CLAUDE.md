@@ -65,7 +65,7 @@ secrets live; `TestRefusalNeverQuotesTheDocument` pins it.
   depth cap, which is also what refuses a cyclic value instead of overflowing
   the stack.
 - **Pools.** The parser (arena included) is pooled through
-  `kernel/recycler.NewCappedPool`, dropped past 256 KiB; the encoder's entry
+  `kernel/concur/recycler.NewCappedPool`, dropped past 256 KiB; the encoder's entry
   slices likewise. `Marshal` and the streaming encoder write into the shared
   `core/codec/scratch` buffer; `Append` writes onto `dst` directly.
 - **Plans per type.** `plan.go` caches one `typeInfo` per `reflect.Type`: the

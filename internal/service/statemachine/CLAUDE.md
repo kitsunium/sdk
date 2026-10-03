@@ -12,7 +12,7 @@ record per entity, and fires timers and guards from its own loop, which sleeps
 until the next transition due and wakes on a write. Public facade:
 `pkg/v1/statemachine`.
 
-Stdlib plus `core/statemachine` and `kernel/{backoff,clock,errs,heap}` —
+Stdlib plus `core/statemachine` and `kernel/{backoff,clock,errs,collections/heap}` —
 `kernel/backoff` is the one backoff curve (ADR 0103), so the engine depends on
 no other service domain. Code range `0.3.88.*`.
 
@@ -95,7 +95,7 @@ no other service domain. Code range `0.3.88.*`.
 - **Per-entity backoff.** `agenda.failed` holds back the failing key only;
   `schedule` clamps any instant to its `notBefore`; a success or a new state
   (`restart`) clears it.
-- **Lazy deletion, bounded.** `kernel/heap` has no `Fix`; a reschedule pushes
+- **Lazy deletion, bounded.** `kernel/collections/heap` has no `Fix`; a reschedule pushes
   a fresh entry and the stale one is dropped when it surfaces, the heap rebuilt
   past `2*live + 64` — `TestTheHeapIsRebuiltBeforeStaleEntriesOutgrowItsBound`.
   Sequence numbers never repeat, so a forgotten key's stale entries can never

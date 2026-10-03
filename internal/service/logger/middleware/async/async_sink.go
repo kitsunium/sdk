@@ -18,10 +18,10 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/collections/ring"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
-	"github.com/kitsunium/sdk/internal/kernel/ring"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // defaultBufferSize is the ring capacity supplied when Config.BufferSize is

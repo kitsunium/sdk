@@ -144,7 +144,7 @@ func joinListenerFailure(name string, eventType corev.EventType, err error) erro
 // what the rest of the application gets to see.
 //
 // The stack is captured here, inside the deferred recover, while the
-// panicking frames are still unwinding. kernel/group needed a PanicValue type
+// panicking frames are still unwinding. kernel/concur/group needed a PanicValue type
 // to carry that across a goroutine boundary; there is no boundary here — the
 // listener ran on this goroutine — so the stack goes straight into a field
 // and the recovered value becomes an ordinary typed error.

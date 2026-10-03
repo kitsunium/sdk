@@ -10,7 +10,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/batcher"
+	"github.com/kitsunium/sdk/internal/kernel/concur/batcher"
 )
 
 // TestNewDBSink pins newDBSink's two zero-value substitutions: a non-positive

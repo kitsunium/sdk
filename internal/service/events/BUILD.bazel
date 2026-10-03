@@ -19,8 +19,8 @@ go_library(
     ],
     deps = [
         "//internal/core/events",
+        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
-        "//internal/kernel/snapshot",
     ],
 )
 

@@ -3,9 +3,9 @@
 // sibling interfaces through which a store advertises what else it can do.
 // A core sibling admitted by ADR 0049, which amends ADR 0025.
 //
-// # This is not internal/kernel/cache
+// # This is not internal/kernel/collections/cache
 //
-// [github.com/kitsunium/sdk/internal/kernel/cache] is a PRIMITIVE: a generic
+// [github.com/kitsunium/sdk/internal/kernel/collections/cache] is a PRIMITIVE: a generic
 // LRU + TTL map with no port, no error surface and no vocabulary. It stays
 // exactly what it is, and the concrete store in internal/service/cache is
 // built on top of it.

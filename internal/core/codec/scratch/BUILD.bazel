@@ -10,7 +10,7 @@ go_library(
         "//:__subpackages__",
         "//internal/core:core_consumers",
     ],
-    deps = ["//internal/kernel/recycler"],
+    deps = ["//internal/kernel/concur/recycler"],
 )
 
 alias(

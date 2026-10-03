@@ -8,8 +8,8 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 )
 
 // countingDownstream counts every Write so drainer tests can assert that

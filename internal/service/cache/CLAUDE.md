@@ -6,7 +6,7 @@
 The concrete cache stores implementing `internal/core/cache` (ADR 0049):
 
 - **`NewMemory[V]`** — the kernel LRU + TTL primitive, a two-way tag index
-  beside it, and a `kernel/singleflight` group in front of the fill path.
+  beside it, and a `kernel/concur/singleflight` group in front of the fill path.
   Implements `Store` + `EntryFetcher` + `Tagger` + `Loader`.
 - **`NewChain[V]`** — puts one store in front of another (L1/L2), promoting a
   far hit into every nearer tier with its **remaining** TTL and its tags.

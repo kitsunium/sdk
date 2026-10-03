@@ -43,7 +43,7 @@ go_library(
         "//internal/core/proc",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-        "//internal/kernel/pathchain",
+        "//internal/kernel/fs/pathchain",
     ],
 )
 

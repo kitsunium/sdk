@@ -20,10 +20,10 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
-        "//internal/kernel/buffer",
         "//internal/kernel/clock",
+        "//internal/kernel/concur/buffer",
+        "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
-        "//internal/kernel/recycler",
         "//internal/service/logger/encoder",
     ],
 )

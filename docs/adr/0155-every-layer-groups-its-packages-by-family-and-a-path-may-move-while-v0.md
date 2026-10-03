@@ -141,6 +141,11 @@ is on disk, never on a number someone maintains.
   `concur` / `collections` packages, and the guard of §6. This record changes
   no code; until a family's pull request lands, the tree on disk is the
   authority and the table above is the target.
+- **As implemented in the kernel**, which took a family wherever one applies
+  rather than only where `pkg/v1` publishes one: `buffer` joined `concur`
+  beside the `recycler` it specialises, `cache` joined `collections`, and
+  `pathchain` heads a third family, `fs`; `errs`, `clock`, `backoff`, `semver`
+  and `plugin` stay at its root (ADR 0159, as implemented).
 - What does not change: the four layers and their direction
   (`check-layer-deps.sh` is keyed on layers, not on directories), every error
   code value (ADR 0160), the module boundaries, and the standard-library-only

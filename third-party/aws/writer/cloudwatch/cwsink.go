@@ -6,7 +6,7 @@
 // the event cap, on the FlushEvery ticker, or on Flush / Close. The
 // PutLogEvents chronological-order requirement is honoured by the deliver
 // closure (a stable sort by timestamp), so the coalescing/flush/ticker
-// machinery is the shared kernel/batcher (ADR 0014), not a hand-rolled copy.
+// machinery is the shared kernel/concur/batcher (ADR 0014), not a hand-rolled copy.
 package cloudwatch
 
 import (
@@ -15,7 +15,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/batcher"
+	"github.com/kitsunium/sdk/internal/kernel/concur/batcher"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

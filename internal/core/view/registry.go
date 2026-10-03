@@ -7,9 +7,9 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // registry maps each [Engine] to its [Factory].

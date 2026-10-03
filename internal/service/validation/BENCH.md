@@ -100,7 +100,7 @@ rules = 9 rule evaluations and 4 path descents per validation.
 
 ## `singleflight` on `planFor`: measured, and refused
 
-ADR 0049 shipped `kernel/singleflight` and named two candidates for it that it
+ADR 0049 shipped `kernel/concur/singleflight` and named two candidates for it that it
 had not checked. `planFor` is one of them. It is checked here, and the answer is
 no.
 
@@ -116,7 +116,7 @@ so the redundancy costs CPU and never correctness — and it happens **once per
 | | ns | allocs |
 |---|---:|---:|
 | one plan compile (`PlanCompile`, above) | 6 836 | 51 |
-| one `singleflight.Do`, uncontended (`internal/kernel/singleflight/BENCH.md`) | 2 032 | 6 |
+| one `singleflight.Do`, uncontended (`internal/kernel/concur/singleflight/BENCH.md`) | 2 032 | 6 |
 
 For an N-way cold-start race on one type:
 
@@ -137,7 +137,7 @@ So it does win arithmetically past two racers — by **32 µs, once per type**.
   the right answer for an origin fetch that takes milliseconds and can be
   cancelled. A 7 µs pure-CPU compile that no caller ever abandons needs none
   of it;
-- **a new dependency edge** from `service/validation` to `kernel/singleflight`,
+- **a new dependency edge** from `service/validation` to `kernel/concur/singleflight`,
   to save 32 µs at boot;
 - and the redundancy it removes is **already harmless**: two goroutines compile
   the same tags into two identical plans, and `LoadOrStore` publishes one.

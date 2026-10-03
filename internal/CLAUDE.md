@@ -6,7 +6,9 @@
 The SDK's private layer. Everything here is blocked from external import by Go's `internal/` rule, which Bazel mirrors (ADR 0004; the firewall *between* the sublayers is a checked graph, not visibility — ADR 0068, below). Three sublayers model the SDK's dependency discipline:
 
 ```
-kernel/    stdlib-only, generic primitives (no domain vocabulary)
+kernel/    stdlib-only, generic primitives (no domain vocabulary), by family:
+           concur/, collections/, fs/, and a root for errs, clock, backoff,
+           semver and plugin (ADR 0155)
 core/      domain interfaces and domain values
 service/   concrete implementations of core contracts
 ```

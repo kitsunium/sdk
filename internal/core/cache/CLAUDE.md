@@ -11,9 +11,9 @@ contract, the domain value, and the typed sentinels.
 
 Code range: `0.2.18.*` (ADR 0049).
 
-## This is not `internal/kernel/cache`
+## This is not `internal/kernel/collections/cache`
 
-`kernel/cache` is a **primitive**: a generic LRU + TTL map, no port, no error
+`kernel/collections/cache` is a **primitive**: a generic LRU + TTL map, no port, no error
 surface, no vocabulary. It stays exactly what ADR 0025 made it, and the memory
 store is built on it.
 

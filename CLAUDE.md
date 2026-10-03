@@ -54,10 +54,11 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 
 ```
 internal/
-├── kernel/        stdlib-only AND generic primitives
-│                  backoff, batcher, buffer, cache, clock, errs, group,
-│                  heap, pathchain, plugin, recycler, ring, semver,
-│                  singleflight, snapshot, worker
+├── kernel/        stdlib-only AND generic primitives, by family (ADR 0155)
+│                  backoff, clock, errs, plugin, semver,
+│                  concur/{batcher, buffer, group, recycler, singleflight,
+│                          snapshot, worker},
+│                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  authz, cache, cli, codec, codec/scratch, config, crypto,
 │                  events, health, i18n, id, lifecycle, lock, logger,

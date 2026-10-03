@@ -10,9 +10,9 @@ import (
 	"slices"
 	"strings"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // Package-level indexes.
@@ -29,7 +29,7 @@ import (
 // snapshot.Value (ADR 0011) serialises writers on a mutex, so Register's
 // read-modify-write publish is race-free WITHOUT the hand-rolled CAS loop this
 // package carried before; readers stay lock-free via Value.Load. The
-// copy-on-write mechanism lives in internal/kernel/snapshot — only the domain
+// copy-on-write mechanism lives in internal/kernel/concur/snapshot — only the domain
 // clone logic (cloneFormatMap / cloneAliasMap) stays here.
 var (
 	registry  snapshot.Value[map[Format]Codec]

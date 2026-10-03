@@ -13,7 +13,7 @@ go_library(
         "//:__subpackages__",
         "//internal/kernel:kernel_consumers",
     ],
-    deps = ["//internal/kernel/snapshot"],
+    deps = ["//internal/kernel/concur/snapshot"],
 )
 
 alias(

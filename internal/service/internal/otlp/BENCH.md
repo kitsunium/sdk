@@ -4,7 +4,7 @@
 One question, asked when the two signals' OTLP code was merged here: **should
 the OTLP/JSON marshal borrow a pooled buffer instead of a fresh `bytes.Buffer`
 per export?** It is the obvious optimisation, the SDK has the primitives for it
-(`internal/kernel/buffer`, `internal/core/codec/scratch`), and it was measured
+(`internal/kernel/concur/buffer`, `internal/core/codec/scratch`), and it was measured
 rather than assumed. The answer is **no**, and the pooled variant is kept in
 the suite as a CONTROL (`_PooledControl`), the way `internal/service/trace`
 keeps its `RWMutex` control, so the answer can be re-asked by running one

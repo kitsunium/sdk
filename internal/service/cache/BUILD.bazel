@@ -24,10 +24,10 @@ go_library(
     ],
     deps = [
         "//internal/core/cache",
-        "//internal/kernel/cache",
         "//internal/kernel/clock",
+        "//internal/kernel/collections/cache",
+        "//internal/kernel/concur/singleflight",
         "//internal/kernel/errs",
-        "//internal/kernel/singleflight",
     ],
 )
 

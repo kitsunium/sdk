@@ -181,7 +181,7 @@ Duration: 1.49s, Total samples = 1570ms (105.15%)
       70ms  4.46% 58.60%       70ms  4.46%  runtime.memmove
       50ms  3.18% 61.78%     1480ms 94.27%  …/service/logger.(*genericHandler).Handle
       50ms  3.18% 64.97%       50ms  3.18%  …/logger/encoder.appendPad2 (inline)
-      30ms  1.91% 66.88%       60ms  3.82%  …/kernel/recycler.(*CappedPool[…]).Put
+      30ms  1.91% 66.88%       60ms  3.82%  …/kernel/concur/recycler.(*CappedPool[…]).Put
       30ms  1.91% 68.79%      240ms 15.29%  …/logger/encoder.appendHeader
       20ms  1.27%     —       680ms 43.31%  …/logger/sink/file.(*fileSink).Write
       10ms  0.64%     —       620ms 39.49%  internal/poll.(*FD).Write

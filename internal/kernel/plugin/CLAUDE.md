@@ -28,7 +28,7 @@ Code range: none. The answer is a string, not an error — see below.
 | File | Surface |
 |---|---|
 | `plugin.go` | `Unusable` — the entry guard |
-| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/snapshot` |
+| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/concur/snapshot` |
 | `plugin_external_test.go` | both refusals, both acceptances, and the comparison a caller is about to make |
 | `registry_external_test.go` | the three publish outcomes, the two misses, the order of `Names`, and racing writers losing nothing |
 | `registry_internal_test.go` | the copy a publish makes leaves the source a reader may be walking untouched |

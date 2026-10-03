@@ -385,21 +385,21 @@ rules:
       - "internal/service/logger/**"
       - "**/pkg/v1/logger/**"
       - "pkg/v1/logger/**"
-      # kernel/singleflight carries a recovered PANIC value across a goroutine
+      # kernel/concur/singleflight carries a recovered PANIC value across a goroutine
       # boundary. recover() is defined by the language to return `any`, and the
       # payload really can be anything a panic() call was given — so `any` is not
       # a missing abstraction here, it is the only type the value HAS. Narrowing
       # it would either drop payloads (the rule's suggestion, an interface with
       # String()) or silently change what a caller recovers, which is exactly
       # what PanicValue.Raised exists to preserve verbatim.
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
-      # kernel/group carries a recovered panic out of a TASK goroutine for the
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
+      # kernel/concur/group carries a recovered panic out of a TASK goroutine for the
       # identical reason, and the two PanicValue types are deliberately
       # separate so the message a crash prints names the primitive that was
       # running the code which failed. Same rule limitation, same justification.
-      - "**/internal/kernel/group/**"
-      - "internal/kernel/group/**"
+      - "**/internal/kernel/concur/group/**"
+      - "internal/kernel/concur/group/**"
       # The events domain (ADR 0053) is an in-process bus carrying MANY event
       # types on one Bus. Go methods cannot take type parameters, so a
       # `Subscribe[E]` method cannot be written and a `Bus[E]` would carry
@@ -1021,27 +1021,27 @@ rules:
       - "internal/core/i18n/**"
       - "**/internal/service/i18n/**"
       - "internal/service/i18n/**"
-      # kernel/singleflight.Group has NO constructor on purpose: its zero value
+      # kernel/concur/singleflight.Group has NO constructor on purpose: its zero value
       # is usable, exactly as sync.Mutex, sync.WaitGroup and sync.Map are, and
       # the map it lazily builds is the only state it owns. A NewGroup() would
       # be a second way in that adds nothing and makes `var g Group[K,V]` look
       # wrong when it is the intended spelling. (The rule's own message here
       # reads "constructor NewNewGroup()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
       # The two primitives added alongside it hit the SAME broken suggestion:
-      # kernel/group.Group and kernel/heap.Heap DO have constructors, named
+      # kernel/concur/group.Group and kernel/collections/heap.Heap DO have constructors, named
       # New, because each package produces one main type and Go's convention
       # for that case is group.New() / heap.New(). NewGroup() and NewHeap()
       # would stutter, which the same linter's naming rules discourage
       # elsewhere — the net/client entry above records the very same trade.
       # (The rule's own messages here read "constructor NewNewGroup()" and
       # "NewNewHeap()", neither of which is a name anything could satisfy.)
-      - "**/internal/kernel/group/**"
-      - "internal/kernel/group/**"
-      - "**/internal/kernel/heap/**"
-      - "internal/kernel/heap/**"
+      - "**/internal/kernel/concur/group/**"
+      - "internal/kernel/concur/group/**"
+      - "**/internal/kernel/collections/heap/**"
+      - "internal/kernel/collections/heap/**"
       # core/trace.StateValue is the parsed W3C `tracestate` list, and it has no
       # from-parts constructor ON PURPOSE: every instance comes out of
       # ParseTraceState or Insert, each of which validates the key against
@@ -1082,7 +1082,7 @@ rules:
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
   #
-  # kernel/singleflight.Group holds `map[K]*call[V]` under an RWMutex, and the
+  # kernel/concur/singleflight.Group holds `map[K]*call[V]` under an RWMutex, and the
   # RWMutex exists for exactly one read-only method (InFlight); every other path
   # mutates. Neither suggestion works here:
   #   - sync.Map is for read-heavy, insert-once maps. Join must, ATOMICALLY,
@@ -1098,8 +1098,8 @@ rules:
   # is; they cannot see that the workload is write-heavy by construction.
   KTN-GOROUTINE-SYNCMAP:
     exclude:
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
       # service/vfs.memFS is the same shape and the same answer. Its RWMutex
       # guards `map[string]*memNode`, and the map is a FILESYSTEM TREE: MkdirAll
       # inserts a whole chain of parents, RemoveAll deletes a node and every
@@ -1115,8 +1115,8 @@ rules:
       - "internal/service/vfs/**"
   KTN-GOROUTINE-ATOMICVAL:
     exclude:
-      - "**/internal/kernel/singleflight/**"
-      - "internal/kernel/singleflight/**"
+      - "**/internal/kernel/concur/singleflight/**"
+      - "internal/kernel/concur/singleflight/**"
       # Same struct, same reason, plus one of its own: atomic.Value replaces a
       # field a writer swaps WHOLESALE, and memFS mutates its map in place under
       # the lock that also orders the compound operations above. Copy-on-write
@@ -1823,7 +1823,7 @@ rules:
   # it and carry their own retirement conditions.
   #
   # • KTN-VAR-PTRINTF — false positive on a generic `*T` (kodflow/ktn-linter#365).
-  #   v1.34.5 no longer flags internal/kernel/snapshot's Value[T] *T signatures.
+  #   v1.34.5 no longer flags internal/kernel/concur/snapshot's Value[T] *T signatures.
   # • KTN-API-MINIF — false positive on *snapshot.Value[...] params + a malformed
   #   message (#366). v1.34.5 no longer flags internal/core/codec/registry.go.
   # • KTN-TEST-PARALLEL — false positive: a serial test mutating the package

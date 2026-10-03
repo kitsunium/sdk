@@ -44,7 +44,7 @@ A realistic four-attribute observation builds its series identity in 31.45 ns
 with zero allocations, reusing the caller's buffer. Compare the four
 constructors that produced those attributes — roughly 27 ns together — and the
 picture is that **encoding the identity is not the expensive part; nothing
-here is.** For scale, `kernel/cache`'s `Fetch` hit is 59.89 ns and a contended
+here is.** For scale, `kernel/collections/cache`'s `Fetch` hit is 59.89 ns and a contended
 one 375.5 ns, so a full attributed observation costs less than half of one
 uncontended cache lookup.
 

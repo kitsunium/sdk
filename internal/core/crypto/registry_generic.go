@@ -10,8 +10,8 @@ import (
 	"maps"
 	"slices"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // schemeRegistry is the shared registry backing one crypto capability. V is the

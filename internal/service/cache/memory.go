@@ -8,10 +8,10 @@ import (
 	"time"
 
 	corecache "github.com/kitsunium/sdk/internal/core/cache"
-	kcache "github.com/kitsunium/sdk/internal/kernel/cache"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	kcache "github.com/kitsunium/sdk/internal/kernel/collections/cache"
+	"github.com/kitsunium/sdk/internal/kernel/concur/singleflight"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/singleflight"
 )
 
 // memoryStore is the in-process store: the kernel LRU+TTL primitive, a tag

@@ -13,8 +13,8 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // The problems an encode refuses a value for.

@@ -179,7 +179,7 @@ Two things about it were got wrong first and are worth keeping wrong-proof:
   consequence above changed — the drain still does not wait on the connection,
   the engine still never closes it — which
   `TestAHijackedConnectionStillCountsAgainstTheCeiling` pins in the same run.
-- **The serving goroutine is a `kernel/worker.LoopDaemon`**, so its owner and
+- **The serving goroutine is a `kernel/concur/worker.LoopDaemon`**, so its owner and
   termination are explicit and `shutdown` has a `Done()` channel to bound its
   wait on. `http.Server` is interrupted by closing its listener, not by a stop
   signal, which is why the loop ignores the stop channel.

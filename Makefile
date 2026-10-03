@@ -36,7 +36,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-profile" "$(DIM)capture cpu+mem+block+mutex pprof per kernel package → profiles/<pkg>/$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-compare" "$(DIM)benchstat .bench.main.out vs .bench.out (A/B vs main)$(RST)"
 

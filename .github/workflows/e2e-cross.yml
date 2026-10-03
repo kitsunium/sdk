@@ -69,7 +69,7 @@ env:
   # `ipc` joins them because its endpoint IS the platform: a Unix socket gated
   # by its directory, SO_PEERCRED on Linux, a named pipe with its own DACL on
   # Windows (ADR 0148).
-  KERNEL_PKGS: "./pathchain"
+  KERNEL_PKGS: "./fs/pathchain"
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./ipc ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject

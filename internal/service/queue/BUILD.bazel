@@ -42,9 +42,9 @@ go_library(
         "//internal/core/vfs",
         "//internal/kernel/backoff",
         "//internal/kernel/clock",
+        "//internal/kernel/collections/heap",
+        "//internal/kernel/concur/group",
         "//internal/kernel/errs",
-        "//internal/kernel/group",
-        "//internal/kernel/heap",
         "//internal/service/sql",
         "//internal/service/vfs",
     ] + select({

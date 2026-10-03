@@ -9,7 +9,7 @@ package logger
 
 import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // initialAttrCap is the starting capacity reserved for an event's attribute

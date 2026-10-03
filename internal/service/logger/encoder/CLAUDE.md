@@ -58,7 +58,7 @@ exports it as a type alias for legacy call sites). This package ships two:
 - **IFACE-PLUGIN.** `NewText` and `NewJSON` return the `Encoder` interface —
   the concrete `textEncoder` and `jsonEncoder` are unexported on purpose.
 - **Zero-alloc steady state.** Encoders write into the caller's `dst` slice
-  (typically borrowed from `kernel/buffer`); no internal allocations on the
+  (typically borrowed from `kernel/concur/buffer`); no internal allocations on the
   hot path beyond `strconv.Append*` growth. The trace identifiers hold to it:
   `TraceContextValue.Append*Hex` `hex.Encode`s into a stack array and appends,
   so no Go string is ever materialised — profiled in `pkg/v1/logger/BENCH.md`.

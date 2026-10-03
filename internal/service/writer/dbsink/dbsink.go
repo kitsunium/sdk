@@ -29,8 +29,8 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/kernel/batcher"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/concur/batcher"
 )
 
 // defaultMaxRows bounds the in-memory batch when Config leaves MaxRows at its

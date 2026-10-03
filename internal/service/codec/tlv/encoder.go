@@ -10,8 +10,8 @@ import (
 	"reflect"
 
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // scratchInitialCap is the starting capacity for fresh pooled scratch
@@ -29,7 +29,7 @@ const uvarintSingleByteCap uint64 = 0x80
 // only encode path that rents one: Marshal hands Append a nil destination
 // and Append writes into the caller's. Without it every record paid for a
 // scratch slice grown by append's doubling. It is the kernel recycler's
-// CappedPool over *[]byte, the shape kernel/buffer has: a pointer, so a Put
+// CappedPool over *[]byte, the shape kernel/concur/buffer has: a pointer, so a Put
 // boxes nothing; reset to zero length on Put; and orphaned instead when a
 // record grew it past scratch.MaxRetainedBufBytes, so one oversized record
 // cannot pin its buffer in the pool. That ceiling is the codec domain's,

@@ -6,7 +6,7 @@
 // is higher than nine independent pools (sync.Pool is internally per-P
 // sharded, so consolidation does not add contention).
 //
-// The pooling MECHANISM lives in internal/kernel/recycler (ADR 0010); scratch
+// The pooling MECHANISM lives in internal/kernel/concur/recycler (ADR 0010); scratch
 // is a codec-domain consumer that keeps the 256 KiB threshold and the concrete
 // *bytes.Buffer / *bytes.Reader types here.
 //
@@ -19,7 +19,7 @@ package scratch
 import (
 	"bytes"
 
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // MaxRetainedBufBytes is the project-wide cap-discard threshold for pooled

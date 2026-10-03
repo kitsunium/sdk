@@ -102,7 +102,7 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `vfs/` — see `internal/core/vfs/CLAUDE.md` (the filesystem port, ADR 0056 — and why reading is an alias rather than a new interface)
 - `view/` — see `internal/core/view/CLAUDE.md` (server-side rendering, ADR 0058 — the contract built ON html/template, the one trust type, and the XSS the SDK cannot see)
 - `lock/` — see `internal/core/lock/CLAUDE.md` (mutual exclusion, ADR 0052 — ownership, renewal and fencing decided out loud, and the guarantee the domain does NOT make)
-- `cache/` — see `internal/core/cache/CLAUDE.md` (the cache domain, ADR 0049 — and why it is NOT `internal/kernel/cache`, which stays exactly what ADR 0025 made it)
+- `cache/` — see `internal/core/cache/CLAUDE.md` (the cache domain, ADR 0049 — and why it is NOT `internal/kernel/collections/cache`, which stays exactly what ADR 0025 made it)
 - `cli/` — see `internal/core/cli/CLAUDE.md` (the FUNC ports, leaf-XOR-group, and why nothing can exit — ADR 0065)
 - `authz/` — see `internal/core/authz/CLAUDE.md` (the two FUNC ports, why abstention is the zero value — ADR 0057)
 - `trace/` — see `internal/core/trace/CLAUDE.md` (distributed tracing, ADR 0051 — the W3C refusals, and why the attribute model is `core/otel`'s)

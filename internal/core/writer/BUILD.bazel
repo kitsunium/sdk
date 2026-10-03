@@ -30,9 +30,9 @@ go_library(
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/kernel/clock",
+        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
-        "//internal/kernel/snapshot",
     ],
 )
 

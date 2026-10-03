@@ -9,7 +9,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/kernel/heap"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 )
 
 // compactSlack is how many stale entries the heap may hold beyond its live

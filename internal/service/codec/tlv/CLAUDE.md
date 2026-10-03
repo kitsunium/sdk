@@ -80,7 +80,7 @@ caller's own input buffer.
 **`cachedStructTypeInfo` is NOT a `singleflight` candidate — measured, `BENCH.md`
 §4.** A cache miss (`buildStructTypeInfo`) costs 234.7 ns at one field, 896.1 ns
 at five and 2 356 ns at sixteen, against a **2 007 ns** leading `singleflight.Do`
-(`internal/kernel/singleflight/BENCH.md`); it happens once per Go type per
+(`internal/kernel/concur/singleflight/BENCH.md`); it happens once per Go type per
 process; and the hit path is 26.23 ns serial, 3.71 ns aggregate across 8 P, so
 there is no contention to relieve either. Wrapping it would make the worst case
 slower in wall time to save ~16 µs of CPU, once, for the life of the process.
@@ -105,7 +105,7 @@ prefixes, and typed root decode (Phases 6-8).
 
 The encode scratch is `encodeScratch` (`encoder.go`), a
 `recycler.CappedPool[*[]byte]` — the kernel primitive of ADR 0010, in the shape
-`kernel/buffer` has — and only the streaming `Encoder` rents from it: `Marshal`
+`kernel/concur/buffer` has — and only the streaming `Encoder` rents from it: `Marshal`
 hands `Append` a nil destination and `Append` writes into the caller's. It
 resets a buffer to zero length on `Put`, not on `Get`, and orphans one a record
 grew past `scratch.MaxRetainedBufBytes` instead (discard-before-reset), so an
@@ -114,7 +114,7 @@ ceiling is read from `internal/core/codec/scratch`, the codec domain's single
 source for it, and never copied into a local constant. Two neighbours were
 rejected on their shape: `scratch.AcquireBuffer` pools `*bytes.Buffer`, which
 cannot adopt the raw `[]byte` TLV's varint encoder grows by `append` without
-copying the record; `kernel/buffer` pools the right type but with the logger's
+copying the record; `kernel/concur/buffer` pools the right type but with the logger's
 thresholds — a 1 KiB first buffer and a 64 KiB ceiling — so records between 64
 and 256 KiB would stop being recycled. Moving off the hand-rolled `sync.Pool`
 it replaced changed no allocation count and costs **3.5 ns per rent and

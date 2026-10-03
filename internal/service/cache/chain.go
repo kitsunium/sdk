@@ -7,8 +7,8 @@ import (
 	"slices"
 
 	corecache "github.com/kitsunium/sdk/internal/core/cache"
+	"github.com/kitsunium/sdk/internal/kernel/concur/singleflight"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/singleflight"
 )
 
 // minChainTiers is the smallest tier count that makes a chain mean anything.

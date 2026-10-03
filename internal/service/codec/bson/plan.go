@@ -15,7 +15,7 @@ import (
 	"time"
 	"unicode/utf8"
 
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // planKind is the mapping a plan applies.

@@ -263,7 +263,7 @@ SUIVI : le verrou a atterri sur …/elsewhere/locks/a4d268….lock
 ```
 
 `checkChain` (chain.go) now walks every component through
-`internal/kernel/pathchain` **before** `os.MkdirAll` — auditing afterwards
+`internal/kernel/fs/pathchain` **before** `os.MkdirAll` — auditing afterwards
 means refusing the directory only after creating it inside the planter's tree.
 
 The rule is **not** "refuse a link". `/tmp` is a symbolic link on macOS,

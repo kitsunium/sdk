@@ -65,7 +65,7 @@ otherwise be ranging over. It is proportional to k, not to N.
 `BenchmarkFetch_Hit` (171.3 ns/op, 0 allocs), so the early-return in `Load`
 really does keep the hit path out of the singleflight group. Joining a group
 costs a mutex acquisition, a map lookup and a channel receive
-(`internal/kernel/singleflight/BENCH.md` measures a leading call at ~2 µs), and
+(`internal/kernel/concur/singleflight/BENCH.md` measures a leading call at ~2 µs), and
 a cache whose hits paid that would be a cache that made things slower.
 
 Both are allocation-free.

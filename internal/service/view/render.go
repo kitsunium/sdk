@@ -8,8 +8,8 @@ import (
 	"html/template"
 
 	coreview "github.com/kitsunium/sdk/internal/core/view"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // initialBufferBytes is the scratch buffer a fresh pool entry starts at: 32 KiB,

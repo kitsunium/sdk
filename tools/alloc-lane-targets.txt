@@ -31,9 +31,9 @@
 # Kernel zero-alloc invariant gate (buffer/clock/errs/ring). (original)
 //internal/kernel:kernel_test
 # Recycler zero-alloc invariant (ADR 0010) — Pool/CappedPool Get+Put.
-//internal/kernel/recycler:recycler_test
+//internal/kernel/concur/recycler:recycler_test
 # Snapshot zero-alloc invariant (ADR 0011) — Load/Store/Swap.
-//internal/kernel/snapshot:snapshot_test
+//internal/kernel/concur/snapshot:snapshot_test
 # Version comparison allocates nothing (ADR 0156 §4): every reading of
 # kernel/semver is a substring of its input. strings.Split in place of the
 # in-place identifier walk returns the same identifiers, so every functional

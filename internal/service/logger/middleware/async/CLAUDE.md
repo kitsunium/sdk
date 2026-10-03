@@ -15,7 +15,7 @@ S3) so a backed-up drain never stalls the application.
 
 | File | Role |
 |---|---|
-| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the production drainer runs on a `kernel/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
+| `async_sink.go`        | `asyncSink` + `New` + `Write` / `Flush` / `Close`; the production drainer runs on a `kernel/concur/worker.LoopDaemon`, whose idempotent `Stop` is the join (ADR 0014 §D6) |
 | `async_sink_policy.go` | `DropPolicy` enum (`DropNewest` default, `DropOldest`) |
 | `drainer.go`           | drainer body: `drain` (the loop body the daemon runs and the white-box tests spawn directly; closes `done` via `doneOnce`) / `drainLoop` (selects on the sink's `stop`) / `forward` / `drainRemaining`; `maxSaneCap` (64 KiB) bounds pool retention against attacker-influenced records |
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
@@ -42,7 +42,7 @@ S3) so a backed-up drain never stalls the application.
   effective producers (`Write`, `Close`, `DropOldest`'s read-then-write
   retry) against the drainer's read. Closes the Close-vs-Write TOCTOU race.
 - **Lifecycle via worker.LoopDaemon.** The production drainer goroutine is
-  owned by a `kernel/worker.LoopDaemon`; its idempotent `Stop` joins the loop.
+  owned by a `kernel/concur/worker.LoopDaemon`; its idempotent `Stop` joins the loop.
   `Close` closes the `stop` channel under `ringMu` (guarded by `stopOnce` so
   repeated Close never double-closes) then joins the daemon, preserving the
   `drainRemaining` "lose nothing accepted" contract. The white-box test path

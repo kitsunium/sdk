@@ -8,8 +8,8 @@ import (
 	"runtime/debug"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/group"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/group"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 )

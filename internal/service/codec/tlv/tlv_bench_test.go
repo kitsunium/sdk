@@ -322,8 +322,8 @@ func BenchmarkTypeInfoHitParallel(b *testing.B) {
 
 // BenchmarkTypeInfoBuild is the MISS — the reflect walk the cache exists to
 // perform once per type per process. This is the number that decides whether
-// wrapping the cache in a kernel/singleflight Group could ever pay: a leading
-// singleflight call is measured at ~2 µs in internal/kernel/singleflight/BENCH.md,
+// wrapping the cache in a kernel/concur/singleflight Group could ever pay: a leading
+// singleflight call is measured at ~2 µs in internal/kernel/concur/singleflight/BENCH.md,
 // so if a build costs materially less than that, the Group is a pure loss.
 func BenchmarkTypeInfoBuild(b *testing.B) {
 	for _, target := range []reflect.Type{

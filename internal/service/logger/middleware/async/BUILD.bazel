@@ -21,10 +21,10 @@ go_library(
     ],
     deps = [
         "//internal/core/logger",
+        "//internal/kernel/collections/ring",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/concur/worker",
         "//internal/kernel/errs",
-        "//internal/kernel/recycler",
-        "//internal/kernel/ring",
-        "//internal/kernel/worker",
     ],
 )
 
@@ -50,9 +50,9 @@ go_test(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/concur/worker",
         "//internal/kernel/errs",
-        "//internal/kernel/recycler",
-        "//internal/kernel/worker",
         "//internal/service/logger/sink/console",
     ],
 )

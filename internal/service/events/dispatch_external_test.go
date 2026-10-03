@@ -240,7 +240,7 @@ func TestAPanicInAListenerReachesNeitherThePublisherNorTheSiblings(t *testing.T)
 
 // TestAPanicCarriesTheOriginatingStackAndValue — a recovered panic whose
 // stack is gone is a crash report naming the recover site, which is code that
-// did nothing wrong. kernel/group makes the same promise across a goroutine
+// did nothing wrong. kernel/concur/group makes the same promise across a goroutine
 // boundary; here there is none, so the stack is simply captured in place.
 func TestAPanicCarriesTheOriginatingStackAndValue(t *testing.T) {
 	t.Parallel()

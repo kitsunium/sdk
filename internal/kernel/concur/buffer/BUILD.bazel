@@ -1,0 +1,34 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "buffer",
+    srcs = ["buffer.go"],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/concur/buffer",
+    visibility = ["//internal/kernel:kernel_consumers"],
+    deps = ["//internal/kernel/concur/recycler"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":buffer",
+    visibility = ["//internal/kernel:kernel_consumers"],
+)
+
+go_test(
+    name = "buffer_test",
+    size = "small",
+    srcs = [
+        "buffer_bench_test.go",
+        "buffer_external_test.go",
+        "buffer_internal_test.go",
+    ],
+    embed = [":buffer"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

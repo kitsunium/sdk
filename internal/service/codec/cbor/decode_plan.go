@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"sync"
 
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // The properties a decode plan can have.

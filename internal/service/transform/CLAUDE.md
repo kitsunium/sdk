@@ -100,7 +100,7 @@ silently.
 A CPU profile of a 256-byte gzip put `runtime.memclrNoHeapPointers` at 18.83 % —
 zeroing tables the call was about to overwrite — and an allocation profile put
 **99.94 %** of the bytes in `compress/flate` construction. `pool.go` recycles both
-directions through `kernel/recycler`. Medians of three runs, in `BENCH.md`:
+directions through `kernel/concur/recycler`. Medians of three runs, in `BENCH.md`:
 
 | verb | payload | before | after |
 |---|---:|---:|---:|

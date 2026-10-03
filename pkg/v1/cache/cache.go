@@ -70,7 +70,7 @@ import (
 	"time"
 
 	corecache "github.com/kitsunium/sdk/internal/core/cache"
-	kcache "github.com/kitsunium/sdk/internal/kernel/cache"
+	kcache "github.com/kitsunium/sdk/internal/kernel/collections/cache"
 	svccache "github.com/kitsunium/sdk/internal/service/cache"
 )
 

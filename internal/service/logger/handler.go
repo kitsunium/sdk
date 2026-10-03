@@ -10,8 +10,8 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 )
@@ -67,7 +67,7 @@ func (h *genericHandler) Enabled(ctx context.Context, r corelogger.RecordEvent) 
 }
 
 // Handle encodes r through the configured encoder and forwards the bytes to
-// the configured sink. Borrows a scratch buffer from kernel/buffer so the
+// the configured sink. Borrows a scratch buffer from kernel/concur/buffer so the
 // ENCODING step itself does not allocate; the record's attrs clone is a
 // separate cost (one slice per emit — see pkg/v1/logger/BENCH.md).
 func (h *genericHandler) Handle(ctx context.Context, r corelogger.RecordEvent) error {

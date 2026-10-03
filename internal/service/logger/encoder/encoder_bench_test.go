@@ -14,7 +14,7 @@ import (
 const (
 	// benchScratchCap is the scratch buffer capacity the encoder benchmarks
 	// start from. The production path borrows its destination from
-	// kernel/buffer, which is pooled and warm, so re-using one buffer per
+	// kernel/concur/buffer, which is pooled and warm, so re-using one buffer per
 	// benchmark models the real call and keeps the allocator out of the
 	// measurement.
 	benchScratchCap int = 4096

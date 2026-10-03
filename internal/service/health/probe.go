@@ -7,8 +7,8 @@ import (
 	"context"
 
 	corehealth "github.com/kitsunium/sdk/internal/core/health"
+	"github.com/kitsunium/sdk/internal/kernel/concur/group"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/group"
 )
 
 // phase is the process's own position in its life, derived from state rather
@@ -176,7 +176,7 @@ func (h *health) unknown(probe corehealth.Probe) corehealth.ReportValue {
 // with the number of dependencies — and an endpoint an orchestrator polls on a
 // fixed period must not get slower every time somebody registers a check.
 //
-// They run through kernel/group's Collect: the results come back in
+// They run through kernel/concur/group's Collect: the results come back in
 // REGISTRATION order rather than completion order — two identical probes must
 // render identically — and a fault in the evaluation path itself is re-raised
 // here, on the probing goroutine, after every sibling check has returned,

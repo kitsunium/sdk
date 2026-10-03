@@ -16,8 +16,8 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
-        "//internal/kernel/batcher",
         "//internal/kernel/clock",
+        "//internal/kernel/concur/batcher",
         "//internal/service/logger/middleware/async",
         "//internal/service/writer/levelgate",
     ],
@@ -43,7 +43,7 @@ go_test(
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
-        "//internal/kernel/batcher",
+        "//internal/kernel/concur/batcher",
         "//internal/kernel/errs",
         "//internal/service/logger",
         "//internal/service/logger/encoder",

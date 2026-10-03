@@ -1,7 +1,7 @@
 // Package logger — implements the TextHandler — a concrete
 // core.Handler that renders RecordEvent values as
 // "TIME LEVEL msg key=val..." and writes the bytes to an io.Writer under a
-// mutex. It composes the kernel/buffer pool and kernel/clock abstraction so
+// mutex. It composes the kernel/concur/buffer pool and kernel/clock abstraction so
 // that tests can drive it deterministically.
 package logger
 
@@ -13,8 +13,8 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/encoder"
 )

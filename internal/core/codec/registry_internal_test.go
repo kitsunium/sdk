@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // Test_indexAliases covers fresh-alias, idempotent, and conflict paths of

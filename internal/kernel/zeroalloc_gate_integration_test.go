@@ -19,10 +19,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/collections/ring"
+	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/ring"
 )
 
 // gateMu serialises the probes.

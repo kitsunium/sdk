@@ -7,9 +7,9 @@ import (
 	"fmt"
 	"maps"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // aeads maps each Algorithm to its AEAD (the shared read-mostly schemeRegistry);

@@ -8,8 +8,8 @@ import (
 	"bytes"
 	"unicode/utf8"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
 )
 
 // maxDocumentBytes caps the size of a document Unmarshal and the streaming

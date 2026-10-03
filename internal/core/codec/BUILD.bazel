@@ -15,9 +15,9 @@ go_library(
     importpath = "github.com/kitsunium/sdk/internal/core/codec",
     visibility = ["//internal/core:core_consumers"],
     deps = [
+        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
-        "//internal/kernel/snapshot",
     ],
 )
 
@@ -39,8 +39,8 @@ go_test(
     ],
     embed = [":codec"],
     deps = [
+        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
-        "//internal/kernel/snapshot",
     ],
 )
 

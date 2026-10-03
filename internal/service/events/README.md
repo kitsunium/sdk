@@ -27,7 +27,7 @@ with `errors.Join`, carrying the bus's `ListenerFailed` verdict and the
 listener's own error side by side, so `errs.HasCode` and the caller's
 `errors.Is` both answer on the same value.
 
-The membership is a `kernel/snapshot` copy-on-write value, so a dispatch is one
+The membership is a `kernel/concur/snapshot` copy-on-write value, so a dispatch is one
 atomic load with no lock and no allocation, and a listener may subscribe or
 unsubscribe from inside the dispatch that is walking the list.
 

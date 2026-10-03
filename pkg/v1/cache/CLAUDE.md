@@ -4,7 +4,7 @@
 ## Purpose
 
 Public facade for the SDK's cache, two surfaces side by side. The PRIMITIVE
-(ADR 0025): the generic LRU + TTL cache of `internal/kernel/cache`. The DOMAIN
+(ADR 0025): the generic LRU + TTL cache of `internal/kernel/collections/cache`. The DOMAIN
 (ADR 0049): the `Store[V]` port of `internal/core/cache` and the two stores of
 `internal/service/cache` — a tagged, stampede-protected memory store and a tier
 chain. Both are re-exported as **type aliases** (zero runtime cost) plus thin
@@ -15,8 +15,8 @@ dep-light; cross-OS portable.
 
 | Symbol | Notes |
 |---|---|
-| `Cache[K,V]` / `Config[K,V]` / `Stats` | type aliases onto `internal/kernel/cache` (`Stats = StatsValue`) |
-| `New[K,V](cfg)` | constructor (wraps `kernel/cache.NewCache`) |
+| `Cache[K,V]` / `Config[K,V]` / `Stats` | type aliases onto `internal/kernel/collections/cache` (`Stats = StatsValue`) |
+| `New[K,V](cfg)` | constructor (wraps `kernel/collections/cache.NewCache`) |
 | methods `Fetch`/`Set`/`SetTTL`/`Delete`/`Len`/`Purge`/`Stats` | inherited from the aliased type |
 | `Store[V]` | alias of `corecache.Store[V]` — `Fetch`/`Set`/`Delete` on string keys, FROZEN at three methods (ADR 0039) |
 | `EntryFetcher[V]` / `Tagger` / `Loader[V]` | siblings reached by type assertion: `FetchEntry` (value, remaining TTL, tags), `InvalidateTag`, `Load(ctx, key, fill)` |

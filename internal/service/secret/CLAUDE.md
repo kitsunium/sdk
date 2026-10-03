@@ -11,7 +11,7 @@ subject, wrapped by a `Keyring` root that rotates, destroyed to erase what it
 sealed, with the memory `core/secret.SubjectKeyStore`. Everything reuses the
 SDK's own mechanisms: `crypto` (AES-256-GCM, HKDF-SHA256, HMAC-SHA256), `vfs`
 (atomic publication), `lock` (the file locker), `clock` (every stamp and every
-wait), `kernel/cache` (the opened subject keys).
+wait), `kernel/collections/cache` (the opened subject keys).
 
 Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
 
@@ -27,7 +27,7 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
 | `keyring_view.go` | `rootView` — the keyring read ONCE, every usable version's sealing key derived once: what `Rewrap` seals and opens with |
 | `subjectkeys.go` | `SubjectKeys` / `NewSubjectKeys` / `SubjectKeysConfig` — `Seal`, `Open`, `Destroy`, and the acquire / load / create / unwrap path |
 | `subjectbox.go` | the subject box layout, `SubjectOf`, the length-prefixed binding, the wrap's associated data |
-| `subjectcache.go` | `openedKey` (copies out, wipes in place) and `keyCache` (the `kernel/cache` primitive plus the destruction epoch) |
+| `subjectcache.go` | `openedKey` (copies out, wipes in place) and `keyCache` (the `kernel/collections/cache` primitive plus the destruction epoch) |
 | `subjectrewrap.go` | `Rewrap` / `RewrapValue` and `OldestRoot` |
 | `subjectmemory.go` | `NewMemorySubjectKeyStore` — the reference `core/secret.SubjectKeyStore` |
 | `rotator.go` | `Rotator` / `NewRotator` / `RotatorConfig` / `PolicySpec` / `Random` |

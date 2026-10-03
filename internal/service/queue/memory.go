@@ -11,8 +11,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	"github.com/kitsunium/sdk/internal/kernel/collections/heap"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/heap"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 )

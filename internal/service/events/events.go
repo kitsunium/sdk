@@ -6,8 +6,8 @@ import (
 	"reflect"
 
 	corev "github.com/kitsunium/sdk/internal/core/events"
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // bus is the concrete core/events.Bus. It is unexported: there is one

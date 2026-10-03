@@ -163,7 +163,7 @@ make bench       # regenerate codec BENCH.md from real Go benchmarks
 ## Benchmarks
 
 Kernel hot-path benchmarks live next to their source as
-`internal/kernel/*/*_bench_test.go`. Run them via:
+`internal/kernel/**/*_bench_test.go`. Run them via:
 
 ```bash
 make sdk-bench          # steady-state numbers → .bench.out (benchstat-friendly)

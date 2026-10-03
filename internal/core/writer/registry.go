@@ -9,9 +9,9 @@ import (
 	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // registry maps each writer Name to its Factory.

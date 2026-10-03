@@ -36,8 +36,8 @@ const layerZeroOwner string = "internal/kernel/errs"
 // just-in-time allocation step: do it in the same change that introduces the
 // codes, and never renumber a published code to make this table fit.
 var codeRangeOwners = map[uint64]string{
-	0x00_01_03_00: "internal/kernel/ring",
-	0x00_01_05_00: "internal/kernel/batcher",
+	0x00_01_03_00: "internal/kernel/collections/ring",
+	0x00_01_05_00: "internal/kernel/concur/batcher",
 	0x00_02_02_00: "internal/core/codec",
 	0x00_02_03_00: "internal/core/writer",
 	0x00_02_04_00: "internal/core/crypto",

@@ -67,7 +67,7 @@ only producer of — splitting them left three files nothing else referenced.
 
 `Clock` is a **published port**, not an internal detail. `pkg/v1/clock`
 publishes it as an alias (ADR 0090), and `pkg/v1/cache.Config` is a *type
-alias* for `internal/kernel/cache.Config[K,V]`, whose `Clock` field carries this
+alias* for `internal/kernel/collections/cache.Config[K,V]`, whose `Clock` field carries this
 exact interface — so any consumer of the released `pkg` module can write a
 two-method double and pass it in. Go interfaces are structural: a double
 satisfies `clock.Clock` whether or not it names it, and adding a method breaks
@@ -79,7 +79,7 @@ a complete `Timed`:
 
 | Package | Type |
 |---|---|
-| `internal/kernel/cache` | `fakeClock`, `fixedClock` |
+| `internal/kernel/collections/cache` | `fakeClock`, `fixedClock` |
 | `internal/service/logger` | `frozenClock` |
 | `internal/service/writer/dbsink` | `frozenClock` |
 | `internal/service/writer/rotfile` | `fakeClock` |

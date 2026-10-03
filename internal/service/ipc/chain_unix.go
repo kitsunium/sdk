@@ -69,7 +69,7 @@ import (
 	"path/filepath"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/pathchain"
+	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 )
 
 // worldWritable is the bit that lets any account create, rename or remove an

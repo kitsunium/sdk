@@ -129,7 +129,7 @@ types handled by building in a private map and publishing complete graphs);
 `map[string]any`, `[]any`, `map[string]string` and the common scalars bypass
 reflection. `Marshal` allocates exactly its result; `Append` into a sized
 buffer allocates nothing; the decode state and map holders are recycled through
-`kernel/recycler`.
+`kernel/concur/recycler`.
 
 Against fxamacker, measured side by side in CPU time (`BENCH.md` says how, and
 why not wall time): at parity or faster on every benchmark but two, with

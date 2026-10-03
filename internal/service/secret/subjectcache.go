@@ -7,8 +7,8 @@ import (
 	"time"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
-	kcache "github.com/kitsunium/sdk/internal/kernel/cache"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
+	kcache "github.com/kitsunium/sdk/internal/kernel/collections/cache"
 )
 
 // openedKey is one subject's data key, opened: the AEAD key derived from it

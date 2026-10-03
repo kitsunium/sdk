@@ -45,7 +45,7 @@ import (
 	"log"
 	"path/filepath"
 
-	"github.com/kitsunium/sdk/internal/kernel/pathchain"
+	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )

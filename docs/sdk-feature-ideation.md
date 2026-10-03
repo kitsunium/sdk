@@ -70,7 +70,7 @@ Cinq questions, une seule réponse « non » suffit à exclure du SDK :
 | Métriques | counter/gauge/histogram + exporter texte | **pas de labels** (ADR 0027 différé) |
 | Configuration | env + fichier + merge + poll-watch | pas de schéma, pas de secrets |
 | Réseau | `net` : serveur TCP/UDP/TLS + middlewares + phases, client à policy, identité TLS | pas de WS/SSE, pas de discovery |
-| Cache | `kernel/cache` LRU+TTL | primitive in-proc, **pas un domaine** |
+| Cache | `kernel/collections/cache` LRU+TTL | primitive in-proc, **pas un domaine** |
 | Horloge, ring, worker, batcher, recycler, snapshot, buffer | kernel | — |
 
 Slots de code d'erreur libres : **core `0.2.12`–`0.2.15` puis `0.2.18+`**
@@ -127,9 +127,9 @@ Consommé par : config (schéma), le futur `mapper`, les forms du framework.
 
 ### B3. `cache` promu de primitive à domaine
 
-`kernel/cache` reste la primitive. Il manque le domaine : port `Store` +
+`kernel/collections/cache` reste la primitive. Il manque le domaine : port `Store` +
 registre, **tags et invalidation par tag**, **protection anti-stampede** (via
-`kernel/singleflight`), chaînage L1/L2. C'est exactement le delta entre une
+`kernel/concur/singleflight`), chaînage L1/L2. C'est exactement le delta entre une
 `map` et SF `Cache` / `bigcache` (8,2k) / `fastcache` (2,4k). Redis en
 `third-party/`.
 
@@ -167,7 +167,7 @@ et `EventDispatcher`. Deux domaines distincts : `events` = bus in-process typé
 en `third-party/`.
 
 > **Suite (2026-10)** : `kernel/topic` a été livré (T30) puis supprimé du
-> kernel. `events` ne s'est pas construit dessus mais sur `kernel/snapshot`
+> kernel. `events` ne s'est pas construit dessus mais sur `kernel/concur/snapshot`
 > (ADR 0053 §D9 : un tampon par abonné fait rendre la main à `Publish` avant
 > que les listeners aient tourné), et aucun autre consommateur n'est apparu.
 
@@ -310,8 +310,8 @@ ADR. **T02 les pré-alloue tous ; rien ne part en parallèle avant son merge.**
 ### V1 — 4 pistes disjointes
 | Piste | Tâches |
 |---|---|
-| A — cache | T10 `kernel/singleflight` → T11 `cache` domaine (tags, anti-stampede) |
-| B — lifecycle | T12 `kernel/group` → **T13 `lifecycle`** |
+| A — cache | T10 `kernel/concur/singleflight` → T11 `cache` domaine (tags, anti-stampede) |
+| B — lifecycle | T12 `kernel/concur/group` → **T13 `lifecycle`** |
 | C — validation | T14 `validation` |
 | D — formats | T15 `transform`:zlib · T16 codec form-urlencoded · T17 codec multipart |
 
@@ -320,7 +320,7 @@ ADR. **T02 les pré-alloue tous ; rien ne part en parallèle avant son merge.**
 |---|---|
 | A — auth | T20 crypto JWK/JWKS → T21 `token` → T22 `session` |
 | B — net temps réel | T23 WebSocket → T24 SSE |
-| C — temps | T25 `kernel/heap` → T26 `scheduler` |
+| C — temps | T25 `kernel/collections/heap` → T26 `scheduler` |
 | D — metrics | **T27 labels** → T28 exporter Prometheus |
 
 ### V3 — 4 pistes

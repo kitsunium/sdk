@@ -29,8 +29,8 @@ go_library(
         "//internal/core/health",
         "//internal/core/lifecycle",
         "//internal/kernel/clock",
+        "//internal/kernel/concur/group",
         "//internal/kernel/errs",
-        "//internal/kernel/group",
         "//internal/service/proc/sdnotify",
     ],
 )

@@ -9,7 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/cache",
-        "//internal/kernel/cache",
+        "//internal/kernel/collections/cache",
         "//internal/service/cache",
     ],
 )

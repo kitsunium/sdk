@@ -12,7 +12,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/kernel/recycler"
+	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 )
 
 // Package-level caches and the types the planner recognises.

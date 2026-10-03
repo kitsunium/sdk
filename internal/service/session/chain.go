@@ -22,7 +22,7 @@
 // # The rule is the lock domain's, and so is the reason for it
 //
 // internal/service/lock closed the same gap for its lock directory (ADR 0083),
-// on internal/kernel/pathchain, and this is the same rule over the same walk:
+// on internal/kernel/fs/pathchain, and this is the same rule over the same walk:
 // an indirection is refused when the directory HOLDING it is world-writable —
 // when anybody could have planted it — and the sticky bit exempts nothing,
 // because planting a component CREATES an entry rather than unlinking one.
@@ -44,7 +44,7 @@
 package session
 
 import (
-	"github.com/kitsunium/sdk/internal/kernel/pathchain"
+	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 
