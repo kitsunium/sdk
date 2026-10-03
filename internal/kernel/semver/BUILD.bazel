@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "semver",
+    srcs = [
+        "parse.go",
+        "pseudo.go",
+        "semver.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/semver",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":semver",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "semver_test",
+    size = "small",
+    srcs = [
+        "oracle_external_test.go",
+        "parse_internal_test.go",
+        "pseudo_external_test.go",
+        "semver_alloc_external_test.go",
+        "semver_bench_test.go",
+        "semver_external_test.go",
+    ],
+    embed = [":semver"],
+)

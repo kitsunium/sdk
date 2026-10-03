@@ -31,6 +31,12 @@
 //internal/kernel/recycler:recycler_test
 # Snapshot zero-alloc invariant (ADR 0011) — Load/Store/Swap.
 //internal/kernel/snapshot:snapshot_test
+# Version comparison allocates nothing (ADR 0156 §4): every reading of
+# kernel/semver is a substring of its input. strings.Split in place of the
+# in-place identifier walk returns the same identifiers, so every functional
+# test passes against it — and costs 1 000 allocations over 500 comparisons.
+# Mutation-checked in the file's doc comment.
+//internal/kernel/semver:semver_test
 # encwrite frame-overflow probe (AllocsPerRun-based).
 //internal/service/logger/middleware/encwrite:encwrite_test
 # Labelled-series lookup allocation gate — the claim that resolving an existing
