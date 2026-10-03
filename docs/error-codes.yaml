@@ -1518,6 +1518,14 @@ codes:
     const: CodeBSONSizeExceeded
     hex: "0x00_03_24_03"
     package: internal/service/codec/bson
+  - code: "0.3.36.4"
+    const: CodeBSONDepthExceeded
+    hex: "0x00_03_24_04"
+    package: internal/service/codec/bson
+  - code: "0.3.36.5"
+    const: CodeBSONValueInvalid
+    hex: "0x00_03_24_05"
+    package: internal/service/codec/bson
   - code: "0.3.37.1"
     const: CodeHCLMarshalFailed
     hex: "0x00_03_25_01"

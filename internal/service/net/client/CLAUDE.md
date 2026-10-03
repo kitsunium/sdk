@@ -132,7 +132,7 @@ stdlib (`bytes`, `net/http`, `net/url`, `regexp`, `strings`, `io`, `time`) +
 `internal/kernel/*` + `internal/core/net`. Never `pkg/*`.
 
 **Never the codec.** The client must not decode response bodies: depending on
-the codec registry would drag mongo-driver, msgpack and cbor into the module
+the codec registry would drag msgpack and cbor into the module
 graph of every consumer that only wanted a guarded GET. Decoding belongs above
 this layer.
 

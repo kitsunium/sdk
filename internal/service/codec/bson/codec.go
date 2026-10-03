@@ -1,25 +1,35 @@
-// Package bson wraps go.mongodb.org/mongo-driver/bson as a codec.Codec
-// implementation. BSON is a document format: the top-level value MUST be a
-// struct or map (BSON cannot represent a bare scalar at the root), so Marshal
-// of a top-level scalar surfaces BSON_MARSHAL_FAILED. The library exposes no
-// incremental Encoder/Decoder over an io stream in its stable surface, so this
-// codec is NOT a StreamingCodec; it does implement the optional Appender.
+// Package bson is the BSON codec: a native implementation of the BSON 1.1
+// specification (bsonspec.org) behind the universal core/codec.Codec
+// dispatch, written with the standard library alone.
+//
+// BSON is a document format: the top-level value MUST encode as a document — a
+// struct, a map, a D — so Marshal of a top-level scalar or array surfaces
+// BSON_MARSHAL_FAILED. Go values map onto BSON as the MongoDB Go driver's v1
+// default registry mapped them, struct tags included
+// (bson:"name,omitempty,minsize,truncate,inline"), and the BSON types Go has
+// no type for decode into this package's own: ObjectID, DateTime, Decimal128,
+// Binary, Regex, Timestamp, D, M, A and the rest.
+//
+// Unmarshal checks the whole input before it touches the target — every
+// declared length against the bytes remaining, every terminator, every type
+// byte, every string's UTF-8, a nesting depth of at most 100 — so a malformed
+// document is refused whole and never half-decoded. The codec is not a
+// StreamingCodec; it implements the optional Appender.
 package bson
 
 import (
+	"bytes"
 	"slices"
 
-	gobson "go.mongodb.org/mongo-driver/bson"
-
 	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// maxBSONBytes caps the Unmarshal input for untrusted payloads. mongo-driver's
-// decoder reads declared element lengths before validating them, so a crafted
-// document can pre-allocate large buffers; size-limiting the input is the
-// primary memory-exhaustion defence (CWE-400). 10 MiB covers realistic
-// documents and matches the other library-backed codecs.
+// maxBSONBytes caps the Unmarshal input for untrusted payloads (CWE-400). The
+// validator never allocates from a declared length it has not checked, so
+// the cap bounds what one call can make the decoder allocate; 10 MiB covers
+// realistic documents and matches the other codecs.
 const maxBSONBytes int = 10 << 20
 
 var (
@@ -60,28 +70,33 @@ func (*bsonCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal encodes v as a BSON document. v must be a struct or map at the top
-// level; a scalar surfaces BSON_MARSHAL_FAILED via the library error.
+// Marshal encodes v as a BSON document into a slice the caller owns. v must
+// encode as a document at the top level; anything else surfaces
+// BSON_MARSHAL_FAILED, and nesting past 100 levels — a cyclic value included —
+// BSON_DEPTH_EXCEEDED.
 func (*bsonCodec) Marshal(v any) (encoded []byte, err error) {
-	//: delegate to the library encoder.
-	out, merr := gobson.Marshal(v)
-	//: success fast-path.
-	if merr == nil {
-		//: hand back the freshly-encoded document.
-		return out, nil
+	buf := scratch.AcquireBuffer()
+	defer scratch.ReleaseBuffer(buf)
+	out, err := appendDocument(buf.AvailableBuffer(), v)
+	//: nothing half-written reaches the caller.
+	if err != nil {
+		//: the typed refusal.
+		return nil, err
 	}
-	//: wrap the library failure with the dotted-quad code.
-	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeBSONMarshalFailed,
-		Reason:  "BSON_MARSHAL_FAILED",
-		Public:  "BSON encoding failed",
-		Private: "service/codec/bson.Marshal: go.mongodb.org/mongo-driver/bson.Marshal returned an error",
-	})
+	encoded = slices.Clone(out)
+	//: a document that outgrew the pooled buffer leaves its larger backing
+	//: array to the pool instead, when the pool may keep one that large.
+	if cap(out) > buf.Cap() && cap(out) <= scratch.MaxRetainedBufBytes {
+		*buf = *bytes.NewBuffer(out[:0])
+	}
+	//: one exact-size copy for the caller.
+	return encoded, nil
 }
 
-// Unmarshal decodes a BSON document into v after the size cap.
+// Unmarshal decodes the BSON document data into v, which must be a non-nil
+// pointer or a non-nil map. The input is checked whole before v is touched.
 func (*bsonCodec) Unmarshal(data []byte, v any) error {
-	//: CWE-400 defence — refuse oversized inputs before the decoder allocates.
+	//: CWE-400 defence — refuse oversized inputs before anything is read.
 	if len(data) > maxBSONBytes {
 		//: surface the size sentinel.
 		return errs.Wrap(nil, errs.WrapParams{
@@ -91,35 +106,20 @@ func (*bsonCodec) Unmarshal(data []byte, v any) error {
 			Private: "service/codec/bson.Unmarshal: len(data) > maxBSONBytes",
 		})
 	}
-	//: delegate to the library decoder.
-	uerr := gobson.Unmarshal(data, v)
-	//: success fast-path.
-	if uerr == nil {
-		//: nothing to wrap.
-		return nil
+	//: one well-formed document, or nothing is decoded.
+	if err := validateRoot(data); err != nil {
+		//: malformed, or nested too deep.
+		return err
 	}
-	//: wrap the library failure with the dotted-quad code.
-	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeBSONUnmarshalFailed,
-		Reason:  "BSON_UNMARSHAL_FAILED",
-		Public:  "BSON decoding failed",
-		Private: "service/codec/bson.Unmarshal: go.mongodb.org/mongo-driver/bson.Unmarshal returned an error",
-	})
+	//: decode into the target.
+	return decodeInto(data, v)
 }
 
-// Append encodes v as BSON and appends the result onto dst. Implements the
-// optional codec.Appender. mongo-driver has no append-style API, so the encode
-// allocates an intermediate document; a failure leaves dst untouched.
-func (c *bsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: snapshot dst so a failure restores the caller's buffer exactly.
-	origLen := len(dst)
-	//: encode the document (intermediate allocation is unavoidable here).
-	out, merr := c.Marshal(v)
-	//: Marshal already wrapped any error with the BSON sentinel.
-	if merr != nil {
-		//: leave dst as the caller passed it.
-		return dst[:origLen], merr
-	}
-	//: append the encoded document onto dst.
-	return append(dst, out...), nil
+// Append encodes v as BSON and appends the document onto dst. Implements the
+// optional codec.Appender: the encoder writes straight into dst, so a
+// destination with room allocates nothing for the document itself. A failure
+// returns dst with its original length.
+func (*bsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
+	//: the encoder restores dst's length itself on failure.
+	return appendDocument(dst, v)
 }

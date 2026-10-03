@@ -103,7 +103,7 @@ proof that the three names suffice.
 ## One format at a time (ADR 0134)
 
 Importing this package registers every format, and so links every codec's
-library — the MongoDB driver for BSON, CBOR, MessagePack, TOML, YAML — into a
+library — CBOR, MessagePack, TOML, YAML; BSON is native and has none — into a
 program that may read one of them. `json/`, `yaml/` and `toml/` are facades that
 each blank-import ONE service codec and nothing else: a program that reads its
 configuration through `config.FSSource` imports `pkg/v1/codec/yaml` and links

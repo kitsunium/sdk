@@ -8,7 +8,7 @@ imported, blank usually (ADR 0134). Everything that dispatches by format name
 then reads and writes YAML: `config.FileSource` / `config.FSSource`,
 `i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the YAML
 codec and gopkg.in/yaml.v3, and nothing else — where `pkg/v1/codec` links every format
-the SDK ships, the MongoDB driver included.
+the SDK ships, with their libraries.
 
 ## Surface
 

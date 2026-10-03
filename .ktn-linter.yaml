@@ -1140,6 +1140,17 @@ rules:
       # first, and from every storage port beside them (ADR 0139).
       - "**/internal/service/docstore/sql_store.go"
       - "internal/service/docstore/sql_store.go"
+      # service/codec/bson's value types — Binary, Regex, DBPointer,
+      # CodeWithScope, Timestamp, E, MinKey, MaxKey, Undefined, Null — are the
+      # names of the BSON types they stand for (bsonspec.org), and the names
+      # every MongoDB-shaped document is spoken in: a caller type-switches on
+      # bson.Binary exactly as it did on the driver's primitive.Binary, and on
+      # bson.Binary in the driver's own v2. A suffix ("BinaryValue",
+      # "TimestampValue") would rename the vocabulary to satisfy a rule, and a
+      # compatibility alias to dodge it is itself a finding
+      # (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
+      - "**/internal/service/codec/bson/types.go"
+      - "internal/service/codec/bson/types.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the
@@ -1555,6 +1566,13 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/secret/**"
       - "internal/core/secret/**"
+  #
+  # service/codec/bson's DateTime, ObjectID and Decimal128 are the same case:
+  # their MarshalJSON / MarshalText — and their String, Hex, IsZero, which a
+  # value held in a map entry or an interface must answer — take a value
+  # receiver, and UnmarshalJSON / UnmarshalText, which assign, a pointer one,
+  # exactly as on the driver types they replace and on time.Time. Scoped to
+  # the three files.
   KTN-VAR-RECVCONS:
     exclude:
       - "**/internal/core/net/**"
@@ -1563,12 +1581,24 @@ rules:
       - "internal/core/secret/**"
       - "**/framework/internal/kit/seal_store.go"
       - "framework/internal/kit/seal_store.go"
+      - "**/internal/service/codec/bson/types.go"
+      - "internal/service/codec/bson/types.go"
+      - "**/internal/service/codec/bson/objectid.go"
+      - "internal/service/codec/bson/objectid.go"
+      - "**/internal/service/codec/bson/decimal.go"
+      - "internal/service/codec/bson/decimal.go"
   KTN-STRUCT-RECVTYPE:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
       - "**/internal/core/secret/**"
       - "internal/core/secret/**"
+      - "**/internal/service/codec/bson/types.go"
+      - "internal/service/codec/bson/types.go"
+      - "**/internal/service/codec/bson/objectid.go"
+      - "internal/service/codec/bson/objectid.go"
+      - "**/internal/service/codec/bson/decimal.go"
+      - "internal/service/codec/bson/decimal.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #

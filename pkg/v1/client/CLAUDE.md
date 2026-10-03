@@ -59,8 +59,8 @@ Two related refusals, both evaluated **before** any pattern:
 
 ## Do NOT
 
-- Add decoding here. Depending on the codec registry would pull mongo-driver,
-  msgpack and cbor into every consumer that only wanted a guarded GET.
+- Add decoding here. Depending on the codec registry would pull msgpack and
+  cbor into every consumer that only wanted a guarded GET.
 - Move the policy check to the call site. That converts a guarantee into a
   convention.
 - Hand-edit `README.md` — regenerate with `make docs-readme`.
