@@ -9,6 +9,7 @@ import (
 	"context"
 	"errors"
 	"os"
+	"path/filepath"
 	"syscall"
 	"testing"
 	"time"
@@ -498,6 +499,33 @@ func Test_handle_awaitExit(t *testing.T) {
 	}
 }
 
+// startTermIgnoringChild spawns a shell that ignores SIGTERM and returns once
+// the trap is installed. Signalling it any earlier races the shell's start-up:
+// the default SIGTERM action kills it before `trap` runs, so a test meant for
+// the escalation exercises the graceful path instead — or, when the grace
+// window closes before the reaper has collected the corpse, it escalates to a
+// group holding only a zombie, which darwin's kill(2) refuses with EPERM where
+// Linux reports success.
+func startTermIgnoringChild(t *testing.T) *handle {
+	t.Helper()
+	ready := filepath.Join(t.TempDir(), "ready")
+	h := startChild(t, true, "trap '' TERM; : > '"+ready+"'; sleep 30")
+	deadline := time.Now().Add(10 * time.Second)
+	//: the shell creates the file only after its trap is in place.
+	for {
+		//: the trap is installed: SIGTERM is now ignored by the shell and by
+		//: the sleep it forks, which inherits the disposition.
+		if _, err := os.Stat(ready); err == nil {
+			return h
+		}
+		//: a child that never gets there is a broken fixture, not a pass.
+		if time.Now().After(deadline) {
+			t.Fatal("the child never reported its SIGTERM trap installed")
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+}
+
 // Test_handle_graceOnInjectedClock pins that Stop's grace window is measured on
 // the handle's clock: an hour of grace closes when a manual clock is advanced
 // an hour, and not a nanosecond before — so a supervisor's stop path is tested
@@ -535,8 +563,9 @@ func Test_handle_graceOnInjectedClock(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		//: a child that ignores SIGTERM: only the escalation can stop it.
-		h := startChild(t, true, "trap '' TERM; sleep 30")
+		//: a child that ignores SIGTERM: only the escalation can stop it —
+		//: once its trap is installed, which startTermIgnoringChild waits for.
+		h := startTermIgnoringChild(t)
 		manual := clock.NewManualClock(time.Unix(1_700_000_000, 0))
 		h.clk = manual
 		done := make(chan error, 1)
