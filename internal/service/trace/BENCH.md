@@ -219,8 +219,9 @@ changes claimed and not something else.
 | child **unsampled**, before → after | 1 385 → 1 391 | 904 → 904 | 11 → 11 |
 
 **(a) `span.SetAttrs` no longer clones a single attribute** — `sortedIncoming`
-in `span.go`. `coremetrics.SortAttrs` always clones, and its reason is
-ownership: it sorts **in place**, so it must not sort the caller's array. One
+in `span.go`. `coretrace.SortAttrs` (`coremetrics.SortAttrs` when this was
+measured — the same shared rule, now refusing under the trace code) always
+clones, and its reason is ownership: it sorts **in place**, so it must not sort the caller's array. One
 attribute is already sorted, so there is nothing to sort and nothing to protect,
 and the merge that follows only ever copies elements *out* of the slice. The
 validation still runs, still on the caller's goroutine, still outside the lock —

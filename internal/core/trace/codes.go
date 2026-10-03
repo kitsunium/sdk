@@ -31,3 +31,11 @@ const CodeDuplicateRegistration errs.Code = 0x00_02_14_05 // 0.2.20.5
 // name is the low-cardinality operation label every backend groups on, so an
 // empty one produces a trace nobody can search for.
 const CodeInvalidSpanName errs.Code = 0x00_02_14_06 // 0.2.20.6
+
+// CodeInvalidAttribute identifies an attribute set a span, an event, a link or
+// a Resource cannot carry: an attribute with an empty Key, the same Key twice,
+// or a value no constructor ever set (AttrKindInvalid). The rules are the
+// shared model's (internal/core/otel); this code is the trace signal's own,
+// where it used to borrow the metrics one (0.2.9.4) because the model lived in
+// internal/core/metrics.
+const CodeInvalidAttribute errs.Code = 0x00_02_14_07 // 0.2.20.7

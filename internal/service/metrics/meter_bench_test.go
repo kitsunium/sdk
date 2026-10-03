@@ -12,14 +12,15 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // benchAttrs is a realistic three-dimension attribute set, deliberately given
 // out of key order so the sort is inside the measurement.
-var benchAttrs = []coremetrics.AttrValue{
-	coremetrics.String("status", "200"),
-	coremetrics.String("method", "GET"),
-	coremetrics.String("route", "/v1/widgets"),
+var benchAttrs = []coreotel.AttrValue{
+	coreotel.String("status", "200"),
+	coreotel.String("method", "GET"),
+	coreotel.String("route", "/v1/widgets"),
 }
 
 // BenchmarkCounterLookup_NoAttrs is the dimensionless call shape, unchanged
@@ -54,7 +55,7 @@ func BenchmarkCounterLookup_Overflow(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		i++
-		m.Counter("http_requests_total", coremetrics.String("request_id", strconv.Itoa(i))).Inc()
+		m.Counter("http_requests_total", coreotel.String("request_id", strconv.Itoa(i))).Inc()
 	}
 }
 
@@ -100,7 +101,7 @@ func BenchmarkCollect_1000Names(b *testing.B) {
 func BenchmarkCollect_1000Series(b *testing.B) {
 	m := NewMeter()
 	for i := range 1000 {
-		m.Counter("http_requests_total", coremetrics.String("route", strconv.Itoa(i))).Inc()
+		m.Counter("http_requests_total", coreotel.String("route", strconv.Itoa(i))).Inc()
 	}
 	b.ReportAllocs()
 	for b.Loop() {
@@ -166,10 +167,10 @@ func BenchmarkHistogramRecord(b *testing.B) {
 // call site actually writes: the status code is an integer, not the string
 // "200". The comparison against benchAttrs is what says whether typing the
 // attribute model cost anything on the observation path.
-var benchTypedAttrs = []coremetrics.AttrValue{
-	coremetrics.Int64("status", 200),
-	coremetrics.String("method", "GET"),
-	coremetrics.Bool("cached", false),
+var benchTypedAttrs = []coreotel.AttrValue{
+	coreotel.Int64("status", 200),
+	coreotel.String("method", "GET"),
+	coreotel.Bool("cached", false),
 }
 
 // BenchmarkCounterLookup_3TypedAttrs resolves a three-attribute series whose
@@ -201,7 +202,7 @@ func BenchmarkUpDownCounterLookup_3Attrs(b *testing.B) {
 func BenchmarkCollect_1000Series_Delta(b *testing.B) {
 	m := NewMeterWithConfig(MeterConfig{Temporality: coremetrics.TemporalityDelta})
 	for i := range 1000 {
-		m.Counter("http_requests_total", coremetrics.String("route", strconv.Itoa(i))).Inc()
+		m.Counter("http_requests_total", coreotel.String("route", strconv.Itoa(i))).Inc()
 	}
 	b.ReportAllocs()
 	for b.Loop() {

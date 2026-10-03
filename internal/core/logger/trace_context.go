@@ -5,8 +5,8 @@
 // The pair lives here rather than in internal/core/trace because a log record
 // is not a span: it borrows two identifiers from one. Keeping the value local
 // keeps this package stdlib-only — importing the trace domain would put its
-// whole model (and core/metrics behind it) in front of every consumer that
-// only wants a line on stderr. The binding between the two lives at the top
+// whole model (and the shared core/otel model behind it) in front of every
+// consumer that only wants a line on stderr. The binding between the two lives at the top
 // layer, in pkg/v1/logger, which is allowed to know both domains. See
 // ADR 0062.
 package logger

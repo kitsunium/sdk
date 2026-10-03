@@ -1,0 +1,37 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "logfile",
+    srcs = [
+        "logfile.go",
+        "open_flags_other.go",
+        "open_flags_unix.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/internal/logfile",
+    visibility = [
+        "//internal/service:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":logfile",
+    visibility = [
+        "//internal/service:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "logfile_test",
+    srcs = [
+        "logfile_external_test.go",
+        "open_flags_unix_internal_test.go",
+    ],
+    embed = [":logfile"],
+    deps = ["//internal/kernel/errs"],
+)

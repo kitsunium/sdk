@@ -1,5 +1,21 @@
-// Package metrics — the typed attribute that gives a series its identity.
-package metrics
+// Package otel holds the OpenTelemetry types every signal shares: the typed
+// attribute (common/v1 KeyValue and AnyValue), the Resource (resource/v1) and
+// the InstrumentationScope (common/v1). They live in the SHARED protos because
+// every signal uses them, so internal/core/metrics and internal/core/trace both
+// sit above this one model rather than one signal borrowing the other's. ADR
+// 0051 §Decision 2 named this package and deferred it; it is that extraction.
+//
+// Like the two signals above it, it implements the specification and imports
+// nothing from go.opentelemetry.io — nor anything else of this SDK: it is
+// standard library only.
+//
+// It declares NO error code. An unusable attribute set is a programmer error
+// at the call site that wrote it, so the refusal belongs to the signal whose
+// API was misused: every function here that can refuse takes the caller's
+// sentinel and panics with it. Metrics keeps INVALID_ATTRIBUTE at 0.2.9.4,
+// trace has its own at 0.2.20.7, and a value built for one signal is still
+// accepted by the other, because there is only one type.
+package otel
 
 import (
 	"cmp"
@@ -9,19 +25,6 @@ import (
 	"strconv"
 	"strings"
 )
-
-// OverflowAttrKey names the reserved attribute the meter attaches to the single
-// aggregated series it folds observations into once an instrument has reached
-// its cardinality bound. It is spelled with underscores rather than dots so it
-// needs no mangling to be a legal Prometheus label name — unlike every
-// OTel-conventional key, which is dotted.
-//
-// The key is RESERVED: a caller who passes it explicitly with a BOOL value is
-// writing into the same series the meter uses for overflow, and their
-// observations merge with it. That is not enforced — enforcing it would cost a
-// comparison per attribute on the lookup path to prevent a collision nobody
-// reaches by accident.
-const OverflowAttrKey string = "sdk_metric_overflow"
 
 // The two identity bytes a bool attribute encodes to, plus the strconv
 // parameters the canonical text rendering uses.
@@ -42,7 +45,7 @@ type AttrKind uint8
 const (
 	// AttrKindInvalid is the zero value, and it names no type. An AttrValue
 	// carrying it was built by a struct literal rather than by a
-	// constructor, so its value was never set; the meter refuses it rather
+	// constructor, so its value was never set; every signal refuses it rather
 	// than inventing an empty string for it (ADR 0031).
 	AttrKindInvalid AttrKind = iota
 	// AttrKindString marks a string-valued attribute.
@@ -55,15 +58,15 @@ const (
 	AttrKindFloat64
 )
 
-// AttrValue is one dimension of a series: a Key naming the dimension and a TYPED
-// value observed for it.
+// AttrValue is one dimension — of a metric series, of a span, of a Resource: a
+// Key naming the dimension and a TYPED value observed for it.
 //
 // The Key is STRUCTURE and the value is DATA. A key is written at the call site
 // and is constant for the lifetime of the process ("http.request.method"); a
 // value comes from whatever the process is measuring and varies per observation
 // ("GET", 503, true). That asymmetry is why an unusable key is a programmer
-// error the meter panics on, while an unbounded stream of values is a runtime
-// condition the meter absorbs into an overflow series.
+// error the signal panics on, while an unbounded stream of values is a runtime
+// condition — the meter absorbs it into an overflow series.
 //
 // The value is unexported and reachable only through Kind and the four typed
 // accessors, so the only way to build a usable AttrValue is one of the four
@@ -72,7 +75,7 @@ const (
 // as an empty string.
 type AttrValue struct {
 	// Key names the dimension. It must be non-empty and appear at most once
-	// in an attribute set; both are checked on every instrument fetch.
+	// in an attribute set; ValidateAttrs checks both.
 	Key string
 	// kind discriminates which of num/str carries the value.
 	kind AttrKind
@@ -163,9 +166,9 @@ func (a AttrValue) Float64() float64 {
 //
 // The kind tag is what keeps String("v", "1") and Int64("v", 1) apart: without
 // it the two would encode identically and two series carrying different
-// dimensions would silently accumulate into one. It lives here rather than in
-// the meter so that every Meter implementation inherits the same injectivity
-// instead of re-deriving it.
+// dimensions would silently accumulate into one. It lives with the type rather
+// than in the meter so that every Meter implementation inherits the same
+// injectivity instead of re-deriving it.
 func (a AttrValue) AppendIdentity(dst []byte) []byte {
 	//: the tag opens the value and discriminates every case below.
 	dst = append(dst, byte(a.kind))
@@ -191,7 +194,7 @@ func (a AttrValue) AppendIdentity(dst []byte) []byte {
 		//: big-endian so the bytes read the same on every architecture, and
 		//: FIXED WIDTH so it needs no length prefix of its own.
 		return binary.BigEndian.AppendUint64(dst, a.num)
-	//: an invalid attribute never reaches here — the meter refuses it first.
+	//: an invalid attribute never reaches here — every signal refuses it first.
 	default:
 		//: the tag alone, so a hand-built value still encodes injectively.
 		return dst
@@ -281,42 +284,48 @@ func CompareAttrValue(a, b AttrValue) int {
 	}
 }
 
-// ValidateAttrs panics when sorted cannot name a series: an empty Key, a value
-// no constructor ever set, or the same Key twice.
+// ValidateAttrs panics with refusal's message when sorted cannot name a
+// dimension set: an empty Key, a value no constructor ever set, or the same Key
+// twice.
 //
 // It runs on the ALREADY SORTED set so duplicates are adjacent and the check
-// costs one comparison per attribute. Panicking is the same call the meter
-// makes for a cross-kind name reuse, and it is safe for the same reason: an
-// attribute key and an attribute KIND are both structure, written at the call
-// site, so they are wrong on the first call or never. The alternative is a
-// series no exporter can emit — Prometheus and OTLP both reject an empty
-// attribute name — failing far away, inside the component the SDK told the
-// caller to stop thinking about.
-func ValidateAttrs(sorted []AttrValue) {
+// costs one comparison per attribute. Panicking is safe for the reason the
+// meter's cross-kind name refusal is: an attribute key and an attribute KIND
+// are both structure, written at the call site, so they are wrong on the first
+// call or never. The alternative is a set no exporter can emit — Prometheus and
+// OTLP both reject an empty attribute name — failing far away, inside the
+// component the SDK told the caller to stop thinking about.
+//
+// refusal is the CALLER'S sentinel — an *errs.Error in every caller this SDK
+// has, typed here as the error it is so the model needs no import of its own:
+// the signal whose API was misused names the defect with its own dotted-quad
+// code, and this package owns none. It is read only to panic.
+func ValidateAttrs(sorted []AttrValue, refusal error) {
 	//: walk once; the set is sorted, so a duplicate sits next to its twin.
 	for i, attr := range sorted {
 		//: an empty key names no dimension.
 		if attr.Key == "" {
-			//: fail at the call site that wrote it.
-			panic(InvalidAttribute.Error())
+			//: fail at the call site that wrote it, under the caller's code.
+			panic(refusal.Error())
 		}
 		//: a value no constructor set is not a value.
 		if attr.kind == AttrKindInvalid {
 			//: same refusal — the set is unusable either way.
-			panic(InvalidAttribute.Error())
+			panic(refusal.Error())
 		}
 		//: the same key twice means the set is not a set.
 		if i > 0 && sorted[i-1].Key == attr.Key {
 			//: same refusal.
-			panic(InvalidAttribute.Error())
+			panic(refusal.Error())
 		}
 	}
 }
 
 // SortAttrs returns a sorted, validated, owned copy of attrs — the cold-path
-// form of what the meter does with a stack buffer on every fetch. Resource and
-// Scope use it once at construction, never per observation.
-func SortAttrs(attrs []AttrValue) []AttrValue {
+// form of what the meter does with a stack buffer on every fetch, and what a
+// Resource, a span, an event and a link do once each. It panics with refusal's
+// message on an unusable set, for the reason ValidateAttrs gives.
+func SortAttrs(attrs []AttrValue, refusal error) []AttrValue {
 	//: an empty set stays nil, which is what "no dimensions" is spelled as.
 	if len(attrs) == 0 {
 		//: nothing to own.
@@ -326,7 +335,7 @@ func SortAttrs(attrs []AttrValue) []AttrValue {
 	sorted := slices.Clone(attrs)
 	slices.SortFunc(sorted, CompareAttrKey)
 	//: refuse an unusable set here rather than at the first export.
-	ValidateAttrs(sorted)
+	ValidateAttrs(sorted, refusal)
 	//: hand back the canonical set.
 	return sorted
 }

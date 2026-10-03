@@ -7,8 +7,7 @@ import (
 	"testing"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
@@ -197,10 +196,10 @@ func TestSetAttrsReplacesOnKey(t *testing.T) {
 	sink := &collector{}
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: sink.sink()})
 	_, span := tracer.Start(context.Background(), "op", coretrace.SpanParams{
-		Attrs: []coremetrics.AttrValue{coremetrics.Int64("status", 200)},
+		Attrs: []coreotel.AttrValue{coreotel.Int64("status", 200)},
 	})
-	span.SetAttrs(coremetrics.Int64("status", 503), coremetrics.String("zone", "eu"))
-	span.SetAttrs(coremetrics.String("app", "checkout"))
+	span.SetAttrs(coreotel.Int64("status", 503), coreotel.String("zone", "eu"))
+	span.SetAttrs(coreotel.String("app", "checkout"))
 	span.End()
 
 	attrs := sink.list()[0].Attrs
@@ -225,7 +224,7 @@ func TestWritesAfterEndAreDropped(t *testing.T) {
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: sink.sink()})
 	_, span := tracer.Start(context.Background(), "op", coretrace.SpanParams{})
 	span.End()
-	span.SetAttrs(coremetrics.String("late", "yes"))
+	span.SetAttrs(coreotel.String("late", "yes"))
 	span.AddEvent("late")
 	span.SetStatus(coretrace.StatusError, "late")
 
@@ -301,7 +300,7 @@ func TestConcurrentAnnotationIsSafe(t *testing.T) {
 	var wg sync.WaitGroup
 	for i := range 8 {
 		wg.Go(func() {
-			span.SetAttrs(coremetrics.Int64("worker", int64(i)))
+			span.SetAttrs(coreotel.Int64("worker", int64(i)))
 			span.AddEvent("step")
 			span.SetStatus(coretrace.StatusOK, "")
 		})
@@ -350,21 +349,21 @@ func TestTheValueASinkReceivesIsFinal(t *testing.T) {
 	})
 	_, span := tracer.Start(context.Background(), "GET", coretrace.SpanParams{
 		Kind: coretrace.SpanKindServer,
-		Attrs: []coremetrics.AttrValue{
-			coremetrics.String("http.request.method", "GET"),
-			coremetrics.String("url.path", "/v1/orders/42"),
-			coremetrics.String("url.scheme", "https"),
-			coremetrics.String("server.address", "api.example.com"),
+		Attrs: []coreotel.AttrValue{
+			coreotel.String("http.request.method", "GET"),
+			coreotel.String("url.path", "/v1/orders/42"),
+			coreotel.String("url.scheme", "https"),
+			coreotel.String("server.address", "api.example.com"),
 		},
 	})
 	//: a separate call, so the array grows and keeps spare capacity.
-	span.SetAttrs(coremetrics.Int64("http.response.status_code", 200))
+	span.SetAttrs(coreotel.Int64("http.response.status_code", 200))
 	span.End()
 	if len(captured.Attrs) != 5 {
 		t.Fatalf("the sink received %d attributes, want 5", len(captured.Attrs))
 	}
 	//: everything below happens to a span that has already been exported.
-	span.SetAttrs(coremetrics.String("http.request.method", "MUTATED"))
+	span.SetAttrs(coreotel.String("http.request.method", "MUTATED"))
 	span.AddEvent("late")
 	span.SetStatus(coretrace.StatusError, "late")
 	for _, attr := range captured.Attrs {

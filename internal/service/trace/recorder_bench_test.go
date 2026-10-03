@@ -6,7 +6,7 @@ import (
 	"testing"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
 )
@@ -60,12 +60,12 @@ var benchSpanValue = coretrace.SpanValue{
 	Kind:      coretrace.SpanKindServer,
 	StartTime: time.Unix(1_700_000_000, 0),
 	EndTime:   time.Unix(1_700_000_000, 1_000_000),
-	Attrs: coremetrics.SortAttrs([]coremetrics.AttrValue{
-		coremetrics.String("http.request.method", "GET"),
-		coremetrics.String("url.path", "/v1/orders/42"),
-		coremetrics.String("url.scheme", "https"),
-		coremetrics.String("server.address", "api.example.com"),
-		coremetrics.Int64("http.response.status_code", 200),
+	Attrs: coretrace.SortAttrs([]coreotel.AttrValue{
+		coreotel.String("http.request.method", "GET"),
+		coreotel.String("url.path", "/v1/orders/42"),
+		coreotel.String("url.scheme", "https"),
+		coreotel.String("server.address", "api.example.com"),
+		coreotel.Int64("http.response.status_code", 200),
 	}),
 }
 

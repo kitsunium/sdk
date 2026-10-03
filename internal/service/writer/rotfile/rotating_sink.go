@@ -12,6 +12,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/worker"
+	"github.com/kitsunium/sdk/internal/service/internal/logfile"
 )
 
 // defaultFilePerm is the permission bitmask for the active file and every
@@ -20,12 +21,25 @@ import (
 // rather than inheriting gzip's default.
 const defaultFilePerm os.FileMode = 0o600
 
-// kindSymlink is the value of the "kind" field both symlink refusals carry —
-// the policy one in refuseSymlink and the kernel one behind openHardened's
-// OpenFile. One sentinel serves both (CodeRotFileOpenFailed), so the field is
-// what lets a consumer tell "someone put a link at my log path" apart from a
-// full disk, at whichever of the two points caught it.
-const kindSymlink string = "symlink"
+// openRefusals is this sink's vocabulary for the hardened open both file sinks
+// share (internal/service/internal/logfile): one sentinel,
+// CodeRotFileOpenFailed, for the policy refusal of a planted link and for every
+// failed open — the kernel's refusal of a link planted after the check among
+// them — told apart by the "kind" field the shared open adds.
+var openRefusals = logfile.RefusalSpec{
+	Symlink: errs.WrapParams{
+		Code:    CodeRotFileOpenFailed,
+		Reason:  "ROT_FILE_OPEN_FAILED",
+		Public:  "Rotating file sink refuses to open a symlink",
+		Private: "service/writer/rotfile.refuseSymlink: path is a symlink; refusing per hardening policy",
+	},
+	Open: errs.WrapParams{
+		Code:    CodeRotFileOpenFailed,
+		Reason:  "ROT_FILE_OPEN_FAILED",
+		Public:  "Rotating file sink could not open the destination file",
+		Private: "service/writer/rotfile.openHardened: os.OpenFile returned an error",
+	},
+}
 
 // rotatingSink is the unexported Sink that appends formatted records to Path
 // and rotates the file when a write would exceed cfg.MaxBytes. It owns the
@@ -54,91 +68,15 @@ type rotatingSink struct {
 	tickErr error
 }
 
-// openHardened opens path with 0600 and the platform's strongest refusal of an
-// indirection, after refusing a pre-existing symlink. It is the single
-// hardening entry point so the checks re-run identically at construction AND on
-// every reopen after a rotation (CWE-59) — the rotation cycle never reopens
-// through a weaker path.
-//
-// The two refusals are not redundant. refuseSymlink is a check and therefore
-// has a window after it; openFlags carries O_NOFOLLOW on every Unix so the
-// kernel refuses inside that window (see open_flags_unix.go, and
-// open_flags_other.go for the platforms where the check is all there is).
+// openHardened opens path with 0600 through the hardened open both file sinks
+// share: a pre-existing symlink is refused, and O_NOFOLLOW makes the kernel
+// refuse one planted after that check, on every platform that has it. It is
+// this sink's single entry point, so the checks re-run identically at
+// construction AND on every reopen after a rotation (CWE-59) — the rotation
+// cycle never reopens through a weaker path.
 func openHardened(path string) (file *os.File, err error) {
-	//: reject a pre-existing symlink before OpenFile can follow it.
-	if serr := refuseSymlink(path); serr != nil {
-		//: surface the hardening sentinel so HasCode introspection works.
-		return nil, serr
-	}
-	//: open with O_NOFOLLOW where the platform has it, so a symlink planted
-	//: between the Lstat check and this call fails the open rather than
-	//: silently redirecting the sink to a file someone else chose.
-	f, oerr := os.OpenFile(path, openFlags, defaultFilePerm)
-	//: wrap os errors via errs.Wrap so errors.Is still catches the cause.
-	if oerr != nil {
-		//: surface the documented open sentinel for HasCode introspection.
-		return nil, explainOpenFailure(path, oerr)
-	}
-	//: caller owns the returned descriptor.
-	return f, nil
-}
-
-// explainOpenFailure wraps a failed open under CodeRotFileOpenFailed and adds
-// what an os.Lstat can still say about path.
-//
-// That Lstat is DIAGNOSIS and never the decision. The refusal was already taken
-// one line earlier, by the kernel, so a planter who removes the link between
-// the two calls changes which field this error carries and cannot change
-// whether the open was refused. It is the opposite situation from
-// refuseSymlink, which runs BEFORE the open and is a check the flag exists to
-// back up — the same distinction internal/service/lock draws in
-// classifyOpenFailure (ADR 0082 §D4).
-//
-// The errno is deliberately not consulted. O_NOFOLLOW reports a planted link as
-// ELOOP on linux, openbsd and darwin, EMLINK on freebsd and dragonfly, and
-// EFTYPE on netbsd; a three-value table across six kernels is the shape of
-// thing that is wrong on the seventh, and there is nothing to branch on anyway
-// since both refusals share one sentinel.
-func explainOpenFailure(path string, openErr error) error {
-	fields := []errs.FieldValue{errs.String("path", path)}
-	info, serr := os.Lstat(path)
-	//: an indirection sits there now, so the kernel declining to traverse it
-	//: is the likeliest reading of the failure — say so, without asking which
-	//: errno said it.
-	if serr == nil && info.Mode()&os.ModeSymlink != 0 {
-		//: same sentinel as any other open failure; only the field differs.
-		fields = append(fields, errs.String("kind", kindSymlink))
-	}
-	return errs.Wrap(openErr, errs.WrapParams{
-		Code:    CodeRotFileOpenFailed,
-		Reason:  "ROT_FILE_OPEN_FAILED",
-		Public:  "Rotating file sink could not open the destination file",
-		Private: "service/writer/rotfile.openHardened: os.OpenFile returned an error",
-	}, fields...)
-}
-
-// refuseSymlink returns a typed error when path's final component is a symlink.
-// os.Lstat does not traverse the final component, so a symlink that is already
-// there is caught before OpenFile can follow it; openFlags is what covers the
-// window this check leaves behind, on every platform that has O_NOFOLLOW.
-func refuseSymlink(path string) error {
-	//: Lstat does NOT follow the final component; absent paths / stat errors
-	//: fall through so OpenFile surfaces the real diagnostic uniformly.
-	fi, lerr := os.Lstat(path)
-	//: pass through when stat fails OR the target is a regular file.
-	if lerr != nil || fi.Mode()&os.ModeSymlink == 0 {
-		//: happy path — not a symlink, hand control back to OpenFile.
-		return nil
-	}
-	//: path resolved to a symlink → reject by policy, carrying the same
-	//: "kind" field the kernel-refused path carries so a consumer filtering on
-	//: it sees both enforcement points and not just the rarer one.
-	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeRotFileOpenFailed,
-		Reason:  "ROT_FILE_OPEN_FAILED",
-		Public:  "Rotating file sink refuses to open a symlink",
-		Private: "service/writer/rotfile.refuseSymlink: path is a symlink; refusing per hardening policy",
-	}, errs.String("path", path), errs.String("kind", kindSymlink))
+	//: the shared open, refusing under this sink's ROT_FILE_OPEN_FAILED.
+	return logfile.Open(path, defaultFilePerm, &openRefusals)
 }
 
 // newRotatingSink validates cfg, opens the active file through the hardened

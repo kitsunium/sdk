@@ -9,6 +9,7 @@ package metrics_test
 import (
 	"errors"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/metrics"
@@ -68,6 +69,32 @@ func Test_ExporterName_String(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// TestARefusedConflictKeepsTheFirstRegistration pins the half of a conflict
+// the shared table (internal/kernel/plugin.Registry) cannot: the refusal is
+// THIS signal's DUPLICATE_REGISTRATION, under its own code, and the exporter
+// registered first still resolves after a second one was refused on its name.
+func TestARefusedConflictKeepsTheFirstRegistration(t *testing.T) {
+	first := stubExporter{name: "exp-keeps-first"}
+	metrics.RegisterExporter(first)
+	func() {
+		defer func() {
+			msg, isString := recover().(string)
+			if !isString {
+				t.Fatal("a distinct exporter on a taken name was not refused with a message")
+			}
+			if !strings.Contains(msg, metrics.CodeDuplicateRegistration.String()) ||
+				!strings.Contains(msg, "DUPLICATE_REGISTRATION") {
+				t.Errorf("the refusal %q does not carry this signal's DUPLICATE_REGISTRATION", msg)
+			}
+		}()
+		metrics.RegisterExporter(stubExporter2{name: "exp-keeps-first"})
+	}()
+	got, ok := metrics.LookupExporter("exp-keeps-first")
+	if !ok || got != first {
+		t.Errorf("LookupExporter = %v, %v after a refused conflict; want the first registration", got, ok)
 	}
 }
 

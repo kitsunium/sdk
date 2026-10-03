@@ -35,4 +35,10 @@ var (
 	InvalidSpanName = errs.Define(CodeInvalidSpanName, "INVALID_SPAN_NAME",
 		"A span name must not be empty",
 		"core/trace: Tracer.Start requires a low-cardinality operation name; an empty one produces a trace no backend can group")
+
+	// InvalidAttribute is the panic sentinel for an unusable attribute set on
+	// a span, an event, a link or a Resource.
+	InvalidAttribute = errs.Define(CodeInvalidAttribute, "INVALID_ATTRIBUTE",
+		"An attribute key is empty or repeated, or its value was never set",
+		"core/trace: an attribute set must name each dimension once, with a non-empty key and a value from String/Bool/Int64/Float64")
 )

@@ -16,6 +16,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/internal/logfile"
 )
 
 // defaultFilePerm is the permission bitmask passed to os.OpenFile when the
@@ -25,76 +26,24 @@ import (
 // Operators that need group or other-reader access chmod explicitly.
 const defaultFilePerm os.FileMode = 0o600
 
-// kindSymlink is the value of the "kind" field both symlink refusals carry —
-// the policy one in refuseSymlink and the kernel one behind New's OpenFile.
-// One sentinel serves both (CodeOpenFailed), so the field is what lets a
-// consumer tell "someone put a link at my log path" apart from a full disk, at
-// whichever of the two points caught it.
-const kindSymlink string = "symlink"
-
-// explainOpenFailure wraps a failed open under CodeOpenFailed and adds what an
-// os.Lstat can still say about path.
-//
-// That Lstat is DIAGNOSIS and never the decision. The refusal was already taken
-// one line earlier, by the kernel, so a planter who removes the link between
-// the two calls changes which field this error carries and cannot change
-// whether the open was refused. It is the opposite situation from
-// refuseSymlink, which runs BEFORE the open and is a check the flag exists to
-// back up — the same distinction internal/service/lock draws in
-// classifyOpenFailure (ADR 0082 §D4).
-//
-// The errno is deliberately not consulted. O_NOFOLLOW reports a planted link as
-// ELOOP on linux, openbsd and darwin, EMLINK on freebsd and dragonfly, and
-// EFTYPE on netbsd; a three-value table across six kernels is the shape of
-// thing that is wrong on the seventh, and there is nothing to branch on anyway
-// since both refusals share one sentinel.
-func explainOpenFailure(path string, openErr error) error {
-	fields := []errs.FieldValue{errs.String("path", path)}
-	info, serr := os.Lstat(path)
-	//: an indirection sits there now, so the kernel declining to traverse it
-	//: is the likeliest reading of the failure — say so, without asking which
-	//: errno said it.
-	if serr == nil && info.Mode()&os.ModeSymlink != 0 {
-		//: same sentinel as any other open failure; only the field differs.
-		fields = append(fields, errs.String("kind", kindSymlink))
-	}
-	return errs.Wrap(openErr, errs.WrapParams{
-		Code:    CodeOpenFailed,
-		Reason:  "OPEN_FAILED",
-		Public:  "File sink could not open the destination file",
-		Private: "service/logger/sink/file.New: os.OpenFile returned an error",
-	}, fields...)
-}
-
-// refuseSymlink returns a typed error when path refers to a symbolic link.
-// Pre-opening the file through Lstat lets us reject attacker-planted links
-// (CWE-59) before OpenFile follows them. os.Lstat does NOT traverse the final
-// component, so a link that is already there is caught before OpenFile can
-// follow it — but a check has a window after it, and openFlags is what covers
-// that window: O_NOFOLLOW on every Unix (open_flags_unix.go), nothing at all on
-// the platforms open_flags_other.go serves. Neither covers a symbolic link at a
-// PARENT component; the "do NOT place the log file under an attacker-writable
-// directory" precondition does.
-func refuseSymlink(path string) error {
-	//: Lstat does NOT follow the final component, so a symlink is caught
-	//: before OpenFile can follow it. Absent paths / stat errors fall
-	//: through: OpenFile will surface the real diagnostic uniformly.
-	fi, lerr := os.Lstat(path)
-	//: pass through when stat fails OR the target is a regular file.
-	//: (Go's short-circuit evaluation makes fi.Mode() safe when lerr==nil.)
-	if lerr != nil || fi.Mode()&os.ModeSymlink == 0 {
-		//: happy path — not a symlink, hand control back to OpenFile.
-		return nil
-	}
-	//: path resolved to a symlink → reject by policy, carrying the same
-	//: "kind" field the kernel-refused path carries so a consumer filtering on
-	//: it sees both enforcement points and not just the rarer one.
-	return errs.Wrap(nil, errs.WrapParams{
+// openRefusals is this sink's vocabulary for the hardened open both file sinks
+// share (internal/service/internal/logfile): one sentinel, CodeOpenFailed, for
+// the policy refusal of a planted link and for every failed open — the kernel's
+// refusal of a link planted after the check among them — told apart by the
+// "kind" field the shared open adds.
+var openRefusals = logfile.RefusalSpec{
+	Symlink: errs.WrapParams{
 		Code:    CodeOpenFailed,
 		Reason:  "OPEN_FAILED",
 		Public:  "File sink refuses to open a symlink",
 		Private: "service/logger/sink/file.New: path is a symlink; refusing per hardening policy",
-	}, errs.String("path", path), errs.String("kind", kindSymlink))
+	},
+	Open: errs.WrapParams{
+		Code:    CodeOpenFailed,
+		Reason:  "OPEN_FAILED",
+		Public:  "File sink could not open the destination file",
+		Private: "service/logger/sink/file.New: os.OpenFile returned an error",
+	},
 }
 
 // fileSink wraps *os.File behind a mutex so concurrent goroutines emit
@@ -115,21 +64,15 @@ func New(path string) (sink corelogger.Sink, err error) {
 		//: documented sentinel — caller must supply a path.
 		return nil, PathEmpty
 	}
-	//: reject pre-existing symlinks (CWE-59); O_NOFOLLOW closes the remaining
-	//: TOCTOU window between this check and OpenFile on every Unix.
-	if serr := refuseSymlink(path); serr != nil {
-		//: surface the hardening sentinel so HasCode introspection works.
-		return nil, serr
-	}
-	//: open with O_NOFOLLOW where the platform has it, so a symlink planted
-	//: between the Lstat check and this call fails the open rather than
-	//: silently redirecting the sink to a file someone else chose. openFlags
-	//: is platform-scoped in open_flags_{unix,other}.go.
-	f, oerr := os.OpenFile(path, openFlags, defaultFilePerm)
-	//: surface os errors via errs.Wrap so errors.Is still catches the cause.
+	//: reject a pre-existing symlink (CWE-59), then open with O_NOFOLLOW where
+	//: the platform has it, so a link planted between the check and the open
+	//: fails the open rather than silently redirecting the sink — the hardened
+	//: open both file sinks share, refusing under this sink's OPEN_FAILED.
+	f, oerr := logfile.Open(path, defaultFilePerm, &openRefusals)
+	//: the refusal already carries the code, the path and, for a link, the kind.
 	if oerr != nil {
-		//: wrap with the documented sentinel for HasCode-style introspection.
-		return nil, explainOpenFailure(path, oerr)
+		//: surface the typed refusal for HasCode-style introspection.
+		return nil, oerr
 	}
 	//: defensive close-on-error defer satisfies the lifecycle linter; the
 	//: success path below owns the descriptor through fileSink.Close.

@@ -2,6 +2,8 @@
 // collection time rather than written at observation time.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // ObserveInt64 reports ONE integer measurement, with its own attribute set,
 // from inside an Int64Callback. It is valid only for the duration of that call;
 // retaining it and calling it later observes into a collection that has already
@@ -10,10 +12,10 @@ package metrics
 // It is a FUNC port, not a single-method interface, for the reason ADR 0041
 // gives: a published func type cannot grow a method, so it cannot break a
 // downstream implementer the way widening an interface would (ADR 0039).
-type ObserveInt64 func(value int64, attrs ...AttrValue)
+type ObserveInt64 func(value int64, attrs ...coreotel.AttrValue)
 
 // ObserveFloat64 is ObserveInt64 for a double-valued observable.
-type ObserveFloat64 func(value float64, attrs ...AttrValue)
+type ObserveFloat64 func(value float64, attrs ...coreotel.AttrValue)
 
 // Int64Callback is read ONCE PER COLLECTION and reports the instrument's
 // current ABSOLUTE value — not a delta. That is the OTel contract for an

@@ -6,8 +6,7 @@ import (
 	"sync"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -42,7 +41,7 @@ type span struct {
 	// mu guards everything below it.
 	mu sync.Mutex
 	// attrs accumulate; a repeated Key replaces rather than duplicates.
-	attrs []coremetrics.AttrValue
+	attrs []coreotel.AttrValue
 	// events accumulate in the order they were recorded.
 	events []coretrace.EventValue
 	// status is the recorded outcome.
@@ -54,8 +53,9 @@ type span struct {
 }
 
 // newSpan builds a recording span. It normalises the attributes ONCE here — the
-// same SortAttrs the metrics domain uses, so an unusable attribute set panics at
-// the call site that wrote it rather than at the first export.
+// shared model's SortAttrs (internal/core/otel), refusing under this signal's
+// own InvalidAttribute, so an unusable attribute set panics at the call site
+// that wrote it rather than at the first export.
 func newSpan(tracer *Tracer, context, parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) *span {
 	//: an unset StartTime means "now", which is what all but a replaying
 	//: caller wants (ADR 0031 §clamp).
@@ -74,7 +74,7 @@ func newSpan(tracer *Tracer, context, parent coretrace.SpanContextValue, name st
 		kind:    params.Kind.Resolved(),
 		start:   start,
 		links:   normalizeLinks(params.Links),
-		attrs:   coremetrics.SortAttrs(params.Attrs),
+		attrs:   coretrace.SortAttrs(params.Attrs),
 	}
 }
 
@@ -91,7 +91,7 @@ func (s *span) SpanContext() coretrace.SpanContextValue {
 // that keeps the attribute set a set: two `http.response.status_code` entries on
 // one span are a payload a backend renders arbitrarily, and the arbitrary choice
 // differs between backends.
-func (s *span) SetAttrs(attrs ...coremetrics.AttrValue) {
+func (s *span) SetAttrs(attrs ...coreotel.AttrValue) {
 	//: nothing to record.
 	if len(attrs) == 0 {
 		//: no lock taken for a no-op.
@@ -114,7 +114,7 @@ func (s *span) SetAttrs(attrs ...coremetrics.AttrValue) {
 	//: merge each incoming attribute, replacing on Key.
 	for _, attr := range incoming {
 		//: the set is sorted by Key, so the position is a binary search.
-		at, found := slices.BinarySearchFunc(s.attrs, attr, coremetrics.CompareAttrKey)
+		at, found := slices.BinarySearchFunc(s.attrs, attr, coreotel.CompareAttrKey)
 		//: an existing Key is overwritten in place.
 		if found {
 			//: replace.
@@ -139,28 +139,28 @@ func (s *span) SetAttrs(attrs ...coremetrics.AttrValue) {
 // One attribute is not a corner case: it is what ServerMiddleware does with the
 // response status on every request, and what almost every hand-written
 // `span.SetAttrs(...)` at an instrumentation site does.
-func sortedIncoming(attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
+func sortedIncoming(attrs []coreotel.AttrValue) []coreotel.AttrValue {
 	//: more than one attribute has an order to establish, and establishing it
 	//: means owning the array first.
 	if len(attrs) > 1 {
 		//: clone + sort + validate.
-		return coremetrics.SortAttrs(attrs)
+		return coretrace.SortAttrs(attrs)
 	}
 	//: exactly one — SetAttrs already returned on zero. Validate it with the
 	//: same call SortAttrs would have made, on a set that is trivially sorted.
-	coremetrics.ValidateAttrs(attrs)
+	coretrace.ValidateAttrs(attrs)
 	//: the caller's array, read and never retained.
 	return attrs
 }
 
 // AddEvent implements core/trace.Span, stamping the event with the tracer's
 // clock.
-func (s *span) AddEvent(name string, attrs ...coremetrics.AttrValue) {
+func (s *span) AddEvent(name string, attrs ...coreotel.AttrValue) {
 	//: normalise outside the lock, for the reason SetAttrs does.
 	event := coretrace.EventValue{
 		Time:  s.tracer.cfg.Clock.Now(),
 		Name:  name,
-		Attrs: coremetrics.SortAttrs(attrs),
+		Attrs: coretrace.SortAttrs(attrs),
 	}
 	//: append under the lock.
 	s.mu.Lock()

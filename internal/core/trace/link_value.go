@@ -4,7 +4,7 @@ package trace
 import (
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // LinkValue points at a span that is causally related to this one but is not its
@@ -24,14 +24,14 @@ type LinkValue struct {
 	// dropped rather than emitted — it names nothing.
 	Context SpanContextValue
 	// Attrs describe the relationship, sorted by Key.
-	Attrs []coremetrics.AttrValue
+	Attrs []coreotel.AttrValue
 }
 
 // Normalized returns the link a span actually records: attributes sorted,
 // validated and owned.
 func (l LinkValue) Normalized() LinkValue {
 	//: SortAttrs panics on an unusable set, at the call site that wrote it.
-	return LinkValue{Context: l.Context, Attrs: coremetrics.SortAttrs(l.Attrs)}
+	return LinkValue{Context: l.Context, Attrs: SortAttrs(l.Attrs)}
 }
 
 // IsValid reports whether the link names a joinable span.
@@ -53,7 +53,7 @@ type SpanParams struct {
 	// Attrs are the dimensions known at Start. They are the ONLY ones a
 	// Sampler sees, so anything the sampling decision depends on belongs here
 	// rather than in a later SetAttrs.
-	Attrs []coremetrics.AttrValue
+	Attrs []coreotel.AttrValue
 	// Links point at causally related spans in other traces.
 	Links []LinkValue
 	// StartTime overrides the span's start instant. The zero value means

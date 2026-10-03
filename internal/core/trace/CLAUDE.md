@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # internal/core/trace/
 
 ## Purpose
@@ -16,7 +16,8 @@ of the import graph.
 Concrete implementations — the tracer, the samplers, the recorder, the OTLP/JSON
 encoder, the HTTP middlewares — live in `internal/service/trace`.
 
-Code range: `0.2.20.*` (ADR 0051).
+Code range: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
+attribute model moved to `internal/core/otel`).
 
 ## Contents
 
@@ -38,10 +39,11 @@ Code range: `0.2.20.*` (ADR 0051).
 | `spans_value.go` | `SpansValue` — Resource + Scope + spans, the exportable payload |
 | `sampler.go` | `Sampler` and `SpanSink` — FUNC ports (ADR 0041) |
 | `sampling_params.go` | `SamplingParams` — what a Sampler sees |
-| `scope.go` | `DefaultScopeName` + `NormalizeScope` |
-| `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) |
+| `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
+| `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/otel` and refusing with this package's `InvalidAttribute` |
+| `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/metrics`' exporter registry runs on too |
 | `codes.go` | `Code*` constants — range 0.2.20.* |
-| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` |
+| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute` |
 
 ## The one rule everything else follows from
 
@@ -62,18 +64,21 @@ was dropped becomes an orphan the backend renders as its own root, so one reques
 appears as several unrelated ones and the latency of the whole is unrecoverable —
 and nothing looks wrong at the process that caused it.
 
-## Why the attribute model is `core/metrics`' — Do NOT twin it
+## Why the attribute model is `core/otel`'s — Do NOT twin it
 
 This package declares **no** attribute, Resource or Scope type: every model
-value holds `core/metrics`' `AttrValue`, `ResourceValue` and `ScopeValue`
-directly, and `pkg/v1/trace` aliases those same types, so `pkg/v1/trace.Attr`
-and `pkg/v1/metrics.Attr` are one type.
+value holds `internal/core/otel`'s `AttrValue`, `ResourceValue` and `ScopeValue`
+directly, and `pkg/v1/trace` aliases those same types — as does `pkg/v1/metrics`
+— so `pkg/v1/trace.Attr` and `pkg/v1/metrics.Attr` are one type.
 
-They are not metrics concepts. `AttrValue` is `common/v1.KeyValue`/`AnyValue`,
-`ResourceValue` is `resource/v1.Resource`, `ScopeValue` is
-`common/v1.InstrumentationScope` — all three live in the SHARED protos precisely
-because every signal uses them. They sit in `core/metrics` only because metrics
-was the first signal this SDK implemented.
+They are not metrics concepts and never were. `AttrValue` is
+`common/v1.KeyValue`/`AnyValue`, `ResourceValue` is `resource/v1.Resource`,
+`ScopeValue` is `common/v1.InstrumentationScope` — all three live in the SHARED
+protos precisely because every signal uses them. They sat in `core/metrics`
+until the extraction ADR 0051 §Decision 2 named and deferred; both signals now
+sit above `core/otel`, and this package no longer imports `core/metrics` at all.
+That also took the metrics port out of `pkg/v1/logger`'s import graph, which
+reaches this package for trace correlation (ADR 0062).
 
 A twin costs three things, and none of them is hypothetical:
 
@@ -85,14 +90,19 @@ A twin costs three things, and none of them is hypothetical:
    a trace id to a metric data point. One model makes that a field; two make it a
    conversion at the boundary the feature exists to cross.
 
-`DefaultScopeName` is the exception and it is NOT shared: a scope names the
-library that produced THIS signal, so a span batch stamped `…/pkg/v1/metrics`
-would be a lie. `NormalizeScope` is this package's own, guarded by
-`TestScopeDefaultNamesTheTracePackage`.
+What is NOT shared, and has a test each:
 
-The extraction that would make the graph read forwards — a shared
-`internal/core/otel` under both — is recorded in ADR 0051 §Decision 2 with the
-reason it is not done yet. Do not do it piecemeal.
+- **`DefaultScopeName`.** A scope names the library that produced THIS signal,
+  so a span batch stamped `…/pkg/v1/metrics` would be a lie. `core/otel`'s
+  `NormalizeScope` takes the default as a parameter; this package's passes its
+  own (`TestScopeDefaultNamesTheTracePackage`).
+- **The refusal.** An unusable attribute set panics with THIS package's
+  `InvalidAttribute`, `0.2.20.7` (`TestAnUnusableAttributeIsRefusedUnderTheTraceCode`).
+  It used to panic with the metrics code, `0.2.9.4`, because the refusal
+  travelled with the type; `core/otel` owns no code, so each signal names the
+  defect itself. Every panic site is a programmer error at the call site — an
+  empty or repeated key, a value no constructor set — so only the code in the
+  message changed, and no constant changed value.
 
 ## W3C Trace Context — the refusals that look arbitrary
 
@@ -167,6 +177,7 @@ enforced in `Insert` instead. Documented in place and in
 | `TestParseTraceParentIsForwardCompatible` | §3.2.4, including the undashed-tail case |
 | `TestFormatTraceParentMasksUndefinedFlagBits` | mask on output, keep on input |
 | `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
-| `TestAttributesAreTheSameTypeAsMetrics` | one attribute type across every model value, as a compile and value fact |
+| `TestAttributesAreTheSameTypeAsMetrics` | one attribute type across every model value of BOTH signals, as a compile and value fact |
+| `TestAnUnusableAttributeIsRefusedUnderTheTraceCode` | every attribute refusal here carries `0.2.20.7`, never the metrics code |
 | `TestScopeDefaultNamesTheTracePackage` | the one thing that is NOT shared |
 | `TestHTTPHeaderIsACarrierWithNoAdapter` | the ADR 0039 freeze on `Carrier` |

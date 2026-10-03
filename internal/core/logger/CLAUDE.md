@@ -41,7 +41,7 @@ Sub-package: `level/` — severity constants (`Debug`/`Info`/`Warn`/`Error`); se
 - Add concrete types with runtime behaviour here. Even a default `nopHandler` belongs in `internal/service/logger`.
 - Add a `Builder` chainable here. The chainable record builder is a `pkg/v1/logger` ergonomic helper — keeping it out of core lets handlers stay generic.
 - Grow `RecordEvent` with sink-specific metadata (CloudWatch tags, syslog facility); sinks read what they need from the record + ctx directly. `TraceContext` is NOT an exception being carved out: it is not sink-specific, every formatter needs it, and the `Encoder` port has no other way to receive it (ADR 0062).
-- Import `internal/core/trace` from here. The trace domain's model — and `core/metrics` behind it — would then sit in front of every consumer who wants a line on stderr. The bridge is `pkg/v1/logger/tracecontext.go`, and it is the only place the two domains meet.
+- Import `internal/core/trace` from here. The trace domain's model — and the shared `core/otel` model behind it — would then sit in front of every consumer who wants a line on stderr. The bridge is `pkg/v1/logger/tracecontext.go`, and it is the only place the two domains meet.
 - Expose a `Value.UnmarshalAny` reflection helper — `Value` is a write-once payload and the typed accessors are the contract.
 
 ## Verification

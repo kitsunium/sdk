@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # internal/service/logger/sink/file/
 
 ## Purpose
@@ -11,34 +11,39 @@ POSIX. Rotation is out of scope here. The `file` writer
 (`internal/service/writer/file`) wraps this sink and never rotates; the
 `rotfile` writer (`internal/service/writer/rotfile`, ADR 0014, opt-in per
 ADR 0015) is a separate sink that owns its descriptor — a rotation closes,
-renames and reopens the path, which an append-only sink cannot — and carries
-its own copy of this hardening, re-run on every reopen.
+renames and reopens the path, which an append-only sink cannot — and re-runs
+the SAME hardening on every reopen: both sinks open through
+`internal/service/internal/logfile`, which they used to carry a copy of each.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `file.go`                  | `fileSink` + `New` + `Write` / `Flush` (`fsync`) / `Close` + `refuseSymlink` + `explainOpenFailure` |
-| `open_flags_unix.go`       | `openFlags = O_APPEND \| O_CREATE \| O_WRONLY \| O_NOFOLLOW` — every `unix` GOOS |
-| `open_flags_other.go`      | `!unix` fallback (no `O_NOFOLLOW`): windows, plan9, js/wasm, wasip1 |
+| `file.go`                  | `fileSink` + `New` + `Write` / `Flush` (`fsync`) / `Close` + `openRefusals`, this sink's `logfile.RefusalSpec` for the shared hardened open |
 | `codes.go`, `errors.go`    | sentinels — range 0.3.14.\* |
+
+The hardened open itself — `refuseSymlink`, `explainOpenFailure`, `openFlags`
+and the `open_flags_{unix,other}.go` split — is `internal/service/internal/logfile`
+(`RefuseSymlink`, `ExplainOpenFailure`, `Open`), shared with `rotfile`. This
+package hands it `openRefusals`, so both refusals still carry `OPEN_FAILED`
+(`0.3.14.2`) and this package's wording, byte for byte.
 
 ## Security hardening
 
-- **Symlink rejection (CWE-59), in two halves.** `refuseSymlink` calls
-  `os.Lstat` before `os.OpenFile` and refuses paths whose final component
-  is a symlink. A check has a window after it, and `O_NOFOLLOW` in
-  `openFlags` is what makes the *kernel* refuse inside that window — so
-  the two are not redundant. `O_NOFOLLOW` governs the **final component
+- **Symlink rejection (CWE-59), in two halves**, both in the shared
+  `logfile.Open`. `RefuseSymlink` calls `os.Lstat` before `os.OpenFile` and
+  refuses paths whose final component is a symlink. A check has a window
+  after it, and `O_NOFOLLOW` in the shared `openFlags` is what makes the
+  *kernel* refuse inside that window — so the two are not redundant. `O_NOFOLLOW` governs the **final component
   only**: a symbolic link at a PARENT component is still traversed, which
   is what the "do NOT place the log file under an attacker-writable
   directory" pre-condition below covers.
 - **Both refusals carry `kind=symlink`.** One sentinel (`OpenFailed`)
   answers every open failure here, so a full disk and someone redirecting
   the log path would otherwise produce the same line. The field is added
-  by `refuseSymlink` (policy, before the open) and by `explainOpenFailure`
+  by `RefuseSymlink` (policy, before the open) and by `ExplainOpenFailure`
   (diagnosis, *after* the kernel already refused). The `os.Lstat` in
-  `explainOpenFailure` is never the decision — a planter who removes the
+  `ExplainOpenFailure` is never the decision — a planter who removes the
   link between the open and that stat changes a field and cannot change
   the refusal. The errno is deliberately not consulted: `ELOOP` on linux /
   openbsd / darwin, `EMLINK` on freebsd / dragonfly, `EFTYPE` on netbsd
@@ -58,7 +63,7 @@ its own copy of this hardening, re-run on every reopen.
 ### Which platform gets which protection
 
 Protection is **not uniform**, and this table says where it is not. `Lstat`
-is `refuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
+is `RefuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
 
 | Platform | `syscall.O_NOFOLLOW` in go1.27.1 | Protection at the open |
 |---|---|---|
@@ -76,7 +81,8 @@ by `unix` and every one of them compiles the constant; the remaining 8 are
 `wasip1/wasm` — the second and third rows above.
 
 Of the `unix` GOOS, seven are **executed** on a real kernel by the
-`e2e-cross` lane (`SERVICE_FILE_PKGS` carries `./logger/sink/file`):
+`e2e-cross` lane (`SERVICE_FILE_PKGS` carries `./logger/sink/file` and the
+shared `./internal/logfile`, whose suite holds the O_NOFOLLOW proof):
 linux, darwin, freebsd, openbsd, netbsd, illumos and solaris (ADR 0144).
 DragonFly, aix, android and ios get the flag by build tag and by
 cross-compile, never by execution — they are covered, not proven, and this sentence is the
@@ -118,14 +124,14 @@ Use `t.TempDir()` for paths and `t.Cleanup(func(){ sink.Close() })` so the
 descriptor releases deterministically even on test failure.
 
 `TestNew_RejectsSymlink` plants a link and then calls `New`, so
-`refuseSymlink` answers first and the flag word is never asked anything —
-that case passes identically with and without `O_NOFOLLOW`.
-`open_flags_unix_internal_test.go` (`//go:build unix`) is what asks the
-flag word directly: it opens with exactly `openFlags` and `defaultFilePerm`
-against a path that IS a link, with a live row and a dangling row, asserts
-no descriptor and an untouched target, and **never inspects the errno**. A
-row that cannot be planted is not a passing row — the parent counts the
-rows planted and fails on zero.
+`RefuseSymlink` answers first and the flag word is never asked anything —
+that case passes identically with and without `O_NOFOLLOW`. The proof that
+asks the flag word directly — a live and a dangling link, no descriptor, an
+untouched target, the errno never inspected — moved with the flag word to
+`internal/service/internal/logfile/open_flags_unix_internal_test.go`, the one
+copy both sinks used to carry. `TestBothSymlinkRefusalsNameTheIndirection`
+stays here: it pins that the two refusals, handed THIS package's
+`openRefusals`, carry `OPEN_FAILED` and agree on `kind=symlink`.
 
 ## Do NOT
 

@@ -1,6 +1,8 @@
 // Package metrics — the OTLP payload tree: a Go mirror of
-// opentelemetry/proto/{collector/metrics,metrics,common,resource}/v1, restricted
-// to the fields this SDK produces.
+// opentelemetry/proto/{collector/metrics,metrics}/v1, restricted to the fields
+// this SDK produces. The common/v1 and resource/v1 messages it embeds —
+// KeyValue, AnyValue, Resource, InstrumentationScope — and the proto3-JSON
+// scalars are the ones both signals share, in internal/service/internal/otlp.
 //
 // Field ORDER inside each struct is the schema's FIELD-NUMBER order, not a
 // reading order: encoding/json emits struct fields as declared, and deriving
@@ -16,6 +18,8 @@
 // and is omitted only when the metric carries none — see otlpMetric.
 package metrics
 
+import "github.com/kitsunium/sdk/internal/service/internal/otlp"
+
 // otlpRequest is ExportMetricsServiceRequest — the body of a POST to
 // /v1/metrics. Exactly one resourceMetrics entry, because one Meter has exactly
 // one Resource.
@@ -28,30 +32,15 @@ type otlpRequest struct {
 // optional, nothing here produces one, and an always-empty field is a
 // placeholder.
 type otlpResourceMetrics struct {
-	Resource     otlpResource       `json:"resource"`
-	ScopeMetrics []otlpScopeMetrics `json:"scopeMetrics"`
-}
-
-// otlpResource is Resource: attributes (1). droppedAttributesCount (2) is
-// absent because this SDK drops no resource attribute — it folds excess SERIES,
-// which is a different thing and shows up as its own data point.
-type otlpResource struct {
-	Attributes []otlpKeyValue `json:"attributes,omitempty"`
+	Resource     otlp.ResourceMessage `json:"resource"`
+	ScopeMetrics []otlpScopeMetrics   `json:"scopeMetrics"`
 }
 
 // otlpScopeMetrics is ScopeMetrics: scope (1) + metrics (2), with the same
 // schemaUrl omission as otlpResourceMetrics.
 type otlpScopeMetrics struct {
-	Scope   otlpScope    `json:"scope"`
-	Metrics []otlpMetric `json:"metrics,omitempty"`
-}
-
-// otlpScope is InstrumentationScope: name (1) + version (2). A Meter normalises
-// Name, so it is always present; Version is optional in the specification and
-// omitted when the caller has none rather than emitted blank.
-type otlpScope struct {
-	Name    string `json:"name,omitempty"`
-	Version string `json:"version,omitempty"`
+	Scope   otlp.ScopeMessage `json:"scope"`
+	Metrics []otlpMetric      `json:"metrics,omitempty"`
 }
 
 // otlpMetric is Metric: name (1) + description (2), plus the data oneof —
@@ -118,11 +107,11 @@ type otlpHistogram struct {
 // (ADR 0044 §Deferred — no tracing domain, so no span id to carry) and sets no
 // data-point flag.
 type otlpNumberDataPoint struct {
-	StartTimeUnixNano otlpUint64     `json:"startTimeUnixNano"`
-	TimeUnixNano      otlpUint64     `json:"timeUnixNano"`
-	AsDouble          *otlpDouble    `json:"asDouble,omitempty"`
-	AsInt             *otlpInt64     `json:"asInt,omitempty"`
-	Attributes        []otlpKeyValue `json:"attributes,omitempty"`
+	StartTimeUnixNano otlp.Uint64     `json:"startTimeUnixNano"`
+	TimeUnixNano      otlp.Uint64     `json:"timeUnixNano"`
+	AsDouble          *otlp.Double    `json:"asDouble,omitempty"`
+	AsInt             *otlp.Int64     `json:"asInt,omitempty"`
+	Attributes        []otlp.KeyValue `json:"attributes,omitempty"`
 }
 
 // otlpHistogramDataPoint is HistogramDataPoint, again in field-number order:
@@ -139,34 +128,11 @@ type otlpNumberDataPoint struct {
 // optional. exemplars (8) and flags (10) are absent for the reasons
 // otlpNumberDataPoint gives.
 type otlpHistogramDataPoint struct {
-	StartTimeUnixNano otlpUint64     `json:"startTimeUnixNano"`
-	TimeUnixNano      otlpUint64     `json:"timeUnixNano"`
-	Count             otlpUint64     `json:"count"`
-	Sum               *otlpDouble    `json:"sum"`
-	BucketCounts      []otlpUint64   `json:"bucketCounts,omitempty"`
-	ExplicitBounds    []otlpDouble   `json:"explicitBounds,omitempty"`
-	Attributes        []otlpKeyValue `json:"attributes,omitempty"`
-}
-
-// otlpKeyValue is common.v1.KeyValue: key (1) + value (2). One attribute of a
-// resource, a scope or a data point.
-type otlpKeyValue struct {
-	Key   string       `json:"key"`
-	Value otlpAnyValue `json:"value"`
-}
-
-// otlpAnyValue is common.v1.AnyValue, restricted to the four SCALAR cases this
-// SDK's attribute model has: stringValue (1), boolValue (2), intValue (3),
-// doubleValue (4).
-//
-// arrayValue (5), kvlistValue (6) and bytesValue (7) are absent because
-// AttrValue has no corresponding kind — homogeneous array attributes are
-// deferred with a measured reason (ADR 0044 §Decision 2). Exactly one pointer
-// is non-nil, and it is emitted even at its zero value, because a oneof member
-// has explicit presence.
-type otlpAnyValue struct {
-	StringValue *string     `json:"stringValue,omitempty"`
-	BoolValue   *bool       `json:"boolValue,omitempty"`
-	IntValue    *otlpInt64  `json:"intValue,omitempty"`
-	DoubleValue *otlpDouble `json:"doubleValue,omitempty"`
+	StartTimeUnixNano otlp.Uint64     `json:"startTimeUnixNano"`
+	TimeUnixNano      otlp.Uint64     `json:"timeUnixNano"`
+	Count             otlp.Uint64     `json:"count"`
+	Sum               *otlp.Double    `json:"sum"`
+	BucketCounts      []otlp.Uint64   `json:"bucketCounts,omitempty"`
+	ExplicitBounds    []otlp.Double   `json:"explicitBounds,omitempty"`
+	Attributes        []otlp.KeyValue `json:"attributes,omitempty"`
 }

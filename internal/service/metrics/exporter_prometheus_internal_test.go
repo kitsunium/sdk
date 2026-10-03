@@ -7,7 +7,7 @@ import (
 	"os"
 	"testing"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // TestValidMetricName pins the metric-name grammar of the exposition format,
@@ -204,7 +204,7 @@ func TestAppendEscapedValueCoversTheFormat(t *testing.T) {
 // perfectly representable.
 func TestCheckLabelNamesReservesLeOnlyForHistograms(t *testing.T) {
 	t.Parallel()
-	labels := []coremetrics.AttrValue{attr(boundLabelKey, "1")}
+	labels := []coreotel.AttrValue{attr(boundLabelKey, "1")}
 
 	if err := checkAttrNames(labels, false); err != nil {
 		t.Errorf("checkAttrNames(le, non-histogram) = %v, want nil", err)

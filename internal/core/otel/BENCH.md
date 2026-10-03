@@ -1,10 +1,14 @@
-<!-- generated from internal/core/metrics/attr_bench_test.go — run `cd internal/core && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./metrics/` to refresh -->
-# Benchmarks — `internal/core/metrics`
+<!-- generated from internal/core/otel/attr_bench_test.go — run `cd internal/core && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./otel/` to refresh -->
+# Benchmarks — `internal/core/otel`
 
-ADR 0044 makes two claims that live in this package rather than in the meter
-above it: that an attribute's **kind** is part of a series' identity, and that
-the attributed hot path allocates **nothing**. `internal/service/metrics` had
-benchmarks; the layer that makes the claims did not. These are them.
+ADR 0044 makes two claims that live in the attribute model rather than in the
+meter above it: that an attribute's **kind** is part of a series' identity, and
+that the attributed hot path allocates **nothing**. `internal/service/metrics`
+had benchmarks; the layer that makes the claims did not. These are them.
+
+They were written in `internal/core/metrics`, where the model lived until it
+moved here, under both signals (ADR 0051 §Decision 2). The tables below were
+measured there and are kept as measured; §The move re-runs the set here.
 
 ## The headline: every hot-path function allocates zero
 
@@ -109,6 +113,54 @@ contended machine's GC can move, and the run above shared the host with several
 other jobs. The cost of a description is measured where it is actually paid —
 one map read per instrument NAME per collection, in
 `internal/service/metrics/BENCH.md` §ADR 0067.
+
+## The move to `internal/core/otel` — nothing measurable moved
+
+The functions moved verbatim, with one change on the two that can refuse:
+`ValidateAttrs` and `SortAttrs` now take the CALLER'S sentinel as a second
+argument (`*errs.Error`, one pointer, read only to panic). The meter calls them
+through `core/metrics.ValidateAttrs`, a one-line wrapper the compiler inlines.
+
+Re-run on 2026-10-03, darwin/arm64 (Apple M1 Pro, 10 cores), go1.27.1, on a box
+shared with several concurrent builds — three interleaved runs of the base
+(`internal/core/metrics` at `390aa80f`) and of this package, same command,
+`-benchtime=1s`:
+
+| | base (3 runs), ns/op | here (3 runs), ns/op | B/op | allocs/op |
+|---|---|---|---:|---:|
+| `ValidateAttrs` (4-attribute set) | 6.81 / 11.59 / 15.51 | 7.06 / 9.74 / 10.09 | 0 → 0 | **0 → 0** |
+| `SortAttrs` (4-attribute set) | 417.2 / 211.6 / 406.3 | 138.9 / 133.3 / 149.4 | 192 → 192 | 1 → 1 |
+| `AppendIdentity` (4-attribute set) | 22.05 / 44.23 / 22.85 | 48.84 / 24.67 / 51.81 | 0 → 0 | **0 → 0** |
+| `String` | 4.46 / 3.89 / 3.35 | 11.65 / 7.45 / 7.16 | 0 → 0 | **0 → 0** |
+
+The allocation columns are the invariant and they did not move. The
+nanoseconds swing 2–3× between consecutive runs of the SAME binary here, in
+both directions, which is the box and not the code: `SortAttrs` is the only
+allocating function, so it is the one a contended GC moves most, and `String`
+is the constructor whose cost §One measured oddity already records as
+unexplained by alignment, write barriers or inlining. A full run of the moved
+set, same box, same day:
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/kitsunium/sdk/internal/core/otel
+cpu: Apple M1 Pro
+BenchmarkString-10                            	395396594	         4.288 ns/op	       0 B/op	       0 allocs/op
+BenchmarkBool-10                              	383333224	         3.043 ns/op	       0 B/op	       0 allocs/op
+BenchmarkInt64-10                             	514334484	         3.216 ns/op	       0 B/op	       0 allocs/op
+BenchmarkFloat64-10                           	358691359	         7.827 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppendIdentity_String-10             	100000000	        17.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppendIdentity_Int64-10              	420098686	         4.603 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppendIdentity_Set4-10               	62215654	        20.75 ns/op	       0 B/op	       0 allocs/op
+BenchmarkAppendText-10                        	396981780	         3.135 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompareAttrValue_SameKind-10         	301951359	         4.655 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompareAttrValue_DifferentKind-10    	423749199	         3.300 ns/op	       0 B/op	       0 allocs/op
+BenchmarkValidateAttrs_Set4-10                	100000000	        18.46 ns/op	       0 B/op	       0 allocs/op
+BenchmarkSortAttrs_Set4-10                    	 1369945	       737.7 ns/op	     192 B/op	       1 allocs/op
+PASS
+ok  	github.com/kitsunium/sdk/internal/core/otel	19.674s
+```
 
 ## Reproducibility envelope
 

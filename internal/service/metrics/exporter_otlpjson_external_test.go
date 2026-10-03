@@ -18,6 +18,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
@@ -91,11 +92,11 @@ var (
 // each monotonicity), a gauge and a delta histogram.
 func otlpFullSnapshot() coremetrics.SnapshotValue {
 	return coremetrics.SnapshotValue{
-		Resource: coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
-			coremetrics.String("deployment.environment", "prod"),
-			coremetrics.String(coremetrics.ServiceNameKey, "orders"),
+		Resource: coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+			coreotel.String("deployment.environment", "prod"),
+			coreotel.String(coreotel.ServiceNameKey, "orders"),
 		}},
-		Scope:     coremetrics.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"},
+		Scope:     coreotel.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"},
 		StartTime: otlpStart,
 		Time:      otlpEnd,
 		Sums: map[string]coremetrics.SumMetricValue{
@@ -103,9 +104,9 @@ func otlpFullSnapshot() coremetrics.SnapshotValue {
 				Temporality: coremetrics.TemporalityCumulative,
 				Monotonic:   true,
 				Points: []coremetrics.SumValue{{
-					Attrs: []coremetrics.AttrValue{
-						coremetrics.String("http.request.method", "GET"),
-						coremetrics.Int64("http.response.status_code", 503),
+					Attrs: []coreotel.AttrValue{
+						coreotel.String("http.request.method", "GET"),
+						coreotel.Int64("http.response.status_code", 503),
 					},
 					Value: 4200,
 				}},
@@ -118,7 +119,7 @@ func otlpFullSnapshot() coremetrics.SnapshotValue {
 		},
 		Gauges: map[string]coremetrics.GaugeMetricValue{
 			"process.cpu.utilization": {Points: []coremetrics.GaugeValue{{
-				Attrs: []coremetrics.AttrValue{coremetrics.Bool("cache.hit", false)},
+				Attrs: []coreotel.AttrValue{coreotel.Bool("cache.hit", false)},
 				Value: 0.25,
 			}}},
 		},
@@ -179,19 +180,19 @@ func TestEncodeOTLPJSONSpellsEveryAttributeKind(t *testing.T) {
 	t.Parallel()
 	tests := []struct {
 		name string
-		attr coremetrics.AttrValue
+		attr coreotel.AttrValue
 		want string
 	}{
-		{"string", coremetrics.String("k", "v"), `{"key":"k","value":{"stringValue":"v"}}`},
-		{"bool true", coremetrics.Bool("k", true), `{"key":"k","value":{"boolValue":true}}`},
-		{"bool false", coremetrics.Bool("k", false), `{"key":"k","value":{"boolValue":false}}`},
-		{"int64", coremetrics.Int64("k", -9007199254740993), `{"key":"k","value":{"intValue":"-9007199254740993"}}`},
-		{"float64", coremetrics.Float64("k", 2.5), `{"key":"k","value":{"doubleValue":2.5}}`},
+		{"string", coreotel.String("k", "v"), `{"key":"k","value":{"stringValue":"v"}}`},
+		{"bool true", coreotel.Bool("k", true), `{"key":"k","value":{"boolValue":true}}`},
+		{"bool false", coreotel.Bool("k", false), `{"key":"k","value":{"boolValue":false}}`},
+		{"int64", coreotel.Int64("k", -9007199254740993), `{"key":"k","value":{"intValue":"-9007199254740993"}}`},
+		{"float64", coreotel.Float64("k", 2.5), `{"key":"k","value":{"doubleValue":2.5}}`},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			t.Parallel()
-			doc := mustEncode(t, gaugeSnapshot([]coremetrics.AttrValue{test.attr}, 1))
+			doc := mustEncode(t, gaugeSnapshot([]coreotel.AttrValue{test.attr}, 1))
 			if !strings.Contains(doc, test.want) {
 				t.Errorf("attribute rendering missing\n got: %s\nwant substring: %s", doc, test.want)
 			}
@@ -382,7 +383,7 @@ func TestEncodeOTLPJSONMapsAnUnsetWindowToZero(t *testing.T) {
 func TestEncodeOTLPJSONDoesNotEscapeHTML(t *testing.T) {
 	t.Parallel()
 	raw := "https://example.test/search?q=a&lang=<go>"
-	doc := mustEncode(t, gaugeSnapshot([]coremetrics.AttrValue{coremetrics.String("url.full", raw)}, 1))
+	doc := mustEncode(t, gaugeSnapshot([]coreotel.AttrValue{coreotel.String("url.full", raw)}, 1))
 	if !strings.Contains(doc, raw) {
 		t.Errorf("URL attribute was escaped: %s", doc)
 	}
@@ -405,7 +406,7 @@ func TestEncodeOTLPJSONOmitsTheDimensionlessAttributeArray(t *testing.T) {
 func TestEncodeOTLPJSONOmitsAnAbsentScopeVersion(t *testing.T) {
 	t.Parallel()
 	snap := gaugeSnapshot(nil, 1)
-	snap.Scope = coremetrics.ScopeValue{Name: "lib"}
+	snap.Scope = coreotel.ScopeValue{Name: "lib"}
 	doc := mustEncode(t, snap)
 	if !strings.Contains(doc, `"scope":{"name":"lib"}`) {
 		t.Errorf("scope rendering wrong: %s", doc)
@@ -485,7 +486,7 @@ func TestOTLPJSONIsRegisteredOnStderr(t *testing.T) {
 // gaugeSnapshot is the smallest snapshot that carries one attributed gauge
 // point: no temporality to resolve and no bucket ladder to validate, so it
 // isolates whatever the caller is actually asserting on.
-func gaugeSnapshot(attrs []coremetrics.AttrValue, value float64) coremetrics.SnapshotValue {
+func gaugeSnapshot(attrs []coreotel.AttrValue, value float64) coremetrics.SnapshotValue {
 	return coremetrics.SnapshotValue{
 		StartTime: otlpStart,
 		Time:      otlpEnd,

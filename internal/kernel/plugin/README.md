@@ -27,4 +27,10 @@ and cannot serve one call:
 The reason is a fragment meant to follow a colon in the caller's message, so
 each registry keeps its own dotted-quad code and reason.
 
+`Registry[K, V]` is where the entry then goes: a name-keyed, copy-on-write
+table (`Publish` / `Lookup` / `Names`) that readers load without a lock. A
+`Publish` of the identical value is an idempotent no-op, a different value
+under a taken name is REPORTED as a conflict — never turned into an error — and
+the registrar refuses it with its own code, as it does `Unusable`'s answer.
+
 ADR 0071. See `CLAUDE.md` for why it returns a string rather than an error.

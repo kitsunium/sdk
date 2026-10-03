@@ -33,10 +33,10 @@ visible aggregated overflow series.
 | `UpDownMeter` / `AsyncMeter` / `FullMeter` | the two INSTRUMENT sibling ports and their union — what `NewMeter` returns |
 | `Describer` | the third sibling: `Describe(name, description string)`. Deliberately NOT in `FullMeter` — reach it by type assertion, and read the false case as "this meter records no description" |
 | `Counter` / `UpDownCounter` / `Gauge` / `Histogram` | instrument aliases; every accessor is variadic in `Attr` |
-| `Attr` (= `AttrValue`) / `AttrKind` + `AttrKind*` | one TYPED dimension of a series |
+| `Attr` (= `internal/core/otel.AttrValue`) / `AttrKind` + `AttrKind*` | one TYPED dimension of a series — the same type `pkg/v1/trace.Attr` is |
 | `String` / `Bool` / `Int64` / `Float64` | the only ways to build a usable `Attr` |
 | `Temporality` + `Temporality*` | delta or cumulative, carried by the metric |
-| `Resource` / `Scope` + `ServiceNameKey` / `UnknownService` / `DefaultScopeName` | who produced the payload, and what instrumented it |
+| `Resource` / `Scope` + `ServiceNameKey` / `UnknownService` / `DefaultScopeName` | who produced the payload, and what instrumented it. The two types alias `internal/core/otel`'s, shared with `pkg/v1/trace`; neither carries a `Normalized()` method any more (a v0 shape change, ADR 0040) — the meter normalises them with this signal's code and default |
 | `Snapshot` (= `SnapshotValue`) | `{Resource, Scope, StartTime, Time, Sums/Gauges/Histograms map[name]…Metric}` — see below |
 | `SumMetric` / `GaugeMetric` / `HistogramMetric` | the per-name envelopes — each carries `Description`, `""` when nobody wrote one |
 | `SumPoint` / `GaugePoint` / `HistogramPoint` | the per-series points |

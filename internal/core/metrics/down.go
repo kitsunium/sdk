@@ -1,6 +1,8 @@
 // Package metrics — the sibling port that mints the non-monotonic sum.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // UpDownMeter mints the non-monotonic sum Meter cannot — the instrument for a
 // total that goes down as well as up.
 //
@@ -8,7 +10,7 @@ package metrics
 // is published through a `pkg/v1` type alias, Go interfaces are structural, and
 // widening one breaks every downstream implementer at compile time.
 type UpDownMeter interface {
-	UpDownCounter(name string, attrs ...AttrValue) UpDownCounter
+	UpDownCounter(name string, attrs ...coreotel.AttrValue) UpDownCounter
 }
 
 // UpDownCounter is a NON-MONOTONIC sum: a running total that may go down as

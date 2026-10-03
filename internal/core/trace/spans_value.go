@@ -1,7 +1,7 @@
 // Package trace — SpansValue: the exportable payload.
 package trace
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
 
 // SpansValue is a batch of finished spans plus the two facts that describe all
 // of them at once — the OTLP payload hierarchy flattened into one Go value.
@@ -24,10 +24,10 @@ import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 // a span would overwrite the only timestamps a trace has.
 type SpansValue struct {
 	// Resource identifies the producer, carried once for the whole payload.
-	Resource coremetrics.ResourceValue
+	Resource coreotel.ResourceValue
 	// Scope identifies the instrumentation, carried once for the whole
 	// payload.
-	Scope coremetrics.ScopeValue
+	Scope coreotel.ScopeValue
 	// Spans are the finished spans, in the order they ended. That order is
 	// stable and is what makes an exporter's output diffable; it is NOT
 	// causal — a parent ends after its children.

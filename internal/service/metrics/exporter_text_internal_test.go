@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // Test_newTextExporter pins the shared constructor: the writer it is handed is
@@ -91,7 +92,7 @@ func Test_appendSeriesLine(t *testing.T) {
 		name   string
 		buf    []byte
 		metric string
-		attrs  []coremetrics.AttrValue
+		attrs  []coreotel.AttrValue
 		value  string
 		want   string
 	}
@@ -113,48 +114,48 @@ func Test_appendSeriesLine(t *testing.T) {
 		{name: "an empty name", metric: "", value: "1", want: " 1\n"},
 		{
 			name: "one attribute", metric: "requests",
-			attrs: []coremetrics.AttrValue{coremetrics.String("method", "GET")},
+			attrs: []coreotel.AttrValue{coreotel.String("method", "GET")},
 			value: "7", want: "requests{method=\"GET\"} 7\n",
 		},
 		{
 			name:   "several attributes keep the snapshot's order",
 			metric: "requests",
-			attrs: []coremetrics.AttrValue{
-				coremetrics.String("method", "GET"),
-				coremetrics.String("status", "200"),
+			attrs: []coreotel.AttrValue{
+				coreotel.String("method", "GET"),
+				coreotel.String("status", "200"),
 			},
 			value: "7", want: "requests{method=\"GET\",status=\"200\"} 7\n",
 		},
 		{
 			//: an empty VALUE is legitimate data and renders as empty quotes.
 			name: "an empty string value", metric: "g",
-			attrs: []coremetrics.AttrValue{coremetrics.String("tenant", "")},
+			attrs: []coreotel.AttrValue{coreotel.String("tenant", "")},
 			value: "1", want: "g{tenant=\"\"} 1\n",
 		},
 		{
 			//: the three non-string kinds render unquoted, which is how the
 			//: diagnostic keeps the type visible.
 			name: "an integer attribute is bare", metric: "requests",
-			attrs: []coremetrics.AttrValue{coremetrics.Int64("status", 503)},
+			attrs: []coreotel.AttrValue{coreotel.Int64("status", 503)},
 			value: "1", want: "requests{status=503} 1\n",
 		},
 		{
 			name: "a boolean attribute is bare", metric: "requests",
-			attrs: []coremetrics.AttrValue{coremetrics.Bool("cached", true)},
+			attrs: []coreotel.AttrValue{coreotel.Bool("cached", true)},
 			value: "1", want: "requests{cached=true} 1\n",
 		},
 		{
 			name: "a double attribute is bare", metric: "requests",
-			attrs: []coremetrics.AttrValue{coremetrics.Float64("ratio", 0.5)},
+			attrs: []coreotel.AttrValue{coreotel.Float64("ratio", 0.5)},
 			value: "1", want: "requests{ratio=0.5} 1\n",
 		},
 		{
 			//: the pair the wire would merge stays two distinguishable
 			//: renderings here — quoted "1" against bare 1.
 			name: "a string and an integer that spell the same", metric: "requests",
-			attrs: []coremetrics.AttrValue{
-				coremetrics.Int64("n", 1),
-				coremetrics.String("s", "1"),
+			attrs: []coreotel.AttrValue{
+				coreotel.Int64("n", 1),
+				coreotel.String("s", "1"),
 			},
 			value: "1", want: "requests{n=1,s=\"1\"} 1\n",
 		},
@@ -162,7 +163,7 @@ func Test_appendSeriesLine(t *testing.T) {
 			//: a key is escaped like a value: unescaped, this one forged a
 			//: second line that read as a series of its own.
 			name: "a key carrying a newline stays on its line", metric: "requests",
-			attrs: []coremetrics.AttrValue{coremetrics.String("a\nforged 1\nb", "v")},
+			attrs: []coreotel.AttrValue{coreotel.String("a\nforged 1\nb", "v")},
 			value: "7", want: "requests{a\\nforged 1\\nb=\"v\"} 7\n",
 		},
 		{

@@ -4,8 +4,7 @@ package trace
 import (
 	"sync"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -35,8 +34,8 @@ const DefaultMaxSpans int = 2048
 // telemetry looks exactly like a service that is quiet.
 type Recorder struct {
 	// resource and scope are stamped on every payload. Immutable.
-	resource coremetrics.ResourceValue
-	scope    coremetrics.ScopeValue
+	resource coreotel.ResourceValue
+	scope    coreotel.ScopeValue
 	// maxSpans is the resolved bound.
 	maxSpans int
 
@@ -87,7 +86,7 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 	}
 	//: resource and scope are normalised once, exactly as a Meter does.
 	return &Recorder{
-		resource: cfg.Resource.Normalized(),
+		resource: coretrace.NormalizeResource(cfg.Resource),
 		scope:    coretrace.NormalizeScope(cfg.Scope),
 		maxSpans: maxSpans,
 	}
@@ -96,13 +95,13 @@ func NewRecorder(cfg RecorderConfig) *Recorder {
 // Resource returns the producing resource this Recorder stamps on every payload,
 // already normalised. It exists so a Tracer and its Recorder can be given ONE
 // resource literal rather than two that a later edit could let drift apart.
-func (r *Recorder) Resource() coremetrics.ResourceValue {
+func (r *Recorder) Resource() coreotel.ResourceValue {
 	//: normalised at construction.
 	return r.resource
 }
 
 // Scope returns the instrumentation scope this Recorder stamps on every payload.
-func (r *Recorder) Scope() coremetrics.ScopeValue {
+func (r *Recorder) Scope() coreotel.ScopeValue {
 	//: normalised at construction.
 	return r.scope
 }

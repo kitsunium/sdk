@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
@@ -16,10 +17,10 @@ import (
 // labelsOf is the string-attribute shorthand the tables below share. Every
 // case here is a STRING attribute, because that is the only kind the Prometheus
 // wire can carry without losing its type — the typed kinds get their own test.
-func labelsOf(pairs ...string) []coremetrics.AttrValue {
-	out := make([]coremetrics.AttrValue, 0, len(pairs)/2)
+func labelsOf(pairs ...string) []coreotel.AttrValue {
+	out := make([]coreotel.AttrValue, 0, len(pairs)/2)
 	for i := 0; i+1 < len(pairs); i += 2 {
-		out = append(out, coremetrics.String(pairs[i], pairs[i+1]))
+		out = append(out, coreotel.String(pairs[i], pairs[i+1]))
 	}
 	return out
 }
@@ -508,10 +509,10 @@ func TestPrometheusExporterRefusalIsAtomicAcrossFamilies(t *testing.T) {
 func TestPrometheusExporterEmitsTheOverflowSeries(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{MaxSeriesPerInstrument: 1})
-	meter.Counter("requests_total", coremetrics.String("route", "/a")).Inc()
+	meter.Counter("requests_total", coreotel.String("route", "/a")).Inc()
 	//: past the bound of one, every further label set folds into overflow.
-	meter.Counter("requests_total", coremetrics.String("route", "/b")).Inc()
-	meter.Counter("requests_total", coremetrics.String("route", "/c")).Inc()
+	meter.Counter("requests_total", coreotel.String("route", "/b")).Inc()
+	meter.Counter("requests_total", coreotel.String("route", "/c")).Inc()
 
 	got := exportPrometheus(t, meter.Collect())
 
@@ -533,7 +534,7 @@ func TestPrometheusExporterEmitsTheOverflowSeries(t *testing.T) {
 func TestPrometheusExporterFromARealMeter(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeter()
-	meter.Counter("requests_total", coremetrics.String("method", "GET")).Add(3)
+	meter.Counter("requests_total", coreotel.String("method", "GET")).Add(3)
 	meter.Gauge("in_flight").Set(2.5)
 	hist := meter.Histogram("latency_seconds", []float64{0.5, 1})
 	hist.Record(0.25)
@@ -725,9 +726,9 @@ func TestPrometheusFlattensEveryAttributeKindToAString(t *testing.T) {
 	got := exportPrometheus(t, coremetrics.SnapshotValue{
 		Sums: map[string]coremetrics.SumMetricValue{
 			"requests_total": promCounter(
-				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Bool("cached", true)}, Value: 1},
-				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Float64("ratio", 0.5)}, Value: 2},
-				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Int64("status", 503)}, Value: 3},
+				coremetrics.SumValue{Attrs: []coreotel.AttrValue{coreotel.Bool("cached", true)}, Value: 1},
+				coremetrics.SumValue{Attrs: []coreotel.AttrValue{coreotel.Float64("ratio", 0.5)}, Value: 2},
+				coremetrics.SumValue{Attrs: []coreotel.AttrValue{coreotel.Int64("status", 503)}, Value: 3},
 			),
 		},
 	})
@@ -744,8 +745,8 @@ func TestPrometheusFlattensEveryAttributeKindToAString(t *testing.T) {
 	collapsed := exportPrometheus(t, coremetrics.SnapshotValue{
 		Sums: map[string]coremetrics.SumMetricValue{
 			"requests_total": promCounter(
-				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.Int64("v", 1)}, Value: 1},
-				coremetrics.SumValue{Attrs: []coremetrics.AttrValue{coremetrics.String("v", "1")}, Value: 2},
+				coremetrics.SumValue{Attrs: []coreotel.AttrValue{coreotel.Int64("v", 1)}, Value: 1},
+				coremetrics.SumValue{Attrs: []coreotel.AttrValue{coreotel.String("v", "1")}, Value: 2},
 			),
 		},
 	})
@@ -765,10 +766,10 @@ func TestPrometheusFlattensEveryAttributeKindToAString(t *testing.T) {
 func TestPrometheusDropsResourceAndScope(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{
-		Resource: coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
-			coremetrics.String(coremetrics.ServiceNameKey, "orders"),
+		Resource: coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+			coreotel.String(coreotel.ServiceNameKey, "orders"),
 		}},
-		Scope: coremetrics.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"},
+		Scope: coreotel.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"},
 	})
 	meter.Counter("requests_total").Inc()
 

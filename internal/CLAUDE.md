@@ -75,8 +75,8 @@ go list -f '{{$p := .ImportPath}}{{range .Imports}}{{$p}} -> {{.}}{{"\n"}}{{end}
 A core package may import another core package on the same terms. The core
 query, `deps(//internal/core/...) intersect (//internal/service/... + //pkg/...
 + //third-party/...)`, names what is above core and nothing beside it, and
-`core/trace` builds on `core/metrics`'s attribute model by decision (ADR 0051
-§2). The row said "stdlib + `internal/kernel/*`", the gap the service row had.
+`core/metrics` and `core/trace` both build on `core/otel`'s shared attribute
+model by decision (ADR 0051 §2). The row said "stdlib + `internal/kernel/*`", the gap the service row had.
 The same `go list`, run from `internal/core` over `./...` with the grep on
 `internal/core/`, lists the edges.
 

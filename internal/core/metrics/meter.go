@@ -1,6 +1,8 @@
 // Package metrics — the Meter: the frozen instrument factory + collector.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // Meter mints named, attributed instruments and collects their values.
 //
 // A SERIES is one instrument name plus one attribute set, and it is the unit of
@@ -25,9 +27,9 @@ package metrics
 // instruments it lacks live on UpDownMeter and AsyncMeter, and FullMeter is the
 // union every in-tree constructor actually returns.
 type Meter interface {
-	Counter(name string, attrs ...AttrValue) Counter
-	Gauge(name string, attrs ...AttrValue) Gauge
-	Histogram(name string, buckets []float64, attrs ...AttrValue) Histogram
+	Counter(name string, attrs ...coreotel.AttrValue) Counter
+	Gauge(name string, attrs ...coreotel.AttrValue) Gauge
+	Histogram(name string, buckets []float64, attrs ...coreotel.AttrValue) Histogram
 	// Collect returns a point-in-time SnapshotValue of every series.
 	//
 	// Under TemporalityDelta it is a MUTATION: it consumes the window it

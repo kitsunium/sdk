@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
@@ -38,18 +39,18 @@ var (
 // identified stamps snap with the fixed Resource, Scope and window the golden
 // documents expect.
 func identified(snap coremetrics.SnapshotValue) coremetrics.SnapshotValue {
-	snap.Resource = coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
-		coremetrics.String(coremetrics.ServiceNameKey, "orders"),
+	snap.Resource = coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+		coreotel.String(coreotel.ServiceNameKey, "orders"),
 	}}
-	snap.Scope = coremetrics.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"}
+	snap.Scope = coreotel.ScopeValue{Name: "github.com/acme/orders", Version: "1.4.0"}
 	snap.StartTime = textStart
 	snap.Time = textEnd
 	return snap
 }
 
 // oneAttr is the single-string-attribute shorthand the tables below use.
-func oneAttr(key, value string) []coremetrics.AttrValue {
-	return []coremetrics.AttrValue{coremetrics.String(key, value)}
+func oneAttr(key, value string) []coreotel.AttrValue {
+	return []coreotel.AttrValue{coreotel.String(key, value)}
 }
 
 // TestNewTextExporter pins the rendering and the ordering.
@@ -148,11 +149,11 @@ func TestNewTextExporter(t *testing.T) {
 			name: "each attribute kind keeps its type",
 			snap: coremetrics.SnapshotValue{Sums: map[string]coremetrics.SumMetricValue{
 				"requests": promCounter(coremetrics.SumValue{
-					Attrs: []coremetrics.AttrValue{
-						coremetrics.Bool("cached", true),
-						coremetrics.String("method", "GET"),
-						coremetrics.Float64("ratio", 0.5),
-						coremetrics.Int64("status", 503),
+					Attrs: []coreotel.AttrValue{
+						coreotel.Bool("cached", true),
+						coreotel.String("method", "GET"),
+						coreotel.Float64("ratio", 0.5),
+						coreotel.Int64("status", 503),
 					},
 					Value: 1,
 				}),
@@ -236,10 +237,10 @@ func TestTextExporterOmitsAnAbsentScopeVersion(t *testing.T) {
 	t.Parallel()
 	var buf bytes.Buffer
 	err := svcmetrics.NewTextExporter("test", &buf).Export(coremetrics.SnapshotValue{
-		Resource: coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
-			coremetrics.String(coremetrics.ServiceNameKey, "orders"),
+		Resource: coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+			coreotel.String(coreotel.ServiceNameKey, "orders"),
 		}},
-		Scope: coremetrics.ScopeValue{Name: "github.com/acme/orders"},
+		Scope: coreotel.ScopeValue{Name: "github.com/acme/orders"},
 	})
 	if err != nil {
 		t.Fatalf("Export = %v, want nil", err)
@@ -258,7 +259,7 @@ func TestTextExporterOmitsAnAbsentScopeVersion(t *testing.T) {
 func TestTextExporterFromARealMeter(t *testing.T) {
 	t.Parallel()
 	meter := svcmetrics.NewMeter()
-	meter.Counter("requests", coremetrics.Int64("status", 503)).Inc()
+	meter.Counter("requests", coreotel.Int64("status", 503)).Inc()
 
 	var buf bytes.Buffer
 	if err := svcmetrics.NewTextExporter("test", &buf).Export(meter.Collect()); err != nil {
@@ -267,7 +268,7 @@ func TestTextExporterFromARealMeter(t *testing.T) {
 	got := buf.String()
 
 	//: the mandated default, not a value this SDK invented.
-	wantResource := "# resource service.name=\"" + coremetrics.UnknownService + "\"\n"
+	wantResource := "# resource service.name=\"" + coreotel.UnknownService + "\"\n"
 	if len(got) < len(wantResource) || got[:len(wantResource)] != wantResource {
 		t.Errorf("the document opens with %q, want %q", got, wantResource)
 	}

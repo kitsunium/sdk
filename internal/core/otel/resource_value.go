@@ -1,5 +1,5 @@
-// Package metrics — Resource: who produced the telemetry.
-package metrics
+// Package otel — Resource: who produced the telemetry.
+package otel
 
 import "slices"
 
@@ -7,7 +7,8 @@ import "slices"
 // conventions reserve for the logical name of the service. It is dotted, like
 // every OTel-conventional key — which is exactly why the Prometheus connector
 // cannot carry it (see internal/service/metrics/CLAUDE.md §What the Prometheus
-// connector loses).
+// connector loses). It is also the key a backend correlates a trace with a
+// metric on, which is why both signals read it from here.
 const ServiceNameKey string = "service.name"
 
 // UnknownService is the value the OpenTelemetry specification mandates when a
@@ -18,8 +19,9 @@ const UnknownService string = "unknown_service"
 
 // ResourceValue identifies the ENTITY that produced the telemetry — the
 // service, the process, the host. Its attributes are carried ONCE per payload
-// rather than on every point, which is the whole reason the concept exists:
-// service.name on ten thousand data points is ten thousand copies of one fact.
+// rather than on every point or span, which is the whole reason the concept
+// exists: service.name on ten thousand data points is ten thousand copies of
+// one fact.
 //
 // SchemaURL is deliberately absent. It is optional in the specification, this
 // SDK emits no semantic-convention version, and a field that is always empty is
@@ -27,21 +29,25 @@ const UnknownService string = "unknown_service"
 // version, next to Attrs, and nothing else about the shape changes.
 type ResourceValue struct {
 	// Attrs are the producer's attributes, sorted by Key. A ResourceValue
-	// built through a Meter always carries ServiceNameKey.
+	// normalised by NormalizeResource always carries ServiceNameKey.
 	Attrs []AttrValue
 }
 
-// Normalized returns the ResourceValue a Meter publishes: attributes sorted,
-// validated, owned, and carrying ServiceNameKey whether or not the caller
-// supplied it.
+// NormalizeResource returns the ResourceValue a Meter or a Tracer publishes:
+// attributes sorted, validated, owned, and carrying ServiceNameKey whether or
+// not the caller supplied it. An unusable attribute set panics with refusal's
+// message, at construction, rather than at the first export.
 //
 // The service.name default is not an SDK invention — the OpenTelemetry
 // specification mandates unknown_service for exactly this case, so the clamp
 // substitutes nobody's judgement (ADR 0031 §clamp).
-func (r ResourceValue) Normalized() ResourceValue {
+//
+// It is a function and not a method because refusal is the CALLER'S: a method
+// on the shared type would have to pick one signal's code for both.
+func NormalizeResource(resource ResourceValue, refusal error) ResourceValue {
 	//: sort + validate + own; an unusable attribute set panics here, at
 	//: construction, rather than at the first export.
-	attrs := SortAttrs(r.Attrs)
+	attrs := SortAttrs(resource.Attrs, refusal)
 	//: a supplied service.name is kept exactly as the caller wrote it.
 	if slices.ContainsFunc(attrs, isServiceName) {
 		//: already identified.

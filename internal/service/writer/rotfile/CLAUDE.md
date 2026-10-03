@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:55Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # internal/service/writer/rotfile/
 
 ## Purpose
@@ -20,26 +20,31 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 |---|---|
 | `rotfile.go` | `Writer` singleton, `rotFileFactory` (`Name` / `Open`) |
 | `rotating_sink_config.go` | `Config` — an **alias** of `core/writer.RotFileConfig` (moved there for issue #93 so `pkg/v1/logger` can re-export it); type identity unchanged |
-| `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` / `refuseSymlink` / `explainOpenFailure` / `newRotatingSink` (wires the interval daemon) |
+| `rotating_sink.go` | `rotatingSink` + `Write` / `Flush` / `Close` + `openHardened` (this sink's one door into the shared `logfile.Open`) + `openRefusals` (its `logfile.RefusalSpec`) + `newRotatingSink` (wires the interval daemon) |
 | `rotate_interval.go` | `tickRotate` — the `worker.Every` daemon tick body |
 | `decode.go` | `rotFileFactory.Decode` (`core/writer.Decoder`) + key-coercion helpers |
 | `rotate.go` | `maybeRotate` / `rotate` / `shiftBackups` (threshold + cycle) |
 | `rotate_manual.go` | `Rotate` — the on-demand rotation (SIGHUP / logrotate), under the same mutex as `Write` |
 | `backups.go` | backup-name arithmetic + per-slot move/gzip helpers |
 | `prune.go` | `pruneByAge` calendar pruning (MaxAgeDays) |
-| `open_flags_unix.go` | `openFlags = O_APPEND \| O_CREATE \| O_WRONLY \| O_NOFOLLOW` — every `unix` GOOS |
-| `open_flags_other.go` | `!unix` fallback (no `O_NOFOLLOW`): windows, plan9, js/wasm, wasip1 |
 | `codes.go`, `errors.go` | sentinels — range 0.3.27.\* (service slot 0x1b) |
 
 ## Security hardening
 
+The hardened open is `internal/service/internal/logfile` (`Open`,
+`RefuseSymlink`, `ExplainOpenFailure`, `openFlags` and its
+`open_flags_{unix,other}.go` split), shared with `logger/sink/file`; this
+package carried a copy of it until both sinks moved onto the one. It hands the
+shared open `openRefusals`, so both refusals still carry `ROT_FILE_OPEN_FAILED`
+and this package's wording, byte for byte.
+
 - **Symlink rejection re-applied on EVERY reopen (CWE-59).** `openHardened`
-  runs the `os.Lstat` symlink refusal (`refuseSymlink`) **and** opens with
-  `openFlags` + `0600`. It is the single open entry point used by both
+  runs the `os.Lstat` symlink refusal (`RefuseSymlink`) **and** opens with
+  `openFlags` + `0600`, through `logfile.Open`. It is the single open entry point used by both
   construction **and** the rotation reopen, so a symlink planted at `Path`
   after a rename is refused on the next write — not only at first `New`.
   Pre-condition: the parent directory must not be attacker-writable.
-- **The two refusals are not redundant.** `refuseSymlink` is a *check*, so it
+- **The two refusals are not redundant.** `RefuseSymlink` is a *check*, so it
   has a window after it; `O_NOFOLLOW` in `openFlags` is what makes the *kernel*
   refuse inside that window. `O_NOFOLLOW` governs the **final component only** —
   a symlink at a parent component is still traversed, which is what the
@@ -47,7 +52,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 - **Both refusals carry `kind=symlink`** on the same sentinel
   (`RotFileOpenFailed`), so a planted link is distinguishable from a full disk
   at whichever of the two points caught it. The `os.Lstat` inside
-  `explainOpenFailure` runs **after** the open has already been refused: it is
+  `ExplainOpenFailure` runs **after** the open has already been refused: it is
   diagnosis, never the decision, and nothing branches on the errno (it is
   `ELOOP` on linux/openbsd/darwin, `EMLINK` on freebsd/dragonfly, `EFTYPE` on
   netbsd — ADR 0082 §D4).
@@ -63,7 +68,7 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 ### Which platform gets which protection
 
 Protection is **not uniform**, and this table says where it is not. `Lstat` is
-`refuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
+`RefuseSymlink`, present everywhere; `O_NOFOLLOW` is the kernel half.
 
 | Platform | `syscall.O_NOFOLLOW` in go1.27.1 | Protection at the open |
 |---|---|---|
@@ -159,10 +164,11 @@ only the writer, never the offending value.
 Use `t.TempDir()` for paths. The reopen-hardening case plants a symlink where
 the reopened active file would be created and asserts `RotFileOpenFailed`.
 
-Every one of those cases goes through `openHardened`, so `refuseSymlink`
+Every one of those cases goes through `openHardened`, so `RefuseSymlink`
 answers first and the flag word is never asked anything — they pass identically
-with and without `O_NOFOLLOW`. `open_flags_unix_internal_test.go` (`//go:build unix`) is
-the one that is not blind to it: it opens with the same flag word and mode
+with and without `O_NOFOLLOW`. The shared package's
+`open_flags_unix_internal_test.go` (`//go:build unix`) is the one that is not
+blind to it — the one copy of a proof this package used to carry too: it opens with the same flag word and mode
 against a path that **is** a symlink, which is the state a planter leaves by
 winning the race against the check. Its dangling-link row is the sharper of the
 two — a followed `O_CREATE` *creates* the target, so the target's continued
@@ -170,7 +176,8 @@ absence is positive proof of non-traversal. A row that cannot be planted is not
 a passing row: the parent counts planted rows and fails at zero rather than
 going green on an empty table.
 
-`./writer/rotfile` runs on real kernels in `.github/workflows/e2e-cross.yml`
+`./writer/rotfile` — and `./internal/logfile`, which holds the O_NOFOLLOW proof
+— runs on real kernels in `.github/workflows/e2e-cross.yml`
 (`SERVICE_FILE_PKGS`): linux, macos-15, freebsd, openbsd, netbsd, OmniOS
 r151054 (illumos) and Oracle Solaris 11.4 — and on
 windows through the whole-suite step, which gates there since ADR 0095. Two

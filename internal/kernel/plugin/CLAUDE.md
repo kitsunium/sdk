@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:06:22Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # internal/kernel/plugin/
 
 ## Purpose
@@ -11,14 +11,27 @@ reason fragment when it is not. `T` is the registrar's port, inferred at the
 call; what is judged is the dynamic value behind it, which `reflect` reads
 through the boxing. ADR 0071.
 
+And, once that question is answered, **where the entry goes**: `Registry[K, V]`
+is the read-mostly, name-keyed, copy-on-write table a registrar publishes into
+— `Publish` / `Lookup` / `Names`. It REPORTS a conflict and never builds an
+error, for the reason `Unusable` returns a string: the registrar refuses with
+its own code. Its first two users are the metrics and trace exporter registries,
+which were one mechanism written twice (`publishExporter` + a map clone, in
+`core/metrics` and `core/trace`); the core registries that still carry their own
+copy of it — codec, writer, crypto's `schemeRegistry`, transform, id, view — are
+the next candidates.
+
 Code range: none. The answer is a string, not an error — see below.
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `plugin.go` | `Unusable` — the whole package |
+| `plugin.go` | `Unusable` — the entry guard |
+| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/snapshot` |
 | `plugin_external_test.go` | both refusals, both acceptances, and the comparison a caller is about to make |
+| `registry_external_test.go` | the three publish outcomes, the two misses, the order of `Names`, and racing writers losing nothing |
+| `registry_internal_test.go` | the copy a publish makes leaves the source a reader may be walking untouched |
 
 ## The two shapes the compiler accepts and a registry cannot store
 
@@ -75,10 +88,16 @@ Superseded by ADR 0154 (the charter); ADR 0071 stays as the incident's record, a
 
 - **Add a "well-known port" check.** This package has no vocabulary: it never
   learns what a Codec or a Compressor is, which is why it can serve all of them.
-- **Widen it into a registry.** The registries differ in key type, in extra
-  indexes (codec's MIME and extension tables) and in their error codes; what
-  they share is this one question.
-- **Call it on a hot path.** It is an import-time guard.
+- **Teach `Registry` a domain's refusal.** It reports a conflict; the
+  registrar panics or returns with ITS code, and asks `Unusable` before it
+  publishes, because `==` on a non-comparable dynamic value panics inside the
+  duplicate check with Go's message instead of the registrar's.
+- **Grow `Registry` an index a single registry needs.** Registries differ in
+  extra indexes (codec's MIME and extension tables) and in their error codes;
+  what they share is the name-keyed copy-on-write table, and a registry with a
+  second index keeps it beside this one rather than inside it.
+- **Call `Unusable` on a hot path.** It is an import-time guard. (`Lookup` is
+  the read every dispatch makes: one atomic load and a map read, no lock.)
 
 ## Verification
 

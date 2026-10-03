@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // Test_memSum_Add pins monotonicity, which is the ONLY difference between a
@@ -400,7 +401,7 @@ func TestDeltaObservableThatStopsReportingReportsZero(t *testing.T) {
 			//: a fixed shard order, so the reports are deterministic.
 			for _, shard := range []string{"a", "b"} {
 				if value, ok := windows[window][shard]; ok {
-					observe(value, coremetrics.String("shard", shard))
+					observe(value, coreotel.String("shard", shard))
 				}
 			}
 		})

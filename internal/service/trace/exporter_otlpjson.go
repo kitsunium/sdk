@@ -3,19 +3,12 @@
 package trace
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
-	"math"
 	"os"
-	"strconv"
-	"sync"
-	"time"
-
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/internal/otlp"
 )
 
 // otlpJSONExporterName is the registered name of the default OTLP/JSON span
@@ -41,62 +34,52 @@ const (
 	spanFlagsIsRemote uint32 = 0x0000_0200
 )
 
-// The three spellings proto3 JSON gives a non-finite double. A double is "a
-// number or one of the special string values 'NaN', 'Infinity', and
-// '-Infinity'", so a NaN-valued attribute is expressible rather than fatal —
-// unlike encoding/json's own float path, which refuses it outright.
-const (
-	otlpNaN         string = `"NaN"`
-	otlpPosInfinity string = `"Infinity"`
-	otlpNegInfinity string = `"-Infinity"`
+var (
+	// otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
+	// under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
+	// field of the tree is a Go primitive or one of the shared Marshalers — and
+	// still typed rather than swallowed.
+	otlpEncodeFailure = errs.WrapParams{
+		Code:    coretrace.CodeExportFailed,
+		Reason:  "EXPORT_FAILED",
+		Public:  "The trace exporter failed to ship the spans",
+		Private: "service/trace: the OTLP/JSON encoder could not render the payload",
+	}
+
+	// otlpWriteFailure is the wrap a writer fault leaves under when the
+	// writer-bound exporter emits a document: this signal's EXPORT_FAILED.
+	otlpWriteFailure = errs.WrapParams{
+		Code:    coretrace.CodeExportFailed,
+		Reason:  "EXPORT_FAILED",
+		Public:  "The trace exporter failed to ship the spans",
+		Private: "service/trace: OTLP/JSON exporter writer returned an error",
+	}
+
+	// OTLPJSON is the default OTLP/JSON span exporter, registered to write each
+	// batch to stderr as one newline-terminated document. Use NewOTLPJSONExporter
+	// for a custom writer/name, EncodeOTLPJSON for the bytes alone, or
+	// NewOTLPHTTPExporter to actually ship them to a collector.
+	//
+	// stderr, not stdout, for the reason ADR 0030 gives in full: importing a package
+	// must never arm a writer on a stream the process may be using as a protocol
+	// channel. This instance is a diagnostic — the production path is
+	// NewOTLPHTTPExporter, which is never registered because arming a network client
+	// on import would be strictly worse than arming a writer.
+	OTLPJSON = coretrace.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
 )
-
-// otlpDocumentTerminator ends each document a WRITER-bound OTLP exporter emits,
-// so a stream of exports is newline-delimited JSON. It is deliberately NOT part
-// of what EncodeOTLPJSON returns: that is the HTTP body, and a body is one
-// document.
-const otlpDocumentTerminator byte = '\n'
-
-// otlpIntBufferSize pre-sizes a quoted 64-bit decimal: 20 digits, a sign, two
-// quotes, rounded up.
-const otlpIntBufferSize int = 24
-
-// OTLPJSON is the default OTLP/JSON span exporter, registered to write each
-// batch to stderr as one newline-terminated document. Use NewOTLPJSONExporter
-// for a custom writer/name, EncodeOTLPJSON for the bytes alone, or
-// NewOTLPHTTPExporter to actually ship them to a collector.
-//
-// stderr, not stdout, for the reason ADR 0030 gives in full: importing a package
-// must never arm a writer on a stream the process may be using as a protocol
-// channel. This instance is a diagnostic — the production path is
-// NewOTLPHTTPExporter, which is never registered because arming a network client
-// on import would be strictly worse than arming a writer.
-var OTLPJSON = coretrace.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
 
 // otlpJSONExporter writes each batch to dst as one OTLP/JSON document.
 //
-// mu serialises the single dst.Write: core/trace.SpanExporter requires
-// concurrency safety and dst is caller-supplied. Encoding happens outside the
-// lock, so a slow writer serialises callers without also serialising the work.
+// The shared stream serialises the single write: core/trace.SpanExporter
+// requires concurrency safety and the writer is caller-supplied. Encoding
+// happens before it, outside the lock, so a slow writer serialises callers
+// without also serialising the work.
 type otlpJSONExporter struct {
-	mu   sync.Mutex
+	// name is the exporter's registry key.
 	name coretrace.ExporterName
-	dst  io.Writer
+	// stream is the newline-delimited document stream bound to the writer.
+	stream *otlp.Stream
 }
-
-// otlpInt64 is a signed 64-bit integer rendered as a DECIMAL STRING — the
-// proto3 JSON mapping OTLP inherits. The reason is range, not taste: a JSON
-// number is a double in most parsers, so an int64 past 2^53 loses its low bits.
-type otlpInt64 int64
-
-// otlpUint64 is an unsigned 64-bit integer rendered as a decimal string, for the
-// same reason otlpInt64 is: fixed64 and uint64 both map to a string. Every
-// timestamp in this payload uses it, and every one of them is past 2^53.
-type otlpUint64 uint64
-
-// otlpDouble is an IEEE-754 double rendered as a JSON number, or as one of the
-// three quoted spellings proto3 JSON gives a non-finite value.
-type otlpDouble float64
 
 // EncodeOTLPJSON renders spans as ONE OTLP/JSON ExportTraceServiceRequest —
 // exactly the bytes that go in the body of a POST to /v1/traces under
@@ -136,46 +119,15 @@ func EncodeOTLPJSON(spans coretrace.SpansValue) (doc []byte, err error) {
 	//: the two collapsed levels are literal single-element slices: one Tracer
 	//: is one Resource and one Scope, so there is nothing to group.
 	scope := otlpScopeSpans{
-		Scope: otlpScope{Name: spans.Scope.Name, Version: spans.Scope.Version},
+		Scope: otlp.ScopeOf(spans.Scope),
 		Spans: rendered,
 	}
 	resource := otlpResourceSpans{
-		Resource:   otlpResource{Attributes: otlpAttrs(spans.Resource.Attrs)},
+		Resource:   otlp.ResourceOf(spans.Resource),
 		ScopeSpans: []otlpScopeSpans{scope},
 	}
-	//: marshal the tree with HTML escaping off — see marshalOTLPJSON.
-	return marshalOTLPJSON(otlpRequest{ResourceSpans: []otlpResourceSpans{resource}})
-}
-
-// marshalOTLPJSON renders request with HTML escaping DISABLED and no trailing
-// newline.
-//
-// encoding/json escapes '<', '>' and '&' into their \u00xx forms by default, a
-// defence for JSON embedded in a <script> element. An OTLP body never is, and
-// OTel-conventional span attributes carry URLs (url.full, http.route) whose
-// query separator is exactly '&' — so the default turns a readable payload into
-// an unreadable one for no gain, and makes this SDK's bytes differ from every
-// other OTLP producer's for identical input. json.Encoder is the only way to
-// turn it off, and it appends a newline a single-document body must not carry.
-func marshalOTLPJSON(request otlpRequest) (doc []byte, err error) {
-	//: encode into a local buffer so the escaping switch is available.
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	//: '&' in a URL attribute stays '&'.
-	encoder.SetEscapeHTML(false)
-	//: the only failure mode left is a type encoding/json cannot render, and
-	//: every field of this tree is a Go primitive or a Marshaler defined here.
-	if encodeErr := encoder.Encode(request); encodeErr != nil {
-		//: report it typed rather than swallowing an impossible case.
-		return nil, errs.Wrap(encodeErr, errs.WrapParams{
-			Code:    coretrace.CodeExportFailed,
-			Reason:  "EXPORT_FAILED",
-			Public:  "The trace exporter failed to ship the spans",
-			Private: "service/trace: the OTLP/JSON encoder could not render the payload",
-		})
-	}
-	//: Encode appends a newline; the HTTP body is one document, so drop it.
-	return bytes.TrimSuffix(buf.Bytes(), []byte{otlpDocumentTerminator}), nil
+	//: marshal the tree with HTML escaping off — see otlp.Marshal.
+	return otlp.Marshal(otlpRequest{ResourceSpans: []otlpResourceSpans{resource}}, &otlpEncodeFailure)
 }
 
 // otlpSpans renders a batch, validating each span before any of them is encoded.
@@ -239,9 +191,9 @@ func otlpSpanOf(span coretrace.SpanValue) otlpSpan {
 		ParentSpanID:      parent,
 		Name:              span.Name,
 		Kind:              int32(span.Kind.Resolved()),
-		StartTimeUnixNano: otlpUnixNano(span.StartTime),
-		EndTimeUnixNano:   otlpUnixNano(span.EndTime),
-		Attributes:        otlpAttrs(span.Attrs),
+		StartTimeUnixNano: otlp.UnixNano(span.StartTime),
+		EndTimeUnixNano:   otlp.UnixNano(span.EndTime),
+		Attributes:        otlp.Attrs(span.Attrs),
 		Events:            otlpEvents(span.Events),
 		Links:             otlpLinks(span.Links),
 		Status:            otlpStatusOf(span.Status),
@@ -307,9 +259,9 @@ func otlpEvents(events []coretrace.EventValue) []otlpEvent {
 	for _, event := range events {
 		//: one Event message per recorded point.
 		out = append(out, otlpEvent{
-			TimeUnixNano: otlpUnixNano(event.Time),
+			TimeUnixNano: otlp.UnixNano(event.Time),
 			Name:         event.Name,
-			Attributes:   otlpAttrs(event.Attrs),
+			Attributes:   otlp.Attrs(event.Attrs),
 		})
 	}
 	//: hand back the rendered events.
@@ -333,7 +285,7 @@ func otlpLinks(links []coretrace.LinkValue) []otlpLink {
 			TraceID:    link.Context.TraceID.String(),
 			SpanID:     link.Context.SpanID.String(),
 			TraceState: link.Context.State.String(),
-			Attributes: otlpAttrs(link.Attrs),
+			Attributes: otlp.Attrs(link.Attrs),
 			Flags:      otlpSpanFlags(link.Context, link.Context),
 		})
 	}
@@ -341,81 +293,10 @@ func otlpLinks(links []coretrace.LinkValue) []otlpLink {
 	return out
 }
 
-// otlpAttrs renders an attribute set as the repeated KeyValue every OTLP message
-// spells its dimensions with. An empty set stays nil, which encoding/json omits.
-func otlpAttrs(attrs []coremetrics.AttrValue) []otlpKeyValue {
-	//: the dimensionless case has no attributes array at all.
-	if len(attrs) == 0 {
-		//: omitted by the omitempty tag.
-		return nil
-	}
-	//: exactly-sized; the set is already sorted by Key.
-	pairs := make([]otlpKeyValue, len(attrs))
-	//: one KeyValue per dimension, in the batch's canonical order.
-	for i, attr := range attrs {
-		//: the AnyValue oneof carries the TYPE.
-		pairs[i] = otlpKeyValueOf(attr)
-	}
-	//: hand back the rendered set.
-	return pairs
-}
-
-// otlpKeyValueOf maps one typed attribute onto a KeyValue whose AnyValue names
-// the attribute's kind.
-//
-// Exactly one AnyValue field is non-nil, and it is emitted even when it holds the
-// type's zero: a oneof member has explicit presence, so an absent field means
-// "no case selected", not "the default".
-func otlpKeyValueOf(attr coremetrics.AttrValue) otlpKeyValue {
-	//: one oneof case per attribute kind.
-	switch attr.Kind() {
-	//: the common dimension.
-	case coremetrics.AttrKindString:
-		//: stringValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{StringValue: new(attr.Str())}}
-	//: a flag.
-	case coremetrics.AttrKindBool:
-		//: boolValue — false is a value, not an absence.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{BoolValue: new(attr.Bool())}}
-	//: a signed 64-bit integer, which rides as a decimal string.
-	case coremetrics.AttrKindInt64:
-		//: intValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{IntValue: new(otlpInt64(attr.Int64()))}}
-	//: an IEEE-754 double, non-finite values included.
-	case coremetrics.AttrKindFloat64:
-		//: doubleValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{DoubleValue: new(otlpDouble(attr.Float64()))}}
-	//: AttrKindInvalid never reaches a batch — SortAttrs panics on it at the
-	//: call site that wrote it.
-	default:
-		//: an empty AnyValue selects no case, which is what "no value" is.
-		return otlpKeyValue{Key: attr.Key}
-	}
-}
-
-// otlpUnixNano converts a wall-clock instant to the fixed64 nanosecond timestamp
-// OTLP carries, mapping an unset instant onto 0.
-//
-// The guard is not defensive noise. time.Time's own documentation says UnixNano's
-// "result is undefined if the Unix time in nanoseconds cannot be represented by
-// an int64", and the zero Time is exactly that case: it returns a large negative
-// number which, cast to uint64, becomes a timestamp several centuries in the
-// future. An event stamped by a manual clock left at its zero is the reachable
-// path, and it would ship silently wrong rather than visibly empty.
-func otlpUnixNano(instant time.Time) otlpUint64 {
-	//: the unset instant, and a pre-1970 one, have no unsigned spelling.
-	if instant.IsZero() || instant.UnixNano() < 0 {
-		//: the schema's own "unknown" value, rather than a wrapped one.
-		return 0
-	}
-	//: in range and positive.
-	return otlpUint64(instant.UnixNano())
-}
-
 // newOTLPJSONExporter is the shared constructor.
 func newOTLPJSONExporter(name coretrace.ExporterName, dst io.Writer) *otlpJSONExporter {
-	//: a stateless writer-bound exporter.
-	return &otlpJSONExporter{name: name, dst: dst}
+	//: a writer-bound exporter whose only state is the shared stream's lock.
+	return &otlpJSONExporter{name: name, stream: otlp.NewStream(dst, &otlpWriteFailure)}
 }
 
 // NewOTLPJSONExporter returns a SpanExporter writing each batch to dst as one
@@ -442,69 +323,6 @@ func (e *otlpJSONExporter) Export(spans coretrace.SpansValue) error {
 		//: the sentinel already carries the code, reason and public message.
 		return err
 	}
-	//: terminate the document so consecutive exports do not run together.
-	doc = append(doc, otlpDocumentTerminator)
-	//: single write — serialised so concurrent Exports cannot interleave
-	//: partial documents into a non-atomic dst.
-	e.mu.Lock()
-	_, writeErr := e.dst.Write(doc)
-	e.mu.Unlock()
-	//: success fast-path.
-	if writeErr == nil {
-		//: batch written.
-		return nil
-	}
-	//: wrap the writer fault with the dotted-quad code.
-	return errs.Wrap(writeErr, errs.WrapParams{
-		Code:    coretrace.CodeExportFailed,
-		Reason:  "EXPORT_FAILED",
-		Public:  "The trace exporter failed to ship the spans",
-		Private: "service/trace: OTLP/JSON exporter writer returned an error",
-	})
-}
-
-// MarshalJSON renders the integer as a quoted decimal string.
-func (v otlpInt64) MarshalJSON() (encoded []byte, err error) {
-	//: quote, digits, quote — no escaping is possible inside a decimal.
-	out := make([]byte, 0, otlpIntBufferSize)
-	out = append(out, '"')
-	out = strconv.AppendInt(out, int64(v), decimalBase)
-	//: json.Marshal never sees an error from a decimal rendering.
-	return append(out, '"'), nil
-}
-
-// MarshalJSON renders the integer as a quoted decimal string.
-func (v otlpUint64) MarshalJSON() (encoded []byte, err error) {
-	//: quote, digits, quote.
-	out := make([]byte, 0, otlpIntBufferSize)
-	out = append(out, '"')
-	out = strconv.AppendUint(out, uint64(v), decimalBase)
-	//: json.Marshal never sees an error from a decimal rendering.
-	return append(out, '"'), nil
-}
-
-// MarshalJSON renders the double shortest-round-trip, or names it when it is not
-// finite. encoding/json refuses NaN and ±Inf outright, so without this type a
-// single NaN-valued attribute would fail the whole export.
-func (v otlpDouble) MarshalJSON() (encoded []byte, err error) {
-	//: a value that is not a number has a name rather than a rendering.
-	value := float64(v)
-	//: NaN first — it fails every ordered comparison below.
-	if math.IsNaN(value) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpNaN), nil
-	}
-	//: +Inf.
-	if math.IsInf(value, 1) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpPosInfinity), nil
-	}
-	//: -Inf.
-	if math.IsInf(value, -1) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpNegInfinity), nil
-	}
-	//: finite: shortest representation that round-trips, which is a JSON
-	//: number in every form strconv produces.
-	return []byte(formatFloat(value)), nil
+	//: one terminated document, one write, under this signal's EXPORT_FAILED.
+	return e.stream.Emit(doc)
 }

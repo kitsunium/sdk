@@ -2,7 +2,7 @@
 package trace
 
 import (
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -41,11 +41,11 @@ func RecordError(span coretrace.Span, err error) {
 		return
 	}
 	//: the message is always present; the type is only present when it exists.
-	attrs := []coremetrics.AttrValue{coremetrics.String(coretrace.ExceptionMessageKey, err.Error())}
+	attrs := []coreotel.AttrValue{coreotel.String(coretrace.ExceptionMessageKey, err.Error())}
 	//: an SDK error carries a dotted-quad identity; a foreign one does not.
 	if code, ok := errs.CodeOf(err); ok {
 		//: the stable identity, in the MM.LL.PP.SS spelling.
-		attrs = append(attrs, coremetrics.String(coretrace.ExceptionTypeKey, code.String()))
+		attrs = append(attrs, coreotel.String(coretrace.ExceptionTypeKey, code.String()))
 	}
 	//: the conventional event name a backend renders as an error.
 	span.AddEvent(coretrace.ExceptionEventName, attrs...)

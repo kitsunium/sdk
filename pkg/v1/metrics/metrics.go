@@ -264,6 +264,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
 
@@ -277,10 +278,10 @@ const (
 	OverflowAttrKey string = coremetrics.OverflowAttrKey
 	// ServiceNameKey is the attribute key the OTel resource semantic
 	// conventions reserve for the logical name of the service.
-	ServiceNameKey string = coremetrics.ServiceNameKey
+	ServiceNameKey string = coreotel.ServiceNameKey
 	// UnknownService is the service.name the specification mandates when a
 	// producer supplies none.
-	UnknownService string = coremetrics.UnknownService
+	UnknownService string = coreotel.UnknownService
 	// DefaultScopeName names this SDK as the instrumenting library when a
 	// caller declares no scope of their own.
 	DefaultScopeName string = coremetrics.DefaultScopeName
@@ -335,25 +336,25 @@ type Gauge = coremetrics.Gauge
 type Histogram = coremetrics.Histogram
 
 // Attr is the public alias for one typed dimension of a series.
-type Attr = coremetrics.AttrValue
+type Attr = coreotel.AttrValue
 
 // AttrKind is the public alias for an attribute value's type tag.
-type AttrKind = coremetrics.AttrKind
+type AttrKind = coreotel.AttrKind
 
 // AttrKindInvalid marks an attribute whose value no constructor ever set.
-const AttrKindInvalid AttrKind = coremetrics.AttrKindInvalid
+const AttrKindInvalid AttrKind = coreotel.AttrKindInvalid
 
 // AttrKindString marks a string-valued attribute.
-const AttrKindString AttrKind = coremetrics.AttrKindString
+const AttrKindString AttrKind = coreotel.AttrKindString
 
 // AttrKindBool marks a bool-valued attribute.
-const AttrKindBool AttrKind = coremetrics.AttrKindBool
+const AttrKindBool AttrKind = coreotel.AttrKindBool
 
 // AttrKindInt64 marks a signed 64-bit integer attribute.
-const AttrKindInt64 AttrKind = coremetrics.AttrKindInt64
+const AttrKindInt64 AttrKind = coreotel.AttrKindInt64
 
 // AttrKindFloat64 marks an IEEE-754 double attribute.
-const AttrKindFloat64 AttrKind = coremetrics.AttrKindFloat64
+const AttrKindFloat64 AttrKind = coreotel.AttrKindFloat64
 
 // Temporality is the public alias for a metric's aggregation temporality.
 type Temporality = coremetrics.Temporality
@@ -370,11 +371,11 @@ const TemporalityCumulative Temporality = coremetrics.TemporalityCumulative
 
 // Resource is the public alias for the producer's identity, carried once per
 // snapshot.
-type Resource = coremetrics.ResourceValue
+type Resource = coreotel.ResourceValue
 
 // Scope is the public alias for the instrumentation's identity, carried once
 // per snapshot.
-type Scope = coremetrics.ScopeValue
+type Scope = coreotel.ScopeValue
 
 // Snapshot is the public alias for a whole-meter point-in-time copy.
 type Snapshot = coremetrics.SnapshotValue
@@ -482,26 +483,26 @@ var (
 // constructors to write because a string dimension is the common one.
 func String(key, value string) Attr {
 	//: delegate to the core constructor.
-	return coremetrics.String(key, value)
+	return coreotel.String(key, value)
 }
 
 // Bool returns a bool-valued attribute.
 func Bool(key string, value bool) Attr {
 	//: delegate to the core constructor.
-	return coremetrics.Bool(key, value)
+	return coreotel.Bool(key, value)
 }
 
 // Int64 returns a signed-integer attribute.
 func Int64(key string, value int64) Attr {
 	//: delegate to the core constructor.
-	return coremetrics.Int64(key, value)
+	return coreotel.Int64(key, value)
 }
 
 // Float64 returns a double attribute. A float is a measurement rather than a
 // dimension, and it is keyed on its bit pattern — see the core documentation.
 func Float64(key string, value float64) Attr {
 	//: delegate to the core constructor.
-	return coremetrics.Float64(key, value)
+	return coreotel.Float64(key, value)
 }
 
 // NewMeter returns a fresh in-memory Meter with every MeterConfig knob at its

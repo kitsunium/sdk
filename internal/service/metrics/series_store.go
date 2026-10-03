@@ -1,7 +1,7 @@
 // Package metrics — one snapshot group's series map.
 package metrics
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
 
 // seriesStore holds every live series of ONE snapshot group (sums, gauges or
 // histograms), keyed by the canonical series key (name + sorted attribute set,
@@ -83,7 +83,7 @@ func (s *seriesStore[T]) lookup(key []byte) (inst T, ok bool) {
 // pressure with the same cause. The conversion happens only on insertion,
 // where the key is actually retained.
 func (s *seriesStore[T]) admit(
-	name string, kind instrumentKind, key []byte, sorted []coremetrics.AttrValue, build func() T,
+	name string, kind instrumentKind, key []byte, sorted []coreotel.AttrValue, build func() T,
 ) T {
 	s.meter.mu.Lock()
 	defer s.meter.mu.Unlock()

@@ -30,6 +30,7 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // allocRuns is how many fetches each claim performs inside the measured window.
@@ -118,22 +119,22 @@ func mallocsOver(runs int, f func()) uint64 {
 func TestLookupIsAllocationFree(t *testing.T) {
 	type tc struct {
 		name   string
-		labels []coremetrics.AttrValue
+		labels []coreotel.AttrValue
 	}
 	tests := []tc{
 		{name: "the dimensionless series"},
 		{
 			name:   "one attribute",
-			labels: []coremetrics.AttrValue{coremetrics.String("method", "GET")},
+			labels: []coreotel.AttrValue{coreotel.String("method", "GET")},
 		},
 		{
 			//: declared out of key order, so the sort runs inside the
 			//: measurement rather than being optimised away by luck.
 			name: "three attributes, unsorted",
-			labels: []coremetrics.AttrValue{
-				coremetrics.String("status", "200"),
-				coremetrics.String("method", "GET"),
-				coremetrics.String("route", "/v1/widgets"),
+			labels: []coreotel.AttrValue{
+				coreotel.String("status", "200"),
+				coreotel.String("method", "GET"),
+				coreotel.String("route", "/v1/widgets"),
 			},
 		},
 		{
@@ -142,11 +143,11 @@ func TestLookupIsAllocationFree(t *testing.T) {
 			//: their own case — a strconv call on this path would be an
 			//: allocation per observation.
 			name: "every attribute kind at once",
-			labels: []coremetrics.AttrValue{
-				coremetrics.Bool("cached", true),
-				coremetrics.String("method", "GET"),
-				coremetrics.Float64("ratio", 0.5),
-				coremetrics.Int64("status", 503),
+			labels: []coreotel.AttrValue{
+				coreotel.Bool("cached", true),
+				coreotel.String("method", "GET"),
+				coreotel.Float64("ratio", 0.5),
+				coreotel.Int64("status", 503),
 			},
 		},
 		{
@@ -186,9 +187,9 @@ func TestLookupIsAllocationFree(t *testing.T) {
 // `200 resolved fetches performed 7 allocations, want 0`, and
 // testing.AllocsPerRun reported 0 for the same mutated path.
 func TestEveryInstrumentLookupIsAllocationFree(t *testing.T) {
-	labels := []coremetrics.AttrValue{
-		coremetrics.String("status", "200"),
-		coremetrics.String("method", "GET"),
+	labels := []coreotel.AttrValue{
+		coreotel.String("status", "200"),
+		coreotel.String("method", "GET"),
 	}
 	//: hoisted, deliberately. A bucket slice written as a literal inside the
 	//: indirect call below cannot be proved non-escaping by the compiler, so
@@ -265,7 +266,7 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 	m := NewMeterWithConfig(MeterConfig{MaxSeriesPerInstrument: 1})
 	//: spend the one admitted slot, then force the overflow series to exist.
 	m.Counter("http_requests_total").Inc()
-	m.Counter("http_requests_total", coremetrics.String("id", "0")).Inc()
+	m.Counter("http_requests_total", coreotel.String("id", "0")).Inc()
 
 	//: every distinct attribute set from here on folds into that one series. The
 	//: values are pre-rendered so the benchmark measures the meter, not
@@ -278,7 +279,7 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 
 	got := mallocsOver(allocRuns, func() {
 		i++
-		m.Counter("http_requests_total", coremetrics.String("id", ids[i%len(ids)])).Inc()
+		m.Counter("http_requests_total", coreotel.String("id", ids[i%len(ids)])).Inc()
 	})
 	if got != 0 {
 		t.Errorf("%d overflowing fetches performed %d allocations, want 0", allocRuns, got)
@@ -307,9 +308,9 @@ func TestOverflowLookupIsAllocationFree(t *testing.T) {
 // `200 fetches on a described meter performed 7 allocations, want 0`, and
 // testing.AllocsPerRun reported 0 for the same mutated path.
 func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
-	labels := []coremetrics.AttrValue{
-		coremetrics.String("status", "200"),
-		coremetrics.String("method", "GET"),
+	labels := []coreotel.AttrValue{
+		coreotel.String("status", "200"),
+		coreotel.String("method", "GET"),
 	}
 	m := NewMeter()
 	//: the map exists and is non-empty for the whole measurement.
@@ -332,10 +333,10 @@ func TestDescribedMeterLookupIsAllocationFree(t *testing.T) {
 
 // manyAttrs builds n distinct attributes with keys in descending order, so the
 // sort has real work to do.
-func manyAttrs(n int) []coremetrics.AttrValue {
-	out := make([]coremetrics.AttrValue, n)
+func manyAttrs(n int) []coreotel.AttrValue {
+	out := make([]coreotel.AttrValue, n)
 	for i := range out {
-		out[i] = coremetrics.String(
+		out[i] = coreotel.String(
 			"k"+string(rune('a'+(n-1-i))),
 			"v"+string(rune('a'+i)),
 		)

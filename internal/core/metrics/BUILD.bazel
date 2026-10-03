@@ -6,7 +6,7 @@ go_library(
     name = "metrics",
     srcs = [
         "async_meter.go",
-        "attr_value.go",
+        "attrs.go",
         "codes.go",
         "counter.go",
         "describer.go",
@@ -19,8 +19,7 @@ go_library(
         "histogram_value.go",
         "meter.go",
         "observable.go",
-        "resource_value.go",
-        "scope_value.go",
+        "scope.go",
         "snapshot_value.go",
         "sum_value.go",
         "temporality.go",
@@ -31,9 +30,9 @@ go_library(
         "//internal/core:core_consumers",
     ],
     deps = [
+        "//internal/core/otel",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
-        "//internal/kernel/snapshot",
     ],
 )
 
@@ -56,13 +55,14 @@ filegroup(
 go_test(
     name = "metrics_test",
     srcs = [
-        "attr_bench_test.go",
         "describer_external_test.go",
         "exporter_external_test.go",
-        "exporter_internal_test.go",
         "model_external_test.go",
         "registry_guard_external_test.go",
     ],
-    embed = [":metrics"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        ":metrics",
+        "//internal/core/otel",
+        "//internal/kernel/errs",
+    ],
 )

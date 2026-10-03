@@ -8,8 +8,8 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/trace",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/metrics",
         "//internal/core/net",
+        "//internal/core/otel",
         "//internal/core/trace",
         "//internal/service/trace",
     ],

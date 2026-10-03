@@ -30,19 +30,28 @@ alphabetical order.
 | Export | `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`, `RegisterExporter`, `LookupExporter`, `AvailableExporters`, `Export` |
 | Attributes | `String`, `Bool`, `Int64`, `Float64` |
 | Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported`, `MaxTraceStateMembers`; the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
-| Sentinels | core: `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`; service: `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess` |
+| Sentinels | core: `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `InvalidAttribute`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`; service: `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess` |
 
 ## `trace.Attr` IS `metrics.Attr`
 
 Not "compatible with" — the same type. Both alias
-`internal/core/metrics.AttrValue`, which is OTel's `common/v1.KeyValue`/`AnyValue`,
+`internal/core/otel.AttrValue`, which is OTel's `common/v1.KeyValue`/`AnyValue`,
 shared by every signal. So is `trace.Resource`, which matters more: `service.name`
 is the key a backend correlates a trace with a metric on, and two Resource types
-could disagree about it.
+could disagree about it. (`ServiceNameKey` is one constant for the same reason.)
 
 `TestPublicAttributeIsTheMetricsAttribute` pins the assignment in both
-directions. ADR 0051 §Decision 2 has the reasoning and the deferred extraction
-that would make the import graph read forwards.
+directions. ADR 0051 §Decision 2 has the reasoning; the extraction it deferred —
+the shared model in its own package, under both signals — is done, so this
+package no longer reaches the metrics port at all.
+
+What is NOT shared is the refusal: an unusable attribute set on a span, event,
+link or Resource panics with this package's `InvalidAttribute` (`0.2.20.7`),
+where it used to carry the metrics code (`0.2.9.4`) because the refusal
+travelled with the type. And `Resource` / `Scope` no longer carry a
+`Normalized()` method — the tracer normalises them itself, with this signal's
+code and this signal's `DefaultScopeName` (the old `Scope.Normalized()` stamped
+the METRICS package's name). A v0 published-shape change (ADR 0040).
 
 ## `SDKTracer` is what `NewTracer` returns, and `Tracer` stays the port
 

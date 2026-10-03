@@ -4,7 +4,7 @@ package trace
 import (
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // SpanValue is a completed span: the OpenTelemetry trace data model's `Span`
@@ -45,7 +45,7 @@ type SpanValue struct {
 	// exporter in this SDK will ship one.
 	EndTime time.Time
 	// Attrs are the span's typed dimensions, sorted by Key.
-	Attrs []coremetrics.AttrValue
+	Attrs []coreotel.AttrValue
 	// Events are timestamped points inside the interval, in the order they
 	// were recorded.
 	Events []EventValue

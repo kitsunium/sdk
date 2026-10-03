@@ -4,9 +4,8 @@ package trace
 import (
 	"net/http"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -77,8 +76,8 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 	//: the CLIENT span is a child of whatever scope the caller is in.
 	ctx, span := t.tracer.Start(request.Context(), request.Method, coretrace.SpanParams{
 		Kind: coretrace.SpanKindClient,
-		Attrs: []coremetrics.AttrValue{
-			coremetrics.String(HTTPRequestMethodKey, request.Method),
+		Attrs: []coreotel.AttrValue{
+			coreotel.String(HTTPRequestMethodKey, request.Method),
 			//: Redacted(), never String(): url.URL.String() renders userinfo
 			//: verbatim, so a caller who dials https://user:secret@host puts that
 			//: password into a span attribute, which the exporter then ships to a
@@ -88,8 +87,8 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 			//: secret passed as ?api_key= still travels — that one the SDK cannot
 			//: fix without guessing which parameters are sensitive, and it is
 			//: stated in URLFullKey's own doc rather than left to be discovered.
-			coremetrics.String(URLFullKey, request.URL.Redacted()),
-			coremetrics.String(ServerAddressKey, request.URL.Host),
+			coreotel.String(URLFullKey, request.URL.Redacted()),
+			coreotel.String(ServerAddressKey, request.URL.Host),
 		},
 	})
 	//: the span closes on every exit, transport fault included.
@@ -105,7 +104,7 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 	if callErr != nil {
 		//: error.type names the failure without echoing the upstream's text,
 		//: which may carry an internal address.
-		span.SetAttrs(coremetrics.String(ErrorTypeKey, "transport"))
+		span.SetAttrs(coreotel.String(ErrorTypeKey, "transport"))
 		//: the message is left empty for the reason the server side leaves it
 		//: empty: a free-text field is read verbatim by an operator.
 		span.SetStatus(coretrace.StatusError, "")
@@ -113,7 +112,7 @@ func (t *tracedRoundTripper) RoundTrip(request *http.Request) (response *http.Re
 		return nil, callErr
 	}
 	//: the status the upstream answered with.
-	span.SetAttrs(coremetrics.Int64(HTTPResponseStatusCodeKey, int64(answer.StatusCode)))
+	span.SetAttrs(coreotel.Int64(HTTPResponseStatusCodeKey, int64(answer.StatusCode)))
 	//: on a CLIENT span a 4xx is a failed call — see httpClientErrorFloor.
 	if answer.StatusCode >= httpClientErrorFloor {
 		//: recorded without a message.

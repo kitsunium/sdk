@@ -9,8 +9,6 @@ go_library(
         "codes.go",
         "decode.go",
         "errors.go",
-        "open_flags_other.go",
-        "open_flags_unix.go",
         "prune.go",
         "rotate.go",
         "rotate_interval.go",
@@ -31,6 +29,7 @@ go_library(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/worker",
+        "//internal/service/internal/logfile",
         "//internal/service/writer/levelgate",
     ],
 )
@@ -51,7 +50,6 @@ go_test(
         "decode_internal_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
-        "open_flags_unix_internal_test.go",
         "prune_internal_test.go",
         "rotate_internal_test.go",
         "rotate_interval_bench_test.go",
@@ -67,6 +65,7 @@ go_test(
         "//internal/core/logger/level",
         "//internal/core/writer",
         "//internal/kernel/errs",
+        "//internal/service/internal/logfile",
     ],
 )
 

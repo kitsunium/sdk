@@ -3,6 +3,8 @@
 // SnapshotValue, whose field it is.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // SumValue is one series of a sum metric: the attribute set that identifies it
 // plus its value. Monotonicity and temporality are NOT here — they belong to
 // the metric, not to the point, which is the OTel data model's own split.
@@ -16,7 +18,7 @@ type SumValue struct {
 	// Cloning instead would cost one allocation per series per collection,
 	// i.e. it would scale the cost of scraping with cardinality, which is
 	// the exact axis the cardinality bound exists to contain.
-	Attrs []AttrValue
+	Attrs []coreotel.AttrValue
 	// Value is the series' total: cumulative since the meter started, or the
 	// delta since the previous collection, according to
 	// SumMetricValue.Temporality.

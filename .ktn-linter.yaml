@@ -878,6 +878,14 @@ rules:
   # would stutter, which the same linter's own naming rules discourage elsewhere.
   KTN-STRUCT-CTOR:
     exclude:
+      # kernel/plugin.Registry's zero value IS the empty registry, ready to
+      # use, as sync.Mutex's is an unlocked mutex: every registry is a
+      # package-level `var registry plugin.Registry[...]`, initialised before
+      # the first RegisterX at import. A NewRegistry() could only return that
+      # same zero value behind a pointer — a second way in that adds a heap
+      # allocation and nothing else.
+      - "**/internal/kernel/plugin/registry.go"
+      - "internal/kernel/plugin/registry.go"
       # service/mail/spool.Spool is the one main type of package spool, so
       # Go's convention names its constructor New — spool.New, as server.New
       # below. NewSpool would stutter at every call site (spool.NewSpool),
@@ -955,16 +963,18 @@ rules:
       # NewNewKeyValue()", which is not a name anything could satisfy.)
       - "**/internal/service/crypto/jwk/**"
       - "internal/service/crypto/jwk/**"
-      # core/metrics.AttrValue is built by FOUR kind-specific constructors —
+      # core/otel.AttrValue is built by FOUR kind-specific constructors —
       # String / Bool / Int64 / Float64 — and by nothing else: the value payload
       # is unexported precisely so a struct literal cannot produce an attribute
       # whose kind and payload disagree. A NewAttrValue(key, kind, num, str)
       # would be exactly the "poorly initialized struct" the rule exists to
       # prevent, reachable in one call. (The rule's own message here reads
       # "constructor NewNewAttrValue()", which is not a name anything could
-      # satisfy — the same broken suggestion the jwk entry above records.)
-      - "**/internal/core/metrics/**"
-      - "internal/core/metrics/**"
+      # satisfy — the same broken suggestion the jwk entry above records.) It
+      # was declared in core/metrics until the shared OTel model moved to
+      # core/otel (ADR 0051 §Decision 2); the exclusion moved with the type.
+      - "**/internal/core/otel/**"
+      - "internal/core/otel/**"
       # The i18n values (ADR 0063) are the jwk and metrics case again: every
       # one comes out of a constructor that VALIDATES, and each is named for
       # what it does rather than for the type it returns. TagValue comes from
@@ -1125,6 +1135,15 @@ rules:
       # first, and from every storage port beside them (ADR 0139).
       - "**/internal/service/docstore/sql_store.go"
       - "internal/service/docstore/sql_store.go"
+      # kernel/plugin.Registry is the word every registrar in the SDK is
+      # discussed in — "the exporter registry", "the codec registry",
+      # RegisterExporter — and the table those registrars now share. None of
+      # the accepted suffixes names it: it is not a Value (it has identity:
+      # each registrar's package-level table is THE table), nor a State, a
+      # Config, a Spec or an Event, and "RegistryState" would name the one
+      # generic table differently from every registry built on it.
+      - "**/internal/kernel/plugin/registry.go"
+      - "internal/kernel/plugin/registry.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the

@@ -9,6 +9,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
@@ -62,10 +63,10 @@ func TestObservableCallbacksAccumulate(t *testing.T) {
 	t.Parallel()
 	m := svcmetrics.NewMeter()
 	m.ObservableGauge("shards", func(observe coremetrics.ObserveFloat64) {
-		observe(1, coremetrics.String("shard", "a"))
+		observe(1, coreotel.String("shard", "a"))
 	})
 	m.ObservableGauge("shards", func(observe coremetrics.ObserveFloat64) {
-		observe(2, coremetrics.String("shard", "b"))
+		observe(2, coreotel.String("shard", "b"))
 	})
 
 	points := m.Collect().Gauges["shards"].Points
@@ -109,7 +110,7 @@ func TestObservableHonoursTheCardinalityBound(t *testing.T) {
 	m := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{MaxSeriesPerInstrument: 3})
 	m.ObservableUpDownCounter("queue_depth", func(observe coremetrics.ObserveInt64) {
 		for i := range 50 {
-			observe(int64(i), coremetrics.String("id", strconv.Itoa(i)))
+			observe(int64(i), coreotel.String("id", strconv.Itoa(i)))
 		}
 	})
 
