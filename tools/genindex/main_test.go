@@ -34,6 +34,17 @@ type Widget struct{}
 // Do performs the thing.
 func (w Widget) Do() {}
 
+// NewWidget builds a Widget.
+func NewWidget() *Widget { return nil }
+
+// ParseWidget reads a Widget, or says why it cannot.
+func ParseWidget(text string) (Widget, error) { return Widget{}, nil }
+
+// Widgets lists every Widget.
+func Widgets() []Widget { return nil }
+
+func newWidget() *Widget { return nil }
+
 // Limit is the ceiling.
 const Limit = 10
 
@@ -658,20 +669,24 @@ func Test_emit(t *testing.T) {
 		// wantQualified is the qualified form one row must carry.
 		wantQualified string
 	}
+	everyName := []string{
+		"Exported", "Widget", "Do", "NewWidget", "ParseWidget", "Widgets",
+		"Limit", "A", "B", "Registry",
+	}
 	tests := []tc{
 		{
 			name:         "a nested package",
 			packageShort: "fixture",
-			//: a function, a type, its method, a lone const, both names of a
-			//: const block, and a var.
-			wantNames:     []string{"Exported", "Widget", "Do", "Limit", "A", "B", "Registry"},
+			//: a function, a type, its method, the three functions go/doc files
+			//: under it, a lone const, both names of a const block, and a var.
+			wantNames:     everyName,
 			wantQualified: "fixture.Exported",
 		},
 		{
 			//: the root falls back to the package's own name.
 			name:         "the module root",
 			packageShort: ".",
-			wantNames:    []string{"Exported", "Widget", "Do", "Limit", "A", "B", "Registry"},
+			wantNames:    everyName,
 			//: no leading dot, which is what the fallback exists to prevent.
 			wantQualified: "fixture.Exported",
 		},
@@ -716,6 +731,73 @@ func Test_emit(t *testing.T) {
 			t.Parallel()
 			runCase(t, c)
 		})
+	}
+}
+
+// Test_emit_typeFuncs pins the functions go/doc files under a type rather than
+// with the package: one whose only result type of the package is that type —
+// *T, T beside an error, []T. Each is a package-level function and gets that
+// row exactly once: a func, no receiver, its own name and anchor. Indexing
+// p.Funcs alone dropped every one of them, 303 of the 444 functions pkg/v1
+// declares, and nothing reported a symbol missing.
+func Test_emit_typeFuncs(t *testing.T) {
+	t.Parallel()
+	dp, fset := parseFixture(t, fixtureSource)
+	rows := emit(dp, fset, "fixture", &indexOptions{urlBase: "/v1/local"})
+
+	type tc struct {
+		// name describes the case.
+		name string
+		// want is the function the row must be for.
+		want string
+		// wantSignature is the signature the row must carry.
+		wantSignature string
+	}
+	tests := []tc{
+		{name: "a constructor returning a pointer", want: "NewWidget", wantSignature: "func NewWidget() *Widget"},
+		{name: "a parser returning the type beside an error", want: "ParseWidget", wantSignature: "func ParseWidget(text string) (Widget, error)"},
+		{name: "a function returning a slice of the type", want: "Widgets", wantSignature: "func Widgets() []Widget"},
+		{name: "a function filed with the package", want: "Exported", wantSignature: "func Exported(a int) error"},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var found []symbol
+		for _, row := range rows {
+			if row.Name == c.want {
+				found = append(found, row)
+			}
+		}
+		//: once: a second row would offer the same result twice.
+		if len(found) != 1 {
+			t.Fatalf("%q produced %d rows, want exactly 1", c.want, len(found))
+		}
+		row := found[0]
+		if row.Kind != "func" || row.Receiver != "" {
+			t.Errorf("row = %+v, want a func row with no receiver", row)
+		}
+		if row.Qualified != "fixture."+c.want || row.URL != "/v1/local/fixture/#"+c.want {
+			t.Errorf("row addresses %q at %q, want the function's own name and anchor", row.Qualified, row.URL)
+		}
+		if row.Signature != c.wantSignature || row.Doc == "" {
+			t.Errorf("row signature %q and synopsis %q, want %q and a synopsis", row.Signature, row.Doc, c.wantSignature)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	//: every exported function of the fixture, and nothing else, is a func row.
+	var funcs []string
+	for _, row := range rows {
+		if row.Kind == "func" {
+			funcs = append(funcs, row.Name)
+		}
+	}
+	slices.Sort(funcs)
+	if want := []string{"Exported", "NewWidget", "ParseWidget", "Widgets"}; !slices.Equal(funcs, want) {
+		t.Errorf("func rows = %q, want %q", funcs, want)
 	}
 }
 

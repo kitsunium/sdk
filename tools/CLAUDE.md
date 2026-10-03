@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-03T18:53:00Z -->
 # tools/
 
 ## Purpose
@@ -10,7 +10,7 @@ Single-purpose scripts, data files and small Go programs the build tooling calls
 | Path | Called by | Emits |
 |---|---|---|
 | `workspace_status.sh` | `bazel build --stamp` (via `workspace_status_command` in `.bazelrc`) | `STABLE_VERSION <git-sha>` to stdout, falling back to `STABLE_VERSION dev` outside a git checkout |
-| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform that compiles the file — ten of the cross-build lane's twelve cells, illumos and solaris not among them (ADR 0138; see `genindex/CLAUDE.md`) |
+| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform that compiles the file — the cross-build lane's twelve cells, which `Test_platforms` reads from `bazel-ci.yml` (ADR 0138, ADR 0144; see `genindex/CLAUDE.md`) |
 | `sdkguard/` (Go program, stdlib-only) | a consumer's CI / `make`, or `go run github.com/kitsunium/sdk/tools/sdkguard@latest` | diagnostics on stderr in `file:line:col` form; exit 1 on findings, 2 on tool error — see `tools/sdkguard/CLAUDE.md` |
 | `alloc-lane-targets.txt` (plain list, `#` comments) | `make test-alloc`, the `bazel-ci.yml` alloc step, and `scripts/pre-commit/check-alloc-lane-coverage.sh` | nothing — it IS the data: one Bazel test target per line for `bazel test --config=alloc` |
 
@@ -41,7 +41,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 ### `genindex/`
 
 1. `docs/site/scripts/gen-symbols.mjs` (a Node prebuild step) reads `versions.json` + `build-info.json`, then spawns `go run github.com/kitsunium/sdk/tools/genindex` with `GOWORK=off` (keeping the workspace invariant from the root `CLAUDE.md` intact: `go.work` names the root and the modules the release chain tags, nothing else).
-2. `genindex` walks every package under `-input` (e.g. `pkg/v1`), uses `go/parser` + `go/doc` to extract exported symbols, and emits one JSON row per func / type / method / const / var. `-source-url-prefix` (set to the current commit's GitHub blob URL) is concatenated with the repo-relative file path + line number to produce the per-symbol `sourceUrl`.
+2. `genindex` walks every package under `-input` (e.g. `pkg/v1`), uses `go/parser` + `go/doc` to extract exported symbols, and emits one JSON row per func / type / method / const / var — a function go/doc files under the type it returns (a constructor, a parser) included. `-source-url-prefix` (set to the current commit's GitHub blob URL) is concatenated with the repo-relative file path + line number to produce the per-symbol `sourceUrl`.
 3. The docs site's `Search.astro` component lazy-loads the JSON on first ⌘K and feeds MiniSearch.
 
 ## Conventions

@@ -23,12 +23,17 @@ import (
 // an aliased Broker resolves nothing there while a link to Broker itself does.
 const docLinkAdvice string = "a member of an ALIASED type cannot be a doc link in the package that aliases it — write [Type].Member, which links the alias and reads the same (ADR 0138)"
 
-// platforms are the targets the cross-build lane compiles (ADR 0137). A
-// package's symbols differ between them — a _windows.go file declares what a
-// _linux.go one does not — and pkg.go.dev renders a package per build context,
-// so a comment is judged against what its package declares on each platform
-// that compiles the file holding it. One table over the union of every file
-// would accept a link to a symbol no single platform has.
+// platforms are the twelve targets the cross-build lane compiles (ADR 0137,
+// ADR 0144), in the order bazel-ci.yml lists them; Test_platforms holds the two
+// tables equal. A package's symbols differ between them — a _windows.go file
+// declares what a _linux.go one does not — and pkg.go.dev renders a package per
+// build context, so a comment is judged against what its package declares on
+// each platform that compiles the file holding it. One table over the union of
+// every file would accept a link to a symbol no single platform has.
+//
+// illumos and solaris are two cells, not one: the go command selects a
+// _solaris.go file and the solaris build tag for both, and an _illumos.go file
+// for illumos alone, so each declares what the other may not.
 var platforms = []platform{
 	{goos: "linux", goarch: "amd64"},
 	{goos: "linux", goarch: "arm64"},
@@ -40,6 +45,8 @@ var platforms = []platform{
 	{goos: "openbsd", goarch: "amd64"},
 	{goos: "netbsd", goarch: "amd64"},
 	{goos: "dragonfly", goarch: "amd64"},
+	{goos: "illumos", goarch: "amd64"},
+	{goos: "solaris", goarch: "amd64"},
 }
 
 // platform is one GOOS/GOARCH pair a doc comment is judged under.
