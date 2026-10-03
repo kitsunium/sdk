@@ -55,8 +55,8 @@ its own until a second consumer shows it is generic.
   joined — beside the first-error mode it has. `health`'s probe runner,
   `queue`'s consumer and `scheduler`'s run loop adopt it in place of their
   `sync.WaitGroup`s.
-- `worker` and `batcher` take a `clock.Timed`, so their ticks run on the clock
-  a service injects; `clock.System` stays the default.
+- `worker` and `batcher` take a clock (a `clock.Waiter` as built), so their
+  ticks run on the clock a service injects; `clock.System` stays the default.
 - `ring` gains a multi-producer mode beside the single-producer one.
 
 ### 3. Added: `backoff`, `semver`, `flock`, and a generic registry
@@ -102,6 +102,30 @@ published, which is why §2 comes first.
   registries rewritten as instances, the five service edges onto `resilience`
   replaced by `kernel/backoff`, then the `pkg/v1` aliases. This record changes
   no code.
+- **As implemented so far**, and where the code settled a detail this record
+  left open:
+  - `topic` is deleted, and the five service edges are gone: `lifecycle`,
+    `queue`, `statemachine`, `mail/spool` and `net/server` import
+    `kernel/backoff`, whose `Value.Delay` is the curve and whose `Grow`,
+    `Widen`, `NormalMultiplier` and `NormalJitter` are its two halves as
+    package functions, so nothing new reaches the public alias's method set.
+  - `group`'s join mode is `NewJoined` — every failure joined in submission
+    order, the first one still cancelling the siblings — beside `Collect`,
+    which returns each task's value in order. `queue`'s consumer adopts
+    `NewJoined` and `health`'s probe runner `Collect`. `scheduler` does not
+    adopt it, deliberately: a job's error is published and never returned, and
+    one entry's failure must not cancel the others.
+  - `worker.Every` takes `WithClock` and `batcher.Config` a `Clock`, both a
+    `clock.Waiter` (the narrowest port that arms a ticker), the wall clock when
+    unset.
+  - `plugin.Registry[K cmp.Ordered, V comparable]` landed with the metrics and
+    trace exporter registries as its first instances. It REPORTS a conflict
+    (`Publish` returns false) instead of taking the caller's codes at
+    construction: the registrar asks `Unusable` before publishing and refuses
+    with its own code, so the kernel table builds no error. The codec, writer,
+    crypto, transform, id and view registries are still their own copies.
+  - Not yet: `ring`'s multi-producer mode, `semver`, `flock`, and the `pkg/v1`
+    aliases of §4.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
 - Five service-to-service edges disappear from the dependency graph; the
