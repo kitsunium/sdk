@@ -85,11 +85,15 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 
 ## How to declare a sentinel (emitter packages)
 
+Since ADR 0160 §2 a service package's codes are declared in the core package at
+its path — here the logger engine's, in `internal/core/observe/logger` — and the
+service only returns them.
+
 ```go
-// service/observe/logger/codes.go
+// core/observe/logger/codes.go
 const CodeWriterNil errs.Code = 0x00_03_01_01 // 0.3.1.1
 
-// service/observe/logger/errors.go
+// core/observe/logger/errors.go
 var WriterNil = errs.Define(CodeWriterNil, "WRITER_NIL",
     "Log handler requires a non-nil writer",                       // public, literal, ≤120 runes
     "service/observe/logger.NewTextHandler called with nil io.Writer")     // private (log-only)

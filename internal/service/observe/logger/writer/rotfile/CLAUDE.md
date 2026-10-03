@@ -94,7 +94,7 @@ done here, and named rather than implied.
 
 - `Open` type-asserts `rotfile.Config`; a mismatch returns the shared
   `core/observe/logger/writer.WriterConfigInvalid`. An empty `Path` or a symlink target
-  surfaces this package's `RotFileOpenFailed`.
+  surfaces `RotFileOpenFailed` (declared in `core/observe/logger/writer/rotfile`).
 - `Write` is mutex-serialised; it rotates **before** the write when the
   projected size would exceed `MaxBytes` (`MaxBytes <= 0` disables rotation; an
   empty file is never spun into a backup so a single oversized record still
