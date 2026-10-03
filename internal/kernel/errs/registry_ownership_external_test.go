@@ -146,7 +146,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_58_00: "internal/service/app/statemachine",
 	0x00_03_59_00: "internal/service/observe/profiling",
 	0x00_03_5A_00: "internal/service/data/codec/jsonpatch",
-	0x00_03_5B_00: "internal/service/proc/ipc",     // ADR 0148
+	0x00_03_5B_00: "internal/core/proc/ipc",        // ADR 0148
 	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework module
 	0x00_04_02_00: "framework/internal/kit",
 	0x00_04_03_00: "framework/telemetry", // ADR 0149

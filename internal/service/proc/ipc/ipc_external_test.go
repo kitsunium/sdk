@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/proc/ipc"
 )
@@ -58,12 +59,12 @@ func TestARoundTripKnowsItsPeer(t *testing.T) {
 	if s, err := os.Stat(cfg.Path); err != nil || s.Mode().Perm() != 0o600 {
 		t.Fatalf("the socket: %v %v, want 0600", s, err)
 	}
-	done := make(chan ipc.PeerValue, 1)
+	done := make(chan coreipc.PeerValue, 1)
 	go func() {
 		c, err := ln.Accept()
 		if err != nil {
 			t.Error(err)
-			done <- ipc.PeerValue{}
+			done <- coreipc.PeerValue{}
 			return
 		}
 		defer closeOrLog(t, c)
@@ -117,7 +118,7 @@ func TestALiveSocketIsNeverTakenOver(t *testing.T) {
 			closeOrLog(t, c)
 		}
 	}()
-	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, ipc.CodeInUse) {
+	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, coreipc.CodeInUse) {
 		t.Fatalf("a second listener on a live socket: %v, want IN_USE", err)
 	}
 	if _, err := os.Stat(cfg.Path); err != nil {
@@ -159,7 +160,7 @@ func TestSomethingElseAtThePathIsNeverRemoved(t *testing.T) {
 	if err := os.WriteFile(cfg.Path, []byte("keep me"), 0o600); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, ipc.CodeDirectoryUnsafe) {
+	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, coreipc.CodeDirectoryUnsafe) {
 		t.Fatalf("a regular file at the socket path: %v, want DIRECTORY_UNSAFE", err)
 	}
 	if b, err := os.ReadFile(cfg.Path); err != nil || string(b) != "keep me" {
@@ -176,10 +177,10 @@ func TestAnUnsafeDirectoryIsRefusedOnBothSides(t *testing.T) {
 		t.Fatal(err)
 	}
 	cfg := ipc.Config{Path: filepath.Join(dir, "d.sock")}
-	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, ipc.CodeDirectoryUnsafe) {
+	if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, coreipc.CodeDirectoryUnsafe) {
 		t.Errorf("Listen in a world-writable directory: %v", err)
 	}
-	if _, err := ipc.Dial(t.Context(), &cfg); !errs.HasCode(err, ipc.CodeDirectoryUnsafe) {
+	if _, err := ipc.Dial(t.Context(), &cfg); !errs.HasCode(err, coreipc.CodeDirectoryUnsafe) {
 		t.Errorf("Dial into a world-writable directory: %v", err)
 	}
 	link := dir + "-link"
@@ -194,7 +195,7 @@ func TestAnUnsafeDirectoryIsRefusedOnBothSides(t *testing.T) {
 	if err := os.Chmod(dir, 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ipc.NewListener(&ipc.Config{Path: filepath.Join(link, "d.sock")}); !errs.HasCode(err, ipc.CodeDirectoryUnsafe) {
+	if _, err := ipc.NewListener(&ipc.Config{Path: filepath.Join(link, "d.sock")}); !errs.HasCode(err, coreipc.CodeDirectoryUnsafe) {
 		t.Errorf("Listen through a link: %v", err)
 	}
 }
@@ -206,7 +207,7 @@ func TestAConfigurationIsCheckedBeforeAnythingIsTouched(t *testing.T) {
 		{Path: "/" + strings.Repeat("x", 200)},
 		{Path: "/tmp/x.sock", AllowUIDs: []int{-1}},
 	} {
-		if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, ipc.CodeMisconfigured) {
+		if _, err := ipc.NewListener(&cfg); !errs.HasCode(err, coreipc.CodeMisconfigured) {
 			t.Errorf("NewListener(%+v) = %v, want MISCONFIGURED", cfg, err)
 		}
 	}
@@ -217,7 +218,7 @@ func TestADialToNothingSaysSo(t *testing.T) {
 	if err := os.MkdirAll(filepath.Dir(cfg.Path), 0o700); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ipc.Dial(t.Context(), &cfg); !errs.HasCode(err, ipc.CodeDialFailed) {
+	if _, err := ipc.Dial(t.Context(), &cfg); !errs.HasCode(err, coreipc.CodeDialFailed) {
 		t.Errorf("Dial to no listener: %v, want DIAL_FAILED", err)
 	}
 }
@@ -227,8 +228,53 @@ func TestADialToNothingSaysSo(t *testing.T) {
 // made unsafe.
 func TestADialBeforeTheDirectoryExistsIsNobodyListening(t *testing.T) {
 	cfg := new(ipc.Config{Path: filepath.Join(socketDir(t), "never", "d.sock")})
-	if _, err := ipc.Dial(t.Context(), cfg); !errs.HasCode(err, ipc.CodeDialFailed) {
+	if _, err := ipc.Dial(t.Context(), cfg); !errs.HasCode(err, coreipc.CodeDialFailed) {
 		t.Errorf("Dial with no directory: %v, want DIAL_FAILED", err)
+	}
+}
+
+// TestTheEnginesAreReachedThroughThePorts accepts and dials through the core
+// ports alone, the way code that holds a coreipc.Listener and a
+// coreipc.Dialer — and is handed these engines in production — does
+// (ADR 0160). A dialer refuses its configuration before it touches anything,
+// as the listener does.
+//
+// Goroutine lifecycle: one goroutine accepts one connection, closes it and
+// reports on a buffered channel; the test waits on that channel.
+func TestTheEnginesAreReachedThroughThePorts(t *testing.T) {
+	if _, err := ipc.NewDialer(&ipc.Config{Path: "relative.sock"}); !errs.HasCode(err, coreipc.CodeMisconfigured) {
+		t.Errorf("NewDialer with a relative path: %v, want MISCONFIGURED", err)
+	}
+	cfg := ipc.Config{Path: filepath.Join(socketDir(t), "p.sock")}
+	engine, err := ipc.NewListener(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var ln coreipc.Listener = engine
+	defer closeOrLog(t, ln)
+	dialer, err := ipc.NewDialer(&cfg)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var d coreipc.Dialer = dialer
+	accepted := make(chan error, 1)
+	go func() {
+		c, err := ln.Accept()
+		if err == nil {
+			closeOrLog(t, c)
+		}
+		accepted <- err
+	}()
+	c, err := d.Dial(t.Context())
+	if err != nil {
+		t.Fatal(err)
+	}
+	closeOrLog(t, c)
+	if err := <-accepted; err != nil {
+		t.Errorf("Accept through the port: %v", err)
+	}
+	if ln.Path() != cfg.Path || ln.Refused() != 0 || ln.Addr() == nil {
+		t.Errorf("the port's view: path %q, refused %d, addr %v", ln.Path(), ln.Refused(), ln.Addr())
 	}
 }
 
@@ -240,7 +286,7 @@ func TestAcceptAfterCloseIsClosed(t *testing.T) {
 	if err := ln.Close(); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ln.Accept(); !errs.HasCode(err, ipc.CodeClosed) {
+	if _, err := ln.Accept(); !errs.HasCode(err, coreipc.CodeClosed) {
 		t.Errorf("Accept after Close: %v, want CLOSED", err)
 	}
 }

@@ -37,7 +37,7 @@ type Listener struct {
 	opts     listenerOptions
 
 	mu     sync.Mutex
-	ln     *ipc.Listener
+	ln     ipc.Listener
 	path   string
 	cancel context.CancelFunc
 	open   map[*ipc.Conn]bool

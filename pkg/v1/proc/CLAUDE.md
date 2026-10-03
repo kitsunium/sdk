@@ -28,14 +28,16 @@ no child either.
 | `memlimit/` | the runtime soft memory limit from the cap already bounding this process (ADR 0075) | `memlimit` |
 | `systemd/notify/` | sd_notify(3): the notifier, and `Listen` for a supervisor | `systemd/notify` |
 | `systemd/listen/` | socket activation, sd_listen_fds(3), and `Prepare` for an activator | `systemd/listen` |
-| `ipc/` | a private socket between processes of one machine, the peer the kernel names (ADR 0148) | `ipc` |
+| `ipc/` | a private socket between processes of one machine, the peer the kernel names (ADR 0148); `Listener` and `Dialer` are ports a test can double (ADR 0160) | `ipc` |
 
 `systemd/` holds no Go code: it groups the two systemd protocols, and each was
 renamed for the path it sits at — package `notify`, formerly `sdnotify`, and
 package `listen`, formerly `sdlisten` (`systemd/CLAUDE.md`). Every child but
 `ipc` builds on `internal/core/proc` — its ports, values and `0.2.6.*`
-sentinels; `ipc` re-exports the `0.3.91.*` codes its engine declares. Each
-child has its own `CLAUDE.md` and generated `README.md`.
+sentinels; `ipc` builds on its own contract, `internal/core/proc/ipc` — the
+`Listener` and `Dialer` ports, `Peer`, `Conn` and the `0.3.91.*` codes it
+re-exports (ADR 0160). Each child has its own `CLAUDE.md` and generated
+`README.md`.
 
 ## Why this exists
 

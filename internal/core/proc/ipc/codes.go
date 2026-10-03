@@ -1,4 +1,9 @@
-// Package ipc — range 0.3.91.* (ADR 0148).
+// Package ipc — the private socket's codes, range 0.3.91.* (ADR 0148).
+//
+// The range was allocated to internal/service/proc/ipc, the engine, and is
+// declared here, at the same path in the core, since ADR 0160. The values did
+// not change with the move, and the LL byte still records the service layer
+// that allocated them.
 package ipc
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -44,5 +49,5 @@ const CodeClosed errs.Code = 0x00_03_5B_08 // 0.3.91.8
 // It is its own code, as LOCK_PATH_REDIRECTED is lock's (ADR 0083), because
 // the remedy differs: DIRECTORY_UNSAFE asks for a chmod or a chown, this asks
 // a human to look at a component that may be an attack in progress — or to
-// move the socket under [RuntimeDir].
+// move the socket under the directory the engine's RuntimeDir names.
 const CodePathUnsafe errs.Code = 0x00_03_5B_09 // 0.3.91.9

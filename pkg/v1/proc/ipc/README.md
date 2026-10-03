@@ -33,6 +33,10 @@ Listen dials a socket already at the path first. One that answers is left alone 
 
 [RuntimeDir](<#RuntimeDir>) names an application's directory: $RUNTIME\_DIRECTORY \(systemd\), $XDG\_RUNTIME\_DIR/\<app\>, %LOCALAPPDATA%\\\<app\> on Windows, else \<tmp\>/\<app\>\-\<uid\>. A path is at most the shortest sun\_path any supported kernel has, less its NUL.
 
+### Ports, and the doubles they admit
+
+[Listener](<#Listener>) and [Dialer](<#Dialer>) are interfaces, as net.Listener is: [Listen](<#Listen>) and [NewDialer](<#NewDialer>) return the socket engine behind them, and code that holds one can be handed a double in a test — connections from net.Pipe, with the [Peer](<#Peer>) the test chooses — instead of a socket on disk. Both are frozen at the methods they have; a capability added later is a second interface an endpoint may also implement, never a method added to these.
+
 ## Index
 
 - [Constants](<#constants>)
@@ -40,8 +44,10 @@ Listen dials a socket already at the path first. One that answers is left alone 
 - [type Config](<#Config>)
 - [type Conn](<#Conn>)
   - [func Dial\(ctx context.Context, cfg Config\) \(\*Conn, error\)](<#Dial>)
+- [type Dialer](<#Dialer>)
+  - [func NewDialer\(cfg Config\) \(Dialer, error\)](<#NewDialer>)
 - [type Listener](<#Listener>)
-  - [func Listen\(cfg Config\) \(\*Listener, error\)](<#Listen>)
+  - [func Listen\(cfg Config\) \(Listener, error\)](<#Listen>)
 - [type Peer](<#Peer>)
 
 
@@ -51,20 +57,20 @@ Listen dials a socket already at the path first. One that answers is left alone 
 
 ```go
 const (
-    CodeMisconfigured   errs.Code = svcipc.CodeMisconfigured
-    CodeDirectoryUnsafe errs.Code = svcipc.CodeDirectoryUnsafe
-    CodeInUse           errs.Code = svcipc.CodeInUse
-    CodeListenFailed    errs.Code = svcipc.CodeListenFailed
-    CodePeerRefused     errs.Code = svcipc.CodePeerRefused
-    CodeDialFailed      errs.Code = svcipc.CodeDialFailed
-    CodeEndpointForeign errs.Code = svcipc.CodeEndpointForeign
-    CodeClosed          errs.Code = svcipc.CodeClosed
-    CodePathUnsafe      errs.Code = svcipc.CodePathUnsafe
+    CodeMisconfigured   errs.Code = coreipc.CodeMisconfigured
+    CodeDirectoryUnsafe errs.Code = coreipc.CodeDirectoryUnsafe
+    CodeInUse           errs.Code = coreipc.CodeInUse
+    CodeListenFailed    errs.Code = coreipc.CodeListenFailed
+    CodePeerRefused     errs.Code = coreipc.CodePeerRefused
+    CodeDialFailed      errs.Code = coreipc.CodeDialFailed
+    CodeEndpointForeign errs.Code = coreipc.CodeEndpointForeign
+    CodeClosed          errs.Code = coreipc.CodeClosed
+    CodePathUnsafe      errs.Code = coreipc.CodePathUnsafe
 )
 ```
 
 <a name="RuntimeDir"></a>
-## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L103>)
+## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L138>)
 
 ```go
 func RuntimeDir(app string) string
@@ -73,25 +79,25 @@ func RuntimeDir(app string) string
 RuntimeDir is where an application's private sockets belong on this machine. It creates nothing.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L86>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L96>)
 
-Config is where a private socket lives and who, besides its own account, may use it.
+Config is where a private socket lives and who, besides its own account, may use it — the engine's configuration, shared by both ends.
 
 ```go
 type Config = svcipc.Config
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L90>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L100>)
 
 Conn is a connection with its peer's identity.
 
 ```go
-type Conn = svcipc.Conn
+type Conn = coreipc.Conn
 ```
 
 <a name="Dial"></a>
-### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L99>)
+### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L134>)
 
 ```go
 func Dial(ctx context.Context, cfg Config) (*Conn, error)
@@ -99,31 +105,49 @@ func Dial(ctx context.Context, cfg Config) (*Conn, error)
 
 Dial connects to the private socket at cfg.Path, within ctx and one second.
 
-<a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L92>)
+<a name="Dialer"></a>
+## type [Dialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L107>)
 
-Listener accepts the connections of admitted peers only.
+Dialer is the connecting end of a private socket: it reaches the listener its configuration names, and refuses one it cannot trust before a byte is sent.
 
 ```go
-type Listener = svcipc.Listener
+type Dialer = coreipc.Dialer
+```
+
+<a name="NewDialer"></a>
+### func [NewDialer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L124>)
+
+```go
+func NewDialer(cfg Config) (Dialer, error)
+```
+
+NewDialer returns the engine behind the Dialer port for the private socket at cfg.Path. The configuration is checked here, before anything is touched, and copied: editing cfg's slices afterwards changes nothing.
+
+<a name="Listener"></a>
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L103>)
+
+Listener is the accepting end of a private socket: it hands out the connections of admitted peers only, and closes and counts the others.
+
+```go
+type Listener = coreipc.Listener
 ```
 
 <a name="Listen"></a>
-### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L96>)
+### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L112>)
 
 ```go
-func Listen(cfg Config) (*Listener, error)
+func Listen(cfg Config) (Listener, error)
 ```
 
-Listen opens the private socket at cfg.Path.
+Listen opens the private socket at cfg.Path and returns the engine behind the Listener port.
 
 <a name="Peer"></a>
-## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L88>)
+## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/proc/ipc/ipc.go#L98>)
 
 Peer is who is at the other end of a connection, as the kernel says.
 
 ```go
-type Peer = svcipc.PeerValue
+type Peer = coreipc.PeerValue
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

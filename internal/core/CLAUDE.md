@@ -19,7 +19,8 @@ with `logger/level` and `logger/writer` beneath it, `metrics`, `otel`,
 `scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
 one package, that package sits at the family's path (`crypto/`, `net/`,
 `proc/`), and a service package beneath it with codes, values or ports of its
-own is mirrored beneath it at the same path (`crypto/key/jwk` — ADR 0160). No
+own is mirrored beneath it at the same path (`crypto/key/jwk`, `proc/ipc` —
+ADR 0160). No
 domain sits at the root of this layer any more, and the root
 `CLAUDE.md` architecture tree names every package by its path
 (`check-domain-docs.sh`).
@@ -35,6 +36,7 @@ domain sits at the root of this layer any more, and the root
 | `app/mail/` | electronic-mail port: `Transport` frozen at one method, `BatchSender`/`Outbox` siblings, the message as a value (`MessageValue`/`AddressValue`/`AttachmentValue`/`HeaderFieldValue`), `EnvelopeValue` where Bcc becomes RCPT TO and no header, and the injection gate every writer runs — CR/LF/NUL in a header is a typed refusal, never a repair; **no registry** (ADR 0064) | `0.2.31.*` |
 | `observe/logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
+| `proc/ipc/` | the private socket's contract: the `Listener` port (frozen at five — `Accept`/`Addr`/`Close`/`Path`/`Refused`) and the `Dialer` port (frozen at one), `PeerValue` (the kernel's word on the peer, `Verified` false where only the directory admitted it) and `Conn`; the engine is `internal/service/proc/ipc`, and its `Config` stays there (ADR 0074, ADR 0148, ADR 0160) | `0.3.91.*` (allocated to the service, value unchanged) |
 | `data/queue/` | asynchronous DURABLE message-queue contract: the `Broker` port FROZEN at four methods (`Publish`/`Receive`/`Ack`/`Nack`), the `Handler` FUNC port, `MessageValue`/`DeliveryValue`/`LeaseValue`/`ReceiptValue`/`NackValue`/`DeadLetterValue`, `PolicyValue` + its shared guard (with `MaxRetryDelay`, a retry delay that grows — ADR 0151), and `DeadLetterReader`/`LeaseExtender`/`Waker` (+ `WakeValue`)/`Rejecter`/`DeadLetterManager` as the five ADR 0039 siblings — the third lets an idle consumer sleep until a publication or a due instant instead of polling (ADR 0104), the fourth dead-letters a leased message at once and the fifth replays or deletes a dead letter (ADR 0151); `DoNotRetry` marks a failure no retry can fix on the wrap trail, so the cause stays the origin a dead letter records; **no registry**. **`queue` is not `events`** — many processes, asynchronous, a consumer's goroutine, durable, retried, dead-lettered; it is the right-hand column of ADR 0053's frontier table, and the routing key is a NAME rather than a Go type precisely because a type has no identity in another process. Delivery is AT-LEAST-ONCE and the type says so: `Deliveries` counts from 1 on every delivery. Both ADR 0031 branches live in `PolicyValue` (ADR 0054) | `0.2.23.*` |
 | `app/id/` | `Generator` port + `Scheme` registry (UUIDv4/v7, ULID, snowflake, NanoID, KSUID; TypeID is constructor-only — it needs a prefix, so nothing is registered under it); canonical-string output (ADR 0024) | `0.2.7.*` |
 | `app/i18n/` | message-translation port: `Catalog` frozen at two methods with `KeyLister`/`Fallbacker` as ADR 0039 siblings, `TagValue` (BCP 47 subset), `MessageValue` (compiled at load), CLDR `Form` (`FormOther` is the zero), `CountValue` (the CLDR operands, carrying the DISPLAY precision) and `Args map[string]string`; **no registry** (ADR 0063) | `0.2.30.*` |
@@ -106,6 +108,7 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `crypto/key/jwk/` — see `internal/core/crypto/key/jwk/CLAUDE.md` (the JWK format's codes, declared at the path that mirrors the service — ADR 0160)
 - `data/transform/` — see `internal/core/data/transform/CLAUDE.md`
 - `proc/` — see `internal/core/proc/CLAUDE.md` (OS process-supervision foundation, ADR 0016)
+- `proc/ipc/` — see `internal/core/proc/ipc/CLAUDE.md` (the private socket's ports and values, and why the configuration is not among them — ADR 0160)
 - `data/queue/` — see `internal/core/data/queue/CLAUDE.md` (the frozen Broker, at-least-once in the type, and why the routing key is a name — ADR 0054; the siblings and the mark ADR 0151 added)
 - `app/id/` — see `internal/core/app/id/CLAUDE.md` (identifier generation, ADR 0024)
 - `app/i18n/` — see `internal/core/app/i18n/CLAUDE.md` (the frozen Catalog, the CLDR Form, and why the plural rules follow the message — ADR 0063)

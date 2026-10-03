@@ -11,6 +11,7 @@ import (
 	"testing"
 	"time"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/proc/ipc"
 )
@@ -20,7 +21,7 @@ import (
 func closeOrFail(t *testing.T, c io.Closer) {
 	t.Helper()
 	t.Cleanup(func() {
-		if err := c.Close(); err != nil && !errors.Is(err, os.ErrClosed) && !errs.HasCode(err, ipc.CodeClosed) {
+		if err := c.Close(); err != nil && !errors.Is(err, os.ErrClosed) && !errs.HasCode(err, coreipc.CodeClosed) {
 			t.Errorf("close: %v", err)
 		}
 	})
@@ -45,7 +46,7 @@ func TestAPipeCarriesALineBothWays(t *testing.T) {
 	}
 	closeOrFail(t, ln)
 	type accepted struct {
-		c   *ipc.Conn
+		c   *coreipc.Conn
 		err error
 	}
 	got := make(chan accepted, 1)
@@ -95,7 +96,7 @@ func TestASecondPipeListenerIsInUse(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if _, err := ipc.NewListener(cfg); !errs.HasCode(err, ipc.CodeInUse) {
+	if _, err := ipc.NewListener(cfg); !errs.HasCode(err, coreipc.CodeInUse) {
 		t.Errorf("second listener: %v, want IN_USE", err)
 	}
 	if err := ln.Close(); err != nil {
@@ -132,13 +133,13 @@ func TestClosingAPipeListenerEndsItsAccept(t *testing.T) {
 	}
 	select {
 	case err := <-done:
-		if !errs.HasCode(err, ipc.CodeClosed) {
+		if !errs.HasCode(err, coreipc.CodeClosed) {
 			t.Errorf("accept after close: %v", err)
 		}
 	case <-time.After(5 * time.Second):
 		t.Fatal("Accept did not return after Close")
 	}
-	if _, err := ipc.Dial(t.Context(), cfg); !errs.HasCode(err, ipc.CodeDialFailed) {
+	if _, err := ipc.Dial(t.Context(), cfg); !errs.HasCode(err, coreipc.CodeDialFailed) {
 		t.Errorf("dial with nobody listening: %v", err)
 	}
 }

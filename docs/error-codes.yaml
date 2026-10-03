@@ -2541,39 +2541,39 @@ codes:
   - code: "0.3.91.1"
     const: CodeMisconfigured
     hex: "0x00_03_5B_01"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.2"
     const: CodeDirectoryUnsafe
     hex: "0x00_03_5B_02"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.3"
     const: CodeInUse
     hex: "0x00_03_5B_03"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.4"
     const: CodeListenFailed
     hex: "0x00_03_5B_04"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.5"
     const: CodePeerRefused
     hex: "0x00_03_5B_05"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.6"
     const: CodeDialFailed
     hex: "0x00_03_5B_06"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.7"
     const: CodeEndpointForeign
     hex: "0x00_03_5B_07"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.8"
     const: CodeClosed
     hex: "0x00_03_5B_08"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.9"
     const: CodePathUnsafe
     hex: "0x00_03_5B_09"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

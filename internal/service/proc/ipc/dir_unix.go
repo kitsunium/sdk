@@ -10,6 +10,7 @@ import (
 	"os"
 	"syscall"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -28,7 +29,7 @@ func prepareDir(dir string) error {
 		return err
 	}
 	if err := os.Mkdir(dir, 0o700); err != nil && !errors.Is(err, os.ErrExist) {
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be created"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be created"),
 			errs.String("path", dir), errs.String("cause", err.Error()))
 	}
 	return checkDir(dir)
@@ -57,18 +58,18 @@ func checkEntry(dir string) error {
 	info, err := os.Lstat(dir)
 	switch {
 	case err != nil:
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be read"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory cannot be read"),
 			errs.String("path", dir), errs.String("cause", err.Error()))
 	case info.Mode()&os.ModeSymlink != 0:
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory is a link"), errs.String("path", dir))
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory is a link"), errs.String("path", dir))
 	case !info.IsDir():
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "not a directory"), errs.String("path", dir))
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "not a directory"), errs.String("path", dir))
 	case info.Mode().Perm()&groupOrWorldWritable != 0:
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "writable by its group or by anyone"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "writable by its group or by anyone"),
 			errs.String("path", dir), errs.String("mode", info.Mode().Perm().String()))
 	}
 	if uid, known := ownerOf(info); known && uid != os.Geteuid() {
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "owned by another account"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "owned by another account"),
 			errs.String("path", dir), errs.Int("uid", uid))
 	}
 	return nil

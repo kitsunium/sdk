@@ -55,11 +55,21 @@
 // $XDG_RUNTIME_DIR/<app>, %LOCALAPPDATA%\<app> on Windows, else
 // <tmp>/<app>-<uid>. A path is at most the shortest sun_path any supported
 // kernel has, less its NUL.
+//
+// # Ports, and the doubles they admit
+//
+// [Listener] and [Dialer] are interfaces, as net.Listener is: [Listen] and
+// [NewDialer] return the socket engine behind them, and code that holds one
+// can be handed a double in a test — connections from net.Pipe, with the
+// [Peer] the test chooses — instead of a socket on disk. Both are frozen at
+// the methods they have; a capability added later is a second interface an
+// endpoint may also implement, never a method added to these.
 package ipc
 
 import (
 	"context"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcipc "github.com/kitsunium/sdk/internal/service/proc/ipc"
 )
@@ -69,31 +79,56 @@ import (
 // (fix the deployment, or look for whoever planted a component) from "nobody
 // answers" (start one).
 const (
-	CodeMisconfigured   errs.Code = svcipc.CodeMisconfigured
-	CodeDirectoryUnsafe errs.Code = svcipc.CodeDirectoryUnsafe
-	CodeInUse           errs.Code = svcipc.CodeInUse
-	CodeListenFailed    errs.Code = svcipc.CodeListenFailed
-	CodePeerRefused     errs.Code = svcipc.CodePeerRefused
-	CodeDialFailed      errs.Code = svcipc.CodeDialFailed
-	CodeEndpointForeign errs.Code = svcipc.CodeEndpointForeign
-	CodeClosed          errs.Code = svcipc.CodeClosed
-	CodePathUnsafe      errs.Code = svcipc.CodePathUnsafe
+	CodeMisconfigured   errs.Code = coreipc.CodeMisconfigured
+	CodeDirectoryUnsafe errs.Code = coreipc.CodeDirectoryUnsafe
+	CodeInUse           errs.Code = coreipc.CodeInUse
+	CodeListenFailed    errs.Code = coreipc.CodeListenFailed
+	CodePeerRefused     errs.Code = coreipc.CodePeerRefused
+	CodeDialFailed      errs.Code = coreipc.CodeDialFailed
+	CodeEndpointForeign errs.Code = coreipc.CodeEndpointForeign
+	CodeClosed          errs.Code = coreipc.CodeClosed
+	CodePathUnsafe      errs.Code = coreipc.CodePathUnsafe
 )
 
 type (
 	// Config is where a private socket lives and who, besides its own
-	// account, may use it.
+	// account, may use it — the engine's configuration, shared by both ends.
 	Config = svcipc.Config
 	// Peer is who is at the other end of a connection, as the kernel says.
-	Peer = svcipc.PeerValue
+	Peer = coreipc.PeerValue
 	// Conn is a connection with its peer's identity.
-	Conn = svcipc.Conn
-	// Listener accepts the connections of admitted peers only.
-	Listener = svcipc.Listener
+	Conn = coreipc.Conn
+	// Listener is the accepting end of a private socket: it hands out the
+	// connections of admitted peers only, and closes and counts the others.
+	Listener = coreipc.Listener
+	// Dialer is the connecting end of a private socket: it reaches the
+	// listener its configuration names, and refuses one it cannot trust
+	// before a byte is sent.
+	Dialer = coreipc.Dialer
 )
 
-// Listen opens the private socket at cfg.Path.
-func Listen(cfg Config) (*Listener, error) { return svcipc.NewListener(&cfg) }
+// Listen opens the private socket at cfg.Path and returns the engine behind
+// the Listener port.
+func Listen(cfg Config) (Listener, error) {
+	ln, err := svcipc.NewListener(&cfg)
+	//: a refused configuration is a nil port, never a nil engine inside one.
+	if err != nil {
+		return nil, err
+	}
+	return ln, nil
+}
+
+// NewDialer returns the engine behind the Dialer port for the private socket
+// at cfg.Path. The configuration is checked here, before anything is touched,
+// and copied: editing cfg's slices afterwards changes nothing.
+func NewDialer(cfg Config) (Dialer, error) {
+	d, err := svcipc.NewDialer(&cfg)
+	//: the same rule as Listen: a refusal returns no port at all.
+	if err != nil {
+		return nil, err
+	}
+	return d, nil
+}
 
 // Dial connects to the private socket at cfg.Path, within ctx and one second.
 func Dial(ctx context.Context, cfg Config) (*Conn, error) { return svcipc.Dial(ctx, &cfg) }
