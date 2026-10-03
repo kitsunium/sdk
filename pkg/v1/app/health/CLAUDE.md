@@ -39,5 +39,5 @@ visibly discards the deadline. Possible, visible, reviewable.
 ## Verification
 
 ```
-cd pkg && GOWORK=off go test -race ./v1/health/...
+cd pkg && GOWORK=off go test -race ./v1/app/health/...
 ```

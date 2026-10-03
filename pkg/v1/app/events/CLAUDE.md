@@ -57,5 +57,5 @@ dep-light; cross-OS portable.
 ```
 bazel test --config=race //pkg/v1/app/events:events_test
 # OR
-cd pkg && GOWORK=off go test -race ./v1/events
+cd pkg && GOWORK=off go test -race ./v1/app/events
 ```

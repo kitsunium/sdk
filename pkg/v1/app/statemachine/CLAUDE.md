@@ -56,5 +56,5 @@ hand-edit it.
 
 ```sh
 bazel test --config=race //pkg/v1/app/statemachine:statemachine_test
-cd pkg && GOWORK=off go test -race ./v1/statemachine/
+cd pkg && GOWORK=off go test -race ./v1/app/statemachine/
 ```

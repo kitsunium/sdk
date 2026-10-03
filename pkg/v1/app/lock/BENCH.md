@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/lock/lock_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/lock/` to refresh -->
+<!-- generated from pkg/v1/app/lock/lock_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/lock/` to refresh -->
 # Benchmarks — `pkg/v1/app/lock`
 
 Named exclusive leases over one process or one machine (ADR 0052). The two

@@ -53,5 +53,5 @@ portable.
 ```
 bazel test --config=race //pkg/v1/app/scheduler:scheduler_test
 # OR
-cd pkg && GOWORK=off go test -race ./v1/scheduler
+cd pkg && GOWORK=off go test -race ./v1/app/scheduler
 ```

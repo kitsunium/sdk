@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/resilience/resilience_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/resilience/` to refresh -->
+<!-- generated from pkg/v1/app/resilience/resilience_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/resilience/` to refresh -->
 # Benchmarks — `pkg/v1/app/resilience`
 
 Seven composable policies (ADR 0026 / ADR 0031). Every one of them wraps a call,

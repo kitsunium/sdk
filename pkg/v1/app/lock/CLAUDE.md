@@ -56,5 +56,5 @@ and the keepalive helper, so consumers depend only on `pkg/v1`.
 
 ```
 bazel test --config=race //pkg/v1/app/lock:lock_test
-# or: cd pkg && GOWORK=off go test -race ./v1/lock/...
+# or: cd pkg && GOWORK=off go test -race ./v1/app/lock/...
 ```

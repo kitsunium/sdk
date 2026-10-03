@@ -66,5 +66,5 @@ stop. Stdlib-only → dep-light; cross-OS portable.
 ```
 bazel test --config=race //pkg/v1/app/lifecycle:lifecycle_test
 # OR
-cd pkg && GOWORK=off go test -race ./v1/lifecycle
+cd pkg && GOWORK=off go test -race ./v1/app/lifecycle
 ```

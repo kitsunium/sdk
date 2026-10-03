@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/id/id_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/id/` to refresh -->
+<!-- generated from pkg/v1/app/id/id_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/id/` to refresh -->
 # Benchmarks — `pkg/v1/app/id`
 
 Seven identifier schemes (ADR 0024 / ADR 0038). A caller choosing between them

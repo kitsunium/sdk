@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/scheduler/scheduler_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/scheduler/` to refresh -->
+<!-- generated from pkg/v1/app/scheduler/scheduler_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/scheduler/` to refresh -->
 # Benchmarks — `pkg/v1/app/scheduler`
 
 Five-field POSIX cron and fixed intervals (ADR 0041). A schedule is **parsed

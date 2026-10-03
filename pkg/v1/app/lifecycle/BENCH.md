@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/lifecycle/lifecycle_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/lifecycle/` to refresh -->
+<!-- generated from pkg/v1/app/lifecycle/lifecycle_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/lifecycle/` to refresh -->
 # Benchmarks — `pkg/v1/app/lifecycle`
 
 Ordered bring-up and reverse teardown (ADR 0050). This runs **once per
@@ -57,7 +57,7 @@ context is 993 ns and 4 allocations). Three domains, one mechanism, one cost.
 
 A thirty-two-component application spends **108 µs** ordering its startup and
 shutdown. An empty Go binary takes about **2 ms** to start and exit — measured
-independently in `pkg/v1/app/cli/BENCH.md` — so the whole lifecycle engine is
+independently in `internal/service/app/cli/BENCH.md` — so the whole lifecycle engine is
 roughly **5 %** of doing nothing at all, before a single component has opened a
 socket or dialled a database.
 

@@ -62,5 +62,5 @@ Stdlib-only → dep-light; cross-OS portable.
 ```
 bazel test --config=race //pkg/v1/app/validation:validation_test
 # OR
-cd pkg && GOWORK=off go test -race ./v1/validation
+cd pkg && GOWORK=off go test -race ./v1/app/validation
 ```

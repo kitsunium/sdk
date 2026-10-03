@@ -69,5 +69,5 @@ Importing this package is what wires the `html` engine: the facade imports
 
 ```
 bazel test --config=race //pkg/v1/app/view:view_test
-# or: cd pkg && GOWORK=off go test -race ./v1/view/...
+# or: cd pkg && GOWORK=off go test -race ./v1/app/view/...
 ```

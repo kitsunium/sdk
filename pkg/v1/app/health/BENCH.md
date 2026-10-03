@@ -1,4 +1,4 @@
-<!-- generated from pkg/v1/app/health/health_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/health/` to refresh -->
+<!-- generated from pkg/v1/app/health/health_bench_test.go — run `cd pkg && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./v1/app/health/` to refresh -->
 # Benchmarks — `pkg/v1/app/health`
 
 Startup, readiness and liveness (ADR 0060). An orchestrator polls these every

@@ -60,5 +60,5 @@ over `internal/core/app/cli` and `internal/service/app/cli`, plus the two helper
 ```
 bazel test --config=race //pkg/v1/app/cli:cli_test
 # OR
-cd pkg && GOWORK=off go test -race ./v1/cli
+cd pkg && GOWORK=off go test -race ./v1/app/cli
 ```
