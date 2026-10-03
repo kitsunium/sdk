@@ -9,6 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/kernel/errs",
+        "//internal/service/data/transform",
         "//internal/service/observe/profiling",
     ],
 )

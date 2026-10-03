@@ -46,7 +46,6 @@ go_test(
     embed = [":multipart"],
     deps = [
         "//internal/core/data/codec",
-        "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
 )

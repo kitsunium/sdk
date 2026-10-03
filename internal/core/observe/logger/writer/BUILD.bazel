@@ -30,7 +30,6 @@ go_library(
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
         "//internal/kernel/clock",
-        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
     ],
@@ -59,6 +58,7 @@ go_test(
     deps = [
         "//internal/core/observe/logger",
         "//internal/kernel/errs",
+        "//internal/kernel/plugin",
     ],
 )
 

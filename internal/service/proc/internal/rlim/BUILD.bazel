@@ -1,0 +1,68 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+go_library(
+    name = "rlim",
+    srcs = [
+        "doc.go",
+        "value_default.go",
+        "value_signed.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/proc/internal/rlim",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":rlim",
+    visibility = [
+        "//internal/service:service_consumers",
+        "//internal/service/proc:__subpackages__",
+    ],
+)
+
+go_test(
+    name = "rlim_test",
+    srcs = [
+        "value_default_external_test.go",
+        "value_signed_external_test.go",
+    ],
+    deps = select({
+        "@rules_go//go/platform:aix": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:android": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:darwin": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:dragonfly": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:freebsd": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:illumos": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:ios": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:linux": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:netbsd": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:openbsd": [
+            ":rlim",
+        ],
+        "@rules_go//go/platform:solaris": [
+            ":rlim",
+        ],
+        "//conditions:default": [],
+    }),
+)

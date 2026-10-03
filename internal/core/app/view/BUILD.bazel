@@ -19,7 +19,6 @@ go_library(
         "//internal/core:core_consumers",
     ],
     deps = [
-        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
     ],

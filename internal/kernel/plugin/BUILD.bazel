@@ -29,8 +29,10 @@ go_test(
     name = "plugin_test",
     srcs = [
         "plugin_external_test.go",
+        "registry_bench_test.go",
         "registry_external_test.go",
         "registry_internal_test.go",
     ],
     embed = [":plugin"],
+    deps = ["//internal/kernel/concur/snapshot"],
 )
