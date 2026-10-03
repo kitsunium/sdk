@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-03T05:55:00Z -->
 # internal/service/codec/toml/
 
 ## Purpose
@@ -174,3 +174,10 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem ./codec/t
 
 `TestAllocBudget` (`codec_integration_test.go`) is `//go:build !race` and runs
 in the race-off alloc lane.
+
+`TestSizeCap` admits a document of exactly the cap through the size check
+alone — handed no target, it is refused for the target and not for its size —
+in every build, and also decodes the whole 10 MiB everywhere but a coverage
+build: under the race detector, which `bazel coverage` keeps on, every
+coverage counter is an instrumented atomic, and that decode took 15.9 s of the
+target's 60 s.

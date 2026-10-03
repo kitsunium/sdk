@@ -602,7 +602,17 @@ func TestNestingCap(t *testing.T) {
 	}
 }
 
-// TestSizeCap refuses a document larger than the cap before reading it.
+// TestSizeCap refuses a document larger than the cap before reading it, and
+// admits one of exactly the cap.
+//
+// The cap is admitted twice over. With no target, the refusal that follows
+// names the target and not the size: that is the size check alone, at no
+// cost, in every build. Outside a coverage build the whole 10 MiB document is
+// also decoded. In a coverage build each basic block bumps a counter, and
+// under the race detector, which `bazel coverage` keeps on, every bump is an
+// instrumented atomic: that decode took 15.9 s of the 60 s .bazelrc gives the
+// target (2.5 s under the race detector alone). The race suite, the alloc lane
+// and `go test` still decode it.
 func TestSizeCap(t *testing.T) {
 	t.Parallel()
 	doc := make([]byte, 10<<20+1)
@@ -616,9 +626,15 @@ func TestSizeCap(t *testing.T) {
 	if fieldOf(err, "problem") != "the document is larger than the limit" || fieldOf(err, "limit") != "10485760" {
 		t.Errorf("err = %v %v", err, errs.FieldsOf(err))
 	}
-	//: one byte under the cap is fine.
-	if err := toml.New().Unmarshal(doc[:10<<20], &out); err != nil {
-		t.Errorf("at the cap: %v", err)
+	//: one byte under the cap passes the size check: what refuses it is the missing target.
+	if err := toml.New().Unmarshal(doc[:10<<20], nil); fieldOf(err, "problem") != "the target is not a non-nil pointer" {
+		t.Errorf("at the cap, with no target: err = %v %v", err, errs.FieldsOf(err))
+	}
+	//: and it decodes, wherever a 10 MiB decode fits the budget.
+	if testing.CoverMode() == "" {
+		if err := toml.New().Unmarshal(doc[:10<<20], &out); err != nil {
+			t.Errorf("at the cap: %v", err)
+		}
 	}
 }
 
