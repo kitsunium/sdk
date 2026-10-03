@@ -224,6 +224,41 @@ publish_remote() {
   [ -z "$(g ls-remote --tags origin)" ]
 }
 
+# A stray stable root tag below the pkg history — the v0.0.0 the proxy already
+# knows for this path — must not lift the hold. Red against the first draft,
+# which held only while no vX.Y.Z existed: it pushed v0.18.0 from an automatic
+# run.
+@test "a stray root tag below pkg's history does not lift the hold" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0 v0.0.0
+  commit_pkg 'refactor: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor"
+  [ "$status" -eq 3 ]
+  [[ "$output" == *"refusing to auto-cut the FIRST release of the SDK module (v0.18.0, after pkg/v0.17.0"* ]]
+  [ -z "$(g ls-remote --tags origin)" ]
+}
+
+# The first root tag moves every consumer to another module: a patch would cut
+# a v0.17.1 the proxy keeps for good. Refused like an undecided size, with the
+# two ways to state it — even when a maintainer authorised the bootstrap.
+@test "the first root tag is refused as a patch, even with --allow-bootstrap" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --allow-bootstrap"
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"refusing v0.17.1 as the SDK module's first tag"* ]]
+  [[ "$output" == *"release:minor"* ]]
+  [[ "$output" == *"bump=minor"* ]]
+  [ -z "$(g ls-remote --tags origin)" ]
+  # …and an automatic run says it at once, rather than holding a v0.17.1.
+  run bash -c "echo sdk | $SCRIPT --bump=patch"
+  [ "$status" -eq 65 ]
+  [[ "$output" != *"refusing to auto-cut"* ]]
+}
+
 @test "--allow-bootstrap cuts the first root tag on a detached release commit" {
   need_toolchain
   publish_remote
@@ -428,9 +463,10 @@ publish_remote() {
   tag_release pkg/v0.17.0
   g tag v0.1.0 "$(g rev-parse 'pkg/v0.17.0^{commit}')"
   commit_pkg 'fix(codec): one'
-  run bash -c "echo sdk | $SCRIPT --dry-run"
+  run bash -c "echo sdk | $SCRIPT --dry-run --bump=minor"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.17.1" ]
+  [ "$(would_tag)" = "v0.18.0" ]
+  [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0"* ]]
 }
 
 # The tokens compute-bumps.sh emitted before ADR 0162 each released the whole
@@ -544,7 +580,9 @@ publish_remote() {
 }
 
 # The same across ADR 0162: the label the last pkg release honoured stays
-# consumed for the first root tag, whose range opens after pkg's base.
+# consumed for the first root tag, whose range opens after pkg's base. Read
+# again, it would size a v0.18.0; left out, the size is a patch, which the
+# first root tag refuses — so the refusal is the proof it was left out.
 @test "a label consumed by the last pkg release is not applied to the first root tag" {
   need_toolchain
   commit_pkg 'feat(codec): symbols'
@@ -552,8 +590,10 @@ publish_remote() {
   tag_release pkg/v0.17.0
   commit_pkg 'fix(codec): follow-up'
   run bash -c "echo sdk | $SCRIPT --dry-run"
-  [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.17.1" ]
+  [ "$status" -eq 65 ]
+  [[ "$output" == *"no merge in the range is labelled above patch"* ]]
+  [[ "$output" == *"refusing v0.17.1 as the SDK module's first tag"* ]]
+  [[ "$output" != *"would tag"* ]]
 }
 
 @test "several merges, none labelled and none asking, is still a patch" {

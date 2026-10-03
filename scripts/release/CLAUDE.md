@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T00:30:00Z -->
 # scripts/release/
 
 ## Purpose
@@ -37,11 +37,23 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   or an `internal/` directory back in the workspace) is tagged `<dir>/vX.Y.Z`
   only when a file of it a consumer sees changed since the commit its own last
   tag was cut from, or when it has never been tagged. A module that keeps its
-  tag keeps a go.mod requiring the SDK release it was cut with.
-- **The first root tag is a bootstrap.** Without a `vX.Y.Z` tag the version
-  continues the newest `pkg/vX.Y.Z` (v0.17.0 → v0.18.0 for a minor), and the
-  cut is held — exit 3 — unless `--allow-bootstrap`, which a maintainer's
-  dispatch of SDK Release passes (ADR 0009).
+  tag keeps a go.mod requiring the SDK release it was cut with. Its own
+  directory is all that is measured: an `internal/` fix the module uses cuts a
+  release (rule 2 counts `//third-party/...`) but does not re-tag it, and its
+  consumer takes the fix by requiring the newer SDK release.
+- **The first root tag is held while its base is a `pkg/vX.Y.Z` tag.** Until a
+  `vX.Y.Z` above the pkg history exists, the version continues the newest
+  `pkg/vX.Y.Z` (v0.17.0 → v0.18.0 for a minor), and the cut is held — exit 3 —
+  unless `--allow-bootstrap`, which a maintainer's dispatch of SDK Release
+  passes (ADR 0009). A stray root tag below the history — the `v0.0.0` the
+  proxy knows for the path — does not lift the hold: asking "is there no
+  `vX.Y.Z` yet?" instead let one through, and an automatic run cut the first
+  release (seen red in the suite first).
+- **From a `pkg/` base a patch is refused** (exit 65, like an undecided size):
+  the first root tag moves every consumer to another module, which v0 says with
+  a minor at least, and the proxy keeps a v0.17.1 for good. The refusal names
+  `release:minor` and `bump=minor`, and comes before the hold, so an automatic
+  run says it as soon as the merge lands.
 - **A release commit always exists.** It is the tags' commit, a detached child
   of the main commit the release was cut from — `--allow-empty` when nothing is
   rewritten —, because the next range and every vendor module's next

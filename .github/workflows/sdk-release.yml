@@ -285,7 +285,7 @@ jobs:
             # an output rather than inferred from an empty cut.log, which is
             # also what a silent failure looks like.
             echo "held=true" >> "$GITHUB_OUTPUT"
-            echo "::notice::First release of the SDK module held for manual validation (ADR 0009, ADR 0162). Dispatch this workflow manually once the module zip + a clean-room 'go get' are verified."
+            echo "::notice::First release of the SDK module held for manual validation (ADR 0009, ADR 0162). Dispatch this workflow manually, with bump=minor for v0.18.0, once the module zip + a clean-room 'go get' are verified."
             exit 0
           fi
           echo "held=false" >> "$GITHUB_OUTPUT"
@@ -407,7 +407,9 @@ jobs:
               echo
               echo "Bump \`${MAJORS}\` computed; the first release of the SDK module is"
               echo "held for manual validation (ADR 0009, ADR 0162). Nothing was"
-              echo "published, on purpose."
+              echo "published, on purpose. Dispatch SDK Release with \`bump=minor\` —"
+              echo "v0.18.0, after pkg/v0.17.0 — once the module zip and a clean-room"
+              echo "\`go get\` are verified."
             else
               echo "### Release token"
               echo

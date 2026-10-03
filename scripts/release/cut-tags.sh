@@ -36,8 +36,11 @@
 # pkg/v0.17.0 and a minor make v0.18.0. That first root tag is the first
 # release of the SDK module's content — the proxy knows the path only at
 # v0.0.0, a 2024 tag of an earlier history —, so it is held like the very first
-# release (ADR 0009): refused without --allow-bootstrap, which a maintainer's
+# release (ADR 0009) whenever its base is a pkg/vX.Y.Z tag, whatever root tag
+# sits below it: refused without --allow-bootstrap, which a maintainer's
 # dispatch passes once the module zip and a clean-room `go get` are validated.
+# From that base a patch is refused outright (exit 65): the module change every
+# consumer makes is a minor at least.
 
 set -euo pipefail
 shopt -s nullglob
@@ -582,7 +585,6 @@ publish_release() {
 # The version: the next one after the last release — the newest SDK tag, or,
 # until the first one exists, the newest pkg tag (ADR 0162). latest_release_tag
 # takes the higher of the two.
-last_sdk="$(latest_sdk_tag || true)"
 last="$(latest_release_tag || true)"
 first=0
 if [ -z "$last" ]; then
@@ -596,13 +598,30 @@ else
     exit 1
   fi
   next="$(bump_for "$last")"
-  if [ -z "$last_sdk" ]; then
+  # A pkg/ base IS the first root tag, whatever root tag the repository holds
+  # below it. Asking "is there no vX.Y.Z yet?" instead let any stray stable
+  # root tag — the v0.0.0 the proxy already knows for this path, say — lift
+  # the hold, and an automatic run cut the module's first release unvalidated.
+  # Measured: pkg/v0.17.0 plus a v0.0.0, no --allow-bootstrap, pushed v0.18.0.
+  if is_valid_pkg_tag "$last"; then
     first=1
   fi
 fi
 if ! is_valid_tag "$next"; then
   echo "cut-tags: computed invalid tag '$next'" >&2
   exit 1
+fi
+
+# The first root tag moves every consumer from …/pkg to the SDK module (ADR
+# 0162): a change a consumer must act on, which v0 says with a minor at least,
+# and the proxy keeps whatever version is cut for good. From a pkg/ base a patch
+# is therefore refused, like a size nobody decided (ADR 0135, exit 65), naming
+# the two ways to state it. It is checked before the hold, so an automatic run
+# says so as soon as the merge lands, instead of holding a v0.17.1.
+if [ "$first" -eq 1 ] && [ -n "$last" ] && [ "$size" = "patch" ]; then
+  echo "cut-tags: refusing $next as the SDK module's first tag — after $last a patch would hide the module change every consumer makes (ADR 0162)" >&2
+  echo "cut-tags:   label the pull request release:minor and re-run this job, or dispatch SDK Release with bump=minor." >&2
+  exit 65
 fi
 
 # Bootstrap guard (ADR 0009): the first release of the SDK module publishes its
