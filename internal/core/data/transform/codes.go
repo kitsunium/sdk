@@ -1,4 +1,6 @@
-// Package transform — range 0.2.5.* (ADR 0014 core/data/transform block).
+// Package transform — range 0.2.5.* (ADR 0014 core/data/transform block), and
+// the stdlib schemes' 0.3.26.* (ADR 0014 service/data/transform block, declared
+// here since ADR 0160).
 package transform
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -40,3 +42,24 @@ const CodeDuplicateRegistration errs.Code = 0x00_02_05_05 // 0.2.5.5
 // its own limit produced. Collapsing them would force that caller to report a
 // malformed stream for one whose only established fault is its size.
 const CodeDecompressedTooLarge errs.Code = 0x00_02_05_06 // 0.2.5.6
+
+// range: 0.3.26.0 - 0.3.26.255 (0x1a) — the stdlib schemes' codes, allocated by
+// the service layer (LL = 3) and declared here since ADR 0160: a code keeps the
+// value its layer allocated when its declaration moves.
+
+// CodeGzipFailed identifies a failure inside compress/gzip during either a
+// Compress (writer) or Decompress (reader) operation; the wrap trail and the
+// COMPRESSION_FAILED / DECOMPRESSION_FAILED sentinels distinguish the
+// direction.
+const CodeGzipFailed errs.Code = 0x00_03_1A_01 // 0.3.26.1
+
+// CodeFlateFailed identifies a failure inside compress/flate during either a
+// Compress (writer) or Decompress (reader) operation.
+const CodeFlateFailed errs.Code = 0x00_03_1A_02 // 0.3.26.2
+
+// CodeZlibFailed identifies a failure inside compress/zlib during either a
+// Compress (writer) or Decompress (reader) operation. It is distinct from
+// CodeFlateFailed because the zlib envelope (RFC 1950) is a distinct wire format
+// from the raw DEFLATE stream (RFC 1951): a stream rejected under one scheme is
+// routinely valid under the other, so the two must be told apart at the code.
+const CodeZlibFailed errs.Code = 0x00_03_1A_03 // 0.3.26.3

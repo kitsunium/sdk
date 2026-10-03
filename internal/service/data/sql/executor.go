@@ -6,6 +6,8 @@ import (
 	"context"
 	stdsql "database/sql"
 	"sync/atomic"
+
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 )
 
 // deadContext is an already-cancelled context, built once at init.
@@ -74,12 +76,12 @@ func (e *scopedExecutor) usable() error {
 	//: the scope that lent this handle has already returned.
 	if !e.live.Load() {
 		//: the caller's bug, named as one.
-		return failed(TxClosed, nil)
+		return failed(coresql.TxClosed, nil)
 	}
 	//: a savepoint rollback failed somewhere in this transaction.
 	if poison := e.state.poisonedErr(); poison != nil {
 		//: the original cause travels beside the verdict.
-		return failed(TxPoisoned, poison)
+		return failed(coresql.TxPoisoned, poison)
 	}
 	//: the handle may run.
 	return nil
@@ -117,7 +119,8 @@ func (e *scopedExecutor) QueryContext(
 //
 // This is the one method that cannot carry a typed refusal. *sql.Row has no
 // exported constructor and no exported error field, so there is no way to
-// hand back a Row whose Scan returns [TxClosed] or [TxPoisoned].
+// hand back a Row whose Scan returns [coresql.TxClosed] or
+// [coresql.TxPoisoned].
 //
 // What matters more than the code is that NOTHING EXECUTES, and that is
 // guaranteed: on a refused handle the call is delegated with an

@@ -12,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -86,20 +87,20 @@ type sqlPrepared struct {
 // On a store that keeps versions, it makes one, stamped with nothing.
 func (s *SQLStore[T]) Put(ctx context.Context, v T) error {
 	//: anything under the key is fine.
-	return s.store(ctx, v, upsert, StampValue{})
+	return s.store(ctx, v, upsert, coredocstore.StampValue{})
 }
 
 // Insert stores v, which must be new: DocumentExists when its key is taken.
 func (s *SQLStore[T]) Insert(ctx context.Context, v T) error {
 	//: nothing may be under the key.
-	return s.store(ctx, v, insertOnly, StampValue{})
+	return s.store(ctx, v, insertOnly, coredocstore.StampValue{})
 }
 
 // Replace stores v over the document already under its key: DocumentNotFound
 // when there is none, so a document deleted meanwhile is never brought back.
 func (s *SQLStore[T]) Replace(ctx context.Context, v T) error {
 	//: a document must be under the key.
-	return s.store(ctx, v, replaceOnly, StampValue{})
+	return s.store(ctx, v, replaceOnly, coredocstore.StampValue{})
 }
 
 // Update applies fn to a copy of the document stored under key and stores the
@@ -115,12 +116,12 @@ func (s *SQLStore[T]) Replace(ctx context.Context, v T) error {
 // the very write that is waiting for fn.
 func (s *SQLStore[T]) Update(ctx context.Context, key string, fn func(*T) error) (T, error) {
 	//: a new version, stamped with nothing, where versions are kept.
-	return s.UpdateStamped(ctx, key, StampValue{}, fn)
+	return s.UpdateStamped(ctx, key, coredocstore.StampValue{}, fn)
 }
 
 // UpdateStamped is Update, with what the write says about the version it
 // makes.
-func (s *SQLStore[T]) UpdateStamped(ctx context.Context, key string, stamp StampValue, fn func(*T) error) (T, error) {
+func (s *SQLStore[T]) UpdateStamped(ctx context.Context, key string, stamp coredocstore.StampValue, fn func(*T) error) (T, error) {
 	var zero, result T
 	err := s.run(ctx, true, func(txCtx context.Context, ex coresql.Executor) error {
 		var err error
@@ -156,7 +157,7 @@ func (s *SQLStore[T]) Delete(ctx context.Context, key string) error {
 }
 
 // store prepares v outside any transaction, writes it, and announces it.
-func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode, stamp StampValue) error {
+func (s *SQLStore[T]) store(ctx context.Context, v T, mode writeMode, stamp coredocstore.StampValue) error {
 	p, err := s.prepare(v)
 	//: DocumentKeyEmpty, DocumentUnencodable or KeyTooLong: nothing opened.
 	if err != nil {
@@ -389,7 +390,7 @@ func (s *SQLStore[T]) lockedReplace(ctx context.Context, ex coresql.Executor, p 
 	//: nothing to replace, and nothing is brought back.
 	if errors.Is(err, stdsql.ErrNoRows) {
 		//: DocumentNotFound, naming no key.
-		return nil, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return nil, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the locking read did not complete.
 	if err != nil {
@@ -453,7 +454,7 @@ func (s *SQLStore[T]) insertRow(ctx context.Context, ex coresql.Executor, p *sql
 		//: the key was taken.
 		if n == 0 {
 			//: DocumentExists, naming no key.
-			return kerrs.Wrap(DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.table))
+			return kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.table))
 		}
 		//: created.
 		return nil
@@ -469,14 +470,14 @@ func (s *SQLStore[T]) insertRow(ctx context.Context, ex coresql.Executor, p *sql
 }
 
 // modify runs Update's read-modify-write inside its transaction.
-func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key string, stamp StampValue, fn func(*T) error) (T, error) {
+func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key string, stamp coredocstore.StampValue, fn func(*T) error) (T, error) {
 	var zero T
 	var raw []byte
 	err := ex.QueryRowContext(ctx, s.stmts.lockDoc, []byte(key)).Scan(&raw)
 	//: nothing to update.
 	if errors.Is(err, stdsql.ErrNoRows) {
 		//: DocumentNotFound, naming no key.
-		return zero, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return zero, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the locking read did not complete.
 	if err != nil {
@@ -503,7 +504,7 @@ func (s *SQLStore[T]) modify(ctx context.Context, ex coresql.Executor, key strin
 	//: an update is not a rename.
 	if p.key != key {
 		//: DocumentKeyChanged.
-		return zero, kerrs.Wrap(DocumentKeyChanged, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return zero, kerrs.Wrap(coredocstore.DocumentKeyChanged, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the row is locked, so it is there to be written.
 	if affErr := s.writeLockedRow(ctx, ex, p); affErr != nil {
@@ -613,7 +614,7 @@ func (s *SQLStore[T]) checkUnique(ctx context.Context, ex coresql.Executor, p *s
 		//: held by another document.
 		if slices.Contains(taken, spec.Name) {
 			//: UniqueKeyTaken, naming the index and never the key.
-			return kerrs.Wrap(UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("index", spec.Name))
+			return kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("index", spec.Name))
 		}
 	}
 	//: every unique key is free, or the document's own.
@@ -633,14 +634,14 @@ func (s *SQLStore[T]) classify(ctx context.Context, conflict *mayConflict) error
 		//: the key is taken: the refusal the insertion raced into.
 		if err == nil {
 			//: DocumentExists, naming no key.
-			return kerrs.Wrap(DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.table))
+			return kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.table))
 		}
 		//: no document: the failure was something else.
 		return s.failed(conflict.step, conflict.cause)
 	}
 	//: a unique key now held elsewhere.
 	if refusal := s.checkUnique(ctx, ex, conflict.written, true); refusal != nil &&
-		kerrs.HasCode(refusal, CodeUniqueKeyTaken) {
+		kerrs.HasCode(refusal, coredocstore.CodeUniqueKeyTaken) {
 		//: UniqueKeyTaken, naming the index.
 		return refusal
 	}
@@ -684,7 +685,7 @@ func (s *SQLStore[T]) affected(result stdsql.Result, execErr error, step string)
 	//: no document under the key.
 	if n == 0 {
 		//: DocumentNotFound, naming no key.
-		return kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: a document was written or removed.
 	return nil
@@ -698,7 +699,7 @@ func (s *SQLStore[T]) tooLong(index string) error {
 		fields = append(fields, kerrs.String("index", index))
 	}
 	//: never the key.
-	return kerrs.Wrap(KeyTooLong, kerrs.WrapParams{}, fields...)
+	return kerrs.Wrap(coredocstore.KeyTooLong, kerrs.WrapParams{}, fields...)
 }
 
 // rowsAffected reads a statement's affected-row count, or its failure.

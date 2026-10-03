@@ -1,8 +1,10 @@
-// Package docstore — the store's construction parameters and the index
-// declarations, and the refusals a configuration no store could honour gets.
+// Package docstore — the store's construction parameters, and the refusals a
+// configuration no store could honour gets, the index declarations' included:
+// an IndexSpec is core/data/docstore's, which both engines take (ADR 0160).
 package docstore
 
 import (
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -70,52 +72,9 @@ type Config[T any] struct {
 	Versions int
 }
 
-// IndexSpec declares one secondary index: a name to read it by, whether it is
-// unique, and the function that gives a document its keys in it. Build one
-// with [Unique] or [Index], and give it to [Open]. The indexes are rebuilt
-// when the store opens and kept in step with every write.
-type IndexSpec[T any] struct {
-	// Keys returns a document's keys in the index. Empty keys are not
-	// indexed, and a key listed twice is filed once.
-	Keys func(T) []string
-	// Name reads the index in Lookup and Find, and names it in a refusal.
-	Name string
-	// Unique refuses a write that would file two documents under one key.
-	Unique bool
-}
-
-// Unique declares a unique index over the one key key returns: no two
-// documents may share it, and a write that would is refused with
-// UniqueKeyTaken. An empty key is not indexed, so any number of documents may
-// have none.
-func Unique[T any](name string, key func(T) string) IndexSpec[T] {
-	//: a nil function stays nil, for Open to refuse by name.
-	if key == nil {
-		//: the declaration, without a way to compute its keys.
-		return IndexSpec[T]{Name: name, Unique: true}
-	}
-	//: one key, or none when it is empty.
-	return IndexSpec[T]{Name: name, Unique: true, Keys: func(v T) []string {
-		//: the empty key is not a key.
-		if k := key(v); k != "" {
-			//: the one key.
-			return []string{k}
-		}
-		//: nothing to file.
-		return nil
-	}}
-}
-
-// Index declares an index where a document may have several keys and a key
-// several documents — the members a task is shared with. Find reads it.
-func Index[T any](name string, keys func(T) []string) IndexSpec[T] {
-	//: the declaration as given; Open checks it.
-	return IndexSpec[T]{Name: name, Keys: keys}
-}
-
 // validate refuses a configuration no store could honour, with the indexes
 // Open was given, before anything touches a filesystem.
-func (c *Config[T]) validate(indexes []IndexSpec[T]) error {
+func (c *Config[T]) validate(indexes []coredocstore.IndexSpec[T]) error {
 	//: a store that cannot key a document cannot store one.
 	if c.Key == nil {
 		//: StoreMisconfigured, naming the setting.
@@ -157,7 +116,7 @@ func validateVersions(versions int, held bool) error {
 // with no name, two of one name, or one with no key function. Both Open and
 // OpenSQL call it, so a declaration refused by one engine is refused by the
 // other.
-func validateIndexes[T any](indexes []IndexSpec[T]) error {
+func validateIndexes[T any](indexes []coredocstore.IndexSpec[T]) error {
 	//: every index has a distinct name and a function.
 	seen := make(map[string]bool, len(indexes))
 	//: in declaration order, so the first mistake is the one reported.
@@ -170,14 +129,14 @@ func validateIndexes[T any](indexes []IndexSpec[T]) error {
 		//: two indexes of one name make every read of it ambiguous.
 		if seen[spec.Name] {
 			//: StoreMisconfigured, naming the index.
-			return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+			return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 				kerrs.String("setting", "Indexes"), kerrs.String("problem", "declared twice"), kerrs.String("index", spec.Name))
 		}
 		seen[spec.Name] = true
 		//: an index that cannot compute a key files nothing.
 		if spec.Keys == nil {
 			//: StoreMisconfigured, naming the index.
-			return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+			return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 				kerrs.String("setting", "Indexes"), kerrs.String("problem", "no key function"), kerrs.String("index", spec.Name))
 		}
 	}
@@ -201,7 +160,7 @@ func (c *Config[T]) validatePath() error {
 	//: the snapshot's name and the overlay's are both write targets.
 	if pathErr := corevfs.ValidateWritePath(c.Path); pathErr != nil {
 		//: StoreMisconfigured, with the vfs verdict's message as a field.
-		return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Path"), kerrs.String("problem", "not a writable io/fs name"), kerrs.String("cause", pathErr.Error()))
 	}
 	//: a persistent store.
@@ -211,6 +170,6 @@ func (c *Config[T]) validatePath() error {
 // misconfigured is StoreMisconfigured naming the setting and the problem.
 func misconfigured(setting, problem string) error {
 	//: the two fields every configuration refusal carries.
-	return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+	return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 		kerrs.String("setting", setting), kerrs.String("problem", problem))
 }

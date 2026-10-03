@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T06:00:00Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/service/data/
 
 ## Purpose
@@ -38,21 +38,24 @@ the family, `security/secret` publishes its records through `vfs`, and
 
 | Package | What it is | Implements | Code range | Facade |
 |---|---|---|---|---|
-| `cache/` | the tagged, stampede-protected memory store over `kernel/collections/cache` and the L1/L2 `NewChain`; one fill per key per PROCESS, through `kernel/concur/singleflight` (ADR 0049) | `core/data/cache` | `0.3.48.*` (plus core sentinels `0.2.18.*`) | `pkg/v1/data/cache` |
+| `cache/` | the tagged, stampede-protected memory store over `kernel/collections/cache` and the L1/L2 `NewChain`; one fill per key per PROCESS, through `kernel/concur/singleflight` (ADR 0049) | `core/data/cache` | `0.3.48.*`, declared in `core/data/cache` | `pkg/v1/data/cache` |
 | `codec/` | sixteen format packages over 24 Format names — `asn1`, `baseenc` (nine base-N Formats), `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` — each registered at package load (ADR 0003, ADR 0156) | `core/data/codec` | `0.3.2.*` … `0.3.41.*` (one PP slot per format) | `pkg/v1/data/codec` and its per-format children (ADR 0134) |
 | `codec/strictjson/` | one JSON document decoded one way, within a bound on reading — a decoder, not a Format (ADR 0102) | none — no port | `0.3.72.*` | `pkg/v1/data/codec/strictjson` |
 | `codec/jsonshape/` | a Go type's wire shape under `encoding/json` — not a Format (ADR 0133) | none — no port | none | `pkg/v1/data/codec/jsonshape` |
 | `codec/jsonpatch/` | two JSON documents' difference as RFC 6902 operations — not a Format (ADR 0143) | none — no port | `0.3.90.*` | `pkg/v1/data/codec/jsonpatch` |
-| `docstore/` | typed, keyed JSON documents with unique and multi-valued indexes, persisted as one overlay entry per write through `vfs` (ADR 0110), or in two tables of the caller's database through `sql` (ADR 0139), with a document's versions kept in its own write (ADR 0143) | none yet — no core counterpart (ADR 0110 §D1; ADR 0160 §1 adds one) | `0.3.80.*` | `pkg/v1/data/docstore` |
-| `queue/` | the file broker (its state a directory, through `vfs`), the SQL broker (one table of the caller's database, through `sql`) and the memory broker, and the `Consume` loop that sleeps on the `Waker` sibling (ADR 0054, ADR 0104, ADR 0151) | `core/data/queue` | `0.3.53.*` (plus core sentinels `0.2.23.*`) | `pkg/v1/data/queue` |
-| `sql/` | the transaction manager — savepoints, the pool policy, `Join` and `Defer` — and the migration runner under a lock that dies with its holder, SQLite's on the database file's write lock (ADR 0055, ADR 0139, ADR 0140) | `core/data/sql` | `0.3.54.*` (plus core sentinels `0.2.24.*`) | `pkg/v1/data/sql` |
-| `transform/` | the stdlib compressors — gzip, raw DEFLATE (`flate`) and the RFC 1950 `zlib` envelope — and the bounded decompression (ADR 0014) | `core/data/transform` | `0.3.26.*` | published through `pkg/v1/data/codec` |
-| `vfs/` | `NewOS`, confined by `os.Root`, and `NewMem`, with the five-step atomic publication (ADR 0056) | `core/data/vfs` | `0.3.55.*` (plus core sentinels `0.2.25.*`) | `pkg/v1/data/vfs` |
+| `docstore/` | typed, keyed JSON documents with unique and multi-valued indexes, persisted as one overlay entry per write through `vfs` (ADR 0110), or in two tables of the caller's database through `sql` (ADR 0139), with a document's versions kept in its own write (ADR 0143) | `core/data/docstore` — `Collection` and `Versioned` (the file engine), `CollectionContext` and `VersionedContext` (the SQL engine), `Announcer` (both) — ADR 0160 §1 | `0.3.80.*`, declared in `core/data/docstore` | `pkg/v1/data/docstore` |
+| `queue/` | the file broker (its state a directory, through `vfs`), the SQL broker (one table of the caller's database, through `sql`) and the memory broker, and the `Consume` loop that sleeps on the `Waker` sibling (ADR 0054, ADR 0104, ADR 0151) | `core/data/queue` | `0.3.53.*`, declared in `core/data/queue` | `pkg/v1/data/queue` |
+| `sql/` | the transaction manager — savepoints, the pool policy, `Join` and `Defer` — and the migration runner under a lock that dies with its holder, SQLite's on the database file's write lock (ADR 0055, ADR 0139, ADR 0140) | `core/data/sql` | `0.3.54.*`, declared in `core/data/sql` | `pkg/v1/data/sql` |
+| `transform/` | the stdlib compressors — gzip, raw DEFLATE (`flate`) and the RFC 1950 `zlib` envelope — and the bounded decompression (ADR 0014) | `core/data/transform` | `0.3.26.*`, declared in `core/data/transform` | published through `pkg/v1/data/codec` |
+| `vfs/` | `NewOS`, confined by `os.Root`, and `NewMem`, with the five-step atomic publication (ADR 0056) | `core/data/vfs` | `0.3.55.*`, declared in `core/data/vfs` | `pkg/v1/data/vfs` |
 
 Every range above kept its value when its package moved (ADR 0160):
 `codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
 names the new directories under the same keys, and `//:audit_sources` lists
-them by their new labels.
+them by their new labels. The ranges of `cache`, `docstore`, `queue`, `sql`,
+`transform` and `vfs` are declared by the core package at the same path
+(ADR 0160 §2) — those engines declare no code and wrap or restate their core's
+sentinels, and their labels left `//:audit_sources` for the core's.
 
 ## Do NOT
 
@@ -62,5 +65,7 @@ them by their new labels.
   `lock`, a wait to `kernel/clock`, a recycled buffer to
   `kernel/concur/recycler` or `core/data/codec/scratch`.
 - Import one member from another without saying so in both `CLAUDE.md` files:
-  today `docstore` and `queue` reach `sql` and `vfs`, and no other member
-  reaches a sibling.
+  today `docstore` reaches `sql` (its `Withheld`) and `queue` reaches `sql` and
+  `vfs`, and no other member reaches a sibling — `docstore` persists through
+  the `core/data/vfs` port alone, since the code it matched a publication's
+  failure on moved there (ADR 0160).

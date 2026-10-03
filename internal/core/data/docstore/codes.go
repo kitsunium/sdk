@@ -1,5 +1,7 @@
-// Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block; ADR 0139
-// added 16 and 17, ADR 0143 18 to 20).
+// Package docstore — range 0.3.80.* (ADR 0110 service/data/docstore block;
+// ADR 0139 added 16 and 17, ADR 0143 18 to 20). Both engines answer every one
+// of them alike, and the range keeps the LL = 3 its engine allocated it under
+// now that it is declared here (ADR 0160).
 package docstore
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

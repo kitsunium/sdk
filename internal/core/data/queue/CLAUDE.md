@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:53:04Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/core/data/queue/
 
 ## Purpose
@@ -32,8 +32,8 @@ construction; a change to `events` that moves it right is wrong the same way.
 | `deadletter.go` | the fourth and fifth siblings (ADR 0151): `Rejecter` — dead-letter a leased message at once — and `DeadLetterManager` — `ReplayDeadLetter` and `DeleteDeadLetter` |
 | `retry.go` | `DoNotRetry(cause)`: the mark a handler puts on a failure no retry can fix (ADR 0151) |
 | `policy.go` | `PolicyValue` (with `MaxRetryDelay`, ADR 0151), `Validate` + `validateRetryGrowth`, `Normalized`, `DefaultMaxMessageBytes`, `MaxDeadlineOffset` |
-| `codes.go` | the seven `0.2.23.*` codes |
-| `errors.go` | the seven sentinels |
+| `codes.go` | the seven `0.2.23.*` codes, then the five `0.3.53.*` codes of the brokers and the consumer engine (ADR 0160) |
+| `errors.go` | the seven port sentinels, then `QueueBackendFailed`, `QueueDirectoryUnusable`, `ConsumerMisconfigured`, `HandlerPanicked` and `SQLQueueMisconfigured`, which `internal/service/data/queue` emits — declared here since ADR 0160 under the service layer's `LL = 3` they were allocated with |
 
 ## The five things this domain decided
 

@@ -47,10 +47,10 @@
 // scope rolls back in turn — the common case, and the safe default.
 //
 // If the ROLLBACK TO SAVEPOINT statement itself fails, the transaction is
-// POISONED: every later operation is refused with [TxPoisoned], the commit
-// never happens, and the whole transaction is rolled back. The engine's state
-// is unknown at that point, and committing work the SDK believes it undid is
-// the one outcome worse than failing.
+// POISONED: every later operation is refused with [coresql.TxPoisoned], the
+// commit never happens, and the whole transaction is rolled back. The
+// engine's state is unknown at that point, and committing work the SDK
+// believes it undid is the one outcome worse than failing.
 //
 // # Joining a transaction, and holding what waits for its commit
 //

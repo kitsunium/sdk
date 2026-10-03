@@ -50,6 +50,9 @@ import, with their own ceiling (ADR 0066).
 
 ## Error codes (range `0.3.26.*`)
 
+Declared in `internal/core/data/transform` since ADR 0160, under the values
+this package allocated; the schemes here wrap a stdlib cause in them.
+
 | Code       | Var          | Trigger |
 |---|---|---|
 | `0.3.26.1` | `GzipFailed`  | `compress/gzip` returned an error (Compress or Decompress) |

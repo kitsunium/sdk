@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-27
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D2: the two engines implement ports after all, declared in `internal/core/data/docstore` — two families, `Collection` without a context and `CollectionContext` with one, and the shared `Announcer` — so neither engine gains or loses a context
 - **Related**: [ADR 0055](0055-sdk-sql-domain.md) (the `sql` domain this builds on), [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) (the document store whose contract this keeps), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a port grows by siblings), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (an engine's values are the engine's), [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (the SQLite runner that migrates its tables); kitsunium/platform ADRs 0004, 0006 and 0007 (kitsunium/platform#18), tracked here as #254
 
 ## Context

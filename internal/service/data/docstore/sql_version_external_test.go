@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
@@ -54,7 +55,7 @@ func reopenSQL(t *testing.T, tm coresql.Transactor, dialect coresql.Dialect,
 }
 
 // sqlVersionsOf reads key's versions, failing the test on an error.
-func sqlVersionsOf(t *testing.T, store *docstore.SQLStore[account], key string) []docstore.VersionValue {
+func sqlVersionsOf(t *testing.T, store *docstore.SQLStore[account], key string) []coredocstore.VersionValue {
 	t.Helper()
 	all, err := store.Versions(t.Context(), key)
 	if err != nil {
@@ -73,15 +74,15 @@ func TestSQLVersionsAreNumberedStampedAndPruned(t *testing.T) {
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx, clk := t.Context(), clock.NewManualClock(epoch)
 		store := openSQLVersioned(t, dialect, keeping(2, clk)).store
-		must(t, store.InsertStamped(ctx, account{ID: "acc_1", Name: "v1"}, docstore.StampValue{Meta: map[string]string{"by": "ada"}}))
+		must(t, store.InsertStamped(ctx, account{ID: "acc_1", Name: "v1"}, coredocstore.StampValue{Meta: map[string]string{"by": "ada"}}))
 		clk.Advance(time.Minute)
 		must(t, store.Put(ctx, account{ID: "acc_1", Name: "v2"}))
 		clk.Advance(time.Minute)
-		_, err := store.UpdateStamped(ctx, "acc_1", docstore.StampValue{Meta: map[string]string{"by": "grace", "command": "rename"}},
+		_, err := store.UpdateStamped(ctx, "acc_1", coredocstore.StampValue{Meta: map[string]string{"by": "grace", "command": "rename"}},
 			func(a *account) error { a.Name = "v3"; return nil })
 		must(t, err)
 		clk.Advance(time.Minute)
-		must(t, store.ReplaceStamped(ctx, account{ID: "acc_1", Name: "v4"}, docstore.StampValue{Meta: map[string]string{"by": "alan"}}))
+		must(t, store.ReplaceStamped(ctx, account{ID: "acc_1", Name: "v4"}, coredocstore.StampValue{Meta: map[string]string{"by": "alan"}}))
 
 		all := sqlVersionsOf(t, store, "acc_1")
 		if got := numbers(all); !slices.Equal(got, []uint64{4, 3, 2}) {
@@ -104,10 +105,10 @@ func TestSQLVersionsAreNumberedStampedAndPruned(t *testing.T) {
 			t.Fatalf("Version(3) = %+v, %v", one, err)
 		}
 		_, err = store.Version(ctx, "acc_1", 1)
-		requireCode(t, err, docstore.CodeVersionNotFound, "a pruned version")
+		requireCode(t, err, coredocstore.CodeVersionNotFound, "a pruned version")
 		quotesNothing(t, err, "acc_1")
 		_, err = store.Versions(ctx, "acc_404")
-		requireCode(t, err, docstore.CodeDocumentNotFound, "the versions of no document")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "the versions of no document")
 	})
 }
 
@@ -119,13 +120,13 @@ func TestSQLAWriteThatChangesNothingMakesNoVersion(t *testing.T) {
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx, clk := t.Context(), clock.NewManualClock(epoch)
 		store := openSQLVersioned(t, dialect, keeping(5, clk)).store
-		must(t, store.InsertStamped(ctx, account{ID: "acc_1", Name: "draft"}, docstore.StampValue{InPlace: true, Meta: map[string]string{"by": "ada"}}))
+		must(t, store.InsertStamped(ctx, account{ID: "acc_1", Name: "draft"}, coredocstore.StampValue{InPlace: true, Meta: map[string]string{"by": "ada"}}))
 		clk.Advance(time.Hour)
 		must(t, store.Put(ctx, account{ID: "acc_1", Name: "draft"}))
 		_, err := store.Update(ctx, "acc_1", func(*account) error { return nil })
 		must(t, err)
-		must(t, store.ReplaceStamped(ctx, account{ID: "acc_1", Name: "published"}, docstore.StampValue{InPlace: true}))
-		must(t, store.PutStamped(ctx, account{ID: "acc_1", Name: "republished"}, docstore.StampValue{InPlace: true}))
+		must(t, store.ReplaceStamped(ctx, account{ID: "acc_1", Name: "published"}, coredocstore.StampValue{InPlace: true}))
+		must(t, store.PutStamped(ctx, account{ID: "acc_1", Name: "republished"}, coredocstore.StampValue{InPlace: true}))
 		all := sqlVersionsOf(t, store, "acc_1")
 		if len(all) != 1 || all[0].Number != 1 || !all[0].At.Equal(epoch) || all[0].Meta["by"] != "ada" {
 			t.Fatalf("versions = %+v, want version 1 as the creation made it", all)
@@ -149,7 +150,7 @@ func TestSQLVersionsAreNeverIndexed(t *testing.T) {
 		must(t, store.Put(ctx, account{ID: "acc_1", Email: "old@x.dev", Teams: []string{"red"}}))
 		must(t, store.Put(ctx, account{ID: "acc_1", Email: "new@x.dev", Teams: []string{"blue"}}))
 		_, err := store.Lookup(ctx, "email", "old@x.dev")
-		requireCode(t, err, docstore.CodeDocumentNotFound, "Lookup of a former version's e-mail")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "Lookup of a former version's e-mail")
 		if red, findErr := store.Find(ctx, "team", "red"); findErr != nil || len(red) != 0 {
 			t.Fatalf("Find of a former version's team = %v, %v", ids(red), findErr)
 		}
@@ -171,7 +172,7 @@ func TestSQLADeletionTakesTheVersions(t *testing.T) {
 			t.Fatalf("the deletion left the version rows %v", left)
 		}
 		_, err := fx.store.Versions(ctx, "acc_1")
-		requireCode(t, err, docstore.CodeDocumentNotFound, "the versions of a deleted document")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "the versions of a deleted document")
 		must(t, fx.store.Insert(ctx, account{ID: "acc_1", Name: "again"}))
 		if got := numbers(sqlVersionsOf(t, fx.store, "acc_1")); !slices.Equal(got, []uint64{1}) {
 			t.Fatalf("a document inserted again has versions %v, want 1", got)
@@ -238,11 +239,11 @@ func TestSQLRewriteVersions(t *testing.T) {
 		}
 		hooked := 0
 		store.OnWrite(func(string) { hooked++ })
-		must(t, store.RewriteVersions(ctx, "acc_1", func(former []docstore.VersionValue) ([]docstore.VersionValue, error) {
+		must(t, store.RewriteVersions(ctx, "acc_1", func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) {
 			if got := numbers(former); !slices.Equal(got, []uint64{3, 2, 1}) {
 				t.Fatalf("the rewrite was given %v, want the former versions newest first", got)
 			}
-			kept := []docstore.VersionValue{former[0], former[2]}
+			kept := []coredocstore.VersionValue{former[0], former[2]}
 			for i := range kept {
 				kept[i].JSON = json.RawMessage(`{"id": "acc_1", "name": "[erased]"}`)
 				kept[i].Meta = map[string]string{"erased": "yes"}
@@ -262,20 +263,20 @@ func TestSQLRewriteVersions(t *testing.T) {
 		if hooked != 0 {
 			t.Fatalf("a rewrite called OnWrite %d times", hooked)
 		}
-		err := store.RewriteVersions(ctx, "acc_1", func(f []docstore.VersionValue) ([]docstore.VersionValue, error) {
-			return []docstore.VersionValue{f[1], f[0]}, nil
+		err := store.RewriteVersions(ctx, "acc_1", func(f []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) {
+			return []coredocstore.VersionValue{f[1], f[0]}, nil
 		})
-		requireCode(t, err, docstore.CodeVersionsRewriteRefused, "a rewrite out of order")
+		requireCode(t, err, coredocstore.CodeVersionsRewriteRefused, "a rewrite out of order")
 		refusal := errors.New("the caller's own refusal")
-		err = store.RewriteVersions(ctx, "acc_1", func([]docstore.VersionValue) ([]docstore.VersionValue, error) { return nil, refusal })
+		err = store.RewriteVersions(ctx, "acc_1", func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error) { return nil, refusal })
 		if !errors.Is(err, refusal) {
 			t.Fatalf("a failing rewrite = %v, want the function's own error", err)
 		}
 		if got := numbers(sqlVersionsOf(t, store, "acc_1")); !slices.Equal(got, []uint64{4, 3, 1}) {
 			t.Fatalf("a refused rewrite changed the versions: %v", got)
 		}
-		err = store.RewriteVersions(ctx, "acc_404", func(f []docstore.VersionValue) ([]docstore.VersionValue, error) { return f, nil })
-		requireCode(t, err, docstore.CodeDocumentNotFound, "a rewrite of no document")
+		err = store.RewriteVersions(ctx, "acc_404", func(f []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) { return f, nil })
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "a rewrite of no document")
 	})
 }
 
@@ -286,14 +287,14 @@ func TestSQLAStoreWithoutVersionsTouchesNoVersionsTable(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx, fx := t.Context(), openSQLVersioned(t, dialect)
-		must(t, fx.store.PutStamped(ctx, account{ID: "acc_1"}, docstore.StampValue{Meta: map[string]string{"by": "ada"}}))
+		must(t, fx.store.PutStamped(ctx, account{ID: "acc_1"}, coredocstore.StampValue{Meta: map[string]string{"by": "ada"}}))
 		must(t, fx.store.Delete(ctx, "acc_1"))
 		_, err := fx.store.Versions(ctx, "acc_1")
-		requireCode(t, err, docstore.CodeVersionsNotKept, "Versions")
+		requireCode(t, err, coredocstore.CodeVersionsNotKept, "Versions")
 		_, err = fx.store.Version(ctx, "acc_1", 1)
-		requireCode(t, err, docstore.CodeVersionsNotKept, "Version")
-		err = fx.store.RewriteVersions(ctx, "acc_1", func(f []docstore.VersionValue) ([]docstore.VersionValue, error) { return f, nil })
-		requireCode(t, err, docstore.CodeVersionsNotKept, "RewriteVersions")
+		requireCode(t, err, coredocstore.CodeVersionsNotKept, "Version")
+		err = fx.store.RewriteVersions(ctx, "acc_1", func(f []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) { return f, nil })
+		requireCode(t, err, coredocstore.CodeVersionsNotKept, "RewriteVersions")
 		for _, role := range fx.engine.roles() {
 			if strings.Contains(role, "ersion") || role == "claim" || role == "pruneCut" || role == "retireHead" {
 				t.Fatalf("a store without versions sent %s", role)
@@ -340,7 +341,7 @@ func TestSQLAFailedVersionStatementUndoesTheWrite(t *testing.T) {
 		for _, role := range []string{"retireHead", "insertVersions", "pruneCut", "pruneVersions", "versionHead"} {
 			fx.engine.failNext(role, errors.New("the statement was cancelled"))
 			err := fx.store.Put(ctx, account{ID: "acc_1", Name: "refused", Email: "refused@x.dev"})
-			requireCode(t, err, docstore.CodeStatementFailed, role)
+			requireCode(t, err, coredocstore.CodeStatementFailed, role)
 			if got := namesIn(t, sqlVersionsOf(t, fx.store, "acc_1")); !slices.Equal(got, []string{"v2", "v1"}) {
 				t.Fatalf("%s failed and the versions hold %v", role, got)
 			}
@@ -350,7 +351,7 @@ func TestSQLAFailedVersionStatementUndoesTheWrite(t *testing.T) {
 		}
 		fx.engine.failNext("insertVersions", errors.New("the statement was cancelled"))
 		err := fx.tm.Transact(ctx, coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
-			requireCode(t, fx.store.Put(ctx, account{ID: "acc_1", Name: "refused"}), docstore.CodeStatementFailed, "a failed write, caught")
+			requireCode(t, fx.store.Put(ctx, account{ID: "acc_1", Name: "refused"}), coredocstore.CodeStatementFailed, "a failed write, caught")
 			return fx.store.Put(ctx, account{ID: "acc_2", Name: "kept"})
 		})
 		must(t, err)
@@ -508,7 +509,7 @@ func TestSQLVersionsConfigurationRefusals(t *testing.T) {
 		},
 	} {
 		_, err := docstore.OpenSQL(cfg)
-		requireCode(t, err, docstore.CodeStoreMisconfigured, name)
+		requireCode(t, err, coredocstore.CodeStoreMisconfigured, name)
 	}
 	if roles := engine.roles(); len(roles) != 0 {
 		t.Fatalf("a refused configuration sent %v", roles)

@@ -1,5 +1,8 @@
-// Package vfs — declares the sentinel *errs.Error port outcomes. Each var's
-// name equals its errs.Define Reason in SCREAMING_SNAKE form.
+// Package vfs — declares the sentinel *errs.Error port outcomes, and the two
+// a concrete filesystem in internal/service/data/vfs can produce and an
+// abstract one cannot (ADR 0160: every code is declared in the core, at the
+// service's path). Each var's name equals its errs.Define Reason in
+// SCREAMING_SNAKE form.
 //
 // No Public string here names a path. A Public is read by third parties, and a
 // path is the one piece of caller data a filesystem error is guaranteed to
@@ -103,4 +106,29 @@ var (
 		"That directory still has entries in it",
 		"core/data/vfs: Remove targets one file or one EMPTY directory; RemoveAll is the recursive call",
 		errs.WithExitCode(exitDataErr))
+
+	// RootUnavailable is returned by NewOS when the root cannot be opened.
+	//
+	// It is a CONSTRUCTION-time refusal on purpose: a filesystem whose root
+	// does not exist will fail every call it is ever given, and the useful
+	// place to learn that is where the program is assembled, not on the first
+	// request that happens to write something.
+	RootUnavailable = errs.Define(CodeRootUnavailable, "ROOT_UNAVAILABLE",
+		"The filesystem root could not be opened",
+		"service/data/vfs: os.OpenRoot failed — the path is absent, is not a directory, or is not searchable by this process",
+		errs.WithExitCode(exitConfig))
+
+	// DirectorySyncFailed is returned when the rename succeeded and the
+	// parent directory could not be flushed afterwards.
+	//
+	// It deliberately does NOT roll back. The rename has already happened, so
+	// the new content is what every reader sees; undoing it would mean a
+	// second non-atomic write to repair a durability problem, which is how a
+	// good file gets replaced by a worse one. The caller is told exactly what
+	// is true — published, not proven durable — and decides whether that is
+	// acceptable for its data.
+	DirectorySyncFailed = errs.Define(CodeDirectorySyncFailed, "DIRECTORY_SYNC_FAILED",
+		"The file was published but the directory entry was not flushed",
+		"service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back",
+		errs.WithExitCode(exitIOErr))
 )

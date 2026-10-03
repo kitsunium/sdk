@@ -11,47 +11,9 @@ import (
 	"strconv"
 	"time"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
-
-// VersionValue is one version of a document: its number, when the write that
-// made it ran, what that write's caller said about it, and the document as the
-// version holds it.
-type VersionValue struct {
-	// At is when the write that made the version ran, in UTC, read from the
-	// store's clock and kept to the nanosecond — by the file engine for the
-	// years 0 to 9999, which RFC 3339 writes, and by the SQL engine for any
-	// instant. It is zero for the first version of a document the store held
-	// before it kept versions: when that one was written is not known.
-	At time.Time
-	// Meta is what the write's caller said about it — who made it, which
-	// command — as its [StampValue] gave it; nil when it said nothing. The
-	// store keeps it and never reads it.
-	Meta map[string]string
-	// JSON is the document as the version holds it, compact, a copy the
-	// caller owns. The newest version's is the document itself.
-	JSON json.RawMessage
-	// Number counts a document's versions from 1. No number is given twice
-	// while the document exists, pruning included; a document deleted and
-	// written again is a new document, and starts again at 1.
-	Number uint64
-}
-
-// StampValue is what a write says about the version it makes, for the
-// Stamped writes. Its zero value is what Put, Insert, Replace and Update say:
-// nothing, and a new version.
-type StampValue struct {
-	// Meta is kept with the version the write makes — who made it, which
-	// command — and read back with it. The store copies it and never reads
-	// it.
-	Meta map[string]string
-	// InPlace makes the write change the document without making a version:
-	// the current version keeps its number, its instant and its Meta, and
-	// holds the new document. A framework stamps so a workflow's transition,
-	// which its journal already records. A creation is version 1 all the
-	// same.
-	InPlace bool
-}
 
 // versionsRecord is one document's versions as the file store keeps them in
 // memory and in its files: the current version without its document — the
@@ -91,28 +53,28 @@ type formerVersion struct {
 var firstHead = versionHead{Number: 1}
 
 // PutStamped is Put, with what the write says about the version it makes.
-func (s *Store[T]) PutStamped(v T, stamp StampValue) error {
+func (s *Store[T]) PutStamped(v T, stamp coredocstore.StampValue) error {
 	//: anything under the key is fine.
 	return s.store(v, upsert, stamp)
 }
 
 // InsertStamped is Insert, with what the write says about the version it
 // makes: version 1, whatever stamp.InPlace says.
-func (s *Store[T]) InsertStamped(v T, stamp StampValue) error {
+func (s *Store[T]) InsertStamped(v T, stamp coredocstore.StampValue) error {
 	//: nothing may be under the key.
 	return s.store(v, insertOnly, stamp)
 }
 
 // ReplaceStamped is Replace, with what the write says about the version it
 // makes.
-func (s *Store[T]) ReplaceStamped(v T, stamp StampValue) error {
+func (s *Store[T]) ReplaceStamped(v T, stamp coredocstore.StampValue) error {
 	//: a document must be under the key.
 	return s.store(v, replaceOnly, stamp)
 }
 
 // UpdateStamped is Update, with what the write says about the version it
 // makes.
-func (s *Store[T]) UpdateStamped(key string, stamp StampValue, fn func(*T) error) (T, error) {
+func (s *Store[T]) UpdateStamped(key string, stamp coredocstore.StampValue, fn func(*T) error) (T, error) {
 	v, applied, err := s.modify(key, stamp, fn)
 	//: a write that took effect is announced, WriteUnconfirmed included.
 	if applied {
@@ -126,7 +88,7 @@ func (s *Store[T]) UpdateStamped(key string, stamp StampValue, fn func(*T) error
 // key, newest first: the current one — the document as it is now — then the
 // former ones. It returns DocumentNotFound when no document is stored under
 // key, and VersionsNotKept when the store keeps no versions.
-func (s *Store[T]) Versions(key string) ([]VersionValue, error) {
+func (s *Store[T]) Versions(key string) ([]coredocstore.VersionValue, error) {
 	//: a store that keeps none has none to read.
 	if s.keep == 0 {
 		//: VersionsNotKept, naming the store.
@@ -139,12 +101,12 @@ func (s *Store[T]) Versions(key string) ([]VersionValue, error) {
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return nil, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: no document, so no version either.
 	if !found {
 		//: DocumentNotFound, naming no key.
-		return nil, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return nil, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	//: copies: a record is never changed once stored, so reading it outside
 	//: the lock is reading what it held when it was taken.
@@ -154,12 +116,12 @@ func (s *Store[T]) Versions(key string) ([]VersionValue, error) {
 // Version returns the version numbered number of the document stored under
 // key, VersionNotFound when the document keeps none of that number — never
 // made, or pruned — and what Versions returns otherwise.
-func (s *Store[T]) Version(key string, number uint64) (VersionValue, error) {
+func (s *Store[T]) Version(key string, number uint64) (coredocstore.VersionValue, error) {
 	all, err := s.Versions(key)
 	//: StoreClosed, DocumentNotFound or VersionsNotKept.
 	if err != nil {
 		//: nothing read.
-		return VersionValue{}, err
+		return coredocstore.VersionValue{}, err
 	}
 	//: the one asked for, or a miss.
 	return pickVersion(s.path, all, number)
@@ -177,7 +139,7 @@ func (s *Store[T]) Version(key string, number uint64) (VersionValue, error) {
 //
 // It is what an erasure needs: the former versions cleared as the document
 // is, or dropped. fn runs under the writers' lock, like Update's.
-func (s *Store[T]) RewriteVersions(key string, fn func(former []VersionValue) ([]VersionValue, error)) error {
+func (s *Store[T]) RewriteVersions(key string, fn func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)) error {
 	//: a store that keeps none has none to rewrite.
 	if s.keep == 0 {
 		//: VersionsNotKept, naming the store.
@@ -188,13 +150,13 @@ func (s *Store[T]) RewriteVersions(key string, fn func(former []VersionValue) ([
 	//: a closed store takes nothing.
 	if s.closed {
 		//: StoreClosed.
-		return kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	raw, found := s.docs[key]
 	//: no document, so no version either.
 	if !found {
 		//: DocumentNotFound, naming no key.
-		return kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	record := s.versions[key]
 	next, err := rewriteRecord(s.path, record, fn)
@@ -205,7 +167,7 @@ func (s *Store[T]) RewriteVersions(key string, fn func(former []VersionValue) ([
 	}
 	persistErr := s.persist(key, raw, false, next)
 	//: the filesystem refused: nothing changed anywhere.
-	if persistErr != nil && !kerrs.HasCode(persistErr, CodeWriteUnconfirmed) {
+	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
 		return persistErr
 	}
@@ -226,7 +188,7 @@ func (s *Store[T]) RewriteVersions(key string, fn func(former []VersionValue) ([
 // the document is held. It returns nil for a store that keeps no versions,
 // and for a document stored before it kept them that no write has versioned
 // since. The caller holds the writers' lock.
-func (s *Store[T]) nextVersions(key string, raw json.RawMessage, stamp StampValue) *versionsRecord {
+func (s *Store[T]) nextVersions(key string, raw json.RawMessage, stamp coredocstore.StampValue) *versionsRecord {
 	//: a store that keeps none records none.
 	if s.keep == 0 {
 		//: no versions.
@@ -306,17 +268,17 @@ func (s *Store[T]) now() time.Time {
 // list returns the versions of a document whose current JSON is current,
 // newest first, as copies the caller owns. A nil record is a document stored
 // before its store kept versions: its one version is the document.
-func (r *versionsRecord) list(current json.RawMessage) []VersionValue {
+func (r *versionsRecord) list(current json.RawMessage) []coredocstore.VersionValue {
 	head, former := firstHead, []formerVersion(nil)
 	//: versioned since.
 	if r != nil {
 		head, former = r.Current, r.Former
 	}
-	out := make([]VersionValue, 0, 1+len(former))
-	out = append(out, VersionValue{At: head.At, Meta: maps.Clone(head.Meta), JSON: compactJSON(current), Number: head.Number})
+	out := make([]coredocstore.VersionValue, 0, 1+len(former))
+	out = append(out, coredocstore.VersionValue{At: head.At, Meta: maps.Clone(head.Meta), JSON: compactJSON(current), Number: head.Number})
 	//: newest first.
 	for _, f := range former {
-		out = append(out, VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number})
+		out = append(out, coredocstore.VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number})
 	}
 	//: every version kept.
 	return out
@@ -325,16 +287,16 @@ func (r *versionsRecord) list(current json.RawMessage) []VersionValue {
 // rewriteRecord applies a rewrite's function to the former versions of
 // record, and returns the record it leaves: the same current version, and the
 // former versions fn kept, checked. A nil record has no former version.
-func rewriteRecord(store string, record *versionsRecord, fn func([]VersionValue) ([]VersionValue, error)) (*versionsRecord, error) {
+func rewriteRecord(store string, record *versionsRecord, fn func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error)) (*versionsRecord, error) {
 	var given []formerVersion
 	//: a document versioned since its store kept versions.
 	if record != nil {
 		given = record.Former
 	}
-	copies := make([]VersionValue, len(given))
+	copies := make([]coredocstore.VersionValue, len(given))
 	//: copies, so fn cannot reach what the store holds.
 	for i, f := range given {
-		copies[i] = VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number}
+		copies[i] = coredocstore.VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number}
 	}
 	kept, err := fn(copies)
 	//: the caller's own error travels untouched.
@@ -362,7 +324,7 @@ func rewriteRecord(store string, record *versionsRecord, fn func([]VersionValue)
 // of those it was given, in the same order, with its own number and instant,
 // and a document that is JSON, compacted and HTML-escaped as json.Marshal
 // writes one. Both engines check through it.
-func checkRewrite(store string, given []formerVersion, kept []VersionValue) ([]formerVersion, error) {
+func checkRewrite(store string, given []formerVersion, kept []coredocstore.VersionValue) ([]formerVersion, error) {
 	out := make([]formerVersion, 0, len(kept))
 	next := 0
 	//: in the order fn returned them.
@@ -398,7 +360,7 @@ func checkRewrite(store string, given []formerVersion, kept []VersionValue) ([]f
 
 // pickVersion returns the version numbered number among all, or
 // VersionNotFound naming store and the number.
-func pickVersion(store string, all []VersionValue, number uint64) (VersionValue, error) {
+func pickVersion(store string, all []coredocstore.VersionValue, number uint64) (coredocstore.VersionValue, error) {
 	//: newest first; a document keeps few.
 	for _, v := range all {
 		//: the one asked for.
@@ -408,7 +370,7 @@ func pickVersion(store string, all []VersionValue, number uint64) (VersionValue,
 		}
 	}
 	//: never made, or pruned.
-	return VersionValue{}, kerrs.Wrap(VersionNotFound, kerrs.WrapParams{},
+	return coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.VersionNotFound, kerrs.WrapParams{},
 		kerrs.String("store", store), kerrs.String("number", strconv.FormatUint(number, 10)))
 }
 
@@ -430,11 +392,11 @@ func compactJSON(raw json.RawMessage) json.RawMessage {
 // versionsNotKept is VersionsNotKept naming store.
 func versionsNotKept(store string) error {
 	//: the store, never a key.
-	return kerrs.Wrap(VersionsNotKept, kerrs.WrapParams{}, kerrs.String("store", store))
+	return kerrs.Wrap(coredocstore.VersionsNotKept, kerrs.WrapParams{}, kerrs.String("store", store))
 }
 
 // rewriteRefused is VersionsRewriteRefused naming store and the problem.
 func rewriteRefused(store, problem string) error {
 	//: the problem, never a version.
-	return kerrs.Wrap(VersionsRewriteRefused, kerrs.WrapParams{}, kerrs.String("store", store), kerrs.String("problem", problem))
+	return kerrs.Wrap(coredocstore.VersionsRewriteRefused, kerrs.WrapParams{}, kerrs.String("store", store), kerrs.String("problem", problem))
 }

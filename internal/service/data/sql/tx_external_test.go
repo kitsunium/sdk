@@ -80,7 +80,7 @@ func TestCommitFailureSaysTheWorkHadNoEffect(t *testing.T) {
 	err := tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(context.Context, coresql.Executor) error {
 		return nil
 	})
-	if !errs.HasCode(err, svcsql.CodeCommitFailed) {
+	if !errs.HasCode(err, coresql.CodeCommitFailed) {
 		t.Fatalf("Transact = %v, want COMMIT_FAILED", err)
 	}
 	if !errors.Is(err, errScripted) {
@@ -100,7 +100,7 @@ func TestBeginFailureRunsNothing(t *testing.T) {
 		ran = true
 		return nil
 	})
-	if !errs.HasCode(err, svcsql.CodeBeginFailed) {
+	if !errs.HasCode(err, coresql.CodeBeginFailed) {
 		t.Fatalf("Transact = %v, want BEGIN_FAILED", err)
 	}
 	if ran {
@@ -229,10 +229,10 @@ func TestAFailedSavepointRollbackPoisonsTheTransaction(t *testing.T) {
 		_, afterPoison = ex.ExecContext(ctx, "AFTER")
 		return nil
 	})
-	if !errs.HasCode(afterPoison, svcsql.CodeTxPoisoned) {
+	if !errs.HasCode(afterPoison, coresql.CodeTxPoisoned) {
 		t.Fatalf("post-poison Exec = %v, want TX_POISONED", afterPoison)
 	}
-	if !errs.HasCode(err, svcsql.CodeTxPoisoned) {
+	if !errs.HasCode(err, coresql.CodeTxPoisoned) {
 		t.Fatalf("Transact = %v, want TX_POISONED", err)
 	}
 	if f.sent("COMMIT") {
@@ -257,7 +257,7 @@ func TestAFailedReleasePoisonsTooCoversTheForgottenHalf(t *testing.T) {
 			return nil
 		})
 	})
-	if !errs.HasCode(err, svcsql.CodeSavepointFailed) {
+	if !errs.HasCode(err, coresql.CodeSavepointFailed) {
 		t.Fatalf("Transact = %v, want SAVEPOINT_FAILED", err)
 	}
 	if f.sent("COMMIT") {
@@ -277,7 +277,7 @@ func TestAFailedSavepointCreationLeavesTheOuterScopeUntouched(t *testing.T) {
 			t.Error("the unit of work ran although its savepoint was refused")
 			return nil
 		})
-		if !errs.HasCode(inner, svcsql.CodeSavepointFailed) {
+		if !errs.HasCode(inner, coresql.CodeSavepointFailed) {
 			t.Errorf("nested Transact = %v, want SAVEPOINT_FAILED", inner)
 		}
 		_, execErr := ex.ExecContext(ctx, "AFTER")
@@ -390,7 +390,7 @@ func TestARetiredExecutorRefusesAndReachesNoDriver(t *testing.T) {
 		//: the inner scope has returned; its handle must be inert even though
 		//: the transaction underneath is very much alive.
 		_, execErr := leaked.ExecContext(ctx, "LEAKED")
-		if !errs.HasCode(execErr, svcsql.CodeTxClosed) {
+		if !errs.HasCode(execErr, coresql.CodeTxClosed) {
 			t.Errorf("stale Exec = %v, want TX_CLOSED", execErr)
 		}
 		return nil
@@ -479,7 +479,7 @@ func TestANilUnitOfWorkIsRefusedBeforeAnythingOpens(t *testing.T) {
 	t.Parallel()
 	f := newFakeDB()
 	tm := newTransactor(t, f)
-	if err := tm.Transact(t.Context(), coresql.TxOptionsValue{}, nil); !errs.HasCode(err, svcsql.CodeConfigInvalid) {
+	if err := tm.Transact(t.Context(), coresql.TxOptionsValue{}, nil); !errs.HasCode(err, coresql.CodeConfigInvalid) {
 		t.Fatalf("Transact(nil) = %v, want CONFIG_INVALID", err)
 	}
 	if len(f.statements()) != 0 {

@@ -51,7 +51,7 @@ func TestCheckReportsADriverFailureWithoutRepeatingIt(t *testing.T) {
 	f.pingErr = errors.New("dial tcp 10.0.0.7:5432: connection refused")
 	checker := newChecker(t, f, clock.NewManualClock(time.Unix(0, 0)))
 	err := checker.Check(t.Context())
-	if !errs.HasCode(err, svcsql.CodeHealthCheckFailed) {
+	if !errs.HasCode(err, coresql.CodeHealthCheckFailed) {
 		t.Fatalf("Check = %v, want HEALTH_CHECK_FAILED", err)
 	}
 	if !errors.Is(err, f.pingErr) {
@@ -87,7 +87,7 @@ func TestCheckTimesOutOnTheInjectedClockWithoutSleeping(t *testing.T) {
 	manual.Advance(probeBudget)
 	err := <-verdict
 	close(f.pingBlock)
-	if !errs.HasCode(err, svcsql.CodeHealthCheckTimeout) {
+	if !errs.HasCode(err, coresql.CodeHealthCheckTimeout) {
 		t.Fatalf("Check = %v, want HEALTH_CHECK_TIMEOUT", err)
 	}
 }
@@ -97,7 +97,7 @@ func TestCheckTimesOutOnTheInjectedClockWithoutSleeping(t *testing.T) {
 // different operational facts.
 func TestATimeoutIsADifferentCodeFromARefusal(t *testing.T) {
 	t.Parallel()
-	if svcsql.CodeHealthCheckTimeout == svcsql.CodeHealthCheckFailed {
+	if coresql.CodeHealthCheckTimeout == coresql.CodeHealthCheckFailed {
 		t.Fatal("a hang and a refusal share one code")
 	}
 }

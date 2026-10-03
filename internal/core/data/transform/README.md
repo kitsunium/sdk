@@ -43,3 +43,12 @@ port + registry. See ADR 0014 D1.
 | `0.2.5.2` | `CompressionFailed`      | the compressor returned an error |
 | `0.2.5.3` | `DecompressionFailed`    | the decompressor returned an error |
 | `0.2.5.4` | `CompressedFrameInvalid` | malformed frame OR decompression-bomb guard tripped (emitter: `pkg/v1/data/codec` frame layer) |
+
+The stdlib schemes' three sentinels are declared here too since ADR 0160,
+under the range their layer allocated:
+
+| Code       | Var           | Trigger |
+|---|---|---|
+| `0.3.26.1` | `GzipFailed`  | `compress/gzip` returned an error (Compress or Decompress) |
+| `0.3.26.2` | `FlateFailed` | `compress/flate` returned an error (Compress or Decompress) |
+| `0.3.26.3` | `ZlibFailed`  | `compress/zlib` returned an error, including a failed Adler-32 check |

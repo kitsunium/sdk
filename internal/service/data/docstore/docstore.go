@@ -75,6 +75,7 @@ import (
 	"strconv"
 	"sync"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -131,15 +132,6 @@ type Store[T any] struct {
 	closed bool
 }
 
-// EntryValue is one stored document as the store holds it: its key and its
-// JSON, for a caller that shows documents rather than decoding them.
-type EntryValue struct {
-	// Key is the document's key.
-	Key string
-	// JSON is the document, a copy the caller owns.
-	JSON json.RawMessage
-}
-
 // StatsValue is what a store can say about itself: how many documents it
 // holds, how far its overlay has grown, and how its folds have gone.
 type StatsValue struct {
@@ -166,12 +158,12 @@ func (s *Store[T]) Get(key string) (T, error) {
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return zero, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return zero, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: a miss.
 	if !found {
 		//: DocumentNotFound, naming no key.
-		return zero, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return zero, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	//: a copy of the stored document.
 	return s.decode(raw)
@@ -183,7 +175,7 @@ func (s *Store[T]) List() ([]T, error) {
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return nil, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: decoded outside the lock.
 	return s.decodeAll(entries)
@@ -213,12 +205,12 @@ func (s *Store[T]) Filter(keep func(T) bool) ([]T, error) {
 // Entries returns up to limit stored documents as JSON, in key order — every
 // one when limit is not positive — for a caller that shows documents rather
 // than decoding them. Each JSON is the caller's own copy.
-func (s *Store[T]) Entries(limit int) ([]EntryValue, error) {
+func (s *Store[T]) Entries(limit int) ([]coredocstore.EntryValue, error) {
 	entries, closed := s.snapshotEntries(limit)
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return nil, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: copies, so a caller's edit never reaches the store.
 	for i := range entries {
@@ -237,12 +229,12 @@ func (s *Store[T]) Lookup(index, key string) (T, error) {
 	//: an index the store never declared.
 	if !found {
 		//: IndexUnknown, naming the index.
-		return zero, kerrs.Wrap(IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
+		return zero, kerrs.Wrap(coredocstore.IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
 	}
 	//: one document is only meaningful from a unique index.
 	if !ix.unique {
 		//: IndexNotUnique, naming the index.
-		return zero, kerrs.Wrap(IndexNotUnique, kerrs.WrapParams{}, kerrs.String("index", index))
+		return zero, kerrs.Wrap(coredocstore.IndexNotUnique, kerrs.WrapParams{}, kerrs.String("index", index))
 	}
 	s.mu.RLock()
 	owners, closed := ix.holders(key), s.closed
@@ -255,13 +247,13 @@ func (s *Store[T]) Lookup(index, key string) (T, error) {
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return zero, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return zero, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: nobody holds the key. The key is not quoted: an index key is often
 	//: what a caller must not learn back — an e-mail, the hash of a token.
 	if raw == nil {
 		//: DocumentNotFound, naming the index.
-		return zero, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", index))
+		return zero, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", index))
 	}
 	//: a copy of the holder.
 	return s.decode(raw)
@@ -275,20 +267,20 @@ func (s *Store[T]) Find(index, key string) ([]T, error) {
 	//: an index the store never declared.
 	if !found {
 		//: IndexUnknown, naming the index.
-		return nil, kerrs.Wrap(IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
+		return nil, kerrs.Wrap(coredocstore.IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
 	}
 	s.mu.RLock()
 	owners, closed := ix.holders(key), s.closed
-	entries := make([]EntryValue, len(owners))
+	entries := make([]coredocstore.EntryValue, len(owners))
 	//: each holder's JSON, taken under the lock.
 	for i, owner := range owners {
-		entries[i] = EntryValue{Key: owner, JSON: s.docs[owner]}
+		entries[i] = coredocstore.EntryValue{Key: owner, JSON: s.docs[owner]}
 	}
 	s.mu.RUnlock()
 	//: a closed store answers nothing.
 	if closed {
 		//: StoreClosed.
-		return nil, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return nil, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: decoded outside the lock; empty, never nil.
 	return s.decodeAll(entries)
@@ -306,7 +298,7 @@ func (s *Store[T]) Stats() StatsValue {
 // snapshotEntries takes up to limit documents, in key order — all of them
 // when limit is not positive — and reports whether the store is closed. The
 // JSON slices are the store's own: the caller copies what it hands out.
-func (s *Store[T]) snapshotEntries(limit int) (entries []EntryValue, closed bool) {
+func (s *Store[T]) snapshotEntries(limit int) (entries []coredocstore.EntryValue, closed bool) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
 	//: a closed store has nothing to hand out.
@@ -319,10 +311,10 @@ func (s *Store[T]) snapshotEntries(limit int) (entries []EntryValue, closed bool
 	if limit > 0 && limit < len(keys) {
 		keys = keys[:limit]
 	}
-	entries = make([]EntryValue, len(keys))
+	entries = make([]coredocstore.EntryValue, len(keys))
 	//: each document's JSON under its key.
 	for i, key := range keys {
-		entries[i] = EntryValue{Key: key, JSON: s.docs[key]}
+		entries[i] = coredocstore.EntryValue{Key: key, JSON: s.docs[key]}
 	}
 	//: open.
 	return entries, false
@@ -345,7 +337,7 @@ func decodeAs[T any](store string, raw []byte) (T, error) {
 		var zero T
 		//: DocumentUndecodable; what failed, never the document and never
 		//: the key.
-		return zero, kerrs.Wrap(DocumentUndecodable, kerrs.WrapParams{},
+		return zero, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
 			kerrs.String("store", store), kerrs.String("cause", jsonCause(err)))
 	}
 	//: the caller's own copy.
@@ -353,7 +345,7 @@ func decodeAs[T any](store string, raw []byte) (T, error) {
 }
 
 // decodeAll decodes entries in order. It never returns nil for no entries.
-func (s *Store[T]) decodeAll(entries []EntryValue) ([]T, error) {
+func (s *Store[T]) decodeAll(entries []coredocstore.EntryValue) ([]T, error) {
 	out := make([]T, len(entries))
 	//: in the order given.
 	for i, entry := range entries {

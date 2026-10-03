@@ -22,7 +22,7 @@ func TestANonPositiveMaxOpenIsRefused(t *testing.T) {
 			DB: db, Dialect: coresql.DialectPostgres,
 			Pool: svcsql.PoolConfig{MaxOpen: value},
 		})
-		if !errs.HasCode(err, svcsql.CodePoolMisconfigured) {
+		if !errs.HasCode(err, coresql.CodePoolMisconfigured) {
 			t.Fatalf("MaxOpen=%d: NewTransactor = %v, want POOL_MISCONFIGURED", value, err)
 		}
 	}
@@ -40,7 +40,7 @@ func TestARefusedPoolPolicyLeavesTheCallersDBUntouched(t *testing.T) {
 	//: the assertion below would pass for the wrong reason.
 	if _, err := svcsql.NewTransactor(svcsql.Config{
 		DB: db, Dialect: coresql.DialectPostgres, Pool: svcsql.PoolConfig{MaxOpen: 0},
-	}); !errs.HasCode(err, svcsql.CodePoolMisconfigured) {
+	}); !errs.HasCode(err, coresql.CodePoolMisconfigured) {
 		t.Fatalf("NewTransactor(MaxOpen: 0) = %v, want POOL_MISCONFIGURED", err)
 	}
 	if got := db.Stats().MaxOpenConnections; got != 7 {
@@ -78,7 +78,7 @@ func TestConfigRefusesAnUnsetDialect(t *testing.T) {
 	t.Parallel()
 	db := closeOnCleanup(t, newFakeDB().open())
 	_, err := svcsql.NewTransactor(svcsql.Config{DB: db, Pool: svcsql.PoolConfig{MaxOpen: 2}})
-	if !errs.HasCode(err, svcsql.CodeConfigInvalid) {
+	if !errs.HasCode(err, coresql.CodeConfigInvalid) {
 		t.Fatalf("NewTransactor = %v, want CONFIG_INVALID", err)
 	}
 }
@@ -88,7 +88,7 @@ func TestConfigRefusesAnUnsetDialect(t *testing.T) {
 func TestConfigRefusesANilPool(t *testing.T) {
 	t.Parallel()
 	_, err := svcsql.NewTransactor(svcsql.Config{Dialect: coresql.DialectPostgres})
-	if !errs.HasCode(err, svcsql.CodeConfigInvalid) {
+	if !errs.HasCode(err, coresql.CodeConfigInvalid) {
 		t.Fatalf("NewTransactor = %v, want CONFIG_INVALID", err)
 	}
 }

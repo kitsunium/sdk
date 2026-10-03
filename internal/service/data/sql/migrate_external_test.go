@@ -180,7 +180,7 @@ func TestUpRefusesAMigrationOlderThanOneApplied(t *testing.T) {
 		coresql.MigrationValue{Version: 20, Name: "shipped", Up: step(&applied, "UP 20"), Down: coresql.Irreversible},
 	)
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationOutOfOrder) {
+	if !errs.HasCode(err, coresql.CodeMigrationOutOfOrder) {
 		t.Fatalf("Up = %v, want MIGRATION_OUT_OF_ORDER", err)
 	}
 	if len(applied) != 0 {
@@ -245,7 +245,7 @@ func TestUpAppliesNothingWhenTheLockIsHeldForTheWholeBudget(t *testing.T) {
 	manual.BlockUntil(1)
 	manual.Advance(lockRetry)
 	err := <-verdict
-	if !errs.HasCode(err, svcsql.CodeMigrationLockTimeout) {
+	if !errs.HasCode(err, coresql.CodeMigrationLockTimeout) {
 		t.Fatalf("Up = %v, want MIGRATION_LOCK_TIMEOUT", err)
 	}
 	if len(applied) != 0 {
@@ -273,7 +273,7 @@ func TestAMigrationAndItsVersionRowCommitTogether(t *testing.T) {
 		coresql.MigrationValue{Version: 1, Name: "one", Up: step(&applied, "UP 1"), Down: coresql.Irreversible},
 	)
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED", err)
 	}
 	if f.sent(recordRow) {
@@ -350,7 +350,7 @@ func TestDownRefusesBeforeReversingAnythingWhenTheDatabaseIsAhead(t *testing.T) 
 		coresql.MigrationValue{Version: 1, Name: "one", Up: noop, Down: step(&reversed, "DOWN 1")},
 	)
 	err := runner.Down(t.Context(), 0)
-	if !errs.HasCode(err, svcsql.CodeMigrationUnknownVersion) {
+	if !errs.HasCode(err, coresql.CodeMigrationUnknownVersion) {
 		t.Fatalf("Down = %v, want MIGRATION_UNKNOWN_VERSION", err)
 	}
 	if len(reversed) != 0 {
@@ -369,7 +369,7 @@ func TestDuplicateVersionsAreRefusedAtConstruction(t *testing.T) {
 			{Version: 1, Name: "one again", Up: noop, Down: noop},
 		},
 	})
-	if !errs.HasCode(err, svcsql.CodeDuplicateMigration) {
+	if !errs.HasCode(err, coresql.CodeDuplicateMigration) {
 		t.Fatalf("NewMigrator = %v, want DUPLICATE_MIGRATION", err)
 	}
 }
@@ -417,7 +417,7 @@ func TestVersionTableMustBeAPlainIdentifier(t *testing.T) {
 	} {
 		_, _, err := buildMigrator(t, newFakeDB(), clock.NewManualClock(time.Unix(0, 0)),
 			svcsql.MigrateConfig{VersionTable: name})
-		if !errs.HasCode(err, svcsql.CodeVersionTableInvalid) {
+		if !errs.HasCode(err, coresql.CodeVersionTableInvalid) {
 			t.Fatalf("VersionTable=%q: NewMigrator = %v, want VERSION_TABLE_INVALID", name, err)
 		}
 	}
@@ -433,7 +433,7 @@ func TestAnUnreadableVersionTableStopsTheRun(t *testing.T) {
 	runner, _ := newMigrator(t, f, clock.NewManualClock(time.Unix(0, 0)),
 		coresql.MigrationValue{Version: 1, Name: "one", Up: step(&applied, "UP 1"), Down: coresql.Irreversible},
 	)
-	if err := runner.Up(t.Context()); !errs.HasCode(err, svcsql.CodeMigrationFailed) {
+	if err := runner.Up(t.Context()); !errs.HasCode(err, coresql.CodeMigrationFailed) {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED", err)
 	}
 	if len(applied) != 0 {
@@ -454,7 +454,7 @@ func TestStatementsRunsInOrderAndStopsAtTheFirstFailure(t *testing.T) {
 			Down: coresql.Irreversible,
 		},
 	)
-	if err := runner.Up(t.Context()); !errs.HasCode(err, svcsql.CodeMigrationFailed) {
+	if err := runner.Up(t.Context()); !errs.HasCode(err, coresql.CodeMigrationFailed) {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED", err)
 	}
 	if !f.sent("FIRST") || !f.sent("SECOND") {
@@ -498,7 +498,7 @@ func TestARejectedLockStatementIsNotABusySignal(t *testing.T) {
 	f.failOn(tryLock)
 	runner, _ := newMigrator(t, f, clock.NewManualClock(time.Unix(0, 0)))
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED", err)
 	}
 	if errors.Is(err, nil) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {

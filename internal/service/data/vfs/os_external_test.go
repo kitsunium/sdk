@@ -62,7 +62,7 @@ func TestARootThatIsNotThereIsRefusedAtConstruction(t *testing.T) {
 		t.Skipf("NewOS refuses %s before it looks at the path", runtime.GOOS)
 	}
 	_, err := svcvfs.NewOS(filepath.Join(t.TempDir(), "absent"))
-	if !kerrs.HasCode(err, svcvfs.CodeRootUnavailable) {
+	if !kerrs.HasCode(err, corevfs.CodeRootUnavailable) {
 		t.Fatalf("NewOS = %v, want ROOT_UNAVAILABLE", err)
 	}
 	if !errors.Is(err, fs.ErrNotExist) {

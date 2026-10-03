@@ -7,6 +7,7 @@ import (
 	"slices"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
@@ -19,8 +20,8 @@ func TestTheWriteModes(t *testing.T) {
 	t.Parallel()
 	store := openAccounts(t, nil)
 	must(t, store.Insert(account{ID: "acc_1", Name: "Ada"}))
-	requireCode(t, store.Insert(account{ID: "acc_1", Name: "Twin"}), docstore.CodeDocumentExists, "Insert over an existing key")
-	requireCode(t, store.Replace(account{ID: "acc_2", Name: "Nobody"}), docstore.CodeDocumentNotFound, "Replace of a missing key")
+	requireCode(t, store.Insert(account{ID: "acc_1", Name: "Twin"}), coredocstore.CodeDocumentExists, "Insert over an existing key")
+	requireCode(t, store.Replace(account{ID: "acc_2", Name: "Nobody"}), coredocstore.CodeDocumentNotFound, "Replace of a missing key")
 	must(t, store.Replace(account{ID: "acc_1", Name: "Ada Lovelace"}))
 	must(t, store.Put(account{ID: "acc_2", Name: "Grace"}))
 	must(t, store.Put(account{ID: "acc_2", Name: "Grace Hopper"}))
@@ -40,10 +41,10 @@ func TestTheWriteModes(t *testing.T) {
 	}
 	//: a deletion, then everything that needs the document refuses.
 	must(t, store.Delete("acc_1"))
-	requireCode(t, store.Delete("acc_1"), docstore.CodeDocumentNotFound, "Delete of a missing key")
-	requireCode(t, store.Replace(account{ID: "acc_1"}), docstore.CodeDocumentNotFound, "Replace of a deleted key")
+	requireCode(t, store.Delete("acc_1"), coredocstore.CodeDocumentNotFound, "Delete of a missing key")
+	requireCode(t, store.Replace(account{ID: "acc_1"}), coredocstore.CodeDocumentNotFound, "Replace of a deleted key")
 	_, getErr := store.Get("acc_1")
-	requireCode(t, getErr, docstore.CodeDocumentNotFound, "Get of a deleted key")
+	requireCode(t, getErr, coredocstore.CodeDocumentNotFound, "Get of a deleted key")
 	if n := store.Stats().Documents; n != 1 {
 		t.Fatalf("Stats().Documents = %d, want 1", n)
 	}
@@ -54,7 +55,7 @@ func TestTheWriteModes(t *testing.T) {
 func TestAKeyIsNeverEmpty(t *testing.T) {
 	t.Parallel()
 	store := openAccounts(t, nil)
-	requireCode(t, store.Put(account{Name: "No ID"}), docstore.CodeDocumentKeyEmpty, "Put of an empty key")
+	requireCode(t, store.Put(account{Name: "No ID"}), coredocstore.CodeDocumentKeyEmpty, "Put of an empty key")
 	if n := store.Stats().Documents; n != 0 {
 		t.Fatalf("the refused document was stored: %d documents", n)
 	}
@@ -91,13 +92,13 @@ func TestUpdate(t *testing.T) {
 		t.Fatalf("Update() with a failing function = %v, want the function's own error", err)
 	}
 	_, err = store.Update("acc_1", func(a *account) error { a.ID = "acc_9"; return nil })
-	requireCode(t, err, docstore.CodeDocumentKeyChanged, "an update that renames")
+	requireCode(t, err, coredocstore.CodeDocumentKeyChanged, "an update that renames")
 	_, err = store.Update("acc_404", func(*account) error { return nil })
-	requireCode(t, err, docstore.CodeDocumentNotFound, "an update of a missing key")
+	requireCode(t, err, coredocstore.CodeDocumentNotFound, "an update of a missing key")
 	if got, getErr := store.Get("acc_1"); getErr != nil || got.Name != "Ada, after Grace" {
 		t.Fatalf("a refused update changed the document: %+v, %v", got, getErr)
 	}
-	if _, found := store.Get("acc_9"); !errs.HasCode(found, docstore.CodeDocumentNotFound) {
+	if _, found := store.Get("acc_9"); !errs.HasCode(found, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("a refused rename stored the new key: %v", found)
 	}
 }
@@ -124,7 +125,7 @@ func TestHooks(t *testing.T) {
 	_, err := store.Update("acc_1", func(a *account) error { a.Name = "Ada"; return nil })
 	must(t, err)
 	//: refused writes announce nothing.
-	requireCode(t, store.Insert(account{ID: "acc_1"}), docstore.CodeDocumentExists, "Insert over an existing key")
+	requireCode(t, store.Insert(account{ID: "acc_1"}), coredocstore.CodeDocumentExists, "Insert over an existing key")
 	_, err = store.Update("acc_1", func(*account) error { return errors.New("refused") })
 	if err == nil {
 		t.Fatal("the failing update succeeded")
@@ -180,20 +181,20 @@ func TestAClosedStore(t *testing.T) {
 	must(t, store.Close())
 	must(t, store.Close())
 	_, getErr := store.Get("acc_1")
-	requireCode(t, getErr, docstore.CodeStoreClosed, "Get after Close")
+	requireCode(t, getErr, coredocstore.CodeStoreClosed, "Get after Close")
 	_, listErr := store.List()
-	requireCode(t, listErr, docstore.CodeStoreClosed, "List after Close")
+	requireCode(t, listErr, coredocstore.CodeStoreClosed, "List after Close")
 	_, lookupErr := store.Lookup("email", "a@x.dev")
-	requireCode(t, lookupErr, docstore.CodeStoreClosed, "Lookup after Close")
+	requireCode(t, lookupErr, coredocstore.CodeStoreClosed, "Lookup after Close")
 	_, findErr := store.Find("email", "a@x.dev")
-	requireCode(t, findErr, docstore.CodeStoreClosed, "Find after Close")
+	requireCode(t, findErr, coredocstore.CodeStoreClosed, "Find after Close")
 	_, entriesErr := store.Entries(1)
-	requireCode(t, entriesErr, docstore.CodeStoreClosed, "Entries after Close")
-	requireCode(t, store.Put(account{ID: "acc_2"}), docstore.CodeStoreClosed, "Put after Close")
-	requireCode(t, store.Delete("acc_1"), docstore.CodeStoreClosed, "Delete after Close")
+	requireCode(t, entriesErr, coredocstore.CodeStoreClosed, "Entries after Close")
+	requireCode(t, store.Put(account{ID: "acc_2"}), coredocstore.CodeStoreClosed, "Put after Close")
+	requireCode(t, store.Delete("acc_1"), coredocstore.CodeStoreClosed, "Delete after Close")
 	_, updateErr := store.Update("acc_1", func(*account) error { return nil })
-	requireCode(t, updateErr, docstore.CodeStoreClosed, "Update after Close")
-	requireCode(t, store.Fold(), docstore.CodeStoreClosed, "Fold after Close")
+	requireCode(t, updateErr, coredocstore.CodeStoreClosed, "Update after Close")
+	requireCode(t, store.Fold(), coredocstore.CodeStoreClosed, "Fold after Close")
 	if n := store.Stats().Documents; n != 1 {
 		t.Fatalf("Stats().Documents after Close = %d, want 1", n)
 	}
@@ -224,7 +225,7 @@ func TestADocumentTheTypeNoLongerFits(t *testing.T) {
 	must(t, older.Put(storedAs{ID: "item_1", Stock: "s3cr3t-quantity"}))
 	must(t, older.Close())
 	_, openErr := docstore.Open(docstore.Config[readAs]{Key: func(v readAs) string { return v.ID }, FS: fsys, Path: "shop/items.json"})
-	requireCode(t, openErr, docstore.CodeDocumentUndecodable, "an open over a document the type no longer fits")
+	requireCode(t, openErr, coredocstore.CodeDocumentUndecodable, "an open over a document the type no longer fits")
 	if quotes(errs.PublicOf(openErr)+errs.PrivateOf(openErr)+openErr.Error()+fieldsText(openErr), "s3cr3t-quantity") {
 		t.Fatalf("the refusal quotes the stored value: %v %v", openErr, errs.FieldsOf(openErr))
 	}

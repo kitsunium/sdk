@@ -108,7 +108,7 @@ func TestSQLAFailedPublicationLeavesTheCallersTransactionUsable(t *testing.T) {
 	eachDialect(t, func(t *testing.T, fx *sqlFixture, _ *clock.ManualClock) {
 		fx.engine.failNext("insert", errors.New("the statement was cancelled"))
 		err := inTransaction(t, fx, func(ctx context.Context) error {
-			if _, failed := fx.broker.Publish(ctx, []byte("failed")); !errs.HasCode(failed, svcqueue.CodeQueueBackendFailed) {
+			if _, failed := fx.broker.Publish(ctx, []byte("failed")); !errs.HasCode(failed, corequeue.CodeQueueBackendFailed) {
 				t.Fatalf("the failed Publish = %v, want CodeQueueBackendFailed", failed)
 			}
 			_, pubErr := fx.broker.Publish(ctx, []byte("kept"))
@@ -140,7 +140,7 @@ func TestSQLAStorageFailureWithholdsTheDriversText(t *testing.T) {
 		} {
 			fx.engine.failNext(role, errDuplicate{key: secret})
 			err := call()
-			if !errs.HasCode(err, svcqueue.CodeQueueBackendFailed) {
+			if !errs.HasCode(err, corequeue.CodeQueueBackendFailed) {
 				t.Fatalf("%s: %v, want CodeQueueBackendFailed", role, err)
 			}
 			rendered := err.Error()
@@ -357,7 +357,7 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 		"an empty table":       {table(""), "Table"},
 	} {
 		_, err := svcqueue.NewSQL(tc.cfg)
-		if !errs.HasCode(err, svcqueue.CodeSQLQueueMisconfigured) {
+		if !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
 			t.Errorf("%s: NewSQL() = %v, want CodeSQLQueueMisconfigured", name, err)
 			continue
 		}

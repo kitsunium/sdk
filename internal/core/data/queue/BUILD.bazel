@@ -38,6 +38,7 @@ go_test(
     srcs = [
         "queue_external_test.go",
         "retry_external_test.go",
+        "service_range_external_test.go",
     ],
     deps = [
         ":queue",

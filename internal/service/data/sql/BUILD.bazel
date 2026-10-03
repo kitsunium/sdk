@@ -5,10 +5,8 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "sql",
     srcs = [
-        "codes.go",
         "config.go",
         "dialect_sql.go",
-        "errors.go",
         "executor.go",
         "health.go",
         "join.go",
@@ -67,9 +65,14 @@ go_test(
     ],
     # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
     # files at runtime. Bazel's sandbox strips the source-tree relationship, so
-    # the sources have to reach the test as runfiles — the same mechanism
-    # //internal/kernel/errs uses for its AST audits.
-    data = ["//:audit_sources"],
+    # the sources have to reach the test as runfiles — :audit_srcs ships them,
+    # and //:audit_sources the go.work that roots the tree, the same mechanism
+    # //internal/kernel/errs uses for its AST audits. The package declares no
+    # code since ADR 0160, so //:audit_sources no longer lists it.
+    data = [
+        ":audit_srcs",
+        "//:audit_sources",
+    ],
     deps = [
         ":sql",
         "//internal/core/data/sql",
@@ -78,9 +81,9 @@ go_test(
     ],
 )
 
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+# audit_srcs ships this package's .go files to its own wall-clock audit
+# (nosleep_external_test.go), which reads them at runtime.
 filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

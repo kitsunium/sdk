@@ -14,6 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 )
@@ -168,10 +169,10 @@ func TestSQLMigrationCreatesTheOneTable(t *testing.T) {
 // version the version table cannot hold.
 func TestSQLMigrationRefusals(t *testing.T) {
 	t.Parallel()
-	if _, err := svcqueue.SQLMigration(coresql.DialectUnknown, jobsTable, 1); !errs.HasCode(err, svcqueue.CodeSQLQueueMisconfigured) {
+	if _, err := svcqueue.SQLMigration(coresql.DialectUnknown, jobsTable, 1); !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
 		t.Errorf("SQLMigration(no dialect) = %v, want CodeSQLQueueMisconfigured", err)
 	}
-	if _, err := svcqueue.SQLMigration(coresql.DialectSQLite, "Jobs; DROP", 1); !errs.HasCode(err, svcqueue.CodeSQLQueueMisconfigured) {
+	if _, err := svcqueue.SQLMigration(coresql.DialectSQLite, "Jobs; DROP", 1); !errs.HasCode(err, corequeue.CodeSQLQueueMisconfigured) {
 		t.Errorf("SQLMigration(a table name that is not one) = %v, want CodeSQLQueueMisconfigured", err)
 	}
 	if _, err := svcqueue.SQLMigration(coresql.DialectSQLite, jobsTable, 0); !errs.HasCode(err, coresql.CodeInvalidMigration) {

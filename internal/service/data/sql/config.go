@@ -106,14 +106,14 @@ func (c Config) resolve() (settings resolved, err error) {
 	//: a nil pool cannot be recovered from — there is nothing to talk to.
 	if c.DB == nil {
 		//: the missing field names which half is absent.
-		return settings, kerrs.Wrap(ConfigInvalid, kerrs.WrapParams{},
+		return settings, kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{},
 			kerrs.String("missing", "db"))
 	}
 	//: DialectUnknown is what an unset field looks like; reading it as
 	//: "probably postgres" is how a MySQL deployment learns the difference.
 	if !c.Dialect.Valid() {
 		//: name the dialect rather than the DSN.
-		return settings, kerrs.Wrap(ConfigInvalid, kerrs.WrapParams{},
+		return settings, kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{},
 			kerrs.String("missing", "dialect"), kerrs.String("dialect", c.Dialect.String()))
 	}
 	//: the pool policy is refused before anything is applied, so a rejected
@@ -155,7 +155,7 @@ func (p PoolConfig) apply(db *stdsql.DB) error {
 	//: the one field with no defensible default — refuse rather than invent.
 	if p.MaxOpen <= 0 {
 		//: the value is the caller's own, so naming it leaks nothing.
-		return kerrs.Wrap(PoolMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coresql.PoolMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "MaxOpen"), kerrs.Int("value", p.MaxOpen))
 	}
 	db.SetMaxOpenConns(p.MaxOpen)

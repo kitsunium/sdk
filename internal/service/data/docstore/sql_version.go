@@ -13,6 +13,7 @@ import (
 	"slices"
 	"time"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -53,21 +54,21 @@ type versionRow struct {
 }
 
 // PutStamped is Put, with what the write says about the version it makes.
-func (s *SQLStore[T]) PutStamped(ctx context.Context, v T, stamp StampValue) error {
+func (s *SQLStore[T]) PutStamped(ctx context.Context, v T, stamp coredocstore.StampValue) error {
 	//: anything under the key is fine.
 	return s.store(ctx, v, upsert, stamp)
 }
 
 // InsertStamped is Insert, with what the write says about the version it
 // makes: version 1, whatever stamp.InPlace says.
-func (s *SQLStore[T]) InsertStamped(ctx context.Context, v T, stamp StampValue) error {
+func (s *SQLStore[T]) InsertStamped(ctx context.Context, v T, stamp coredocstore.StampValue) error {
 	//: nothing may be under the key.
 	return s.store(ctx, v, insertOnly, stamp)
 }
 
 // ReplaceStamped is Replace, with what the write says about the version it
 // makes.
-func (s *SQLStore[T]) ReplaceStamped(ctx context.Context, v T, stamp StampValue) error {
+func (s *SQLStore[T]) ReplaceStamped(ctx context.Context, v T, stamp coredocstore.StampValue) error {
 	//: a document must be under the key.
 	return s.store(ctx, v, replaceOnly, stamp)
 }
@@ -77,7 +78,7 @@ func (s *SQLStore[T]) ReplaceStamped(ctx context.Context, v T, stamp StampValue)
 // former ones, read in one statement on the transaction ctx carries.
 // DocumentNotFound when no document is stored under key, VersionsNotKept when
 // the store keeps no versions.
-func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []VersionValue, err error) {
+func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []coredocstore.VersionValue, err error) {
 	//: a store that keeps none has none to read.
 	if s.keep == 0 {
 		//: VersionsNotKept, naming the store.
@@ -92,7 +93,7 @@ func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []Vers
 	}
 	//: rows are this call's, so this call closes them.
 	defer func() { err = s.finishRows(rows, "read the versions", err) }()
-	versions = make([]VersionValue, 0, s.keep+1)
+	versions = make([]coredocstore.VersionValue, 0, s.keep+1)
 	//: newest first; a document stored before versions were kept is one row
 	//: without a number.
 	for rows.Next() {
@@ -113,7 +114,7 @@ func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []Vers
 	//: no row: no document.
 	if len(versions) == 0 {
 		//: DocumentNotFound, naming no key.
-		return nil, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return nil, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the finisher reports a failure that ended the rows early.
 	return versions, nil
@@ -122,12 +123,12 @@ func (s *SQLStore[T]) Versions(ctx context.Context, key string) (versions []Vers
 // Version returns the version numbered number of the document stored under
 // key, VersionNotFound when the document keeps none of that number — never
 // made, or pruned — and what Versions returns otherwise.
-func (s *SQLStore[T]) Version(ctx context.Context, key string, number uint64) (VersionValue, error) {
+func (s *SQLStore[T]) Version(ctx context.Context, key string, number uint64) (coredocstore.VersionValue, error) {
 	all, err := s.Versions(ctx, key)
 	//: StatementFailed, DocumentNotFound or VersionsNotKept.
 	if err != nil {
 		//: nothing read.
-		return VersionValue{}, err
+		return coredocstore.VersionValue{}, err
 	}
 	//: the one asked for, or a miss.
 	return pickVersion(s.table, all, number)
@@ -141,7 +142,7 @@ func (s *SQLStore[T]) Version(ctx context.Context, key string, number uint64) (V
 // the rules of [Store].RewriteVersions: VersionsRewriteRefused otherwise, and
 // fn's own error returned as it is, nothing changed either way. It calls no
 // hook: the document did not change.
-func (s *SQLStore[T]) RewriteVersions(ctx context.Context, key string, fn func(former []VersionValue) ([]VersionValue, error)) error {
+func (s *SQLStore[T]) RewriteVersions(ctx context.Context, key string, fn func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)) error {
 	//: a store that keeps none has none to rewrite.
 	if s.keep == 0 {
 		//: VersionsNotKept, naming the store.
@@ -155,13 +156,13 @@ func (s *SQLStore[T]) RewriteVersions(ctx context.Context, key string, fn func(f
 }
 
 // rewrite is RewriteVersions' work, inside its transaction.
-func (s *SQLStore[T]) rewrite(ctx context.Context, ex coresql.Executor, key string, fn func([]VersionValue) ([]VersionValue, error)) error {
+func (s *SQLStore[T]) rewrite(ctx context.Context, ex coresql.Executor, key string, fn func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error)) error {
 	var raw []byte
 	err := ex.QueryRowContext(ctx, s.stmts.lockDoc, []byte(key)).Scan(&raw)
 	//: no document, so no version either.
 	if errors.Is(err, stdsql.ErrNoRows) {
 		//: DocumentNotFound, naming no key.
-		return kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the locking read did not complete.
 	if err != nil {
@@ -174,10 +175,10 @@ func (s *SQLStore[T]) rewrite(ctx context.Context, ex coresql.Executor, key stri
 		//: the rewrite rolls back.
 		return err
 	}
-	copies := make([]VersionValue, len(given))
+	copies := make([]coredocstore.VersionValue, len(given))
 	//: copies, so fn cannot reach the rows read.
 	for i, f := range given {
-		copies[i] = VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number}
+		copies[i] = coredocstore.VersionValue{At: f.At, Meta: maps.Clone(f.Meta), JSON: slices.Clone(f.Document), Number: f.Number}
 	}
 	kept, err := fn(copies)
 	//: the caller's own error travels untouched.
@@ -391,7 +392,7 @@ func (s *SQLStore[T]) versionArgs(key string, batch []versionRow) ([]any, error)
 			//: unreachable for a map of strings.
 			if err != nil {
 				//: DocumentUnencodable, naming what failed.
-				return nil, kerrs.Wrap(DocumentUnencodable, kerrs.WrapParams{},
+				return nil, kerrs.Wrap(coredocstore.DocumentUnencodable, kerrs.WrapParams{},
 					kerrs.String("store", s.table), kerrs.String("cause", encodeCause(err)))
 			}
 			meta = encoded
@@ -423,8 +424,8 @@ type scannedVersion struct {
 // versionOf turns one row of a versions read into a version. A row without a
 // number is a document stored before its store kept versions: version 1,
 // made at an unknown instant.
-func (s *SQLStore[T]) versionOf(row *scannedVersion) (VersionValue, error) {
-	v := VersionValue{JSON: row.doc, Number: 1}
+func (s *SQLStore[T]) versionOf(row *scannedVersion) (coredocstore.VersionValue, error) {
+	v := coredocstore.VersionValue{JSON: row.doc, Number: 1}
 	//: a version the table records.
 	if row.num.Valid {
 		v.Number = uint64(row.num.Int64)
@@ -439,7 +440,7 @@ func (s *SQLStore[T]) versionOf(row *scannedVersion) (VersionValue, error) {
 		//: a JSON object of strings, as a write stored it.
 		if err := json.Unmarshal(row.meta, &v.Meta); err != nil {
 			//: DocumentUndecodable, naming what failed and never the value.
-			return VersionValue{}, kerrs.Wrap(DocumentUndecodable, kerrs.WrapParams{},
+			return coredocstore.VersionValue{}, kerrs.Wrap(coredocstore.DocumentUndecodable, kerrs.WrapParams{},
 				kerrs.String("store", s.table), kerrs.String("cause", "the metadata of a version: "+jsonCause(err)))
 		}
 	}

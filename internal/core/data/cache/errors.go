@@ -1,5 +1,7 @@
-// Package cache — declares the sentinel *errs.Error port outcomes. Each var's
-// name equals its errs.Define Reason in SCREAMING_SNAKE form.
+// Package cache — declares the sentinel *errs.Error port outcomes, and the
+// two the chained store in internal/service/data/cache emits (ADR 0160: every
+// code is declared in the core, at the service's path). Each var's name equals
+// its errs.Define Reason in SCREAMING_SNAKE form.
 package cache
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -57,4 +59,29 @@ var (
 		"The cache entry is not storable as given",
 		"core/data/cache: Set received an empty key, an empty tag, or a negative TTL that is not cache.NoExpiry; the fields name the offending part",
 		errs.WithExitCode(exitDataErr))
+
+	// CacheChainMisconfigured is returned by NewChain for a tier set it cannot
+	// honour.
+	//
+	// The interesting refusal is the third one. Every tier must implement
+	// [EntryFetcher] and [Tagger], and that is checked ONCE, at construction,
+	// rather than per call. The reason is the whole point of tagging:
+	// promoting a value into a nearer tier WITHOUT its tags produces a copy
+	// that InvalidateTag can no longer reach, so the invalidation reports
+	// success, the far tier forgets the entry, and the near tier keeps
+	// serving it until its TTL runs out. A tag invalidation that silently
+	// misses one copy is worse than one that was never offered — so the chain
+	// refuses to be built rather than degrade at the moment nobody is looking.
+	CacheChainMisconfigured = errs.Define(CodeCacheChainMisconfigured, "CACHE_CHAIN_MISCONFIGURED",
+		"The cache chain cannot be built from the given tiers",
+		"service/data/cache: NewChain received fewer than two tiers, a nil tier, or a tier that does not implement EntryFetcher and Tagger; the fields name the position and the missing capability",
+		errs.WithExitCode(exitConfig))
+
+	// CacheTierFailed is returned when a chained operation failed inside one
+	// tier. Its fields name the tier's position and the operation, because a
+	// chain's caller holds one Store and would otherwise have no way to tell
+	// which of two backends broke.
+	CacheTierFailed = errs.Define(CodeCacheTierFailed, "CACHE_TIER_FAILED",
+		"A tier of the cache chain could not serve the operation",
+		"service/data/cache: one tier of a chained store returned an error; the fields name the tier position, the operation and the key")
 )

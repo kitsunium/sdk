@@ -150,12 +150,12 @@ var (
 	DirectoryNotEmpty = corevfs.DirectoryNotEmpty
 	// RootUnavailable is returned by NewOS when the root cannot be opened:
 	// absent, not a directory, or not searchable by this process.
-	RootUnavailable = svcvfs.RootUnavailable
+	RootUnavailable = corevfs.RootUnavailable
 	// DirectorySyncFailed is returned when the rename succeeded and the
 	// directory entry could not be flushed. The content IS published; only
 	// its survival across a power loss is in doubt, and it is deliberately
 	// not rolled back.
-	DirectorySyncFailed = svcvfs.DirectorySyncFailed
+	DirectorySyncFailed = corevfs.DirectorySyncFailed
 )
 
 // NewOS opens root as a filesystem confined to that directory tree.

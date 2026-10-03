@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
@@ -13,7 +14,7 @@ import (
 
 // reopen opens a second store over fx's engine and transactor, with other
 // index declarations — what a new release of a program does to its tables.
-func reopen(t *testing.T, fx *sqlFixture, dialect coresql.Dialect, indexes ...docstore.IndexSpec[account]) *docstore.SQLStore[account] {
+func reopen(t *testing.T, fx *sqlFixture, dialect coresql.Dialect, indexes ...coredocstore.IndexSpec[account]) *docstore.SQLStore[account] {
 	t.Helper()
 	store, err := docstore.OpenSQL(docstore.SQLConfig[account]{
 		Key: accountKey, Transactor: fx.tm, Dialect: dialect, Table: accountsTable,
@@ -30,7 +31,7 @@ func TestSQLReindexFilesWhatANewDeclarationMissed(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx := t.Context()
-		fx := openSQL(t, dialect, docstore.Index("old", func(a account) []string { return []string{"x"} }))
+		fx := openSQL(t, dialect, coredocstore.Index("old", func(a account) []string { return []string{"x"} }))
 		const stored int = 600
 		for i := range stored {
 			must(t, fx.store.Put(ctx, account{ID: fmt.Sprintf("acc_%04d", i), Teams: []string{"all"}}))
@@ -51,7 +52,7 @@ func TestSQLReindexFilesWhatANewDeclarationMissed(t *testing.T) {
 		}
 		must(t, store.Insert(ctx, account{ID: "new", Email: "new@x.dev"}))
 		requireCode(t, store.Insert(ctx, account{ID: "newer", Email: "new@x.dev"}),
-			docstore.CodeUniqueKeyTaken, "the rebuilt unique index constraining a later write")
+			coredocstore.CodeUniqueKeyTaken, "the rebuilt unique index constraining a later write")
 	})
 }
 
@@ -63,13 +64,13 @@ func TestSQLReindexRefusesDocumentsThatBreakAUniqueIndex(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx := t.Context()
-		fx := openSQL(t, dialect, docstore.Index("email", func(a account) []string { return []string{a.Email} }))
+		fx := openSQL(t, dialect, coredocstore.Index("email", func(a account) []string { return []string{a.Email} }))
 		must(t, fx.store.Put(ctx, account{ID: "acc_1", Email: "same@x.dev"}))
 		must(t, fx.store.Put(ctx, account{ID: "acc_2", Email: "same@x.dev"}))
 		before := fx.engine.snapshot().ix
-		store := reopen(t, fx, dialect, docstore.Unique("email", func(a account) string { return a.Email }))
+		store := reopen(t, fx, dialect, coredocstore.Unique("email", func(a account) string { return a.Email }))
 		err := store.Reindex(ctx)
-		requireCode(t, err, docstore.CodeIndexBroken, "two documents sharing a key made unique")
+		requireCode(t, err, coredocstore.CodeIndexBroken, "two documents sharing a key made unique")
 		quotesNothing(t, err, "same@x.dev")
 		if index := fieldValue(errs.FieldsOf(err), "index"); index != "email" {
 			t.Fatalf("the refusal names index %q, want email", index)
@@ -90,9 +91,9 @@ func TestSQLReindexRefusesAKeyFunctionThatPanics(t *testing.T) {
 		ctx := t.Context()
 		fx := openSQL(t, dialect)
 		must(t, fx.store.Put(ctx, account{ID: "acc_1"}))
-		store := reopen(t, fx, dialect, docstore.Index("broken", func(account) []string { panic("no keys for this one") }))
+		store := reopen(t, fx, dialect, coredocstore.Index("broken", func(account) []string { panic("no keys for this one") }))
 		err := store.Reindex(ctx)
-		requireCode(t, err, docstore.CodeIndexBroken, "a key function that panics")
+		requireCode(t, err, coredocstore.CodeIndexBroken, "a key function that panics")
 		if problem := fieldValue(errs.FieldsOf(err), "problem"); problem != "a key function panicked" {
 			t.Fatalf("the refusal says %q", problem)
 		}

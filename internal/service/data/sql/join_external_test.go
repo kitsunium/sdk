@@ -9,7 +9,6 @@ import (
 
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
 
 // siblings returns the manager over f as the two capabilities under test.
@@ -81,7 +80,7 @@ func TestJoinAnswersTheInnermostScope(t *testing.T) {
 		}); nestedErr != nil {
 			return nestedErr
 		}
-		if _, execErr := inner.ExecContext(ctx, "STALE"); !errs.HasCode(execErr, svcsql.CodeTxClosed) {
+		if _, execErr := inner.ExecContext(ctx, "STALE"); !errs.HasCode(execErr, coresql.CodeTxClosed) {
 			t.Errorf("the nested scope's executor after it returned = %v, want TX_CLOSED", execErr)
 		}
 		outer, _ := joiner.Join(ctx)
@@ -115,7 +114,7 @@ func TestALeakedContextNeverFallsBackToThePool(t *testing.T) {
 	if !inTx {
 		t.Fatal("Join forgot the transaction a leaked context names")
 	}
-	if _, err := ex.ExecContext(t.Context(), "AFTER THE END"); !errs.HasCode(err, svcsql.CodeTxClosed) {
+	if _, err := ex.ExecContext(t.Context(), "AFTER THE END"); !errs.HasCode(err, coresql.CodeTxClosed) {
 		t.Fatalf("a statement through a finished transaction = %v, want TX_CLOSED", err)
 	}
 	if f.sent("AFTER THE END") {

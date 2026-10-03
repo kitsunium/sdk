@@ -31,7 +31,10 @@ alias(
 go_test(
     name = "cache_test",
     size = "small",
-    srcs = ["cache_external_test.go"],
+    srcs = [
+        "cache_external_test.go",
+        "service_range_external_test.go",
+    ],
     deps = [
         ":cache",
         "//internal/kernel/errs",

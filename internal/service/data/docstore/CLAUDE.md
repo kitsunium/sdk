@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:24:48Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/service/data/docstore/
 
 ## Purpose
@@ -23,19 +23,25 @@ Public facade: `pkg/v1/data/docstore`.
 Code range `0.3.80.*`, shared: both engines answer the same refusals under the
 same codes, and the SQL engine adds `STATEMENT_FAILED` and `KEY_TOO_LONG`;
 versions add `VERSIONS_NOT_KEPT`, `VERSION_NOT_FOUND` and
-`VERSIONS_REWRITE_REFUSED` to both. No core counterpart: the two engines
-differ on the one thing a port would have to fix — a context, and a database
-that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
+`VERSIONS_REWRITE_REFUSED` to both. The codes and sentinels, the values both
+engines read and return (`EntryValue`, `VersionValue`, `StampValue`), the index
+declaration both take (`IndexSpec`, `Unique`, `Index`) and the ports are
+declared in `internal/core/data/docstore` (ADR 0160): `Collection` and
+`Versioned` for the file engine, `CollectionContext` and `VersionedContext` for
+the SQL engine — two families, because the engines differ on the one thing a
+single port would have to fix, a context (ADR 0139 §D2) — and `Announcer`,
+which both implement as they are. This package holds the engines, their
+configurations and the file engine's `StatsValue` (ADR 0074).
 
 ## Contents
 
 | File | Surface |
 |---|---|
-| `docstore.go` | package doc, `Store[T]`, `EntryValue`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
+| `docstore.go` | package doc, `Store[T]`, `StatsValue`; the reads — `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `decode` → `decodeAs` (shared), `jsonCause` (a decoding failure described without a byte of the document) |
 | `open.go` | `Open[T](Config[T], ...IndexSpec[T])`; `newStore`; `open` — load, rebuild, THEN fold, so a refused open writes no data |
-| `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `IndexSpec[T]`, `Unique`, `Index`, `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` and `validateVersions` (shared) |
+| `config.go` | `Config[T]` (`Key`, `FS`, `Clock`, `Held`, `Path`, `FoldAt`, `Versions`), `DefaultFoldAt`; the refusals (`StoreMisconfigured`), `validateIndexes` — over `core/data/docstore.IndexSpec` — and `validateVersions` (shared) |
 | `write.go` | `Put` / `Insert` / `Replace` (the three write modes), `Update`, `Delete`; `prepare` → `encodeAs` (shared, outside every lock) → `commit` / `modify` / `remove` (under the writers' lock) → `persistAndApply`, which computes the versions a write leaves before it persists anything; `encodeCause` |
-| `version.go` | `VersionValue`, `StampValue` (shared); the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON` |
+| `version.go` | the file engine's `PutStamped` / `InsertStamped` / `ReplaceStamped` / `UpdateStamped`, `Versions`, `Version`, `RewriteVersions`; `versionsRecord` (a record is never changed once stored), `nextVersions` → `pruned` (asks `Held` only when something would go), `checkRewrite` and `pickVersion` (shared), `compactJSON` |
 | `index.go` | the index maps (`entries`, `owned`), `fileableKeys` (shared: the empty key is no key, a repeated one is filed once), `uniqueTaken`, `file` / `unfile`, `rebuild` on open: every document decoded, checked against its own `Key` (`LOAD_FAILED` otherwise, naming the file via `origin`) and filed; a broken unique index or a panicking key function refuses the open |
 | `persist.go` | the files: `entryName` (SHA-256 of the key), `persist` (one overlay entry per write, the document and its versions), `publish` (PersistFailed vs WriteUnconfirmed), `maybeFold`, `Fold`, `Close`, `fold` / `foldVersions` (the versions file, then the snapshot) / `removeFolded` / `recordFold`, `encodeSnapshot` |
 | `load.go` | `load`: the directories, `readSnapshot`, `replayOverSnapshot` → `readVersions` (refused by a store that keeps none), `readOverlay` / `replay` / `checkEntryVersions`, `versionsWithoutDocument`, `checkRecord`, `compacted`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
@@ -47,7 +53,7 @@ that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
 | `sql_version.go` | the SQL engine's `PutStamped` / `InsertStamped` / `ReplaceStamped`, `Versions` (one LEFT JOIN), `Version`, `RewriteVersions`; `keepVersions` (the version rows a write leaves, in its transaction), `readHead`, `prune`, `insertVersionRows` (150 a statement), `versionOf` |
 | `sql_reindex.go` | `Reindex`: every index row rebuilt from the documents, a page at a time, `INDEX_BROKEN` for a unique key two documents share |
 | `sql_migration.go` | `SQLMigration`: the two tables as one idempotent `core/data/sql` migration the caller numbers; `SQLVersionsMigration`: the versions table, beside it |
-| `codes.go` / `errors.go` | `0.3.80.1`–`0.3.80.20` |
+| `docstore_compliance.go` | the compile-time assertions that `Store[T]` implements `core/data/docstore.Collection` and `Versioned`, `SQLStore[T]` `CollectionContext` and `VersionedContext`, and both `Announcer` |
 | `BENCH.md` | what a write costs as the file store grows, against the whole-file rewrite it replaces |
 
 ## Why-this-shape

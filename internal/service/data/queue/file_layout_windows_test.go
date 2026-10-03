@@ -21,6 +21,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 )
@@ -179,7 +180,7 @@ func assertWindowsVerdict(t *testing.T, err error, refusedAt, why string) {
 		return
 	}
 	//: refused by the rules, by the queue's own code.
-	if !errs.HasCode(err, svcqueue.CodeQueueDirectoryUnusable) {
+	if !errs.HasCode(err, corequeue.CodeQueueDirectoryUnusable) {
 		t.Fatalf("NewFile = %v, want QUEUE_DIRECTORY_UNUSABLE refused at %s", err, refusedAt)
 	}
 	wantState := refusedAt

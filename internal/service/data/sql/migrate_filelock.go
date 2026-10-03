@@ -78,7 +78,7 @@ func (m *migrator) fileLockedRun(ctx context.Context, work func(context.Context)
 		if lockErr := m.takeFileLock(txCtx, ex); lockErr != nil {
 			busy = lockBusy(lockErr)
 			//: rolled back either way; a real failure also names its phase.
-			return failed(MigrationFailed, lockErr, kerrs.String("phase", lockPhase))
+			return failed(coresql.MigrationFailed, lockErr, kerrs.String("phase", lockPhase))
 		}
 		//: every migration runs in its own savepoint of this transaction.
 		outcome = work(txCtx)
@@ -97,7 +97,7 @@ func (m *migrator) fileLockedRun(ctx context.Context, work func(context.Context)
 	//: connection still holds is then unknown, and the run stops and says so.
 	if busy {
 		//: the rollback's own verdict, beside the busy answer that caused it.
-		if kerrs.HasCode(err, CodeRollbackFailed) {
+		if kerrs.HasCode(err, coresql.CodeRollbackFailed) {
 			//: not retried.
 			return false, err
 		}
@@ -115,14 +115,14 @@ func (m *migrator) fileLockedRun(ctx context.Context, work func(context.Context)
 // migration the run applied.
 func runPhase(err error, began bool, outcome error) error {
 	//: nothing failed, or the failure already names its phase.
-	if err == nil || kerrs.HasCode(err, CodeMigrationFailed) {
+	if err == nil || kerrs.HasCode(err, coresql.CodeMigrationFailed) {
 		//: as it is.
 		return err
 	}
 	//: BEGIN itself was refused: no migration started.
 	if !began {
 		//: the lock phase, which BEGIN is part of on SQLite.
-		return failed(MigrationFailed, err, kerrs.String("phase", lockPhase))
+		return failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
 	}
 	//: the work reported its own failure; the transaction's travels beside it.
 	if outcome != nil {
@@ -130,7 +130,7 @@ func runPhase(err error, began bool, outcome error) error {
 		return err
 	}
 	//: the COMMIT took the run with it.
-	return failed(MigrationFailed, err, kerrs.String("phase", commitPhase))
+	return failed(coresql.MigrationFailed, err, kerrs.String("phase", commitPhase))
 }
 
 // takeFileLock makes the run's transaction the database's one writer.

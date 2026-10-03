@@ -162,7 +162,7 @@ func Test_flateDecompress(t *testing.T) {
 		wantErr error
 	}{
 		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, FlateFailed},
+		{"over-cap-fails-closed", loweredCapBytes, coretransform.FlateFailed},
 	}
 	//: drive each cap relationship through flateDecompress.
 	for _, tc := range cases {
@@ -191,7 +191,7 @@ func Test_gzipDecompress(t *testing.T) {
 		wantErr error
 	}{
 		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, GzipFailed},
+		{"over-cap-fails-closed", loweredCapBytes, coretransform.GzipFailed},
 	}
 	//: drive each cap relationship through gzipDecompress.
 	for _, tc := range cases {
@@ -221,7 +221,7 @@ func Test_zlibDecompress(t *testing.T) {
 		wantErr error
 	}{
 		{"under-cap-round-trips", maxDecompressedBytes, nil},
-		{"over-cap-fails-closed", loweredCapBytes, ZlibFailed},
+		{"over-cap-fails-closed", loweredCapBytes, coretransform.ZlibFailed},
 	}
 	//: drive each cap relationship through zlibDecompress.
 	for _, tc := range cases {

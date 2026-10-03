@@ -14,6 +14,7 @@ import (
 	"sync"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
@@ -36,7 +37,7 @@ type sqlFixture struct {
 
 // openSQL opens an accounts store on dialect over a fresh engine, with the
 // given indexes — the accounts indexes when none are given.
-func openSQL(t *testing.T, dialect coresql.Dialect, indexes ...docstore.IndexSpec[account]) *sqlFixture {
+func openSQL(t *testing.T, dialect coresql.Dialect, indexes ...coredocstore.IndexSpec[account]) *sqlFixture {
 	t.Helper()
 	engine := newSQLEngine(dialect, accountsTable)
 	tm := newSQLTransactor(t, engine, dialect)
@@ -99,18 +100,18 @@ func TestSQLTheWriteModes(t *testing.T) {
 		ctx, store := t.Context(), openSQL(t, dialect).store
 		must(t, store.Insert(ctx, account{ID: "acc_1", Name: "Ada"}))
 		err := store.Insert(ctx, account{ID: "acc_1", Name: "Again"})
-		requireCode(t, err, docstore.CodeDocumentExists, "a second Insert")
+		requireCode(t, err, coredocstore.CodeDocumentExists, "a second Insert")
 		quotesNothing(t, err, "acc_1")
-		requireCode(t, store.Replace(ctx, account{ID: "acc_2"}), docstore.CodeDocumentNotFound, "Replace of a missing key")
+		requireCode(t, store.Replace(ctx, account{ID: "acc_2"}), coredocstore.CodeDocumentNotFound, "Replace of a missing key")
 		must(t, store.Put(ctx, account{ID: "acc_2", Name: "Grace"}))
 		must(t, store.Put(ctx, account{ID: "acc_2", Name: "Grace Hopper"}))
 		if got, getErr := store.Get(ctx, "acc_2"); getErr != nil || got.Name != "Grace Hopper" {
 			t.Fatalf("Get() after two Puts = %+v, %v", got, getErr)
 		}
 		must(t, store.Delete(ctx, "acc_2"))
-		requireCode(t, store.Replace(ctx, account{ID: "acc_2"}), docstore.CodeDocumentNotFound, "Replace after a Delete")
-		requireCode(t, store.Delete(ctx, "acc_2"), docstore.CodeDocumentNotFound, "a second Delete")
-		if _, getErr := store.Get(ctx, "acc_2"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		requireCode(t, store.Replace(ctx, account{ID: "acc_2"}), coredocstore.CodeDocumentNotFound, "Replace after a Delete")
+		requireCode(t, store.Delete(ctx, "acc_2"), coredocstore.CodeDocumentNotFound, "a second Delete")
+		if _, getErr := store.Get(ctx, "acc_2"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("Get() of a deleted document = %v", getErr)
 		}
 		if got, getErr := store.Get(ctx, "acc_1"); getErr != nil || got.Name != "Ada" {
@@ -128,12 +129,12 @@ func TestSQLAKeyIsNeverEmptyNorTooLong(t *testing.T) {
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx, fx := t.Context(), openSQL(t, dialect)
 		long := strings.Repeat("k", docstore.MaxSQLKeyLen+1)
-		requireCode(t, fx.store.Put(ctx, account{ID: ""}), docstore.CodeDocumentKeyEmpty, "an empty key")
+		requireCode(t, fx.store.Put(ctx, account{ID: ""}), coredocstore.CodeDocumentKeyEmpty, "an empty key")
 		err := fx.store.Put(ctx, account{ID: long})
-		requireCode(t, err, docstore.CodeKeyTooLong, "a store key past the limit")
+		requireCode(t, err, coredocstore.CodeKeyTooLong, "a store key past the limit")
 		quotesNothing(t, err, long)
 		err = fx.store.Put(ctx, account{ID: "acc_1", Email: long})
-		requireCode(t, err, docstore.CodeKeyTooLong, "an index key past the limit")
+		requireCode(t, err, coredocstore.CodeKeyTooLong, "an index key past the limit")
 		if index := fieldValue(errs.FieldsOf(err), "index"); index != "email" {
 			t.Fatalf("the refusal names index %q, want email", index)
 		}
@@ -222,13 +223,13 @@ func TestSQLUpdate(t *testing.T) {
 			t.Fatalf("Update() with a failing function = %v, want the function's own error", err)
 		}
 		_, err = fx.store.Update(ctx, "acc_1", func(a *account) error { a.ID = "acc_9"; return nil })
-		requireCode(t, err, docstore.CodeDocumentKeyChanged, "an update that renames")
+		requireCode(t, err, coredocstore.CodeDocumentKeyChanged, "an update that renames")
 		_, err = fx.store.Update(ctx, "acc_404", func(*account) error { return nil })
-		requireCode(t, err, docstore.CodeDocumentNotFound, "an update of a missing key")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "an update of a missing key")
 		if got, getErr := fx.store.Get(ctx, "acc_1"); getErr != nil || got.Name != "Ada, after Grace" {
 			t.Fatalf("a refused update changed the document: %+v, %v", got, getErr)
 		}
-		if _, getErr := fx.store.Get(ctx, "acc_9"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		if _, getErr := fx.store.Get(ctx, "acc_9"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("a refused rename stored the new key: %v", getErr)
 		}
 	})
@@ -243,12 +244,12 @@ func TestSQLUniqueIndex(t *testing.T) {
 		ctx, store := t.Context(), openSQL(t, dialect).store
 		must(t, store.Insert(ctx, account{ID: "acc_1", Email: "ada@x.dev"}))
 		err := store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"})
-		requireCode(t, err, docstore.CodeUniqueKeyTaken, "a second holder of a unique key")
+		requireCode(t, err, coredocstore.CodeUniqueKeyTaken, "a second holder of a unique key")
 		quotesNothing(t, err, "ada@x.dev", "acc_2")
 		if index := fieldValue(errs.FieldsOf(err), "index"); index != "email" {
 			t.Fatalf("the refusal names index %q, want email", index)
 		}
-		if _, getErr := store.Get(ctx, "acc_2"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		if _, getErr := store.Get(ctx, "acc_2"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("a refused write stored its document: %v", getErr)
 		}
 		must(t, store.Put(ctx, account{ID: "acc_1", Email: "ada@x.dev", Name: "rewritten"}))
@@ -260,14 +261,14 @@ func TestSQLUniqueIndex(t *testing.T) {
 			t.Fatalf("Lookup() = %+v, %v", a, lookErr)
 		}
 		_, err = store.Lookup(ctx, "email", "nobody@x.dev")
-		requireCode(t, err, docstore.CodeDocumentNotFound, "a Lookup nobody answers")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "a Lookup nobody answers")
 		quotesNothing(t, err, "nobody@x.dev")
 		_, err = store.Lookup(ctx, "email", "")
-		requireCode(t, err, docstore.CodeDocumentNotFound, "a Lookup of the empty key")
+		requireCode(t, err, coredocstore.CodeDocumentNotFound, "a Lookup of the empty key")
 		_, err = store.Lookup(ctx, "team", "red")
-		requireCode(t, err, docstore.CodeIndexNotUnique, "a Lookup in a multi-valued index")
+		requireCode(t, err, coredocstore.CodeIndexNotUnique, "a Lookup in a multi-valued index")
 		_, err = store.Lookup(ctx, "nope", "x")
-		requireCode(t, err, docstore.CodeIndexUnknown, "a Lookup in an undeclared index")
+		requireCode(t, err, coredocstore.CodeIndexUnknown, "a Lookup in an undeclared index")
 	})
 }
 
@@ -305,7 +306,7 @@ func TestSQLFindAndFilter(t *testing.T) {
 			}
 		}
 		_, err = fx.store.Find(ctx, "nope", "x")
-		requireCode(t, err, docstore.CodeIndexUnknown, "a Find in an undeclared index")
+		requireCode(t, err, coredocstore.CodeIndexUnknown, "a Find in an undeclared index")
 	})
 }
 
@@ -325,14 +326,14 @@ func TestSQLManyUniqueKeysAreCheckedInBatches(t *testing.T) {
 	}
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
 		ctx := t.Context()
-		fx := openSQL(t, dialect, docstore.IndexSpec[account]{Name: "aliases", Unique: true, Keys: aliases})
+		fx := openSQL(t, dialect, coredocstore.IndexSpec[account]{Name: "aliases", Unique: true, Keys: aliases})
 		must(t, fx.store.Put(ctx, account{ID: "acc_1", Name: "ada"}))
 		if checks := countOf(fx.engine.roles(), "uniqueTaken"); checks != 2 {
 			t.Fatalf("450 unique keys took %d checks, want 2 bounded batches", checks)
 		}
 		must(t, fx.store.Put(ctx, account{ID: "acc_3", Name: "grace"}))
 		err := fx.store.Put(ctx, account{ID: "acc_2", Name: "ada"})
-		requireCode(t, err, docstore.CodeUniqueKeyTaken, "a key taken in the last batch")
+		requireCode(t, err, coredocstore.CodeUniqueKeyTaken, "a key taken in the last batch")
 		if index := fieldValue(errs.FieldsOf(err), "index"); index != "aliases" {
 			t.Fatalf("the refusal names index %q, want aliases", index)
 		}
@@ -367,7 +368,7 @@ func TestSQLIndexKeysMayBeStoredHashed(t *testing.T) {
 		if red, findErr := store.Find(ctx, "team", "red"); findErr != nil || len(red) != 1 {
 			t.Fatalf("Find() through the hash = %+v, %v", red, findErr)
 		}
-		requireCode(t, store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"}), docstore.CodeUniqueKeyTaken, "a hashed unique key")
+		requireCode(t, store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"}), coredocstore.CodeUniqueKeyTaken, "a hashed unique key")
 		must(t, store.Delete(ctx, "acc_1"))
 		if n := len(engine.snapshot().ix); n != 0 {
 			t.Fatalf("%d index rows left after the only document went", n)
@@ -391,7 +392,7 @@ func TestSQLHooksAfterTheWriteStood(t *testing.T) {
 		})
 		removeDelete := store.OnDelete(func(key string) { deleted = append(deleted, key) })
 		must(t, store.Insert(ctx, account{ID: "acc_1", Email: "ada@x.dev"}))
-		requireCode(t, store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"}), docstore.CodeUniqueKeyTaken, "a refused write")
+		requireCode(t, store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"}), coredocstore.CodeUniqueKeyTaken, "a refused write")
 		_, err := store.Update(ctx, "acc_1", func(a *account) error { a.Name = "Ada"; return nil })
 		must(t, err)
 		must(t, store.Delete(ctx, "acc_1"))
@@ -424,7 +425,7 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 	})
 	for name, tc := range map[string]struct {
 		mutate  func(*docstore.SQLConfig[account])
-		indexes []docstore.IndexSpec[account]
+		indexes []coredocstore.IndexSpec[account]
 		setting string
 	}{
 		"no key function":               {mutate: func(c *docstore.SQLConfig[account]) { c.Key = nil }, setting: "Key"},
@@ -437,13 +438,13 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 		"a derived table's separator":   {mutate: func(c *docstore.SQLConfig[account]) { c.Table = "members___ix" }, setting: "Table"},
 		"a name SQLite reserves":        {mutate: func(c *docstore.SQLConfig[account]) { c.Table = "sqlite_accounts" }, setting: "Table"},
 		"an index name past the limit": {
-			indexes: []docstore.IndexSpec[account]{docstore.Unique(strings.Repeat("i", docstore.MaxSQLIndexNameLen+1), func(a account) string { return a.Email })},
+			indexes: []coredocstore.IndexSpec[account]{coredocstore.Unique(strings.Repeat("i", docstore.MaxSQLIndexNameLen+1), func(a account) string { return a.Email })},
 			setting: "Indexes",
 		},
 		"an index declared twice": {
-			indexes: []docstore.IndexSpec[account]{
-				docstore.Unique("email", func(a account) string { return a.Email }),
-				docstore.Unique("email", func(a account) string { return a.Name }),
+			indexes: []coredocstore.IndexSpec[account]{
+				coredocstore.Unique("email", func(a account) string { return a.Email }),
+				coredocstore.Unique("email", func(a account) string { return a.Name }),
 			},
 			setting: "Indexes",
 		},
@@ -455,7 +456,7 @@ func TestSQLConfigurationRefusals(t *testing.T) {
 				tc.mutate(&cfg)
 			}
 			_, err := docstore.OpenSQL(cfg, tc.indexes...)
-			requireCode(t, err, docstore.CodeStoreMisconfigured, name)
+			requireCode(t, err, coredocstore.CodeStoreMisconfigured, name)
 			if setting := fieldValue(errs.FieldsOf(err), "setting"); setting != tc.setting {
 				t.Fatalf("the refusal names setting %q, want %q", setting, tc.setting)
 			}
@@ -496,7 +497,7 @@ func TestSQLConcurrentWriters(t *testing.T) {
 				switch {
 				case err == nil:
 					wins++
-				case errs.HasCode(err, docstore.CodeUniqueKeyTaken):
+				case errs.HasCode(err, coredocstore.CodeUniqueKeyTaken):
 					conflicts++
 				default:
 					t.Errorf("unexpected %v", err)

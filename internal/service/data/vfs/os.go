@@ -72,12 +72,12 @@ func (o *osFS) Close() error {
 	return nil
 }
 
-// failRoot wraps a constructor cause onto [RootUnavailable] by restating it,
-// so the operating-system error survives in the chain.
+// failRoot wraps a constructor cause onto [corevfs.RootUnavailable] by
+// restating it, so the operating-system error survives in the chain.
 func failRoot(cause error, fields ...kerrs.FieldValue) error {
 	//: same restatement shape as failRead / failWrite / failPublish.
 	return kerrs.Wrap(cause, kerrs.WrapParams{
-		Code:     CodeRootUnavailable,
+		Code:     corevfs.CodeRootUnavailable,
 		Reason:   "ROOT_UNAVAILABLE",
 		Public:   "The filesystem root could not be opened",
 		Private:  "service/data/vfs: os.OpenRoot failed — the path is absent, is not a directory, or is not searchable by this process",

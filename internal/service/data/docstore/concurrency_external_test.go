@@ -7,6 +7,7 @@ import (
 	"sync"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
@@ -48,13 +49,13 @@ func TestReadersDoNotWaitForTheDisk(t *testing.T) {
 	<-gated.entered // the write is inside the device wait now
 
 	//: every read answers while the writer waits, with the state before it.
-	if _, err := store.Get("acc_1"); !errs.HasCode(err, docstore.CodeDocumentNotFound) {
+	if _, err := store.Get("acc_1"); !errs.HasCode(err, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("Get while the write waits = %v, want DocumentNotFound", err)
 	}
 	if all, err := store.List(); err != nil || len(all) != 0 {
 		t.Fatalf("List while the write waits = %v, %v", all, err)
 	}
-	if _, err := store.Lookup("email", "held@x.dev"); !errs.HasCode(err, docstore.CodeDocumentNotFound) {
+	if _, err := store.Lookup("email", "held@x.dev"); !errs.HasCode(err, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("Lookup while the write waits = %v", err)
 	}
 	if stats := store.Stats(); stats.Documents != 0 {
@@ -99,7 +100,7 @@ func TestEverythingAtOnce(t *testing.T) {
 			store := backend.open(t)
 			store.OnWrite(func(key string) {
 				_, getErr := store.Get(key)
-				tolerate(t, getErr, docstore.CodeDocumentNotFound)
+				tolerate(t, getErr, coredocstore.CodeDocumentNotFound)
 			})
 			var wg sync.WaitGroup
 			for worker := range 8 {

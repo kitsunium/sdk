@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T06:00:00Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # pkg/v1/data/
 
 ## Purpose
@@ -41,7 +41,7 @@ stays at the kernel's root, `internal/kernel/semver`.
 | `codec/strictjson/` | `Decode` / `DecodeRequest` — one JSON document read one way, within a bound on reading (ADR 0102) | `internal/service/data/codec/strictjson` | `codec/strictjson/README.md` |
 | `codec/jsonshape/` | `Of` / `For[T]` → a type's wire shape under `encoding/json` (ADR 0133) | `internal/service/data/codec/jsonshape` | `codec/jsonshape/README.md` |
 | `codec/jsonpatch/` | `Diff` → two JSON documents' difference as RFC 6902 operations (ADR 0143) | `internal/service/data/codec/jsonpatch` | `codec/jsonpatch/README.md` |
-| `docstore/` | `Open` → a `Store[T]` over a `vfs` filesystem and `OpenSQL` → an `SQLStore[T]` over the caller's database, with unique and multi-valued indexes and versions (ADR 0110, ADR 0139, ADR 0143) | `internal/service/data/docstore` | `docstore/README.md` |
+| `docstore/` | `Open` → a `Store[T]` over a `vfs` filesystem and `OpenSQL` → an `SQLStore[T]` over the caller's database, with unique and multi-valued indexes and versions (ADR 0110, ADR 0139, ADR 0143); the ports a double stands in for (ADR 0160) | `internal/core/data/docstore`, `internal/service/data/docstore` | `docstore/README.md` |
 | `queue/` | `NewFile` / `NewSQL` / `NewMemory` → a `Broker`, and `Consume` (ADR 0054, ADR 0104, ADR 0151) | `internal/core/data/queue`, `internal/service/data/queue` | `queue/README.md` |
 | `semver/` | `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` (ADR 0156 §4) | `internal/kernel/semver` | `semver/README.md` |
 | `sql/` | `NewTransactor` / `NewChecker` / `NewMigrator` over `database/sql`, no driver and no ORM (ADR 0055, ADR 0139, ADR 0140) | `internal/core/data/sql`, `internal/service/data/sql` | `sql/README.md` |

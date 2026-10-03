@@ -5,6 +5,7 @@ package docstore
 import (
 	"encoding/json"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -17,10 +18,10 @@ import (
 //
 //	accounts, err := docstore.Open(
 //	    docstore.Config[Account]{Key: Account.ID, FS: data, Path: "members/accounts.json"},
-//	    docstore.Unique("email", func(a Account) string { return a.Email }),
-//	    docstore.Index("team", func(a Account) []string { return a.Teams }),
+//	    coredocstore.Unique("email", func(a Account) string { return a.Email }),
+//	    coredocstore.Index("team", func(a Account) []string { return a.Teams }),
 //	)
-func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
+func Open[T any](cfg Config[T], indexes ...coredocstore.IndexSpec[T]) (*Store[T], error) {
 	//: everything decidable without a filesystem is decided first.
 	if invalid := cfg.validate(indexes); invalid != nil {
 		//: StoreMisconfigured.
@@ -38,7 +39,7 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error) {
 }
 
 // newStore builds the empty store a validated cfg and its indexes describe.
-func newStore[T any](cfg Config[T], indexes []IndexSpec[T]) *Store[T] {
+func newStore[T any](cfg Config[T], indexes []coredocstore.IndexSpec[T]) *Store[T] {
 	store := &Store[T]{
 		key:          cfg.Key,
 		fs:           cfg.FS,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -39,20 +40,20 @@ type prepared struct {
 // On a store that keeps versions, it makes one, stamped with nothing.
 func (s *Store[T]) Put(v T) error {
 	//: anything under the key is fine.
-	return s.store(v, upsert, StampValue{})
+	return s.store(v, upsert, coredocstore.StampValue{})
 }
 
 // Insert stores v, which must be new: DocumentExists when its key is taken.
 func (s *Store[T]) Insert(v T) error {
 	//: nothing may be under the key.
-	return s.store(v, insertOnly, StampValue{})
+	return s.store(v, insertOnly, coredocstore.StampValue{})
 }
 
 // Replace stores v over the document already under its key: DocumentNotFound
 // when there is none, so a document deleted meanwhile is never brought back.
 func (s *Store[T]) Replace(v T) error {
 	//: a document must be under the key.
-	return s.store(v, replaceOnly, StampValue{})
+	return s.store(v, replaceOnly, coredocstore.StampValue{})
 }
 
 // Update applies fn to a copy of the document stored under key and stores the
@@ -64,7 +65,7 @@ func (s *Store[T]) Replace(v T) error {
 // to it — the write would wait for the lock fn holds, forever.
 func (s *Store[T]) Update(key string, fn func(*T) error) (T, error) {
 	//: a new version, stamped with nothing, where versions are kept.
-	return s.UpdateStamped(key, StampValue{}, fn)
+	return s.UpdateStamped(key, coredocstore.StampValue{}, fn)
 }
 
 // Delete removes the document stored under key, or returns DocumentNotFound.
@@ -80,7 +81,7 @@ func (s *Store[T]) Delete(key string) error {
 }
 
 // store prepares v outside every lock, commits it, and announces it.
-func (s *Store[T]) store(v T, mode writeMode, stamp StampValue) error {
+func (s *Store[T]) store(v T, mode writeMode, stamp coredocstore.StampValue) error {
 	p, prepErr := s.prepare(v)
 	//: DocumentKeyEmpty or DocumentUnencodable: nothing was locked.
 	if prepErr != nil {
@@ -118,13 +119,13 @@ func encodeAs[T any](store string, keyOf func(T) string, v T) (key string, raw j
 	//: a document the store could never find again.
 	if key == "" {
 		//: DocumentKeyEmpty.
-		return "", nil, kerrs.Wrap(DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", store))
+		return "", nil, kerrs.Wrap(coredocstore.DocumentKeyEmpty, kerrs.WrapParams{}, kerrs.String("store", store))
 	}
 	raw, err = json.Marshal(v)
 	//: a channel, a function, a cycle, a failing MarshalJSON.
 	if err != nil {
 		//: DocumentUnencodable; what failed, never what it held.
-		return "", nil, kerrs.Wrap(DocumentUnencodable, kerrs.WrapParams{},
+		return "", nil, kerrs.Wrap(coredocstore.DocumentUnencodable, kerrs.WrapParams{},
 			kerrs.String("store", store), kerrs.String("cause", encodeCause(err)))
 	}
 	//: the key and the document as written.
@@ -133,44 +134,44 @@ func encodeAs[T any](store string, keyOf func(T) string, v T) (key string, raw j
 
 // commit checks a prepared write against the store and stores it. It reports
 // whether the write took effect.
-func (s *Store[T]) commit(p prepared, mode writeMode, stamp StampValue) (applied bool, err error) {
+func (s *Store[T]) commit(p prepared, mode writeMode, stamp coredocstore.StampValue) (applied bool, err error) {
 	s.writing.Lock()
 	defer s.writing.Unlock()
 	//: a closed store takes nothing.
 	if s.closed {
 		//: StoreClosed.
-		return false, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	_, existed := s.docs[p.key]
 	//: an insertion over an existing document.
 	if mode == insertOnly && existed {
 		//: DocumentExists, naming no key.
-		return false, kerrs.Wrap(DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return false, kerrs.Wrap(coredocstore.DocumentExists, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	//: a replacement of a document that is gone.
 	if mode == replaceOnly && !existed {
 		//: DocumentNotFound, naming no key.
-		return false, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return false, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	//: durable, then applied, then perhaps folded.
 	return s.persistAndApply(p, stamp)
 }
 
 // modify runs Update's read-modify-write under the writers' lock.
-func (s *Store[T]) modify(key string, stamp StampValue, fn func(*T) error) (result T, applied bool, err error) {
+func (s *Store[T]) modify(key string, stamp coredocstore.StampValue, fn func(*T) error) (result T, applied bool, err error) {
 	var zero T
 	s.writing.Lock()
 	defer s.writing.Unlock()
 	//: a closed store takes nothing.
 	if s.closed {
 		//: StoreClosed.
-		return zero, false, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return zero, false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	raw, found := s.docs[key]
 	//: nothing to update.
 	if !found {
 		//: DocumentNotFound, naming no key.
-		return zero, false, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return zero, false, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	v, decodeErr := s.decode(raw)
 	//: a stored document the type no longer fits.
@@ -192,7 +193,7 @@ func (s *Store[T]) modify(key string, stamp StampValue, fn func(*T) error) (resu
 	//: an update is not a rename.
 	if p.key != key {
 		//: DocumentKeyChanged.
-		return zero, false, kerrs.Wrap(DocumentKeyChanged, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return zero, false, kerrs.Wrap(coredocstore.DocumentKeyChanged, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	applied, err = s.persistAndApply(p, stamp)
 	//: a write that did not take effect returns nothing.
@@ -207,16 +208,16 @@ func (s *Store[T]) modify(key string, stamp StampValue, fn func(*T) error) (resu
 // persistAndApply checks the unique indexes, makes the write durable — the
 // document and its versions in one entry — applies it, and folds when the
 // overlay has grown enough. The caller holds the writers' lock.
-func (s *Store[T]) persistAndApply(p prepared, stamp StampValue) (applied bool, err error) {
+func (s *Store[T]) persistAndApply(p prepared, stamp coredocstore.StampValue) (applied bool, err error) {
 	//: a unique index already filing one of the keys elsewhere.
 	if name, taken := s.uniqueTaken(p.key, p.keys); taken {
 		//: UniqueKeyTaken, naming the index and never the key.
-		return false, kerrs.Wrap(UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
+		return false, kerrs.Wrap(coredocstore.UniqueKeyTaken, kerrs.WrapParams{}, kerrs.String("store", s.path), kerrs.String("index", name))
 	}
 	versions := s.nextVersions(p.key, p.raw, stamp)
 	persistErr := s.persist(p.key, p.raw, false, versions)
 	//: the filesystem refused: nothing changed anywhere.
-	if persistErr != nil && !kerrs.HasCode(persistErr, CodeWriteUnconfirmed) {
+	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
 		return false, persistErr
 	}
@@ -238,16 +239,16 @@ func (s *Store[T]) remove(key string) (applied bool, err error) {
 	//: a closed store removes nothing.
 	if s.closed {
 		//: StoreClosed.
-		return false, kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return false, kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: nothing to remove.
 	if _, found := s.docs[key]; !found {
 		//: DocumentNotFound, naming no key.
-		return false, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
+		return false, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.path))
 	}
 	persistErr := s.persist(key, nil, true, nil)
 	//: the filesystem refused: nothing changed anywhere.
-	if persistErr != nil && !kerrs.HasCode(persistErr, CodeWriteUnconfirmed) {
+	if persistErr != nil && !kerrs.HasCode(persistErr, coredocstore.CodeWriteUnconfirmed) {
 		//: PersistFailed.
 		return false, persistErr
 	}

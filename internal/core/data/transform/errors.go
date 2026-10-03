@@ -1,7 +1,10 @@
 // Package transform — declares the sentinels returned by the Compressor
-// facade. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
-// form. CodeUnknownCompressor is also surfaced via panic at boot on a duplicate
-// registration (see registry.go), not only as an *Error sentinel.
+// facade, and the three the stdlib schemes in internal/service/data/transform
+// wrap a compress/* failure in (ADR 0160: every code is declared in the core,
+// at the service's path). Each var's name equals its errs.Define Reason in
+// SCREAMING_SNAKE form. CodeUnknownCompressor is also surfaced via panic at
+// boot on a duplicate registration (see registry.go), not only as an *Error
+// sentinel.
 package transform
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -58,4 +61,20 @@ var (
 	DuplicateRegistration = errs.Define(CodeDuplicateRegistration, "DUPLICATE_REGISTRATION",
 		"A compressor is already registered under that algorithm",
 		"core/data/transform.Register: a distinct scheme already claims this algorithm, or a nil scheme was supplied")
+
+	// GzipFailed wraps a failure from compress/gzip (Compress or Decompress).
+	GzipFailed = errs.Define(CodeGzipFailed, "GZIP_FAILED",
+		"gzip transform failed",
+		"service/data/transform: compress/gzip returned an error")
+
+	// FlateFailed wraps a failure from compress/flate (Compress or Decompress).
+	FlateFailed = errs.Define(CodeFlateFailed, "FLATE_FAILED",
+		"flate transform failed",
+		"service/data/transform: compress/flate returned an error")
+
+	// ZlibFailed wraps a failure from compress/zlib (Compress or Decompress),
+	// including a failed Adler-32 check the raw-DEFLATE scheme cannot detect.
+	ZlibFailed = errs.Define(CodeZlibFailed, "ZLIB_FAILED",
+		"zlib transform failed",
+		"service/data/transform: compress/zlib returned an error")
 )

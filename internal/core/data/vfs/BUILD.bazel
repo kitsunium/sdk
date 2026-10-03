@@ -34,6 +34,7 @@ go_test(
     size = "small",
     srcs = [
         "path_bench_test.go",
+        "service_range_external_test.go",
         "vfs_external_test.go",
     ],
     deps = [

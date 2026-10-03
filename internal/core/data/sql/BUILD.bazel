@@ -33,7 +33,10 @@ alias(
 go_test(
     name = "sql_test",
     size = "small",
-    srcs = ["sql_external_test.go"],
+    srcs = [
+        "service_range_external_test.go",
+        "sql_external_test.go",
+    ],
     deps = [
         ":sql",
         "//internal/kernel/errs",

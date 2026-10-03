@@ -172,7 +172,7 @@ func zlibDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 	//: over the layer's own ceiling — the scheme's failure sentinel.
 	if tooLarge {
 		//: ZlibFailed is the sentinel for any zlib-direction failure.
-		return dst, ZlibFailed
+		return dst, coretransform.ZlibFailed
 	}
 	//: within bounds.
 	return out, nil

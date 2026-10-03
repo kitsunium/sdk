@@ -119,7 +119,7 @@ func (m MigrateConfig) resolvedTable() (table string, err error) {
 	//: an identifier cannot be bound, so it must be proven safe here.
 	if !isIdentifier(name) {
 		//: the offending name is the caller's own configuration, not a secret.
-		return "", kerrs.Wrap(VersionTableInvalid, kerrs.WrapParams{}, kerrs.String("table", name))
+		return "", kerrs.Wrap(coresql.VersionTableInvalid, kerrs.WrapParams{}, kerrs.String("table", name))
 	}
 	//: safe to interpolate.
 	return name, nil
@@ -183,7 +183,7 @@ func validateSet(sorted []coresql.MigrationValue) error {
 		//: applied?" unanswerable.
 		if sorted[index-1].Version == migration.Version {
 			//: name the duplicated value; it is the caller's own.
-			return kerrs.Wrap(DuplicateMigration, kerrs.WrapParams{},
+			return kerrs.Wrap(coresql.DuplicateMigration, kerrs.WrapParams{},
 				kerrs.String("version", strconv.FormatUint(migration.Version, decimalBase)))
 		}
 	}

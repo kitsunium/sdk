@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/core/data/transform/
 
 ## Purpose
@@ -24,7 +24,11 @@ self-registering via a package-level `var` at import — no `init()`. `flate` (r
 1951) and `zlib` (the RFC 1950 envelope HTTP misnames `deflate`) are distinct
 `Algorithm`s, not aliases — see that package's `CLAUDE.md`.
 
-Code range: `0.2.5.*` (ADR 0014).
+Code range: `0.2.5.*` (ADR 0014), and since ADR 0160 also `0.3.26.*`
+(`0x1a`) — `GZIP_FAILED`, `FLATE_FAILED`, `ZLIB_FAILED`, the three sentinels the
+stdlib schemes in `internal/service/data/transform` wrap a `compress/*` failure
+in. That range keeps the service layer's `LL = 3` it was allocated under: a
+code keeps its value when its declaration moves (ADR 0160 §3).
 
 ## Contents
 
@@ -32,8 +36,8 @@ Code range: `0.2.5.*` (ADR 0014).
 |---|---|
 | `transform.go` | `Algorithm` typed string (`String` / `Known`) + `Compressor` interface (`Algorithm` / `Compress` / `Decompress`) + `BoundedDecompressor`, the optional extension adding `DecompressBounded(dst, src, max)`, detected by type assertion |
 | `registry.go`  | `snapshot.Value`-backed Compressor registry: `Register` / `Lookup` / `Available` |
-| `codes.go`     | `Code*` constants — range 0.2.5.\* |
-| `errors.go`    | `UnknownCompressor` (0.2.5.1), `CompressionFailed` (0.2.5.2), `DecompressionFailed` (0.2.5.3), `CompressedFrameInvalid` (0.2.5.4), `DuplicateRegistration` (0.2.5.5), `DecompressedTooLarge` (0.2.5.6) |
+| `codes.go`     | `Code*` constants — range 0.2.5.\*, then the schemes' 0.3.26.\* |
+| `errors.go`    | `UnknownCompressor` (0.2.5.1), `CompressionFailed` (0.2.5.2), `DecompressionFailed` (0.2.5.3), `CompressedFrameInvalid` (0.2.5.4), `DuplicateRegistration` (0.2.5.5), `DecompressedTooLarge` (0.2.5.6); `GzipFailed` (0.3.26.1), `FlateFailed` (0.3.26.2), `ZlibFailed` (0.3.26.3) |
 
 `CodeCompressedFrameInvalid` is allocated here so the whole `0.2.5.*` block is
 declared in one place per ADR 0014, but its **emitter** is the `pkg/v1/data/codec`

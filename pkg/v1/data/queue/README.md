@@ -213,7 +213,7 @@ const (
     // CodeDeadLetterNotFound is [DeadLetterNotFound]'s code.
     CodeDeadLetterNotFound errs.Code = corequeue.CodeDeadLetterNotFound
     // CodeSQLQueueMisconfigured is [SQLQueueMisconfigured]'s code.
-    CodeSQLQueueMisconfigured errs.Code = svcqueue.CodeSQLQueueMisconfigured
+    CodeSQLQueueMisconfigured errs.Code = corequeue.CodeSQLQueueMisconfigured
 )
 ```
 
@@ -270,18 +270,18 @@ var (
     // SQLQueueMisconfigured refuses an SQLConfig no SQL broker could run: no
     // transactor, one it cannot join a transaction of, a dialect it cannot
     // spell, or a table name it cannot use.
-    SQLQueueMisconfigured = svcqueue.SQLQueueMisconfigured
+    SQLQueueMisconfigured = corequeue.SQLQueueMisconfigured
     // QueueBackendFailed reports a refusal from a durable broker's storage:
     // the filesystem's, or a statement the SQL broker's database did not
     // complete.
-    QueueBackendFailed = svcqueue.QueueBackendFailed
+    QueueBackendFailed = corequeue.QueueBackendFailed
     // QueueDirectoryUnusable refuses a queue directory that is missing, is
     // not a directory, or is writable by accounts that must not be able to
     // inject or drain messages.
-    QueueDirectoryUnusable = svcqueue.QueueDirectoryUnusable
+    QueueDirectoryUnusable = corequeue.QueueDirectoryUnusable
     // ConsumerMisconfigured refuses a consumer with no Handler, or one whose
     // author has not asserted HandlerIsIdempotent.
-    ConsumerMisconfigured = svcqueue.ConsumerMisconfigured
+    ConsumerMisconfigured = corequeue.ConsumerMisconfigured
     // HandlerPanicked reports a recovered handler panic. The message was
     // nacked and the consumer kept running.
     //
@@ -289,7 +289,7 @@ var (
     // returns an error has its error recorded in the dead letter unmodified,
     // because a verdict wrapped around it would displace the reason whoever
     // reads that record actually needs.
-    HandlerPanicked = svcqueue.HandlerPanicked
+    HandlerPanicked = corequeue.HandlerPanicked
 )
 ```
 

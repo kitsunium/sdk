@@ -14,6 +14,12 @@ All three implement every capability sibling: `DeadLetterReader`,
 `DeadLetterManager`; and all three wait the same growing retry delay when the
 policy's `MaxRetryDelay` asks for one (`retry.go`).
 
+Code range: `0.3.53.*` (ADR 0054) — `QUEUE_BACKEND_FAILED`,
+`QUEUE_DIRECTORY_UNUSABLE`, `CONSUMER_MISCONFIGURED`, `HANDLER_PANICKED` and
+`SQL_QUEUE_MISCONFIGURED`, declared since ADR 0160 with the port's `0.2.23.*` in
+`internal/core/data/queue`, under the values this package allocated. This
+package declares no code.
+
 ## Contents
 
 | File | Holds |
@@ -38,7 +44,6 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `consume.go` | `Consume` (its workers in a `kernel/concur/group` joined group), the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
-| `codes.go` / `errors.go` | the five `0.3.53.*` codes and their sentinels |
 
 ## Why the durable broker's state is a FILENAME
 

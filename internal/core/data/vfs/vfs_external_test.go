@@ -230,6 +230,8 @@ func TestSentinelsCarryTheirAllocatedCode(t *testing.T) {
 		{"publish failed", corevfs.PublishFailed, corevfs.CodePublishFailed, "PUBLISH_FAILED"},
 		{"not regular file", corevfs.NotRegularFile, corevfs.CodeNotRegularFile, "NOT_REGULAR_FILE"},
 		{"directory not empty", corevfs.DirectoryNotEmpty, corevfs.CodeDirectoryNotEmpty, "DIRECTORY_NOT_EMPTY"},
+		{"root unavailable", corevfs.RootUnavailable, corevfs.CodeRootUnavailable, "ROOT_UNAVAILABLE"},
+		{"directory sync failed", corevfs.DirectorySyncFailed, corevfs.CodeDirectorySyncFailed, "DIRECTORY_SYNC_FAILED"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -255,6 +257,7 @@ func TestNoPublicMessageNamesAPath(t *testing.T) {
 		corevfs.InvalidPath, corevfs.InvalidPermission, corevfs.PathEscaped,
 		corevfs.ReadFailed, corevfs.WriteFailed, corevfs.PublishFailed,
 		corevfs.NotRegularFile, corevfs.DirectoryNotEmpty,
+		corevfs.RootUnavailable, corevfs.DirectorySyncFailed,
 	}
 	for _, sentinel := range sentinels {
 		public := sentinel.Public()

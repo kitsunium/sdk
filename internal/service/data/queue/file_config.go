@@ -69,7 +69,7 @@ func prepareQueueDir(dir string) error {
 	//: is never what anybody meant.
 	if dir == "" {
 		//: QueueDirectoryUnusable, naming the field.
-		return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{}, kerrs.String("field", "Dir"))
+		return kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{}, kerrs.String("field", "Dir"))
 	}
 	//: MkdirAll rather than Mkdir: a queue nested under a fresh state
 	//: directory is the ordinary deployment shape.
@@ -112,7 +112,7 @@ func checkQueueDir(dir string, info fs.FileInfo) error {
 		return nil
 	}
 	//: QueueDirectoryUnusable, naming the value.
-	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
+	return kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{},
 		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("value", dir), kerrs.String("why", why))...)
 }
 
@@ -248,7 +248,7 @@ func prepareState(dir, state string) error {
 		return nil
 	}
 	//: QueueDirectoryUnusable, naming the state as well as its path.
-	return kerrs.Wrap(QueueDirectoryUnusable, kerrs.WrapParams{},
+	return kerrs.Wrap(corequeue.QueueDirectoryUnusable, kerrs.WrapParams{},
 		withObserved(observed, kerrs.String("field", "Dir"), kerrs.String("state", state),
 			kerrs.String("value", statePath), kerrs.String("why", why))...)
 }

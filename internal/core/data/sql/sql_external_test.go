@@ -328,6 +328,12 @@ func TestNoPublicMessageDescribesInfrastructure(t *testing.T) {
 	sentinels := []error{
 		coresql.UnknownDialect, coresql.DialectRefused, coresql.NestedIsolation,
 		coresql.InvalidMigration, coresql.MigrationIrreversible,
+		coresql.ConfigInvalid, coresql.PoolMisconfigured, coresql.BeginFailed,
+		coresql.CommitFailed, coresql.RollbackFailed, coresql.SavepointFailed,
+		coresql.TxPoisoned, coresql.TxClosed, coresql.HealthCheckFailed,
+		coresql.HealthCheckTimeout, coresql.MigrationFailed, coresql.MigrationOutOfOrder,
+		coresql.MigrationLockUnsupported, coresql.MigrationLockTimeout,
+		coresql.MigrationUnknownVersion, coresql.VersionTableInvalid, coresql.DuplicateMigration,
 	}
 	banned := []string{"password", "host=", "://", "SELECT", "INSERT", "dsn"}
 	for _, sentinel := range sentinels {

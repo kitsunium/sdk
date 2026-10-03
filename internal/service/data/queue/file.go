@@ -19,6 +19,12 @@ import (
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
+// exitIOErr matches sysexits EX_IOERR (74), QUEUE_BACKEND_FAILED's exit code,
+// which backendFailed restates: a filesystem that refused an operation may
+// accept the next one, so the caller's retry is meaningful in a way a
+// configuration refusal's is not.
+const exitIOErr int = 74
+
 // fileBroker is a queue whose entire state is a directory.
 //
 // # What survives, and what that costs
@@ -89,8 +95,8 @@ type fileBroker struct {
 //
 // It refuses, at construction rather than at first use: a policy it cannot
 // honour ([corequeue.QueueMisconfigured]), a directory it cannot use safely
-// ([QueueDirectoryUnusable]), and a platform with no atomic replace or no
-// flushable directory handle — core/proc.UnsupportedPlatform, raised by
+// ([corequeue.QueueDirectoryUnusable]), and a platform with no atomic replace
+// or no flushable directory handle — core/proc.UnsupportedPlatform, raised by
 // internal/service/data/vfs.NewOS and passed through unmodified (ADR 0018).
 func NewFile(cfg FileConfig) (broker corequeue.Broker, err error) {
 	//: the SAME guard the memory broker runs, which is what makes that one an
@@ -303,7 +309,7 @@ func (b *fileBroker) classifyMissing(op, name string, cause error) error {
 func backendFailed(op, name string, cause error) error {
 	//: the cause survives; the verdict is added on top.
 	return kerrs.Wrap(cause, kerrs.WrapParams{
-		Code: CodeQueueBackendFailed, Reason: "QUEUE_BACKEND_FAILED",
+		Code: corequeue.CodeQueueBackendFailed, Reason: "QUEUE_BACKEND_FAILED",
 		Public:   "The queue's storage refused an operation",
 		Private:  "service/data/queue: a filesystem call failed; the fields name the operation and the path",
 		ExitCode: exitIOErr,

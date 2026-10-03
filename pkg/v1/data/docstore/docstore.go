@@ -121,6 +121,17 @@
 // and withheld from its text, because a driver quotes the row a constraint
 // refused and that row holds a key.
 //
+// # The ports, for a double
+//
+// [Store] and [SQLStore] are engines. A caller that must stand a double in for
+// one depends instead on the port it implements: [Collection] and [Versioned]
+// for a [Store], whose calls take no context, [CollectionContext] and
+// [VersionedContext] for a [SQLStore], whose every call takes one, and
+// [Announcer] — OnWrite and OnDelete — for either. Each pair carries the same
+// methods, the same documents and the same refusals; there is no single port
+// over both, because the file engine waits on nothing a context could abandon
+// while the SQL engine waits on a database (ADR 0160).
+//
 // # Versions
 //
 // A store opened with [Config].Versions — or [SQLConfig].Versions — keeps the
@@ -157,6 +168,7 @@
 package docstore
 
 import (
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcdocstore "github.com/kitsunium/sdk/internal/service/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
@@ -182,91 +194,91 @@ const MaxSQLIndexNameLen int = svcdocstore.MaxSQLIndexNameLen
 const (
 	// CodeDocumentNotFound: no document under the key, or nobody holds the
 	// key in a unique index.
-	CodeDocumentNotFound errs.Code = svcdocstore.CodeDocumentNotFound
+	CodeDocumentNotFound errs.Code = coredocstore.CodeDocumentNotFound
 	// CodeDocumentExists: Insert over a taken key.
-	CodeDocumentExists errs.Code = svcdocstore.CodeDocumentExists
+	CodeDocumentExists errs.Code = coredocstore.CodeDocumentExists
 	// CodeUniqueKeyTaken: a unique index refused the write.
-	CodeUniqueKeyTaken errs.Code = svcdocstore.CodeUniqueKeyTaken
+	CodeUniqueKeyTaken errs.Code = coredocstore.CodeUniqueKeyTaken
 	// CodeDocumentKeyEmpty: the key function returned the empty string.
-	CodeDocumentKeyEmpty errs.Code = svcdocstore.CodeDocumentKeyEmpty
+	CodeDocumentKeyEmpty errs.Code = coredocstore.CodeDocumentKeyEmpty
 	// CodeDocumentKeyChanged: an Update's function changed the key.
-	CodeDocumentKeyChanged errs.Code = svcdocstore.CodeDocumentKeyChanged
+	CodeDocumentKeyChanged errs.Code = coredocstore.CodeDocumentKeyChanged
 	// CodeIndexUnknown: a read named an index the store never declared.
-	CodeIndexUnknown errs.Code = svcdocstore.CodeIndexUnknown
+	CodeIndexUnknown errs.Code = coredocstore.CodeIndexUnknown
 	// CodeIndexNotUnique: Lookup on a multi-valued index.
-	CodeIndexNotUnique errs.Code = svcdocstore.CodeIndexNotUnique
+	CodeIndexNotUnique errs.Code = coredocstore.CodeIndexNotUnique
 	// CodeDocumentUndecodable: a stored document no longer fits the type.
-	CodeDocumentUndecodable errs.Code = svcdocstore.CodeDocumentUndecodable
+	CodeDocumentUndecodable errs.Code = coredocstore.CodeDocumentUndecodable
 	// CodeDocumentUnencodable: encoding/json refused the value.
-	CodeDocumentUnencodable errs.Code = svcdocstore.CodeDocumentUnencodable
+	CodeDocumentUnencodable errs.Code = coredocstore.CodeDocumentUnencodable
 	// CodePersistFailed: the filesystem refused the write; nothing changed.
-	CodePersistFailed errs.Code = svcdocstore.CodePersistFailed
+	CodePersistFailed errs.Code = coredocstore.CodePersistFailed
 	// CodeLoadFailed: the store's files cannot be read or are not a store's.
-	CodeLoadFailed errs.Code = svcdocstore.CodeLoadFailed
+	CodeLoadFailed errs.Code = coredocstore.CodeLoadFailed
 	// CodeIndexBroken: the stored documents break a unique index.
-	CodeIndexBroken errs.Code = svcdocstore.CodeIndexBroken
+	CodeIndexBroken errs.Code = coredocstore.CodeIndexBroken
 	// CodeStoreClosed: a call after Close.
-	CodeStoreClosed errs.Code = svcdocstore.CodeStoreClosed
+	CodeStoreClosed errs.Code = coredocstore.CodeStoreClosed
 	// CodeStoreMisconfigured: Open refused its configuration.
-	CodeStoreMisconfigured errs.Code = svcdocstore.CodeStoreMisconfigured
+	CodeStoreMisconfigured errs.Code = coredocstore.CodeStoreMisconfigured
 	// CodeWriteUnconfirmed: the write stands, its durability is in doubt.
-	CodeWriteUnconfirmed errs.Code = svcdocstore.CodeWriteUnconfirmed
+	CodeWriteUnconfirmed errs.Code = coredocstore.CodeWriteUnconfirmed
 	// CodeStatementFailed: the SQL store's database did not complete a call.
-	CodeStatementFailed errs.Code = svcdocstore.CodeStatementFailed
+	CodeStatementFailed errs.Code = coredocstore.CodeStatementFailed
 	// CodeKeyTooLong: a key is longer than the SQL store's key columns hold.
-	CodeKeyTooLong errs.Code = svcdocstore.CodeKeyTooLong
+	CodeKeyTooLong errs.Code = coredocstore.CodeKeyTooLong
 	// CodeVersionsNotKept: a call on versions to a store that keeps none.
-	CodeVersionsNotKept errs.Code = svcdocstore.CodeVersionsNotKept
+	CodeVersionsNotKept errs.Code = coredocstore.CodeVersionsNotKept
 	// CodeVersionNotFound: the document keeps no version of that number.
-	CodeVersionNotFound errs.Code = svcdocstore.CodeVersionNotFound
+	CodeVersionNotFound errs.Code = coredocstore.CodeVersionNotFound
 	// CodeVersionsRewriteRefused: a rewrite returned what a rewrite may not.
-	CodeVersionsRewriteRefused errs.Code = svcdocstore.CodeVersionsRewriteRefused
+	CodeVersionsRewriteRefused errs.Code = coredocstore.CodeVersionsRewriteRefused
 )
 
 // The store's sentinels, for errors.Is.
 var (
 	// DocumentNotFound is a miss.
-	DocumentNotFound = svcdocstore.DocumentNotFound
+	DocumentNotFound = coredocstore.DocumentNotFound
 	// DocumentExists refuses an insertion over a taken key.
-	DocumentExists = svcdocstore.DocumentExists
+	DocumentExists = coredocstore.DocumentExists
 	// UniqueKeyTaken refuses a write a unique index cannot file.
-	UniqueKeyTaken = svcdocstore.UniqueKeyTaken
+	UniqueKeyTaken = coredocstore.UniqueKeyTaken
 	// DocumentKeyEmpty refuses a document whose key is empty.
-	DocumentKeyEmpty = svcdocstore.DocumentKeyEmpty
+	DocumentKeyEmpty = coredocstore.DocumentKeyEmpty
 	// DocumentKeyChanged refuses an update that renames.
-	DocumentKeyChanged = svcdocstore.DocumentKeyChanged
+	DocumentKeyChanged = coredocstore.DocumentKeyChanged
 	// IndexUnknown refuses a read of an undeclared index.
-	IndexUnknown = svcdocstore.IndexUnknown
+	IndexUnknown = coredocstore.IndexUnknown
 	// IndexNotUnique refuses a Lookup on a multi-valued index.
-	IndexNotUnique = svcdocstore.IndexNotUnique
+	IndexNotUnique = coredocstore.IndexNotUnique
 	// DocumentUndecodable reports a stored document the type no longer fits.
-	DocumentUndecodable = svcdocstore.DocumentUndecodable
+	DocumentUndecodable = coredocstore.DocumentUndecodable
 	// DocumentUnencodable refuses a value encoding/json cannot encode.
-	DocumentUnencodable = svcdocstore.DocumentUnencodable
+	DocumentUnencodable = coredocstore.DocumentUnencodable
 	// PersistFailed reports a write the filesystem refused.
-	PersistFailed = svcdocstore.PersistFailed
+	PersistFailed = coredocstore.PersistFailed
 	// LoadFailed refuses files that are not a store's.
-	LoadFailed = svcdocstore.LoadFailed
+	LoadFailed = coredocstore.LoadFailed
 	// IndexBroken refuses documents that break a unique index.
-	IndexBroken = svcdocstore.IndexBroken
+	IndexBroken = coredocstore.IndexBroken
 	// StoreClosed refuses a call after Close.
-	StoreClosed = svcdocstore.StoreClosed
+	StoreClosed = coredocstore.StoreClosed
 	// StoreMisconfigured refuses a configuration no store could honour.
-	StoreMisconfigured = svcdocstore.StoreMisconfigured
+	StoreMisconfigured = coredocstore.StoreMisconfigured
 	// WriteUnconfirmed reports a write that stands but may not survive a
 	// power loss.
-	WriteUnconfirmed = svcdocstore.WriteUnconfirmed
+	WriteUnconfirmed = coredocstore.WriteUnconfirmed
 	// StatementFailed reports a call the SQL store's database did not
 	// complete; the driver's error is joined beside it, its text withheld.
-	StatementFailed = svcdocstore.StatementFailed
+	StatementFailed = coredocstore.StatementFailed
 	// KeyTooLong refuses a key longer than the SQL store's key columns hold.
-	KeyTooLong = svcdocstore.KeyTooLong
+	KeyTooLong = coredocstore.KeyTooLong
 	// VersionsNotKept refuses a call on versions to a store that keeps none.
-	VersionsNotKept = svcdocstore.VersionsNotKept
+	VersionsNotKept = coredocstore.VersionsNotKept
 	// VersionNotFound is a miss on a version: never made, or pruned.
-	VersionNotFound = svcdocstore.VersionNotFound
+	VersionNotFound = coredocstore.VersionNotFound
 	// VersionsRewriteRefused refuses what a rewrite's function returned.
-	VersionsRewriteRefused = svcdocstore.VersionsRewriteRefused
+	VersionsRewriteRefused = coredocstore.VersionsRewriteRefused
 )
 
 // Store is the public alias for the document store: Get, List, Filter,
@@ -285,18 +297,18 @@ type Config[T any] = svcdocstore.Config[T]
 // Version is the public alias for one version of a document: its Number from
 // 1, the instant At the write that made it ran, the Meta that write carried,
 // and the document as JSON.
-type Version = svcdocstore.VersionValue
+type Version = coredocstore.VersionValue
 
 // Stamp is the public alias for what a Stamped write says about the version
 // it makes: the Meta the version records, or InPlace — no version.
-type Stamp = svcdocstore.StampValue
+type Stamp = coredocstore.StampValue
 
 // IndexSpec is the public alias for one secondary index's declaration, built
 // by [Unique] or [Index] and given to [Open].
-type IndexSpec[T any] = svcdocstore.IndexSpec[T]
+type IndexSpec[T any] = coredocstore.IndexSpec[T]
 
 // Entry is the public alias for one stored document as JSON, with its key.
-type Entry = svcdocstore.EntryValue
+type Entry = coredocstore.EntryValue
 
 // Stats is the public alias for what a store says about itself: documents,
 // pending overlay entries, folds, and the last automatic fold's failure.
@@ -314,6 +326,31 @@ type SQLStore[T any] = svcdocstore.SQLStore[T]
 // Transactor, Dialect and Table (required), IndexKey, and Versions with its
 // Clock and Held.
 type SQLConfig[T any] = svcdocstore.SQLConfig[T]
+
+// Collection is the public alias for the port of a store whose calls take no
+// context, which [Store] implements: Get, List, Filter, Entries, Lookup and
+// Find; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is
+// what a caller depends on to stand a double in for a [Store]; Stats, Fold
+// and Close are the engine's own.
+type Collection[T any] = coredocstore.Collection[T]
+
+// Versioned is the public alias for the sibling of [Collection] that reads and
+// writes a document's versions without a context, which [Store] implements:
+// the four Stamped writes, Versions, Version and RewriteVersions.
+type Versioned[T any] = coredocstore.Versioned[T]
+
+// CollectionContext is the public alias for [Collection] with a context on
+// every call, which [SQLStore] implements; Count and Reindex are the engine's
+// own.
+type CollectionContext[T any] = coredocstore.CollectionContext[T]
+
+// VersionedContext is the public alias for [Versioned] with a context on every
+// call, which [SQLStore] implements beside [CollectionContext].
+type VersionedContext[T any] = coredocstore.VersionedContext[T]
+
+// Announcer is the public alias for the pair of hooks both engines answer
+// exactly as they are: OnWrite and OnDelete.
+type Announcer = coredocstore.Announcer
 
 // Open builds a store from cfg with the secondary indexes given: in memory
 // without a filesystem, otherwise loaded from it — the snapshot, the overlay
@@ -355,13 +392,13 @@ func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sq
 // Unique declares a unique index over the one key key returns. An empty key is
 // not indexed, so any number of documents may have none.
 func Unique[T any](name string, key func(T) string) IndexSpec[T] {
-	//: delegate verbatim to the service declaration.
-	return svcdocstore.Unique(name, key)
+	//: delegate verbatim to the core declaration.
+	return coredocstore.Unique(name, key)
 }
 
 // Index declares an index where a document may have several keys and a key
 // several documents. Empty keys are not indexed.
 func Index[T any](name string, keys func(T) []string) IndexSpec[T] {
-	//: delegate verbatim to the service declaration.
-	return svcdocstore.Index(name, keys)
+	//: delegate verbatim to the core declaration.
+	return coredocstore.Index(name, keys)
 }

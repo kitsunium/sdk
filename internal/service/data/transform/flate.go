@@ -123,7 +123,7 @@ func flateDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 	//: over the layer's own ceiling — the scheme's failure sentinel.
 	if tooLarge {
 		//: FlateFailed is the sentinel for any flate-direction failure.
-		return dst, FlateFailed
+		return dst, coretransform.FlateFailed
 	}
 	//: within bounds.
 	return out, nil

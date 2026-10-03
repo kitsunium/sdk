@@ -61,7 +61,7 @@ func (m *migrator) ensureTable(ctx context.Context) error {
 	//: a table the runner cannot create makes every later step a guess.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
-		return failed(MigrationFailed, err, kerrs.String("phase", tablePhase))
+		return failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
 	}
 	//: the history is readable.
 	return nil
@@ -75,14 +75,14 @@ func (m *migrator) applied(ctx context.Context) (versions map[uint64]bool, highe
 	//: an unreadable history stops the run rather than producing a plan.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
-		return nil, 0, failed(MigrationFailed, err, kerrs.String("phase", tablePhase))
+		return nil, 0, failed(coresql.MigrationFailed, err, kerrs.String("phase", tablePhase))
 	}
 	//: rows are this function's, so this function closes them.
 	defer func() {
 		//: a close error after a successful scan still invalidates the read.
 		if cerr := rows.Close(); cerr != nil && err == nil {
 			//: the driver's error travels beside the verdict.
-			err = failed(MigrationFailed, cerr, kerrs.String("phase", tablePhase))
+			err = failed(coresql.MigrationFailed, cerr, kerrs.String("phase", tablePhase))
 		}
 	}()
 	//: collected into a set: membership is the only question ever asked.
@@ -109,7 +109,7 @@ func (m *migrator) pending(
 		//: express what happened.
 		if migration.Version < highest {
 			//: both numbers are the caller's own.
-			return nil, kerrs.Wrap(MigrationOutOfOrder, kerrs.WrapParams{},
+			return nil, kerrs.Wrap(coresql.MigrationOutOfOrder, kerrs.WrapParams{},
 				kerrs.String("version", strconv.FormatUint(migration.Version, decimalBase)),
 				kerrs.String("applied", strconv.FormatUint(highest, decimalBase)))
 		}
@@ -152,14 +152,14 @@ func scanVersions(rows *stdsql.Rows) (versions map[uint64]bool, highest uint64, 
 		//: a row the driver cannot decode makes the whole history unreliable.
 		if serr := rows.Scan(&recorded); serr != nil {
 			//: the driver's error travels beside the verdict.
-			return nil, 0, failed(MigrationFailed, serr, kerrs.String("phase", tablePhase))
+			return nil, 0, failed(coresql.MigrationFailed, serr, kerrs.String("phase", tablePhase))
 		}
 		//: a negative version cannot come from this runner, so the table has
 		//: been written by something else — refuse rather than wrap it into a
 		//: colossal uint64 and silently reorder the history.
 		if recorded < 0 {
 			//: no driver error to attach; the row itself is the fact.
-			return nil, 0, failed(MigrationFailed, nil,
+			return nil, 0, failed(coresql.MigrationFailed, nil,
 				kerrs.String("phase", tablePhase), kerrs.Int64("version", recorded))
 		}
 		version := uint64(recorded)
@@ -176,7 +176,7 @@ func scanVersions(rows *stdsql.Rows) (versions map[uint64]bool, highest uint64, 
 	//: Next() reports only as "no more rows".
 	if rerr := rows.Err(); rerr != nil {
 		//: the driver's error travels beside the verdict.
-		return nil, 0, failed(MigrationFailed, rerr, kerrs.String("phase", tablePhase))
+		return nil, 0, failed(coresql.MigrationFailed, rerr, kerrs.String("phase", tablePhase))
 	}
 	//: the complete recorded history.
 	return versions, highest, nil

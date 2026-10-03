@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:31:45Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/service/data/transform/
 
 ## Purpose
@@ -18,7 +18,11 @@ substitution: s2 reads Snappy streams, and ADR 0066 §Why-not refuses to registe
 under the `"snappy"` NAME because the block encoder emits extensions a Snappy
 decoder does not read.
 
-Code range: `0.3.26.*` (`0x1a`, ADR 0014).
+Code range: `0.3.26.*` (`0x1a`, ADR 0014) — `GZIP_FAILED`, `FLATE_FAILED` and
+`ZLIB_FAILED`, declared since ADR 0160 with the port's `0.2.5.*` in
+`internal/core/data/transform`, under the values this package allocated. This
+package declares no code: `wrap.go` restates each sentinel in the
+`errs.WrapParams` a scheme attaches to a stdlib cause.
 
 ## `flate` and `zlib` are NOT the same thing
 
@@ -51,8 +55,7 @@ refactor that quietly turned one into the other would fail rather than ship.
 | `zlib.go`    | `ZlibCompressor` singleton + `NewZlibCompressor(level)` + `zlibCompressor` (Algorithm "zlib") |
 | `pool.go`    | the recycled stdlib codecs — `take*`/`release*` per scheme, the per-level zlib pools, and `readerBox` |
 | `bounded.go` | `readAllBounded` — the shared layer-local decompression bound |
-| `codes.go`   | `CodeGzipFailed` (0.3.26.1), `CodeFlateFailed` (0.3.26.2), `CodeZlibFailed` (0.3.26.3) |
-| `errors.go`  | `GzipFailed` / `FlateFailed` / `ZlibFailed` sentinels + `gzipWrap` / `flateWrap` / `zlibWrap` WrapParams |
+| `wrap.go`    | `gzipWrap` / `flateWrap` / `zlibWrap` — the WrapParams restating `core/data/transform`'s `GzipFailed` (0.3.26.1) / `FlateFailed` (0.3.26.2) / `ZlibFailed` (0.3.26.3) |
 
 ## Bounded decompression (locked choice)
 

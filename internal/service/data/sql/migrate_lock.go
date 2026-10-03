@@ -8,6 +8,7 @@ import (
 	"errors"
 	"time"
 
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -58,7 +59,7 @@ func (m *migrator) acquire(ctx context.Context) (held *advisoryLock, err error) 
 	//: no connection means no session, so no lock can be held at all.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
-		return nil, failed(MigrationFailed, err, kerrs.String("phase", lockPhase))
+		return nil, failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
 	}
 	held, err = m.waitForLock(ctx, conn)
 	//: a failed acquisition must not leak the connection it was going to
@@ -90,7 +91,7 @@ func (m *migrator) waitForLock(
 		//: a rejected lock statement is a real failure, not a busy signal.
 		if err != nil {
 			//: the driver's error travels beside the verdict.
-			return nil, failed(MigrationFailed, err, kerrs.String("phase", lockPhase))
+			return nil, failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
 		}
 		//: another process is not migrating — this one may.
 		if granted {
@@ -112,12 +113,12 @@ func (m *migrator) pause(ctx context.Context, deadline time.Time) error {
 	//: reports a timeout rather than sleeping once for nothing.
 	if !m.cfg.clk.Now().Before(deadline) {
 		//: nothing was applied — that is the fact the caller needs.
-		return failed(MigrationLockTimeout, nil)
+		return failed(coresql.MigrationLockTimeout, nil)
 	}
 	select {
 	case <-ctx.Done():
 		//: the caller gave up; say so with the cancellation beside it.
-		return failed(MigrationFailed, ctx.Err(), kerrs.String("phase", lockPhase))
+		return failed(coresql.MigrationFailed, ctx.Err(), kerrs.String("phase", lockPhase))
 	case <-m.cfg.clk.After(m.plan.retry):
 		//: one interval elapsed on the injected clock — try again.
 		return nil
@@ -209,5 +210,5 @@ func closeVerdict(conn *stdsql.Conn) error {
 		return nil
 	}
 	//: the pool is one connection short; say so with the phase attached.
-	return failed(MigrationFailed, err, kerrs.String("phase", lockPhase))
+	return failed(coresql.MigrationFailed, err, kerrs.String("phase", lockPhase))
 }

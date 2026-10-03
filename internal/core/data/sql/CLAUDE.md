@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:24:48Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/core/data/sql/
 
 ## Purpose
@@ -14,7 +14,10 @@ the domain values
 and the typed sentinels. Admitted by **ADR 0055**. Every concrete
 implementation lives in `internal/service/data/sql`.
 
-Code range: `0.2.24.*` (ADR 0055).
+Code range: `0.2.24.*` (ADR 0055), and since ADR 0160 also `0.3.54.*` — the 17
+run outcomes the transaction manager, the health probe and the migration runner
+in `internal/service/data/sql` emit, declared here under the service layer's
+`LL = 3` they were allocated with (ADR 0160 §3).
 
 ## Contents
 
@@ -25,8 +28,8 @@ Code range: `0.2.24.*` (ADR 0055).
 | `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + the engine's vocabulary `Placeholder` / `QuoteIdent` / `ForUpdate` / `ForUpdateSkipLocked` + `ParseDialect` |
 | `sql_txoptions.go` | `TxOptionsValue` — `Isolation` / `ReadOnly` + `IsZero` / `StdOptions` |
 | `sql_migration.go` | `Step func(ctx, Executor) error`, `MigrationValue` + `Validate`, `Irreversible` |
-| `codes.go` | `Code*` constants — range 0.2.24.* |
-| `errors.go` | `UnknownDialect` / `DialectRefused` / `NestedIsolation` / `InvalidMigration` / `MigrationIrreversible` (`errs.Define`) |
+| `codes.go` | `Code*` constants — range 0.2.24.*, then the service's 0.3.54.* |
+| `errors.go` | `UnknownDialect` / `DialectRefused` / `NestedIsolation` / `InvalidMigration` / `MigrationIrreversible`, then the 17 run outcomes — `ConfigInvalid`, `PoolMisconfigured`, `BeginFailed`, `CommitFailed`, `RollbackFailed`, `SavepointFailed`, `TxPoisoned`, `TxClosed`, `HealthCheckFailed`, `HealthCheckTimeout`, `MigrationFailed`, `MigrationOutOfOrder`, `MigrationLockUnsupported`, `MigrationLockTimeout`, `MigrationUnknownVersion`, `VersionTableInvalid`, `DuplicateMigration` (`errs.Define`) |
 
 ## Conventions
 

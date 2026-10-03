@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -31,14 +32,14 @@ func crashVersioned(t *testing.T, fsys corevfs.FullFS, versions int, fn func(sto
 
 // reopenedVersions opens a store keeping versions former versions over fsys
 // and returns every document's versions, by key, closing it after.
-func reopenedVersions(t *testing.T, fsys corevfs.FullFS, versions int) map[string][]docstore.VersionValue {
+func reopenedVersions(t *testing.T, fsys corevfs.FullFS, versions int) map[string][]coredocstore.VersionValue {
 	t.Helper()
 	store, err := openWith(versionedConfig(fsys, versions, nil))
 	must(t, err)
 	defer func() { must(t, store.Close()) }()
 	all, err := store.List()
 	must(t, err)
-	out := make(map[string][]docstore.VersionValue, len(all))
+	out := make(map[string][]coredocstore.VersionValue, len(all))
 	for _, a := range all {
 		out[a.ID] = versionsOf(t, store, a.ID)
 	}
@@ -47,13 +48,13 @@ func reopenedVersions(t *testing.T, fsys corevfs.FullFS, versions int) map[strin
 
 // sameVersions fails the test unless got and want hold the same documents
 // with the same versions: numbers, instants, metadata and JSON.
-func sameVersions(t *testing.T, what string, got, want map[string][]docstore.VersionValue) {
+func sameVersions(t *testing.T, what string, got, want map[string][]coredocstore.VersionValue) {
 	t.Helper()
 	if !slices.Equal(slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want))) {
 		t.Fatalf("%s: the documents are %v, want %v", what, slices.Sorted(maps.Keys(got)), slices.Sorted(maps.Keys(want)))
 	}
 	for key, versions := range want {
-		if !slices.EqualFunc(got[key], versions, func(a, b docstore.VersionValue) bool {
+		if !slices.EqualFunc(got[key], versions, func(a, b coredocstore.VersionValue) bool {
 			return a.Number == b.Number && a.At.Equal(b.At) && maps.Equal(a.Meta, b.Meta) && string(a.JSON) == string(b.JSON)
 		}) {
 			t.Fatalf("%s: %s has versions\n%+v\nwant\n%+v", what, key, got[key], versions)
@@ -65,13 +66,13 @@ func sameVersions(t *testing.T, what string, got, want map[string][]docstore.Ver
 // documents, one edited three times and stamped, one deleted, one created.
 func history(t *testing.T, store *docstore.Store[account], clk *clock.ManualClock) {
 	t.Helper()
-	must(t, store.PutStamped(account{ID: "acc_1", Name: "first"}, docstore.StampValue{Meta: map[string]string{"by": "ada"}}))
+	must(t, store.PutStamped(account{ID: "acc_1", Name: "first"}, coredocstore.StampValue{Meta: map[string]string{"by": "ada"}}))
 	must(t, store.Put(account{ID: "acc_2", Name: "doomed"}))
 	for _, name := range []string{"second", "third", "fourth"} {
 		if clk != nil {
 			clk.Advance(time.Minute)
 		}
-		must(t, store.PutStamped(account{ID: "acc_1", Name: name}, docstore.StampValue{Meta: map[string]string{"by": name}}))
+		must(t, store.PutStamped(account{ID: "acc_1", Name: name}, coredocstore.StampValue{Meta: map[string]string{"by": name}}))
 	}
 	must(t, store.Delete("acc_2"))
 	must(t, store.Put(account{ID: "acc_3", Name: "third doc"}))
@@ -84,10 +85,10 @@ func history(t *testing.T, store *docstore.Store[account], clk *clock.ManualCloc
 func TestVersionsAreDurableWithTheirDocument(t *testing.T) {
 	t.Parallel()
 	fsys := memFS()
-	var before map[string][]docstore.VersionValue
+	var before map[string][]coredocstore.VersionValue
 	crashVersioned(t, fsys, 2, func(store *docstore.Store[account]) {
 		history(t, store, nil)
-		before = map[string][]docstore.VersionValue{"acc_1": versionsOf(t, store, "acc_1"), "acc_3": versionsOf(t, store, "acc_3")}
+		before = map[string][]coredocstore.VersionValue{"acc_1": versionsOf(t, store, "acc_1"), "acc_3": versionsOf(t, store, "acc_3")}
 		//: the write's own entry already holds the pruned versions.
 		var entry struct {
 			Versions struct {
@@ -150,7 +151,7 @@ func TestAFoldInterruptedAnywhereKeepsVersionsWithTheirDocuments(t *testing.T) {
 				saved = saveOverlay(t, faulty)
 				if c.refused != "" {
 					faulty.set(c.refused, true, false)
-					requireCode(t, store.Fold(), docstore.CodePersistFailed, "a fold whose publication is refused")
+					requireCode(t, store.Fold(), coredocstore.CodePersistFailed, "a fold whose publication is refused")
 					faulty.set("", false, false)
 					return
 				}
@@ -178,9 +179,9 @@ func TestAWriteTheDiskRefusedChangesNoVersion(t *testing.T) {
 	store := openVersioned(t, versionedConfig(faulty, 3, nil))
 	must(t, store.Put(account{ID: "acc_1", Name: "kept"}))
 	faulty.set("", true, false)
-	requireCode(t, store.Put(account{ID: "acc_1", Name: "refused"}), docstore.CodePersistFailed, "a refused Put")
-	err := store.RewriteVersions("acc_1", func([]docstore.VersionValue) ([]docstore.VersionValue, error) { return nil, nil })
-	requireCode(t, err, docstore.CodePersistFailed, "a refused rewrite")
+	requireCode(t, store.Put(account{ID: "acc_1", Name: "refused"}), coredocstore.CodePersistFailed, "a refused Put")
+	err := store.RewriteVersions("acc_1", func([]coredocstore.VersionValue) ([]coredocstore.VersionValue, error) { return nil, nil })
+	requireCode(t, err, coredocstore.CodePersistFailed, "a refused rewrite")
 	faulty.set("", false, false)
 	if got := namesIn(t, versionsOf(t, store, "acc_1")); !slices.Equal(got, []string{"kept"}) {
 		t.Fatalf("after a refused write the versions hold %v", got)
@@ -202,7 +203,7 @@ func TestTheVersionsFile(t *testing.T) {
 	store, err := openWith(versionedConfig(fsys, 2, clk))
 	must(t, err)
 	history(t, store, clk)
-	before := map[string][]docstore.VersionValue{"acc_1": versionsOf(t, store, "acc_1"), "acc_3": versionsOf(t, store, "acc_3")}
+	before := map[string][]coredocstore.VersionValue{"acc_1": versionsOf(t, store, "acc_1"), "acc_3": versionsOf(t, store, "acc_3")}
 	must(t, store.Close())
 	var snapshot map[string]account
 	must(t, json.Unmarshal([]byte(readFile(t, fsys, snapshotPath)), &snapshot))
@@ -273,7 +274,7 @@ func TestFilesThatKeepVersionsTheStoreDoesNot(t *testing.T) {
 	} {
 		before := readFile(t, c.fsys, c.file)
 		_, err := openWith(accountConfig(c.fsys))
-		requireCode(t, err, docstore.CodeLoadFailed, name)
+		requireCode(t, err, coredocstore.CodeLoadFailed, name)
 		if file := fieldValue(errs.FieldsOf(err), "file"); file != c.file {
 			t.Fatalf("%s: the refusal names %q, want %q", name, file, c.file)
 		}
@@ -316,7 +317,7 @@ func TestVersionsFilesThatAreNotAStores(t *testing.T) {
 				must(t, fsys.WriteAtomic(name, []byte(content), 0o600))
 			}
 			_, err := openWith(versionedConfig(fsys, 2, nil))
-			requireCode(t, err, docstore.CodeLoadFailed, c.name)
+			requireCode(t, err, coredocstore.CodeLoadFailed, c.name)
 			if quotes(err.Error()+errs.PublicOf(err)+errs.PrivateOf(err)+fieldsText(err), secret, "acc_9") {
 				t.Errorf("%s: the refusal quotes the file: %s", c.name, fieldsText(err))
 			}
@@ -335,7 +336,7 @@ func TestARewrittenVersionReadsBackAlikeAfterAReopen(t *testing.T) {
 	must(t, err)
 	must(t, store.Put(account{ID: "acc_1", Name: "a"}))
 	must(t, store.Put(account{ID: "acc_1", Name: "b"}))
-	must(t, store.RewriteVersions("acc_1", func(former []docstore.VersionValue) ([]docstore.VersionValue, error) {
+	must(t, store.RewriteVersions("acc_1", func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error) {
 		former[0].JSON = json.RawMessage(`{ "id": "acc_1", "name": "<b>&</b>" }`)
 		return former, nil
 	}))
@@ -344,7 +345,7 @@ func TestARewrittenVersionReadsBackAlikeAfterAReopen(t *testing.T) {
 		t.Fatalf("the rewritten version is %s, want %s", before[1].JSON, want)
 	}
 	must(t, store.Close())
-	sameVersions(t, "after a reopen", reopenedVersions(t, fsys, 2), map[string][]docstore.VersionValue{"acc_1": before})
+	sameVersions(t, "after a reopen", reopenedVersions(t, fsys, 2), map[string][]coredocstore.VersionValue{"acc_1": before})
 }
 
 // TestAnInstantIsKeptToTheNanosecondInTheFiles pins the instant through the
@@ -363,7 +364,7 @@ func TestAnInstantIsKeptToTheNanosecondInTheFiles(t *testing.T) {
 	clk.Set(far)
 	must(t, store.Put(account{ID: "acc_1", Name: "later"}))
 	clk.Set(time.Date(12000, 1, 1, 0, 0, 0, 0, time.UTC))
-	requireCode(t, store.Put(account{ID: "acc_1", Name: "too late"}), docstore.CodePersistFailed, "a write stamped past the year 9999")
+	requireCode(t, store.Put(account{ID: "acc_1", Name: "too late"}), coredocstore.CodePersistFailed, "a write stamped past the year 9999")
 	must(t, store.Close())
 	all := reopenedVersions(t, fsys, 3)["acc_1"]
 	if len(all) != 2 || !all[0].At.Equal(far) || !all[1].At.Equal(ancient) {

@@ -304,7 +304,7 @@ func TestADirectoryFlushThatFailsAfterTheRenameIsNotRolledBack(t *testing.T) {
 	disk.ops = brittleOps(disk, stepSyncDir, false)
 	publishErr := disk.WriteAtomic(target, replacement, 0o644)
 
-	if !kerrs.HasCode(publishErr, CodeDirectorySyncFailed) {
+	if !kerrs.HasCode(publishErr, corevfs.CodeDirectorySyncFailed) {
 		t.Fatalf("WriteAtomic = %v, want DIRECTORY_SYNC_FAILED", publishErr)
 	}
 	if kerrs.HasCode(publishErr, corevfs.CodePublishFailed) {
@@ -384,8 +384,8 @@ func TestWrapHelpersRestateTheirSentinelExactly(t *testing.T) {
 		{"read", failRead(errInjected), corevfs.ReadFailed},
 		{"write", failWrite(errInjected), corevfs.WriteFailed},
 		{"publish", failPublish(errInjected), corevfs.PublishFailed},
-		{"root", failRoot(errInjected), RootUnavailable},
-		{"directory sync", syncPublished(failingSyncOps(), ".", "x"), DirectorySyncFailed},
+		{"root", failRoot(errInjected), corevfs.RootUnavailable},
+		{"directory sync", syncPublished(failingSyncOps(), ".", "x"), corevfs.DirectorySyncFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
