@@ -2,7 +2,7 @@
 // docs/site/scripts/sync-versions.mjs — npm prebuild script.
 //
 // Materialises every (major, release) coordinate into
-// src/content/docs/<major>/<release>/*.md from the REAL source files
+// src/content/docs/<release>/<major>/**.md from the REAL source files
 // of the corresponding tag (or HEAD in bootstrap mode). The docs site
 // never carries hand-authored prose — every page in the versioned
 // tree is a copy of a markdown file that lives in pkg/<major>/**,
@@ -33,6 +33,7 @@ import {
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
 import { RESERVED } from "./lib/page-catalog.mjs";
+import { listPackageDirs, rewriteReadmeLinks } from "./lib/packages.mjs";
 import {
   deriveProvenance,
   buildFeaturePayload,
@@ -266,6 +267,10 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   const pkgMajor = join(sourceRoot, "pkg", major);
   const claudeMd = join(sourceRoot, "CLAUDE.md");
   const adrDir = join(sourceRoot, "docs", "adr");
+  //: Every package page this release gets, as its path under pkg/<major>/
+  //: — family directories included (lib/packages.mjs, ADR 0155). The Home
+  //: page's links (step 1) and the package pages (step 2) read the same list.
+  const packages = await listPackageDirs(pkgMajor);
 
   // 1. Landing page (index.md): the repo README is now the
   // authoritative "what is this SDK" doc — same vocabulary on
@@ -278,25 +283,22 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   const readme = join(sourceRoot, "README.md");
   if (existsSync(readme)) {
     const body = await readFile(readme, "utf8");
-    //: The README's package links (`./pkg/v1/errs`) resolve to the package
-    //: directory on GitHub, but the docs portal renders each sub-package as a
-    //: flat sibling page (`/<major>/errs`, written as `${sub.name}.md` below).
-    //: Rewrite `](./pkg/<major>/<name>)` → `](./<name>/)` so the Home table
-    //: links to the portal routes instead of 404ing. Trailing slash matches
-    //: the ADR-index convention. Deeper links (BENCH.md, a package under a
-    //: family directory such as `./pkg/v1/data/codec`, …) are left alone.
-    const portalBody = body
-      .replace(
-        new RegExp("\\]\\(\\./pkg/" + major + "/([^)/]+)/?\\)", "g"),
-        "](./$1/)",
-      )
-      //: README's ./LICENSE resolves to the repo root on GitHub, but the
-      //: portal has no LICENSE page — point the portal copy at the GitHub
-      //: blob (same convention as the BENCH.md link on /contributors/).
-      .replace(
-        /\]\(\.\/LICENSE\)/g,
-        "](https://github.com/kitsunium/sdk/blob/HEAD/LICENSE)",
-      );
+    //: The README's package links (`./pkg/v1/data/codec`) resolve to the
+    //: package directory on GitHub, but the docs portal renders each package
+    //: as a page at its path under pkg/<major>/ (`/<major>/data/codec`,
+    //: written as `${rel}.md` below). Rewrite `](./pkg/<major>/<path>)` →
+    //: `](./<path>/)` for every path that IS a package page, so the Home
+    //: table links to the portal routes instead of 404ing. Trailing slash
+    //: matches the ADR-index convention. Every other relative link (LICENSE,
+    //: a module of the framework, a BENCH.md) names something the portal does
+    //: not publish, and points at the GitHub blob instead (same convention as
+    //: the BENCH.md link on /contributors/).
+    const portalBody = rewriteReadmeLinks(
+      body,
+      major,
+      packages,
+      "https://github.com/kitsunium/sdk/blob/HEAD",
+    );
     await writeFile(
       join(dest, "index.md"),
       frontmatter({
@@ -315,9 +317,10 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
     );
   }
 
-  // 2. Service READMEs. Each sub-package under pkg/<major>/ that
-  // ships a README.md becomes a top-level service page. We post-
-  // process the gomarkdoc output to strip the "## Index" block —
+  // 2. Package READMEs. Every package under pkg/<major>/ that ships a
+  // README.md — at any depth, a family directory's members included
+  // (lib/packages.mjs) — becomes a page at its path under pkg/<major>/.
+  // We post-process the gomarkdoc output to strip the "## Index" block —
   // it's a redundant flat list of every symbol that duplicates
   // the right-side TOC the docs site already renders. We inject a
   // `source` frontmatter pointing at the gomarkdoc-generated README
@@ -325,11 +328,9 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   // the page (their edits should target the Go doc comments — but
   // pkg.go.dev shows the right entry point all the same).
   if (existsSync(pkgMajor)) {
-    const subs = await readdir(pkgMajor, { withFileTypes: true });
-    for (const sub of subs) {
-      if (!sub.isDirectory()) continue;
-      const readme = join(pkgMajor, sub.name, "README.md");
-      if (!existsSync(readme)) continue;
+    for (const rel of packages) {
+      const pkgDir = join(pkgMajor, rel);
+      const readme = join(pkgDir, "README.md");
       const raw = await readFile(readme, "utf8");
       const indexStripped = stripGomarkdocIndex(raw);
 
@@ -358,7 +359,7 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
       //: between the narrative and the API reference dump. Replicable
       //: across packages: drop a USES.md alongside README.md and it's
       //: picked up automatically.
-      const usesPath = join(pkgMajor, sub.name, "USES.md");
+      const usesPath = join(pkgDir, "USES.md");
       let body = narrative;
       if (existsSync(usesPath)) {
         body += "\n" + (await readFile(usesPath, "utf8")) + "\n";
@@ -373,7 +374,7 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
 
       //: Append the package's BENCH.md (if any) under a "## Benchmarks"
       //: H2 — same pattern across codec / errs / logger.
-      const benchPath = join(pkgMajor, sub.name, "BENCH.md");
+      const benchPath = join(pkgDir, "BENCH.md");
       if (existsSync(benchPath)) {
         const benchRaw = await readFile(benchPath, "utf8");
         const benchBody = benchRaw
@@ -382,16 +383,20 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
         body += `\n\n## Benchmarks\n\n${benchBody}`;
       }
 
+      //: A package under a family directory lands in a subdirectory of
+      //: dest (data/codec.md, data/codec/json.md), created on first use.
+      const pagePath = join(dest, `${rel}.md`);
+      await mkdir(dirname(pagePath), { recursive: true });
       await writeFile(
-        join(dest, `${sub.name}.md`),
-        frontmatter({ source: `pkg/${major}/${sub.name}/README.md` }) + body,
+        pagePath,
+        frontmatter({ source: `pkg/${major}/${rel}/README.md` }) + body,
       );
     }
     //: Standalone /benchmarks/ page intentionally NOT materialised
     //: anymore (cf. .claude/contexts/docs-sidebar-rethink.md — 0/7
     //: SDKs surface a benchmarks page in main nav). The 37 KB
     //: pkg/v1/data/codec/BENCH.md stays accessible via GitHub and will
-    //: be re-surfaced inline at the bottom of /codec/ in P3
+    //: be re-surfaced inline at the bottom of /data/codec/ in P3
     //: (.claude/contexts/package-inline-benchmarks.md).
   }
 

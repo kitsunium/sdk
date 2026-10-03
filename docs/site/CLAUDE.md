@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:44Z -->
+<!-- updated: 2026-10-03T10:41:22Z -->
 # docs/site/
 
 ## Purpose
@@ -18,7 +18,7 @@ drift from the code.
 | `prebuild` | `scripts/sync-versions.mjs` | `src/content/docs/<release>/<major>/**` (gitignored), `src/data/versions.json`, `src/data/build-info.json`, the `src/data/features-<release>-<major>.json` banner data (curated in `src/data/features.mjs`; `scripts/gen-features.mjs` regenerates the local release's alone) |
 | | `scripts/gen-symbols.mjs` → `tools/genindex` | `public/_search/symbols-<major>.json` (⌘K search index) |
 | `build` | `astro build` + `pagefind` | `dist/` + `dist/_pagefind/` |
-| `test` | `node --test scripts/lib/*.test.mjs` | tag-format and feature-catalog unit tests |
+| `test` | `node --test scripts/lib/*.test.mjs` | tag-format, feature-catalog, package-discovery and page-catalog unit tests |
 
 Run `make docs` / `make serve` from the repo root (they call the above); `make docs-dev` runs `npm run dev`, the same sync then `astro dev`.
 
@@ -27,7 +27,7 @@ Run `make docs` / `make serve` from the repo root (they call the above); `make d
 | Path | Holds |
 |---|---|
 | `scripts/` | the build scripts of the table above |
-| `scripts/lib/` | shared modules — `base.mjs` (`withBase`), `tag-format.mjs`, `features.mjs` (the curated-feature logic), `page-catalog.mjs` (the page taxonomy `Sidebar.astro` and `Search.astro` share) — and their `*.test.mjs` |
+| `scripts/lib/` | shared modules — `base.mjs` (`withBase`), `tag-format.mjs`, `features.mjs` (the curated-feature logic), `packages.mjs` (which directories of `pkg/<major>/` become package pages, and the Home page's links to them), `page-catalog.mjs` (the page taxonomy `Sidebar.astro`, `Search.astro` and `PrevNext.astro` share) — and their `*.test.mjs` |
 | `src/data/` | `features.mjs`, the curated feature catalogue; the generated JSON lands beside it |
 | `src/pages/` | `index.astro`, `404.astro`, `rss.xml.js`, and `[release]/index.astro` + `[release]/[major]/[...slug].astro` rendering the synced content |
 | `src/components/`, `src/layouts/`, `src/styles/` | the Astro components, `Default.astro`, `global.css` |
@@ -63,8 +63,15 @@ a glob the bare `pkg/vX.Y.Z` tags of ADR 0017 do not match. Each tagged release 
 - Never hand-edit `src/content/docs/**` — it is regenerated each build. Edit the
   upstream source (package doc comments, ADRs, README) instead.
 - Hand-written absolute internal URLs go through `withBase()`.
-- Generated markdown uses relative links (`./codec/`) — base-agnostic, no help
-  needed.
+- Generated markdown uses relative links (`./data/codec/`) — base-agnostic, no
+  help needed.
+- A package page sits at the package's path under `pkg/<major>/`, family
+  directory included (`/<release>/<major>/data/codec/` — ADR 0155): every
+  directory below `pkg/<major>/` holding a `README.md` gets one, at any depth,
+  `internal/` and `testdata/` excepted. A family directory that is not itself a
+  package (`pkg/v1/data`) gets no page, and its breadcrumb is text, not a link.
+  Listing only `pkg/<major>`'s immediate children published four packages once
+  the families existed.
 
 ## Do NOT
 

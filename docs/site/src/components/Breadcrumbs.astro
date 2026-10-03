@@ -6,12 +6,16 @@
 // / local / codec"). We render only the slugs after <major>:
 //
 //   /local/v1/                       → (no breadcrumb, on Home)
-//   /local/v1/codec/                 → Home / codec
+//   /local/v1/errs/                  → Home / errs
+//   /local/v1/data/codec/            → Home / data / codec
 //   /local/v1/adr/0005-foo/          → Home / ADRs / 0005-foo
 //
 // Labels come from the page catalog so they match what the sidebar
 // shows; falls back to the raw slug segment when no catalog entry
-// applies (deep-nested pages).
+// applies (deep-nested pages). An intermediate crumb links only to a
+// page that exists: a family directory that is not itself a package
+// (`data` above — ADR 0155) has no page, so its crumb is plain text.
+import { getCollection } from "astro:content";
 import { RESERVED } from "../../scripts/lib/page-catalog.mjs";
 import { DEPLOY_BASE } from "../../scripts/lib/base.mjs";
 
@@ -32,13 +36,24 @@ const base =
     : DEPLOY_BASE || "";
 const homeLabel = RESERVED.index.label ?? "Home";
 
-const crumbs: Array<{ href: string; label: string }> = [];
+//: The ids of every page under this <release>/<major>, to tell a crumb
+//: that names a page from one that names only a directory.
+const root = segments.length >= 2 ? `${segments[0]}/${segments[1]}` : "";
+let pageIds = new Set<string>();
+try {
+  const entries = await getCollection("docs", e => e.id.startsWith(`${root}/`));
+  pageIds = new Set(entries.map(e => e.id));
+} catch { /* collection empty in bootstrap */ }
+
+const crumbs: Array<{ href: string | null; label: string }> = [];
 if (base !== "") crumbs.push({ href: `${base}/`, label: homeLabel });
 let accum = base;
+let slug = "";
 for (const seg of inDoc) {
   accum += `/${seg}`;
+  slug = slug === "" ? seg : `${slug}/${seg}`;
   const label = RESERVED[seg]?.label ?? seg;
-  crumbs.push({ href: `${accum}/`, label });
+  crumbs.push({ href: pageIds.has(`${root}/${slug}`) ? `${accum}/` : null, label });
 }
 const last = crumbs.length - 1;
 //: Hide on the landing page itself — no value in a single-link
@@ -53,7 +68,9 @@ const visible = inDoc.length > 0;
         <li>
           {i === last
             ? <span aria-current="page">{c.label}</span>
-            : <a href={c.href}>{c.label}</a>}
+            : c.href !== null
+              ? <a href={c.href}>{c.label}</a>
+              : <span>{c.label}</span>}
           {i !== last && <span class="sep" aria-hidden="true">/</span>}
         </li>
       ))}
