@@ -1,0 +1,47 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "pem",
+    srcs = [
+        "codec.go",
+        "codes.go",
+        "errors.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/pem",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":pem",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "pem_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+    ],
+    embed = [":pem"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -9,12 +9,12 @@ import (
 
 	corei18n "github.com/kitsunium/sdk/internal/core/i18n"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	_ "github.com/kitsunium/sdk/internal/service/codec/json" // register the "json" Format
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register the "json" Format
 	svci18n "github.com/kitsunium/sdk/internal/service/i18n"
 )
 
 // jsonFormat is the Format the blank import above registers. It is spelled as
-// a literal rather than taken from pkg/v1/codec, which internal/service must
+// a literal rather than taken from pkg/v1/data/codec, which internal/service must
 // not import.
 const jsonFormat = "json"
 
@@ -33,7 +33,7 @@ const polishJSON = `{
 func TestLoadFSReadsOneFilePerLanguage(t *testing.T) {
 	t.Parallel()
 
-	// io/fs is internal/core/vfs.FS unchanged (ADR 0056), so an embed.FS, an
+	// io/fs is internal/core/data/vfs.FS unchanged (ADR 0056), so an embed.FS, an
 	// os.DirFS, a vfs root and this test double are the same call and this
 	// package imports neither vfs nor os.
 	dir := fstest.MapFS{
@@ -140,7 +140,7 @@ func TestLoadFSRefusesAnUnregisteredFormatBeforeTouchingTheFilesystem(t *testing
 func TestLoadFSKeepsTheFilesystemCauseInTheChain(t *testing.T) {
 	t.Parallel()
 
-	// The same discipline internal/service/vfs applies: the cause is wrapped
+	// The same discipline internal/service/data/vfs applies: the cause is wrapped
 	// rather than replaced, so errors.Is against fs.ErrNotExist keeps
 	// answering and a caller can tell "no catalogue directory" from "a
 	// catalogue that will not compile".

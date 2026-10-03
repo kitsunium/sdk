@@ -12,12 +12,12 @@ Package config is the public facade for the SDK's configuration domain: layer co
 type Conf struct{ Port int `json:"port"` }
 var c Conf
 err := config.Load(&c,
-    config.FileSource("json", "/etc/app.json"), // blank-import pkg/v1/codec
+    config.FileSource("json", "/etc/app.json"), // blank-import pkg/v1/data/codec
     config.EnvSource("APP"),                     // APP_PORT overrides the file
 )
 ```
 
-File parsing dispatches through the codec registry — blank\-import the format's codec \(e.g. pkg/v1/codec\) so it is registered. Failures surface typed sentinels \(SourceFailed / DecodeFailed / ValidationFailed / WatchFailed\).
+File parsing dispatches through the codec registry — blank\-import the format's codec \(e.g. pkg/v1/data/codec\) so it is registered. Failures surface typed sentinels \(SourceFailed / DecodeFailed / ValidationFailed / WatchFailed\).
 
 ### A configuration carried in the binary
 
@@ -306,7 +306,7 @@ FSSource returns a Source reading path inside fsys and parsing it as format — 
 func FileSource(format, path string) Source
 ```
 
-FileSource returns a Source reading path and parsing it as format \(the codec must be registered — blank\-import its package, e.g. pkg/v1/codec\).
+FileSource returns a Source reading path and parsing it as format \(the codec must be registered — blank\-import its package, e.g. pkg/v1/data/codec\).
 
 <a name="Validator"></a>
 ## type [Validator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/config/config.go#L183>)

@@ -17,7 +17,7 @@ type Timed interface { Clock; Waiter }
 ```
 
 Ask for the narrowest half you need. `Clock` is a published port — reachable
-downstream through `pkg/v1/cache.Config.Clock` — so it stays at two methods and
+downstream through `pkg/v1/data/cache.Config.Clock` — so it stays at two methods and
 new capabilities land on `Waiter`.
 
 ## Production

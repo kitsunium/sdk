@@ -8,8 +8,8 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/config",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/codec",
         "//internal/core/config",
+        "//internal/core/data/codec",
         "//internal/service/config",
     ],
 )
@@ -25,7 +25,7 @@ go_test(
     srcs = ["config_external_test.go"],
     deps = [
         ":config",
-        "//pkg/v1/codec",
+        "//pkg/v1/data/codec",
         "//pkg/v1/errs",
         "//pkg/v1/security/secret",
     ],

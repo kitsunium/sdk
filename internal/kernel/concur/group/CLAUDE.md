@@ -119,7 +119,7 @@ Go has no way to abandon a goroutine.
   evaluation path is re-raised in the probing goroutine, after every sibling
   check has returned, instead of crashing the process from a goroutine nobody
   can recover.
-- `internal/service/queue` — `Consume` runs its workers in a `NewJoined` group:
+- `internal/service/data/queue` — `Consume` runs its workers in a `NewJoined` group:
   each worker that hits the storage reports its OWN failure, the first one
   stops the others, and `Consume` returns them joined.
 - `internal/service/scheduler` was considered and does not use it: a job's

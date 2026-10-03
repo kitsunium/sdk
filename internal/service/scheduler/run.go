@@ -176,7 +176,7 @@ func (s *scheduler) run(ctx context.Context, wg *sync.WaitGroup, e *entry, sched
 // The stack is captured inside the deferred recover, while the job's frames
 // are still on it, and travels as a field. Without it the report names only
 // the recover site — this engine, which did nothing wrong — and the frame
-// that actually panicked is gone for good; service/events, service/queue and
+// that actually panicked is gone for good; service/events, service/data/queue and
 // service/cli capture it on the same path for the same reason.
 func invoke(ctx context.Context, e *entry) (err error) {
 	//: a panicking job must not reach the runtime: one job's bug would take

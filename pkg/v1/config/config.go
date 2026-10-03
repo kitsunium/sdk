@@ -8,12 +8,12 @@
 //	type Conf struct{ Port int `json:"port"` }
 //	var c Conf
 //	err := config.Load(&c,
-//	    config.FileSource("json", "/etc/app.json"), // blank-import pkg/v1/codec
+//	    config.FileSource("json", "/etc/app.json"), // blank-import pkg/v1/data/codec
 //	    config.EnvSource("APP"),                     // APP_PORT overrides the file
 //	)
 //
 // File parsing dispatches through the codec registry — blank-import the format's
-// codec (e.g. pkg/v1/codec) so it is registered. Failures surface typed
+// codec (e.g. pkg/v1/data/codec) so it is registered. Failures surface typed
 // sentinels (SourceFailed / DecodeFailed / ValidationFailed / WatchFailed).
 //
 // # A configuration carried in the binary
@@ -158,8 +158,8 @@ import (
 	"io/fs"
 	"time"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	svcconfig "github.com/kitsunium/sdk/internal/service/config"
 )
 
@@ -305,7 +305,7 @@ func EnvSource(prefix string) Source {
 }
 
 // FileSource returns a Source reading path and parsing it as format (the codec
-// must be registered — blank-import its package, e.g. pkg/v1/codec).
+// must be registered — blank-import its package, e.g. pkg/v1/data/codec).
 func FileSource(format, path string) Source {
 	//: delegate, converting the format name to the codec key type.
 	return svcconfig.FileSource(codec.Format(format), path)

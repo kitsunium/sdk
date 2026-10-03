@@ -38,10 +38,10 @@ const layerZeroOwner string = "internal/kernel/errs"
 var codeRangeOwners = map[uint64]string{
 	0x00_01_03_00: "internal/kernel/collections/ring",
 	0x00_01_05_00: "internal/kernel/concur/batcher",
-	0x00_02_02_00: "internal/core/codec",
+	0x00_02_02_00: "internal/core/data/codec",
 	0x00_02_03_00: "internal/core/observe/logger/writer",
 	0x00_02_04_00: "internal/core/crypto",
-	0x00_02_05_00: "internal/core/transform",
+	0x00_02_05_00: "internal/core/data/transform",
 	0x00_02_06_00: "internal/core/proc",
 	0x00_02_07_00: "internal/core/id",
 	0x00_02_08_00: "internal/core/resilience",
@@ -53,16 +53,16 @@ var codeRangeOwners = map[uint64]string{
 	0x00_02_0E_00: "internal/core/security/session",
 	0x00_02_0F_00: "internal/core/validation",
 	0x00_02_11_00: "internal/core/observe/logger/level",
-	0x00_02_12_00: "internal/core/cache",
+	0x00_02_12_00: "internal/core/data/cache",
 	0x00_02_13_00: "internal/core/lifecycle",
 	0x00_02_14_00: "internal/core/observe/trace",
 	0x00_02_15_00: "internal/core/lock",
 	0x00_02_16_00: "internal/core/events",
-	0x00_02_17_00: "internal/core/queue",
+	0x00_02_17_00: "internal/core/data/queue",
 	0x00_02_1A_00: "internal/core/security/authz",
 	0x00_02_1B_00: "internal/core/view",
-	0x00_02_18_00: "internal/core/sql",
-	0x00_02_19_00: "internal/core/vfs",
+	0x00_02_18_00: "internal/core/data/sql",
+	0x00_02_19_00: "internal/core/data/vfs",
 	0x00_02_1D_00: "internal/core/health",
 	0x00_02_1E_00: "internal/core/i18n",
 	0x00_02_1F_00: "internal/core/mail",
@@ -74,16 +74,16 @@ var codeRangeOwners = map[uint64]string{
 	0x00_02_25_00: "internal/core/security/secret",
 	0x00_02_38_00: "internal/core/statemachine",
 	0x00_03_01_00: "internal/service/observe/logger",
-	0x00_03_02_00: "internal/service/codec/json",
-	0x00_03_03_00: "internal/service/codec/xml",
-	0x00_03_04_00: "internal/service/codec/yaml",
-	0x00_03_05_00: "internal/service/codec/toml",
-	0x00_03_06_00: "internal/service/codec/cbor",
-	0x00_03_07_00: "internal/service/codec/msgpack",
-	0x00_03_08_00: "internal/service/codec/csv",
-	0x00_03_09_00: "internal/service/codec/asn1",
-	0x00_03_0A_00: "internal/service/codec/pem",
-	0x00_03_0B_00: "internal/service/codec/ndjson",
+	0x00_03_02_00: "internal/service/data/codec/json",
+	0x00_03_03_00: "internal/service/data/codec/xml",
+	0x00_03_04_00: "internal/service/data/codec/yaml",
+	0x00_03_05_00: "internal/service/data/codec/toml",
+	0x00_03_06_00: "internal/service/data/codec/cbor",
+	0x00_03_07_00: "internal/service/data/codec/msgpack",
+	0x00_03_08_00: "internal/service/data/codec/csv",
+	0x00_03_09_00: "internal/service/data/codec/asn1",
+	0x00_03_0A_00: "internal/service/data/codec/pem",
+	0x00_03_0B_00: "internal/service/data/codec/ndjson",
 	0x00_03_0D_00: "internal/service/observe/logger/sink/console",
 	0x00_03_0E_00: "internal/service/observe/logger/sink/file",
 	0x00_03_0F_00: "internal/service/observe/logger/sink/syslog",
@@ -93,11 +93,11 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_13_00: "internal/service/observe/logger/middleware/failover",
 	0x00_03_14_00: "internal/service/observe/logger/middleware/sample",
 	0x00_03_15_00: "internal/service/observe/logger/middleware/recover",
-	0x00_03_16_00: "internal/service/codec/tlv",
-	0x00_03_17_00: "internal/service/codec/flatbuffers",
-	0x00_03_18_00: "internal/service/codec/baseenc",
+	0x00_03_16_00: "internal/service/data/codec/tlv",
+	0x00_03_17_00: "internal/service/data/codec/flatbuffers",
+	0x00_03_18_00: "internal/service/data/codec/baseenc",
 	0x00_03_19_00: "third-party/aws/writer/cloudwatch",
-	0x00_03_1A_00: "internal/service/transform",
+	0x00_03_1A_00: "internal/service/data/transform",
 	0x00_03_1B_00: "internal/service/observe/logger/writer/rotfile",
 	0x00_03_1C_00: "internal/service/observe/logger/middleware/encwrite",
 	0x00_03_1D_00: "internal/service/observe/logger/middleware/tee",
@@ -107,28 +107,28 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_21_00: "third-party/db/writer/clickhouse",
 	0x00_03_22_00: "third-party/db/writer/redis",
 	0x00_03_23_00: "third-party/aws/writer/s3",
-	0x00_03_24_00: "internal/service/codec/bson",
+	0x00_03_24_00: "internal/service/data/codec/bson",
 	0x00_03_25_00: "third-party/codec/hcl",
 	0x00_03_26_00: "third-party/codec/protobuf",
 	0x00_03_27_00: "internal/service/id",
-	0x00_03_28_00: "internal/service/codec/form",
-	0x00_03_29_00: "internal/service/codec/multipart",
+	0x00_03_28_00: "internal/service/data/codec/form",
+	0x00_03_29_00: "internal/service/data/codec/multipart",
 	0x00_03_2A_00: "internal/service/crypto/key/jwk",
 	0x00_03_2B_00: "internal/service/scheduler",
 	0x00_03_2C_00: "internal/service/security/token",
 	0x00_03_2D_00: "internal/service/observe/metrics",
 	0x00_03_2E_00: "internal/service/security/session",
 	0x00_03_2F_00: "internal/service/validation",
-	0x00_03_30_00: "internal/service/cache",
+	0x00_03_30_00: "internal/service/data/cache",
 	0x00_03_31_00: "internal/service/lifecycle",
 	0x00_03_32_00: "internal/service/observe/trace",
 	0x00_03_33_00: "internal/service/lock",
 	0x00_03_34_00: "internal/service/events",
-	0x00_03_35_00: "internal/service/queue",
+	0x00_03_35_00: "internal/service/data/queue",
 	0x00_03_38_00: "internal/service/security/authz",
 	0x00_03_39_00: "internal/service/view",
-	0x00_03_36_00: "internal/service/sql",
-	0x00_03_37_00: "internal/service/vfs",
+	0x00_03_36_00: "internal/service/data/sql",
+	0x00_03_37_00: "internal/service/data/vfs",
 	0x00_03_3B_00: "internal/service/health",
 	0x00_03_3C_00: "internal/service/i18n",
 	0x00_03_3D_00: "internal/service/mail",
@@ -138,14 +138,14 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_42_00: "framework/internal/service/selfupdate",
 	0x00_03_43_00: "framework/internal/service/entitlement",
 	0x00_03_44_00: "internal/service/security/secret",
-	0x00_03_48_00: "internal/service/codec/strictjson",
+	0x00_03_48_00: "internal/service/data/codec/strictjson",
 	0x00_03_49_00: "internal/service/security/redact",
 	0x00_03_4D_00: "third-party/codec/yaml", // yaml.v3 behind the opt-in "yaml-full" Format
-	0x00_03_50_00: "internal/service/docstore",
+	0x00_03_50_00: "internal/service/data/docstore",
 	0x00_03_51_00: "internal/service/mail/spool",
 	0x00_03_58_00: "internal/service/statemachine",
 	0x00_03_59_00: "internal/service/observe/profiling",
-	0x00_03_5A_00: "internal/service/codec/jsonpatch",
+	0x00_03_5A_00: "internal/service/data/codec/jsonpatch",
 	0x00_03_5B_00: "internal/service/proc/ipc",     // ADR 0148
 	0x00_04_01_00: "framework/model/internal/core", // ADR 0147: layer 4 is the framework module
 	0x00_04_02_00: "framework/internal/kit",
@@ -156,7 +156,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_04_12_00: "framework/connectors/sqlite",
 	0x01_01_00_00: "pkg/v1/observe/logger",
 	0x01_01_01_00: "pkg/v1/observe/logger/slogbridge",
-	0x01_02_00_00: "pkg/v1/codec",
+	0x01_02_00_00: "pkg/v1/data/codec",
 }
 
 // codeDecl is one resolved `const X Code = <value>` declaration, paired with
@@ -355,7 +355,7 @@ func collectGenDeclCodes(
 
 // collectCodeDeclsInDir resolves every Code declaration in the .go files of
 // dir. Ownership is keyed on DECLARATIONS, not on errs.Define call sites:
-// internal/core/codec declares the whole 0.2.2.* block and never calls Define
+// internal/core/data/codec declares the whole 0.2.2.* block and never calls Define
 // (it formats the code into its registry errors), so a Define-keyed audit is
 // blind to a range that is very much allocated.
 //
@@ -802,7 +802,7 @@ var CodeUnset errs.Code
 
 import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 )
 
 var Codec codec.Codec = newCodec()

@@ -39,7 +39,7 @@ never fails a request.
 ```go
 english, _ := i18n.ParseTag("en")
 
-store, err := i18n.LoadFS(os.DirFS("locales"), ".", "json", english)   // blank-import pkg/v1/codec
+store, err := i18n.LoadFS(os.DirFS("locales"), ".", "json", english)   // blank-import pkg/v1/data/codec
 negotiator, err := i18n.NewNegotiator(store.Tags(), english)
 
 // one Printer per language, at startup — NOT per request

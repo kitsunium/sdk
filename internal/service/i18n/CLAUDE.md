@@ -89,7 +89,7 @@ the same set.
   walked sorted, so a catalogue with two defects always reports the same one
   first and a failing build can be bisected.
 - **`LoadFS` invents no format and no filesystem.** Bytes go through
-  `codec.Lookup` (blank-import `pkg/v1/codec`); the tree is `io/fs.FS`, which
+  `codec.Lookup` (blank-import `pkg/v1/data/codec`); the tree is `io/fs.FS`, which
   is `vfs.FS` unchanged (ADR 0056). This package imports neither `vfs` nor
   `os`.
 - **The language comes from the file NAME**, through `ParseTag` — so
@@ -97,7 +97,7 @@ the same set.
   two files resolving to one tag are `CATALOG_INVALID`.
 - **`failLoad` keeps the filesystem cause IN THE CHAIN**, so
   `errors.Is(err, fs.ErrNotExist)` still answers. Same shape and same reason as
-  `service/vfs.failRead`.
+  `service/data/vfs.failRead`.
 - **A `Store` never mutates after construction.** No Add, no Set, no Reload.
 - **`ja` and `zh` carry no rule.** `PluralValue.Select` answers `FormOther`
   when the rule is nil, and `Valid` reads the category SET rather than the

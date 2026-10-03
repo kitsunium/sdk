@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 )
 
 // Watches (ADR 0008). A module hears of the writes of the fields a product

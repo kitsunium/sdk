@@ -28,7 +28,7 @@ internal/kernel/
 | `errs/` | SDK-wide typed error + dotted-quad registry (ADR 0005) | `0.0.0.*` (meta-codes 0.0.0.1-6, documentary only) |
 | `clock/` | time port, split in two: `Clock` (`Now` + `Since`) and `Waiter` (`After`/`NewTimer`/`NewTicker`/`Sleep`), joined by `Timed`; `System` delegates to package `time`, `ManualClock` is the deterministic test double | `0.1.2.*` (reserved — none emitted, none planned: bad input panics) |
 | `backoff/` | `Value{BaseDelay, MaxDelay, Multiplier, Jitter}.Delay(attempt)` — the SDK's one exponential backoff curve, never negative (ADR 0103), plus its two halves `Grow` (pure) and `Widen` (jitter); `pkg/v1/resilience.Backoff` and `service/resilience.BackoffValue` alias it (ADR 0074) | (none — every input is normalised, nothing is refused) |
-| `semver/` | SemVer 2.0.0 precedence with Go's leading `v`, and Go pseudo-versions: `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` — the six functions the SDK called on `golang.org/x/mod`, which it replaces (ADR 0156 §4); one pass, no allocation, published as `pkg/v1/semver` | (none — answers with values and `bool`s; an invalid string orders below every version) |
+| `semver/` | SemVer 2.0.0 precedence with Go's leading `v`, and Go pseudo-versions: `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` — the six functions the SDK called on `golang.org/x/mod`, which it replaces (ADR 0156 §4); one pass, no allocation, published as `pkg/v1/data/semver` | (none — answers with values and `bool`s; an invalid string orders below every version) |
 | `plugin/` | `Unusable(v)` — the one question every process-wide registry asks before publishing: a typed nil and a non-comparable value both satisfy a port and neither can serve (ADR 0071) — and `Registry[K, V]`, the name-keyed copy-on-write table the entry is then published into, which reports a conflict rather than building an error (first users: the metrics and trace exporter registries) | (none — returns a reason string, and a conflict bool, the registrar puts behind its own code) |
 
 ### `concur/` — concurrency: goroutines run, joined and deduplicated, work coalesced, values shared or reused across goroutines (see `concur/CLAUDE.md`)
@@ -74,12 +74,12 @@ Lesson: stdlib-only is necessary but NOT sufficient. When considering a new kern
 As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 
 - `errs` stays — every layer of the SDK uses typed errors, including kernel itself. Meta-infrastructure.
-- `clock` stays — textbook generic time abstraction. Extended in place (2026-09) with the waiting half (`Waiter`/`Timer`/`Ticker`) plus `ManualClock`, which is still stdlib-only and still domain-free: no `Job`, no `Task`, no `Schedule` appears in a signature. `Clock` itself was deliberately NOT widened — it is reachable downstream through the `pkg/v1/cache.Config` alias, so a new method would break every consumer's hand-written double. See `clock/CLAUDE.md` §"Why `Clock` was NOT extended".
+- `clock` stays — textbook generic time abstraction. Extended in place (2026-09) with the waiting half (`Waiter`/`Timer`/`Ticker`) plus `ManualClock`, which is still stdlib-only and still domain-free: no `Job`, no `Task`, no `Schedule` appears in a signature. `Clock` itself was deliberately NOT widened — it is reachable downstream through the `pkg/v1/data/cache.Config` alias, so a new method would break every consumer's hand-written double. See `clock/CLAUDE.md` §"Why `Clock` was NOT extended".
 - `recycler` admitted by ADR 0010 — `Pool[T]` + `CappedPool[T]` are textbook generic object pools (reuse + reset + cap-discard). Any byte buffer, codec stream, HTTP body encoder, or metrics line writer can reuse the mechanism; the thresholds stay with the consumers.
 - `buffer` stays — the `[]byte` pool is generic even though `service/observe/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
-- `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/cache` and `internal/service/security/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
+- `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/data/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/data/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/data/cache` and `internal/service/security/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
 - `plugin` admitted by ADR 0071 — `Unusable(v any) (why string)` names no domain and knows no port; what it judges is the VALUE, and the two shapes it refuses are properties of Go's interfaces, not of any registry. It has **fifteen** in-tree consumers on day one, in eight core packages, which is unusual here and is the consolidation argument ADR 0010 made for `recycler`: the guard existed fifteen times as `if x == nil` and was wrong in the same way fifteen times. `Registry[K cmp.Ordered, V comparable]` joined it on the same argument: the name-keyed copy-on-write table behind a registry (a check-and-publish under `snapshot.Value`'s writer lock, idempotent on the identical value, a conflict REPORTED as a bool for the registrar to refuse with its own code) existed as a private copy per registry; it names no domain and builds no error, and its first users are the metrics and trace exporter registries.
 - `backoff` admitted on rule 1 — stdlib-only, and its signatures name a
   duration, a factor, a ceiling and a jitter, nothing else — and moved here
@@ -94,8 +94,8 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   one in-tree consumer, `internal/service/lock`, and that was stated rather than
   dressed up; `internal/service/proc/ipc` is the second (its socket directory's
   parents); three neighbours ask a related question with hand-rolled checks
-  today (`internal/service/queue`'s symlinked state directory,
-  `internal/core/vfs`'s `PathEscaped`, `internal/service/observe/logger/writer/rotfile`'s
+  today (`internal/service/data/queue`'s symlinked state directory,
+  `internal/core/data/vfs`'s `PathEscaped`, `internal/service/observe/logger/writer/rotfile`'s
   `refuseSymlink`) and none of them can ask THIS one. It deliberately produces
   no verdict: `/var/run` being a symbolic link is a distribution's decision and
   `/tmp/myapp` being one may be an attack, so the primitive measures and the
@@ -108,7 +108,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   SemVer's and the Go toolchain's, which every Go program shares. It ships with
   one in-tree consumer, `internal/service/proc/self` (pseudo-versions); the two
   callers of `x/mod/semver`, `selfupdate` and `entitlement`, moved to the
-  framework (ADR 0158) and reach it through `pkg/v1/semver`, the alias that
+  framework (ADR 0158) and reach it through `pkg/v1/data/semver`, the alias that
   exists for exactly that reason (ADR 0159 §4). Written from the
   specifications, not from x/mod's source; x/mod's test vectors are what the
   suite borrows, so the two are shown to agree.
@@ -122,8 +122,8 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   above it — **ADR 0025 admitted `cache` with ZERO consumers** — and ADR 0010's
   "three copies already existed" was a *consolidation* argument, not a gate.
   Both have consumers now: `group` in `service/health` (through `Collect`) and
-  `service/queue` (through `NewJoined`, which was added for it), `heap` in
-  `service/queue`'s lease expiry and `service/statemachine`'s agenda.
+  `service/data/queue` (through `NewJoined`, which was added for it), `heap` in
+  `service/data/queue`'s lease expiry and `service/statemachine`'s agenda.
 - `topic` — a typed in-process broadcast admitted on the same rule — was
   **deleted** (2026-10). Its only candidate consumer, `service/events`, read it
   and refused it in writing (ADR 0053 §D9: a per-subscriber buffer makes

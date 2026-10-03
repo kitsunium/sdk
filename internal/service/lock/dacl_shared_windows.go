@@ -4,7 +4,7 @@
 // same question of their own directories.
 //
 // "Can an account meaning anybody put an entry here, or take one away?" is not
-// a question about locks. internal/service/queue asks it of its queue and state
+// a question about locks. internal/service/data/queue asks it of its queue and state
 // directories, and on Windows it has exactly one answer in this repository:
 // this package's DACL reader (ADR 0084, ADR 0086). A second reader would be a
 // second place to get the eight ACE shapes, the deny subtraction and the NULL

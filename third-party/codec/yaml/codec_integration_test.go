@@ -5,7 +5,7 @@ package yaml_test
 import (
 	"testing"
 
-	corecodec "github.com/kitsunium/sdk/internal/core/codec"
+	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/third-party/codec/yaml"
 )
 

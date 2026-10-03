@@ -1,15 +1,15 @@
 // Package logger — exposes FromConfig, the capstone of the config-driven writer
 // subsystem (ADR 0014 §D5): it builds a fully wired Logger from a config blob
 // with zero Go glue. The blob is decoded by a codec the CONSUMER already
-// registered (FromConfig imports only the core/codec dispatch surface, never
-// pkg/v1/codec or any service codec, so a pkg/v1/observe/logger consumer inherits no
+// registered (FromConfig imports only the core/data/codec dispatch surface, never
+// pkg/v1/data/codec or any service codec, so a pkg/v1/observe/logger consumer inherits no
 // vendor modules). Each decoded WriterEntry is resolved against the writer
 // registry; a Factory that implements ConfigDecoder translates its own option
 // map, otherwise a default mapping passes the raw map straight to the factory.
 package logger
 
 import (
-	corecodec "github.com/kitsunium/sdk/internal/core/codec"
+	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
 	corewriter "github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svclogger "github.com/kitsunium/sdk/internal/service/observe/logger"
@@ -22,7 +22,7 @@ type Format = corecodec.Format
 
 // FromConfig builds a Logger from raw, a config blob in the wire format named by
 // format, decoded by a codec the consumer has already registered (blank-import
-// github.com/kitsunium/sdk/pkg/v1/codec or a single service codec to activate
+// github.com/kitsunium/sdk/pkg/v1/data/codec or a single service codec to activate
 // one). It unmarshals raw into a Topology, resolves each WriterEntry against the
 // writer registry — calling the Factory's ConfigDecoder when it implements one,
 // else a default mapping — composes the sinks via Multi, and returns a Logger
@@ -71,7 +71,7 @@ func FromConfig(format Format, raw []byte) (lg Logger, err error) {
 }
 
 // decodeTopology unmarshals raw into a Topology using the codec registered under
-// format. It stays on the core/codec surface (Lookup + Codec.Unmarshal) so the
+// format. It stays on the core/data/codec surface (Lookup + Codec.Unmarshal) so the
 // public logger package inherits no vendor codec dependency. Every failure maps
 // to the redacted TopologyInvalid sentinel — the raw bytes are never echoed.
 func decodeTopology(format Format, raw []byte) (topo TopologyConfig, err error) {

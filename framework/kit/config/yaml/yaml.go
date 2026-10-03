@@ -13,7 +13,7 @@ package yaml
 
 import (
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
-	yamlcodec "github.com/kitsunium/sdk/pkg/v1/codec/yaml"
+	yamlcodec "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml"
 )
 
 // Importing the package gives kit the YAML codec: a blank package-level value

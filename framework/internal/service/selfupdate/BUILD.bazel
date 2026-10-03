@@ -40,8 +40,8 @@ go_library(
         "//pkg/v1/clock",
         "//pkg/v1/crypto/hash",
         "//pkg/v1/crypto/sign",
+        "//pkg/v1/data/semver",
         "//pkg/v1/proc",
-        "//pkg/v1/semver",
     ],
 )
 

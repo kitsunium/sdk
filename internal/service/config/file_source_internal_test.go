@@ -6,11 +6,11 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
-	_ "github.com/kitsunium/sdk/internal/service/codec/json" // register "json"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register "json"
 )
 
 // Test_fileSource_Load pins the order of the two things that can go wrong: the

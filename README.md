@@ -4,16 +4,17 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 25 at the top level, plus thirty-nine nested
-ones (`codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`,
-`codec/yaml`, `codec/toml`, `codec/bson`, the six scheme facades under
-`crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — the five under
-`security/` — `authz`, `redact`, `secret`, `session`, `token` — the six under
-`net/` — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — the six
-under `observe/` — `logger`, `logger/writer`, `logger/slogbridge`, `metrics`,
-`trace`, `profiling` — and the nine under `proc/` — `process`, `signal`,
-`reaper`, `rlimit`, `cgroup`, `memlimit`, `ipc`, `systemd/notify`,
-`systemd/listen`), and links the standard library and
+`pkg/v1` ships **64 packages**: 18 at the top level, plus forty-six nested
+ones (the six scheme facades under `crypto/` — `agree`, `hash`, `kdf`, `mac`,
+`password`, `sign` — the five under `security/` — `authz`, `redact`, `secret`,
+`session`, `token` — the six under `net/` — `server`, `client`, `tlsid`,
+`sse`, `websocket`, `static` — the six under `observe/` — `logger`,
+`logger/writer`, `logger/slogbridge`, `metrics`, `trace`, `profiling` — the
+nine under `proc/` — `process`, `signal`, `reaper`, `rlimit`, `cgroup`,
+`memlimit`, `ipc`, `systemd/notify`, `systemd/listen` — and the fourteen under
+`data/` — `codec`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
+`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, `sql`, `docstore`,
+`queue`, `cache`, `vfs`, `semver`), and links the standard library and
 nothing else (ADR 0156). They are grouped below by the job they do, and each
 links to its own generated `README.md`. The distribution mechanisms that close
 the list are the framework's packages, imported from
@@ -37,12 +38,12 @@ the list are the framework's packages, imported from
 | [`lifecycle`](./pkg/v1/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. A **supervisor** keeps a component's loop running: restarted after an error, an early return or a panic, on a growing backoff, and joined on stop. |
 | [`cli`](./pkg/v1/cli) | Sub-commands, generated help and a typed exit status on the stdlib `flag`, with zero dependencies. `flag.ExitOnError` is refused by name — nothing here can end your process. |
 | [`events`](./pkg/v1/events) | In-process **synchronous** bus keyed on the event's concrete Go type. Not a queue: no durability, no retry, no dead-letter path, and deliberately no async mode. |
-| [`queue`](./pkg/v1/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. An idle consumer sleeps until a publication, a retry falling due or a lapsed lease wakes it, so the poll only bounds what another process publishes. |
+| [`queue`](./pkg/v1/data/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. An idle consumer sleeps until a publication, a retry falling due or a lapsed lease wakes it, so the poll only bounds what another process publishes. |
 | [`scheduler`](./pkg/v1/scheduler) | Five-field POSIX cron + fixed intervals. DST, missed deadlines and overlap are decided and documented rather than emergent. |
 | [`statemachine`](./pkg/v1/statemachine) | Entities of **your** store moved along declared states: events you fire, timers after a duration in a state, deadlines the entity carries, guards on it. One transition per entity at a time, a hook that panics never leaves one locked, and a replace never resurrects a deleted entity. The loop keeps an agenda — one heap entry per entity — so it sleeps until the next transition due or a write and finds it in O(log N), not by re-reading the store. |
-| [`cache`](./pkg/v1/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
+| [`cache`](./pkg/v1/data/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
 | [`clock`](./pkg/v1/clock) | The time port — `Clock` / `Waiter` / `Timed`, plus `System` and a `ManualClock` a test drives by hand. Every SDK `Clock` field takes one, so a timeout, a cron cadence or a lease expiry is asserted exactly, with no sleeping. |
-| [`semver`](./pkg/v1/semver) | Version precedence the way Go writes versions — SemVer 2.0.0 with a leading `v` — and Go pseudo-versions recognised and read, with `golang.org/x/mod`'s names and answers and nothing outside the standard library. An unreadable string sorts first, numbers of any size order exactly, nothing allocates. |
+| [`semver`](./pkg/v1/data/semver) | Version precedence the way Go writes versions — SemVer 2.0.0 with a leading `v` — and Go pseudo-versions recognised and read, with `golang.org/x/mod`'s names and answers and nothing outside the standard library. An unreadable string sorts first, numbers of any size order exactly, nothing allocates. |
 | [`resilience`](./pkg/v1/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
 | [`lock`](./pkg/v1/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
 | [`id`](./pkg/v1/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
@@ -62,7 +63,7 @@ the list are the framework's packages, imported from
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) / [`bson`](./pkg/v1/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links the SDK's own YAML reader and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
+| [`codec`](./pkg/v1/data/codec) + [`strictjson`](./pkg/v1/data/codec/strictjson), [`jsonshape`](./pkg/v1/data/codec/jsonshape), [`jsonpatch`](./pkg/v1/data/codec/jsonpatch), [`json`](./pkg/v1/data/codec/json) / [`yaml`](./pkg/v1/data/codec/yaml) / [`toml`](./pkg/v1/data/codec/toml) / [`bson`](./pkg/v1/data/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links the SDK's own YAML reader and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/crypto/hash), [`sign`](./pkg/v1/crypto/sign), [`mac`](./pkg/v1/crypto/mac), [`kdf`](./pkg/v1/crypto/kdf), [`agree`](./pkg/v1/crypto/agree), [`password`](./pkg/v1/crypto/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/security/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
@@ -70,9 +71,9 @@ the list are the framework's packages, imported from
 | [`session`](./pkg/v1/security/session) | Server-side sessions. `Regenerate` is the only call that binds a subject and always mints a new identifier, so session fixation is prevented by the **absence** of any other spelling rather than by remembering a step. |
 | [`authz`](./pkg/v1/security/authz) | RBAC + ABAC with no policy DSL — a condition is a Go func. **Abstention is a third verdict** and the zero value, because folding "no opinion" into a grant is a hole and into a refusal is an outage. |
 | [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
-| [`sql`](./pkg/v1/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
-| [`vfs`](./pkg/v1/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
-| [`docstore`](./pkg/v1/docstore) | Typed, keyed JSON documents with unique and multi-valued indexes, in memory, on a filesystem or over SQL. A write is durable before it returns and costs the same at a hundred documents or a hundred thousand: it publishes one small file, and the store rests as ONE readable snapshot. Asked to, it keeps each document's last **versions** in the document's own write, so no crash ever separates them. |
+| [`sql`](./pkg/v1/data/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
+| [`vfs`](./pkg/v1/data/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
+| [`docstore`](./pkg/v1/data/docstore) | Typed, keyed JSON documents with unique and multi-valued indexes, in memory, on a filesystem or over SQL. A write is durable before it returns and costs the same at a hundred documents or a hundred thousand: it publishes one small file, and the store rests as ONE readable snapshot. Asked to, it keeps each document's last **versions** in the document's own write, so no crash ever separates them. |
 | [`redact`](./pkg/v1/security/redact) | Values, JSON documents, text and log attributes shown with their secrets replaced — a name that says it is one, a field declared secret, a URL's credentials — within an **exact** byte bound, never touching the input. What it does not recognise is stated, because it is a display filter and not an access control. |
 
 ### Process, platform and distribution
@@ -90,7 +91,7 @@ the list are the framework's packages, imported from
 ## Install
 
 ```bash
-go get github.com/kitsunium/sdk/pkg/v1/codec
+go get github.com/kitsunium/sdk/pkg/v1/data/codec
 go get github.com/kitsunium/sdk/pkg/v1/errs
 go get github.com/kitsunium/sdk/pkg/v1/observe/logger
 ```
@@ -102,7 +103,7 @@ package main
 
 import (
     "fmt"
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
 )
 
 func main() {

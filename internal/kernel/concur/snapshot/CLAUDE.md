@@ -7,7 +7,7 @@ The SDK's copy-on-write container primitive. Stdlib-only, domain-neutral.
 `Value[T]` wraps `atomic.Pointer[T]` so readers `Load` the current snapshot
 lock-free and allocation-free, while writers (`Store` / `Swap` / `Update`)
 serialise on a mutex for a race-free read-modify-write publish. The codec
-registry (`internal/core/codec`) is built ON this primitive — the mechanism
+registry (`internal/core/data/codec`) is built ON this primitive — the mechanism
 lives here, the domain clone logic stays with the consumer (ADR 0011).
 
 ## Contents

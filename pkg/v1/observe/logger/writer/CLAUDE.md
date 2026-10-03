@@ -6,7 +6,7 @@ Blank-import activation package for the **dependency-free** logger writers —
 `"console"`, `"file"`, and `"rotfile"` (ADR 0012; rotfile per ADR 0014). A
 single `import _ "github.com/kitsunium/sdk/pkg/v1/observe/logger/writer"` registers all
 three factories so `logger.NewMulti` resolves those names. Mirrors the
-`import _ ".../pkg/v1/codec"` pattern.
+`import _ ".../pkg/v1/data/codec"` pattern.
 
 ## Contents
 
@@ -24,7 +24,7 @@ side-effects. `README.md` is generated from the package doc comment via
   factories. The AWS writers (`s3`, `cloudwatch`) are NOT imported here — they
   live in `third-party/aws/writer/{s3,cloudwatch}` and a consumer blank-imports them
   individually so the AWS SDK enters the build only on explicit opt-in.
-- **Side-effect import.** Like `pkg/v1/codec`, importing the package is the API;
+- **Side-effect import.** Like `pkg/v1/data/codec`, importing the package is the API;
   there is nothing to call.
 
 ## Do NOT

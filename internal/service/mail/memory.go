@@ -35,7 +35,7 @@ type memoryTransport struct {
 // refused in production is refused in the test that was supposed to catch it,
 // with the same typed error.
 //
-// It takes no arguments for the same reason core/vfs.NewMem does: every knob it
+// It takes no arguments for the same reason core/data/vfs.NewMem does: every knob it
 // could offer is one a consumer's test must set before it can assert anything,
 // and the value of a double is that it costs one line.
 //

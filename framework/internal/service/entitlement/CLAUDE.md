@@ -412,7 +412,7 @@ and the cache lock (`pkg/v1/lock`) go through it — `crypto.go` and
 `cache_lock.go`. Four things do not, each for a reason measured on this tree,
 and each is said again at its code site:
 
-- **JSON: `jsonnames.go` stays, not `pkg/v1/codec/strictjson`.** strictjson
+- **JSON: `jsonnames.go` stays, not `pkg/v1/data/codec/strictjson`.** strictjson
   refuses a duplicate name, which is what this package needs, but it also
   refuses every member its target does not declare — ADR 0102's one reading,
   with no mode to relax it — and the four documents read here must ignore one:

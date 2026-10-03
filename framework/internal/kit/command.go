@@ -406,7 +406,7 @@ func (c *Command[C, R]) transactionDrawn() []model.Mechanic {
 // transactionMechanic is a command's transaction: its writes commit
 // together, and its effects leave at the commit.
 func transactionMechanic() model.Mechanic {
-	return model.Mechanic{Kind: "transaction", Label: "one transaction · effects at the commit", Package: "github.com/kitsunium/sdk/pkg/v1/sql"}
+	return model.Mechanic{Kind: "transaction", Label: "one transaction · effects at the commit", Package: "github.com/kitsunium/sdk/pkg/v1/data/sql"}
 }
 
 // keyMechanic is the key's step: the SDK's lock, in the process.

@@ -9,8 +9,8 @@ import (
 	"unicode/utf8"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // The sets of migrations, and their version tables.

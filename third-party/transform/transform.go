@@ -1,6 +1,6 @@
 // Package transform wraps the vendor compressors zstd and s2 (both from
-// github.com/klauspost/compress) as core/transform.Compressor implementations,
-// beside the stdlib gzip/flate/zlib schemes in internal/service/transform.
+// github.com/klauspost/compress) as core/data/transform.Compressor implementations,
+// beside the stdlib gzip/flate/zlib schemes in internal/service/data/transform.
 //
 // # Why it lives under third-party/
 //
@@ -21,7 +21,7 @@
 //
 // # Opt-in
 //
-// Importing this package registers "zstd" and "s2" with the core/transform
+// Importing this package registers "zstd" and "s2" with the core/data/transform
 // registry. Nothing in internal/* or pkg/v1/* imports it, so a consumer who
 // does not name it never compiles it. That is the same contract
 // third-party/codec/hcl has for the "hcl" Format.
@@ -41,7 +41,7 @@ import "github.com/kitsunium/sdk/internal/kernel/errs"
 // built with: 64 MiB.
 //
 // It is deliberately TIGHTER than the 256 MiB backstop the stdlib schemes use
-// in internal/service/transform, and the reason is arithmetic rather than
+// in internal/service/data/transform, and the reason is arithmetic rather than
 // taste. DEFLATE's maximum expansion is roughly 1032:1, so reaching 256 MiB
 // through gzip costs an attacker ~254 KiB of upload. Both schemes here expand
 // far harder — measured in this package's own tests, 13 KiB of zstd and 28

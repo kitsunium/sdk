@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // migrator returns the SDK's runner over e with its own version table.

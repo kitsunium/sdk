@@ -22,7 +22,7 @@ them is in `concur/`.
 
 | Package | What it is | In `pkg/v1` |
 |---|---|---|
-| `cache/` | `Cache[K, V]` — LRU and TTL on the kernel clock, `Fetch` because a hit mutates (ADR 0025) | `pkg/v1/cache`, beside the cache domain it underlies (ADR 0049) |
+| `cache/` | `Cache[K, V]` — LRU and TTL on the kernel clock, `Fetch` because a hit mutates (ADR 0025) | `pkg/v1/data/cache`, beside the cache domain it underlies (ADR 0049) |
 | `heap/` | `Heap[T]` — a binary heap ordered by the caller's comparison, no `container/heap` interface | `pkg/v1/collections/heap`, an alias, once ADR 0159 §4 lands |
 | `ring/` | a single-producer single-consumer lock-free bounded queue (ADR 0006); the only member with codes, `0.1.3.*` | `pkg/v1/collections/ring`, once ADR 0159 §4 lands |
 

@@ -34,7 +34,7 @@ export default [
     title: "Universal Marshal / Unmarshal",
     blurb:
       "One Marshal/Unmarshal pair reaches all 18 wire formats (JSON, CBOR, MsgPack, TLV, XML, YAML, …) via a single Format string — swap formats with a one-word change.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -43,7 +43,7 @@ export default [
     title: "Streaming encode / decode",
     blurb:
       "NewEncoder / NewDecoder give incremental, bounded-memory I/O for every codec that supports streaming.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -52,7 +52,7 @@ export default [
     title: "Base-N byte encodings",
     blurb:
       "Base16 / Base32 / Base64 (std + URL) / Hex / ASCII85 are first-class Format constants behind the same dispatch.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -61,7 +61,7 @@ export default [
     title: "Self-describing compression frame",
     blurb:
       "MarshalCompressed / UnmarshalCompressed wrap any format in a Gzip/Flate frame that decodes without the caller knowing the algorithm up front.",
-    anchor: "pkg/v1/codec/compressed.go",
+    anchor: "pkg/v1/data/codec/compressed.go",
     links: { adr: "0014" },
   },
 

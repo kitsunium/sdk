@@ -10,8 +10,8 @@ import (
 	"strconv"
 	"sync"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // kit's own migrations on a database (ADR 0004): its tables — a store's, its

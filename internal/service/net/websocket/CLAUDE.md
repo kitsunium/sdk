@@ -187,7 +187,7 @@ Two consequences are deliberate and documented:
 
 ## permessage-deflate is NOT negotiated, and the refusal is enforced twice
 
-The extension is out of scope: it would pull `internal/service/transform` into
+The extension is out of scope: it would pull `internal/service/data/transform` into
 this package and roughly double its surface — a compression context per
 connection, a sliding-window parameter negotiation, `client_no_context_takeover`
 and its three siblings, and a whole second class of decompression-bomb bound to

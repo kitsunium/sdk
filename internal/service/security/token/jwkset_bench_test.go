@@ -317,7 +317,7 @@ func BenchmarkSetVerifierConstruction(b *testing.B) {
 // makeConstructionBench returns the timed body for one set size.
 //
 // The set is a PARAMETER rather than a closed-over loop-body local — the shape
-// pkg/v1/codec's makeMarshalBench uses — so the harness's own value does not
+// pkg/v1/data/codec's makeMarshalBench uses — so the harness's own value does not
 // escape to the heap for the duration of a window that is measuring
 // allocations.
 func makeConstructionBench(set jwk.Set) func(b *testing.B) {

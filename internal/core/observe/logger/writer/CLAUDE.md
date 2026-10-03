@@ -6,7 +6,7 @@
 Declares the **transport-factory port** of the logger: a named, config-driven
 constructor (`Factory`) that yields a `core/observe/logger.Sink`, plus the process-wide
 registry mapping a writer `Name` to its `Factory`. Peer of
-`internal/core/codec` — the registry resolves a `Name` to a `Factory` exactly
+`internal/core/data/codec` — the registry resolves a `Name` to a `Factory` exactly
 as codec resolves a `Format` to a `Codec` (ADR 0012). It also holds each SDK
 writer's plain-data configuration value and the credential port the network
 writers share, so `pkg/v1/observe/logger` can alias them without importing a vendor SDK.
@@ -29,7 +29,7 @@ Code range: `0.2.3.*` (ADR 0012).
 | `writer.go`   | `Name` (typed key + `String`/`Known`), `Config = any`, `Factory` interface (`Name` / `Open`) |
 | `writer_spec.go` | `Spec` value type (`Name` + `Config`); re-exported as `logger.WriterSpec` |
 | `config_decoder.go` | `Decoder` **optional** Factory extension (`Decode(map[string]any) (Config, error)`) — mirrors codec's `Appender`; detected by type assertion (ADR 0014 §D5) |
-| `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/codec/registry.go`) |
+| `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/data/codec/registry.go`) |
 | `config_console.go` | `ConsoleConfig` (`Stream` / `MinLevel`) + `ConsoleStream`: `ConsoleStderr` is the zero value, because stdout may be the process's protocol channel (ADR 0030); `ConsoleStdout` is reached only by naming it |
 | `config_file.go` | `FileConfig` (`Path` / `MinLevel`) for `"file"` |
 | `config_rotfile.go` | `RotFileConfig` for `"rotfile"` — `Path`, size cap, backups, compression, age, time-based rotation, injectable clock, `OnError`, `MinLevel` |

@@ -1,0 +1,81 @@
+//go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/jsonpatch .
+
+// Package jsonpatch computes the structural difference between two JSON
+// documents as RFC 6902 operations — add, remove and replace, each at an
+// RFC 6901 JSON Pointer — with the value each operation writes and the value
+// it replaces or removes (ADR 0143).
+//
+//	edits, err := jsonpatch.Diff(before, after)
+//	for _, e := range edits {
+//		fmt.Println(e.Op, e.Path, string(e.Old), "->", string(e.Value))
+//	}
+//
+// It is what a record's history needs to say what changed between two of its
+// versions — a document store's versions are JSON for that reason — and the
+// operations, applied in order to the first document, give the second.
+// json.Marshal of the result is a JSON Patch document: RFC 6902's op, path and
+// value, with the value replaced or removed under "old", a member RFC 6902
+// does not define for these operations and which a patch applier ignores.
+//
+// # How documents are compared
+//
+// Each document must be exactly one JSON value, read strictly — no duplicated
+// member name, valid UTF-8, no trailing data — or Diff returns [NotJSON],
+// naming which document and the offset, never a byte of it. Values are
+// compared as RFC 6902 §4.6 compares them: strings once unescaped, numbers
+// exactly by value (1, 1.0 and 1e0 are one number, and no float is involved),
+// arrays element by element, objects by member name whatever their order.
+//
+// # What the operations are
+//
+// Two objects: a member only the first has is removed, one only the second
+// has is added, and one both have is compared in turn, members in byte order
+// of their names — the same two documents always give the same operations.
+// Two arrays: the elements both keep in order are found, after the equal ones
+// at both ends, and between two kept elements the removed and the added are
+// paired in order and compared, the rest removed or added — so an insertion in
+// the middle is one add. An index is that of the array as the operations
+// before have left it, as RFC 6902 applies them. Past a bound on the elements
+// to align, those in the middle are paired by position: a longer patch, still
+// a correct one. Anything else that differs is replaced whole; two roots of
+// different kinds are one replace at "".
+//
+// It emits no move, copy or test, and applies no patch.
+package jsonpatch
+
+import (
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcjsonpatch "github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch"
+)
+
+// The three operations a diff emits.
+const (
+	// Add adds a member, or inserts an element before the one at the index.
+	Add Op = svcjsonpatch.Add
+	// Remove removes a member, or the element at the index.
+	Remove Op = svcjsonpatch.Remove
+	// Replace replaces the value at the path, the whole document at "".
+	Replace Op = svcjsonpatch.Replace
+)
+
+// CodeNotJSON is the code of [NotJSON] (0.3.90.1), for errs.HasCode.
+const CodeNotJSON errs.Code = svcjsonpatch.CodeNotJSON
+
+// NotJSON refuses a document that is not exactly one JSON value; its fields
+// name the document — "from" or "to" — and the offset, never its content.
+var NotJSON = svcjsonpatch.NotJSON
+
+// Op is what an operation does, as RFC 6902 names it.
+type Op = svcjsonpatch.Op
+
+// Edit is one operation of a diff: its Op, its Path, the Value it writes
+// (add, replace) and the Old value it replaces or removes (replace, remove).
+type Edit = svcjsonpatch.EditValue
+
+// Diff returns the operations that turn the JSON document from into the JSON
+// document to, in the order they apply — an empty slice when the two are the
+// same value — or NotJSON.
+func Diff(from, to []byte) ([]Edit, error) {
+	//: the service layer owns the comparison; this facade only forwards.
+	return svcjsonpatch.Diff(from, to)
+}

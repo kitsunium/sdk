@@ -14,8 +14,8 @@ import (
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	// Registers the json format config.FileSource parses.
-	_ "github.com/kitsunium/sdk/pkg/v1/codec"
 	"github.com/kitsunium/sdk/pkg/v1/config"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/proc"

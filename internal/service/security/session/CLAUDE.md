@@ -90,7 +90,7 @@ store there, because three things are still missing:
 | Missing | Why lock's code does not supply it |
 |---|---|
 | an owner-only DACL, BUILT and then verified | lock's reader (`GrantsAnyone`, ADR 0084/0086/0095) builds nothing, and answers a weaker question: does an identifier meaning ANYBODY — Everyone, Authenticated Users, BUILTIN\Users — hold a right. `0700`/`0600` exclude every other account, a named colleague included; a directory granting read to one named principal passes the reader and fails the Unix rule. Applying a protected owner-only DACL at creation is new ABI (`SetNamedSecurityInfoW`, or a `SECURITY_ATTRIBUTES` on the create) with its own tests |
-| a directory flush | none exists: `FlushFileBuffers` on a directory handle returns `ERROR_ACCESS_DENIED` (ADR 0056 D10) — the reason `internal/service/vfs` refuses Windows too. Without it a power cut can undo a `Destroy` |
+| a directory flush | none exists: `FlushFileBuffers` on a directory handle returns `ERROR_ACCESS_DENIED` (ADR 0056 D10) — the reason `internal/service/data/vfs` refuses Windows too. Without it a power cut can undo a `Destroy` |
 | a lane that runs it | no Windows job runs this package; a green cross-compile is not ADR 0018's runtime bar |
 
 `LockFileEx` (ADR 0081) is the one piece that exists, and it is not enough on
@@ -230,7 +230,7 @@ follows.
 ### Why publication is not `vfs.WriteAtomic`
 
 The audit that found this asked whether the publication copy here could be
-`internal/service/vfs`'s, which `internal/service/security/secret` uses. Not without
+`internal/service/data/vfs`'s, which `internal/service/security/secret` uses. Not without
 dropping what §Do NOT forbids dropping:
 
 | This store needs | `vfs` offers |

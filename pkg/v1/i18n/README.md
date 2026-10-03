@@ -433,7 +433,7 @@ func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback Tag) (store *S
 
 LoadFS reads one catalogue file per language from dir and returns a [Store](<#Store>).
 
-The bytes are decoded by the codec domain, so a catalogue is JSON, YAML, TOML or any other registered format and this package contains no parser — blank\-import pkg/v1/codec to register one. fsys is io/fs.FS, so an embed.FS, an os.DirFS and a pkg/v1/vfs filesystem all work here unchanged.
+The bytes are decoded by the codec domain, so a catalogue is JSON, YAML, TOML or any other registered format and this package contains no parser — blank\-import pkg/v1/data/codec to register one. fsys is io/fs.FS, so an embed.FS, an os.DirFS and a pkg/v1/data/vfs filesystem all work here unchanged.
 
 The language comes from the file NAME: "en.json", "pt\-PT.yaml". Subdirectories are ignored rather than walked, and two files that canonicalise to one tag are [CatalogInvalid](<#InvalidTag>).
 

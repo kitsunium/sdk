@@ -87,7 +87,7 @@ choosing stderr, but by having no destination in the port at all.
 - **A context cancellation returns `ctx.Err()`**, not an SDK sentinel — the
   caller supplied the deadline. Follows `resilience` and `lock`.
 - **Registration goes through a package-level `var` initialiser, not `init()`**
-  — mirrors `core/codec` and `core/observe/logger/writer`.
+  — mirrors `core/data/codec` and `core/observe/logger/writer`.
 
 ## Do NOT
 

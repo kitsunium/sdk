@@ -16,6 +16,6 @@ r.Put(b)
 `Pool[T]` recycles any pointer-sized typed object through a `sync.Pool`
 without boxing on the call path. `CappedPool[T]` (see CLAUDE.md) layers a
 reset-on-Put + capacity-discard policy on top, used by `internal/kernel/concur/buffer`
-(64 KiB) and `internal/core/codec/scratch` (256 KiB).
+(64 KiB) and `internal/core/data/codec/scratch` (256 KiB).
 
 See ADR 0010 for the design rationale and the layering contract.

@@ -16,8 +16,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	jsoncodec "github.com/kitsunium/sdk/pkg/v1/codec/json"
 	sdkconfig "github.com/kitsunium/sdk/pkg/v1/config"
+	jsoncodec "github.com/kitsunium/sdk/pkg/v1/data/codec/json"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/security/redact"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"

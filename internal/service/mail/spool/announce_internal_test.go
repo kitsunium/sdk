@@ -8,8 +8,8 @@ import (
 	"testing"
 	"time"
 
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
-	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 )
 
 // handedOver is a transport that reports the subject of each mail it accepts.

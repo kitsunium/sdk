@@ -7,7 +7,7 @@ The SDK's generic object-recycling primitive. Stdlib-only, domain-neutral.
 `Pool[T]` wraps a `sync.Pool` to recycle ANY pointer-sized typed object
 (event records, attr slices, scratch structs) without the boxing cost on
 Get/Put. The byte-slice pool (`internal/kernel/concur/buffer`) and the codec scratch
-buffer pool (`internal/core/codec/scratch`) are built ON this primitive — the
+buffer pool (`internal/core/data/codec/scratch`) are built ON this primitive — the
 mechanism lives here, the capacity thresholds stay with the consumers
 (ADR 0010).
 

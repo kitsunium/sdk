@@ -92,7 +92,7 @@ exactly as trustworthy as the key itself.
   happens here.
 - **Replay.** `jti` is decoded and returned; nothing here remembers it. A
   replay cache is state with a lifetime and an eviction policy, which belongs
-  to whoever owns the store — `pkg/v1/cache` is one answer.
+  to whoever owns the store — `pkg/v1/data/cache` is one answer.
 - **Revocation.** Same: this package answers "is this token authentic and
   in-window", never "is it still wanted". `MaxLifetime` is the mitigation it
   CAN offer — a short window is what a recipient has instead of revocation.

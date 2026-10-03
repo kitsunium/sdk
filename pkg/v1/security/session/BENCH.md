@@ -21,9 +21,9 @@ requests per second no matter how fast the handler is.
 That is not a defect and not a surprise once measured: `Load` **slides the idle
 window**, which is a WRITE — an idle timeout that is not refreshed on use is not
 an idle timeout — and the file store seals, publishes by `rename(2)` and flushes
-for every one. The same figure appears in `internal/service/vfs/BENCH.md` (a
+for every one. The same figure appears in `internal/service/data/vfs/BENCH.md` (a
 publication is two device round trips, ~3 ms) and in
-`internal/service/queue/BENCH.md` (durability costs 1 865× on a round trip).
+`internal/service/data/queue/BENCH.md` (durability costs 1 865× on a round trip).
 Three domains, one device, one answer.
 
 **The rule that follows**: the file store is for a single-process deployment

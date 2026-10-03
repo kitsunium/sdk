@@ -32,11 +32,11 @@ cite `bench.txt` excerpts in commit bodies.
 
 ## Bench harness opt-ins
 
-`pkg/v1/codec/main_test.go` only enables the block + mutex profiles when
+`pkg/v1/data/codec/main_test.go` only enables the block + mutex profiles when
 the corresponding `-blockprofile` / `-mutexprofile` flag is set. Normal
 `go test` invocations therefore stay at zero pprof overhead.
 
-`pkg/v1/codec/codec_bench_test.go` calls `b.SetBytes(int64(...))` in
+`pkg/v1/data/codec/codec_bench_test.go` calls `b.SetBytes(int64(...))` in
 every throughput closure (Marshal, Append, Unmarshal, StreamEncode,
 StreamDecode, plus parallel variants). Without `SetBytes`, benchstat
 prints `ns/op` only; with it, you also get `MB/s` columns — the

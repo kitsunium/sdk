@@ -6,8 +6,8 @@ import (
 	"path/filepath"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/config"
 )

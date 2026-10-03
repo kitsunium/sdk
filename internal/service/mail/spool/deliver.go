@@ -9,7 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
-	corequeue "github.com/kitsunium/sdk/internal/core/queue"
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

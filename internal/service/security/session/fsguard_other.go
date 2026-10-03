@@ -37,7 +37,7 @@
 //     of the directory, which is what makes Destroy a revocation a power cut
 //     cannot undo. Windows has no equivalent — FlushFileBuffers on a directory
 //     handle returns ERROR_ACCESS_DENIED (ADR 0056 D10) — which is why
-//     internal/service/vfs refuses Windows as well.
+//     internal/service/data/vfs refuses Windows as well.
 //   - A lane that runs it. No Windows job runs this package, and ADR 0018's
 //     runtime bar is not cleared by a green cross-compile.
 //

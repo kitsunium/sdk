@@ -95,7 +95,7 @@ process pass the gate and then block on a `flock` its own process holds.
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
 | `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
 | `dacl_tokens_windows.go` | `tokenSet`: the three nested accounts a DACL is evaluated for — a deny reaches every account holding the SID it names, which a map keyed by the ACE's SID gets wrong (ADR 0084 §D3b; the third account, ADR 0086) |
-| `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
+| `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/data/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 | `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner` |
 | `codes.go` / `errors.go` | the `0.3.51.*` codes and their five sentinels — see §Sentinels |
@@ -435,7 +435,7 @@ Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, a
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
 - **Fork the DACL reader for another package.** `GrantsAnyone` exists so
-  there is one: `internal/service/queue` calls it with masks of its own. A new
+  there is one: `internal/service/data/queue` calls it with masks of its own. A new
   question is a new pair of masks, not a new walk.
 - **Make the DACL check refuse on an API failure.** It fails OPEN on purpose:
   this code cannot be iterated locally, a wrong refusal costs a locker that

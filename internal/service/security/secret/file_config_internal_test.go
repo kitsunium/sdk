@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svcvfs "github.com/kitsunium/sdk/internal/service/vfs"
+	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
 // Test_checkHeldRoot pins the re-check NewFile makes after opening its root:

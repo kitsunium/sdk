@@ -10,7 +10,7 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/codec/strictjson"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson"
 )
 
 // DefaultMaxBody is the largest request body an endpoint reads, unless the

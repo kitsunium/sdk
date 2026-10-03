@@ -38,7 +38,7 @@ maintainer's half.
 Error CODE constants are deliberately not re-exported. `errors.Is(err,
 mail.HeaderInjection)` is the consumer-facing way to match one refusal —
 the SDK error's `Is` method compares `(Code, Reason)` rather than pointers —
-and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/vfs`.
+and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/data/vfs`.
 
 ## Why this shape
 

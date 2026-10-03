@@ -17,9 +17,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // queueEpoch anchors the brokers' ManualClocks: every instant the SQL broker

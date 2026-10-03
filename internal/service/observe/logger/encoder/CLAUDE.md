@@ -89,7 +89,7 @@ exports it as a type alias for legacy call sites). This package ships two:
 ## Error catalogue
 
 This package owns no code range — `0.3.2.*` belongs to
-`internal/service/codec/json` in `codeRangeOwners`
+`internal/service/data/codec/json` in `codeRangeOwners`
 (`internal/kernel/errs/registry_ownership_external_test.go`) — and ships no
 sentinels: encoding never fails (an unhandled `Kind` degrades to `?`, a quoted
 `"?"` in JSON).

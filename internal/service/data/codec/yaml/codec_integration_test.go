@@ -1,0 +1,73 @@
+//go:build !race
+
+package yaml_test
+
+import (
+	"testing"
+
+	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
+	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
+)
+
+// allocSink defeats dead-code elimination in the AllocsPerRun probes.
+var allocSink any
+
+// TestAllocBudget pins YAML's per-call allocation ceilings for Marshal,
+// Unmarshal, and (when implemented) Append over a small fixed map. Carries
+// //go:build !race (testing.AllocsPerRun is +1 under -race) and no
+// t.Parallel (AllocsPerRun reads a process-global counter). Budgets are
+// ceilings — re-pin with intent on a Go toolchain bump.
+func TestAllocBudget(t *testing.T) {
+	payload := map[string]int{"a": 1, "b": 2, "c": 3}
+	c := yaml.New()
+	seed, err := c.Marshal(payload)
+	if err != nil {
+		t.Fatalf("seed Marshal: %v", err)
+	}
+	type tc struct {
+		name string
+		ceil float64
+		fn   func()
+	}
+	//: ceilings re-pinned for the native codec at measured + 2: marshal 6,
+	//: unmarshal 7, append 5 on go1.27.1 (gopkg.in/yaml.v3 needed 32, 60 and
+	//: 31 for the same map — see BENCH.md).
+	tests := []tc{
+		{"marshal", 8, func() {
+			out, merr := c.Marshal(payload)
+			if merr != nil {
+				t.Fatalf("Marshal: %v", merr)
+			}
+			allocSink = out
+		}},
+		{"unmarshal", 9, func() {
+			var dst map[string]int
+			if uerr := c.Unmarshal(seed, &dst); uerr != nil {
+				t.Fatalf("Unmarshal: %v", uerr)
+			}
+			allocSink = dst
+		}},
+	}
+	//: Append is optional — measure it only when the codec implements it.
+	if appender, ok := c.(corecodec.Appender); ok {
+		dst := make([]byte, 0, 256)
+		tests = append(tests, tc{"append", 7, func() {
+			out, aerr := appender.Append(dst[:0], payload)
+			if aerr != nil {
+				t.Fatalf("Append: %v", aerr)
+			}
+			allocSink = out
+		}})
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		got := testing.AllocsPerRun(100, tc.fn)
+		t.Logf("%s: allocs/op=%.0f (ceil %.0f)", tc.name, got, tc.ceil)
+		if got > tc.ceil {
+			t.Errorf("%s: allocs/op=%.0f > ceil %.0f", tc.name, got, tc.ceil)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) { runCase(t, tc) })
+	}
+}

@@ -23,6 +23,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/health"
 	"github.com/kitsunium/sdk/pkg/v1/lifecycle"
@@ -31,7 +32,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 	"github.com/kitsunium/sdk/pkg/v1/proc/signal"
 	"github.com/kitsunium/sdk/pkg/v1/scheduler"
-	"github.com/kitsunium/sdk/pkg/v1/vfs"
 )
 
 // kit's listener, on the SDK's server engine: its bounds on every phase of a

@@ -7,7 +7,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/e2e/harness"
-	"github.com/kitsunium/sdk/pkg/v1/codec"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec"
 )
 
 // wellFormedRow reports what is wrong with a Result, or "" when it is a row the

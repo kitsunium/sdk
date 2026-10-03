@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-10-03T06:00:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -60,15 +60,15 @@ internal/
 │                          snapshot, worker},
 │                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
-│                  cache, cli, codec, codec/scratch, config, crypto,
-│                  events, health, i18n, id, lifecycle, lock, mail, net,
-│                  proc, queue, resilience, scheduler, sql, statemachine,
-│                  transform, validation, vfs, view,
+│                  cli, config, crypto, events, health, i18n, id, lifecycle,
+│                  lock, mail, net, proc, resilience, scheduler,
+│                  statemachine, validation, view,
+│                  data/{cache, codec, codec/scratch, queue, sql, transform,
+│                        vfs},
 │                  observe/{logger, logger/{level, writer}, metrics, otel,
 │                           trace},
 │                  security/{authz, secret, session, token}
 └── service/       concrete implementations
-                   cache   (tagged memory store + L1/L2 chain)
                    cli    (resolution loop + generated help + config seam)
                    config (env, file and fs.FS sources + layered decode +
                            schema + origins + poll watcher)
@@ -77,11 +77,6 @@ internal/
                            + HTTP handler + the loopback Ask)
                    lifecycle (ordered engine + per-component stop budget
                               + opt-in signal/sd_notify Run + the supervisor)
-                   docstore (typed JSON documents + unique/multi indexes;
-                             one overlay entry per write, one snapshot at rest;
-                             + the same store over SQL, joined to the
-                             context's transaction — ADR 0139; + a document's
-                             versions, in its own write — ADR 0143)
                    lock    (in-process leases + file locker over flock(2)
                             or LockFileEx + keepalive)
                    observe (the family — ADR 0155; a directory, no Go code:
@@ -120,14 +115,32 @@ internal/
                              audited with pathchain, then held as an
                              os.Root), AEAD cookie sealer;
                            token  — JWS compact + PASETO v4.public)
-                   codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
-                           form, json, msgpack, multipart, ndjson, pem, tlv, toml,
-                           xml, yaml; + strictjson, a decoder and not a Format;
-                           + jsonshape, a type's wire shape, not a Format;
-                           + jsonpatch, two documents' difference, not a Format)
-                   queue  (file, SQL and memory brokers + Consume loop
-                           waiting on the Waker sibling; the SQL broker
-                           joins the context's transaction — ADR 0151)
+                   data   (the family — ADR 0155; a directory, no Go code:
+                           cache — tagged memory store + L1/L2 chain;
+                           codec — asn1, baseenc, bson, cbor, csv,
+                             flatbuffers, form, json, msgpack, multipart,
+                             ndjson, pem, tlv, toml, xml, yaml; + strictjson,
+                             a decoder and not a Format; + jsonshape, a
+                             type's wire shape, not a Format; + jsonpatch,
+                             two documents' difference, not a Format;
+                           docstore — typed JSON documents + unique/multi
+                             indexes; one overlay entry per write, one
+                             snapshot at rest; + the same store over SQL,
+                             joined to the context's transaction — ADR 0139;
+                             + a document's versions, in its own write —
+                             ADR 0143;
+                           queue — file, SQL and memory brokers + Consume
+                             loop waiting on the Waker sibling; the SQL
+                             broker joins the context's transaction —
+                             ADR 0151;
+                           sql — transaction manager + savepoints + pool
+                             policy + Join/Defer siblings + migration
+                             runner, SQLite's on the database file's write
+                             lock — ADR 0140;
+                           transform — the stdlib gzip, raw DEFLATE and
+                             zlib compressors;
+                           vfs — os.Root-confined FS + memory FS + atomic
+                             publish)
                    proc   (the family — ADR 0155; a directory, no Go code:
                            cgroup, childwait, exec, memlimit, reaper,
                            rlimit, self, signal — process supervision,
@@ -151,18 +164,11 @@ internal/
                    scheduler (cron parser + fixed interval + engine)
                    statemachine (declarations + per-entity transitions +
                            an agenda heap the loop sleeps on)
-                   sql    (transaction manager + savepoints + pool policy
-                           + Join/Defer siblings + migration runner, SQLite's
-                           on the database file's write lock — ADR 0140)
-                   transform
                    validation (constraints + combinators + struct-tag plan)
                    view   (html/template engine + trust scan + parse-once)
-                   vfs    (os.Root-confined FS + memory FS + atomic publish)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
-    ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
-    ├── semver/    (SemVer precedence + Go pseudo-versions on the standard library — ADR 0156 §4, ADR 0159 §4)
     ├── observe/   (a family directory, no Go code — ADR 0155:
     │                 logger/ — + ldflags-injected Version, + writer/, + slogbridge/;
     │                 metrics/ — the OTel data model, zero OTel imports — ADR 0044;
@@ -171,12 +177,24 @@ pkg/
     │                   onto your owners — ADR 0121)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── events/    (in-process synchronous bus — ADR 0053; NOT a queue)
-    ├── codec/     (blank-imports all 16 service codecs + transform;
-    │                 + strictjson/ — one document read one way — ADR 0102;
-    │                 + jsonshape/ — a type's wire shape — ADR 0133;
-    │                 + jsonpatch/ — two documents' difference — ADR 0143;
-    │                 + json/, yaml/, toml/, bson/ — one format each — ADR 0134;
-    │                 bson/ also names BSON's value types)
+    ├── data/      (a family directory, no Go code — ADR 0155:
+    │                 codec/ — blank-imports all 16 service codecs + transform;
+    │                   + strictjson/ — one document read one way — ADR 0102;
+    │                   + jsonshape/ — a type's wire shape — ADR 0133;
+    │                   + jsonpatch/ — two documents' difference — ADR 0143;
+    │                   + json/, yaml/, toml/, bson/ — one format each — ADR 0134;
+    │                   bson/ also names BSON's value types;
+    │                 sql/ — ports over database/sql, no driver, no ORM — ADR 0055;
+    │                   Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140;
+    │                 docstore/ — typed JSON documents, indexes, one entry per write —
+    │                   ADR 0110; the same store over SQL, OpenSQL — ADR 0139;
+    │                   a document's versions, in its own write — ADR 0143;
+    │                 queue/ — durable at-least-once broker, no lock — ADR 0054;
+    │                 cache/ — the ADR 0025 primitive AND the ADR 0049 domain,
+    │                   side by side;
+    │                 vfs/ — io/fs reading unchanged + atomic publication — ADR 0056;
+    │                 semver/ — SemVer precedence + Go pseudo-versions on the
+    │                   standard library — ADR 0156 §4, ADR 0159 §4)
     ├── crypto/    (AEAD and keys at the family's root; its scheme facades are
     │                 its children — a child never links its parent, ADR 0155:
     │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
@@ -204,9 +222,6 @@ pkg/
     ├── health/    (startup, readiness and liveness — three questions, three types — ADR 0060;
     │                 Ask, the loopback readiness probe — ADR 0131)
     ├── resilience/ (retry, breaker, rate limit + keyed, bulkhead, timeout, fallback, hedging — ADR 0026, ADR 0103)
-    ├── docstore/  (typed JSON documents, indexes, one entry per write — ADR 0110;
-    │                 the same store over SQL, OpenSQL — ADR 0139;
-    │                 a document's versions, in its own write — ADR 0143)
     ├── lock/      (Locker/Lease/Deadliner + memory & file lockers — ADR 0052, ADR 0081, ADR 0082, ADR 0083)
     ├── proc/      (the capability preflight at the family's root — ADR 0016, ADR 0144;
     │                 its facades are its children — a child never links its parent,
@@ -222,10 +237,6 @@ pkg/
     └── cli/        (flag + sub-commands + generated help + typed exit — ADR 0065)
     └── mail/       (compose + Transport, injection refused — ADR 0064;
                      the spool, the durable outbox — ADR 0111)
-    └── queue/      (durable at-least-once broker, no lock — ADR 0054)
-    └── sql/        (ports over database/sql, no driver, no ORM — ADR 0055;
-                     Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140)
-    └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:
@@ -252,8 +263,8 @@ framework/         the layer above pkg/v1, its own module — ADR 0147
                      a module of its own — ADR 0079, ADR 0158)
 ```
 
-`baseenc` is NOT a `pkg/v1/codec` subpackage — it is a service codec
-(`internal/service/codec/baseenc`) registering nine base-N Formats
+`baseenc` is NOT a `pkg/v1/data/codec` subpackage — it is a service codec
+(`internal/service/data/codec/baseenc`) registering nine base-N Formats
 (base16/32/45/58/62/64/64url, hex, ascii85) through the same registry as
 every other codec.
 
@@ -292,7 +303,7 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 8. **Every package is documented.** The guard `scripts/pre-commit/check-pkg-docs.sh` — run by `make lint` and CI — fails when any `internal/*` or `pkg/v*/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) require BOTH: `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`) and `CLAUDE.md` (agent-facing), because the two roles do not collapse. The `scripts/release/*.{sh,mjs}` and `docs/site/scripts/*.mjs` trees are tooling, not library code, and are exempt from this gate.
 9. **Every benchmark package ships its numbers.** The guard `scripts/pre-commit/check-bench-md.sh` — run by `make lint` and CI — fails when a directory contains `*_bench_test.go` but no sibling `BENCH.md`. The report is regenerated with `make bench`; it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so cross-machine deltas can be evaluated honestly.
 10. **`pkg/v*/**/README.md` are generated, not hand-authored.** The `gomarkdoc` binary (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`) reads each package's Go doc comments and emits `README.md` per package (ADR 0008). Edit the package comment in the existing `.go` file (`codec.go` / `accessors.go` / `logger.go`); run `make docs-readme` to regenerate; `scripts/pre-commit/check-readme-drift.sh` — run by CI's `bazel` job — blocks any change where the file on disk doesn't match what gomarkdoc would produce now. Maintainer rationale (Why-this-shape, layering, do-not lists) stays in `CLAUDE.md` — consumer-facing prose belongs in the package doc comment.
-11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the Go packages under `internal/core`, at any depth (a family's packages may be written `family/{a, b}`), when a domain is described twice in the Purpose paragraph, or when one of the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, this file's Reference list) drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
+11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/data/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the Go packages under `internal/core`, at any depth (a family's packages may be written `family/{a, b}`), when a domain is described twice in the Purpose paragraph, or when one of the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, this file's Reference list) drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
 12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/observe/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` tagged suites declare their run procedure in `e2e/integration/CLAUDE.md` (they live in the auxiliary `e2e` module — ADR 0157) and `localstack` ones in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module of the census — the framework and its four connectors, `connectors/ssh` included — a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
 
 ## Layout
@@ -343,7 +354,7 @@ sdk/
 | `bash scripts/pre-commit/check-audit-coverage.sh` | exit 0 — no package declaring an `errs.Define`/`errs.Code` sits outside `//:audit_sources` (rule 3) |
 | `GOWORK=off GOARCH=386 CGO_ENABLED=0 go test ./...` (in every module `bash scripts/ci/go-modules.sh` prints) | green — the 32-bit RUNTIME bar, run by CI's `test-386` job over the whole census, `tools/` included and the root module skipped while it holds no package (ADR 0137, ADR 0157). `cross-build` proves the SDK compiles on 386; this proves it behaves, which is where a `int(0xffffffff)` read as `-1` shows up |
 | `make vuln-install && make vuln-check` | every module: no REACHABLE known vulnerability (`govulncheck` source mode, pinned in the `Makefile`; needs `vuln.go.dev`). Blocking in CI's `bazel` job and run daily by `vuln-scan.yml` (ADR 0136) |
-| `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
+| `cd pkg && go test ./...` | green; `pkg/v1/data/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
 | `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
 | `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161); no network — `-version-check=off` |
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |

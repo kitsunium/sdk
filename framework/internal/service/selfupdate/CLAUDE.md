@@ -12,7 +12,7 @@ through `pkg/v1/*` and `internal/kernel/errs` alone (framework/CLAUDE.md rule
 1): the Windows refusal is `pkg/v1/proc`'s `UnsupportedPlatform`.
 
 It depends on no module outside the SDK. Versions are compared through
-`pkg/v1/semver` — `Compare`, `IsValid`, `Prerelease`, with the names and answers
+`pkg/v1/data/semver` — `Compare`, `IsValid`, `Prerelease`, with the names and answers
 of `golang.org/x/mod/semver`, which it replaced (ADR 0156 §4) — the SDK's own
 semver that ADR 0158 §2 routes every version through.
 

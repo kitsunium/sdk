@@ -18,7 +18,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/codec/protobuf",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
         "@org_golang_google_protobuf//proto",
     ],
@@ -39,10 +39,10 @@ go_test(
     ],
     embed = [":protobuf"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
-        "//internal/service/codec/cbor",
-        "//internal/service/codec/json",
+        "//internal/service/data/codec/cbor",
+        "//internal/service/data/codec/json",
         "@org_golang_google_protobuf//proto",
         "@org_golang_google_protobuf//types/descriptorpb",
         "@org_golang_google_protobuf//types/known/structpb",

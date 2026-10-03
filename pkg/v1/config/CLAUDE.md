@@ -31,7 +31,7 @@ sentinels. Stdlib-only → dep-light; cross-OS (poll watcher).
 ## Conventions
 
 - **Type aliases, not new types**; `Load` is generic + delegates.
-- **`FileSource` and `FSSource` need the codec registered** — blank-import `pkg/v1/codec` (or the format's package).
+- **`FileSource` and `FSSource` need the codec registered** — blank-import `pkg/v1/data/codec` (or the format's package).
 - **A missing file is `SourceFailed`, never an empty layer**, on disk and in an
   `fs.FS` alike; an optional layer is the caller's `fs.Stat`.
 - Env values are JSON-coerced **only when the whole value is one complete JSON

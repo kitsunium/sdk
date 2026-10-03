@@ -14,7 +14,7 @@ import (
 	cfg "github.com/kitsunium/sdk/internal/service/config"
 	svcvalidation "github.com/kitsunium/sdk/internal/service/validation"
 
-	_ "github.com/kitsunium/sdk/internal/service/codec/json" // register "json"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register "json"
 )
 
 // secretProbe is the value every leak assertion looks for. It is deliberately

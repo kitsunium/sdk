@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/health"
-	"github.com/kitsunium/sdk/pkg/v1/vfs"
 )
 
 // liveProbeTimeout bounds the question to a running product.

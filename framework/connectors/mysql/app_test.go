@@ -15,7 +15,7 @@ import (
 	"github.com/kitsunium/sdk/framework/connectors/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // The product the end-to-end tests run: one service, whose store the

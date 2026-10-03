@@ -10,7 +10,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/config"
 
-	_ "github.com/kitsunium/sdk/internal/service/codec/json" // register "json"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register "json"
 )
 
 // appConf is the target every loader case decodes into.

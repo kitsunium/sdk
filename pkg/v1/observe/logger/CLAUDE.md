@@ -63,17 +63,17 @@ Writers}` where each `WriterEntryConfig{Name, Options map[string]any}` names a
 registered writer and carries its raw option map (decoded from the blob's
 `config` key), resolves each entry against the writer registry, composes the
 sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
-(`Format` is a `= internal/core/codec.Format` alias; the structs carry the
+(`Format` is a `= internal/core/data/codec.Format` alias; the structs carry the
 `Config` role suffix per `KTN-STRUCT-ROLE`.)
 
 - **Per-writer config translation.** Each resolved Factory is type-asserted to
   `core/observe/logger/writer.Decoder`. When it implements one, `Decode(entry.Options)` owns the
   translation; otherwise the raw `map[string]any` is handed straight to
   `Factory.Open` (the default mapping).
-- **Dep-light invariant (LOCKED).** `FromConfig` imports ONLY the **core/codec
+- **Dep-light invariant (LOCKED).** `FromConfig` imports ONLY the **core/data/codec
   dispatch surface** (`corecodec.Lookup` + `Codec.Unmarshal`) and decodes with a
-  codec the **consumer already registered** (blank-import `pkg/v1/codec` or a
-  single service codec). It MUST NOT blank-import `pkg/v1/codec` or any service
+  codec the **consumer already registered** (blank-import `pkg/v1/data/codec` or a
+  single service codec). It MUST NOT blank-import `pkg/v1/data/codec` or any service
   codec from this package — otherwise every `pkg/v1/observe/logger` consumer inherits the
   whole codec tree — no vendor module any more, since every codec is native
   and the yaml.v3 reader is the opt-in `third-party/codec/yaml`, but every

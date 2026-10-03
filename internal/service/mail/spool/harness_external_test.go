@@ -158,7 +158,7 @@ func requireDiskSpool(t *testing.T, cfg spool.Config) *spool.Spool {
 		if !errs.HasCode(err, coreproc.CodeUnsupportedPlatform) || s != nil {
 			t.Fatalf("New over a directory on windows = (%v, %v), want (nil, UNSUPPORTED_PLATFORM)", s, err)
 		}
-		t.Skip("the durable spool publishes through internal/service/vfs, which refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above")
+		t.Skip("the durable spool publishes through internal/service/data/vfs, which refuses windows by design (ADR 0018, ADR 0056); that refusal is asserted above")
 	}
 	if err != nil {
 		t.Fatalf("New() = %v", err)

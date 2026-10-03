@@ -25,7 +25,7 @@ Code range: `0.2.32.*` (ADR 0065).
 
 - **`flag` is the substrate, not a detail to hide.** A `Binder` receives the
   stdlib's `*flag.FlagSet`, unchanged and unwrapped — the shape
-  `internal/core/vfs` takes for `io/fs` (ADR 0056) and for the same reason. The
+  `internal/core/data/vfs` takes for `io/fs` (ADR 0056) and for the same reason. The
   flag syntax, `flag.Value`, every `FooVar` helper and `PrintDefaults` stay
   the stdlib's. This domain adds sub-commands, composed help, a typed exit
   status and the `config` seam, and nothing else.

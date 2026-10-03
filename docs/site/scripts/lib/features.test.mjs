@@ -157,7 +157,7 @@ test("uniqueAnchors dedupes", () => {
 test("deriveProvenance resolves a real anchor", async () => {
   const prov = await deriveProvenance(
     REPO_ROOT,
-    "pkg/v1/codec/codec.go",
+    "pkg/v1/data/codec/codec.go",
     "HEAD",
   );
   assert.match(prov.sha, /^[0-9a-f]{40}$/);
@@ -167,7 +167,7 @@ test("deriveProvenance resolves a real anchor", async () => {
 test("deriveProvenance throws on a non-existent anchor", async () => {
   await assert.rejects(
     () =>
-      deriveProvenance(REPO_ROOT, "pkg/v1/codec/__does_not_exist__.go", "HEAD"),
+      deriveProvenance(REPO_ROOT, "pkg/v1/data/codec/__does_not_exist__.go", "HEAD"),
     /no creation commit/,
   );
 });

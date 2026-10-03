@@ -71,7 +71,7 @@ type FileConfig struct {
 // waiter resolves the WAITING half of the injected clock.
 //
 // Clock is [clock.Timed] because this store both stamps and waits, which is the
-// same call internal/service/sql made and for the same reason. A nil Clock
+// same call internal/service/data/sql made and for the same reason. A nil Clock
 // falls back to the system clock, so the field stays optional.
 func (c FileConfig) waiter() clock.Waiter {
 	//: a nil clock is a working configuration, so it is filled, not refused.

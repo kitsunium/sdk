@@ -13,7 +13,7 @@ package toml
 
 import (
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
-	tomlcodec "github.com/kitsunium/sdk/pkg/v1/codec/toml"
+	tomlcodec "github.com/kitsunium/sdk/pkg/v1/data/codec/toml"
 )
 
 // Importing the package gives kit the TOML codec: a blank package-level value

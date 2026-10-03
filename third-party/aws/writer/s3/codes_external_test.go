@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/codec/baseenc"
+	"github.com/kitsunium/sdk/internal/service/data/codec/baseenc"
 	"github.com/kitsunium/sdk/third-party/aws/writer/s3"
 )
 

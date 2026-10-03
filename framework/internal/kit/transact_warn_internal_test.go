@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // warnDoc is what the warned app keeps.

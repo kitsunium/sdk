@@ -18,8 +18,8 @@ import (
 	"github.com/kitsunium/sdk/framework/kit"
 	"github.com/kitsunium/sdk/framework/kit/storetest"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // countTables counts the store's table in the file.

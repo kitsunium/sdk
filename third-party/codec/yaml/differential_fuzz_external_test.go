@@ -9,7 +9,7 @@ import (
 
 	goyaml "gopkg.in/yaml.v3"
 
-	native "github.com/kitsunium/sdk/internal/service/codec/yaml"
+	native "github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
 
 // differentialSeeds are documents inside the native subset — the shapes a

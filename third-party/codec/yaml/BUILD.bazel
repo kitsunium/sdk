@@ -20,8 +20,8 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/codec/yaml",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/codec",
-        "//internal/core/codec/scratch",
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],
@@ -47,9 +47,9 @@ go_test(
     data = glob(["testdata/**"]),
     embed = [":yaml"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
-        "//internal/service/codec/yaml",
+        "//internal/service/data/codec/yaml",
         "@in_gopkg_yaml_v3//:yaml_v3",
     ],
 )

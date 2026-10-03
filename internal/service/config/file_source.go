@@ -4,8 +4,8 @@ package config
 import (
 	"os"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -16,7 +16,7 @@ type fileSource struct {
 }
 
 // FileSource returns a Source reading path and parsing it as format (the codec
-// must be registered — blank-import its package, e.g. pkg/v1/codec).
+// must be registered — blank-import its package, e.g. pkg/v1/data/codec).
 func FileSource(format codec.Format, path string) coreconfig.Source {
 	//: a stateless reader bound to a path + format.
 	return fileSource{format: format, path: path}

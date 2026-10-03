@@ -74,7 +74,7 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
   1. `TestAuditPrefixExclusivity` — no range is declared by two packages.
   2. `TestAuditPrefixOwnership` — every declared range is present in `codeRangeOwners` and matches. Catches a package moving into a range that is reserved but unused, which exclusivity alone cannot see.
 
-  Keyed on Code **constant declarations**, not `Define` call sites: `internal/core/codec` declares the whole `0.2.2.*` block and never calls `Define`, so a Define-keyed audit was blind to it. `codeRangeOwners` is **hand-maintained and never generated** — a table derived from `docs/error-codes.yaml` (itself generated from the constants) would record any squatter as the rightful owner and stay green.
+  Keyed on Code **constant declarations**, not `Define` call sites: `internal/core/data/codec` declares the whole `0.2.2.*` block and never calls `Define`, so a Define-keyed audit was blind to it. `codeRangeOwners` is **hand-maintained and never generated** — a table derived from `docs/error-codes.yaml` (itself generated from the constants) would record any squatter as the rightful owner and stay green.
 
   Out of scope, deliberately: cross-package selector values are re-exports, not definitions; a `Code`-typed constant not named `Code*` is machinery, not an allocation (the CIDR masks `MaskByMajor` … `MaskExact`); an explicitly non-`Code`-typed constant is not a code whatever its name.
 

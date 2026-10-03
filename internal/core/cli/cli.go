@@ -10,7 +10,7 @@
 // interface, the -x=v / -x v / --x forms, the "stop at the first non-flag
 // argument" rule and the rendering of the defaults table all stay flag's. A
 // [Binder] receives the stdlib's own *[flag.FlagSet], unchanged and
-// unwrapped — the same shape internal/core/vfs takes for io/fs, and for the
+// unwrapped — the same shape internal/core/data/vfs takes for io/fs, and for the
 // same reason: a wrapper around a stdlib contract is a second contract to
 // learn, to keep in sync, and to get subtly wrong.
 //

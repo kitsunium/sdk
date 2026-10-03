@@ -67,13 +67,13 @@ import (
 	"sync"
 	"time"
 
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
-	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 	svcid "github.com/kitsunium/sdk/internal/service/id"
-	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
 )
 
 // spooledValue is one mail as the spool writes it into the queue.

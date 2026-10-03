@@ -4,8 +4,8 @@ package config
 import (
 	"io/fs"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -19,7 +19,7 @@ type fsSource struct {
 
 // FSSource returns a Source reading path inside fsys and parsing it as format
 // (the codec must be registered — blank-import its package, e.g.
-// pkg/v1/codec). It is [FileSource] over an fs.FS: the same codec dispatch,
+// pkg/v1/data/codec). It is [FileSource] over an fs.FS: the same codec dispatch,
 // the same CONFIG_SOURCE_FAILED for every way the file cannot be read or
 // parsed, and the same description — layer "file", detail the path as given —
 // so a traced load reports it as a file. The reason it exists is a program

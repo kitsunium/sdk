@@ -1,0 +1,139 @@
+<!-- updated: 2026-10-03T00:24:48Z -->
+# internal/core/data/sql/
+
+## Purpose
+
+Declares the **relational-database ports** above `database/sql`: `Executor`
+(the read/write surface a statement runs against), `Transactor` (who owns a
+transaction) with its two ADR 0039 siblings `Joiner` (where a statement issued
+under a context runs) and `Deferrer` (a function held until the context's
+transaction commits — ADR 0139), `Checker` (a bounded liveness probe) and
+`Migrator` (an ordered, versioned, mutually-exclusive schema runner) — plus
+the domain values
+`TxOptionsValue`, `MigrationValue`, `Dialect`, the `TxFunc` / `Step` func ports
+and the typed sentinels. Admitted by **ADR 0055**. Every concrete
+implementation lives in `internal/service/data/sql`.
+
+Code range: `0.2.24.*` (ADR 0055).
+
+## Contents
+
+| File | Surface |
+|---|---|
+| `sql.go` | package doc + `TxFunc func(ctx, Executor) error` |
+| `sql_interface.go` | the four ports and their siblings — `Executor`, `Preparer` (ADR 0039 sibling), `Transactor`, `Joiner` and `Deferrer` (its ADR 0039 siblings, ADR 0139), `Checker`, `Migrator` |
+| `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + the engine's vocabulary `Placeholder` / `QuoteIdent` / `ForUpdate` / `ForUpdateSkipLocked` + `ParseDialect` |
+| `sql_txoptions.go` | `TxOptionsValue` — `Isolation` / `ReadOnly` + `IsZero` / `StdOptions` |
+| `sql_migration.go` | `Step func(ctx, Executor) error`, `MigrationValue` + `Validate`, `Irreversible` |
+| `codes.go` | `Code*` constants — range 0.2.24.* |
+| `errors.go` | `UnknownDialect` / `DialectRefused` / `NestedIsolation` / `InvalidMigration` / `MigrationIrreversible` (`errs.Define`) |
+
+## Conventions
+
+- **`database/sql` is imported, and no driver ever is.** The stdlib's own
+  package is the driver interface of the Go ecosystem, so depending on it is
+  not a vendor dependency; a *driver* is. `pgx`, `go-sql-driver/mysql` and the
+  sqlite bindings are connectors to a third-party system and belong under
+  `third-party/` by the rule that put the AWS writers there (ADR 0012).
+  ADR 0055 §D2.
+- **The ports do not re-declare the stdlib's types.** `Executor` speaks
+  `*sql.Rows`, `*sql.Row` and `sql.Result`. Re-declaring them would be the
+  first step of the ORM this domain refuses to become: once `Rows` is ours,
+  scanning is ours, and once scanning is ours, mapping is a small step.
+- **`Executor` is FROZEN at three methods, and none of them ends a
+  transaction.** There is no `Commit`, no `Rollback`, no `Begin`. A function
+  that receives an `Executor` therefore *cannot* end the transaction it was
+  handed — the mistake does not compile. `Preparer` is the first ADR 0039
+  sibling; a fourth capability gets a fifth interface, never a fourth method.
+- **`Transactor` grows by siblings too.** `Joiner.Join(ctx)` answers the
+  executor of the innermost scope of the transaction ctx carries for THAT
+  transactor — a retired one when the scope has returned, never the pool,
+  so a leaked context refuses instead of running outside its transaction —
+  or the pool when ctx carries none. `Deferrer.Defer(ctx, fn)` holds fn until
+  that transaction commits; the rollback of the savepoint it was held in drops
+  it, and a released savepoint hands it to the scope around it. Both are one
+  method each and frozen, and a transactor that is not the SDK's may offer
+  neither: a consumer asserts for them (ADR 0139).
+- **`TxFunc` and `Step` are FUNC ports**, the shape `internal/core/CLAUDE.md`
+  already admits for `resilience.Operation`, `scheduler.Job` and
+  `lifecycle.Start`. ADR 0039 is satisfied structurally: a func type cannot
+  grow a method at all.
+- **No registry.** There is one `Transactor` and one `Migrator`. A registry
+  would have one entry and would add a way to select a database engine from a
+  configuration string at runtime — which is exactly the mistake `Dialect`
+  exists to prevent.
+- **`Dialect` is a CLOSED set with two different refusals.** A name the SDK has
+  never heard of returns `UnknownDialect`. A name it recognises and declines
+  returns `DialectRefused` *with the reason in a field* — T-SQL has no `RELEASE
+  SAVEPOINT`, Oracle has none either, Db2 requires a mandatory cursor-retention
+  clause. "I have never heard of this" and "I know this engine and its
+  savepoint grammar is a different algorithm" are different facts, and a caller
+  debugging a refusal deserves to know which one they hit.
+- **The zero `Dialect` is unusable.** `DialectUnknown` is what an unset
+  configuration field looks like, and reading it as "probably Postgres" is how
+  a MySQL deployment discovers the difference in production (ADR 0031).
+- **`Dialect` spells its engine's vocabulary, never a statement.**
+  `Placeholder(n)` (`$n` on PostgreSQL, `?` on MySQL and SQLite),
+  `QuoteIdent(name)` (backticks on MySQL, the standard's double quotes on the
+  other two, the delimiter doubled inside the name), `ForUpdate()` and
+  `ForUpdateSkipLocked()` (the clause, leading space included, on PostgreSQL
+  and MySQL; nothing on SQLite, whose exclusion is the database's one write
+  lock, taken by a transaction's first write — ADR 0140) are the tokens every
+  statement `service/data/sql`, `service/data/docstore` and `service/data/queue` render is
+  spelled with. Each of those packages used to carry its own copy; now a
+  fourth engine is spelled in this file or not at all. Composing a statement
+  stays in the package that sends it — a method that builds one is the query
+  builder ADR 0055 §D1 refuses — and so does a clause whose choice is a
+  package's reasoning rather than the engine's grammar: docstore's MySQL-only
+  `LOCK IN SHARE MODE` follows from each engine's default isolation, and
+  PostgreSQL's own share lock is not what that read needs.
+- **The vocabulary refuses to guess, too.** `QuoteIdent` validates nothing:
+  an identifier cannot be bound, so the SDK interpolates only names it
+  validated at construction, and doubling the delimiter only keeps such a name
+  one name. On a dialect that is not `Valid`, `Placeholder` and `QuoteIdent`
+  render the empty string — a statement built from an unset field parses on no
+  engine — while the two lock clauses still render, because an engine refusing
+  a clause is louder than a lock dropped in silence (ADR 0031). `pkg/v1/data/sql`
+  publishes all four through its `Dialect` alias.
+- **The zero `TxOptionsValue` IS a working configuration** — the driver's own
+  default isolation, read-write. That is ADR 0031's *clamp* side: it is the
+  only non-arbitrary default available, because every engine defines its own
+  default level and picking one here would silently change the semantics of an
+  existing application on migration.
+- **A nil `Down` is refused, `Irreversible` is the declaration.** "I forgot the
+  reversal" and "there is no reversal" are the same nil and only one of them is
+  a defect — the rule `core/lifecycle` applies to a nil `Stop`.
+- **A version above `math.MaxInt64` is refused at `Validate`.** It is stored in
+  a `BIGINT` and bound as an `int64`; a value with no representation there
+  would silently reorder the history.
+- Every refusal in this package carries `EX_CONFIG` (78): they are permanent
+  wiring faults, fixed by a code change and never by a retry.
+
+## Do NOT
+
+- **Add a method to `Executor`, `Transactor`, `Joiner`, `Deferrer`,
+  `Checker` or `Migrator`.** `pkg/v1/data/sql` aliases all six, so the shape is
+  published (ADR 0039). A new capability gets a sibling interface discovered
+  by type assertion, as `Preparer`, `Joiner` and `Deferrer` are.
+- **Grow an ORM here.** No entity mapping, no query builder, no lazy loading,
+  no identity map, no change tracking, no repository generation, no schema
+  reflection. ADR 0055 §D1 is a decision, not an omission. `Dialect`'s
+  methods render tokens — a marker, a quoted name, a clause — and a method
+  that renders a whole statement is the first step of the builder.
+- **Spell a dialect token in a service package.** A bind marker, a quoted
+  identifier or a row-lock clause written by hand beside a statement is the
+  copy this file replaced; take it from `Dialect`.
+- **Import a driver, or `net`, or anything that opens a connection.** This
+  package declares shapes; `internal/service/data/sql` runs statements.
+- **Invent a migration file format, directory layout or naming convention.**
+  A `MigrationValue` is a value the consumer constructs. ADR 0055 §D12.
+- **Put a `Rows`/`Row`/`Result` of our own here.** See above — that is the
+  first step of the ORM.
+
+## Verification
+
+```
+bazel test --config=race //internal/core/data/sql:sql_test
+# OR
+cd internal/core && GOWORK=off go test -race ./data/sql
+```

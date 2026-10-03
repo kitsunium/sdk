@@ -1,0 +1,75 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "msgpack",
+    srcs = [
+        "codec.go",
+        "codec_compliance.go",
+        "decode.go",
+        "decode_any.go",
+        "decode_hook.go",
+        "decode_list.go",
+        "decode_map.go",
+        "decode_plan.go",
+        "decode_struct.go",
+        "decoder.go",
+        "encode.go",
+        "encode_hook.go",
+        "encode_map.go",
+        "encode_plan.go",
+        "encode_struct.go",
+        "encoder.go",
+        "failed.go",
+        "fault.go",
+        "struct.go",
+        "timestamp.go",
+        "wire.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/msgpack",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":msgpack",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "msgpack_test",
+    size = "small",
+    srcs = [
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+        "decode_external_test.go",
+        "decode_fuzz_external_test.go",
+        "decoder_external_test.go",
+        "decoder_internal_test.go",
+        "encode_external_test.go",
+        "encoder_internal_test.go",
+        "msgpack_bench_test.go",
+        "struct_external_test.go",
+        "timestamp_external_test.go",
+        "wire_external_test.go",
+    ],
+    data = glob(["testdata/**"]),
+    embed = [":msgpack"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

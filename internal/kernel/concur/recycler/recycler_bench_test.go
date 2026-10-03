@@ -120,7 +120,7 @@ func BenchmarkPool_Parallel(b *testing.B) {
 // pointer-shaped T, and this pair of benchmarks is what makes that concrete.
 //
 // Every consumer in this repository already does the right thing —
-// kernel/concur/buffer pools *[]byte, core/codec/scratch pools *bytes.Buffer and
+// kernel/concur/buffer pools *[]byte, core/data/codec/scratch pools *bytes.Buffer and
 // *bytes.Reader, service/observe/logger pools *chainBuilder, async pools *recordEntry,
 // net/server pools *pooledConn — so this exists to keep the next one honest.
 func BenchmarkPool_GetPut_BufferPtr4K(b *testing.B) {

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"text/tabwriter"
 
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // The migrate command. A database's migrations come in sets, one per origin

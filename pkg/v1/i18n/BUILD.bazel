@@ -8,7 +8,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/i18n",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/core/i18n",
         "//internal/service/i18n",
     ],
@@ -26,7 +26,7 @@ go_test(
     srcs = ["i18n_external_test.go"],
     deps = [
         ":i18n",
-        "//pkg/v1/codec",
+        "//pkg/v1/data/codec",
         "//pkg/v1/errs",
     ],
 )

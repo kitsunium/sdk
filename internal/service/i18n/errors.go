@@ -47,7 +47,7 @@ var (
 	//
 	// The cause is wrapped rather than replaced, so errors.Is against
 	// fs.ErrNotExist and fs.ErrPermission keeps answering — the same
-	// discipline internal/service/vfs applies to its read failures.
+	// discipline internal/service/data/vfs applies to its read failures.
 	CatalogLoadFailed = errs.Define(CodeCatalogLoadFailed, "CATALOG_LOAD_FAILED",
 		"The message catalogue could not be read or decoded",
 		"service/i18n: LoadFS could not list the directory, read a file, resolve the codec format, or decode a catalogue file; the fields carry the path and the cause",
@@ -87,7 +87,7 @@ var (
 // directory" from "the catalogue will not compile", and the only thing that
 // answers that is errors.Is(err, fs.ErrNotExist). Rendering the cause into a
 // field loses it — the text survives and the sentinel does not. Same shape and
-// same reason as internal/service/vfs.failRead.
+// same reason as internal/service/data/vfs.failRead.
 func failLoad(cause error, fields ...errs.FieldValue) error {
 	//: the cause stays in the chain — that is the contract.
 	return errs.Wrap(cause, errs.WrapParams{

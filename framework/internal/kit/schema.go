@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/codec/jsonshape"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape"
 )
 
 var (

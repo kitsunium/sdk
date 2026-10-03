@@ -6,7 +6,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // A module on the product's databases (ADR 0008, ADR 0004): kit.Keeps

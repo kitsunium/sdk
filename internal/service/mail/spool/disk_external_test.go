@@ -8,13 +8,13 @@ import (
 	"testing"
 	"time"
 
+	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	coremail "github.com/kitsunium/sdk/internal/core/mail"
-	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svcqueue "github.com/kitsunium/sdk/internal/service/data/queue"
 	svcmail "github.com/kitsunium/sdk/internal/service/mail"
 	"github.com/kitsunium/sdk/internal/service/mail/spool"
-	svcqueue "github.com/kitsunium/sdk/internal/service/queue"
 )
 
 // TestAMailOutlivesItsProcess is kit's restart case: a mail whose first

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:53:06Z -->
+<!-- updated: 2026-10-03T06:00:00Z -->
 # internal/
 
 ## Purpose
@@ -28,7 +28,7 @@ core  ──┼──▶ service ──▶ (pkg/v1 re-exports / consumes)
 |---|---|
 | `internal/kernel/**` | stdlib only |
 | `internal/core/**`   | stdlib + `internal/kernel/*` + **sibling `internal/core/*`** |
-| `internal/service/**`| stdlib + kernel + core + **sibling `internal/service/*`** (+ vetted third-party encoders for codec/*) |
+| `internal/service/**`| stdlib + kernel + core + **sibling `internal/service/*`** — no module outside the SDK, the codecs under `data/codec/*` included (ADR 0156) |
 | `pkg/v1/**` (consumes) | stdlib + kernel + core + service + **sibling `pkg/v1/*`** |
 
 A service package may import another service package, and that is permitted
@@ -94,7 +94,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 | `github.com/kitsunium/sdk/internal/core`    | `cd internal/core && GOWORK=off go build ./...`   |
 | `github.com/kitsunium/sdk/internal/service` | `cd internal/service && GOWORK=off go build ./...`|
 
-`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root resolves the workspace modules without `replace` — though a pattern never crosses a module boundary, so `go build ./...` at the repo root builds the root module alone; checking every module loops over `bash scripts/ci/go-modules.sh`. No `internal/*` module requires a module outside the SDK: every codec is written natively on the standard library (YAML as a named subset of YAML 1.2.2, whose full yaml.v3 reader is the opt-in `third-party/codec/yaml` module), and `proc/self` reads pseudo-versions with `internal/kernel/semver`, the stdlib primitive that replaced `golang.org/x/mod` (ADR 0156 §4) — its two other callers, `entitlement` and `selfupdate`, are the framework's (ADR 0158) and compare versions through `pkg/v1/semver`.
+`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root resolves the workspace modules without `replace` — though a pattern never crosses a module boundary, so `go build ./...` at the repo root builds the root module alone; checking every module loops over `bash scripts/ci/go-modules.sh`. No `internal/*` module requires a module outside the SDK: every codec is written natively on the standard library (YAML as a named subset of YAML 1.2.2, whose full yaml.v3 reader is the opt-in `third-party/codec/yaml` module), and `proc/self` reads pseudo-versions with `internal/kernel/semver`, the stdlib primitive that replaced `golang.org/x/mod` (ADR 0156 §4) — its two other callers, `entitlement` and `selfupdate`, are the framework's (ADR 0158) and compare versions through `pkg/v1/data/semver`.
 
 ## Conventions
 
@@ -126,7 +126,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 - Move a logger-specific or codec-specific concept into `kernel/`. The kernel rule is both "stdlib-only" AND "generic". `level` was moved OUT for that reason.
 - Call `fmt.Errorf` / `errors.New` in production. All errors go through `errs.Define` / `errs.Wrap`.
 - Reference `service/*` from `core/*` or `kernel/*`; the direction is top-down.
-- Add a third-party import in `kernel/*` or `core/*` — codec parsers and encoders live in `service/codec/*`.
+- Add a third-party import in `kernel/*` or `core/*` — codec parsers and encoders live in `service/data/codec/*`.
 
 ## Verification
 

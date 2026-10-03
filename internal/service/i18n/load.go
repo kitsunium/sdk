@@ -5,7 +5,7 @@ import (
 	"io/fs"
 	"path"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corei18n "github.com/kitsunium/sdk/internal/core/i18n"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -22,15 +22,15 @@ const expectedCatalogueKeys int = 64
 //
 // The bytes are decoded by the codec domain — [codec.Lookup] on the format the
 // caller names — so a catalogue is JSON, YAML, TOML, CBOR, MessagePack or any
-// of the other formats internal/service/codec registers, and this package
-// contains no parser. The codec must be registered: blank-import pkg/v1/codec,
+// of the other formats internal/service/data/codec registers, and this package
+// contains no parser. The codec must be registered: blank-import pkg/v1/data/codec,
 // exactly as internal/service/config.FileSource requires. An unregistered
 // format is [CatalogLoadFailed] rather than a panic or a silent empty
 // catalogue.
 //
 // # It invents no filesystem either
 //
-// fsys is io/fs.FS, which is internal/core/vfs.FS unchanged — the ADR 0056
+// fsys is io/fs.FS, which is internal/core/data/vfs.FS unchanged — the ADR 0056
 // alias — so an embed.FS, an os.DirFS, a vfs.NewOS root and a vfs.NewMem all
 // work here with no adapter and this package imports neither vfs nor os. A
 // catalogue compiled into the binary and a catalogue on disk are the same
@@ -58,7 +58,7 @@ func LoadFS(fsys fs.FS, dir string, format codec.Format, fallback corei18n.TagVa
 	if !ok {
 		//: name the format; the fix is a blank import.
 		return nil, errs.Wrap(CatalogLoadFailed, errs.WrapParams{},
-			errs.String("format", string(format)), errs.String("detail", "no codec registered for this format — blank-import pkg/v1/codec"))
+			errs.String("format", string(format)), errs.String("detail", "no codec registered for this format — blank-import pkg/v1/data/codec"))
 	}
 	//: list the directory.
 	entries, err := fs.ReadDir(fsys, dir)

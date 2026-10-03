@@ -15,7 +15,7 @@ import (
 	// Activate the JSON codec so FromConfig can decode a JSON topology. Test
 	// code is exempt from the dep-light rule that bars pkg/v1/observe/logger itself
 	// from blank-importing a service codec.
-	_ "github.com/kitsunium/sdk/internal/service/codec/json"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json"
 )
 
 // topologyInvalidCode is the dotted-quad of pkg/v1/observe/logger.TopologyInvalid

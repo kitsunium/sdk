@@ -9,4 +9,4 @@ c.Set("k", 7)
 v, ok := c.Fetch("k") // 7, true (Fetch, not Get — a hit promotes LRU)
 ```
 
-Public facade: `pkg/v1/cache`. ADR 0027. See `CLAUDE.md`.
+Public facade: `pkg/v1/data/cache`. ADR 0027. See `CLAUDE.md`.

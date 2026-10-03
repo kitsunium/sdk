@@ -7,8 +7,8 @@ import (
 	"io"
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/vfs"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 )
 
 // What sealing costs a store's writes and reads (ADR 0006 §4). Both engines

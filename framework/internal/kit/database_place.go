@@ -3,7 +3,7 @@ package kit
 
 import (
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Where a store's data is (ADR 0004): the most precise declaration wins — a

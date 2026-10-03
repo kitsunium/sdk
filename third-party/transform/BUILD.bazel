@@ -20,7 +20,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/transform",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/transform",
+        "//internal/core/data/transform",
         "//internal/kernel/errs",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",
@@ -43,9 +43,9 @@ go_test(
     ],
     embed = [":transform"],
     deps = [
-        "//internal/core/transform",
+        "//internal/core/data/transform",
         "//internal/kernel/errs",
-        "//internal/service/transform",
+        "//internal/service/data/transform",
         "@com_github_klauspost_compress//s2",
         "@com_github_klauspost_compress//zstd",
     ],

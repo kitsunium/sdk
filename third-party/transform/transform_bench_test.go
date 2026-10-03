@@ -9,8 +9,8 @@ import (
 
 	"github.com/klauspost/compress/s2"
 
-	coretransform "github.com/kitsunium/sdk/internal/core/transform"
-	_ "github.com/kitsunium/sdk/internal/service/transform" // registers the stdlib gzip reference
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
+	_ "github.com/kitsunium/sdk/internal/service/data/transform" // registers the stdlib gzip reference
 	tptransform "github.com/kitsunium/sdk/third-party/transform"
 )
 
@@ -74,7 +74,7 @@ func benchCorpora() []struct {
 }
 
 // benchSchemes resolves every compressor under measurement, including the
-// stdlib gzip already registered by internal/service/transform. Comparing SDK
+// stdlib gzip already registered by internal/service/data/transform. Comparing SDK
 // compressor against SDK compressor — same port, same append-to-dst convention,
 // same bounded decompression — is the only comparison that answers "which one
 // should I register?".

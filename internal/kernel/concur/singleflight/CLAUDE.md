@@ -97,7 +97,7 @@ system and not a kernel primitive.
 
 - Use it as a cache. Nothing is remembered after the call completes; two
   SEQUENTIAL `Do` calls run `fn` twice. Caching is `kernel/collections/cache`, and the
-  combination of the two is `internal/service/cache` (ADR 0049).
+  combination of the two is `internal/service/data/cache` (ADR 0049).
 - Use it around work that costs less than a few microseconds — see `BENCH.md`.
 - Run `fn` inline on the leader's goroutine "for speed". That is the exact
   defect this package exists to avoid, and

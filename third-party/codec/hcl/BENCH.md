@@ -214,7 +214,7 @@ conclusion here and the nanoseconds do not.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Library            | `github.com/hashicorp/hcl/v2` v2.24.0 |
-| Reference arms     | `internal/service/codec/json`, `internal/service/codec/cbor` (same repo, same run) |
+| Reference arms     | `internal/service/data/codec/json`, `internal/service/data/codec/cbor` (same repo, same run) |
 | Git branch         | `jaimerias-que-tu-te-connect` |
 | Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |

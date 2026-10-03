@@ -13,7 +13,7 @@
 // consumer in this repository already does.
 //
 // The byte-slice pool (internal/kernel/concur/buffer) and the codec scratch buffer
-// pool (internal/core/codec/scratch) are built ON this primitive; Pool[T]
+// pool (internal/core/data/codec/scratch) are built ON this primitive; Pool[T]
 // is the shared mechanism, the capacity thresholds stay with the consumers.
 package recycler
 
@@ -52,7 +52,7 @@ func NewPool[T any](newFn func() T) *Pool[T] {
 // returned value MAY be a previously Put value or a freshly built one. The
 // comma-ok assertion is fail-loud: the pool only ever holds T (both New and
 // Put are typed), so a wrong-typed entry is an internal invariant break that
-// panics rather than silently masking it (mirrors core/codec/scratch.poolGet).
+// panics rather than silently masking it (mirrors core/data/codec/scratch.poolGet).
 func (r *Pool[T]) Get() T {
 	//: the pool only ever holds T — comma-ok guards the invariant.
 	v, ok := r.pool.Get().(T)

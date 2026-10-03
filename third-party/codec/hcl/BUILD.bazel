@@ -18,7 +18,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/third-party/codec/hcl",
     visibility = ["//visibility:public"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
         "@com_github_hashicorp_hcl_v2//gohcl",
         "@com_github_hashicorp_hcl_v2//hclsimple",
@@ -41,10 +41,10 @@ go_test(
     ],
     embed = [":hcl"],
     deps = [
-        "//internal/core/codec",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
-        "//internal/service/codec/cbor",
-        "//internal/service/codec/json",
+        "//internal/service/data/codec/cbor",
+        "//internal/service/data/codec/json",
     ],
 )
 

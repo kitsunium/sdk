@@ -108,7 +108,7 @@ use (
 )
 EOF
 
-  : >pkg/v1/codec.go
+  : >pkg/v1/doc.go
   g add -A
   g commit -q --no-verify -m "init"
 
@@ -133,7 +133,7 @@ tag_release() {
 # commit_pkg <message> — a commit that touches pkg/, so the size its pull
 # request carries — or the request its <message> makes — is in scope for it.
 commit_pkg() {
-  echo "// $RANDOM" >>pkg/v1/codec.go
+  echo "// $RANDOM" >>pkg/v1/doc.go
   g commit -aq --no-verify -F - <<<"$1"
 }
 
@@ -369,7 +369,7 @@ need_toolchain() {
   mkdir -p tools
   pad="$(printf 'y%.0s' $(seq 1 200))"
   for i in $(seq 1 1600); do : >"tools/${pad}${i}.go"; done
-  echo "// touched" >>pkg/v1/codec.go
+  echo "// touched" >>pkg/v1/doc.go
   g add -A
   g commit -q --no-verify -m 'feat(codec): wide merge'
   label_pr 111 release:minor

@@ -5,7 +5,7 @@ no domain vocabulary, no allocation. Written with Go's leading `v`, and the
 `vMAJOR` / `vMAJOR.MINOR` shorthands, exactly as `golang.org/x/mod/semver`
 reads them; it replaces that module and the three pseudo-version functions of
 `golang.org/x/mod/module` in the SDK. Consumers outside the SDK's internals
-import the public alias, `pkg/v1/semver`.
+import the public alias, `pkg/v1/data/semver`.
 
 ```go
 import "github.com/kitsunium/sdk/internal/kernel/semver"

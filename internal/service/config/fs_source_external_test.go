@@ -11,13 +11,13 @@ import (
 	"testing"
 	"testing/fstest"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/config"
 
-	_ "github.com/kitsunium/sdk/internal/service/codec/json" // register "json"
-	_ "github.com/kitsunium/sdk/internal/service/codec/yaml" // register "yaml"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register "json"
+	_ "github.com/kitsunium/sdk/internal/service/data/codec/yaml" // register "yaml"
 )
 
 // fsEnvPrefix namespaces every variable these tests set.

@@ -81,7 +81,7 @@ caller's to choose rather than a default.
 store's snapshot of every key before the pass is the difference. A million
 subjects cost the engine about 2 s. A persistent store adds one durable write
 per key: on a document store on disk that is `WriteAtomic`'s two flushes, about
-11 ms on this device (`internal/service/docstore/BENCH.md`), so ten thousand
+11 ms on this device (`internal/service/data/docstore/BENCH.md`), so ten thousand
 subjects take about two minutes and a million about three hours — in the
 background, while `RotatorConfig.InUse` keeps the old root version until the
 pass is done.

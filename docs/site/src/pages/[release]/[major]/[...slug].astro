@@ -45,7 +45,7 @@ const title = entry.data?.title ?? firstH1?.text ?? slugFallback;
 const description = entry.data?.description;
 //: `source` is repo-relative path to the original file the docs page
 //: was materialised from. sync-versions writes it into frontmatter
-//: (e.g. pkg/v1/codec/README.md). Default.astro feeds it to the
+//: (e.g. pkg/v1/data/codec/README.md). Default.astro feeds it to the
 //: EditLink component so readers can deep-link to GitHub.
 const source = (entry.data as { source?: string | null } | undefined)?.source ?? null;
 //: TOC shows H2 only by default. For dense gomarkdoc pages (logger

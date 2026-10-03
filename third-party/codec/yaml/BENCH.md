@@ -3,7 +3,7 @@
 
 `gopkg.in/yaml.v3` behind the `"yaml-full"` Format. These are the numbers the
 SDK's `"yaml"` Format had while it was this implementation; the fixtures are
-the native codec's (`internal/service/codec/yaml/codec_bench_test.go`, copied
+the native codec's (`internal/service/data/codec/yaml/codec_bench_test.go`, copied
 verbatim), so the two pages compare row for row.
 
 Machine: Apple M1 Pro, 16 GiB, macOS 26.6.2, go1.27.1 darwin/arm64, measured
@@ -30,7 +30,7 @@ configuration with nested sections, a flow list, a map and a literal block
 `Marshal/large` allocates 10.5 MiB to write a 57 927-byte document: yaml.v3 builds a
 node tree and an event stream and grows its emitter buffer per event.
 
-`internal/service/codec/yaml/BENCH.md` runs these benchmarks ALTERNATELY with
+`internal/service/data/codec/yaml/BENCH.md` runs these benchmarks ALTERNATELY with
 the native codec's, eight samples each, so the two columns share the same
 machine load: the native subset is 2.9× to 9.9× faster (4.96× in geometric
 mean) and makes 1 to 4 752 allocations where this codec makes 28 to 50 042.

@@ -6,7 +6,7 @@
 // registry, a routing table, a feature-flag map, a hot-reloaded config — can
 // reuse it.
 //
-// The codec registry (internal/core/codec) is built ON this primitive: three
+// The codec registry (internal/core/data/codec) is built ON this primitive: three
 // atomic.Pointer[map] fields with hand-rolled CAS-loop writers collapse to
 // three Value[map] fields. The mechanism lives here; the domain clone logic
 // stays with the consumer (ADR 0011).

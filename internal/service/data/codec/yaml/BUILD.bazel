@@ -1,0 +1,73 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "yaml",
+    srcs = [
+        "block.go",
+        "codec.go",
+        "decoder.go",
+        "encoder.go",
+        "failed.go",
+        "flow.go",
+        "hooks.go",
+        "hooks_interface.go",
+        "marshal.go",
+        "marshal_block.go",
+        "marshal_flow.go",
+        "marshal_scalar.go",
+        "node.go",
+        "parse.go",
+        "resolve.go",
+        "scan.go",
+        "structinfo.go",
+        "unmarshal.go",
+        "unmarshal_typed.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/data/codec/yaml",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/core/data/codec/scratch",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":yaml",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "yaml_test",
+    size = "small",
+    srcs = [
+        "codec_bench_test.go",
+        "codec_external_test.go",
+        "codec_integration_test.go",
+        "codec_internal_test.go",
+        "decoder_internal_test.go",
+        "encoder_internal_test.go",
+        "fuzz_external_test.go",
+        "limits_external_test.go",
+        "marshal_external_test.go",
+        "refusal_external_test.go",
+        "stream_external_test.go",
+        "subset_external_test.go",
+        "unmarshal_external_test.go",
+    ],
+    embed = [":yaml"],
+    deps = [
+        "//internal/core/data/codec",
+        "//internal/kernel/errs",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

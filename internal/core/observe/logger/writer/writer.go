@@ -1,6 +1,6 @@
 // Package writer declares the transport-factory port: a named, config-driven
 // constructor that yields a logger Sink, plus the process-wide registry that
-// maps a writer Name to its Factory. It is the peer of internal/core/codec —
+// maps a writer Name to its Factory. It is the peer of internal/core/data/codec —
 // the registry resolves a Name to a Factory exactly as codec resolves a Format
 // to a Codec (ADR 0012).
 //

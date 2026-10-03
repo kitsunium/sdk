@@ -70,15 +70,15 @@ vocabulary:
     # is a single-method interface named <Noun>Handler, and "Handler" names the
     # role the type plays rather than its method. The -er forms the rule would
     # impose here ("ServeConner", "ServePacketter") are not words.
-    # BoundedDecompressor is the optional widening of core/transform.Compressor,
+    # BoundedDecompressor is the optional widening of core/data/transform.Compressor,
     # which it embeds; "Decompressor" names the role exactly as "Compressor"
     # does two lines above it in the same file, and the two read as the pair
     # they are. The -er form the rule would impose is "DecompressBoundedder",
     # which is not a word in any reading. Same argument as core/mail.Transport.
-    - github.com/kitsunium/sdk/internal/core/transform.BoundedDecompressor
+    - github.com/kitsunium/sdk/internal/core/data/transform.BoundedDecompressor
     - github.com/kitsunium/sdk/internal/core/net.ConnHandler
     - github.com/kitsunium/sdk/internal/core/net.PacketHandler
-    # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/cache.Store
+    # EntryFetcher and Tagger are ADR 0039 siblings of the frozen core/data/cache.Store
     # port, and the -er forms the rule would impose — "FetchEntrier" and
     # "InvalidateTagger" — are not words. Both name the ROLE a store plays rather
     # than its method: a tier that can hand back its whole entry, and a store that
@@ -87,9 +87,9 @@ vocabulary:
     # ergonomics of a port that grows by siblings. Same argument as UpDownMeter
     # below. Loader is NOT listed: its method is Load, so it satisfies the rule
     # natively — the exemption is only for the two the rule cannot spell.
-    - github.com/kitsunium/sdk/internal/core/cache.EntryFetcher
-    - github.com/kitsunium/sdk/internal/core/cache.Tagger
-    # core/sql.Transactor and core/sql.Preparer (ADR 0055). The -er forms the rule
+    - github.com/kitsunium/sdk/internal/core/data/cache.EntryFetcher
+    - github.com/kitsunium/sdk/internal/core/data/cache.Tagger
+    # core/data/sql.Transactor and core/data/sql.Preparer (ADR 0055). The -er forms the rule
     # would impose are "Transacter" and "PrepareContexter", neither of which is a
     # word. Both name the ROLE the type plays, which is how the domain is
     # discussed end to end — "the transactor owns the transaction", "assert for
@@ -98,8 +98,8 @@ vocabulary:
     # Preparer is an ADR 0039 sibling of the frozen Executor port, exactly the
     # EntryFetcher/Tagger case above: the family name says at a glance which
     # capability a type assertion is asking for.
-    - github.com/kitsunium/sdk/internal/core/sql.Transactor
-    - github.com/kitsunium/sdk/internal/core/sql.Preparer
+    - github.com/kitsunium/sdk/internal/core/data/sql.Transactor
+    - github.com/kitsunium/sdk/internal/core/data/sql.Preparer
     # UpDownMeter is the ADR 0039 sibling of the frozen core/observe/metrics.Meter port,
     # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
     # the word the whole domain is discussed in. The -er form the rule would
@@ -116,7 +116,7 @@ vocabulary:
     # meaning of the word in a domain full of things that start. Same argument
     # as UpDownMeter above and ConnHandler further up.
     - github.com/kitsunium/sdk/internal/core/observe/trace.Tracer
-    # AtomicWriter is the ADR 0039 capability sibling of the frozen core/vfs
+    # AtomicWriter is the ADR 0039 capability sibling of the frozen core/data/vfs
     # WritableFS port, and the -er form the rule would impose —
     # "WriteAtomiccer" — is not a word. The name already ENDS in -er: it names
     # the role a filesystem plays (one that can publish a whole file
@@ -124,9 +124,9 @@ vocabulary:
     # and UpDownMeter do above. The family (FS / WritableFS / AtomicWriter /
     # FullFS) is what tells a reader at a glance which capability a type
     # assertion is asking for.
-    - github.com/kitsunium/sdk/internal/core/vfs.AtomicWriter
+    - github.com/kitsunium/sdk/internal/core/data/vfs.AtomicWriter
     # DeadLetterReader and LeaseExtender are the ADR 0039 capability siblings of
-    # the frozen core/queue.Broker port, and they are the EntryFetcher/Tagger
+    # the frozen core/data/queue.Broker port, and they are the EntryFetcher/Tagger
     # case again. The -er forms the rule would impose are "DeadLetterser",
     # which is not a word, and "Extender", which drops the noun that says WHAT
     # is being extended — a lease, not a deadline, not a batch, not a queue.
@@ -136,8 +136,8 @@ vocabulary:
     # LeaseExtender) is what tells a reader at a glance which capability a type
     # assertion is asking for, which is the whole ergonomics of a port that
     # grows by siblings.
-    - github.com/kitsunium/sdk/internal/core/queue.DeadLetterReader
-    - github.com/kitsunium/sdk/internal/core/queue.LeaseExtender
+    - github.com/kitsunium/sdk/internal/core/data/queue.DeadLetterReader
+    - github.com/kitsunium/sdk/internal/core/data/queue.LeaseExtender
     # KeyLister is the ADR 0063 sibling of the frozen core/i18n.Catalog port,
     # and the -er form the rule would impose — "Keyser" — is not a word. The
     # name already ENDS in -er and names the ROLE a catalogue plays: one that
@@ -151,7 +151,7 @@ vocabulary:
     # core/cli.Executor (ADR 0065). The -er form the rule would impose,
     # "Executer", is not a word: the English agent noun for something that
     # executes is "executor", which is why the SDK already spells
-    # internal/core/sql.Executor that way. The rule does not fire there only
+    # internal/core/data/sql.Executor that way. The rule does not fire there only
     # because that interface carries three methods; this one is FROZEN at one
     # by ADR 0039, so the same word trips a rule the same word survived
     # elsewhere. Renaming for the rule would give the SDK two spellings of one
@@ -267,7 +267,7 @@ rules:
   # Value union demands it for Time / Group / Any payloads (logger).
   # KTN-VAR-STRMAP (phase 4) — the keys are the INPUT, not an enum.
   #
-  # core/sql's dialectByName and refusedDialects are the two halves of
+  # core/data/sql's dialectByName and refusedDialects are the two halves of
   # ParseDialect: they turn a configuration STRING a human wrote ("postgres",
   # "mariadb", "sqlserver") into a Dialect or into a refusal that says why. An
   # int-keyed map cannot do that — the string is what is being looked up, and
@@ -332,8 +332,8 @@ rules:
 
   KTN-VAR-STRMAP:
     exclude:
-      - "**/internal/core/sql/sql_dialect.go"
-      - "internal/core/sql/sql_dialect.go"
+      - "**/internal/core/data/sql/sql_dialect.go"
+      - "internal/core/data/sql/sql_dialect.go"
       # The i18n domain (ADR 0063) is the same direction as sql_dialect.go, in
       # two places and for two reasons.
       #
@@ -355,7 +355,7 @@ rules:
 
   KTN-INTERFACE-ANYUSE:
     exclude:
-      # internal/service/sql — `arg any` is database/sql's OWN bind-parameter
+      # internal/service/data/sql — `arg any` is database/sql's OWN bind-parameter
       # type. (*sql.Tx).ExecContext, QueryContext and QueryRowContext are all
       # `args ...any` in the standard library, and driver.Value is defined as a
       # closed set the DRIVER narrows, not the caller. The three flagged sites
@@ -365,20 +365,20 @@ rules:
       # widened again at the call, and inventing one here is the first step of
       # the ORM ADR 0055 D1 refuses to become: once the bind type is ours,
       # conversion is ours.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
-      - "**/internal/core/codec/**"
-      - "internal/core/codec/**"
-      - "**/internal/service/codec/**"
-      - "internal/service/codec/**"
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      - "**/internal/core/data/codec/**"
+      - "internal/core/data/codec/**"
+      - "**/internal/service/data/codec/**"
+      - "internal/service/data/codec/**"
       # The full yaml.v3 codec (the opt-in "yaml-full" Format) implements the
       # same Codec, Encoder and Decoder contracts as the in-tree codecs and
       # streams documents into a `v any` for the same reason; it lives under
       # third-party/ only because of the library it wraps.
       - "**/third-party/codec/yaml/**"
       - "third-party/codec/yaml/**"
-      - "**/pkg/v1/codec/**"
-      - "pkg/v1/codec/**"
+      - "**/pkg/v1/data/codec/**"
+      - "pkg/v1/data/codec/**"
       # The logger's subtree is listed part by part, in core and in service:
       # since ADR 0155 the writers (logger/writer) and the logfile helper
       # (logger/internal/logfile) sit beneath it, and this exclusion has never
@@ -487,7 +487,7 @@ rules:
       # internal/service/cli and internal/core/cli — this is the sql entry's
       # argument, and here it is the domain's DEFINING decision rather than an
       # incidental one. ADR 0065 §D1: a cli.Binder receives the standard
-      # library's own *flag.FlagSet, unwrapped, exactly as core/vfs takes
+      # library's own *flag.FlagSet, unwrapped, exactly as core/data/vfs takes
       # io/fs unchanged (ADR 0056). The rule suggests replacing it with
       # `interface{ VisitAll(func(*flag.Flag)) }` and `interface{ Int(string,
       # int, string) *int }` — two synthetic types that mention flag.Flag in
@@ -506,7 +506,7 @@ rules:
       - "internal/core/cli/**"
       - "**/internal/service/cli/**"
       - "internal/service/cli/**"
-      # internal/service/sql — the SAME class, and here it is the domain's
+      # internal/service/data/sql — the SAME class, and here it is the domain's
       # central decision rather than an incidental one. ADR 0055 D1: the sql
       # ports speak *sql.DB, *sql.Conn, *sql.Rows and sql.Result — the standard
       # library's own types, deliberately NOT re-declared equivalents — because
@@ -531,13 +531,13 @@ rules:
       - "**/internal/service/i18n/**"
       - "internal/service/i18n/**"
       # sql.TxOptionsValue is the same contract-required-value case as
-      # tlsid.Identity below: it is core/sql's single per-transaction option
-      # type, published as pkg/v1/sql.TxOptions and frozen by ADR 0039.
+      # tlsid.Identity below: it is core/data/sql's single per-transaction option
+      # type, published as pkg/v1/data/sql.TxOptions and frozen by ADR 0039.
       # Narrowing it to `interface{ IsZero() bool }` would hide that the
       # isolation level and the read-only flag travel with it.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
-      # core/sql.Dialect is the same VALUE case since it spells its engine's
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      # core/data/sql.Dialect is the same VALUE case since it spells its engine's
       # vocabulary itself — Placeholder, QuoteIdent, ForUpdate and
       # ForUpdateSkipLocked. The SQL renderers of docstore and queue take the
       # dialect their store or broker was configured with, and the rule now
@@ -548,10 +548,10 @@ rules:
       # to be an engine — the one thing the type exists to make impossible —
       # and the same renderers compare it against the three constants. Scoped
       # to the two renderers.
-      - "**/internal/service/docstore/sql_dialect.go"
-      - "internal/service/docstore/sql_dialect.go"
-      - "**/internal/service/queue/sql_dialect.go"
-      - "internal/service/queue/sql_dialect.go"
+      - "**/internal/service/data/docstore/sql_dialect.go"
+      - "internal/service/data/docstore/sql_dialect.go"
+      - "**/internal/service/data/queue/sql_dialect.go"
+      - "internal/service/data/queue/sql_dialect.go"
       # The view engine's helpers take *html/template.Template, and here the
       # suggestion is not merely unactionable but actively dangerous: the rule
       # proposes `interface{ Execute(wr io.Writer, data any) error }`, which
@@ -618,10 +618,10 @@ rules:
       # advertise that any Syncer will do, which is false — and the testing seam
       # the suggestion is reaching for already exists one level up, as the
       # injectable atomicOps.syncDir that publish() drives.
-      - "**/internal/core/vfs/**"
-      - "internal/core/vfs/**"
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/core/data/vfs/**"
+      - "internal/core/data/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
 
       - "**/internal/service/crypto/**"
       - "internal/service/crypto/**"
@@ -926,20 +926,20 @@ rules:
       # which the same linter's naming rules discourage elsewhere (ADR 0111).
       - "**/internal/service/mail/spool/spool.go"
       - "internal/service/mail/spool/spool.go"
-      # service/docstore.Store is built by Open, as os.Open and sql.Open build
+      # service/data/docstore.Store is built by Open, as os.Open and sql.Open build
       # theirs: the constructor LOADS — the snapshot read, the overlay
       # replayed, the indexes rebuilt — and "open" is what that is called. A
       # NewStore beside it would be a second way in, one that either loads too
       # or builds a store over files it never read (ADR 0110).
-      - "**/internal/service/docstore/docstore.go"
-      - "internal/service/docstore/docstore.go"
-      # service/docstore.SQLStore is built by OpenSQL, the same engine family's
+      - "**/internal/service/data/docstore/docstore.go"
+      - "internal/service/data/docstore/docstore.go"
+      # service/data/docstore.SQLStore is built by OpenSQL, the same engine family's
       # constructor under the same verb as Store's Open. A NewSQLStore beside it
       # would be a second way in that skips the configuration's refusals — a
       # transactor that cannot join, a table name that is not safe to
       # interpolate — which OpenSQL decides before the store exists (ADR 0139).
-      - "**/internal/service/docstore/sql_store.go"
-      - "internal/service/docstore/sql_store.go"
+      - "**/internal/service/data/docstore/sql_store.go"
+      - "internal/service/data/docstore/sql_store.go"
       # service/proc/childwait.Claim is MINTED by Spawn, under the ledger's
       # spawning gate, and by nothing else (ADR 0093): the gate is what keeps a
       # sweep from taking the child for an orphan between the fork and the
@@ -1079,7 +1079,7 @@ rules:
       # message here likewise reads "constructor NewNewAttrValue()".)
       - "**/internal/core/security/authz/**"
       - "internal/core/security/authz/**"
-      # service/codec/toml.LocalDateTime is a VALUE of exported fields — a
+      # service/data/codec/toml.LocalDateTime is a VALUE of exported fields — a
       # LocalDate and a LocalTime, embedded — written as a composite literal,
       # exactly as the LocalDate and LocalTime it is made of (which the rule
       # does not flag), as time.Date's components are, and as the
@@ -1088,8 +1088,8 @@ rules:
       # must change its import and nothing else. NewLocalDateTime(date, clock)
       # would be a second spelling of the literal with nothing to validate:
       # the decoder fills it from a date and a time it has already checked.
-      - "**/internal/service/codec/toml/localtime.go"
-      - "internal/service/codec/toml/localtime.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
@@ -1112,7 +1112,7 @@ rules:
     exclude:
       - "**/internal/kernel/concur/singleflight/**"
       - "internal/kernel/concur/singleflight/**"
-      # service/vfs.memFS is the same shape and the same answer. Its RWMutex
+      # service/data/vfs.memFS is the same shape and the same answer. Its RWMutex
       # guards `map[string]*memNode`, and the map is a FILESYSTEM TREE: MkdirAll
       # inserts a whole chain of parents, RemoveAll deletes a node and every
       # descendant, and WriteFile must observe "is there a non-directory in the
@@ -1123,8 +1123,8 @@ rules:
       # unreachable. The workload is write-heavy by construction too: the
       # RWMutex earns its keep on the read side, and the read side is the half
       # sync.Map would not be helping.
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
   KTN-GOROUTINE-ATOMICVAL:
     exclude:
       - "**/internal/kernel/concur/singleflight/**"
@@ -1133,8 +1133,8 @@ rules:
       # field a writer swaps WHOLESALE, and memFS mutates its map in place under
       # the lock that also orders the compound operations above. Copy-on-write
       # would make every WriteFile clone the entire tree.
-      - "**/internal/service/vfs/**"
-      - "internal/service/vfs/**"
+      - "**/internal/service/data/vfs/**"
+      - "internal/service/data/vfs/**"
 
   # KTN-STRUCT-ROLE-STUTTER (phase 4) — the package name IS the signal's name.
   #
@@ -1166,20 +1166,20 @@ rules:
     exclude:
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
-      # service/docstore.Store is the word the SDK's storage ports already use
-      # — core/security/session.Store, core/cache.Store, core/security/secret.Store — and the
+      # service/data/docstore.Store is the word the SDK's storage ports already use
+      # — core/security/session.Store, core/data/cache.Store, core/security/secret.Store — and the
       # rule only spares them because they are interfaces. The concrete
       # document store is the same role under the same name; the suffix the
       # rule infers ("Service") would read docstore.StoreService and name the
       # one engine differently from every port it sits beside (ADR 0110).
-      - "**/internal/service/docstore/docstore.go"
-      - "internal/service/docstore/docstore.go"
-      # service/docstore.SQLStore is the same role over a database: the store,
+      - "**/internal/service/data/docstore/docstore.go"
+      - "internal/service/data/docstore/docstore.go"
+      # service/data/docstore.SQLStore is the same role over a database: the store,
       # named as its sibling engine is, prefixed by what it keeps its documents
       # in. "SQLStoreService" would name the second engine differently from the
       # first, and from every storage port beside them (ADR 0139).
-      - "**/internal/service/docstore/sql_store.go"
-      - "internal/service/docstore/sql_store.go"
+      - "**/internal/service/data/docstore/sql_store.go"
+      - "internal/service/data/docstore/sql_store.go"
       # kernel/plugin.Registry is the word every registrar in the SDK is
       # discussed in — "the exporter registry", "the codec registry",
       # RegisterExporter — and the table those registrars now share. None of
@@ -1189,7 +1189,7 @@ rules:
       # generic table differently from every registry built on it.
       - "**/internal/kernel/plugin/registry.go"
       - "internal/kernel/plugin/registry.go"
-      # service/codec/bson's value types — Binary, Regex, DBPointer,
+      # service/data/codec/bson's value types — Binary, Regex, DBPointer,
       # CodeWithScope, Timestamp, E, MinKey, MaxKey, Undefined, Null — are the
       # names of the BSON types they stand for (bsonspec.org), and the names
       # every MongoDB-shaped document is spoken in: a caller type-switches on
@@ -1198,9 +1198,9 @@ rules:
       # "TimestampValue") would rename the vocabulary to satisfy a rule, and a
       # compatibility alias to dodge it is itself a finding
       # (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
-      - "**/internal/service/codec/bson/types.go"
-      - "internal/service/codec/bson/types.go"
-      # service/codec/toml's LocalDate, LocalTime and LocalDateTime are the
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      # service/data/codec/toml's LocalDate, LocalTime and LocalDateTime are the
       # names of the three TOML kinds they hold — TOML v1.0.0 §Local Date,
       # §Local Time, §Local Date-Time — and the names the
       # github.com/pelletier/go-toml/v2 types they replace had, so that code
@@ -1208,8 +1208,8 @@ rules:
       # other by changing its import alone. The suffix the rule infers
       # ("Service") would name a value a service, and "LocalDateValue" would
       # break that one-line migration for every consumer.
-      - "**/internal/service/codec/toml/localtime.go"
-      - "internal/service/codec/toml/localtime.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the
@@ -1270,7 +1270,7 @@ rules:
       - "pkg/v1/cli/**"
       - "**/pkg/v1/proc/process/**"
       - "pkg/v1/proc/process/**"
-      # service/sql.Config is 72 bytes — eight over the threshold — and the
+      # service/data/sql.Config is 72 bytes — eight over the threshold — and the
       # eight are not removable: *sql.DB (8) + Dialect (1, padded to 8) +
       # PoolConfig (32) + clock.Timed (16) + CheckTimeout (8). Every field is
       # 8-aligned, so there is no padding hole for the Dialect byte and no
@@ -1285,15 +1285,15 @@ rules:
       # happens ONCE per port — three times in the life of a process, next to
       # a BeginTx that costs a network round trip — so the performance concern
       # the rule guards is not merely moot here, it is unmeasurable
-      # (internal/service/sql/BENCH.md).
+      # (internal/service/data/sql/BENCH.md).
       #
-      # pkg/v1/sql is included because its constructors are pure forwarders of
+      # pkg/v1/data/sql is included because its constructors are pure forwarders of
       # the same alias; excluding only the service layer would leave three
       # findings on functions whose entire body is `return svcsql.New…(cfg)`.
-      - "**/internal/service/sql/**"
-      - "internal/service/sql/**"
-      - "**/pkg/v1/sql/**"
-      - "pkg/v1/sql/**"
+      - "**/internal/service/data/sql/**"
+      - "internal/service/data/sql/**"
+      - "**/pkg/v1/data/sql/**"
+      - "pkg/v1/data/sql/**"
       # service/security/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
       # (16 each, interfaces), Name (16), PolicySpec (24: Every, Keep and the
       # generator func) and OnRotate (8) — and every field is a collaborator a
@@ -1311,7 +1311,7 @@ rules:
       - "internal/service/security/secret/**"
       - "**/pkg/v1/security/secret/**"
       - "pkg/v1/security/secret/**"
-      # service/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
+      # service/data/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
       # gave both Versions (8), Clock (16, an interface) and Held (8): the key
       # function (8), the filesystem (16) and the path (16), or the transactor
       # (16), IndexKey (8), the table (16) and the dialect (8), were already 48
@@ -1324,14 +1324,14 @@ rules:
       # that opened a pool, so the performance concern the rule guards is not
       # measurable here.
       #
-      # pkg/v1/docstore is included because Open and OpenSQL there are pure
+      # pkg/v1/data/docstore is included because Open and OpenSQL there are pure
       # forwarders of the same aliases.
-      - "**/internal/service/docstore/**"
-      - "internal/service/docstore/**"
-      - "**/pkg/v1/docstore/**"
-      - "pkg/v1/docstore/**"
-      # service/queue.FileConfig is 72 bytes and SQLConfig 96 since ADR 0151
-      # gave core/queue.PolicyValue MaxRetryDelay (8), taking it to 40: the
+      - "**/internal/service/data/docstore/**"
+      - "internal/service/data/docstore/**"
+      - "**/pkg/v1/data/docstore/**"
+      - "pkg/v1/data/docstore/**"
+      # service/data/queue.FileConfig is 72 bytes and SQLConfig 96 since ADR 0151
+      # gave core/data/queue.PolicyValue MaxRetryDelay (8), taking it to 40: the
       # clock (16, an interface) and the directory (16), or the transactor and
       # the clock (16 each), the table (16) and the dialect (8), were already
       # 32 and 56 beside it. Every field is a collaborator or a policy knob a
@@ -1343,12 +1343,12 @@ rules:
       # transactor that opened a pool, so the performance concern the rule
       # guards is not measurable here.
       #
-      # pkg/v1/queue is included because NewFile and NewSQL there are pure
+      # pkg/v1/data/queue is included because NewFile and NewSQL there are pure
       # forwarders of the same aliases.
-      - "**/internal/service/queue/**"
-      - "internal/service/queue/**"
-      - "**/pkg/v1/queue/**"
-      - "pkg/v1/queue/**"
+      - "**/internal/service/data/queue/**"
+      - "internal/service/data/queue/**"
+      - "**/pkg/v1/data/queue/**"
+      - "pkg/v1/data/queue/**"
       # core/net — value semantics ARE the contract, for three types:
       #
       #   IdentityValue (96 B) is the opaque, redacting TLS identity. It copies
@@ -1613,7 +1613,7 @@ rules:
   # value) would be printed by reflection instead of redacted. UnmarshalJSON and
   # UnmarshalText are the only two that assign. Scoped to the two packages.
   #
-  # service/codec/toml's LocalDate, LocalTime and LocalDateTime are the same
+  # service/data/codec/toml's LocalDate, LocalTime and LocalDateTime are the same
   # case under encoding.TextMarshaler: String, MarshalText and AsTime must be
   # VALUE methods, or a local value held in a map[string]any — where every
   # decode into an untyped target puts it — would not render through them;
@@ -1622,7 +1622,7 @@ rules:
   #
   # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
   # the two above: the SDK's document store encodes a sealing store's records
-  # BY VALUE — json.Marshal(v) in internal/service/docstore/write.go:123 —, so its
+  # BY VALUE — json.Marshal(v) in internal/service/data/docstore/write.go:123 —, so its
   # MarshalJSON — the record as it rests — must be a value method, while its
   # UnmarshalJSON keeps what it reads and must take a pointer. Scoped to the
   # one file.
@@ -1632,10 +1632,10 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/security/secret/**"
       - "internal/core/security/secret/**"
-      - "**/internal/service/codec/toml/localtime.go"
-      - "internal/service/codec/toml/localtime.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
   #
-  # service/codec/bson's DateTime, ObjectID and Decimal128 are the same case:
+  # service/data/codec/bson's DateTime, ObjectID and Decimal128 are the same case:
   # their MarshalJSON / MarshalText — and their String, Hex, IsZero, which a
   # value held in a map entry or an interface must answer — take a value
   # receiver, and UnmarshalJSON / UnmarshalText, which assign, a pointer one,
@@ -1647,30 +1647,30 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/security/secret/**"
       - "internal/core/security/secret/**"
-      - "**/internal/service/codec/toml/localtime.go"
-      - "internal/service/codec/toml/localtime.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
       - "**/framework/internal/kit/seal_store.go"
       - "framework/internal/kit/seal_store.go"
-      - "**/internal/service/codec/bson/types.go"
-      - "internal/service/codec/bson/types.go"
-      - "**/internal/service/codec/bson/objectid.go"
-      - "internal/service/codec/bson/objectid.go"
-      - "**/internal/service/codec/bson/decimal.go"
-      - "internal/service/codec/bson/decimal.go"
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      - "**/internal/service/data/codec/bson/objectid.go"
+      - "internal/service/data/codec/bson/objectid.go"
+      - "**/internal/service/data/codec/bson/decimal.go"
+      - "internal/service/data/codec/bson/decimal.go"
   KTN-STRUCT-RECVTYPE:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
       - "**/internal/core/security/secret/**"
       - "internal/core/security/secret/**"
-      - "**/internal/service/codec/bson/types.go"
-      - "internal/service/codec/bson/types.go"
-      - "**/internal/service/codec/bson/objectid.go"
-      - "internal/service/codec/bson/objectid.go"
-      - "**/internal/service/codec/bson/decimal.go"
-      - "internal/service/codec/bson/decimal.go"
-      - "**/internal/service/codec/toml/localtime.go"
-      - "internal/service/codec/toml/localtime.go"
+      - "**/internal/service/data/codec/bson/types.go"
+      - "internal/service/data/codec/bson/types.go"
+      - "**/internal/service/data/codec/bson/objectid.go"
+      - "internal/service/data/codec/bson/objectid.go"
+      - "**/internal/service/data/codec/bson/decimal.go"
+      - "internal/service/data/codec/bson/decimal.go"
+      - "**/internal/service/data/codec/toml/localtime.go"
+      - "internal/service/data/codec/toml/localtime.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
@@ -1744,8 +1744,8 @@ rules:
   #
   # Scoped to that one stub. RETIRE alongside the block above.
   #
-  # The second entry is the same class on a different seam. service/cache's
-  # memory store implements core/cache.Store, whose methods take a context
+  # The second entry is the same class on a different seam. service/data/cache's
+  # memory store implements core/data/cache.Store, whose methods take a context
   # because a REMOTE tier can block. This one cannot: every operation is an
   # in-process map access under a mutex, so there is no point at which a
   # cancellation could be honoured, and a ctx.Err() check would be a branch that
@@ -1768,8 +1768,8 @@ rules:
     exclude:
       - "**/internal/service/proc/cgroup/cgroup_other.go"
       - "internal/service/proc/cgroup/cgroup_other.go"
-      - "**/internal/service/cache/**"
-      - "internal/service/cache/**"
+      - "**/internal/service/data/cache/**"
+      - "internal/service/data/cache/**"
       - "**/internal/service/observe/trace/**"
       - "internal/service/observe/trace/**"
       # savepointSQL(_ coresql.Dialect, name string) discards its dialect BY
@@ -1782,8 +1782,8 @@ rules:
       # forgetting this file; naming it would only trade this finding for an
       # unused-parameter one, and using it would mean writing an unreachable
       # branch that returns empty SQL. Scoped to the one file.
-      - "**/internal/service/sql/dialect_sql.go"
-      - "internal/service/sql/dialect_sql.go"
+      - "**/internal/service/data/sql/dialect_sql.go"
+      - "internal/service/data/sql/dialect_sql.go"
       # The trace class again, on the native MessagePack codec's FUNC port.
       # Every encoder there has the signature of its encodeFunc type,
       # func(b []byte, v reflect.Value, depth int), because one plan cached
@@ -1795,8 +1795,8 @@ rules:
       # the direct map[string]V encoders, and the omitempty test of a kind
       # that is never empty, follow the same ports. Naming the parameter
       # would trade this finding for an unused-parameter one.
-      - "**/internal/service/codec/msgpack/**"
-      - "internal/service/codec/msgpack/**"
+      - "**/internal/service/data/codec/msgpack/**"
+      - "internal/service/data/codec/msgpack/**"
 
   # KTN-ITER-YIELD / KTN-STRUCT-ACCESSOR — false positives in the framework
   # module (kodflow/ktn-linter#692, #693). TEMPORARY.
@@ -1817,14 +1817,14 @@ rules:
       # framework module only.
       - "framework/**"
       - "**/framework/**"
-      # TEMPORARY — the same kodflow/ktn-linter#693, on service/sql.Withheld.
+      # TEMPORARY — the same kodflow/ktn-linter#693, on service/data/sql.Withheld.
       # Its Unwrap returns the driver's error it holds, and the rule asks for
       # it to be renamed Cause; but Unwrap is the errors package's protocol,
       # which errors.Is and errors.As call by that name, so the rename would
       # leave the driver's error unreachable — the opposite of what the type
       # exists for. Scoped to the one file; retire with #693.
-      - "**/internal/service/sql/withheld.go"
-      - "internal/service/sql/withheld.go"
+      - "**/internal/service/data/sql/withheld.go"
+      - "internal/service/data/sql/withheld.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on
@@ -1837,7 +1837,7 @@ rules:
   # • KTN-VAR-PTRINTF — false positive on a generic `*T` (kodflow/ktn-linter#365).
   #   v1.34.5 no longer flags internal/kernel/concur/snapshot's Value[T] *T signatures.
   # • KTN-API-MINIF — false positive on *snapshot.Value[...] params + a malformed
-  #   message (#366). v1.34.5 no longer flags internal/core/codec/registry.go.
+  #   message (#366). v1.34.5 no longer flags internal/core/data/codec/registry.go.
   # • KTN-TEST-PARALLEL — false positive: a serial test mutating the package
   #   global logger.Version (FrameworkVersion injection) was wrongly required to
   #   call t.Parallel() (a data race). Fixed by #379 (Closes #376) — NOPARALLEL

@@ -3,7 +3,7 @@ package kit
 
 import (
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // DatabaseURL is what a database's URL points at, as its engine describes it

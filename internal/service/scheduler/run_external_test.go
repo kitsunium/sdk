@@ -345,7 +345,7 @@ func TestJobPanicIsRecoveredAndReported(t *testing.T) {
 // TestAJobPanicCarriesTheJobsOwnStack pins that the recovered report still
 // names the code that panicked. A panic recovered without its stack is a
 // crash report pointing at the recover site — the engine, which did nothing
-// wrong — while the job's own frame is lost; service/events, service/queue and
+// wrong — while the job's own frame is lost; service/events, service/data/queue and
 // service/cli already capture it on the same path. The recovered value stays a
 // field and JOB_PANICKED stays the origin, so the stack changes what the
 // report says, not what it is.

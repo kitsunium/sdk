@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // The tuning kit declares for every database, by the suffix it adds to the

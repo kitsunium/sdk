@@ -91,7 +91,7 @@ package i18n
 import (
 	"io/fs"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	corei18n "github.com/kitsunium/sdk/internal/core/i18n"
 	svci18n "github.com/kitsunium/sdk/internal/service/i18n"
 )
@@ -333,8 +333,8 @@ func NewStore(fallback Tag, catalogues map[Tag]Catalogue) (store *Store, err err
 //
 // The bytes are decoded by the codec domain, so a catalogue is JSON, YAML,
 // TOML or any other registered format and this package contains no parser —
-// blank-import pkg/v1/codec to register one. fsys is io/fs.FS, so an embed.FS,
-// an os.DirFS and a pkg/v1/vfs filesystem all work here unchanged.
+// blank-import pkg/v1/data/codec to register one. fsys is io/fs.FS, so an embed.FS,
+// an os.DirFS and a pkg/v1/data/vfs filesystem all work here unchanged.
 //
 // The language comes from the file NAME: "en.json", "pt-PT.yaml".
 // Subdirectories are ignored rather than walked, and two files that

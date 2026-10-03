@@ -13,11 +13,11 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/health"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // A database in a running app: a lifecycle component, database:<name>,

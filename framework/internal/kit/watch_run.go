@@ -8,9 +8,9 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
 )
 
 // A watch in its app's run (watch.go declares it): its queue and consumer,

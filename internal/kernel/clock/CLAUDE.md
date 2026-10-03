@@ -66,7 +66,7 @@ only producer of — splitting them left three files nothing else referenced.
 ## Why `Clock` was NOT extended
 
 `Clock` is a **published port**, not an internal detail. `pkg/v1/clock`
-publishes it as an alias (ADR 0090), and `pkg/v1/cache.Config` is a *type
+publishes it as an alias (ADR 0090), and `pkg/v1/data/cache.Config` is a *type
 alias* for `internal/kernel/collections/cache.Config[K,V]`, whose `Clock` field carries this
 exact interface — so any consumer of the released `pkg` module can write a
 two-method double and pass it in. Go interfaces are structural: a double
@@ -85,7 +85,7 @@ a complete `Timed`:
 | `internal/service/observe/logger/writer/rotfile` | `fakeClock` |
 | `internal/service/resilience` | `steppedClock` |
 | `internal/service/id` | `steppedClock` |
-| `internal/service/queue` | `steppingClock` |
+| `internal/service/data/queue` | `steppingClock` |
 | `pkg/v1/clock` | `readOnlyClock`, `handClock` |
 
 Widening `Clock` would break all ten plus every downstream one. Adding

@@ -9,7 +9,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/i18n"
 
-	_ "github.com/kitsunium/sdk/pkg/v1/codec" // register every SDK codec Format
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec" // register every SDK codec Format
 )
 
 // polishLocale is a complete Polish catalogue: Polish rules produce one, few,

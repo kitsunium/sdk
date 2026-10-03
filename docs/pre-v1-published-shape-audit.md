@@ -48,15 +48,15 @@ This is the cheap two thirds of the surface.
 | public name (`pkg/v1`) | concrete type | declared in | published from |
 |---|---|---|---|
 | `BreakerConfig` | `BreakerConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
-| `ChainConfig` | `ChainConfig` | `svccache` | `pkg/v1/cache/cache.go` |
+| `ChainConfig` | `ChainConfig` | `svccache` | `pkg/v1/data/cache/cache.go` |
 | `Config` | `ClientConfig` | `corenet` | `pkg/v1/net/client/client.go` |
 | `CloudWatchConfig` | `CloudWatchConfig` | `corewriter` | `pkg/v1/observe/logger/writer.go` |
-| `Config` | `Config` | `kcache` | `pkg/v1/cache/cache.go` |
+| `Config` | `Config` | `kcache` | `pkg/v1/data/cache/cache.go` |
 | `Config` | `Config` | `svchealth` | `pkg/v1/health/health.go` |
 | `Config` | `Config` | `svclc` | `pkg/v1/lifecycle/lifecycle.go` |
 | `Config` | `Config` | `svcsched` | `pkg/v1/scheduler/scheduler.go` |
 | `Config` | `Config` | `svcsession` | `pkg/v1/security/session/session.go` |
-| `Config` | `Config` | `svcsql` | `pkg/v1/sql/sql.go` |
+| `Config` | `Config` | `svcsql` | `pkg/v1/data/sql/sql.go` |
 | `ConsoleConfig` | `ConsoleConfig` | `corewriter` | `pkg/v1/observe/logger/writer.go` |
 | `FallbackConfig` | `FallbackConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
 | `FileConfig` | `FileConfig` | `corewriter` | `pkg/v1/observe/logger/writer.go` |
@@ -68,14 +68,14 @@ This is the cheap two thirds of the surface.
 | `Params` | `IdentityParams` | `corenet` | `pkg/v1/net/tlsid/tlsid.go` |
 | `IssuerConfig` | `IssuerConfig` | `svctoken` | `pkg/v1/security/token/token.go` |
 | `KeepaliveConfig` | `KeepaliveConfig` | `svclock` | `pkg/v1/lock/lock.go` |
-| `MemoryConfig` | `MemoryConfig` | `svccache` | `pkg/v1/cache/cache.go` |
+| `MemoryConfig` | `MemoryConfig` | `svccache` | `pkg/v1/data/cache/cache.go` |
 | `MemoryConfig` | `MemoryConfig` | `svclock` | `pkg/v1/lock/lock.go` |
 | `MeterConfig` | `MeterConfig` | `svcmetrics` | `pkg/v1/observe/metrics/metrics.go` |
-| `MigrateConfig` | `MigrateConfig` | `svcsql` | `pkg/v1/sql/sql.go` |
+| `MigrateConfig` | `MigrateConfig` | `svcsql` | `pkg/v1/data/sql/sql.go` |
 | `OTLPHTTPConfig` | `OTLPHTTPConfig` | `svcmetrics` | `pkg/v1/observe/metrics/metrics.go` |
 | `PasetoIssuerConfig` | `PasetoIssuerConfig` | `svctoken` | `pkg/v1/security/token/token.go` |
 | `PasetoVerifierConfig` | `PasetoVerifierConfig` | `svctoken` | `pkg/v1/security/token/token.go` |
-| `PoolConfig` | `PoolConfig` | `svcsql` | `pkg/v1/sql/sql.go` |
+| `PoolConfig` | `PoolConfig` | `svcsql` | `pkg/v1/data/sql/sql.go` |
 | `RBACConfig` | `RBACConfig` | `svcauthz` | `pkg/v1/security/authz/authz.go` |
 | `RateLimiterConfig` | `RateLimiterConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
 | `RetryConfig` | `RetryConfig` | `svcres` | `pkg/v1/resilience/resilience.go` |
@@ -109,7 +109,7 @@ This is the expensive third.
 | `CredentialValue` | `CredentialValue` | `corewriter` | `pkg/v1/observe/logger/writer.go` |
 | `Default` | `DeclaredValue` | `coreconfig` | `pkg/v1/config/config.go` |
 | `Dispatch` | `DispatchValue` | `corev` | `pkg/v1/events/events.go` |
-| `Entry` | `EntryValue` | `corecache` | `pkg/v1/cache/cache.go` |
+| `Entry` | `EntryValue` | `corecache` | `pkg/v1/data/cache/cache.go` |
 | `Entry` | `EntryValue` | `coresched` | `pkg/v1/scheduler/scheduler.go` |
 | `Event` | `EventValue` | `coretrace` | `pkg/v1/observe/trace/trace.go` |
 | `ExitResult` | `ExitValue` | `coreproc` | `pkg/v1/proc/process/process.go` |
@@ -125,7 +125,7 @@ This is the expensive third.
 | `Link` | `LinkValue` | `coretrace` | `pkg/v1/observe/trace/trace.go` |
 | `ListenerState` | `ListenerStateValue` | `corenet` | `pkg/v1/net/server/server.go` |
 | `LivenessCheck` | `LivenessCheckValue` | `corehealth` | `pkg/v1/health/health.go` |
-| `Migration` | `MigrationValue` | `coresql` | `pkg/v1/sql/sql.go` |
+| `Migration` | `MigrationValue` | `coresql` | `pkg/v1/data/sql/sql.go` |
 | `Notification` | `NotificationValue` | `coreproc` | `pkg/v1/proc/systemd/notify/sdnotify.go` |
 | `Permission` | `PermissionValue` | `svcauthz` | `pkg/v1/security/authz/authz.go` |
 | `ReadinessCheck` | `ReadinessCheckValue` | `corehealth` | `pkg/v1/health/health.go` |
@@ -150,13 +150,13 @@ This is the expensive third.
 | `State` | `StateValue` | `corenet` | `pkg/v1/net/server/server.go` |
 | `State` | `StateValue` | `coresession` | `pkg/v1/security/session/session.go` |
 | `TraceState` | `StateValue` | `coretrace` | `pkg/v1/observe/trace/trace.go` |
-| `Stats` | `StatsValue` | `kcache` | `pkg/v1/cache/cache.go` |
+| `Stats` | `StatsValue` | `kcache` | `pkg/v1/data/cache/cache.go` |
 | `Status` | `StatusValue` | `coretrace` | `pkg/v1/observe/trace/trace.go` |
 | `Subscription` | `SubscriptionValue` | `corev` | `pkg/v1/events/events.go` |
 | `SumMetric` | `SumMetricValue` | `coremetrics` | `pkg/v1/observe/metrics/metrics.go` |
 | `SumPoint` | `SumValue` | `coremetrics` | `pkg/v1/observe/metrics/metrics.go` |
 | `Transition` | `TransitionValue` | `corelc` | `pkg/v1/lifecycle/lifecycle.go` |
-| `TxOptions` | `TxOptionsValue` | `coresql` | `pkg/v1/sql/sql.go` |
+| `TxOptions` | `TxOptionsValue` | `coresql` | `pkg/v1/data/sql/sql.go` |
 | `Violation` | `ViolationValue` | `corevalidation` | `pkg/v1/validation/validation.go` |
 | `Message` | `WSMessageValue` | `corenet` | `pkg/v1/net/websocket/websocket.go` |
 
@@ -168,7 +168,7 @@ change; a plain shape is as exposed as group B.
 
 | public name (`pkg/v1`) | concrete type | declared in | published from |
 |---|---|---|---|
-| `Cache` | `Cache` | `kcache` | `pkg/v1/cache/cache.go` |
+| `Cache` | `Cache` | `kcache` | `pkg/v1/data/cache/cache.go` |
 | `Client` | `Client` | `svcclient` | `pkg/v1/net/client/client.go` |
 | `Conn` | `Conn` | `corenet` | `pkg/v1/net/server/server.go` |
 | `Conn` | `Conn` | `svcws` | `pkg/v1/net/websocket/websocket.go` |

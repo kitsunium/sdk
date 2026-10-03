@@ -690,7 +690,7 @@ main:focus-visible {
 
 /* ── Benchmark tables (codec/errs/logger) ────────────────────────── */
 /* Each cell is wrapped in a <span class="bench-win|bench-loss"> by
-   pkg/v1/codec/codec_bench_test.go's renderer. The whole value gets a
+   pkg/v1/data/codec/codec_bench_test.go's renderer. The whole value gets a
    tinted background so the eye finds the green winners + red losers
    at a glance — no emoji noise. */
 .bench-win,

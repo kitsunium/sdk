@@ -4,19 +4,19 @@
 ## Purpose
 
 The **full** YAML codec — `gopkg.in/yaml.v3` behind the universal
-`core/codec.Codec` dispatch, registered under the Format **`"yaml-full"`**. It
+`core/data/codec.Codec` dispatch, registered under the Format **`"yaml-full"`**. It
 reads everything yaml.v3 reads: anchors and aliases, tags, merge keys, complex
 keys, multi-document streams, YAML 1.1 booleans and octals.
 
-The SDK's own `"yaml"` Format is `internal/service/codec/yaml`: a native,
+The SDK's own `"yaml"` Format is `internal/service/data/codec/yaml`: a native,
 standard-library-only reader of a **named subset** of YAML 1.2.2 sized for
 configuration, which refuses each of those constructs by name. This package is
 the way out for the program that genuinely needs one of them. It is a Go
 module of its own under `third-party/` (ADR 0157), so the public module stays
 standard-library-only (ADR 0156: `pkg` links no `gopkg.in/yaml.v3`) and only a
 consumer that names this module requires yaml.v3. **Opt-in**:
-blank-import this package to register `"yaml-full"`; `pkg/v1/codec` and
-`pkg/v1/codec/yaml` do NOT pull it.
+blank-import this package to register `"yaml-full"`; `pkg/v1/data/codec` and
+`pkg/v1/data/codec/yaml` do NOT pull it.
 
 ## Surface
 
@@ -75,7 +75,7 @@ of the two readers: fix the native codec, keep the input.
 ## Cost
 
 `BENCH.md` measures this codec on the same fixtures as the native one
-(`internal/service/codec/yaml/BENCH.md`): the native subset decodes the same
+(`internal/service/data/codec/yaml/BENCH.md`): the native subset decodes the same
 documents several times faster with a fraction of the allocations, so choose
 this package for what it reads, never for speed.
 
@@ -83,7 +83,7 @@ this package for what it reads, never for speed.
 
 - Claim `.yaml`, `.yml` or a YAML MIME type here: the registry would panic in
   every program importing both codecs.
-- Add this package to `pkg/v1/codec`'s blank imports — it would put
+- Add this package to `pkg/v1/data/codec`'s blank imports — it would put
   `gopkg.in/yaml.v3` back into the public module.
 - Use `fmt.Errorf`/`errors.New`; wrap through `errs.Wrap`.
 

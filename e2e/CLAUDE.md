@@ -37,7 +37,7 @@ e2e/
 │   ├── reaper.go        reaper (subreaper acquisition + orphan adoption)
 │   └── proc_systemd.go  sdnotify (readiness round-trip) + sdlisten (activation env)
 └── integration/       Docker-backed suites, //go:build integration only — see integration/CLAUDE.md
-    ├── sql/            pkg/v1/{sql,docstore,queue} on SQLite, PostgreSQL 17, MySQL 8.4
+    ├── sql/            pkg/v1/data/{sql,docstore,queue} on SQLite, PostgreSQL 17, MySQL 8.4
     └── writer/         third-party/db/writer/{clickhouse,mysql,redis} against real servers
 ```
 

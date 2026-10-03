@@ -8,7 +8,7 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 

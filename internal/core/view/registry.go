@@ -1,6 +1,6 @@
 // Package view — holds the process-wide [Factory] registry. Engine packages
 // register themselves through package-level var initialisers when imported (no
-// init()), mirroring core/codec and core/observe/logger/writer.
+// init()), mirroring core/data/codec and core/observe/logger/writer.
 package view
 
 import (

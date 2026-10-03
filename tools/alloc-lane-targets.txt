@@ -24,7 +24,7 @@
 # same commit, or the guard fails the build.
 
 # Per-codec allocation-budget regression tests.        (original)
-//internal/service/codec/...
+//internal/service/data/codec/...
 # The full yaml.v3 codec kept opt-in beside the native subset: same budget test,
 # re-pinned on the library it wraps.
 //third-party/codec/yaml:yaml_test
@@ -153,5 +153,5 @@
 # under instrumentation. Mutation-checked in the file's doc comment: the guard
 # as it stood before the fix allocates 12.9x the frame ceiling against a budget
 # of 4x.
-//pkg/v1/codec:codec_test
+//pkg/v1/data/codec:codec_test
 //framework/telemetry:telemetry_test

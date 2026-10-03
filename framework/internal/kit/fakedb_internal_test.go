@@ -15,8 +15,8 @@ import (
 	"strings"
 	"sync"
 
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // FakeDB is a database for kit's tests, with no network and no driver: the

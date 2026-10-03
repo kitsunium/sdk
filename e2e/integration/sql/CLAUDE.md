@@ -3,9 +3,9 @@
 ## Purpose
 
 The SDK's SQL mechanisms on the three real engines, through real drivers: the
-document store over SQL (`pkg/v1/docstore`, ADR 0139) with its versions
-(ADR 0143), the queue's SQL broker (`pkg/v1/queue`, ADR 0151), and the
-transactor's and migration runner's contracts (`pkg/v1/sql`), SQLite's file
+document store over SQL (`pkg/v1/data/docstore`, ADR 0139) with its versions
+(ADR 0143), the queue's SQL broker (`pkg/v1/data/queue`, ADR 0151), and the
+transactor's and migration runner's contracts (`pkg/v1/data/sql`), SQLite's file
 lock among them (ADR 0140). It is a suite, not a package: every file is an
 `//go:build integration` test, and there is no production code.
 
@@ -53,9 +53,9 @@ GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchme
 
 They are a named, manual lane, as the database writers' suites beside them
 are (`e2e/integration/CLAUDE.md`): CI's runners do not start the containers.
-Run them on any change to `internal/service/sql`, `internal/core/sql`, the SQL
-engine of `internal/service/docstore`, or the SQL broker of
-`internal/service/queue`.
+Run them on any change to `internal/service/data/sql`, `internal/core/data/sql`, the SQL
+engine of `internal/service/data/docstore`, or the SQL broker of
+`internal/service/data/queue`.
 
 ## Do NOT
 

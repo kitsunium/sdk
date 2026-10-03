@@ -27,7 +27,7 @@ services its own free list and the cores stop talking to each other.
 The package doc claimed callers recycle "without paying the boxing cost". That
 is true only for pointer-shaped `T`, and the comment now says so. **Every
 consumer in this repository already pools a pointer** — `kernel/concur/buffer` holds
-`*[]byte`, `core/codec/scratch` holds `*bytes.Buffer` and `*bytes.Reader`,
+`*[]byte`, `core/data/codec/scratch` holds `*bytes.Buffer` and `*bytes.Reader`,
 `service/observe/logger` holds `*chainBuilder`, `middleware/async` holds `*recordEntry`,
 `net/server` holds `*pooledConn` — so nothing in the tree pays this. The
 benchmark pair exists to keep the next consumer honest.

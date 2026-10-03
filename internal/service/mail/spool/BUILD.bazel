@@ -20,13 +20,13 @@ go_library(
         "//internal/service:service_consumers",
     ],
     deps = [
+        "//internal/core/data/queue",
         "//internal/core/mail",
-        "//internal/core/queue",
         "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/data/queue",
         "//internal/service/id",
-        "//internal/service/queue",
     ],
 )
 
@@ -50,14 +50,14 @@ go_test(
     ],
     embed = [":spool"],
     deps = [
+        "//internal/core/data/queue",
         "//internal/core/mail",
         "//internal/core/proc",
-        "//internal/core/queue",
         "//internal/kernel/backoff",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/service/data/queue",
         "//internal/service/mail",
-        "//internal/service/queue",
     ],
 )
 

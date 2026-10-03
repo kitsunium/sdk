@@ -5,10 +5,10 @@
 // own codec refuses by name.
 //
 // It is a module of its own under third-party/ (ADR 0157), NOT
-// internal/service/codec, because the SDK's own "yaml" Format is a native,
-// standard-library-only reader of a named subset (internal/service/codec/yaml)
+// internal/service/data/codec, because the SDK's own "yaml" Format is a native,
+// standard-library-only reader of a named subset (internal/service/data/codec/yaml)
 // and the public module stays free of gopkg.in/yaml.v3. It is opt-in: a consumer blank-imports this package
-// to register "yaml-full"; pkg/v1/codec does NOT pull it.
+// to register "yaml-full"; pkg/v1/data/codec does NOT pull it.
 //
 // It claims NO MIME type and NO file extension. ".yaml", ".yml" and
 // application/yaml stay the native codec's, whatever else a program imports, so
@@ -25,8 +25,8 @@ import (
 
 	goyaml "gopkg.in/yaml.v3"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
-	"github.com/kitsunium/sdk/internal/core/codec/scratch"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

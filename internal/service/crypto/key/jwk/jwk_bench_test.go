@@ -136,7 +136,7 @@ func BenchmarkAllByKid(b *testing.B) {
 // makeAllByKidBench returns the timed body for one (set, kid) pair.
 //
 // The set is a PARAMETER rather than a closed-over loop-body local, which is
-// the same shape pkg/v1/codec's makeMarshalBench uses: a captured local escapes
+// the same shape pkg/v1/data/codec's makeMarshalBench uses: a captured local escapes
 // to the heap for the whole benchmark, and a jwk.Set captured per sub-benchmark
 // would put the harness's own allocations inside the window it measures.
 func makeAllByKidBench(set jwk.Set, kid string) func(b *testing.B) {
