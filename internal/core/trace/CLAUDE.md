@@ -41,7 +41,7 @@ attribute model moved to `internal/core/otel`).
 | `sampling_params.go` | `SamplingParams` — what a Sampler sees |
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
 | `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/otel` and refusing with this package's `InvalidAttribute` |
-| `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) |
+| `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/metrics`' exporter registry runs on too |
 | `codes.go` | `Code*` constants — range 0.2.20.* |
 | `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute` |
 

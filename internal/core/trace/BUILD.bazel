@@ -36,7 +36,6 @@ go_library(
         "//internal/core/otel",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
-        "//internal/kernel/snapshot",
     ],
 )
 

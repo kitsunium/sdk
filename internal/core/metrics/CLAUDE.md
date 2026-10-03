@@ -52,7 +52,7 @@ may hold.
 | `describer.go` | `Describer` — the third sibling: `Describe(name, description string)`, deliberately NOT in `FullMeter` |
 | `sum_value.go` / `gauge_value.go` / `histogram_value.go` | the three per-series point types |
 | `snapshot_value.go` | `SumMetricValue`/`GaugeMetricValue`/`HistogramMetricValue` + `SnapshotValue` |
-| `exporter.go` | `Exporter` + `ExporterName` + registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) |
+| `exporter.go` | `Exporter` + `ExporterName` + registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) over `internal/kernel/plugin.Registry` — the table `core/trace`'s exporter registry runs on too |
 | `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) |
 
 `pkg/v1/metrics` publishes these under shorter names — `Snapshot`,
@@ -194,8 +194,9 @@ a reader is safe; a writer would corrupt every future snapshot.
   observation path entirely. An empty description and a second, differing one
   are both programmer errors the implementation panics on
   (`InvalidDescription` / `DescriptionConflict`); identical text is idempotent.
-- **Exporter registry** mirrors the writer registry (`snapshot.Value`, idempotent
-  Register, panic on conflict).
+- **Exporter registry** mirrors the writer registry (`kernel/plugin.Registry`
+  over a `snapshot.Value`, idempotent Register, panic on conflict under this
+  package's `DUPLICATE_REGISTRATION`).
 - A name reused across instrument kinds is a programmer error
   (`InstrumentKindConflict`) — including Counter versus UpDownCounter, which
   would flip `Monotonic` on a metric a backend already trusts.
