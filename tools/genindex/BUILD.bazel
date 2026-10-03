@@ -27,5 +27,8 @@ go_test(
         "doclinks_test.go",
         "main_test.go",
     ],
+    # Test_platforms reads the cross-build matrix from the workflow itself, at
+    # the same path relative to this package as `go test` sees it.
+    data = ["//:.github/workflows/bazel-ci.yml"],
     embed = [":genindex_lib"],
 )
