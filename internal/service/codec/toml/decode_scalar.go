@@ -63,24 +63,41 @@ func instantOf(dt *datetime) time.Time {
 	return time.Date(dt.year, time.Month(dt.month), dt.day, dt.hour, dt.minute, dt.second, dt.nanosecond, zone)
 }
 
-// scalar decodes the scalar node n into v.
+// scalar decodes the scalar node n into v: into a kind that holds it, else
+// through the type's UnmarshalText, else refused — the precedence the replaced
+// library had, so a string-kinded type with an UnmarshalText is still set
+// directly from a TOML string.
 func (d *decoder) scalar(n int32, v reflect.Value) error {
 	node := &d.p.nodes[n]
 	info := infoOf(v.Type())
-	//: time.Time and the local types take a date or time as it is.
-	if info.is(typeSpecial) && node.kind >= kindDateTime {
+	//: a date or a time goes into time.Time or a local type, and nothing else.
+	if node.kind >= kindDateTime {
 		//: assigned, or refused.
 		return d.temporal(n, v)
 	}
-	//: a type that reads its own text reads the value's.
-	if info.is(typeTextUnmarshaler) && v.Kind() != reflect.Interface {
-		//: the string's value, or the token as written.
+	//: a kind that holds the value: assigned, or refused for its range.
+	if held, err := d.native(n, v); held {
+		//: nil, or the range refusal.
+		return err
+	}
+	//: a type that reads its own text reads the string, or the token.
+	if info.is(typeTextUnmarshaler) {
+		//: through UnmarshalText.
 		return d.unmarshalText(n, v, d.p.textBytes(node))
 	}
+	//: nothing else holds it.
+	return d.fail(n, problemMismatch, v.Type())
+}
+
+// native assigns a string, an integer, a float or a boolean to v when v's
+// kind holds it, and reports whether it did: a value out of the kind's range
+// is refused there; any other kind is left to the caller.
+func (d *decoder) native(n int32, v reflect.Value) (held bool, err error) {
+	node := &d.p.nodes[n]
 	switch node.kind {
 	//: a string.
 	case kindString:
-		return d.setString(n, v)
+		return d.setString(n, v), nil
 	//: an integer.
 	case kindInteger:
 		return d.setInteger(n, v)
@@ -89,28 +106,28 @@ func (d *decoder) scalar(n int32, v reflect.Value) error {
 		return d.setFloat(n, v, math.Float64frombits(node.num))
 	//: a boolean.
 	case kindBool:
-		return d.setBool(n, v)
-	//: a date or a time into anything but the special types.
+		return d.setBool(n, v), nil
+	//: a date or a time: the special types, handled by the caller.
 	default:
-		return d.fail(n, problemMismatch, v.Type())
+		return false, nil
 	}
 }
 
-// setString decodes a string into a string kind.
-func (d *decoder) setString(n int32, v reflect.Value) error {
+// setString assigns a string to a string kind, and reports whether v was one.
+func (d *decoder) setString(n int32, v reflect.Value) bool {
 	//: only a string holds a string.
 	if v.Kind() != reflect.String {
-		//: refused.
-		return d.fail(n, problemMismatch, v.Type())
+		//: not this kind.
+		return false
 	}
 	v.SetString(string(d.p.textBytes(&d.p.nodes[n])))
-	//: decoded.
-	return nil
+	//: assigned.
+	return true
 }
 
-// setInteger decodes an integer into a signed, unsigned or float kind that
-// holds its value.
-func (d *decoder) setInteger(n int32, v reflect.Value) error {
+// setInteger assigns an integer to a signed, unsigned or float kind, and
+// reports whether v was one; a value out of the kind's range is refused.
+func (d *decoder) setInteger(n int32, v reflect.Value) (held bool, err error) {
 	i := int64(d.p.nodes[n].num)
 	switch v.Kind() {
 	//: a signed integer of any width.
@@ -118,7 +135,7 @@ func (d *decoder) setInteger(n int32, v reflect.Value) error {
 		//: wider than the field.
 		if v.OverflowInt(i) {
 			//: refused.
-			return d.fail(n, problemOverflow, v.Type())
+			return true, d.fail(n, problemOverflow, v.Type())
 		}
 		v.SetInt(i)
 	//: an unsigned integer of any width.
@@ -126,48 +143,48 @@ func (d *decoder) setInteger(n int32, v reflect.Value) error {
 		//: negative, or wider than the field.
 		if i < 0 || v.OverflowUint(uint64(i)) {
 			//: refused.
-			return d.fail(n, problemOverflow, v.Type())
+			return true, d.fail(n, problemOverflow, v.Type())
 		}
 		v.SetUint(uint64(i))
 	//: a float holds an integer, as the previous library allowed.
 	case reflect.Float32, reflect.Float64:
 		return d.setFloat(n, v, float64(i))
-	//: nothing else.
+	//: not an integer kind.
 	default:
-		return d.fail(n, problemMismatch, v.Type())
+		return false, nil
 	}
-	//: decoded.
-	return nil
+	//: assigned.
+	return true, nil
 }
 
-// setFloat decodes f into a float kind, refusing a finite value float32
-// cannot hold.
-func (d *decoder) setFloat(n int32, v reflect.Value, f float64) error {
+// setFloat assigns f to a float kind, and reports whether v was one; a finite
+// value float32 cannot hold is refused.
+func (d *decoder) setFloat(n int32, v reflect.Value, f float64) (held bool, err error) {
 	//: only a float holds a float.
 	if v.Kind() != reflect.Float32 && v.Kind() != reflect.Float64 {
-		//: refused.
-		return d.fail(n, problemMismatch, v.Type())
+		//: not this kind.
+		return false, nil
 	}
 	//: a finite value beyond float32's range would become an infinity.
 	if v.Kind() == reflect.Float32 && !math.IsInf(f, 0) && math.Abs(f) > math.MaxFloat32 {
 		//: refused.
-		return d.fail(n, problemOverflow, v.Type())
+		return true, d.fail(n, problemOverflow, v.Type())
 	}
 	v.SetFloat(f)
-	//: decoded.
-	return nil
+	//: assigned.
+	return true, nil
 }
 
-// setBool decodes a boolean into a bool kind.
-func (d *decoder) setBool(n int32, v reflect.Value) error {
+// setBool assigns a boolean to a bool kind, and reports whether v was one.
+func (d *decoder) setBool(n int32, v reflect.Value) bool {
 	//: only a bool holds a boolean.
 	if v.Kind() != reflect.Bool {
-		//: refused.
-		return d.fail(n, problemMismatch, v.Type())
+		//: not this kind.
+		return false
 	}
 	v.SetBool(d.p.nodes[n].num == 1)
-	//: decoded.
-	return nil
+	//: assigned.
+	return true
 }
 
 // temporal decodes a date or time node into time.Time or one of the local
@@ -185,7 +202,9 @@ func (d *decoder) temporal(n int32, v reflect.Value) error {
 	//: a local type takes its own kind only.
 	case node.kind != kindDateTime && t == localTypeOf(node.kind):
 		out = d.localAny(node)
-	//: an offset date-time into a local type, or a mismatched local type.
+	//: an offset date-time into a local type, a mismatched local type, or any
+	//: other type — not even through UnmarshalText, which the replaced
+	//: library never offered a date.
 	default:
 		return d.fail(n, problemMismatch, t)
 	}

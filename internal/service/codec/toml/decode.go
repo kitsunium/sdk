@@ -24,6 +24,9 @@ const (
 	problemText string = "the target's UnmarshalText refused the value"
 	// problemEmbedded: a nil pointer to an unexported embedded struct.
 	problemEmbedded string = "a nil pointer to an unexported embedded struct cannot be allocated"
+	// problemArrayTooShort: an array of tables longer than the Go array it
+	// decodes into.
+	problemArrayTooShort string = "the array of tables has more elements than the Go array holds"
 	// problemNotThisKind: text that is not the date or time a local type
 	// reads.
 	problemNotThisKind string = "the text is not the date or time this type reads"
@@ -126,20 +129,30 @@ func (d *decoder) anyInto(n int32, existing any) any {
 	return d.anyTable(n)
 }
 
-// mergeTable writes the children of table t into m: a table into a table
-// already there is merged, anything else replaces.
+// mergeTable writes the children of table t into m: a table a header or a
+// dotted key defined is merged into a map already there; an inline table,
+// like any other value, replaces what was there — the replaced library's rule.
 func (d *decoder) mergeTable(t int32, m map[string]any) {
 	nodes := d.p.nodes
 	//: each child.
 	for c := nodes[t].first; c != noNode; c = nodes[c].next {
 		key := d.keyString(c)
 		//: a table meeting a map is merged into it.
-		if nodes[c].kind == kindTable {
+		if d.merges(c) {
 			m[key] = d.anyInto(c, m[key])
 			continue
 		}
 		m[key] = d.anyValue(c)
 	}
+}
+
+// merges reports whether node c merges into a map its target already holds:
+// a table a header or a dotted key defined does; an inline table is
+// self-contained and replaces it, as every other value does.
+func (d *decoder) merges(c int32) bool {
+	node := &d.p.nodes[c]
+	//: a standard table, not an inline one.
+	return node.kind == kindTable && node.origin != originInline
 }
 
 // keyString returns the key of node c as a string, never one aliasing the

@@ -64,8 +64,8 @@ func (d *decoder) intoInterface(n int32, v reflect.Value) error {
 		current = v.Elem().Interface()
 	}
 	var decoded any
-	//: a table merges into a map already there.
-	if d.p.nodes[n].kind == kindTable {
+	//: a standard table merges into a map already there; anything else replaces.
+	if d.merges(n) {
 		decoded = d.anyInto(n, current)
 	} else {
 		decoded = d.anyValue(n)
@@ -81,7 +81,10 @@ func (d *decoder) intoInterface(n int32, v reflect.Value) error {
 	return nil
 }
 
-// table decodes table n into v, a struct or a map.
+// table decodes table n into v: a struct, a map, or — as the replaced
+// library allowed — a slice, whose last element the table goes into (one is
+// appended to an empty slice), or an array, whose first element it goes into
+// when the table is only passed through on the way to a deeper one.
 func (d *decoder) table(n int32, v reflect.Value) error {
 	switch v.Kind() {
 	//: a struct: each key to its field.
@@ -90,10 +93,52 @@ func (d *decoder) table(n int32, v reflect.Value) error {
 	//: a map: each key to an entry.
 	case reflect.Map:
 		return d.mapEntries(n, v)
+	//: a slice: its last element, appended when there is none.
+	case reflect.Slice:
+		return d.tableIntoSlice(n, v)
+	//: an array: its first element.
+	case reflect.Array:
+		return d.tableIntoArray(n, v)
 	//: nothing else holds a table.
 	default:
 		return d.fail(n, problemMismatch, v.Type())
 	}
+}
+
+// tableIntoSlice decodes table n into the last element of slice v, appending
+// a zero one to an empty slice. An inline table is a value, which a slice
+// cannot hold.
+func (d *decoder) tableIntoSlice(n int32, v reflect.Value) error {
+	//: an inline table into a slice.
+	if d.p.nodes[n].origin == originInline {
+		//: refused.
+		return d.fail(n, problemMismatch, v.Type())
+	}
+	//: an empty slice gets the element the table fills.
+	if v.Len() == 0 {
+		v.Set(reflect.Append(v, reflect.New(v.Type().Elem()).Elem()))
+	}
+	//: the last element.
+	return d.value(n, v.Index(v.Len()-1))
+}
+
+// tableIntoArray decodes table n into the first element of array v, when n
+// is a table a longer header or a dotted key passed through. A table defined
+// by its own header, or inline, cannot be stored in an array: the replaced
+// library refused both.
+func (d *decoder) tableIntoArray(n int32, v reflect.Value) error {
+	//: only a table passed through on the way.
+	if from := d.p.nodes[n].origin; from != originImplicit && from != originDotted {
+		//: refused.
+		return d.fail(n, problemMismatch, v.Type())
+	}
+	//: an array of length zero has no element to fill.
+	if v.Len() == 0 {
+		//: refused.
+		return d.fail(n, problemArrayTooShort, v.Type())
+	}
+	//: the first element.
+	return d.value(n, v.Index(0))
 }
 
 // structFields decodes each key of table n into the field of struct v it
@@ -149,11 +194,12 @@ func (d *decoder) field(c int32, v reflect.Value, index []int) (reflect.Value, e
 }
 
 // mapEntries decodes each key of table n into an entry of map v. An entry
-// already there is decoded into, so a table merges into the map it meets.
+// already there is decoded into, so a standard table merges into the map it
+// meets; an inline table is self-contained and starts from an empty map.
 func (d *decoder) mapEntries(n int32, v reflect.Value) error {
 	t := v.Type()
-	//: a nil map is created at the table's size.
-	if v.IsNil() {
+	//: a nil map, or one an inline table replaces, is created at the table's size.
+	if v.IsNil() || !d.merges(n) {
 		v.Set(reflect.MakeMapWithSize(t, int(d.p.nodes[n].count)))
 	}
 	key := reflect.New(t.Key()).Elem()
@@ -183,33 +229,29 @@ func (d *decoder) mapEntries(n int32, v reflect.Value) error {
 }
 
 // mapKey converts the key of node c into key, a value of the map's key type:
-// a string kind, an integer or a float spelled in decimal, or a type whose
-// pointer implements encoding.TextUnmarshaler.
+// a string kind, an integer or a float spelled in decimal, or — for any other
+// kind — a type whose pointer implements encoding.TextUnmarshaler. The kinds
+// come first, as they did in the replaced library.
 func (d *decoder) mapKey(c int32, key reflect.Value) error {
 	raw := d.p.keyBytes(&d.p.nodes[c])
-	//: a type that reads its own text.
-	if infoOf(key.Type()).is(typeTextUnmarshaler) {
-		//: through UnmarshalText.
-		return d.unmarshalText(c, key, raw)
-	}
-	text := d.p.internKey(raw)
 	var ok bool
 	switch key.Kind() {
 	//: the common case.
 	case reflect.String:
-		key.SetString(text)
+		key.SetString(d.p.internKey(raw))
 		ok = true
 	//: a signed integer key.
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		ok = setIntKey(key, text)
+		ok = setIntKey(key, raw)
 	//: an unsigned integer key.
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		ok = setUintKey(key, text)
+		ok = setUintKey(key, raw)
 	//: a float key.
 	case reflect.Float32, reflect.Float64:
-		ok = setFloatKey(key, text)
-	//: no other key type.
+		ok = setFloatKey(key, raw)
+	//: any other key type reads its own text, or none.
 	default:
+		return d.textKey(c, key, raw)
 	}
 	//: a key the type cannot hold.
 	if !ok {
@@ -220,9 +262,21 @@ func (d *decoder) mapKey(c int32, key reflect.Value) error {
 	return nil
 }
 
+// textKey converts a key through the key type's UnmarshalText, refusing a
+// type that has none.
+func (d *decoder) textKey(c int32, key reflect.Value, raw []byte) error {
+	//: a type that reads its own text.
+	if infoOf(key.Type()).is(typeTextUnmarshaler) {
+		//: through UnmarshalText.
+		return d.unmarshalText(c, key, raw)
+	}
+	//: no way to spell a key in this type.
+	return d.fail(c, problemMapKey, key.Type())
+}
+
 // setIntKey parses raw as a decimal integer into the signed key.
-func setIntKey(key reflect.Value, raw string) bool {
-	i, err := strconv.ParseInt(raw, int(decimalBase), 64)
+func setIntKey(key reflect.Value, raw []byte) bool {
+	i, err := strconv.ParseInt(string(raw), int(decimalBase), 64)
 	//: malformed, or too large for the key type.
 	if err != nil || key.OverflowInt(i) {
 		//: refused.
@@ -234,8 +288,8 @@ func setIntKey(key reflect.Value, raw string) bool {
 }
 
 // setUintKey parses raw as a decimal integer into the unsigned key.
-func setUintKey(key reflect.Value, raw string) bool {
-	u, err := strconv.ParseUint(raw, int(decimalBase), 64)
+func setUintKey(key reflect.Value, raw []byte) bool {
+	u, err := strconv.ParseUint(string(raw), int(decimalBase), 64)
 	//: malformed, or too large for the key type.
 	if err != nil || key.OverflowUint(u) {
 		//: refused.
@@ -247,8 +301,8 @@ func setUintKey(key reflect.Value, raw string) bool {
 }
 
 // setFloatKey parses raw as a float into the float key.
-func setFloatKey(key reflect.Value, raw string) bool {
-	f, err := strconv.ParseFloat(raw, key.Type().Bits())
+func setFloatKey(key reflect.Value, raw []byte) bool {
+	f, err := strconv.ParseFloat(string(raw), key.Type().Bits())
 	//: malformed.
 	if err != nil {
 		//: refused.
@@ -278,8 +332,10 @@ func (d *decoder) unmarshalText(c int32, v reflect.Value, raw []byte) error {
 }
 
 // array decodes array n, static or of tables, into v: a slice, which is
-// replaced, or an array, filled from the start and zeroed past the document's
-// elements, which beyond its length are dropped.
+// replaced, or an array, filled from the start — as the replaced library
+// filled one: elements past a static array's length are dropped, an array of
+// tables longer than it is refused, and elements the document does not reach
+// are left as they were.
 func (d *decoder) array(n int32, v reflect.Value) error {
 	count := int(d.p.nodes[n].count)
 	switch v.Kind() {
@@ -296,7 +352,11 @@ func (d *decoder) array(n int32, v reflect.Value) error {
 		return nil
 	//: a Go array of fixed length.
 	case reflect.Array:
-		v.SetZero()
+		//: an element of an array of tables has nowhere to go.
+		if d.p.nodes[n].kind == kindArrayOfTables && count > v.Len() {
+			//: refused.
+			return d.fail(n, problemArrayTooShort, v.Type())
+		}
 		//: each element that fits.
 		return d.elements(n, v)
 	//: nothing else holds an array.

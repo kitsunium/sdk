@@ -7,10 +7,11 @@ The TOML codec, written natively against TOML v1.0.0 with the standard library
 alone — no third-party module, so that the public `pkg` module moves toward
 depending on the standard library and the SDK only. It replaced a wrapper around
 `github.com/pelletier/go-toml/v2` v2.4.3 and keeps its observable behaviour:
-same package, API, `Format` name and error codes; the same decoded values
-(differentially fuzzed against it, 19.7 M inputs, no divergence); the same
-encoded bytes (identical on all 262 valid toml-test documents and on every
-struct-tag option).
+same package, API, `Format` name and error codes; the same decoded values —
+differentially fuzzed against it, 19.7 M inputs into `map[string]any` with no
+divergence, 11.8 M into a typed struct with none but the deliberate ones
+listed below; the same encoded bytes (identical on all 262 valid toml-test
+documents and on every struct-tag option).
 
 ## Surface
 
@@ -77,14 +78,21 @@ secrets live; `TestRefusalNeverQuotesTheDocument` pins it.
 
 | TOML | untyped target (`map[string]any`, `any`) | typed targets |
 |---|---|---|
-| table | `map[string]any` (merged into one already there) | struct, `map[K]V` (`K` a string, an integer, a float or a TextUnmarshaler) |
-| array, array of tables | `[]any` | slice (replaced), array (filled, rest zeroed, extra dropped) |
-| string | `string` | string kinds; any TextUnmarshaler (`time.Time`, `net.IP`, the local types…) |
-| integer | `int64` | signed, unsigned (range-checked), float kinds |
-| float | `float64` | float kinds (`float32` range-checked) |
-| boolean | `bool` | bool |
-| offset date-time | `time.Time` (UTC for a zero offset, else a fixed zone) | `time.Time` |
-| local date-time / date / time | `LocalDateTime` / `LocalDate` / `LocalTime` | the same type, or `time.Time` in `time.Local` |
+| table | `map[string]any` | struct; `map[K]V` (`K` a string, integer or float kind, else a TextUnmarshaler); a slice's last element (one appended to an empty slice); an array's first element, for a table a longer header or a dotted key passes through |
+| array, array of tables | `[]any` | slice (replaced); array (filled from the start, extra static elements dropped, an array of tables too long refused, unreached elements left alone) |
+| string | `string` | a string kind directly; any other kind through its UnmarshalText (`time.Time`, `net.IP`, the local types…) |
+| integer | `int64` | signed, unsigned (range-checked), float kinds directly; any other kind through its UnmarshalText |
+| float | `float64` | float kinds (`float32` range-checked); any other kind through its UnmarshalText |
+| boolean | `bool` | bool; any other kind through its UnmarshalText |
+| offset date-time | `time.Time` (UTC for a zero offset, else a fixed zone) | `time.Time` only |
+| local date-time / date / time | `LocalDateTime` / `LocalDate` / `LocalTime` | the same type, or `time.Time` in `time.Local`; nothing else |
+
+Into a target that already holds a map — untyped or typed — a table defined
+by a `[header]` or by dotted keys is **merged**; an inline table, like every
+other value, **replaces** it. These precedences and placements are go-toml's,
+replicated on purpose and checked by a typed differential fuzz against it
+(11.8 M inputs into a struct of every field shape, from a pre-populated
+target).
 
 Encoding: struct fields in declaration order, map keys sorted; key-values
 first, then `[tables]` and `[[arrays of tables]]`, a blank line before each
@@ -105,6 +113,19 @@ apostrophe or a control character; floats in the shortest `'f'` form with
   specification requires; go-toml let one into a float field.
 - Documents past 10 MiB or nested past 128 levels are refused (go-toml had no
   size cap and capped only arrays and inline tables, at 10 000).
+- The whole document is checked before anything is decoded, so a malformed
+  date, time or number is refused even under a key the target struct does not
+  have; go-toml checked a value only when it decoded it.
+- An integer bound for a float field is converted, so `0x10` gives 16 and `-0`
+  gives +0.0 (go-toml re-parsed the token as float text: it refused `0x10`
+  and gave -0.0).
+- An empty `[table]` into a nil map field gives an empty map, as
+  encoding/json gives one for `{}`; go-toml left the field nil.
+- Two keys of one table that differ only by case both fill the field they
+  fold to, in the order the keys first appear; go-toml's result followed the
+  interleaving of their headers.
+- A pointer type that points to itself (`type P *P`) is refused; go-toml
+  followed it forever.
 - Accepted, as before: the four TOML v1.1.0 relaxations go-toml accepted —
   newlines, comments and a trailing comma in an inline table; `\e` and `\xHH`;
   a time without seconds. Refusing them would have broken documents that

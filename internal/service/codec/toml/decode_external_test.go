@@ -225,6 +225,167 @@ id = 2
 	}
 }
 
+// shouting is a string kind with an UnmarshalText of its own.
+type shouting string
+
+// UnmarshalText upper-cases the text.
+func (s *shouting) UnmarshalText(text []byte) error {
+	*s = shouting(strings.ToUpper(string(text)))
+	return nil
+}
+
+// counted is an integer kind with an UnmarshalText of its own.
+type counted int
+
+// UnmarshalText reads every text as 99.
+func (c *counted) UnmarshalText([]byte) error {
+	*c = 99
+	return nil
+}
+
+// TestNativeKindsBeforeUnmarshalText pins the replaced library's precedence:
+// a value goes into a kind that holds it directly, and UnmarshalText is the
+// fallback for the kinds that do not — a string-kinded type is set from a
+// TOML string as it is, an integer-kinded one from a TOML integer.
+func TestNativeKindsBeforeUnmarshalText(t *testing.T) {
+	t.Parallel()
+	var got struct {
+		Name     shouting         `toml:"name"`
+		Count    counted          `toml:"count"`
+		FromText counted          `toml:"from_text"`
+		When     time.Time        `toml:"when"`
+		ByName   map[shouting]int `toml:"by_name"`
+	}
+	doc := "name = 'quiet'\ncount = 7\nfrom_text = 'seven'\nwhen = '2024-01-15T09:30:00Z'\nby_name = {low = 1}\n"
+	//: decodes.
+	if err := toml.New().Unmarshal([]byte(doc), &got); err != nil {
+		t.Fatal(err)
+	}
+	//: the native kinds are assigned as written.
+	if got.Name != "quiet" || got.Count != 7 || got.ByName["low"] != 1 {
+		t.Errorf("native kinds: %+v", got)
+	}
+	//: a value of another kind goes through UnmarshalText.
+	if got.FromText != 99 || !got.When.Equal(time.Date(2024, 1, 15, 9, 30, 0, 0, time.UTC)) {
+		t.Errorf("through UnmarshalText: %+v", got)
+	}
+}
+
+// TestInlineTablesReplaceStandardTablesMerge pins the replaced library's
+// rule for a target that already holds a map: a table a header or a dotted
+// key defines is merged into it, an inline table replaces it, untyped or
+// typed.
+func TestInlineTablesReplaceStandardTablesMerge(t *testing.T) {
+	t.Parallel()
+	untyped := map[string]any{
+		"inline":   map[string]any{"kept": true},
+		"standard": map[string]any{"kept": true},
+		"dotted":   map[string]any{"kept": true},
+	}
+	doc := "inline = {added = 1}\ndotted.added = 1\n[standard]\nadded = 1\n"
+	//: decodes over the existing maps.
+	if err := toml.New().Unmarshal([]byte(doc), &untyped); err != nil {
+		t.Fatal(err)
+	}
+	//: the inline table replaced its map.
+	if inline, _ := untyped["inline"].(map[string]any); len(inline) != 1 || inline["added"] != int64(1) {
+		t.Errorf("inline = %#v, want only the document's key", untyped["inline"])
+	}
+	//: the standard and dotted tables merged into theirs.
+	for _, key := range []string{"standard", "dotted"} {
+		//: both keys.
+		if m, _ := untyped[key].(map[string]any); len(m) != 2 {
+			t.Errorf("%s = %#v, want the kept key and the added one", key, untyped[key])
+		}
+	}
+	typed := struct {
+		Inline   map[string]int `toml:"inline"`
+		Standard map[string]int `toml:"standard"`
+	}{Inline: map[string]int{"kept": 1}, Standard: map[string]int{"kept": 1}}
+	//: the same rule into typed maps.
+	if err := toml.New().Unmarshal([]byte("inline = {added = 2}\n[standard]\nadded = 2\n"), &typed); err != nil {
+		t.Fatal(err)
+	}
+	//: replaced, merged.
+	if len(typed.Inline) != 1 || len(typed.Standard) != 2 {
+		t.Errorf("typed = %+v", typed)
+	}
+}
+
+// TestGoArrays pins how a fixed-length Go array is filled: elements past its
+// length are dropped from a static array, an array of tables longer than it
+// is refused, and the elements the document does not reach are left alone.
+func TestGoArrays(t *testing.T) {
+	t.Parallel()
+	got := struct {
+		Short [2]int         `toml:"short"`
+		Long  [3]int         `toml:"long"`
+		Items [1]typedNested `toml:"items"`
+	}{Long: [3]int{7, 8, 9}}
+	//: three into two, one into three.
+	if err := toml.New().Unmarshal([]byte("short = [1, 2, 3]\nlong = [1]\n"), &got); err != nil {
+		t.Fatal(err)
+	}
+	//: dropped, and left alone.
+	if got.Short != [2]int{1, 2} || got.Long != [3]int{1, 8, 9} {
+		t.Errorf("short = %v, long = %v", got.Short, got.Long)
+	}
+	err := toml.New().Unmarshal([]byte("[[items]]\nid = 1\n[[items]]\nid = 2\n"), &got)
+	//: a second table has nowhere to go.
+	if fieldOf(err, "problem") != "the array of tables has more elements than the Go array holds" {
+		t.Errorf("err = %v %v", err, errs.FieldsOf(err))
+	}
+}
+
+// TestTablesIntoSlicesAndArrays pins where a table lands when its field is a
+// slice or an array, as the replaced library placed it: a slice's last
+// element, appended when there is none; an array's first element, but only
+// for a table a longer header or a dotted key passes through.
+func TestTablesIntoSlicesAndArrays(t *testing.T) {
+	t.Parallel()
+	type holder struct {
+		Items []typedNested  `toml:"items"`
+		Fixed [2]typedNested `toml:"fixed"`
+	}
+	var got holder
+	//: a [table] into an empty slice, a dotted key through an array.
+	if err := toml.New().Unmarshal([]byte("fixed.id = 4\n[items]\nid = 3\n"), &got); err != nil {
+		t.Fatal(err)
+	}
+	//: the appended element, the first element.
+	if len(got.Items) != 1 || got.Items[0].ID != 3 || got.Fixed[0].ID != 4 {
+		t.Errorf("got %+v", got)
+	}
+	got = holder{Items: []typedNested{{ID: 1}, {ID: 2}}}
+	//: a [table] into a slice that has elements fills the last one.
+	if err := toml.New().Unmarshal([]byte("[items]\nid = 9\n"), &got); err != nil || got.Items[1].ID != 9 || got.Items[0].ID != 1 {
+		t.Errorf("got %+v, %v", got, err)
+	}
+	//: a table defined by its own header, or inline, cannot land on an array.
+	for _, doc := range []string{"[fixed]\nid = 1\n", "fixed = {id = 1}\n", "items = {id = 1}\n"} {
+		err := toml.New().Unmarshal([]byte(doc), &got)
+		//: refused.
+		if fieldOf(err, "problem") != "the value does not fit the target's type" {
+			t.Errorf("%q: err = %v %v", doc, err, errs.FieldsOf(err))
+		}
+	}
+}
+
+// TestDatesOnlyIntoTimes refuses a date or a time into anything but
+// time.Time and the local types, even a type with an UnmarshalText, as the
+// replaced library refused it.
+func TestDatesOnlyIntoTimes(t *testing.T) {
+	t.Parallel()
+	var got struct {
+		Name shouting `toml:"name"`
+	}
+	err := toml.New().Unmarshal([]byte("name = 1979-05-27\n"), &got)
+	//: refused, naming the field.
+	if fieldOf(err, "problem") != "the value does not fit the target's type" || fieldOf(err, "key") != "name" {
+		t.Errorf("err = %v %v", err, errs.FieldsOf(err))
+	}
+}
+
 // TestExactMatchWinsOverFolded pins that a key matching a field exactly is not
 // taken by another field that matches it without regard to case.
 func TestExactMatchWinsOverFolded(t *testing.T) {
