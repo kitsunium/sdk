@@ -1,83 +1,83 @@
-// Package net — the WebSocket frame header and its wire form (RFC 6455 §5).
-package net
+// Package websocket — the frame header and its wire form (RFC 6455 §5).
+//
+// Reading and writing frames is this package's mechanism, not the domain's
+// contract (ADR 0160 §4): it moved here from internal/core/net, which keeps
+// what a second implementation would share — the opcode, the close code, the
+// message and the control-frame ceiling (corenet.WSMaxControlPayload).
+package websocket
 
 import (
 	"encoding/binary"
 	"math"
 
+	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// WSMaskLen is the width of the masking key a client prefixes to every frame.
-const WSMaskLen int = 4
+// MaskLen is the width of the masking key a client prefixes to every frame.
+const MaskLen int = 4
 
-// WSMaxControlPayload is the ceiling RFC 6455 §5.5 puts on a control frame's
-// payload. It exists so an endpoint can answer a Ping without buffering: a
-// control frame is answered inline, between the fragments of a message, so it
-// must fit in a fixed buffer that is always available.
-const WSMaxControlPayload int = 125
-
-// WSMinHeaderLen is the shortest possible frame header: flags/opcode and the
+// MinHeaderLen is the shortest possible frame header: flags/opcode and the
 // mask bit with a 7-bit length.
-const WSMinHeaderLen int = 2
+const MinHeaderLen int = 2
 
-// WSMaxHeaderLen is the longest possible frame header: the two fixed bytes, a
+// MaxHeaderLen is the longest possible frame header: the two fixed bytes, a
 // 64-bit extended length, and a masking key.
-const WSMaxHeaderLen int = WSMinHeaderLen + wsLength64Width + WSMaskLen
+const MaxHeaderLen int = MinHeaderLen + length64Width + MaskLen
 
 // Frame header bit masks and length markers, from the diagram in RFC 6455 §5.2.
 const (
-	wsFinBit         byte = 0x80
-	wsReservedBits   byte = 0x70
-	wsOpCodeBits     byte = 0x0F
-	wsMaskBit        byte = 0x80
-	wsLengthBits     byte = 0x7F
-	wsLength16Marker byte = 126
-	wsLength64Marker byte = 127
-	wsLength16Width  int  = 2
-	wsLength64Width  int  = 8
+	finBit         byte = 0x80
+	reservedBits   byte = 0x70
+	opCodeBits     byte = 0x0F
+	maskBit        byte = 0x80
+	lengthBits     byte = 0x7F
+	length16Marker byte = 126
+	length64Marker byte = 127
+	length16Width  int  = 2
+	length64Width  int  = 8
 )
 
 // Masking strides. They are not protocol constants — RFC 6455 fixes only
-// WSMaskLen — but sizes ApplyWSMask moves the payload in, and both are
-// multiples of WSMaskLen so the key never has to be rotated to stay aligned.
+// MaskLen — but sizes ApplyMask moves the payload in, and both are
+// multiples of MaskLen so the key never has to be rotated to stay aligned.
 const (
-	// wsMaskWordWidth is one 64-bit word: the four-byte key spelled twice.
-	wsMaskWordWidth int = 2 * WSMaskLen
-	// wsMaskBlockWidth is four of those, unrolled so the loop's compare and
+	// maskWordWidth is one 64-bit word: the four-byte key spelled twice.
+	maskWordWidth int = 2 * MaskLen
+	// maskBlockWidth is four of those, unrolled so the loop's compare and
 	// branch are amortised over four words instead of one.
-	wsMaskBlockWidth int = wsMaskWordsPerBlock * wsMaskWordWidth
-	// wsMaskWordsPerBlock is how many words one block iteration writes. It is
+	maskBlockWidth int = maskWordsPerBlock * maskWordWidth
+	// maskWordsPerBlock is how many words one block iteration writes. It is
 	// four because that is where the store port saturates on the machine
 	// BENCH.md was taken on; nothing in the protocol prefers any value.
-	wsMaskWordsPerBlock int = 4
-	// wsMaskQuadBits is the masking key's width in BITS, which is how far the
+	maskWordsPerBlock int = 4
+	// maskQuadBits is the masking key's width in BITS, which is how far the
 	// key must be shifted to spell it a second time inside one word.
-	wsMaskQuadBits int = 8 * WSMaskLen
+	maskQuadBits int = 8 * MaskLen
 	// The four word offsets inside one block, named so the unrolled writes
-	// cannot drift out of step with wsMaskWordWidth.
-	wsMaskWordAt0 int = 0 * wsMaskWordWidth
-	wsMaskWordAt1 int = 1 * wsMaskWordWidth
-	wsMaskWordAt2 int = 2 * wsMaskWordWidth
-	wsMaskWordAt3 int = 3 * wsMaskWordWidth
+	// cannot drift out of step with maskWordWidth.
+	maskWordAt0 int = 0 * maskWordWidth
+	maskWordAt1 int = 1 * maskWordWidth
+	maskWordAt2 int = 2 * maskWordWidth
+	maskWordAt3 int = 3 * maskWordWidth
 )
 
-// WSFrameHeaderValue is one parsed frame header (RFC 6455 §5.2).
+// FrameHeaderValue is one parsed frame header (RFC 6455 §5.2).
 //
 // The RSV bits are absent on purpose. They only mean anything once an extension
 // has been negotiated, this domain negotiates none, and a set RSV bit is
 // therefore a protocol error rather than a value to carry — see
-// ParseWSFrameHeader.
-type WSFrameHeaderValue struct {
+// ParseFrameHeader.
+type FrameHeaderValue struct {
 	// Final is the FIN bit: this frame completes the message.
 	Final bool `json:"final"`
 	// OpCode is the frame type.
-	OpCode WSOpCode `json:"opcode"`
+	OpCode corenet.WSOpCode `json:"opcode"`
 	// Masked is the MASK bit. RFC 6455 §5.1 requires it on every client frame
 	// and forbids it on every server frame.
 	Masked bool `json:"masked"`
 	// MaskKey is the four-byte key, meaningful only when Masked.
-	MaskKey [WSMaskLen]byte `json:"mask_key"`
+	MaskKey [MaskLen]byte `json:"mask_key"`
 	// Length is the payload length the frame announces. It is what the peer
 	// SAYS, not what it has sent — every bound must be checked against it
 	// BEFORE any buffer is sized from it.
@@ -94,11 +94,11 @@ type WSFrameHeaderValue struct {
 // intermediary would read as a second, attacker-chosen HTTP request. An
 // endpoint that accepted unmasked frames would let that script skip the one
 // mechanism the design has against cache poisoning.
-func (h WSFrameHeaderValue) ValidateFromClient() error {
+func (h FrameHeaderValue) ValidateFromClient() error {
 	//: the requirement is absolute; there is no tolerant reading of it.
 	if !h.Masked {
 		//: fail the connection, per §5.1.
-		return errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.String("opcode", h.OpCode.String()),
 			errs.String("why", "a client-to-server frame must be masked"))
 	}
@@ -106,51 +106,51 @@ func (h WSFrameHeaderValue) ValidateFromClient() error {
 	return nil
 }
 
-// WSFrameHeaderLen returns the full header length announced by the first two
+// FrameHeaderLen returns the full header length announced by the first two
 // bytes of a frame, or 0 when fewer than two bytes are available.
 //
 // It exists so a reader can take exactly two bytes, learn how many more the
 // header needs, and take exactly those — never speculating past the header into
 // a payload it has not yet bounded.
-func WSFrameHeaderLen(b []byte) int {
+func FrameHeaderLen(b []byte) int {
 	//: the two fixed bytes are what announces everything else.
-	if len(b) < WSMinHeaderLen {
+	if len(b) < MinHeaderLen {
 		//: not enough to know anything yet.
 		return 0
 	}
-	length := WSMinHeaderLen
+	length := MinHeaderLen
 	//: the 7-bit length field is a marker when it reaches 126.
-	switch b[1] & wsLengthBits {
+	switch b[1] & lengthBits {
 	//: a 16-bit length follows.
-	case wsLength16Marker:
-		length += wsLength16Width
+	case length16Marker:
+		length += length16Width
 	//: a 64-bit length follows.
-	case wsLength64Marker:
-		length += wsLength64Width
+	case length64Marker:
+		length += length64Width
 	}
 	//: a masked frame carries its key immediately after the length.
-	if b[1]&wsMaskBit != 0 {
-		length += WSMaskLen
+	if b[1]&maskBit != 0 {
+		length += MaskLen
 	}
 	//: the exact number of bytes the header occupies.
 	return length
 }
 
-// ParseWSFrameHeader parses a COMPLETE frame header and enforces every rule
+// ParseFrameHeader parses a COMPLETE frame header and enforces every rule
 // RFC 6455 states about it that does not depend on which side sent it.
 //
 // The masking requirement is deliberately NOT here: it is the one rule whose
 // answer depends on the direction of travel, so it lives in
-// [WSFrameHeaderValue.ValidateFromClient] where the direction is named. Every
+// [FrameHeaderValue.ValidateFromClient] where the direction is named. Every
 // other rule — reserved bits, reserved opcodes, control-frame shape, minimal
 // length encoding — is absolute and is checked here, once.
-func ParseWSFrameHeader(b []byte) (header WSFrameHeaderValue, err error) {
-	want := WSFrameHeaderLen(b)
-	//: the caller is expected to have read exactly WSFrameHeaderLen bytes; a
+func ParseFrameHeader(b []byte) (header FrameHeaderValue, err error) {
+	want := FrameHeaderLen(b)
+	//: the caller is expected to have read exactly FrameHeaderLen bytes; a
 	//: short or long slice is a bug here, not a peer's fault.
 	if want == 0 || len(b) != want {
 		//: refuse rather than parse a header that is not all present.
-		return WSFrameHeaderValue{}, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.Int("have", len(b)),
 			errs.Int("want", want),
 			errs.String("why", "the frame header is not complete"))
@@ -159,47 +159,47 @@ func ParseWSFrameHeader(b []byte) (header WSFrameHeaderValue, err error) {
 	//: domain negotiates none — permessage-deflate included — so a set bit is
 	//: a peer compressing into a reader that would hand the application
 	//: compressed bytes as if they were the message.
-	if b[0]&wsReservedBits != 0 {
+	if b[0]&reservedBits != 0 {
 		//: fail the connection rather than deliver a payload we cannot decode.
-		return WSFrameHeaderValue{}, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
-			errs.Int("rsv", int(b[0]&wsReservedBits)),
+		return FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
+			errs.Int("rsv", int(b[0]&reservedBits)),
 			errs.String("why", "a reserved bit is set but no extension was negotiated"))
 	}
-	parsed := WSFrameHeaderValue{
-		Final:  b[0]&wsFinBit != 0,
-		OpCode: WSOpCode(b[0] & wsOpCodeBits),
-		Masked: b[1]&wsMaskBit != 0,
+	parsed := FrameHeaderValue{
+		Final:  b[0]&finBit != 0,
+		OpCode: corenet.WSOpCode(b[0] & opCodeBits),
+		Masked: b[1]&maskBit != 0,
 	}
 	//: a reserved opcode cannot be skipped: the peer believes it said
 	//: something, and an endpoint that ignored it would be desynchronised.
 	if !parsed.OpCode.Defined() {
 		//: fail the connection.
-		return WSFrameHeaderValue{}, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return FrameHeaderValue{}, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.Int("opcode", int(parsed.OpCode)),
 			errs.String("why", "the opcode is reserved"))
 	}
-	length, lerr := parseWSLength(b)
+	length, lerr := parseLength(b)
 	//: a length the encoding cannot honestly express.
 	if lerr != nil {
 		//: the error already names what was wrong with it.
-		return WSFrameHeaderValue{}, lerr
+		return FrameHeaderValue{}, lerr
 	}
 	parsed.Length = length
 	//: control frames must be answerable inline, between two fragments of a
 	//: message, which is only possible if they are short and whole.
-	if cerr := validateWSControlShape(parsed); cerr != nil {
+	if cerr := validateControlShape(parsed); cerr != nil {
 		//: the error already names which half was violated.
-		return WSFrameHeaderValue{}, cerr
+		return FrameHeaderValue{}, cerr
 	}
 	//: the mask key sits at the very end of the header.
 	if parsed.Masked {
-		copy(parsed.MaskKey[:], b[want-WSMaskLen:want])
+		copy(parsed.MaskKey[:], b[want-MaskLen:want])
 	}
 	//: a header that satisfies every direction-independent rule.
 	return parsed, nil
 }
 
-// ApplyWSMask XORs payload in place with the frame's masking key.
+// ApplyMask XORs payload in place with the frame's masking key.
 //
 // The transform is its own inverse, so the same call unmasks what it masked.
 // It is done in place because the payload has already been read into the
@@ -226,28 +226,28 @@ func ParseWSFrameHeader(b []byte) (header WSFrameHeaderValue, err error) {
 // is native-order and would silently disagree with a little-endian key on a
 // big-endian host. Neither appears here, and neither can be added without
 // changing the one order this function names.
-func ApplyWSMask(payload []byte, key [WSMaskLen]byte) {
+func ApplyMask(payload []byte, key [MaskLen]byte) {
 	//: the key repeats every four bytes from the START of the payload, so a
 	//: word is just the key spelled twice — and building it by arithmetic
 	//: rather than staging it through a byte array keeps the whole set-up in
 	//: registers, which is what makes an empty control frame cost the same as
 	//: it did before.
 	quad := binary.LittleEndian.Uint32(key[:])
-	word := uint64(quad) | uint64(quad)<<wsMaskQuadBits
+	word := uint64(quad) | uint64(quad)<<maskQuadBits
 	index := 0
 	//: four words per iteration, because one word per iteration leaves the
 	//: store port idle waiting on the loop's own compare-and-branch. Every step
-	//: is a multiple of WSMaskLen, which is what keeps the key aligned with the
+	//: is a multiple of MaskLen, which is what keeps the key aligned with the
 	//: payload without ever rotating it.
-	for ; index+wsMaskBlockWidth <= len(payload); index += wsMaskBlockWidth {
-		block := payload[index : index+wsMaskBlockWidth : index+wsMaskBlockWidth]
-		binary.LittleEndian.PutUint64(block[wsMaskWordAt0:], binary.LittleEndian.Uint64(block[wsMaskWordAt0:])^word)
-		binary.LittleEndian.PutUint64(block[wsMaskWordAt1:], binary.LittleEndian.Uint64(block[wsMaskWordAt1:])^word)
-		binary.LittleEndian.PutUint64(block[wsMaskWordAt2:], binary.LittleEndian.Uint64(block[wsMaskWordAt2:])^word)
-		binary.LittleEndian.PutUint64(block[wsMaskWordAt3:], binary.LittleEndian.Uint64(block[wsMaskWordAt3:])^word)
+	for ; index+maskBlockWidth <= len(payload); index += maskBlockWidth {
+		block := payload[index : index+maskBlockWidth : index+maskBlockWidth]
+		binary.LittleEndian.PutUint64(block[maskWordAt0:], binary.LittleEndian.Uint64(block[maskWordAt0:])^word)
+		binary.LittleEndian.PutUint64(block[maskWordAt1:], binary.LittleEndian.Uint64(block[maskWordAt1:])^word)
+		binary.LittleEndian.PutUint64(block[maskWordAt2:], binary.LittleEndian.Uint64(block[maskWordAt2:])^word)
+		binary.LittleEndian.PutUint64(block[maskWordAt3:], binary.LittleEndian.Uint64(block[maskWordAt3:])^word)
 	}
 	//: whatever the block loop could not take, one word at a time.
-	for ; index+wsMaskWordWidth <= len(payload); index += wsMaskWordWidth {
+	for ; index+maskWordWidth <= len(payload); index += maskWordWidth {
 		binary.LittleEndian.PutUint64(payload[index:], binary.LittleEndian.Uint64(payload[index:])^word)
 	}
 	//: the last seven bytes at most. The key index is the ABSOLUTE index modulo
@@ -256,11 +256,11 @@ func ApplyWSMask(payload []byte, key [WSMaskLen]byte) {
 	//: way would make this loop's correctness depend on a fact stated three
 	//: loops earlier.
 	for ; index < len(payload); index++ {
-		payload[index] ^= key[index&(WSMaskLen-1)]
+		payload[index] ^= key[index&(MaskLen-1)]
 	}
 }
 
-// AppendWSFrame appends one server frame to dst and returns the extended slice.
+// AppendFrame appends one server frame to dst and returns the extended slice.
 //
 // The frame is never masked, because RFC 6455 §5.1 forbids a server from
 // masking and a client that receives a masked frame fails the connection. That
@@ -269,66 +269,66 @@ func ApplyWSMask(payload []byte, key [WSMaskLen]byte) {
 //
 // Appending rather than allocating is what lets a connection reuse one buffer
 // for its whole life.
-func AppendWSFrame(dst []byte, op WSOpCode, final bool, payload []byte) (wire []byte, err error) {
+func AppendFrame(dst []byte, op corenet.WSOpCode, final bool, payload []byte) (wire []byte, err error) {
 	//: validate everything before touching dst, so a refusal leaves the
 	//: caller's buffer exactly as it was and a stream never carries half a
 	//: frame the peer has already begun parsing.
-	if verr := validateWSOutbound(op, final, len(payload)); verr != nil {
+	if verr := validateOutbound(op, final, len(payload)); verr != nil {
 		//: hand back the untouched buffer with the reason.
 		return dst, verr
 	}
 	first := byte(op)
 	//: the FIN bit says this frame completes its message.
 	if final {
-		first |= wsFinBit
+		first |= finBit
 	}
 	dst = append(dst, first)
 	//: the length is written in the shortest form that can carry it — the
 	//: minimal-encoding rule this package enforces on the way in.
 	switch size := len(payload); {
 	//: the 7-bit field carries it outright.
-	case size < int(wsLength16Marker):
+	case size < int(length16Marker):
 		dst = append(dst, byte(size))
 	//: the 16-bit extension.
 	case size <= math.MaxUint16:
-		dst = append(dst, wsLength16Marker)
+		dst = append(dst, length16Marker)
 		dst = binary.BigEndian.AppendUint16(dst, uint16(size))
 	//: the 64-bit extension.
 	default:
-		dst = append(dst, wsLength64Marker)
+		dst = append(dst, length64Marker)
 		dst = binary.BigEndian.AppendUint64(dst, uint64(size))
 	}
 	//: no mask key: the server never masks.
 	return append(dst, payload...), nil
 }
 
-// parseWSLength reads the payload length, enforcing the minimal-encoding rule.
-func parseWSLength(b []byte) (length uint64, err error) {
-	marker := b[1] & wsLengthBits
+// parseLength reads the payload length, enforcing the minimal-encoding rule.
+func parseLength(b []byte) (length uint64, err error) {
+	marker := b[1] & lengthBits
 	//: a 7-bit length under the markers is the length itself.
-	if marker < wsLength16Marker {
+	if marker < length16Marker {
 		//: the common case: everything up to 125 bytes.
 		return uint64(marker), nil
 	}
 	//: the 16-bit form.
-	if marker == wsLength16Marker {
+	if marker == length16Marker {
 		//: parsed and checked against the form below it.
-		return parseWSLength16(b)
+		return parseLength16(b)
 	}
 	//: the 64-bit form.
-	return parseWSLength64(b)
+	return parseLength64(b)
 }
 
-// parseWSLength16 reads the 16-bit extended length.
-func parseWSLength16(b []byte) (length uint64, err error) {
-	value := uint64(binary.BigEndian.Uint16(b[WSMinHeaderLen:]))
+// parseLength16 reads the 16-bit extended length.
+func parseLength16(b []byte) (length uint64, err error) {
+	value := uint64(binary.BigEndian.Uint16(b[MinHeaderLen:]))
 	//: RFC 6455 §5.2 requires the MINIMAL encoding. A short length spelled
 	//: long is not a harmless alternative: it is a second spelling of the same
 	//: frame, which is exactly the ambiguity a length-prefixed protocol cannot
 	//: afford between two parsers that disagree.
-	if value < uint64(wsLength16Marker) {
+	if value < uint64(length16Marker) {
 		//: refuse the non-minimal encoding.
-		return 0, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return 0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.Int64("length", int64(value)),
 			errs.String("why", "a 16-bit length below 126 is not the minimal encoding"))
 	}
@@ -336,20 +336,20 @@ func parseWSLength16(b []byte) (length uint64, err error) {
 	return value, nil
 }
 
-// parseWSLength64 reads the 64-bit extended length.
-func parseWSLength64(b []byte) (length uint64, err error) {
-	value := binary.BigEndian.Uint64(b[WSMinHeaderLen:])
+// parseLength64 reads the 64-bit extended length.
+func parseLength64(b []byte) (length uint64, err error) {
+	value := binary.BigEndian.Uint64(b[MinHeaderLen:])
 	//: the RFC reserves the most significant bit, so a length with it set is
 	//: not a very large frame — it is a malformed one.
 	if value > math.MaxInt64 {
 		//: refuse rather than treat the sign bit as magnitude.
-		return 0, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return 0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.String("why", "the 64-bit length has its most significant bit set"))
 	}
 	//: the same minimal-encoding rule, one step up.
 	if value <= math.MaxUint16 {
 		//: refuse the non-minimal encoding.
-		return 0, errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return 0, errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.Int64("length", int64(value)),
 			errs.String("why", "a 64-bit length that fits in 16 bits is not the minimal encoding"))
 	}
@@ -357,8 +357,8 @@ func parseWSLength64(b []byte) (length uint64, err error) {
 	return value, nil
 }
 
-// validateWSControlShape enforces RFC 6455 §5.5 on a control frame.
-func validateWSControlShape(header WSFrameHeaderValue) error {
+// validateControlShape enforces RFC 6455 §5.5 on a control frame.
+func validateControlShape(header FrameHeaderValue) error {
 	//: a data frame has neither restriction.
 	if !header.OpCode.IsControl() {
 		//: nothing to check.
@@ -369,15 +369,15 @@ func validateWSControlShape(header WSFrameHeaderValue) error {
 	//: makes Ping answerable at all is that a control frame is always whole.
 	if !header.Final {
 		//: fail the connection.
-		return errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.String("opcode", header.OpCode.String()),
 			errs.String("why", "a control frame must not be fragmented"))
 	}
 	//: 125 bytes is what lets a control frame be answered from a fixed buffer
 	//: that is always available, even mid-message.
-	if header.Length > uint64(WSMaxControlPayload) {
+	if header.Length > uint64(corenet.WSMaxControlPayload) {
 		//: fail the connection.
-		return errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.String("opcode", header.OpCode.String()),
 			errs.Int64("length", int64(header.Length)),
 			errs.String("why", "a control frame payload must not exceed 125 bytes"))
@@ -386,19 +386,19 @@ func validateWSControlShape(header WSFrameHeaderValue) error {
 	return nil
 }
 
-// validateWSOutbound refuses a frame this endpoint must not put on the wire.
-func validateWSOutbound(op WSOpCode, final bool, size int) error {
+// validateOutbound refuses a frame this endpoint must not put on the wire.
+func validateOutbound(op corenet.WSOpCode, final bool, size int) error {
 	//: a reserved opcode is unusable in both directions.
 	if !op.Defined() {
 		//: refuse before anything is written.
-		return errs.Wrap(WSProtocolViolation, errs.WrapParams{},
+		return errs.Wrap(corenet.WSProtocolViolation, errs.WrapParams{},
 			errs.Int("opcode", int(op)),
 			errs.String("why", "the opcode is reserved"))
 	}
 	//: emitting what we would refuse to receive is how two implementations of
 	//: the same RFC end up disagreeing, so the control-frame rules are checked
 	//: on the way out too.
-	return validateWSControlShape(WSFrameHeaderValue{
+	return validateControlShape(FrameHeaderValue{
 		Final:  final,
 		OpCode: op,
 		Length: uint64(size),

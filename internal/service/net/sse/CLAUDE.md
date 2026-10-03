@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-09T00:00:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/net/sse/
 
 ## Purpose
@@ -24,12 +24,17 @@ published**, measured in `BENCH.md` and gated by
 |---|---|
 | `sse.go` | `Stream` — `New`, `Send`, `Comment`, `Done`, `LastEventID`, `Close`; the keep-alive and watcher goroutines; the flush probe; `retain` and the two constants that bound the encode buffer |
 | `options.go` | `Option` — `KeepAlive`, `WithoutKeepAlive`, `WriteTimeout`, `Retry`; `resolve` and the ADR 0031 clamp/refuse split |
+| `frame.go` | the encoder — `AppendEvent` (an event's wire form; `pkg/v1/net/sse.AppendEvent` forwards to it) and `AppendComment` (the keep-alive frame), the one-pass terminator scan (`appendData` and its two forward cursors), `validateComment` |
+| `frame_external_test.go`, `frame_bench_test.go` | the encoder's tests and benchmarks, including the exhaustive equivalence corpus judged against `splitIndexAny`, the oracle |
 | `sse_alloc_internal_test.go` | the malloc-total gates under the "a steady-state send allocates nothing" claim (deliberately NOT `testing.AllocsPerRun` — its integer division reports 0.0 for anything allocating less than once per call) — `//go:build !race`, so the race-off alloc lane is its ONLY lane (see §Verification) |
 | `BENCH.md` | what a stream costs open, per frame, and to drain — see §Cost |
 
-The frame itself — `corenet.SSEEventValue`, its validation and its wire form —
-lives in `internal/core/net/sse.go`. This package owns the *stream*; the core
-owns the *format*.
+The frame as a value — `corenet.SSEEventValue` and its `Validate`, the rules a
+frame must satisfy to be carried at all — lives in `internal/core/net/sse.go`.
+Its wire form is a mechanism, and since ADR 0160 §4 it is this package's
+(`frame.go`), moved with its tests and benchmarks: the stream and the bytes it
+writes are both here, and the core keeps what a second implementation would
+share.
 
 ## Why-this-shape
 
@@ -194,8 +199,25 @@ Full numbers, both benchmark harnesses and the rejected optimisations are in
   is `kvm-clock`. Nothing was done about it: refreshing less often than per
   frame breaks the contract the deadline exists for, and there is no coarse
   monotonic clock in the standard library.
-- **A frame is 1.97×–4.60× cheaper than it was**, in situ, from
-  `internal/core/net`'s terminator scan (which was 91 % of encoding a frame).
+- **An SSE newline SPLITS rather than escapes.** The format has no escape
+  mechanism, so a terminator inside `Data` becomes another `data:` line and the
+  client rejoins them with `"\n"` — that is what makes a multi-line payload
+  expressible. CRLF, CR and LF are all recognised, and all three normalise to
+  LF on reassembly: the VALUE round-trips, its byte spelling does not. A
+  terminator inside a comment is refused, as one inside an id or a name is by
+  `Validate`, because a comment is a single line.
+- **The terminator scan keeps a cursor per byte and never rescans.** Finding
+  the terminators in `Data` is the only per-byte work an event stream does —
+  and `strings.IndexAny`, the obvious call, has no `bytealg` path; a profile
+  put it at **91 %** of encoding a 4 KiB single-line frame. `strings.IndexByte`
+  is the assembly-backed primitive, but it finds ONE byte, and the two obvious
+  ways to call it twice are each quadratic on half the possible payloads —
+  both measured at **16× SLOWER** than the code they replaced. `appendData`
+  finds both terminators once over the whole payload and moves each cursor
+  only FORWARD: **2.1×–6.4×** on the split, and `BENCH.md` §The encoder prints
+  the profile, all four strategies and the corpus that exposes each blow-up.
+- **A frame is 1.97×–4.60× cheaper than it was**, in situ, from the terminator
+  scan (which was 91 % of encoding a frame, then in `internal/core/net`).
   The isolated encoder win is 2.56×–4.62×; the in-situ number is lower at small
   sizes because the stream's own fixed cost — mutex, terminal check, write,
   flush, and on a socket the clock read — does not shrink.
@@ -217,6 +239,16 @@ ADR 0029 the service layer declares **no** codes.
 - Escape a newline in `Data`. The format has no escape; a terminator SPLITS the
   value into another `data:` line, which is what makes a multi-line payload
   expressible at all.
+- Rewrite `appendData`'s two cursors as an `IndexByte` pair per line. It reads
+  as the same thing and is quadratic — in one of two mirror-image halves
+  depending on which scan is left unbounded, both measured at 16× slower than
+  the `IndexAny` form they would replace. The forward-only refresh IS the
+  algorithm, not an optimisation layered on it.
+- Delete `splitIndexAny` from `frame_bench_test.go`, or "simplify" it to call
+  `appendData`. It is the terminator scan shipped before the campaign,
+  transcribed, and the oracle both equivalence tests are judged against — over
+  every string of length 0 to 9 in `{'a', '\n', '\r'}`; the bound is 9 because
+  `strings.IndexAny` itself changes strategy at `len(s) > 8`.
 - Add a replay buffer. See §Last-Event-ID.
 - Write anything to stdout (ADR 0030). The only output is the response.
 - Buffer or batch frames to amortise the flush. The flush IS the protocol: an

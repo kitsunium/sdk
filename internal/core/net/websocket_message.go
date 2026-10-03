@@ -1,12 +1,7 @@
-// Package net — the WebSocket application message and its UTF-8 rule
-// (RFC 6455 §5.6 and §8.1).
+// Package net — the WebSocket application message (RFC 6455 §5.6). Its UTF-8
+// rule (§8.1) is checked by the engine on the bytes, as they come off and go
+// onto the wire: internal/service/net/websocket.ValidateText (ADR 0160 §4).
 package net
-
-import (
-	"unicode/utf8"
-
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-)
 
 // WSMessageValue is one complete WebSocket application message, reassembled
 // from however many frames carried it.
@@ -21,7 +16,7 @@ type WSMessageValue struct {
 	// opcode a zero-valued frame would carry anyway.
 	Binary bool `json:"binary"`
 	// Data is the reassembled payload. For a text message it is valid UTF-8,
-	// verified on both the receiving and the sending side.
+	// which the engine verifies on both the receiving and the sending side.
 	Data []byte `json:"data"`
 }
 
@@ -34,25 +29,4 @@ func (m WSMessageValue) OpCode() WSOpCode {
 	}
 	//: UTF-8 text, the default.
 	return WSText
-}
-
-// ValidateWSText reports whether a payload can travel as a text frame.
-//
-// Validation is performed on the REASSEMBLED message rather than per frame, and
-// that is a correctness requirement rather than an optimisation: a multi-byte
-// sequence may straddle a fragment boundary, so a per-frame check would reject
-// perfectly valid messages whose only fault is where the sender chose to split
-// them.
-func ValidateWSText(b []byte) error {
-	//: RFC 6455 §8.1 — an endpoint that finds a text payload is not UTF-8
-	//: MUST fail the connection. Not sanitise it, not replace the bad bytes:
-	//: a replacement character is a different message, silently substituted.
-	if !utf8.Valid(b) {
-		//: fail the connection with 1007.
-		return errs.Wrap(WSInvalidPayload, errs.WrapParams{},
-			errs.Int("length", len(b)),
-			errs.String("why", "the text payload is not valid UTF-8"))
-	}
-	//: valid UTF-8.
-	return nil
 }

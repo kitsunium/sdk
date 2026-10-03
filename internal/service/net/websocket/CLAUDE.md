@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-11T00:00:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/net/websocket/
 
 ## Purpose
@@ -27,10 +27,20 @@ to get right on this SDK's behalf.
 | `websocket.go` | `Conn` — `NewConn`, `Receive`, `Send`, `SendText`, `SendBinary`, `Ping`, `Close`, `CloseWith`, `Done`, `Subprotocol`, `PeerCloseCode`; the frame reader, the message assembler, the write path, the drain watcher and the heartbeat |
 | `handshake.go` | `Upgrade` — RFC 6455 §4.2 validation, the origin policy, the hijack probe, the 101 response |
 | `options.go` | `Option` — `Subprotocols`, `MaxMessageSize`, `MaxFrameSize`, `PingInterval`, `WithoutPing`, `WriteTimeout`, `AllowOrigins`, `AllowAnyOrigin`; `resolve` and the ADR 0031 clamp/refuse split |
+| `frame.go` | the frame codec — `MaskLen` / `MinHeaderLen` / `MaxHeaderLen`, `FrameHeaderValue` (+ `ValidateFromClient`), `FrameHeaderLen`, `ParseFrameHeader`, `ApplyMask` (word at a time), `AppendFrame` |
+| `close.go` | the close payload — `CloseCodeLen`, `AppendClosePayload`, `ParseClosePayload` |
+| `text.go` | `ValidateText` — the §8.1 UTF-8 rule, on the reassembled message |
+| `handshake_key.go` | `AcceptKey` (the §4.2.2 digest — `pkg/v1/net/websocket.AcceptKey` forwards to it) and `ValidateKey` (§4.1's sixteen-byte nonce) |
 
-The wire format itself — opcodes, close codes, the frame header, masking, the
-UTF-8 rule and the accept-key digest — lives in `internal/core/net/websocket*.go`.
-This package owns the *connection*; the core owns the *format*.
+The protocol's vocabulary — the opcode, the close code and its `Sendable` /
+`Echoable` predicates, the message, the GUID, the version, the header names,
+the control-frame ceiling — lives in `internal/core/net/websocket*.go`: it is
+what a second implementation would share. Reading and writing the wire format
+is a mechanism, and since ADR 0160 §4 it is this package's (`frame.go`,
+`close.go`, `text.go`, `handshake_key.go`), moved with its tests
+(`wire_external_test.go`, `frame_mask_external_test.go`), its fuzz targets
+(`frame_fuzz_external_test.go`: `FuzzApplyMask`, `FuzzParseFrameHeader`,
+`FuzzParseClosePayload`) and its benchmarks (`frame_bench_test.go`).
 
 ## Ownership — the engine defect this domain exposed
 
@@ -185,6 +195,45 @@ Two consequences are deliberate and documented:
   `CloseWith` and samples it, reliably only under `-race` — the numbers are in
   its doc comment.
 
+## The codec — why it is shaped the way it is
+
+These came over with the code from `internal/core/net` (ADR 0160 §4).
+
+- **The frame parser refuses rather than tolerates, and the RSV bits have no
+  field.** RFC 6455 is mostly MUST-fail because a frame stream is
+  length-prefixed: two endpoints that disagree about one frame do not lose one
+  message, they lose the stream, and every byte after it is read as something
+  the sender never wrote. `FrameHeaderValue` therefore carries no RSV field — a
+  reserved bit only means something under a negotiated extension, this domain
+  negotiates none, so a set bit is a protocol error rather than a value to
+  carry. That is also the mechanical half of the permessage-deflate refusal
+  (ADR 0047 §D6). `FrameHeaderValue` is the codec's own representation, never
+  handed to a handler, and so it lives here rather than in the core.
+- **The masking rule lives in its own method, not in the parser.** It is the
+  one framing rule whose answer depends on the direction of travel, so
+  `ValidateFromClient` names the direction; every other rule is absolute and
+  is checked once, in `ParseFrameHeader`. Masking is a security requirement
+  and not ceremony: it stops a hostile script steering a browser into emitting
+  bytes a transparent intermediary would read as a second HTTP request.
+- **The masking transform moves a WORD at a time, and the byte order
+  cancels.** It runs over every inbound byte with no fast path and no way to
+  opt out, so a CPU profile put **88.99 %** of a 4 KiB receive in the
+  byte-at-a-time form. `ApplyMask` takes 32 bytes per iteration, then 8, then
+  1 — **16.1×** the byte-at-a-time throughput, **6.17×** on the whole in-situ
+  receive path — with no assembly, no build-tagged per-architecture file and
+  no `unsafe`, which is the only reason it can be one implementation across
+  every GOOS the SDK targets (ADR 0018, ADR 0144). Endianness safety is a
+  property of using **one** order for the payload word AND the key word, under
+  which a fixed-order decode is a bijection and XOR stays bytewise. Every
+  claim is measured in `BENCH.md` §The wire format.
+- **`ValidateText` is a whole-MESSAGE check.** A multi-byte sequence may
+  straddle a fragment boundary, so a per-frame validator would reject
+  conformant senders — the failure mode is refusing valid input, which only
+  shows up against peers that chunk differently.
+- **The accept digest is SHA-1 by the RFC's instruction**, and not a security
+  primitive here: it proves the server parsed the handshake rather than
+  replaying it. `crypto/sha1` is imported for that one reason.
+
 ## permessage-deflate is NOT negotiated, and the refusal is enforced twice
 
 The extension is out of scope: it would pull `internal/service/data/transform` into
@@ -199,7 +248,7 @@ The refusal is not a documentation claim:
    §4.2.2 defines as the way a server says it uses no extension. Offering the
    extension does not fail the handshake — the connection simply proceeds
    uncompressed, which is what a conforming client expects.
-2. `ParseWSFrameHeader` refuses any frame with an **RSV bit set**, which is
+2. `ParseFrameHeader` refuses any frame with an **RSV bit set**, which is
    exactly what a deflated frame looks like. A client that compressed anyway
    fails the connection with 1002 rather than handing the application a payload
    nothing can decode.
@@ -327,15 +376,17 @@ a denial-of-service lever.**
 
 ### Where the time actually goes — and it is not here
 
-Between **62 % and 89 %** of a received message is `corenet.ApplyWSMask`, the
-per-byte XOR §5.1 makes mandatory on every inbound byte. This package's own flat
-time is ~13 % of the worst case (256 fragments) and ~2 % of the ordinary one.
+Between **62 % and 89 %** of a received message was the per-byte XOR §5.1
+makes mandatory on every inbound byte, when it ran a byte at a time in
+`internal/core/net`; this package's own flat time was ~13 % of the worst case
+(256 fragments) and ~2 % of the ordinary one.
 
-`ApplyWSMask` is byte-at-a-time and runs at 1.36 GB/s; the same transform eight
-bytes at a time measures 7.4 GB/s — **5.5×**, which would take a 4 KiB receive
-from 3 274 ns to roughly 810 ns. It lives in `internal/core/net`, so it is
-**recorded and not taken here**; see `BENCH.md` §"The cost that dominates is in
-another package".
+That transform now moves a word at a time — 16.1× in isolation, a 4 KiB
+receive down from 3 250 ns to 526.5 ns — and it is this package's own
+`ApplyMask` since ADR 0160 §4 moved the codec here. `BENCH.md` keeps both
+halves: §"The cost that dominates is in another package", which sized the
+change and recorded it as not taken here, and §The wire format, which
+measured what was then shipped.
 
 Two optimisations inside this package were tested and **refused with numbers**:
 `bufio.Peek`/`Discard` in `nextHeader` (+1.1 % on realistic shapes, −2.4 % only
@@ -377,9 +428,25 @@ was entertained.
   read path, or by checking a bound after the allocation it guards. §Cost
   measures the price of every MUST-fail and it is 0.37 % of what it costs a peer
   to reach one; there is nothing here to reclaim.
-- Optimise this package for throughput before reading §Cost. The dominant term
-  is `corenet.ApplyWSMask`, in another package, and it is 62–89 % of a received
-  message.
+- Optimise this package for throughput before reading §Cost and `BENCH.md`
+  §The wire format. The per-byte terms are `ApplyMask` and `ValidateText`, and
+  both are already at the memory hierarchy rather than the CPU.
+- Reach for `unsafe`, assembly or a build-tagged per-architecture file to make
+  `ApplyMask` faster. It is already 16× the byte-at-a-time form in pure
+  stdlib, and every one of those three costs the single-implementation
+  property ADR 0018 requires.
+- Read the payload with one `binary` byte order and build the key word with
+  another, or with hand-written shifts that assume a memory layout. One order,
+  used for both, is the entire endianness argument.
+- Delete `applyMaskReference` from `frame_mask_external_test.go`, or
+  "simplify" it to call `ApplyMask`. It is the RFC §5.3 transform transcribed
+  and the oracle every masking test is judged against; an oracle that calls
+  the implementation proves the implementation equals itself.
+- Add an RSV field to `FrameHeaderValue`, or tolerate a set reserved bit. It
+  is how permessage-deflate is refused where the wire can verify it.
+- Treat `crypto/sha1` here as a security primitive, or "upgrade" it. RFC 6455
+  §1.3 fixes the algorithm; changing it produces a server that talks to
+  nothing.
 
 ## Verification
 

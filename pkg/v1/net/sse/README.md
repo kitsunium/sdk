@@ -60,6 +60,7 @@ This package is the server half only. The SDK's outbound client returns a fully\
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
+- [func AppendEvent\(dst \[\]byte, ev Event\) \(wire \[\]byte, err error\)](<#AppendEvent>)
 - [func DrainSignal\(ctx context.Context\) \<\-chan struct\{\}](<#DrainSignal>)
 - [type Event](<#Event>)
 - [type Option](<#Option>)
@@ -127,8 +128,19 @@ var (
 )
 ```
 
+<a name="AppendEvent"></a>
+## func [AppendEvent](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L161>)
+
+```go
+func AppendEvent(dst []byte, ev Event) (wire []byte, err error)
+```
+
+AppendEvent appends ev's wire form to dst and returns the extended slice — the bytes [Stream](<#Stream>).Send writes, for a caller that frames events onto a transport of its own.
+
+It appends nothing when the frame is invalid: the whole frame is validated first, so a partial frame never reaches dst. Appending rather than returning a fresh slice is what lets a caller reuse one buffer for every frame.
+
 <a name="DrainSignal"></a>
-## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L202>)
+## func [DrainSignal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L215>)
 
 ```go
 func DrainSignal(ctx context.Context) <-chan struct{}
@@ -139,16 +151,16 @@ DrainSignal returns the channel closed when the server serving this request begi
 It is what [Stream](<#Stream>) watches, exposed because an event stream is not the only handler that holds a connection open indefinitely — a long poll does too, and so will anything built on a protocol upgrade. A nil channel blocks forever, so a select that watches it needs no nil check.
 
 <a name="Event"></a>
-## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L137>)
+## type [Event](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L138>)
 
-Event is one Server\-Sent Events frame.
+Event is one Server\-Sent Events frame. [Event](<#Event>).Validate reports whether the wire format can carry it; [AppendEvent](<#AppendEvent>) writes it.
 
 ```go
 type Event = corenet.SSEEventValue
 ```
 
 <a name="Option"></a>
-## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L140>)
+## type [Option](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L141>)
 
 Option configures a Stream.
 
@@ -157,7 +169,7 @@ type Option = svcsse.Option
 ```
 
 <a name="KeepAlive"></a>
-### func [KeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L160>)
+### func [KeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L173>)
 
 ```go
 func KeepAlive(d time.Duration) Option
@@ -168,7 +180,7 @@ KeepAlive sets the interval between keep\-alive comments.
 Zero does not mean "never": a stream with keep\-alive silently disabled works perfectly on a developer's loopback and dies at one minute behind a real proxy, which is the worst possible place to learn it. Zero is clamped to [DefaultKeepAlive](<#DefaultKeepAlive>); a negative interval is refused. To disable it, say so with [WithoutKeepAlive](<#WithoutKeepAlive>).
 
 <a name="Retry"></a>
-### func [Retry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L190>)
+### func [Retry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L203>)
 
 ```go
 func Retry(d time.Duration) Option
@@ -179,7 +191,7 @@ Retry sets the reconnection delay the stream advertises in its opening frame.
 It is the server's one chance to control how hard clients come back: a fleet that all reconnect on the browser default of about three seconds is a thundering herd aimed at a server that has just restarted. Zero sends no retry field.
 
 <a name="WithoutKeepAlive"></a>
-### func [WithoutKeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L168>)
+### func [WithoutKeepAlive](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L181>)
 
 ```go
 func WithoutKeepAlive() Option
@@ -188,7 +200,7 @@ func WithoutKeepAlive() Option
 WithoutKeepAlive disables the keep\-alive comment entirely, so that "never" is something a caller writes on purpose rather than something a zero does to them.
 
 <a name="WriteTimeout"></a>
-### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L179>)
+### func [WriteTimeout](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L192>)
 
 ```go
 func WriteTimeout(d time.Duration) Option
@@ -208,7 +220,7 @@ type Stream = svcsse.Stream
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L148>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/net/sse/sse.go#L149>)
 
 ```go
 func New(w http.ResponseWriter, r *http.Request, opts ...Option) (stream *Stream, err error)

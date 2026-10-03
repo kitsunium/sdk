@@ -5,8 +5,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "websocket",
     srcs = [
+        "close.go",
+        "frame.go",
         "handshake.go",
+        "handshake_key.go",
         "options.go",
+        "text.go",
         "websocket.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/net/websocket",
@@ -34,11 +38,15 @@ alias(
 go_test(
     name = "websocket_test",
     srcs = [
+        "frame_bench_test.go",
+        "frame_fuzz_external_test.go",
+        "frame_mask_external_test.go",
         "options_internal_test.go",
         "websocket_alloc_internal_test.go",
         "websocket_bench_test.go",
         "websocket_external_test.go",
         "websocket_internal_test.go",
+        "wire_external_test.go",
     ],
     embed = [":websocket"],
     deps = [
@@ -46,11 +54,4 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

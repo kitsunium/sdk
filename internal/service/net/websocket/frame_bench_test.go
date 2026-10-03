@@ -1,4 +1,4 @@
-package net_test
+package websocket_test
 
 import (
 	"slices"
@@ -6,12 +6,13 @@ import (
 	"testing"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/service/net/websocket"
 )
 
-// benchMaskWordWidth mirrors the width ApplyWSMask moves at a time. The
+// benchMaskWordWidth mirrors the width ApplyMask moves at a time. The
 // production constant is unexported, so the benchmark restates it — and the
 // crossover row in BENCH.md is what would notice if the two ever disagreed.
-const benchMaskWordWidth int = 2 * corenet.WSMaskLen
+const benchMaskWordWidth int = 2 * websocket.MaskLen
 
 // benchHijackBuffer is the size of the bufio.Reader net/http hands to a
 // hijacking handler, which is the largest frame that can arrive in one buffered
@@ -21,7 +22,7 @@ const benchHijackBuffer int = 4096
 // sinks so no frame, mask or validation can be proven unused and elided.
 var (
 	bytesSink  []byte
-	headerSink corenet.WSFrameHeaderValue
+	headerSink websocket.FrameHeaderValue
 	intSink    int
 	strSink    string
 	codeSink   corenet.WSCloseCode
@@ -30,7 +31,7 @@ var (
 
 // benchMaskKey is the four-byte key RFC 6455 requires a client to prefix to
 // every frame. A server therefore XORs every inbound byte with it.
-var benchMaskKey = [corenet.WSMaskLen]byte{0xDE, 0xAD, 0xBE, 0xEF}
+var benchMaskKey = [websocket.MaskLen]byte{0xDE, 0xAD, 0xBE, 0xEF}
 
 // benchPayload builds a payload of n bytes, outside every timed loop.
 func benchPayload(n int) []byte {
@@ -42,9 +43,9 @@ func benchPayload(n int) []byte {
 }
 
 // benchClientFrame assembles a MASKED client frame by hand, because that is the
-// only direction ParseWSFrameHeader accepts: RFC 6455 §5.1 requires a
+// only direction ParseFrameHeader accepts: RFC 6455 §5.1 requires a
 // client-to-server frame to be masked and requires a server to fail the
-// connection on an unmasked one, so AppendWSFrame — which writes the SERVER's
+// connection on an unmasked one, so AppendFrame — which writes the SERVER's
 // unmasked direction — produces bytes the parser refuses. Writing this
 // benchmark tripped over exactly that, which is the requirement being enforced
 // rather than documented.
@@ -63,17 +64,17 @@ func benchClientFrame(b *testing.B, payload []byte) []byte {
 	}
 	wire = append(wire, benchMaskKey[:]...)
 	masked := slices.Clone(payload)
-	corenet.ApplyWSMask(masked, benchMaskKey)
+	websocket.ApplyMask(masked, benchMaskKey)
 	return append(wire, masked...)
 }
 
-// BenchmarkApplyWSMask_* is the per-byte cost every inbound message pays. RFC
+// BenchmarkApplyMask_* is the per-byte cost every inbound message pays. RFC
 // 6455 requires a CLIENT frame to be masked and a server to refuse an unmasked
 // one, so this XOR is not optional and not skippable: it runs over the whole
 // payload of every message a browser sends.
-func BenchmarkApplyWSMask_64B(b *testing.B)  { benchMask(b, 64) }
-func BenchmarkApplyWSMask_4KiB(b *testing.B) { benchMask(b, 4<<10) }
-func BenchmarkApplyWSMask_1MiB(b *testing.B) { benchMask(b, 1<<20) }
+func BenchmarkApplyMask_64B(b *testing.B)  { benchMask(b, 64) }
+func BenchmarkApplyMask_4KiB(b *testing.B) { benchMask(b, 4<<10) }
+func BenchmarkApplyMask_1MiB(b *testing.B) { benchMask(b, 1<<20) }
 
 func benchMask(b *testing.B, n int) {
 	b.Helper()
@@ -82,7 +83,7 @@ func benchMask(b *testing.B, n int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		corenet.ApplyWSMask(payload, benchMaskKey)
+		websocket.ApplyMask(payload, benchMaskKey)
 	}
 	bytesSink = payload
 }
@@ -90,7 +91,7 @@ func benchMask(b *testing.B, n int) {
 // maskBenchLengths are the lengths that expose how the transform handles what
 // its wide loops cannot take.
 //
-// They are not round numbers for tidiness. ApplyWSMask moves a thirty-two-byte
+// They are not round numbers for tidiness. ApplyMask moves a thirty-two-byte
 // block, then a word, then a byte, so seven, fifteen and thirty-one are the
 // worst case of each tier — a full seven bytes left to the slowest loop — while
 // eight, thirty-two and sixty-four are the best. WSMaxControlPayload is RFC
@@ -103,7 +104,7 @@ var maskBenchLengths = []int{
 	corenet.WSMaxControlPayload, benchHijackBuffer, benchHijackBuffer + 1, 64 << 10, 1 << 20,
 }
 
-// BenchmarkApplyWSMask measures the shipped implementation against the
+// BenchmarkApplyMask measures the shipped implementation against the
 // byte-at-a-time form it replaced — IN THE SAME BINARY, on the same lengths and
 // the same payloads.
 //
@@ -111,20 +112,20 @@ var maskBenchLengths = []int{
 // invites a machine-state difference to be read as a speed-up. Here the two
 // rows are minutes apart at most, on the same CPU with the same buffer, so the
 // ratio between them is measured rather than inferred. `byte_at_a_time` calls
-// applyWSMaskReference, which is the previous production body verbatim and is
+// applyMaskReference, which is the previous production body verbatim and is
 // also the correctness oracle in websocket_frame_external_test.go — so the
 // thing being timed is exactly the thing being proved equivalent.
-func BenchmarkApplyWSMask(b *testing.B) {
+func BenchmarkApplyMask(b *testing.B) {
 	//: the shipped word-at-a-time transform.
 	for _, n := range maskBenchLengths {
 		b.Run("wide/"+benchLengthName(n), func(b *testing.B) {
-			benchMaskWith(b, n, corenet.ApplyWSMask)
+			benchMaskWith(b, n, websocket.ApplyMask)
 		})
 	}
 	//: the form it replaced, for the ratio.
 	for _, n := range maskBenchLengths {
 		b.Run("byte_at_a_time/"+benchLengthName(n), func(b *testing.B) {
-			benchMaskWith(b, n, applyWSMaskReference)
+			benchMaskWith(b, n, applyMaskReference)
 		})
 	}
 	//: the rejected alternative — see benchMaskShortGuarded.
@@ -148,20 +149,20 @@ func BenchmarkApplyWSMask(b *testing.B) {
 // smaller than the amount lost above it. A control frame is capped at
 // WSMaxControlPayload by §5.5, so the sizes this would help are precisely the
 // sizes that are already too cheap to matter.
-func benchMaskShortGuarded(payload []byte, key [corenet.WSMaskLen]byte) {
+func benchMaskShortGuarded(payload []byte, key [websocket.MaskLen]byte) {
 	//: below one word there is nothing for the wide loops to take, so the key
 	//: word would be built and thrown away.
 	if len(payload) < benchMaskWordWidth {
 		for i := range payload {
-			payload[i] ^= key[i&(corenet.WSMaskLen-1)]
+			payload[i] ^= key[i&(websocket.MaskLen-1)]
 		}
 		//: handled.
 		return
 	}
-	corenet.ApplyWSMask(payload, key)
+	websocket.ApplyMask(payload, key)
 }
 
-func benchMaskWith(b *testing.B, n int, apply func([]byte, [corenet.WSMaskLen]byte)) {
+func benchMaskWith(b *testing.B, n int, apply func([]byte, [websocket.MaskLen]byte)) {
 	b.Helper()
 	payload := benchPayload(n)
 	b.SetBytes(int64(n))
@@ -184,13 +185,13 @@ func benchLengthName(n int) string {
 	return name
 }
 
-// BenchmarkValidateWSText_* is the other per-byte pass. ADR 0047 judges UTF-8
+// BenchmarkValidateText_* is the other per-byte pass. ADR 0047 judges UTF-8
 // on the REASSEMBLED message, because a rune may straddle a fragment and a
 // per-frame check would reject valid input — so this runs once over the whole
 // message, and its throughput is what caps a text-heavy connection.
-func BenchmarkValidateWSText_64B(b *testing.B)  { benchValidate(b, 64) }
-func BenchmarkValidateWSText_4KiB(b *testing.B) { benchValidate(b, 4<<10) }
-func BenchmarkValidateWSText_1MiB(b *testing.B) { benchValidate(b, 1<<20) }
+func BenchmarkValidateText_64B(b *testing.B)  { benchValidate(b, 64) }
+func BenchmarkValidateText_4KiB(b *testing.B) { benchValidate(b, 4<<10) }
+func BenchmarkValidateText_1MiB(b *testing.B) { benchValidate(b, 1<<20) }
 
 func benchValidate(b *testing.B, n int) {
 	b.Helper()
@@ -199,65 +200,65 @@ func benchValidate(b *testing.B, n int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		errSink = corenet.ValidateWSText(payload)
+		errSink = websocket.ValidateText(payload)
 	}
 	if errSink != nil {
-		b.Fatalf("ValidateWSText: %v", errSink)
+		b.Fatalf("ValidateText: %v", errSink)
 	}
 }
 
-// BenchmarkValidateWSText_Multibyte is the same length in bytes but built from
+// BenchmarkValidateText_Multibyte is the same length in bytes but built from
 // three-byte runes, so the validator cannot take an ASCII fast path. The delta
 // against the ASCII row is what a non-Latin conversation costs.
-func BenchmarkValidateWSText_Multibyte(b *testing.B) {
+func BenchmarkValidateText_Multibyte(b *testing.B) {
 	payload := []byte(strings.Repeat("日", (4<<10)/3))
 	b.SetBytes(int64(len(payload)))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		errSink = corenet.ValidateWSText(payload)
+		errSink = websocket.ValidateText(payload)
 	}
 	if errSink != nil {
-		b.Fatalf("ValidateWSText: %v", errSink)
+		b.Fatalf("ValidateText: %v", errSink)
 	}
 }
 
-// BenchmarkParseWSFrameHeader and BenchmarkWSFrameHeaderLen are per FRAME
+// BenchmarkParseFrameHeader and BenchmarkFrameHeaderLen are per FRAME
 // rather than per byte, so they are the fixed cost of the protocol. ADR 0047
 // checks every ceiling against the length the PEER announced, before any
 // allocation, and that check lives here.
-func BenchmarkWSFrameHeaderLen(b *testing.B) {
+func BenchmarkFrameHeaderLen(b *testing.B) {
 	wire := benchClientFrame(b, benchPayload(4<<10))
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		intSink = corenet.WSFrameHeaderLen(wire)
+		intSink = websocket.FrameHeaderLen(wire)
 	}
 }
 
-func BenchmarkParseWSFrameHeader(b *testing.B) {
+func BenchmarkParseFrameHeader(b *testing.B) {
 	wire := benchClientFrame(b, benchPayload(4<<10))
 	//: the parser takes EXACTLY the header bytes and refuses a longer slice, so
 	//: it cannot over-read into a payload it has not validated the length of.
-	//: That is the contract a connection follows — WSFrameHeaderLen first, then
+	//: That is the contract a connection follows — FrameHeaderLen first, then
 	//: read that many — and the benchmark follows it too.
-	header := wire[:corenet.WSFrameHeaderLen(wire)]
+	header := wire[:websocket.FrameHeaderLen(wire)]
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		headerSink, errSink = corenet.ParseWSFrameHeader(header)
+		headerSink, errSink = websocket.ParseFrameHeader(header)
 	}
 	if errSink != nil {
-		b.Fatalf("ParseWSFrameHeader: %v", errSink)
+		b.Fatalf("ParseFrameHeader: %v", errSink)
 	}
 }
 
-// BenchmarkAppendWSFrame_* is the outbound half: the server writes an unmasked
+// BenchmarkAppendFrame_* is the outbound half: the server writes an unmasked
 // frame, so this is a header plus a copy. Reusing the destination buffer is the
 // documented way to avoid an allocation per message, and these rows are what
 // makes that worth saying.
-func BenchmarkAppendWSFrame_64B(b *testing.B)  { benchAppend(b, 64) }
-func BenchmarkAppendWSFrame_4KiB(b *testing.B) { benchAppend(b, 4<<10) }
+func BenchmarkAppendFrame_64B(b *testing.B)  { benchAppend(b, 64) }
+func BenchmarkAppendFrame_4KiB(b *testing.B) { benchAppend(b, 4<<10) }
 
 func benchAppend(b *testing.B, n int) {
 	b.Helper()
@@ -267,38 +268,38 @@ func benchAppend(b *testing.B, n int) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		bytesSink, errSink = corenet.AppendWSFrame(dst[:0], corenet.WSBinary, true, payload)
+		bytesSink, errSink = websocket.AppendFrame(dst[:0], corenet.WSBinary, true, payload)
 	}
 	if errSink != nil {
-		b.Fatalf("AppendWSFrame: %v", errSink)
+		b.Fatalf("AppendFrame: %v", errSink)
 	}
 }
 
-// BenchmarkAppendWSClosePayload and BenchmarkParseWSClosePayload cover the
+// BenchmarkAppendClosePayload and BenchmarkParseClosePayload cover the
 // close handshake, once per connection.
-func BenchmarkAppendWSClosePayload(b *testing.B) {
+func BenchmarkAppendClosePayload(b *testing.B) {
 	dst := make([]byte, 0, 64)
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		bytesSink, errSink = corenet.AppendWSClosePayload(dst[:0], corenet.WSCloseNormal, "done")
+		bytesSink, errSink = websocket.AppendClosePayload(dst[:0], corenet.WSCloseNormal, "done")
 	}
 	if errSink != nil {
-		b.Fatalf("AppendWSClosePayload: %v", errSink)
+		b.Fatalf("AppendClosePayload: %v", errSink)
 	}
 }
 
-func BenchmarkParseWSClosePayload(b *testing.B) {
-	wire, err := corenet.AppendWSClosePayload(nil, corenet.WSCloseNormal, "done")
+func BenchmarkParseClosePayload(b *testing.B) {
+	wire, err := websocket.AppendClosePayload(nil, corenet.WSCloseNormal, "done")
 	if err != nil {
-		b.Fatalf("AppendWSClosePayload: %v", err)
+		b.Fatalf("AppendClosePayload: %v", err)
 	}
 	b.ReportAllocs()
 	b.ResetTimer()
 	for b.Loop() {
-		codeSink, strSink, errSink = corenet.ParseWSClosePayload(wire)
+		codeSink, strSink, errSink = websocket.ParseClosePayload(wire)
 	}
 	if errSink != nil {
-		b.Fatalf("ParseWSClosePayload: %v", errSink)
+		b.Fatalf("ParseClosePayload: %v", errSink)
 	}
 }

@@ -18,7 +18,8 @@ alone for a consumer using plain `net/http`.
 |---|---|
 | `New` | starts a stream on a `ResponseWriter`; writes and flushes the headers |
 | `Stream` | the open stream — `Send`, `Comment`, `Done`, `LastEventID`, `Close` |
-| `Event` | one frame — `ID`, `Name`, `Data`, `Retry` |
+| `Event` | one frame — `ID`, `Name`, `Data`, `Retry`; `Validate` says whether the format can carry it |
+| `AppendEvent` | an event's wire form, appended to a caller's buffer — for a transport of the caller's own |
 | `Option`, `KeepAlive`, `WithoutKeepAlive`, `WriteTimeout`, `Retry` | stream options |
 | `ContentType`, `LastEventIDHeader`, `MinRetry`, `DefaultKeepAlive`, `DefaultWriteTimeout` | the format's and the domain's constants |
 | `DrainSignal` | the shutdown signal a long-lived handler watches |
@@ -27,6 +28,15 @@ alone for a consumer using plain `net/http`.
 `server.DrainSignal` is the same function, re-exported from `pkg/v1/net/server`
 so a handler that does not stream need not import this package to observe a
 drain.
+
+## `AppendEvent`, and the method it replaced
+
+`Event` aliases `internal/core/net.SSEEventValue`, and until ADR 0160 §4 that
+type also carried its own encoder, `AppendTo`. Writing a wire format is a
+mechanism, so the encoder moved to `internal/service/net/sse` and left the
+alias's method set; `AppendEvent(dst, ev)` is the same function under a
+facade name, so a caller that framed events itself keeps the capability (a v0
+shape change, ADR 0040). `Validate` stayed with the value.
 
 ## Why-this-shape
 

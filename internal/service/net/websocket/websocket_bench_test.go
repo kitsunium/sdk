@@ -53,7 +53,7 @@ var (
 	// client-to-server frame, which is why the XOR runs over every inbound byte
 	// this server will ever see. It is fixed rather than random because the XOR
 	// costs the same either way and a fixed key makes a script reproducible.
-	benchMaskKey = [corenet.WSMaskLen]byte{0x37, 0xFA, 0x21, 0x3D}
+	benchMaskKey = [MaskLen]byte{0x37, 0xFA, 0x21, 0x3D}
 )
 
 // benchAddr is the address a benchSocket reports. Nothing under test reads it.
@@ -202,14 +202,14 @@ func benchFrame(final bool, rsv byte, op byte, masked bool, payload []byte) []by
 	out[1] |= 0x80
 	out = append(out, benchMaskKey[:]...)
 	body := slices.Clone(payload)
-	corenet.ApplyWSMask(body, benchMaskKey)
+	ApplyMask(body, benchMaskKey)
 	//: masked, as a client must.
 	return append(out, body...)
 }
 
 // benchClientFrame assembles one well-formed masked client frame.
 //
-// It is the only direction this server accepts: corenet.AppendWSFrame writes
+// It is the only direction this server accepts: AppendFrame writes
 // the SERVER's unmasked direction, so a benchmark built on it would feed the
 // reader bytes §5.1 requires it to refuse.
 func benchClientFrame(op corenet.WSOpCode, final bool, payload []byte) []byte {
@@ -225,7 +225,7 @@ func benchClientFrame(op corenet.WSOpCode, final bool, payload []byte) []byte {
 func benchFragments(op corenet.WSOpCode, total, parts int) []byte {
 	payload := benchPayload(total)
 	chunk := total / parts
-	script := make([]byte, 0, total+parts*corenet.WSMaxHeaderLen)
+	script := make([]byte, 0, total+parts*MaxHeaderLen)
 	//: the first fragment carries the opcode; every later one continues it, and
 	//: only the last one sets FIN.
 	for i := range parts {
@@ -613,7 +613,7 @@ type benchRefusalRow struct {
 	want errs.Code
 }
 
-// benchFramingRefusals builds the shape refusals — the ones ParseWSFrameHeader
+// benchFramingRefusals builds the shape refusals — the ones ParseFrameHeader
 // and trackFragment decide without reading a payload.
 func benchFramingRefusals() []benchRefusalRow {
 	small := benchPayload(8)
@@ -699,7 +699,7 @@ func benchNonMinimal16(payload []byte) []byte {
 	out = binary.BigEndian.AppendUint16(out, uint16(len(payload)))
 	out = append(out, benchMaskKey[:]...)
 	body := slices.Clone(payload)
-	corenet.ApplyWSMask(body, benchMaskKey)
+	ApplyMask(body, benchMaskKey)
 	//: a frame that is legal in every way except how it wrote its length.
 	return append(out, body...)
 }
@@ -711,7 +711,7 @@ func benchNonMinimal64(payload []byte) []byte {
 	out = binary.BigEndian.AppendUint64(out, uint64(len(payload)))
 	out = append(out, benchMaskKey[:]...)
 	body := slices.Clone(payload)
-	corenet.ApplyWSMask(body, benchMaskKey)
+	ApplyMask(body, benchMaskKey)
 	//: the same frame, the same refusal, one length field wider.
 	return append(out, body...)
 }
@@ -873,7 +873,7 @@ func benchExpectSwitching(b *testing.B, reader *bufio.Reader) {
 // the length parse below read the payload four bytes late.
 func benchReadServerFrame(b *testing.B, reader *bufio.Reader) []byte {
 	b.Helper()
-	var head [corenet.WSMinHeaderLen]byte
+	var head [MinHeaderLen]byte
 	//: the two fixed bytes announce how many more the header needs.
 	if _, err := io.ReadFull(reader, head[:]); err != nil {
 		b.Fatalf("read header: %v", err)
