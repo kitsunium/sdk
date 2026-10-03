@@ -44,8 +44,14 @@ for: worse than an unwritten rule, because a reviewer trusts it.
 2. **The check reads every production file of those trees**, not only the
    packages `//:audit_sources` lists — that set is the `Define` emitters, and a
    package that defines nothing can still construct an untyped error.
-3. **One file is exempt: `internal/kernel/errs/validate.go`.** A second
-   exemption needs an ADR amending this one.
+3. **No file is exempt.** The four `errors.New` values of
+   `internal/kernel/errs/validate.go` that the table counts as the bootstrap
+   turned out to be dead when they were converted: unexported, named by
+   nothing but a `_ = []error{...}` pin, and replaced since ADR 0005 by the
+   `*Error` values `newValidationError` builds as a struct literal — which
+   needs neither `Define` nor the standard library. They were removed rather
+   than exempted, so the check holds every production file to the ban; an
+   exemption, should one ever be needed, needs an ADR amending this one.
 4. **What the `errors` package does besides constructing stays allowed**:
    `errors.Is`, `errors.As`, `errors.AsType`, `errors.Unwrap`, `errors.Join`
    over SDK errors, and `errors.ErrUnsupported`. They inspect or combine typed
@@ -54,18 +60,39 @@ for: worse than an unwritten rule, because a reviewer trusts it.
    registries panic with the typed conflict codes they already own
    (`DUPLICATE_REGISTRATION`), the poll watcher's causes become typed, and the
    framework's failures become `0.4.*` sentinels.
-6. **The mechanism is either of two shapes, and rule 2 names the one that
-   ships**: an AST test beside the registry audit in
-   `//internal/kernel/errs:errs_test` (the shape rule 2 already describes), or
-   SDK002 run as an invariant over the SDK's own tree with the exemption of §3.
-   SDK002 stays a convention for consumers.
+6. **The mechanism is SDK002, run over the SDK's own tree.** Of the two shapes
+   considered — an AST test beside the registry audit in
+   `//internal/kernel/errs:errs_test`, or `tools/sdkguard`'s SDK002 — the one
+   that ships is the second: `make guard`, which `make lint-check` runs (so
+   `make lint` and CI's lint gate do), adds a pass `-rules=SDK002` over
+   `internal/`, `pkg/`, `third-party/` and `framework/`. Choosing the rule by
+   identifier runs it whatever its level, so SDK002 stays a convention for
+   consumers and sdkguard's rule table is unchanged. The same target refuses,
+   fail-closed, any `//sdkguard:allow SDK002` directive in those trees, which
+   pins the exemption list of §3 to empty. Rule 2 of the root `CLAUDE.md`
+   names this mechanism.
 
 ## Consequences / Semantics
 
 - **Implemented by the reorganisation series**, in its first step: the
-  conversions of §5, then the check. This record changes no code; until the
-  check lands, rule 2's sentence about the audit describes this record's
-  target, not the tree.
+  conversions of §5, then the check of §6. The registries of `core/codec`,
+  `core/crypto` and `core/writer` wrap a `DUPLICATE_REGISTRATION` sentinel on
+  the code each already owned (`0.2.2.1`, `0.2.4.1`, `0.2.3.1`); the poll
+  watcher carries its refusals as text through a `withCause` helper;
+  `framework/internal/kit` gains six codes in its range (`0.4.2.70`–`0.4.2.75`,
+  re-exported by its facade) and `framework/kit/storetest` a range of its own,
+  `0.4.4.*`, starting with `0.4.4.1` `ROLLED_BACK`.
+- **sdkguard's shadow heuristic was narrowed on the way.** It counted a struct
+  field or an interface method named `errors`, `fmt`, `logger`, `os`, `log` or
+  `slog` as shadowing the package of that name, which silenced every rule for
+  the whole file: a file declaring `type r struct{ errors []error }` let
+  `errors.New` through with exit 0. A member is no longer a shadow; this
+  narrows ADR 0033 §Deferred's "lexical binding identity" without closing it.
+- **What the ban covers is the two constructors.** The framework's sentinels
+  are built with `pkg/v1/errs.New` and its product wire error, `kit.Error`, by
+  neither `Define` nor `Wrap`; neither is an untyped error, so neither fails
+  the gate, and rule 2's "goes through `errs.Define` or `errs.Wrap`" reads as
+  "is a typed SDK error" there.
 - A new untyped error fails the gate at its line, in the pull request that
   writes it.
 - The framework is held to the same rule as the SDK, which ADR 0147 §6 already
@@ -76,6 +103,10 @@ for: worse than an unwritten rule, because a reviewer trusts it.
 None in the published surface. The registries' panics carry a typed code where
 they carried a wrapped string; a program that recovered one and compared its
 text was relying on a message, which `errs` never promised.
+
+For consumers of `tools/sdkguard`: a file holding a struct field or an
+interface method named like a guarded package is now analysed, so it may report
+findings it used to hide — every one of them a true positive.
 
 ## Alternatives considered
 
@@ -89,12 +120,16 @@ text was relying on a message, which `errs` never promised.
 
 ## Deferred
 
-None.
+- What an AST rule cannot see: a method value (`f := errors.New`), a call
+  through another module's wrapper, and a file that declares a local or a
+  parameter named `errors` or `fmt`, which still disables SDK002 for that file
+  (no production file does today).
 
 ## References
 
 - `internal/kernel/errs/registry_external_test.go`,
   `internal/kernel/errs/registry_ownership_external_test.go` — the two audits
   that exist.
-- `tools/sdkguard/rules.go` (SDK002, `LevelConvention`), the `guard` target of
-  the `Makefile` (`-level=invariant`).
+- `tools/sdkguard/rules.go` (SDK002, `LevelConvention`), `tools/sdkguard/analyze.go`
+  (`memberFields`), and the `guard` target of the `Makefile` — the invariant
+  pass, the `-rules=SDK002` pass and the fail-closed directive scan.
