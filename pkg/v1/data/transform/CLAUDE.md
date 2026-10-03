@@ -33,10 +33,11 @@ frame now goes through this package too.
   the same refusal, `dst` returned as it was.
 - **A negative ceiling is zero.** As in the core contract: "unlimited" would
   be a third meaning, and the one that is a memory-exhaustion bug.
-- **The scheme sentinels are not re-exported yet.** `GZIP_FAILED`,
-  `FLATE_FAILED` and `ZLIB_FAILED` (`0.3.26.*`) are declared by the service
-  package; a caller matches them by reason until their declarations reach the
-  core (ADR 0160), when this facade aliases them like the `0.2.5.*` ones.
+- **The scheme sentinels are re-exported like the others.** `GzipFailed`,
+  `FlateFailed` and `ZlibFailed` (`0.3.26.*`) are declared by
+  `internal/core/data/transform` since ADR 0160, so this facade aliases them
+  beside the `0.2.5.*` ones; `TestACorruptStreamIsTheSchemesRefusal` pins that
+  a corrupt stream is matched by its scheme's code and sentinel.
 - **No codec is linked.** `TestGoListDepsNamesNoCodec` asks `go list -deps`;
   `TestItLinksNoModuleOutsideTheSDK` reads the test binary's modules.
 

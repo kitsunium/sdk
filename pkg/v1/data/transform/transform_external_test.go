@@ -118,6 +118,43 @@ func TestAnUnregisteredAlgorithmIsRefused(t *testing.T) {
 	}
 }
 
+// TestACorruptStreamIsTheSchemesRefusal feeds each stdlib scheme a stream it
+// cannot read: the refusal is that scheme's code and sentinel, re-exported
+// here from the core.
+func TestACorruptStreamIsTheSchemesRefusal(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		algo     transform.Algorithm
+		code     errs.Code
+		sentinel error
+	}
+	tests := []tc{
+		{transform.Gzip, transform.CodeGzipFailed, transform.GzipFailed},
+		{transform.Flate, transform.CodeFlateFailed, transform.FlateFailed},
+		{transform.Zlib, transform.CodeZlibFailed, transform.ZlibFailed},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		box, err := transform.Compress(c.algo, nil, bytes.Repeat([]byte("kitsune "), 32))
+		//: a valid stream to corrupt.
+		if err != nil {
+			t.Fatalf("Compress = %v", err)
+		}
+		//: cut in half: no scheme reads a stream that stops mid-block.
+		_, err = transform.Decompress(c.algo, nil, box[:len(box)/2])
+		//: the scheme's own code, and its sentinel for errors.Is.
+		if !errs.HasCode(err, c.code) || !errors.Is(err, c.sentinel) {
+			t.Errorf("Decompress(cut %s stream) = %v; want code %v and its sentinel", c.algo, err, c.code)
+		}
+	}
+	for _, c := range tests {
+		t.Run(string(c.algo), func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // TestAvailableListsWhatIsRegistered reads the registry: the three stdlib
 // schemes this package's import registered, and the test's own.
 func TestAvailableListsWhatIsRegistered(t *testing.T) {

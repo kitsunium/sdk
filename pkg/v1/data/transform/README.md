@@ -28,12 +28,15 @@ Every function appends to dst, which may be nil, and src must not overlap dst's 
 Match them with errs.HasCode, or the sentinels with errors.Is:
 
 ```
-CodeUnknownCompressor       0.2.5.1  no compressor is registered under the Algorithm
-CodeCompressedFrameInvalid  0.2.5.4  the codec package's compressed frame is malformed, or its bomb guard tripped
-CodeDecompressedTooLarge    0.2.5.6  the plaintext would exceed DecompressBounded's ceiling
+CodeUnknownCompressor       0.2.5.1   no compressor is registered under the Algorithm
+CodeCompressedFrameInvalid  0.2.5.4   the codec package's compressed frame is malformed, or its bomb guard tripped
+CodeDecompressedTooLarge    0.2.5.6   the plaintext would exceed DecompressBounded's ceiling
+CodeGzipFailed              0.3.26.1  compress/gzip refused the stream, compressing or decompressing
+CodeFlateFailed             0.3.26.2  compress/flate refused the stream
+CodeZlibFailed              0.3.26.3  compress/zlib refused the stream
 ```
 
-A malformed stream is the scheme's own refusal, with the scheme's reason: GZIP\_FAILED, FLATE\_FAILED or ZLIB\_FAILED for the three registered here.
+A malformed stream is the scheme's own refusal, with the scheme's code: [GzipFailed](<#UnknownCompressor>), [FlateFailed](<#UnknownCompressor>) or [ZlibFailed](<#UnknownCompressor>) for the three registered here, the stdlib's own error kept in the chain beneath it.
 
 ## Index
 
@@ -51,7 +54,7 @@ A malformed stream is the scheme's own refusal, with the scheme's reason: GZIP\_
 
 ## Constants
 
-<a name="CodeUnknownCompressor"></a>The error codes, range 0.2.5.\*, declared in the core.
+<a name="CodeUnknownCompressor"></a>The error codes, ranges 0.2.5.\* and 0.3.26.\*, declared in the core.
 
 ```go
 const (
@@ -64,6 +67,15 @@ const (
     // CodeDecompressedTooLarge identifies a stream whose plaintext would exceed
     // the ceiling its caller gave (0.2.5.6).
     CodeDecompressedTooLarge errs.Code = coretransform.CodeDecompressedTooLarge
+    // CodeGzipFailed identifies a stream compress/gzip refused, compressing or
+    // decompressing (0.3.26.1).
+    CodeGzipFailed errs.Code = coretransform.CodeGzipFailed
+    // CodeFlateFailed identifies a stream compress/flate refused (0.3.26.2).
+    CodeFlateFailed errs.Code = coretransform.CodeFlateFailed
+    // CodeZlibFailed identifies a stream compress/zlib refused (0.3.26.3): the
+    // RFC 1950 envelope, told apart from raw DEFLATE because a stream one of
+    // them refuses is often valid under the other.
+    CodeZlibFailed errs.Code = coretransform.CodeZlibFailed
 )
 ```
 
@@ -81,11 +93,18 @@ var (
     // DecompressedTooLarge is the sentinel of [CodeDecompressedTooLarge],
     // returned as is.
     DecompressedTooLarge = coretransform.DecompressedTooLarge
+    // GzipFailed is the sentinel of [CodeGzipFailed]; the stdlib's error is
+    // kept beneath it.
+    GzipFailed = coretransform.GzipFailed
+    // FlateFailed is the sentinel of [CodeFlateFailed].
+    FlateFailed = coretransform.FlateFailed
+    // ZlibFailed is the sentinel of [CodeZlibFailed].
+    ZlibFailed = coretransform.ZlibFailed
 )
 ```
 
 <a name="Compress"></a>
-## func [Compress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L121>)
+## func [Compress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L141>)
 
 ```go
 func Compress(algo Algorithm, dst, src []byte) (encoded []byte, err error)
@@ -94,7 +113,7 @@ func Compress(algo Algorithm, dst, src []byte) (encoded []byte, err error)
 Compress compresses src with the scheme registered under algo and appends the result to dst. An unregistered algo is refused with UnknownCompressor and dst comes back as it was.
 
 <a name="Decompress"></a>
-## func [Decompress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L136>)
+## func [Decompress](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L156>)
 
 ```go
 func Decompress(algo Algorithm, dst, src []byte) (decoded []byte, err error)
@@ -103,7 +122,7 @@ func Decompress(algo Algorithm, dst, src []byte) (decoded []byte, err error)
 Decompress decompresses src with the scheme registered under algo and appends the result to dst, bounded by the scheme's own backstop. To bound it by a number of your own, call DecompressBounded. An unregistered algo is refused with UnknownCompressor and dst comes back as it was.
 
 <a name="DecompressBounded"></a>
-## func [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L159>)
+## func [DecompressBounded](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L179>)
 
 ```go
 func DecompressBounded(algo Algorithm, dst, src []byte, limit int64) (decoded []byte, err error)
@@ -114,7 +133,7 @@ DecompressBounded decompresses src with the scheme registered under algo and app
 A scheme implementing BoundedDecompressor stops at limit, so the work is bounded too. A scheme that does not — a consumer's own, or one of the third\-party module's — is decompressed under its own backstop and judged afterwards: declining to tighten the work can never change the verdict, only the bytes touched reaching it.
 
 <a name="Algorithm"></a>
-## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L95>)
+## type [Algorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L115>)
 
 Algorithm is the name a Compressor registers under. The zero value is reserved as invalid.
 
@@ -137,7 +156,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L113>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L133>)
 
 ```go
 func Available() []Algorithm
@@ -146,7 +165,7 @@ func Available() []Algorithm
 Available returns the registered Algorithms, sorted.
 
 <a name="BoundedDecompressor"></a>
-## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L104>)
+## type [BoundedDecompressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L124>)
 
 BoundedDecompressor is the optional extension of a Compressor that can be told how much plaintext it may produce; DecompressBounded uses it when the scheme has it.
 
@@ -155,7 +174,7 @@ type BoundedDecompressor = coretransform.BoundedDecompressor
 ```
 
 <a name="Compressor"></a>
-## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L99>)
+## type [Compressor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L119>)
 
 Compressor is one compression scheme: Compress and Decompress append to dst. Implementations are safe for concurrent use.
 
@@ -164,7 +183,7 @@ type Compressor = coretransform.Compressor
 ```
 
 <a name="Lookup"></a>
-### func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L107>)
+### func [Lookup](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/transform/transform.go#L127>)
 
 ```go
 func Lookup(algo Algorithm) (c Compressor, ok bool)
