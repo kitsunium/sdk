@@ -1,6 +1,7 @@
 # ADR 0009 — Public module must be `go get`-resolvable and accessible
 
 **Status**: Accepted; release-layer mechanism implemented. **Amended by ADR 0017** — the module *path* `pkg/v1` is itself unpublishable (Go forbids the `/v1` suffix); the public module is the bare `…/pkg`. First release `pkg/v0.1.0` validated via clean-room `go get`.
+**Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — the single module this record refused is the decision: no `internal/<mod>/vX.Y.Z` tag is cut any more, and the chain is the SDK module plus the vendor modules that changed. Both normative properties — resolvable, accessible — stand, and so does the held first release
 **Date**: 2026-05-25
 **Deciders**: kitsunium maintainers
 **Supersedes**: —

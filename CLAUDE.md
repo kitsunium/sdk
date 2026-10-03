@@ -558,5 +558,6 @@ The full digest of every ADR — what it decided, what it amends, its status —
 - ADR 0159 — the kernel holds what the domains were rewriting, and is published by nature — `docs/adr/0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md`
 - ADR 0160 — every service has a core, and a code keeps its value when its declaration moves — `docs/adr/0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md`
 - ADR 0161 — an untyped error fails the build — `docs/adr/0161-an-untyped-error-fails-the-build.md`
+- ADR 0162 — the SDK is one module, and a release is one tag — `docs/adr/0162-the-sdk-is-one-module-and-a-release-is-one-tag.md`
 - Layer placement audit — `.claude/contexts/sdk-layer-placement-audit.md`
 - Bazel adoption context — `.claude/contexts/bazel-9-go-sdk.md`

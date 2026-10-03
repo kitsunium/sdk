@@ -1,6 +1,7 @@
 # ADR 0017 — Public module is the bare `pkg`, not `pkg/v1` (Go forbids the `/v1` suffix)
 
 **Status**: Accepted
+**Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — the public module is the repository root, `github.com/kitsunium/sdk`, its tag `vX.Y.Z`; the import paths `…/pkg/v1/*` are unchanged, and the bare `…/pkg` is a module of the past whose tags stay
 **Date**: 2026-06-14
 **Deciders**: kitsunium maintainers
 **Supersedes**: —

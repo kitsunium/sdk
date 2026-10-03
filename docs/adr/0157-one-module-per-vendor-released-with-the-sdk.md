@@ -1,6 +1,7 @@
 # ADR 0157 — one module per vendor, released with the SDK
 
 - **Status**: Accepted
+- **Amended by**: [ADR 0162](0162-the-sdk-is-one-module-and-a-release-is-one-tag.md) — §3: a vendor module is tagged only by a release that changes it, at that release's version, and gets no GitHub release of its own; §5: the root module is the SDK — `internal/`, `pkg/`, `framework/` — so no lane skips it
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0012](0012-logger-writer-registry.md) (the AWS writers in the root module; its rejected alternative, "a dedicated new module", is the one taken), [ADR 0015](0015-sdk-logger-writer-taxonomy-and-rotation.md) §D2 (the `vendor-root` tier, a writer whose vendor lives in the root module, has no placement left), [ADR 0022](0022-sdk-codec-hcl.md) and [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (HCL quarantined in the root module — the quarantine stands, its module changes), [ADR 0023](0023-sdk-schema-codecs.md) (the schema codecs in the root module), [ADR 0066](0066-third-party-compressors.md) (`third-party/transform` in the root module), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) §9 (the release chain gains the vendor modules)
