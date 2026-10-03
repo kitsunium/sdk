@@ -74,3 +74,107 @@ PrefixMatcher-12              23.79    21.3%   21.12 – 26.19      0           
 - Median of 5 repeats (`-count=5`); the per-row `spread` column is the
   within-run min-max. Between-run variance on this box is larger than that
   spread — see the envelope note above before citing any ns/op.
+
+## Every forwarded name — a function variable against a forwarder
+
+`facade_bench_test.go` prices one call to each of the eighteen names this
+package re-exports from `internal/kernel/errs`, made from a consumer's own
+package with every argument read from a variable, so nothing folds and nothing
+is dropped. The table compares the two shapes a re-export can take, on the same
+machine, side by side: the function variable (`var CodeOf = kerrs.CodeOf`, the
+shape until the forwarders change) and the forwarder
+(`func CodeOf(err error) (code Code, ok bool) { return kerrs.CodeOf(err) }`).
+The rule, per name: the forwarder ships when `go build -gcflags=-m` reports
+`can inline`, or when benchstat over ten samples shows no regression beyond 3 %
+at p < 0.05; otherwise the variable stays. Seventeen ship; `ReasonOf` stays a
+variable.
+
+| Dimension | Value |
+|---|---|
+| CPU                | Apple M1 Pro, 10 cores (8 performance, 2 efficiency) |
+| RAM                | 16 GiB |
+| OS / kernel        | macOS 26.6.2 (Darwin 25.6.0) |
+| Architecture       | arm64 |
+| Go toolchain       | go1.27.1 darwin/arm64 |
+| Generated (UTC)    | 2026-10-03 |
+| Machine load       | shared with other builds: 1-minute load average 36 to 186 during the runs |
+
+**Method — CPU time, because the machine was shared.** On that load a
+wall-clock `go test -bench` run of ten interleaved samples had confidence
+intervals up to ±1,314 % (one `HasCode` sample at 82.8 ns beside others at
+6.8 ns), and benchstat could tell almost nothing apart. So each sample is CPU
+time: the same `b.Loop` bodies, built in a scratch module against each tree,
+one window being one `testing.Benchmark` run of 20 ms wall time costed as the
+process's CPU time (`getrusage`, user + system) over `b.N`; a sample is the
+minimum of 25 windows, which discards the windows the scheduler gave an
+efficiency core, and preemption cannot inflate CPU time at all. Ten samples per
+shape, the two builds alternating which runs first, compared by benchstat. The
+confidence interval of each median fell from hundreds of percent to 2–6 % for
+every name that does not allocate.
+
+```
+name                variable (ns/op)   forwarder (ns/op)   change              inlines (cost)   shape shipped
+CodeOf                   7.543              7.697           ~ (p=0.123)         no (88)          forwarder
+ReasonOf                 7.761              8.062           +3.88% (p=0.035)    no (88)          variable
+PublicOf                 7.782              7.433           -4.50% (p=0.023)    yes (77)         forwarder
+PrivateOf                7.732              7.460           -3.52% (p=0.009)    yes (77)         forwarder
+HTTPStatusOf             7.441              7.469           ~ (p=0.393)         yes (61)         forwarder
+ExitCodeOf               7.442              7.464           ~ (p=0.631)         yes (61)         forwarder
+FieldsOf                42.12              45.58            ~ (p=0.315)         yes (61)         forwarder
+HasCode                  7.478              7.128           -4.68% (p=0.001)    yes (62)         forwarder
+HasReason                7.486              7.434           ~ (p=0.393)         yes (62)         forwarder
+NewPrefixMatcher         7.546              7.753           ~ (p=0.971)         yes (12)         forwarder
+Pack                     2.252              2.201           -2.27% (p=0.019)    yes (25)         forwarder
+ParseCode               22.54              22.79            ~ (p=0.579)         yes (70)         forwarder
+String                   5.481              3.192           -41.75% (p=0.000)   yes (13)         forwarder
+Int                      5.051              3.196           -36.74% (p=0.000)   yes (13)         forwarder
+Int64                    5.068              3.180           -37.25% (p=0.000)   yes (13)         forwarder
+Bool                     5.061              3.176           -37.23% (p=0.000)   yes (13)         forwarder
+Float                    5.042              3.193           -36.67% (p=0.000)   yes (13)         forwarder
+NewFieldValue            8.087              3.152           -61.03% (p=0.000)   yes (18)         forwarder
+```
+
+Allocations are identical in both shapes: `FieldsOf` 64 B and one allocation
+(its defensive copy), `NewPrefixMatcher` 8 B and one (the matcher, kept alive
+by the benchmark's sink), every other name zero.
+
+### `CodeOf` and `ReasonOf`, the two the inliner refuses
+
+Each forwarder costs 88 against the budget of 80, because it inlines the kernel
+accessor, itself 75, so it is a real call — a direct one, where the variable's
+was indirect. And the inlined accessor's two returns merge into the forwarder's
+one: the found path gains a taken branch and a `CMP`/`CSET` that rebuilds `ok`,
+which the kernel function, returning from each branch, does not execute. That
+is a cost on every call, and it sits at the rule's margin. Four runs of ten
+samples each, the same bodies:
+
+```
+run            CodeOf               ReasonOf
+1              +2.62% (p=0.143)     +1.88% (p=0.060)
+2              +1.15% (p=0.143)     +1.07% (p=0.190)
+3              +2.03% (p=0.123)     +3.88% (p=0.035)
+4              +4.11% (p=0.052)     +5.13% (p=0.043)
+all 40         +2.77% (p=0.001)     +2.91% (p=0.000)
+```
+
+`ReasonOf` showed a regression beyond 3 % at p < 0.05 in two of the four runs,
+so it stays a variable. `CodeOf` never did, so it ships — but it carries the
+same compiled shape, and the pooled +2.77 % is the measure of how close it
+came. Both would inline cleanly if the kernel accessors returned from one
+place, which is a kernel change of its own, to be measured with its own gates.
+
+### How to read this
+
+- **The sixteen that inline** cost nothing as forwarders: a call compiles to
+  the kernel's body at the call site, or to a direct call into it. The Field
+  builders gain the most, a third to more than half of their cost, because the
+  indirect call through the variable was most of what they did.
+- **`Pack` is barely faster here and is still the largest win.** With its
+  octets read from variables, the benchmark loop's own cost dominates; given
+  constants — the way a caller writes `errs.Pack(0x40, 1, 1, 1)` — the forwarder
+  folds to a constant at compile time (`MOVD $1073807617, R0` where the variable
+  compiled to an indirect call), which the variable could never do.
+- **Reproduce** the wall-clock form with
+  `cd pkg && GOWORK=off go test -run='^$' -bench=Facade -benchmem -count=10 ./v1/errs`
+  on each tree; on a shared machine, trust its verdicts only as far as its
+  confidence intervals allow.
