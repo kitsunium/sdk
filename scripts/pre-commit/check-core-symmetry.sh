@@ -4,8 +4,8 @@
 # ADR 0160 made two decisions a reader cannot keep by remembering them: every
 # service domain has a core, and every error code is declared in the core, at
 # the service's path, so a domain's codes are in one place and its facade's
-# sentinels all alias the core. Both were applied by hand across nine tracks,
-# and both reopen silently: a new engine that declares its own sentinels
+# sentinels all alias the core. Both were applied by hand, one family per
+# track, and both reopen silently: a new engine that declares its own sentinels
 # compiles, passes every test and every audit (check-audit-coverage.sh only
 # asks that the package be audited, not WHERE it sits), and a codes-only core
 # mirror whose engine moved still compiles too. So the rules are mechanical:
@@ -202,11 +202,12 @@ reexport='=[[:space:]]*[[:alpha:]_][[:alnum:]_]*\.[[:alpha:]_][[:alnum:]_]*[[:sp
 # yes, 1 for no, and 2 when the file could not be read — never a guess.
 declares() {
 	local file="$1" body names name pattern status
-	if ! body="$(grep -vE '^[[:space:]]*//' "$file")"; then
-		# grep -v exits 1 when every line is a comment: nothing to declare.
-		[ -r "$file" ] && return 1
-		return 2
-	fi
+	status=0
+	body="$(grep -vE '^[[:space:]]*//' "$file")" || status=$?
+	# grep -v exits 1 when every line is a comment — nothing to declare — and 2
+	# when it could not read the file, which is never read as "nothing".
+	[ "$status" -eq 1 ] && return 1
+	[ "$status" -gt 1 ] && return 2
 	if ! names="$(errs_names "$file")"; then
 		return 2
 	fi

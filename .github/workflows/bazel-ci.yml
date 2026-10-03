@@ -139,7 +139,7 @@ jobs:
       - name: domain-doc invariant — the root CLAUDE.md still describes the tree
         run: bash scripts/pre-commit/check-domain-docs.sh
 
-      # Guards ADR 0160's symmetry, which nine tracks applied by hand and which
+      # Guards ADR 0160's symmetry, which six tracks applied by hand and which
       # reopens silently: a service package declaring its own error code still
       # compiles and is still audited (the audits ask that a package be listed,
       # not where it sits), and a codes-only core mirror whose engine moved
