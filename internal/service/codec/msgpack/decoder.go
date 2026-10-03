@@ -1,18 +1,21 @@
-// Package msgpack — the streaming decoder. Decode first FRAMES one value:
-// it reads exactly the bytes of the next value from the stream into a pooled
-// scratch buffer, walking headers with the same table the in-memory decoder
-// uses and keeping a count of values still owed instead of recursing. Only
-// then is the frame decoded, by the same code Unmarshal runs. Framing never
-// trusts a declared length with memory: a string, binary or extension payload
-// is refused outright when it is longer than the stream can still deliver
-// under its bound, and is otherwise read in frameChunk pieces, so what a
-// hostile header costs is what its bytes cost.
+// Package msgpack — the streaming decoder. When the 4 KiB read-ahead already
+// holds the whole next value — what valueExtent checks, allocating nothing —
+// Decode decodes it IN PLACE, by the same code Unmarshal runs, and consumes
+// it. Otherwise it FRAMES the value: it reads exactly the bytes of the next
+// value into a pooled scratch buffer, walking headers with the same table the
+// in-memory decoder uses and keeping a count of values still owed instead of
+// recursing, and decodes the frame. A value the fast path cannot vouch for —
+// incomplete or malformed — always takes the framed path, which says why, so
+// both paths fail alike. Framing never trusts a declared length with memory:
+// a string, binary or extension payload is refused outright when it is longer
+// than the stream can still deliver under its bound, and is otherwise read in
+// frameChunk pieces, so what a hostile header costs is what its bytes cost.
 //
 // The bound is the one the vendor-backed decoder had: one byte past
-// maxMsgPackBytes, for the whole stream. A clean end of input between two values is io.EOF; an
-// end inside a value, a malformed byte or a value that does not fit its target
-// is UNMARSHAL_FAILED, and ends the stream — More reports false and every
-// later Decode returns the same error.
+// maxMsgPackBytes, for the whole stream. A clean end of input between two
+// values is io.EOF; an end inside a value, a malformed byte or a value that
+// does not fit its target is UNMARSHAL_FAILED, and ends the stream — More
+// reports false and every later Decode returns the same error.
 package msgpack
 
 import (
@@ -77,6 +80,74 @@ func (d *msgpackDecoder) Decode(v any) error {
 		//: the latched failure.
 		return d.err
 	}
+	//: any failure — io.EOF included — ends the stream.
+	if err := d.decodeNext(v); err != nil {
+		d.finish(err)
+		//: io.EOF untouched, anything else typed.
+		return err
+	}
+	//: one value decoded.
+	return nil
+}
+
+// decodeNext decodes the next value in place when the read-ahead already
+// holds all of it — the common case for a stream of documents smaller than
+// the read-ahead — and frames it into a scratch buffer otherwise. Both paths
+// decode exactly as Unmarshal does, and a value the fast path cannot vouch
+// for (incomplete, or malformed) takes the framed path, which says why.
+func (d *msgpackDecoder) decodeNext(v any) error {
+	//: the whole value is already buffered.
+	if frame, ok := d.bufferedValue(); ok {
+		//: decode it where it lies.
+		return d.decodeBuffered(frame, v)
+	}
+	//: read it in, piece by piece, under the stream's bound.
+	return d.decodeFramed(v)
+}
+
+// bufferedValue returns the next value when the read-ahead holds all of it.
+// The slice aliases the read-ahead and is valid until the next read.
+func (d *msgpackDecoder) bufferedValue() ([]byte, bool) {
+	//: an empty read-ahead is filled first; an end or a read failure is
+	//: left to the framed path, which reads again and classifies it.
+	if d.r.Buffered() == 0 {
+		//: one fill, as much as the reader hands over.
+		if _, err := d.r.Peek(1); err != nil {
+			//: no fast path.
+			return nil, false
+		}
+	}
+	buf, err := d.r.Peek(d.r.Buffered())
+	//: unreachable while n ≤ Buffered(); the framed path re-reads if not.
+	if err != nil {
+		//: no fast path.
+		return nil, false
+	}
+	size, complete := valueExtent(buf)
+	//: incomplete or malformed values are left to the framed path.
+	if !complete {
+		//: no fast path.
+		return nil, false
+	}
+	//: exactly the value.
+	return buf[:size], true
+}
+
+// decodeBuffered decodes a value lying in the read-ahead, then consumes it.
+// The decode copies everything it keeps, so the read-ahead may be reused.
+func (d *msgpackDecoder) decodeBuffered(frame []byte, v any) error {
+	err := unmarshalInto(frame, v)
+	//: the value is consumed whatever the decode said, as on the framed path.
+	if _, derr := d.r.Discard(len(frame)); derr != nil {
+		//: unreachable: the bytes are buffered.
+		return wrapUnmarshal(derr, "reading the stream failed")
+	}
+	//: the decode's own verdict.
+	return err
+}
+
+// decodeFramed reads one value into a pooled scratch buffer and decodes it.
+func (d *msgpackDecoder) decodeFramed(v any) error {
 	buf := scratch.AcquireBuffer()
 	f := framer{src: d.src, r: d.r, out: buf.AvailableBuffer()}
 	err := f.run()
@@ -86,14 +157,8 @@ func (d *msgpackDecoder) Decode(v any) error {
 	}
 	retain(buf, f.out)
 	scratch.ReleaseBuffer(buf)
-	//: any failure — io.EOF included — ends the stream.
-	if err != nil {
-		d.finish(err)
-		//: io.EOF untouched, anything else typed.
-		return err
-	}
-	//: one value decoded.
-	return nil
+	//: the framing or the decode verdict.
+	return err
 }
 
 // More reports whether the stream has not ended yet.

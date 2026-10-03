@@ -261,3 +261,72 @@ func (d *decodeState) skipBody(h header, owed uint64) (uint64, error) {
 		return owed, nil
 	}
 }
+
+// valueExtent reports the length of the first value in p when p holds all of
+// it, and false when p ends inside it or the value is malformed. It allocates
+// nothing and decides nothing about a failure — a caller that needs the
+// reason decodes or frames the bytes, which give it.
+func valueExtent(p []byte) (int, bool) {
+	off := 0
+	//: one value is owed; containers add their elements.
+	for owed := uint64(1); owed > 0; owed-- {
+		var ok bool
+		off, owed, ok = extentStep(p, off, owed)
+		//: incomplete or malformed.
+		if !ok {
+			//: unknown extent.
+			return 0, false
+		}
+	}
+	//: the value's length.
+	return off, true
+}
+
+// extentStep steps over the header at off and its payload, adding a
+// container's elements to what is owed.
+func extentStep(p []byte, off int, owed uint64) (next int, stillOwed uint64, ok bool) {
+	//: a header byte must be there.
+	if off >= len(p) {
+		//: incomplete.
+		return off, owed, false
+	}
+	info := &headerTable[p[off]]
+	off++
+	arg := info.inline
+	//: 0xc1, or a field the bytes do not hold.
+	if info.fam == famInvalid || len(p)-off < int(info.width) {
+		//: malformed or incomplete.
+		return off, owed, false
+	}
+	//: a family with a separate field reads it.
+	if info.width != 0 {
+		arg = beUint(p[off : off+int(info.width)])
+		off += int(info.width)
+	}
+	//: what follows the header.
+	return extentBody(p, off, owed, info.fam, arg)
+}
+
+// extentBody steps over a payload, or owes a container's elements; every
+// length and count is checked against the bytes that remain.
+func extentBody(p []byte, off int, owed uint64, fam family, arg uint64) (next int, stillOwed uint64, ok bool) {
+	left := uint64(len(p) - off)
+	//: the families that are more than their header.
+	switch fam {
+	//: str and bin: the payload.
+	case famStr, famBin:
+		return off + int(min(arg, left)), owed, arg <= left
+	//: ext: the type byte and the payload.
+	case famExt:
+		return off + int(min(arg+1, left)), owed, arg+1 <= left
+	//: an array owes its elements, one byte each at least.
+	case famArray:
+		return off, owed + arg, owed+arg-1 <= left
+	//: a map owes a key and a value per pair.
+	case famMap:
+		return off, owed + arg*valuesPerPair, owed+arg*valuesPerPair-1 <= left
+	//: nil, booleans and numbers are complete.
+	default:
+		return off, owed, true
+	}
+}

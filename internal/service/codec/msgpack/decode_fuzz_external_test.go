@@ -7,8 +7,10 @@ import (
 	"math"
 	"reflect"
 	"testing"
+	"testing/iotest"
 	"time"
 
+	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/codec/msgpack"
 )
@@ -77,7 +79,8 @@ func mustMarshalF(f *testing.F, v any) []byte {
 //  1. Unmarshal never panics, into any or into a typed record; a failure is
 //     always UNMARSHAL_FAILED with the package's code.
 //  2. What decodes into any re-encodes, and re-decodes to an equal value.
-//  3. A streaming Decoder agrees with Unmarshal on a single document: same
+//  3. A streaming Decoder agrees with Unmarshal on a single document — read
+//     in place from the read-ahead, and framed one byte per read: same
 //     value, then io.EOF.
 //  4. Nothing decoded aliases the input: overwriting it afterwards changes
 //     no decoded string or byte slice.
@@ -115,15 +118,23 @@ func FuzzUnmarshal(f *testing.F) {
 		if derr := c.Unmarshal(reencoded, &back); derr != nil || !equalAny(v, back) {
 			t.Fatalf("round trip differs (err=%v):\n first  %#v\n second %#v", derr, v, back)
 		}
-		dec := sc.NewDecoder(bytes.NewReader(data))
-		var streamed any
-		if serr := dec.Decode(&streamed); serr != nil || !equalAny(v, streamed) {
-			t.Fatalf("stream disagrees with Unmarshal (err=%v):\n stream %#v\n whole  %#v", serr, streamed, v)
-		}
-		if eof := dec.Decode(&streamed); !errors.Is(eof, io.EOF) {
-			t.Fatalf("stream after the only value: %v, want io.EOF", eof)
-		}
+		//: in place (the read-ahead holds the document) and framed (one byte
+		//: per read forces the piecewise path): both must agree with Unmarshal.
+		checkStream(t, sc.NewDecoder(bytes.NewReader(data)), v)
+		checkStream(t, sc.NewDecoder(iotest.OneByteReader(bytes.NewReader(data))), v)
 	})
+}
+
+// checkStream requires a stream of one document to yield want, then io.EOF.
+func checkStream(t *testing.T, dec codec.Decoder, want any) {
+	t.Helper()
+	var streamed any
+	if serr := dec.Decode(&streamed); serr != nil || !equalAny(want, streamed) {
+		t.Fatalf("stream disagrees with Unmarshal (err=%v):\n stream %#v\n whole  %#v", serr, streamed, want)
+	}
+	if eof := dec.Decode(&streamed); !errors.Is(eof, io.EOF) {
+		t.Fatalf("stream after the only value: %v, want io.EOF", eof)
+	}
 }
 
 // checkFailure requires a decode failure to carry UNMARSHAL_FAILED and the

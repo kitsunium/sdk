@@ -210,3 +210,32 @@ func TestStreamFailedEncodeWritesNothing(t *testing.T) {
 		t.Fatalf("a failed Encode wrote %x", buf.Bytes())
 	}
 }
+
+// TestStreamAcrossTheReadAhead decodes values of every size around the
+// decoder's 4 KiB read-ahead, so some lie wholly in it (decoded in place)
+// and others straddle its end (framed piece by piece): both paths must yield
+// the values that were written, in order.
+func TestStreamAcrossTheReadAhead(t *testing.T) {
+	t.Parallel()
+	var want []any
+	var stream bytes.Buffer
+	for size := 0; size < 9000; size += 97 {
+		v := map[string]any{"n": int8(size % 100), "s": string(bytes.Repeat([]byte{'a' + byte(size%26)}, size))}
+		want = append(want, v)
+		stream.Write(mustMarshal(t, v))
+	}
+	dec := streaming(t).NewDecoder(&stream)
+	for i, w := range want {
+		var got any
+		if err := dec.Decode(&got); err != nil {
+			t.Fatalf("value %d: %v", i, err)
+		}
+		if !reflect.DeepEqual(got, w) {
+			t.Fatalf("value %d differs", i)
+		}
+	}
+	var extra any
+	if err := dec.Decode(&extra); !errors.Is(err, io.EOF) {
+		t.Fatalf("after the last value: %v, want io.EOF", err)
+	}
+}

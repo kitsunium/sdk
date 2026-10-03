@@ -98,6 +98,10 @@ options: `intern` (a non-standard dictionary extension) is ignored.
   at most `preallocBytes` (64 KiB) before growing with the elements that
   actually decode. The stream framer refuses a length beyond what the stream
   can still deliver before reading it, and reads payloads in `frameChunk` pieces.
+- A stream value the 4 KiB read-ahead holds whole is decoded in place (after a
+  non-allocating `valueExtent` scan); any other value — longer, straddling the
+  read-ahead, or malformed — is framed into a scratch buffer first, so both
+  paths refuse alike. `FuzzUnmarshal` checks both against `Unmarshal`.
 
 ## Behaviour changes from the vendor-backed codec (consumer-visible)
 
@@ -143,10 +147,10 @@ returns one exact-size copy; `Append` encodes straight onto `dst`.
 | `wire.go` | format bytes, widths, bounds, the 256-entry header table |
 | `encode.go`, `timestamp.go` | append primitives, the timestamp extension |
 | `encode_plan.go`, `encode_map.go`, `encode_struct.go`, `encode_hook.go` | per-type encoders, map fast paths, struct + omitempty, marshal methods and the untyped entry |
-| `decode.go`, `decode_any.go` | the bounded cursor, skip, untyped decode |
+| `decode.go`, `decode_any.go` | the bounded cursor, skip, the non-allocating extent scan, untyped decode |
 | `decode_plan.go`, `decode_list.go`, `decode_map.go`, `decode_struct.go`, `decode_hook.go` | per-type decoders, slices/arrays, maps, structs, pointers/interfaces/unmarshal methods and the entry |
 | `struct.go` | struct layout and tag parsing, shared by both directions |
-| `encoder.go`, `decoder.go` | streaming encoder; streaming decoder and its framer |
+| `encoder.go`, `decoder.go` | streaming encoder; streaming decoder — in place from the read-ahead, or framed |
 | `fault.go`, `failed.go` | failure constructors; the two codes and sentinels |
 | `codec_compliance.go` | compile-time interface conformance |
 
