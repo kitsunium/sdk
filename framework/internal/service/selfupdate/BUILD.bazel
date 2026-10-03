@@ -37,6 +37,7 @@ go_library(
     deps = [
         "//framework/internal/core/selfupdate",
         "//internal/kernel/errs",
+        "//pkg/v1/clock",
         "//pkg/v1/hash",
         "//pkg/v1/proc",
         "//pkg/v1/sign",
@@ -85,6 +86,7 @@ go_test(
     deps = [
         "//framework/internal/core/selfupdate",
         "//internal/kernel/errs",
+        "//pkg/v1/clock",
         "//pkg/v1/proc",
     ],
 )

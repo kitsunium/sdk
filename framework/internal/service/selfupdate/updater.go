@@ -25,6 +25,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
 // Service constants for GitHub API, versioning, and file operations.
@@ -91,10 +92,11 @@ type Service struct {
 	vendorKey ed25519.PublicKey
 	// vendorKeys are the keys a release may be signed with, in order, the
 	// first of them vendorKey (keys.go, ADR 0150); domain is the signature
-	// domain, now the clock the signed expiry is read against.
+	// domain; clock is what the signed expiry is read against — pkg/v1/clock's
+	// system clock when nil, a manual one in a suite (ADR 0158 §2).
 	vendorKeys []ed25519.PublicKey
 	domain     string
-	now        func() time.Time
+	clock      clock.Clock
 	// probe is what a replacement must answer before it stands (probe.go).
 	probe probeSpec
 	// automatic is WithAutomaticConsent's (consent_product.go).

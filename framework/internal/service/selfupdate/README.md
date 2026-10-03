@@ -342,7 +342,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L67-L102>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L68-L104>)
 
 Service replaces the running binary with a newer signed release of the product its SourceValue names. It manages version checking via GitHub API and binary replacement. goos/goarch are captured at construction time so the per\-platform asset resolution \(\`getBinaryName\`, \`getArchiveSuffix\`, \`innerBinaryName\`\) is stable per\-instance — tests can construct a literal with explicit values instead of mutating package\-level \`runtimeGOOS\`/\`runtimeGOARCH\` \(which would race under t.Parallel\).
 
@@ -353,7 +353,7 @@ type Service struct {
 ```
 
 <a name="NewService"></a>
-### func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L109>)
+### func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L111>)
 
 ```go
 func NewService(version string, src SourceValue) *Service
@@ -364,7 +364,7 @@ NewService creates a new updater instance.
 The returned Service carries NO vendor key and therefore installs nothing: callers chain \`.WithVendorKey\(...\)\` with the build's linked\-in anchor. That is deliberate — see WithVendorKey in signature.go.
 
 <a name="NewUpdaterWithDeps"></a>
-### func [NewUpdaterWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L138>)
+### func [NewUpdaterWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L140>)
 
 ```go
 func NewUpdaterWithDeps(version string, src SourceValue, client Getter, fs FileSystem, copier Copier) *Service
@@ -386,7 +386,7 @@ func (u *Service) AuthoriseUnattendedUpgrade(out io.Writer, in io.Reader, intera
 AuthoriseUnattendedUpgrade decides whether an upgrade nobody asked for may proceed for this Service: an explicit environment answer first, then the product's own consent \(WithAutomaticConsent\), then the source's prompt rule.
 
 <a name="Service.CheckForUpdate"></a>
-### func \(\*Service\) [CheckForUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L153>)
+### func \(\*Service\) [CheckForUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L155>)
 
 ```go
 func (u *Service) CheckForUpdate() (info UpdateValue, checkErr error)
@@ -413,7 +413,7 @@ func (u *Service) ListCandidates() (candidates []CandidateValue, listErr error)
 ListCandidates returns all available release candidates.
 
 <a name="Service.Upgrade"></a>
-### func \(\*Service\) [Upgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L180>)
+### func \(\*Service\) [Upgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L182>)
 
 ```go
 func (u *Service) Upgrade() (info UpdateValue, upgradeErr error)
@@ -440,7 +440,7 @@ func (u *Service) WithProbe(args []string, timeout time.Duration) *Service
 WithProbe makes a replacement stand only once the NEW binary, run with args, exits 0 within timeout \(zero: five seconds\). Before the rename the previous binary is kept as \<binary\>.prev — a hard link, so the binary's own name is never absent —, and a probe that fails puts it back and reports ProbeFailed. A daemon that updates itself declares the argument its binary answers cheaply \("version", "\-\-probe"\).
 
 <a name="Service.WithSignatureDomain"></a>
-### func \(\*Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L69>)
+### func \(\*Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L70>)
 
 ```go
 func (u *Service) WithSignatureDomain(domain string) *Service
@@ -467,7 +467,7 @@ WithVendorKey pins the ed25519 public half every release must be signed with, an
 A Service built WITHOUT this call authenticates nothing and therefore installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single byte is fetched. That default is deliberate. The alternative — treat an absent key as "verification not required" — would mean any construction site that forgot the call silently reverted to the unauthenticated behaviour this file exists to end, and nothing would ever fail to point it out.
 
 <a name="Service.WithVendorKeys"></a>
-### func \(\*Service\) [WithVendorKeys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L36>)
+### func \(\*Service\) [WithVendorKeys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L37>)
 
 ```go
 func (u *Service) WithVendorKeys(keys ...[]byte) *Service

@@ -11,6 +11,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/sign"
 )
 
@@ -140,11 +141,14 @@ func (u *Service) checkStatement(tag, manifest string) error {
 	if err != nil {
 		return refuse(coreupd.SignatureInvalid, errs.String("condition", "expiry_unreadable"), errs.String("tag", tag))
 	}
-	now := time.Now
-	if u.now != nil {
-		now = u.now
+	//: Read against the injected clock, the system one when none was given:
+	//: an expiry is a deadline, and a deadline a suite cannot move is one it
+	//: cannot test from both sides.
+	reader := u.clock
+	if reader == nil {
+		reader = clock.System
 	}
-	if !now().Before(until) {
+	if !reader.Now().Before(until) {
 		return refuse(coreupd.SignatureInvalid, errs.String("condition", "statement_expired"),
 			errs.String("tag", tag), errs.String("expired", until.UTC().Format(time.RFC3339)))
 	}

@@ -13,6 +13,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/clock"
 )
 
 // domainStatement prepends the two header lines a signature domain requires.
@@ -110,7 +111,7 @@ func TestADomainBindsTheSignatureTheTagAndTheExpiry(t *testing.T) {
 			f.manifest = c.statement(f)
 			f.sig = c.sign(f, f.manifest)
 			u := signedServiceFor(t, f.pub, nil, func(w http.ResponseWriter, r *http.Request) { f.serveAsset(t, w, r.URL.Path) }).
-				WithSignatureDomain(domain).withClock(func() time.Time { return now })
+				WithSignatureDomain(domain).withClock(clock.NewManualClock(now))
 			err := u.verifyArchive("v1.1.0", f.archive)
 			if c.condition == "" {
 				if err != nil {
@@ -120,6 +121,54 @@ func TestADomainBindsTheSignatureTheTagAndTheExpiry(t *testing.T) {
 			}
 			if !errs.HasCode(err, coreupd.CodeSignatureInvalid) || !strings.Contains(diagnose(err)+fieldsOf(err), c.condition) {
 				t.Fatalf("verifyArchive = %v (%s), want SIGNATURE_INVALID %s", err, fieldsOf(err), c.condition)
+			}
+		})
+	}
+}
+
+// TestTheExpiryIsReadAgainstTheInjectedClock pins that a signed statement's
+// expiry is judged by the Service's clock and not by the wall clock. Each case
+// puts the injected instant on the OTHER side of the expiry from any real date
+// this suite can run on, so the wall clock answers the opposite of what the
+// case wants: a statement that expired in 2002 still verifies at an injected
+// 2001, and one valid until 2100 is refused at an injected 2101. Seen failing
+// with the expiry read from clock.System: both cases, each the other way round.
+func TestTheExpiryIsReadAgainstTheInjectedClock(t *testing.T) {
+	t.Parallel()
+	const domain = "kitsunium/statusline/release/v1"
+	cases := []struct {
+		name      string
+		now       time.Time
+		expires   string
+		condition string
+	}{
+		{
+			name: "a statement the wall clock calls expired verifies at an earlier injected instant",
+			now:  time.Date(2001, 1, 1, 0, 0, 0, 0, time.UTC), expires: "2002-01-01T00:00:00Z",
+		},
+		{
+			name: "a statement the wall clock calls valid is refused at a later injected instant",
+			now:  time.Date(2101, 1, 1, 0, 0, 0, 0, time.UTC), expires: "2100-01-01T00:00:00Z", condition: "statement_expired",
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			f := newReleaseFixture(t, []byte("new"))
+			f.manifest = domainStatement("v1.1.0", c.expires, f.manifest)
+			f.sig = signDomain(f.priv, domain, f.manifest)
+			u := signedServiceFor(t, f.pub, nil, func(w http.ResponseWriter, r *http.Request) { f.serveAsset(t, w, r.URL.Path) }).
+				WithSignatureDomain(domain).withClock(clock.NewManualClock(c.now))
+			err := u.verifyArchive("v1.1.0", f.archive)
+			if c.condition == "" {
+				if err != nil {
+					t.Fatalf("verifyArchive at %s: %v (%s)", c.now.Format(time.RFC3339), err, fieldsOf(err))
+				}
+				return
+			}
+			if !errs.HasCode(err, coreupd.CodeSignatureInvalid) || !strings.Contains(fieldsOf(err), c.condition) {
+				t.Fatalf("verifyArchive at %s = %v (%s), want SIGNATURE_INVALID %s",
+					c.now.Format(time.RFC3339), err, fieldsOf(err), c.condition)
 			}
 		})
 	}
@@ -200,7 +249,7 @@ func TestAutomaticConsentIsTheProductsAndGrantsNothingElse(t *testing.T) {
 }
 
 // withClock sets the clock the expiry is read against.
-func (u *Service) withClock(now func() time.Time) *Service {
-	u.now = now
+func (u *Service) withClock(c clock.Clock) *Service {
+	u.clock = c
 	return u
 }
