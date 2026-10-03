@@ -13,7 +13,7 @@ import (
 // fixed zone — and decodes each in UTC.
 func TestTimestampRoundTrip(t *testing.T) {
 	t.Parallel()
-	zone := time.FixedZone("UTC+5:30", int(5*time.Hour+30*time.Minute)/int(time.Second))
+	zone := time.FixedZone("UTC+5:30", int((5*time.Hour+30*time.Minute)/time.Second))
 	tests := []struct {
 		name string
 		in   time.Time
