@@ -12,19 +12,18 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// scheme is what every crypto registry stores: a comparable port that names its
-// own Algorithm, the key it registers under. Every capability port satisfies it.
-type scheme interface {
-	comparable
-	Algorithm() Algorithm
-}
-
 // schemeRegistry is one capability's registry: the kernel's read-mostly,
 // copy-on-write table, and the public registrar's name, which is what its
 // refusals carry. Re-registering the SAME value is an idempotent no-op; a
 // DISTINCT value under a taken Algorithm is the hard conflict. The zero table
 // is ready to use; a registry is declared with its verb.
-type schemeRegistry[V scheme] struct {
+//
+// V is what the registry stores: a comparable port that names its own
+// Algorithm, the key it registers under — every capability port is one.
+type schemeRegistry[V interface {
+	comparable
+	Algorithm() Algorithm
+}] struct {
 	// table maps each Algorithm to its scheme; Lookup and Names read it
 	// directly, lock-free.
 	table plugin.Registry[Algorithm, V]

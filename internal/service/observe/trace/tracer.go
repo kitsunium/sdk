@@ -95,7 +95,7 @@ func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanPa
 
 // mint builds the new span's context: the trace id, a fresh span id, the
 // sampled bit and the inherited tracestate. It cannot fail: the draws cannot.
-func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) (context coretrace.SpanContextValue) {
+func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) coretrace.SpanContextValue {
 	//: every span has its own id, root or not.
 	spanID := drawSpanID()
 	//: a valid parent hands down the trace id, the flags and the vendor list

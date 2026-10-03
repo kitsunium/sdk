@@ -19,7 +19,7 @@ import (
 
 // stubScheme is a comparable value for white-box schemeRegistry tests. It
 // implements no capability port — the registrar only needs a comparable value
-// that names its Algorithm, so a bare struct exercises every path.
+// that names its Algorithm, so a bare struct exercises the publish paths.
 type stubScheme struct {
 	id  Algorithm
 	tag int
@@ -28,18 +28,15 @@ type stubScheme struct {
 // Algorithm keys the stub in the registry.
 func (s stubScheme) Algorithm() Algorithm { return s.id }
 
-// uncomparableStub names its Algorithm but holds a slice, so == on it panics —
-// the shape the registrar must refuse before its duplicate check compares it.
-type uncomparableStub struct {
-	stubScheme
-	tags []string
-}
+// : the uncomparable double must satisfy the port its registry stores, exactly
+// : as the stub hasher does.
+var _ Hasher = uncomparableHasher{}
 
-// stubPort is the interface a registry of stubs stores, as a real capability
-// registry stores its port: what the registrar judges is the dynamic value
-// behind it, and a typed nil or an uncomparable value is only reachable that way.
-type stubPort interface {
-	Algorithm() Algorithm
+// uncomparableHasher is a Hasher that holds a slice, so == on it panics — the
+// shape the registrar must refuse before its duplicate check compares it.
+type uncomparableHasher struct {
+	stubHasher
+	tags []string
 }
 
 // Test_schemeRegistry_publish proves the three outcomes every Register* verb
@@ -130,24 +127,25 @@ func Test_schemeRegistry_conflictIsTyped(t *testing.T) {
 // the wrong one is the copy-paste error this test exists to keep out.
 func Test_schemeRegistry_register(t *testing.T) {
 	t.Parallel()
-	r := schemeRegistry[stubPort]{verb: "RegisterStub"}
-	kept := stubScheme{id: "kept"}
-	if got := r.register(kept); got != stubPort(kept) {
+	//: a registry of the Hasher port, as hashers is, under a verb of its own.
+	r := schemeRegistry[Hasher]{verb: "RegisterStub"}
+	kept := stubHasher{id: "kept"}
+	if got := r.register(kept); got != Hasher(kept) {
 		t.Fatalf("register returned %v, want the value it was given", got)
 	}
 	//: the identical value again is the idempotent no-op, not a panic.
-	if got := r.register(kept); got != stubPort(kept) {
+	if got := r.register(kept); got != Hasher(kept) {
 		t.Fatalf("re-register returned %v, want the value it was given", got)
 	}
 	tests := []struct {
 		name  string
-		value stubPort
+		value Hasher
 		want  []string
 	}{
 		{"an untyped nil", nil, []string{"crypto.RegisterStub [0.2.4.1 DUPLICATE_REGISTRATION]: nil"}},
-		{"a typed nil", (*stubScheme)(nil), []string{"crypto.RegisterStub [0.2.4.1 DUPLICATE_REGISTRATION]: nil *crypto.stubScheme"}},
-		{"an uncomparable value", uncomparableStub{stubScheme: stubScheme{id: "slices"}}, []string{"crypto.uncomparableStub is not comparable"}},
-		{"a distinct value under a taken name", stubScheme{id: "kept", tag: 1}, []string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.RegisterStub"`, `algorithm="kept"`}},
+		{"a typed nil", (*stubHasher)(nil), []string{"crypto.RegisterStub [0.2.4.1 DUPLICATE_REGISTRATION]: nil *crypto.stubHasher"}},
+		{"an uncomparable value", uncomparableHasher{tags: []string{"x"}}, []string{"crypto.uncomparableHasher is not comparable"}},
+		{"a distinct value under a taken name", stubHasher{id: "kept", tag: 1}, []string{"[0.2.4.1 DUPLICATE_REGISTRATION]", `registrar="crypto.RegisterStub"`, `algorithm="kept"`}},
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -164,7 +162,7 @@ func Test_schemeRegistry_register(t *testing.T) {
 
 // recoverRegister runs r.register(v) and returns what it panicked with, or the
 // empty string when it did not panic.
-func recoverRegister(r *schemeRegistry[stubPort], v stubPort) (msg string) {
+func recoverRegister(r *schemeRegistry[Hasher], v Hasher) (msg string) {
 	defer func() {
 		//: the registrar refuses by panicking; read the refusal back.
 		if recovered := recover(); recovered != nil {

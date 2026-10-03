@@ -51,6 +51,9 @@ type handRolled struct {
 }
 
 // lookup is the hand-written read, line for line.
+//
+// IFACE-PLUGIN: it hands back the port the table stores, as every registry's
+// Lookup does — the shape under measurement.
 func (h *handRolled) lookup(name string) (value identifier, found bool) {
 	current := h.table.Load()
 	if current == nil {
