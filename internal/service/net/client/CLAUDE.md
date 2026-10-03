@@ -137,8 +137,8 @@ stdlib (`bytes`, `net/http`, `net/url`, `regexp`, `strings`, `io`, `time`) +
 `internal/kernel/*` + `internal/core/net`. Never `pkg/*`.
 
 **Never the codec.** The client must not decode response bodies: depending on
-the codec registry would drag msgpack and cbor into the module
-graph of every consumer that only wanted a guarded GET. Decoding belongs above
+the codec registry would link every codec the SDK ships into every
+consumer that only wanted a guarded GET. Decoding belongs above
 this layer.
 
 ## Do NOT

@@ -222,7 +222,7 @@ var (
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L260>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L261>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
@@ -240,7 +240,7 @@ func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err
 MarshalCompressed serialises v with the codec registered under f, compresses the result with the transform registered under algo, and wraps both in a self\-describing frame so UnmarshalCompressed needs no Format or Algorithm argument. It returns UnknownCompressor when algo has no frame id or no registered body, CompressedFrameInvalid when f exceeds the addressable length, and forwards any codec / compressor error untouched \(origin wins\).
 
 <a name="MarshalMany"></a>
-## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L326>)
+## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L327>)
 
 ```go
 func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error)
@@ -270,7 +270,7 @@ MultipartContentType returns the Content\-Type header value — "multipart/form\
 A caller streaming through NewEncoder\(Multipart, w\) must set the header before the first byte instead: the Encoder returned has a Boundary\(\) string method, and mime.FormatMediaType builds the same value from it.
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L285>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L286>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
@@ -326,7 +326,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L399>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L400>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -344,7 +344,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L386>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L387>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -435,7 +435,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L412>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L413>)
 
 ```go
 func Available() []Format
@@ -444,7 +444,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L431>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L432>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -453,7 +453,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L418>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/codec/codec.go#L419>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)

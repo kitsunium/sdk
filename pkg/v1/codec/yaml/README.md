@@ -12,7 +12,7 @@ Package yaml registers the YAML codec with the SDK's codec registry — and no o
 import _ "github.com/kitsunium/sdk/pkg/v1/codec/yaml"
 ```
 
-Everything that dispatches through the registry by format name then reads and writes YAML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest, with their libraries — which a program that only reads YAML does not need to link. This package links the YAML codec and gopkg.in/yaml.v3, and nothing else.
+Everything that dispatches through the registry by format name then reads and writes YAML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest — which a program that only reads YAML does not need to link. This package links the YAML codec and gopkg.in/yaml.v3, and nothing else.
 
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 

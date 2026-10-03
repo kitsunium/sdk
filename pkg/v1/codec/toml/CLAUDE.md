@@ -8,8 +8,8 @@ imported, blank usually (ADR 0134). Everything that dispatches by format name
 then reads and writes TOML: `config.FileSource` / `config.FSSource`,
 `i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the TOML
 codec, which the SDK implements with the standard library alone, and no module
-outside the SDK — where `pkg/v1/codec` links every format the SDK ships, with
-their libraries. The codec itself is documented in
+outside the SDK — where `pkg/v1/codec` links every format the SDK ships. The
+codec itself is documented in
 `internal/service/codec/toml/CLAUDE.md`.
 
 ## Surface

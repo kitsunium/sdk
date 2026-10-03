@@ -52,7 +52,7 @@ to its own generated `README.md`.
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml` and `toml` register one format each, so a program reading YAML links `yaml.v3` and not the MongoDB driver. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) / [`bson`](./pkg/v1/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links `yaml.v3` and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. BSON, CBOR, MessagePack and TOML are implemented on the standard library alone. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
@@ -106,7 +106,7 @@ func main() {
 
 ## What makes this SDK different
 
-- **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced by Bazel `visibility` rules.
+- **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced on the build graph by `scripts/check-layer-deps.sh` (ADR 0068).
 - **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. `make guard` gates it: the SDK runs its own `sdkguard` rule SDK002 over its production tree in `make lint` and CI.
 - **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
 - **The rules are checkable from outside** — the conventions this SDK states in its ADRs are enforced on *your* codebase too, by a tool the SDK ships:
@@ -114,7 +114,7 @@ func main() {
   go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
   ```
   It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
-- **Multi-module workspace** — `internal/kernel`, `internal/core`, `internal/service`, `pkg`, root. Each can be built standalone with `GOWORK=off`; `go.work` is the umbrella over exactly those five. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **Multi-module workspace** — `go.work` holds seventeen modules: `internal/kernel`, `internal/core`, `internal/service`, `pkg`, the `framework` and its three database connectors, one module per vendor integration under `third-party/` (ADR 0157), and the root. Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 
@@ -138,7 +138,10 @@ docs/            ADRs + the Astro-based docs site
 scripts/release/ release tooling — see ADR 0007
 tools/           build-time helpers (workspace_status, genindex, alloc-lane-targets)
                  + sdkguard/ — consumer-facing rule enforcement (ADR 0033)
-e2e/             real-kernel conformance harness (auxiliary module, GOWORK=off)
+framework/       the layer above pkg/v1 a product imports (ADR 0147)
+third-party/     opt-in vendor integrations, one Go module per vendor (ADR 0157)
+e2e/             real-kernel conformance harness + the Docker-backed integration
+                 suites (auxiliary module, GOWORK=off)
 ```
 
 ## Verification

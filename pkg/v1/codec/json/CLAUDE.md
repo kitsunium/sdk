@@ -8,7 +8,7 @@ imported, blank usually (ADR 0134). Everything that dispatches by format name
 then reads and writes JSON: `config.FileSource` / `config.FSSource`,
 `i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the JSON
 codec and the standard library's encoding/json, and nothing else — where `pkg/v1/codec` links every format
-the SDK ships, with their libraries.
+the SDK ships.
 
 ## Surface
 

@@ -12,7 +12,7 @@ Package toml registers the TOML codec with the SDK's codec registry — and no o
 import _ "github.com/kitsunium/sdk/pkg/v1/codec/toml"
 ```
 
-Everything that dispatches through the registry by format name then reads and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest, with their libraries — which a program that only reads TOML does not need to link. This package links the TOML codec, which the SDK implements with the standard library alone, and no module outside the SDK.
+Everything that dispatches through the registry by format name then reads and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and the codec package's Marshal and Unmarshal. Importing github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK ships — BSON, CBOR, MessagePack and the rest — which a program that only reads TOML does not need to link. This package links the TOML codec, which the SDK implements with the standard library alone, and no module outside the SDK.
 
 The codec reads TOML v1.0.0 \(https://toml.io/en/v1.0.0\), refusing what the specification refuses — a key or a table defined twice, an integer outside int64, bytes that are not UTF\-8 — and accepts the four TOML v1.1.0 relaxations: newlines, comments and a trailing comma in an inline table, the \\e and \\xHH escapes, and a time without seconds. It writes TOML v1.0.0. A refusal never quotes the document; it names the problem, the line and the column.
 

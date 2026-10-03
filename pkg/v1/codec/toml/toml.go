@@ -9,7 +9,7 @@
 // and writes TOML: config.FileSource and config.FSSource, i18n.LoadFS, and
 // the codec package's Marshal and Unmarshal. Importing
 // github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK
-// ships — BSON, CBOR, MessagePack and the rest, with their libraries — which
+// ships — BSON, CBOR, MessagePack and the rest — which
 // a program that only reads TOML does not need to link. This package links
 // the TOML codec, which the SDK implements with the standard library alone,
 // and no module outside the SDK.

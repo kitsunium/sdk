@@ -9,7 +9,7 @@
 // and writes YAML: config.FileSource and config.FSSource, i18n.LoadFS, and
 // the codec package's Marshal and Unmarshal. Importing
 // github.com/kitsunium/sdk/pkg/v1/codec instead registers every format the SDK
-// ships — BSON, CBOR, MessagePack and the rest, with their libraries — which
+// ships — BSON, CBOR, MessagePack and the rest — which
 // a program that only reads YAML does not need to link. This package links
 // the YAML codec and gopkg.in/yaml.v3, and nothing else.
 //

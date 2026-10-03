@@ -40,7 +40,7 @@ A non\-2xx status returns BOTH the response and an error: a caller diagnosing th
 
 ### What it deliberately does not do
 
-It does not decode. Depending on the codec registry would pull msgpack and cbor into the module graph of every consumer that only wanted a guarded GET, so decoding belongs above this layer.
+It does not decode. Depending on the codec registry would link every codec the SDK ships into every consumer that only wanted a guarded GET, so decoding belongs above this layer.
 
 It does not truncate an oversized body — it fails with [ResponseTooLarge](<#RequestDenied>). A silent truncation does not stay silent; it resurfaces several layers away as an incomprehensible decode error on a body that looks complete.
 

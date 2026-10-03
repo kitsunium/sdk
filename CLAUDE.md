@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:09:09Z -->
+<!-- updated: 2026-10-03T04:00:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -55,9 +55,9 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 ```
 internal/
 ├── kernel/        stdlib-only AND generic primitives
-│                  batcher, buffer, cache, clock, errs, group, heap,
-│                  pathchain, plugin, recycler, ring, singleflight,
-│                  snapshot, topic, worker
+│                  backoff, batcher, buffer, cache, clock, errs, group,
+│                  heap, pathchain, plugin, recycler, ring, singleflight,
+│                  snapshot, worker
 ├── core/          domain interfaces + domain values
 │                  authz, cache, cli, codec (+ scratch), config, crypto,
 │                  entitlement, events,
@@ -116,7 +116,8 @@ internal/
                    metrics (in-memory meter + text/prometheus/otlpjson
                              exporters + the OTLP/HTTP emitter)
                    resilience (retry, circuit breaker, rate limit + keyed,
-                           bulkhead, timeout, fallback, hedging; the backoff curve)
+                           bulkhead, timeout, fallback, hedging; the backoff
+                           curve, an alias of kernel/backoff's)
                    scheduler (cron parser + fixed interval + engine)
                    secret (memory, environment and sealed file stores,
                            keyring over versions, rotator; subject keys
@@ -148,6 +149,9 @@ internal/
                    ipc    (a private socket between processes of one machine:
                            the directory gates, SO_PEERCRED on Linux, a
                            named pipe with its own DACL on Windows — ADR 0148)
+                   internal (otlp — the OTLP/HTTP + JSON transport metrics
+                           and trace share; logfile — the hardened open both
+                           file sinks share)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
@@ -159,7 +163,8 @@ pkg/
     │                 + strictjson/ — one document read one way — ADR 0102;
     │                 + jsonshape/ — a type's wire shape — ADR 0133;
     │                 + jsonpatch/ — two documents' difference — ADR 0143;
-    │                 + json/, yaml/, toml/ — one format each — ADR 0134)
+    │                 + json/, yaml/, toml/, bson/ — one format each — ADR 0134;
+    │                 bson/ also names BSON's value types)
     ├── crypto/    (AEAD and keys; its scheme facades are siblings, not children:
     │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
     │                 since ADR 0143)
@@ -207,15 +212,18 @@ pkg/
     └── ipc/         (a private socket, the peer the kernel names — ADR 0148)
     └── redact/      (secrets replaced for display, exact bound — ADR 0101)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
-third-party/       opt-in vendor integrations (root module only)
-                   aws/writer/{cloudwatch,s3}, codec/{hcl,protobuf},
-                   entitlement (the ssh Identity + enrolment ONLY; the
-                     mechanism is pkg/v1/entitlement — ADR 0079),
+third-party/       opt-in vendor integrations, one Go module per vendor
+                   (ADR 0157) — see third-party/CLAUDE.md:
+                   aws (writer/{cloudwatch,s3}), codec/hcl, codec/protobuf,
                    db/writer/{clickhouse,mysql,redis},
-                   db/sql (the SQL mechanisms on real engines — integration
-                     tests only, no production code — ADR 0139/0140),
                    transform (zstd + s2 — ADR 0066),
-                   x-crypto/{argon2id,xchacha}
+                   x-crypto (argon2id, xchacha);
+                   entitlement (the ssh Identity + enrolment ONLY; the
+                     mechanism is pkg/v1/entitlement — ADR 0079), still in
+                     the root module until it leaves for the framework
+                     (ADR 0158);
+                   the SQL mechanisms' suites on real engines moved to
+                     e2e/integration/sql (ADR 0139/0140, ADR 0157)
 framework/         the layer above pkg/v1, its own module — ADR 0147
                    model (the graph types + the ID grammar, Version 5),
                    kit (the runtime a product imports), telemetry (the
@@ -228,7 +236,7 @@ framework/         the layer above pkg/v1, its own module — ADR 0147
 (base16/32/45/58/62/64/64url, hex, ascii85) through the same registry as
 every other codec.
 
-- Nine SDK modules held together by `go.work` — plus three **auxiliary** modules deliberately kept OUT of it: `e2e/`, `tools/genindex/` and `tools/sdkguard/`. Bazel's `go_deps` extension reads `go.work` and cannot process extra modules, so adding any of them breaks the build; they carry `replace` directives (or need none) and are built with `GOWORK=off`. Counting `go.mod` files therefore yields twelve — that is not drift, it is the invariant — and `bash scripts/ci/go-modules.sh` prints them: it is the census every lane that loops over modules reads, so a module git tracks is built, vetted, tested on 32 bits and scanned without anybody editing a workflow (ADR 0137). See `e2e/CLAUDE.md` §Do NOT and `tools/CLAUDE.md` §Do NOT. The nine workspace modules are: root (umbrella — also hosts the opt-in, vendor-dependent integrations under `third-party/*`, e.g. the AWS writers; see ADR 0012), `internal/kernel`, `internal/core`, `internal/service`, and the public `pkg` (module `github.com/kitsunium/sdk/pkg`, `go.mod` at `pkg/go.mod`; its consumer packages live under `pkg/v1/` and import as `…/pkg/v1/*`, but the *module* is the bare `…/pkg` because Go forbids a `/v1` module-path suffix — ADR 0017), and the **framework** (module `github.com/kitsunium/sdk/framework`, `go.mod` at `framework/go.mod` — the layer above `pkg/v1` a product imports, which reaches `internal/` only through `pkg/v1` and `kernel/errs`, owns layer `4` of the dotted-quad and is released in lockstep with `pkg` — ADR 0147), and its three database engines `framework/connectors/{postgres,mysql,sqlite}`, one driver and one module each, released in the same lockstep. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Heavy vendor deps (AWS SDK) live in the **root** `go.mod` only — nothing requires the root module, so `pkg` consumers stay dep-light.
+- Seventeen SDK modules held together by `go.work` — plus three **auxiliary** modules deliberately kept OUT of it: `e2e/`, `tools/genindex/` and `tools/sdkguard/`. Bazel's `go_deps` extension reads `go.work` and cannot process extra modules, so adding any of them breaks the build; they carry `replace` directives (or need none) and are built with `GOWORK=off`. Counting `go.mod` files therefore yields twenty — that is not drift, it is the invariant — and `bash scripts/ci/go-modules.sh` prints them: it is the census every lane that loops over modules reads, so a module git tracks is built, vetted, tested on 32 bits and scanned without anybody editing a workflow (ADR 0137). A pattern never crosses a module boundary — `go build ./...` at the repository root builds the root module alone, in workspace mode or not — so a check of the whole SDK loops over that census. See `e2e/CLAUDE.md` §Do NOT and `tools/CLAUDE.md` §Do NOT. The seventeen workspace modules are: the root (the workspace's anchor beside `go.work` and `MODULE.bazel`: required by nothing and never tagged, it still holds entitlement's ssh `Identity` until that leaves for the framework — ADR 0157, ADR 0158), `internal/kernel`, `internal/core`, `internal/service`, and the public `pkg` (module `github.com/kitsunium/sdk/pkg`, `go.mod` at `pkg/go.mod`; its consumer packages live under `pkg/v1/` and import as `…/pkg/v1/*`, but the *module* is the bare `…/pkg` because Go forbids a `/v1` module-path suffix — ADR 0017), the **framework** (module `github.com/kitsunium/sdk/framework`, `go.mod` at `framework/go.mod` — the layer above `pkg/v1` a product imports, which reaches `internal/` only through `pkg/v1` and `kernel/errs`, owns layer `4` of the dotted-quad and is released in lockstep with `pkg` — ADR 0147) and its three database engines `framework/connectors/{postgres,mysql,sqlite}`, one driver and one module each, and the eight vendor modules under `third-party/` — `aws`, `codec/hcl`, `codec/protobuf`, `db/writer/{clickhouse,mysql,redis}`, `transform` and `x-crypto`, one vendor each (ADR 0157). All of them but the root are released in the same lockstep. Each module-local `go.mod` carries `replace` directives so `GOWORK=off go build ./...` per-module still works. Each vendor lives in its own module's `go.mod` — nothing in the SDK requires a vendor module, so `pkg` consumers stay dep-light and a consumer of one integration takes that vendor's graph and no other's.
 - Dependency direction is strictly top-down: kernel → core → service → pkg/v1 → framework, with `third-party/` above all but the framework. It is enforced on the BUILD GRAPH by `scripts/check-layer-deps.sh` (in `make lint` and CI — ADR 0068), not by visibility: ADR 0004 put it on `package_group` + `visibility`, but Gazelle gives every package under `internal/` the visibility `//:__subpackages__`, which admits the whole repository, and a kernel package importing core was shown to build. A rogue import fails `make lint` and CI, naming the target it reached.
 - Consumers import only `pkg/v1/*`; `internal/*` is blocked by Go's `internal/` firewall, which is also what keeps them out under Bazel.
 - Build / test / lint go through **Bazel 9** — see ADR 0004. `go test ./...` still works locally for quick iteration but CI only runs `bazel`. Because the two build systems disagree about what is in scope, anything excluded from one MUST be covered by the other — see rule 12.
@@ -247,7 +255,7 @@ every other codec.
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | Release dry-run | `make release-dry-run` (computes patch bumps locally without pushing tags — see ADR 0007) |
-| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 66 today — and of every package of the `framework` module declaring one (not the `framework/connectors/*` modules, which that `go generate` does not reach), from its package doc comment; see ADR 0008) |
+| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 67 today — and of every package of the `framework` module declaring one (not the `framework/connectors/*` modules, which that `go generate` does not reach), from its package doc comment; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.
 
@@ -263,8 +271,8 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 8. **Every package is documented.** The guard `scripts/pre-commit/check-pkg-docs.sh` — run by `make lint` and CI — fails when any `internal/*` or `pkg/v*/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) require BOTH: `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`) and `CLAUDE.md` (agent-facing), because the two roles do not collapse. The `scripts/release/*.{sh,mjs}` and `docs/site/scripts/*.mjs` trees are tooling, not library code, and are exempt from this gate.
 9. **Every benchmark package ships its numbers.** The guard `scripts/pre-commit/check-bench-md.sh` — run by `make lint` and CI — fails when a directory contains `*_bench_test.go` but no sibling `BENCH.md`. The report is regenerated with `make bench`; it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so cross-machine deltas can be evaluated honestly.
 10. **`pkg/v*/**/README.md` are generated, not hand-authored.** The `gomarkdoc` binary (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`) reads each package's Go doc comments and emits `README.md` per package (ADR 0008). Edit the package comment in the existing `.go` file (`codec.go` / `accessors.go` / `logger.go`); run `make docs-readme` to regenerate; `scripts/pre-commit/check-readme-drift.sh` — run by CI's `bazel` job — blocks any change where the file on disk doesn't match what gomarkdoc would produce now. Maintainer rationale (Why-this-shape, layering, do-not lists) stays in `CLAUDE.md` — consumer-facing prose belongs in the package doc comment.
-11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the `internal/core` directories, when a domain is described twice in the Purpose paragraph, or when either ADR index drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
-12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` / `localstack` tagged tests declare their run procedure in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module, a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
+11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the `internal/core` directories, when a domain is described twice in the Purpose paragraph, or when one of the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, this file's Reference list) drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
+12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` tagged suites declare their run procedure in `e2e/integration/CLAUDE.md` (they live in the auxiliary `e2e` module — ADR 0157) and `localstack` ones in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module, a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
 
 ## Layout
 
@@ -272,11 +280,11 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 sdk/
 ├── internal/              see internal/CLAUDE.md
 ├── pkg/v1/                see pkg/CLAUDE.md + pkg/v1/CLAUDE.md
-├── third-party/           opt-in vendor integrations in the root module (AWS writers — ADR 0012)
+├── third-party/           opt-in vendor integrations, one Go module per vendor — see third-party/CLAUDE.md (ADR 0157)
 ├── framework/             the framework module above pkg/v1 — see framework/CLAUDE.md (ADR 0147)
 ├── docs/                  ADRs — see docs/CLAUDE.md
 ├── .github/               CI workflows — bazel-ci.yml is the SDK lane
-├── go.work, go.mod        workspace + umbrella module (read by Bazel via from_file)
+├── go.work, go.mod        workspace + the root module, its anchor (read by Bazel via from_file)
 ├── MODULE.bazel           Bzlmod entry point (rules_go 0.60.0 + gazelle 0.50.0 + go_sdk 1.27.1 + go_deps)
 ├── BUILD.bazel            root gazelle target + audit_sources filegroup
 ├── .bazelrc               race-on by default; named configs: race / pure / ci / alloc
@@ -284,7 +292,7 @@ sdk/
 ├── Makefile               build / test / test-alloc / lint / bench / cover / docs / serve / release-dry-run / docs-readme … (run `make` for the full list)
 ├── scripts/               guards (scripts/pre-commit/, run by make lint and CI — ADR 0153), release (scripts/release/) and CI (scripts/ci/) scripts, the layer firewall (check-layer-deps.sh)
 ├── .ktn-linter.yaml       ktn-linter configuration — the phases 1-7 gate `make lint-ktn-check` runs
-├── e2e/                   real-kernel conformance harness — auxiliary module, OUTSIDE go.work (GOWORK=off)
+├── e2e/                   real-kernel conformance harness + the Docker-backed integration suites (e2e/integration) — auxiliary module, OUTSIDE go.work (GOWORK=off)
 ├── tools/sdkguard/        consumer-facing rule enforcement (stdlib-only CLI — ADR 0033)
 ├── tools/workspace_status.sh  prints STABLE_VERSION (consumed by --stamp + x_defs)
 ├── tools/alloc-lane-targets.txt  target list for the race-off alloc lane (rule 12)
@@ -310,13 +318,13 @@ sdk/
 | `make test` | every `*_test` target green incl. `//internal/kernel/errs:errs_test` (AST audit) |
 | `make test-alloc` | race-off allocation gates green — every target in `tools/alloc-lane-targets.txt`, the only lane running `//go:build !race` tests |
 | `bash scripts/pre-commit/check-alloc-lane-coverage.sh` | exit 0 — no `!race` test sits outside `tools/alloc-lane-targets.txt` (rule 12) |
-| `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree still names exactly the `internal/core` directories, no domain is described twice, and both ADR indexes name exactly the ADRs on disk, once each (rule 11) |
+| `bash scripts/pre-commit/check-domain-docs.sh` | exit 0 — the architecture tree still names exactly the `internal/core` directories, no domain is described twice, and the three ADR indexes name exactly the ADRs on disk, once each (rule 11) |
 | `bash scripts/pre-commit/check-audit-coverage.sh` | exit 0 — no package declaring an `errs.Define`/`errs.Code` sits outside `//:audit_sources` (rule 3) |
 | `GOWORK=off GOARCH=386 CGO_ENABLED=0 go test ./...` (in every module `bash scripts/ci/go-modules.sh` prints) | green — the 32-bit RUNTIME bar, run by CI's `test-386` job over the whole census, `tools/` and the root module included (ADR 0137). `cross-build` proves the SDK compiles on 386; this proves it behaves, which is where a `int(0xffffffff)` read as `-1` shows up |
 | `make vuln-install && make vuln-check` | every module: no REACHABLE known vulnerability (`govulncheck` source mode, pinned in the `Makefile`; needs `vuln.go.dev`). Blocking in CI's `bazel` job and run daily by `vuln-scan.yml` (ADR 0136) |
 | `cd pkg && go test ./...` | green; `pkg/v1/codec` completes in seconds — `TestGenerateBenchMD` self-skips unless named via `-run` |
 | `make lint` | drift assertion (read-only): mod tidy + gazelle diff + gofumpt -l + `make guard` + `make doclinks` + ktn-linter + alloc-lane coverage + audit coverage + domain-doc drift + package docs + BENCH.md presence + error-code drift + layer firewall (`scripts/check-layer-deps.sh`) |
-| `make guard` | `tools/sdkguard` over the SDK's own tree at invariant level (ADR 0033); no network — `-version-check=off` |
+| `make guard` | `tools/sdkguard` over the SDK's own tree: the invariants (ADR 0033), then SDK002 over `internal/`, `pkg/`, `third-party/` and `framework/` — rule 2, no exemption (ADR 0161); no network — `-version-check=off` |
 | `make doclinks` | every same-package doc link in the repository names a symbol its package declares — a member of an aliased type is written `[Type].Member` (ADR 0138); part of `make lint-check`, so CI runs it |
 
 ## Reference
