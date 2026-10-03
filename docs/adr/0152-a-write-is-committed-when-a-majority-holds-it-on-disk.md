@@ -1,9 +1,9 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed — first review run stopped at its cap of three rounds; review run 2, round 1 applied; **the R4 version is not yet reviewed**
+- **Status**: Proposed — review run 2, round 2 applied, split from ADR 0160; **the R5 version is not yet reviewed**
 - **Date**: 2026-10-02
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Depends on** the TLS sibling ADR of D4, which must be Accepted before this one (R3-17)
+- **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Split into** [ADR 0160](0160-divergence-is-prevented-by-construction-and-repaired-automatically.md) (divergence prevention and automatic repair, Q12); **Depends on** the TLS sibling ADR of D4, which must be Accepted before this one (R3-17)
 
 ## Context
 
@@ -127,7 +127,7 @@ properties with no failure at the moment of the swap.
 
 | Layer | Package | Holds | May import |
 |---|---|---|---|
-| core | `internal/core/consensus` | every type a port speaks or that implementing a published port requires (ADR 0074, R2-32): `NodeID`, `Incarnation`, `ClusterID`, `LogIdentity`, `GroupID`, `Position`, `Entry`, `EntryKind`, `HardState`, `Stamp`, `Member`, `Membership`, `Message`, `SnapshotMeta`, `SnapshotSink`, `InstallRequest`, `Versions`, `TimingContract`, `Status`; the ports `Replicated`, `StateMachine`, `Snapshot`, `LogStore`, `LogReader`, `SnapshotStore`, `Transport`; the frozen siblings `DurableStateMachine`, `BatchingStateMachine`, `HashingStateMachine`, `UnreachableReporter`, `LeadershipWatcher`; the `0.2.57.*` sentinels | kernel only (`errs`, `clock`) |
+| core | `internal/core/consensus` | every type a port speaks or that implementing a published port requires (ADR 0074, R2-32): `NodeID`, `Incarnation`, `ClusterID`, `LogIdentity`, `GroupID`, `Position`, `Entry`, `EntryKind`, `HardState`, `Stamp`, `Member`, `Membership`, `Message`, `SnapshotMeta`, `SnapshotSink`, `InstallRequest`, `Versions`, `TimingContract`, `Status`; the ports `Replicated`, `StateMachine`, `Snapshot`, `LogStore`, `LogReader`, `SnapshotStore`, `Transport`; the frozen siblings `DurableStateMachine`, `BatchingStateMachine`, `UnreachableReporter`, `LeadershipWatcher`; the `0.2.57.*` sentinels | kernel only (`errs`, `clock`) |
 | service | `internal/service/consensus` | the Raft engine (a pure step function, its event loop and its storage actor), the segmented file log with its `_linux.go` I/O, the snapshot store, the mTLS transport, the offline functions over the shipped layout, the in-memory log and transport doubles, the simulator's fault models (test-only) | kernel; core `consensus`, `net`, `lock`, `metrics`, `trace`, `logger`, `transform`; service `lock` (the data-directory lock, D11), `net/server` (the inbound stream groups), `transform` (flate) |
 | pkg | `pkg/v1/consensus` | type aliases for every type needed to implement a published port (R2-32), `NewRaft`, `Bootstrap`, `OpenDataDir`, the offline functions `Recover`, `RestoreSnapshot` and `Inspect`, the adapters' constructors, the sentinels | its own lower layers, sibling `pkg/v1/*` |
 
@@ -135,14 +135,6 @@ There is no `tools/` row and no `cmd/` row: the SDK has no `package main`
 (Q4, R2-36). An external-module test implements every published port from
 `pkg/v1/consensus` alone, so a missing alias fails to compile in CI rather
 than in a consumer's build (R2-32).
-
-**The determinism checker is a stdlib package (R3-28, R4-22).** The
-round-3 analyzer needed `golang.org/x/tools` and a separate module. Both are
-withdrawn. `pkg/v1/consensus/detcheck` is a stdlib-only checker built on
-`go list -deps -json`, `go/parser` and `go/types` (D3, point 5). The product
-calls it from its own tests. A query of `scripts/check-layer-deps.sh` asserts
-that no non-test package imports it, so the checker never ships inside a
-production binary (R4-29).
 
 The service-to-service edges are lateral and permitted (`internal/CLAUDE.md`).
 Nothing is added to the kernel: the step function is generic only to Raft, so
@@ -167,14 +159,6 @@ type Snapshot interface {
 // Frozen siblings, discovered by assertion (ADR 0039).
 type DurableStateMachine interface { StateMachine; AppliedPosition() (LogIdentity, Position, error) }
 type BatchingStateMachine interface { StateMachine; ApplyBatch(es []Entry, results []any) }
-type HashingStateMachine interface { // R2-18, R3-28
-	StateMachine
-	Hash() [32]byte                         // incremental, at a check index
-	FullHash(view Snapshot) ([32]byte, error) // full recomputation over a point-in-time view (R4-17)
-	HashVersion() uint32                    // the algorithm's version, carried in check entries
-}
-// The engine builds fresh state machines for rebuilds, replays and the
-// self-test through Config.NewMachine func() StateMachine (R4-16).
 ```
 
 **`Apply` is a pure transition of state the state machine owns (R1-01).**
@@ -281,231 +265,26 @@ of discovering it.
 `Restore` cancels an in-flight `WriteTo` and waits for its `Release` before it
 replaces the state, and it is serialised with `Apply`.
 
-**State hash, decided by the log (R1-25, R2-18, R4-11).** A hash check is an
-entry kind. **Digests exist only at deterministic indexes (R4-11).** Every
-index where `index % K == 0` is a check index, and a batch is split there by
-force, so every node computes `Hash()` on its apply goroutine at exactly the
-same state. The leader may also propose an explicit check entry, every
-`StateHashEvery` or when an operation asks for one. That entry only starts a
-round at the next check index, and never carries a digest (R4-07). This is
-the SDK form of the first consumer's per-repository checksum.
-
-**Only self-proposed, signed digests count (R3-10, R4-07).**
-- At a check index, each voter proposes its OWN digest entry. Its origin is
-  the TLS identity of the connection that forwarded it, or the leader itself
-  for the leader's own. A digest written by anyone else for that voter does
-  not count.
-- Each digest is SIGNED with the node's key, over
-  `(lineage, check index, HashVersion, digest)`. `Apply` verifies the
-  signature against the certificate the membership records for that node.
-  An unsigned digest, a bad signature, or a tuple that does not match the
-  round is invalid and ignored.
-- Only one digest per voter per check index counts.
-- When a majority of the voters' valid digests agree, `Apply` decides the
-  verdict deterministically on every node. `STATE_DIVERGED` names the nodes
-  in the minority.
-- A simulator case has a malicious leader forge a proof, with its mutation
-  (D15).
-
-**What a verdict does, automatically (Q10, R4-08).** The owner's decision is
-that divergence handling stays fully automatic. Its guardrails:
-- **A named minority node is fenced, then repaired.** It refuses reads,
-  reports itself unready, never campaigns, and transfers leadership away if
-  it holds it. It repairs itself automatically (below). **Writes stay open**
-  for the majority meanwhile.
-- `ClearDivergence` only RE-ADMITS a repaired node, and only after its
-  `FullHash` matches a majority-validated digest. Issued from a node that the
-  alarm names, it needs a second origin (R4-06).
-- **An inconclusive verdict** (no majority of agreeing digests), or a verdict
-  of an `Apply` bug, refuses writes until an operator acts. No node is blamed.
-- Each row of the decision table below names the node it blames, or says
-  that it blames none.
-
-**A repair follows a fixed lifecycle (R4-08):**
-1. reconstruction in isolation, off the apply goroutine, from a verified
-   anchor and the log;
-2. replay to a FIXED boundary: a check index with a validated digest;
-3. verification: the rebuilt state's `FullHash` must equal that
-   majority-validated, self-proposed and signed digest. A node installs a
-   state ONLY when this holds;
-4. the reconstruction is run TWICE, and both runs must agree before either
-   is trusted, so a bit flip during the rebuild cannot install a bad state;
-5. atomic replacement. The original state is preserved until its replacement
-   has passed step 3;
-6. readiness restored, then re-admission through `ClearDivergence`.
-A simulator case flips a bit during the rebuild (D15).
-
-**No rebuild storm (R4-09).** A node rebuilds only on a COMMITTED verdict that
-names it, or on an inconclusive one, and at most once per check index. A
-mismatch seen in the comparison ring only triggers a `CheckStateHash`,
-rate-limited per origin. It never triggers a rebuild by itself.
-
-- **Repair stays possible under the alarm (R3-27).** As under `NO_SPACE`,
-  `Remove`, `AddLearner`, `Promote`, `TransferLeadership` and
-  `ClearDivergence` are still admitted while `STATE_DIVERGED` is raised, and
-  so are hash-check, digest and trigger entries (R4-14).
-- `Hash()` must be O(1) at the apply point: an incrementally maintained
-  digest, not a scan of the whole state (R3-24).
-- **The full hash is point-in-time (R4-17).** At a check index, the engine
-  captures `Snapshot()` and `Hash()` together on the apply goroutine.
-  `FullHash(view)` is then computed off the loop against that view, and
-  compared with the captured `Hash()`.
-
-**Divergence prevention (R3-28).** These measures, studied by ten agents and
-retained by the owner, make "no majority of agreeing digests" as close to
-impossible as the hardware allows, and decidable when it is not. Round 4
-corrected each of them (Q10).
-
-1. **A canonical, incremental hash (R4-11).**
-   - The digest depends only on the replicated state. It is incremental, and
-     versioned: the algorithm's version and the configuration identity travel
-     in each comparison. A node that lacks that version declares itself
-     unable to verify, which is not a mismatch.
-   - A mismatch names the smallest unit the hash can name: for the first
-     consumer, the repository (D19).
-   - The root is maintained incrementally, as a two-level sum or a
-     maintained tree. The real complexity is stated with the implementation:
-     O(1) per leaf update for the sum, O(log n) for the root of a maintained
-     tree.
-   - The sum is computed on `[4]uint64` limbs with `math/bits` carries, in a
-     fixed limb and byte order, pinned by known-answer vectors.
-   - The weakness is stated: a sum of hashes (AdHash) resists accidental
-     divergence, not an adversary who CHOOSES its inputs. That is acceptable,
-     because the inputs come from the authenticated log, not from an
-     attacker.
-2. **Compared at every check index (R4-11).**
-   - AppendEntries and their responses carry the latest
-     `(check index, root hash)`.
-   - Each node keeps a ring of the last `W` pairs. `W` defaults to 4 096, and
-     a value below twice `MaxInflight` batches is refused.
-   - An index older than the ring is "cannot compare", never a mismatch, and
-     those skipped comparisons are counted.
-   - A mismatch triggers a hash check (R4-09). The verdict comes from the
-     signed, self-proposed digests above, not from the ring.
-   - A faulty LEADER is named by that verdict, and it transfers leadership
-     away. If it cannot, the followers that see the difference stop
-     acknowledging it, and CheckQuorum deposes it.
-3. **A local self-check, and what withdrawing means (R4-10).**
-   - Each node periodically compares its incremental hash with `FullHash` on
-     a point-in-time view (R4-17), and does so after every `Restore`, on a
-     staggered schedule.
-   - A difference is a local fault, `HASHER_FAULT`. At start and every hour, a
-     known-answer self-test runs SHA-256, CRC-32C, a witness `Apply` built by
-     the state-machine factory (R4-16) and the decoders. A failure at start
-     refuses to start (`SELF_TEST_FAILED`).
-   - **To withdraw** is to stop serving reads and stop applying writes,
-     while still voting and still storing the log, with `Health` unready. The
-     exits are a restart whose self-test passes, or an operator's clear.
-   - **Before withdrawing, a node counts** how many members have already
-     withdrawn for the same code. If its own withdrawal would cost the
-     majority, it raises a replicated alarm instead of withdrawing.
-   - A self-test or `FullHash` failure shared by a MAJORITY is a bug in the
-     binary, not hardware. The runbook covers it, including a downgrade while
-     the cluster version has not been raised.
-4. **Never three behaviours (R4-12).**
-   - Each member announces, in the replicated configuration, a **behavioural
-     fingerprint**. It is the SHA-256 of the outputs of every supported
-     `applyVn` on the golden vectors checked into the product, together with
-     the version table of `applyVn`. It is computed at start. It does not use
-     `debug.ReadBuildInfo`: the fingerprint is stable across releases that do
-     not change `Apply`, and it changes when one does.
-   - Only build settings checkable at run time are recorded beside it:
-     `runtime.Version()` and the default `GODEBUG`.
-   - An admission that would create a THIRD distinct fingerprint is refused
-     (`APPLY_FINGERPRINT_REFUSED`). A node's old fingerprint is retired when
-     it re-announces.
-   - When no leader exists, so no new fingerprint can be admitted — a poison
-     entry in the middle of an upgrade — an offline, operator-signed
-     fingerprint replacement is recorded in the log, and the cluster can
-     restart.
-   - The fingerprint guards against mistakes, not attackers, and the text
-     says so.
-   - The `Apply` logic is selected by the entry's version: frozen `applyVn`
-     functions, with golden vectors per version checked in CI. New semantics
-     start only at an index fixed by a **gate entry**, which the hash
-     includes.
-   - **Replay gate:** a new binary replays the latest verified anchor and the
-     log tail OFFLINE with `Replay` (R4-16), and must reproduce every
-     validated hash before it votes (`BINARY_REPLAY_MISMATCH`).
-   - One voter at a time applies to the ROLLING upgrade path. The full-stop
-     path makes the replay gate mandatory on every node before it votes
-     (R4-20, D19).
-5. **Determinism by construction, checked with the standard library
-   (R4-22).**
-   - `Apply`, `ApplyBatch` and `Hash` live in a package with an allow-list of
-     imports.
-   - The checker uses no `golang.org/x/tools` and is no separate module. It
-     is a stdlib function the PRODUCT runs from its own tests:
-     - `go list -deps -json` gives the import closure, which must stay
-       inside the allow-list;
-     - `go/parser` and `go/types` find goroutines, `select`, floating point,
-       `range` over a map, and unstable sorts in the package.
-   - The round-3 transitive call-graph analysis is replaced by that
-     import-closure rule, on the precedent of `tools/sdkguard`
-     (`tools/sdkguard/CLAUDE.md:31-37`).
-   - The forbidden list stands: goroutines, channels, `select`, `sync`,
-     `runtime`, `unsafe`, `reflect`, `os`, `os/exec`, `time`, `math/rand`,
-     `hash/maphash`, floating point, an unsorted `range` over a map, unstable
-     `sort.Slice`/`SortFunc`, `unicode` and case folding, writes to package
-     variables. Most are forbidden by the import rule, the rest by the AST
-     checks.
-   - `Apply` sees only its entry.
-   - The build is pinned: the toolchain and `godebug` in `go.mod`,
-     `GOTOOLCHAIN=local`, `CGO_ENABLED=0`, `-trimpath`. A node refuses to start
-     when `GODEBUG` is set.
-6. **A checksum chain on entries, built by the leader (R4-13).**
-   - The proposer computes only the checksum of the entry's body.
-   - The LEADER computes the chain value at its serialized append point: the
-     checksum of the previous entry's header, chained. The genesis value and
-     the value at a snapshot boundary are fixed constants of the format.
-   - Both are verified when the entry is appended and again before `Apply`.
-     A mismatch at append refuses the acknowledgement, and the leader
-     resends.
-   - After N identical refusals at the same index, a follower stops answering
-     that leader's heartbeats, so CheckQuorum deposes it.
-   - A mismatch found before `Apply` re-fetches the entry from a peer, or
-     stops the node. It never skips the entry.
-7. **Bases and anchors: cut and verification are decoupled (R4-14).**
-   - Snapshots are cut every `SnapshotEvery`, as before. A cut snapshot is a
-     **base**, checksummed, and bounds compaction.
-   - A snapshot that falls due proposes its own hash check, so
-     `StateHashEvery = 0` cannot starve verification.
-   - **Anchors** are the verified subset of bases. A base becomes an anchor
-     when three things hold: its file passes its checksum, a full
-     recomputation equals its recorded hash, and that hash equals one
-     validated in the log.
-   - When no base has become an anchor for N intervals, the node keeps
-     cutting bases and raises an alarm in `Health`. The age of the latest
-     anchor is a metric.
-   - The full replay interval from the OLDEST recovery anchor still promised
-     is retained, with the evidence that verified it. Otherwise an older file
-     is not a local fallback, and the text says so.
-   - The start-up replay is bounded by the distance to the latest anchor.
-     That is about `2 × SnapshotEvery` only while anchors keep being
-     verified.
-   - **A node whose local anchors ALL fail verification starts with no
-     table.** It votes and stores the log, applies nothing, and waits for an
-     install from a peer.
-   - A simulator case reaches the log quota with no anchor.
-   - At any difference, the repair lifecycle above runs. The decision table:
-
-   | Observation | Verdict | Blames |
-   |---|---|---|
-   | live state ≠ the twice-agreeing rebuild | that node's memory or `Apply` run failed | that node |
-   | same content, different hashes | the hasher failed | the node whose hasher disagrees with the validated digest |
-   | the rebuilds agree with the validated digest | they are the truth; the others are repaired | each node not matching it |
-   | the rebuilds differ on equal entries, on stable nodes | a bug in `Apply` | none: writes refused until an operator acts |
-
-8. **The Git projection stays outside the consensus hash**, with its own
-   digest (D19, R4-25).
-9. **Tests** (D15).
-10. **Operations** (D17).
-
-**What remains, stated honestly.** With three nodes, one fault at a time is
-tolerated. Three different digests are still decidable by the reconstruction
-of point 7. The only case with no culprit is a bug in `Apply` that differs
-between builds. Points 4 and 5 and the tests block it upstream. If it still
-happens, writes are refused and no node is blamed.
+**Divergence prevention: ADR 0160 (Q12).** Detecting that replicas which
+applied the same log reached different states, and repairing that
+automatically, moved to ADR 0160 by the owner's decision Q12, with every
+related decision of rounds 3 to 5. ADR 0152 keeps only the contract it
+offers:
+- **A deterministic `Apply`**, as this section states: a pure transition of
+  state the state machine owns, no node-local precondition, log order, one
+  goroutine.
+- **The extension points ADR 0160 needs:**
+  - `Entry.Version`;
+  - the entry kinds reserved for check and digest entries, which ADR 0152
+    admits under `NO_SPACE` like any control entry (D17);
+  - the entry checksum chain of D4;
+  - checksummed snapshots and their `SnapshotMeta`, which carries every
+    replicated alarm;
+  - alarms in `Health` and `Status`;
+  - frozen siblings discovered by assertion (ADR 0039).
+- The error codes and metrics of ADR 0160 keep their serials in this ADR's
+  range, which reserves them (D12).
+Nothing in ADR 0152 waits for ADR 0160, and a node can run without it.
 
 The name collides on purpose with the textbook and must not be confused with
 ADR 0120's `statemachine`, which moves entities between declared states on a
@@ -597,8 +376,7 @@ power loss.
 
 **The shipped log** is a directory of segment files, each record
 `length | CRC-32C | version | term | index | kind | body checksum | previous
-header checksum | payload`, little-endian (the two entry checksums are R3-28's
-chain, point 6),
+header checksum | payload`, little-endian (the entry checksum chain below),
 written with `write(2)` into the current segment and made durable once per
 batch. **The hard state is a record of the log, from raft-sql-poc.** The
 first draft kept term and vote in a separate file published by rename, which
@@ -611,6 +389,20 @@ record holding the hard state, and segments are deleted only as a prefix:
 together the two rules let compaction delete old segments without losing a
 vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
 `storage.js:507-591`). Adopted.
+
+**The entry checksum chain (R4-13, R5-05).**
+- The proposer computes only the checksum of the entry's body.
+- The LEADER computes the chain value at its serialized append point: the
+  checksum of the previous entry's header, chained.
+- Both are verified when the entry is appended and again before `Apply`. A
+  mismatch at append refuses the acknowledgement, and the leader resends. A
+  mismatch found before `Apply` re-fetches the entry from a peer, or stops
+  the node. It never skips the entry.
+- **At a snapshot boundary the chain is carried, never reseeded (R5-05).**
+  `SnapshotMeta` holds the authenticated chain tip at the snapshot's index,
+  and the bytes of the retained suffix are preserved as written. A fixed
+  seed is used only at genesis, or after a replicated chain reset.
+- What happens after repeated refusals at one index belongs to ADR 0160.
 
 **Durability, as the kernel gives it (R1-09).** On Linux, `segment_linux.go`
 calls `fdatasync(2)` and `fallocate(2)`. Elsewhere, `os.File.Sync` is the
@@ -655,8 +447,8 @@ and spelled out:
   the hard state of the moment it was prepared.
 - An activation record seals the previous segment, with its used length and
   the boundary it hands over.
-- Recovery keeps the highest `(term, vote)` it has seen in any checkpoint or
-  record. It ignores a segment holding only a checkpoint as "later data".
+- Recovery keeps the highest term it has seen in any checkpoint or record,
+  then the last vote record of that term (R5-05). It ignores a segment holding only a checkpoint as "later data".
 - A simulator case crashes with a prepared segment present, and the safety
   oracle checks vote uniqueness.
 
@@ -675,6 +467,23 @@ sector proves that a record was never acknowledged ONLY when it lies inside
 the last unsynced write window, which the writer records as its sync
 watermark. A zeroed sector before the watermark is damage to synced data,
 and is quarantined.
+
+**The sync watermark itself (R5-02).**
+- *Representation:* a watermark record names the segment and the end offset
+  of the last batch whose `fdatasync` completed. It is a record of the log,
+  with its own CRC.
+- *Ordering:* the watermark covering a batch is written after that batch's
+  sync and made durable by a sync of its own. **No entry of the batch is
+  acknowledged before its watermark is durable**, because the
+  acknowledgement must wait for the evidence that classifies a later tear.
+  Under load, the watermark rides in the next batch's sync. At rest, a small
+  write and sync follows at once, and its cost is measured (D16).
+- *Recovery:* the last durable watermark splits the tail. Damage after it is
+  a tear of unacknowledged data, and is truncated. Damage before it is
+  corruption, and is quarantined.
+- *Tests:* crashes between the data's sync, the watermark's write, the
+  watermark's sync and the acknowledgement, in every order the kernel
+  allows.
 
 Both are writes that were never acknowledged, because acknowledgement follows
 the sync. A node that truncated one of them **keeps voting and acknowledging**,
@@ -696,8 +505,19 @@ directory and cleared it, through `Inspect` and the product's own procedure
    before returning, a silence condition: no vote and no acknowledgement
    until a leader of a term at least equal to the node's own has rewritten
    its log past the truncation point AND has committed an entry in its
-   current term.
-There is no third exit that keeps the damaged node voting. The simulator flips bits in synced records, not only in the unsynced
+   current term. **Its cost, stated (R5-13):** with one of the two other
+   nodes down, no leader can exist, and the node stays silent until the
+   third returns.
+There is no third exit that keeps the damaged node voting.
+
+**Product commands (R5-12).** The first consumer exposes both exits as
+`forgejo cluster quarantine clear --exit wipe|truncate`. The wipe exit is
+split in two: offline, wipe and `Init` under a NEW `NodeID`, which the
+command prints; online, `Remove(old)` through the site administration.
+With TWO nodes quarantined, the runbook is `Recover` on the healthy one,
+with the other two `Init`ed as learners (D17).
+
+The simulator flips bits in synced records, not only in the unsynced
 tail. A liveness scenario cuts power on all three nodes at once, with torn
 tails, and the cluster must elect and commit again (D15).
 
@@ -1064,11 +884,16 @@ written.
 ### D7 — Snapshots and compaction ship in v1
 
 - **Trigger:** after `SnapshotEvery` applied entries (default 16 384) or
-  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first. **Cut
-  and verification are decoupled (R4-14):** every cut is a checksummed base
-  that bounds compaction, and a base becomes an anchor when a validated
-  digest confirms it (D3, point 7). Only anchors are sent to a peer as a
-  verified state.
+  `SnapshotEveryBytes` of log (default 64 MiB), whichever comes first. **Snapshots follow the core model (R5-01):**
+  - every cut is checksummed: a SHA-256 per chunk of the file, and one over
+    the decoded stream;
+  - a node STARTS from its latest snapshot whose checksums pass, plus the log
+    after it, as etcd and hashicorp/raft do;
+  - a snapshot whose checksum fails is not used. The node falls back to the
+    previous one if it is still retained, or starts with no state and waits
+    for an install;
+  - **integrity checks beyond the checksum never gate start-up.** ADR 0160
+    may add anchors on top of these snapshots without changing that rule.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
   into `SnapshotStore.Create` off it, with a SHA-256 of the stream recorded in
   `SnapshotMeta` beside `Position`, `Membership`, the snapshot format version
@@ -1099,9 +924,6 @@ written.
   - the RECEIVER chooses the resume offset, from what it has durably spooled.
     `Transport.Stream` takes a function that opens the snapshot at an offset,
     so the sender can resume where the receiver says;
-  - **an installed snapshot is verified as an anchor only once the verdict
-    entries for its index have arrived (R4-29).** Until then it is a base,
-    usable for catching up, not a source of repair;
   - **freshness is checked again on the event loop, right before the install
     is accepted.** A snapshot whose index is not beyond the receiver's commit
     index is refused, even from the same leader in the same term. Then the
@@ -1425,12 +1247,20 @@ row late produces a duplicate the receiver drops, never a second effect.
 
 **Positions are scoped by lineage (R3-22).** A `Position` alone is not unique
 across a `Recover` or a `RestoreSnapshot`: the new log restarts its own
-history. Client positions (the read-after-write cookie), outbox identities and
-fences are therefore scoped by the `LogIdentity` they come from. A token of
-another lineage is refused with `LINEAGE_MISMATCH`. At a disaster recovery,
-the fence transition is defined: a resource that accepted fences of the old
+history. Client positions (the read-after-write cookie) and fences are
+therefore scoped by the `LogIdentity` they come from. A token of another
+lineage is refused with `LINEAGE_MISMATCH`. At a disaster recovery, the
+fence transition is defined: a resource that accepted fences of the old
 lineage accepts the new one only after the operator records the change, and
 from then on refuses the old lineage.
+
+**Outbox identities survive a recovery (R5-10).** An outbox item that
+survives `Recover` keeps its ORIGINAL command identity, the one it was
+committed with, so a receiver that already saw it deduplicates it. Only
+commands committed after the recovery carry the new lineage. Dispatch
+authority after a recovery belongs to the new cluster's leader. The old
+cluster is fenced by the `Recover` attestation (D17), so no old node
+dispatches in parallel.
 
 This is the answer to ADR 0052 D11. A lock over this domain is a state
 machine whose acquire entry's `Index` is the lease's `Fence()`; it needs no
@@ -1487,17 +1317,17 @@ change that introduces them (ADR 0035):
 | `0.2.57.11` | `NODE_STOPPED` | the node was closed or stopped itself |
 | `0.2.57.12` | `ENTRY_SUPERSEDED` | the term at the proposal's index is observable and differs: certainly not committed (D6, from IWFS) |
 | `0.2.57.13` | `OVERLOADED` | refused before append: pending bytes or apply lag over their bound (D6) |
-| `0.2.57.14` | `STATE_DIVERGED` | the replicated divergence alarm: it names the minority nodes; writes are refused until an operator acts, while membership changes, transfer and `ClearDivergence` stay admitted (D3, R2-18, R3-10, R3-27); with no majority of digests, the reconstruction of D3 decides (R3-28) |
+| `0.2.57.14` | reserved | `STATE_DIVERGED`, moved to ADR 0160 with its meaning (Q12) |
 | `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
 | `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
 | `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing and membership changes are still admitted (D17, R2-29) |
 | `0.2.57.18` | `RESULT_TYPE_MISMATCH` | `ProposeAs` got an `Apply` result of another type; the entry IS committed, and the error carries its `Position` (D14, R2-19) |
 | `0.2.57.19` | `PAYLOAD_VERSION_REFUSED` | a proposal's payload version is above what some member announced; refused before append, retryable after the upgrade (D18, R2-16) |
 | `0.2.57.20` | `LINEAGE_MISMATCH` | a position, outbox identity or fence from another `LogIdentity` lineage (D10, R3-22) |
-| `0.2.57.21` | `HASHER_FAULT` | the incremental hash differs from a full recomputation: a local fault; the node withdraws on its own, without a vote (D3, R3-28) |
-| `0.2.57.22` | `BINARY_REPLAY_MISMATCH` | a new binary's offline replay did not reproduce a validated hash; it may not vote (D3, R3-28) |
-| `0.2.57.23` | `APPLY_FINGERPRINT_REFUSED` | an admission would create a third distinct `Apply` fingerprint (D3, R3-28) |
-| `0.2.57.24` | `SELF_TEST_FAILED` | a known-answer self-test failed at start or on its hourly run; the node refuses to start or withdraws (D3, R3-28) |
+| `0.2.57.21` | reserved | `HASHER_FAULT`, moved to ADR 0160 with its meaning (Q12) |
+| `0.2.57.22` | reserved | `BINARY_REPLAY_MISMATCH`, moved to ADR 0160 with its meaning (Q12) |
+| `0.2.57.23` | reserved | `APPLY_FINGERPRINT_REFUSED`, moved to ADR 0160 with its meaning (Q12) |
+| `0.2.57.24` | reserved | `SELF_TEST_FAILED`, moved to ADR 0160 with its meaning (Q12) |
 | `0.2.57.25` | `ADMIN_PRECONDITION_FAILED` | a clearing or raising operation named an alarm, version or contract that is not the current one (D17, R4-06) |
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
@@ -1541,16 +1371,16 @@ written before the code:
 | `consensus.barrier.latency` | histogram by mode |
 | `consensus.failure_tolerance` | gauge: how many voters can fail now with a majority left |
 | `consensus.tls.cert_expiry_seconds` | gauge per identity |
-| `consensus.state_hash.mismatches` | counter |
-| `consensus.anchor.age`, `consensus.hash.comparisons_skipped` | gauge, counter (R4-11, R4-14) |
 | `consensus.has_leader`, `consensus.peer.last_contact`, `consensus.peer.rtt` | gauge, gauge by peer, histogram by peer (R2-28) |
 | `consensus.proposals.failed`, `consensus.proposals.pending` | counter by code, gauge (R2-28) |
 | `consensus.fs.free_bytes`, `consensus.cluster_version`, `consensus.protocol_version` | gauges (R2-28) |
 | `consensus.tls.reload_failures`, `consensus.tls.peer_cert_expiry_seconds` | counter, gauge by peer (R2-28) |
 
 `Node.Health()` returns a structured verdict an orchestrator can poll: role,
-leader known, quorum reachable, apply lag over its bound, no-space and
-divergence alarms, certificate expiry under its threshold, the smallest peer
+leader known, quorum reachable, apply lag over its bound, every current alarm
+with its `AlarmID` and the nodes it names (R5-09), the current timing
+contract and cluster version, so the product can fill an operation's
+preconditions, certificate expiry under its threshold, the smallest peer
 snapshot limit approached (R2-30), and **`Stopped` with its `StopReason`**
 when the node has stopped itself (R2-28). A `LeadershipWatcher` sibling
 notifies leadership changes, so the product does not poll for them. Its
@@ -1577,7 +1407,7 @@ type (
 	GroupID        = coreconsensus.GroupID
 	Position       = coreconsensus.Position    // struct{ Term, Index uint64 }
 	Entry          = coreconsensus.Entry       // Position, Kind, Version, BodySum, ChainSum, Data []byte (immutable) (R4-21)
-	Token          = coreconsensus.Token       // {Lineage LogIdentity, Position}: what Propose returns (R4-27)
+	Token          = coreconsensus.Token       // fixed-size, comparable {Cluster, Epoch, Term, Index}; AppendBinary/UnmarshalBinary (R4-27, R5-14)
 	EntryKind      = coreconsensus.EntryKind
 	HardState      = coreconsensus.HardState
 	Stamp          = coreconsensus.Stamp
@@ -1597,7 +1427,6 @@ type (
 	StateMachine         = coreconsensus.StateMachine
 	DurableStateMachine  = coreconsensus.DurableStateMachine
 	BatchingStateMachine = coreconsensus.BatchingStateMachine
-	HashingStateMachine  = coreconsensus.HashingStateMachine
 	Snapshot             = coreconsensus.Snapshot
 	LogReader            = coreconsensus.LogReader
 	LogStore             = coreconsensus.LogStore
@@ -1628,8 +1457,9 @@ type Replicated interface {
 }
 
 // ProposeAs types the Apply result (R2-19). A result of another dynamic type
-// is RESULT_TYPE_MISMATCH, carrying the committed Position: the entry IS
-// committed. A nil result is the zero R.
+// is RESULT_TYPE_MISMATCH, carrying the committed Token: the entry IS
+// committed. A nil result is the zero R (R5-14). The engine keeps the
+// lineage chain; a Token names only its own cluster and epoch.
 func ProposeAs[R any](ctx context.Context, r Replicated, data []byte) (Token, R, error)
 
 type Config struct { // svcconsensus.Config, shown for its fields; every bound is in the table below
@@ -1637,10 +1467,7 @@ type Config struct { // svcconsensus.Config, shown for its fields; every bound i
 	Group               GroupID
 	ID                  NodeID
 	Machine             StateMachine
-	NewMachine          func() StateMachine // fresh instances for rebuilds, Replay and the self-test (R4-16)
 	Durability          Durability // must agree with DurableStateMachine (R2-09); kept in v1 (Q11)
-	HashCheckEvery      uint64     // K: a check index every K entries, batches split there (R4-11)
-	HashRing            int        // W: comparison pairs kept (R4-11)
 	Log                 LogStore
 	Snapshots           SnapshotStore
 	Transport           Transport
@@ -1652,7 +1479,6 @@ type Config struct { // svcconsensus.Config, shown for its fields; every bound i
 	SnapshotEveryBytes, MaxSnapshotBytes, MaxLogBytes, LogReserveBytes int64
 	SnapshotCodec       transform.Compressor // core/transform port; flate by default; id recorded
 	SnapshotPausesApply bool                 // the state machine cannot cut cheaply (R2-34)
-	StateHashEvery      time.Duration        // 0: hash checks only on request
 	Reads               ReadMode
 	PreferredLeaders    []NodeID
 	Meter               metrics.Meter
@@ -1688,7 +1514,6 @@ func (d DataDir) Close() error // idempotent
 
 // Offline, on a stopped node, called by the product's own commands (D17).
 func Init(d DataDir, cluster ClusterID, id NodeID) (Incarnation, error) // joining stamp; idempotent (R3-02, R4-29)
-func Replay(d DataDir, newMachine func() StateMachine) (Report, error)  // checks every validated hash (R4-16)
 func Recover(d DataDir, newCluster ClusterID, members []Member, opt RecoverOptions) error
 func RestoreSnapshot(d DataDir, r io.Reader, newCluster ClusterID, members []Member, opt RestoreOptions) (SnapshotMeta, error) // runs without a Node (R3-15)
 func Inspect(d DataDir) (Report, error) // read-only
@@ -1714,9 +1539,7 @@ func (n *Node) TransferLeadership(ctx context.Context, op Operator, to NodeID) e
 // mismatch, with ADMIN_PRECONDITION_FAILED (R4-06).
 func (n *Node) ProposeTimingContract(ctx context.Context, op Operator, expectedCurrent uint32, c TimingContract) error
 func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, expectedCurrent, v uint32) error
-func (n *Node) CheckStateHash(ctx context.Context, op Operator) (Position, error)
 func (n *Node) ClearNoSpace(ctx context.Context, op Operator, alarm AlarmID) error
-func (n *Node) ClearDivergence(ctx context.Context, op Operator, alarm AlarmID, reinstated []NodeID) error
 func (n *Node) SaveSnapshot(ctx context.Context, op Operator, w io.Writer) (SnapshotMeta, error) // R3-14
 func (n *Node) Membership() Membership
 func (n *Node) Status() Status
@@ -1775,45 +1598,45 @@ transport. The cross-field rules are checked after defaults are applied
   `PeerQueueBytes` per peer and connection, and `InboundDataBytes`. With the
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
-- **The data directory's disk budget is `MaxLogBytes + 4 × MaxSnapshotBytes +
-  LogReserveBytes` (R4-28).** The reservation is computed from the snapshots
-  that can exist AT THE SAME TIME: two anchors kept (R3-28), one being
-  written and one being received. A snapshot pinned by a transfer handle
-  (R3-16) extends one of those lifetimes, and does not add a fifth. On the
-  three VPS, each with one shared 100 GB disk, the recommended values give
-  about 5.3 GiB. They are provisional, like D16's numbers.
+- **Snapshot slots are bounded and enforced, and the disk reservation is
+  their actual maximum (R4-28, R5-01).** At most three snapshots exist at
+  once: the latest, one being written, and one being received.
+  - *Admission:* no cut starts and no install is accepted while its slot is
+    taken.
+  - *Replacement:* the previous snapshot is deleted once the new one is
+    durable and no transfer handle pins it.
+  - *Transfer cancellation:* a transfer whose handle pins a snapshot that
+    must be replaced is cancelled. The peer resumes from the new one.
+
+  The reservation is therefore `MaxLogBytes + 3 × MaxSnapshotBytes +
+  LogReserveBytes`. On the three VPS, each with one shared 100 GB disk, the
+  recommended values give about 4.3 GiB. ADR 0160's anchors add their own
+  slots to that figure. All values are provisional, like D16's numbers.
 - **Inside Forgejo (R3-24).** The replicator shares Forgejo's heap. The
-  product sets `GOMEMLIMIT` with about 0.8 GiB of headroom for the engine, the
-  ref table and the projector, so the garbage collector does not discover
-  the budget by running out. `GOMEMLIMIT` is a SOFT limit: it makes the
+  product sets `GOMEMLIMIT` with headroom for the engine, the ref table and
+  the projector, computed from this budget with the MEASURED table (R5-15).
+  Round 3's 0.8 GiB was an estimate made before the table was measured. The
+  headroom exists so the garbage collector does not discover the budget by
+  running out. `GOMEMLIMIT` is a SOFT limit: it makes the
   collector work harder, it does not refuse an allocation. The budget is
   what keeps the process inside it (R4-18).
 - **A state machine held in memory (R3-29, R4-18).** When the state machine
   is not durable, as for the first consumer (Q9), the budget is: the engine,
-  plus TWICE the measured table, plus its tombstones, the decoding buffers,
-  and the snapshot versions retained by open views. Twice, because a rebuild
-  or a repair holds a second table beside the live one until the replacement
-  is verified (R4-08). Rebuilds are staggered across nodes, so the cluster
-  never doubles its memory everywhere at once.
-- **The start sequence is fixed (R4-18):**
-  1. self-test;
-  2. verify the latest anchor;
+  plus the measured table, its tombstones, the decoding buffers and the
+  snapshot versions retained by open views. ADR 0160 adds a second table
+  while a repair runs.
+- **The start sequence is fixed (R4-18, R5-01):**
+  1. open the data directory under its lock;
+  2. load the latest snapshot whose checksums pass;
   3. replay the log to the commit boundary;
   4. vote;
   5. serve.
-  The start-up replay is bounded by the distance to the latest VERIFIED
-  anchor. That is about `2 × SnapshotEvery` entries only while anchors keep
-  being verified (R4-14). The restart time is a D16 target, measured on the
-  real ref count.
+  The start-up replay is bounded by `SnapshotEvery` plus the entries applied
+  since the last cut. The restart time is a D16 target, measured on the real
+  ref count.
 
 The other defaults are provisional too, and are revised from the simulator
 and the VPS measurements before the first release.
-
-| Field (R4-11) | Owner | Default | Validation |
-|---|---|---|---|
-| `HashCheckEvery` (K) | engine | none yet; to be set from measurement | refuse zero |
-| `HashRing` (W) | engine | 4 096 | refuse below twice `MaxInflight` batches |
-
 ### D15 — Testing: a deterministic simulator first, real clusters second (R1-26)
 
 The engine is split so that it can be tested by simulation: a **step
@@ -1909,9 +1732,6 @@ reintroduces each of these, and the suite must fail on each:
 - the dialer's chain verification dropped, leaving only the SAN check
   (R2-21);
 - a heartbeat commit not clamped to the follower's match (R2-06);
-- a proof entry that carries digests, and a leader that forges one (R4-07);
-- a digest counted without its signature, or proposed by another node
-  (R4-07);
 - a chain value computed by the proposer instead of the leader, and an entry
   skipped on a chain mismatch (R4-13);
 - a voter's incarnation swapped in place (R4-03);
@@ -1934,32 +1754,10 @@ Step-function behaviour is also pinned by **datadriven scripts**: text files
 of inputs and expected outputs, in the style of etcd's raft tests, which make
 a regression readable in review.
 
-**Divergence tests (R3-28).**
-- A **state-hash oracle** runs after every `Apply` in the simulator: every
-  node's hash at a common index must agree.
-- A **non-determinism mutation lane** injects, one at a time:
-  - an unsorted `range` over a map;
-  - a read of the clock;
-  - a field left out of the hash;
-  - a `Restore` that drops tombstones;
-  - a skipped entry;
-  - a wrong incremental hash.
-  Each must be caught, and the verdict must name the right node and index.
-- `Apply` is **fuzzed** against a reference model, and two instances against
-  each other.
-- **Bits are flipped** in the state, in snapshots and in the hasher's input,
-  including on two nodes within the same window.
-- **Differential replay across processes**, varying `GOMAXPROCS`, `-race`,
-  `GODEBUG`, amd64 and arm64, the current Go and the next: every replay must
-  produce the same hashes.
-- A real run ends with a **full diff of the tables** of every node.
-
 **Scenarios added in review run 2 (R4).**
 - a crash with a prepared segment present, under the vote-uniqueness oracle
   (R4-01);
 - a zeroed sector before the sync watermark, which must quarantine (R4-02);
-- a bit flipped during a rebuild, which must not be installed (R4-08);
-- the log at its quota with no verified anchor (R4-14);
 - a restore of three nodes followed by a cold restart of all three (R4-15);
 - all three nodes restarted with a scheduled `gc`, under the object-closure
   oracle (R4-19).
@@ -2007,6 +1805,7 @@ race-off lane (`tools/alloc-lane-targets.txt`, rule 12):
 | encode / decode of a log record and a frame | 0 allocs/op |
 | `Propose` → applied, 3 in-process nodes, memory log and transport | ≤ 4 allocs/op |
 | segmented log, `Append` 64 × 256 B + one `Sync` | reported per device, as ADR 0056's `BENCH.md` reports publication |
+| first consumer's table checksum, one update, at 10³ to 10⁶ repositories | constant time across sizes (R5-07) |
 
 ### D16 — Performance targets: provisional, derived, then measured (R1-27)
 
@@ -2074,9 +1873,10 @@ route, no CLI. The product that embeds the domain exposes them through its
 own administration, with its own accounts, roles, authorization and audit.
 For the first consumer, that is Forgejo's site administration online, and
 these subcommands of the same `forgejo` binary, whose version is therefore
-the node's by construction (R4-29): `forgejo cluster bootstrap`, `init`,
-`recover`, `restore`, `inspect` (with `--replay`), `snapshot save` and
-`reproject`.
+the node's by construction (R4-29, R5-12): `forgejo cluster bootstrap`,
+`init`, `recover`, `restore`, `inspect` (with `--replay`, ADR 0160),
+`snapshot save`, `reproject`, `quarantine clear` and `objects
+verify|backfill`.
 
 **Online operations** (D14), each taking the `Operator` the caller vouches
 for. The SDK writes that identity into the membership or administrative entry
@@ -2085,17 +1885,17 @@ it proposes, so the product's audit and the log agree (R2-36):
   reconfiguration check of D8 (R2-27);
 - `TransferLeadership`;
 - `ProposeTimingContract` (D9) and `RaiseClusterVersion` (D18);
-- `CheckStateHash`, and `ClearDivergence`, which re-admits a repaired node
-  (D3);
 - `ClearNoSpace`;
 - **Every clearing or raising operation names what it acts on (R4-06).**
-  `ClearNoSpace` and `ClearDivergence` name the alarm, by the index that
-  raised it. `ClearDivergence` also names the nodes it reinstates.
+  `ClearNoSpace` names the alarm, by the index that raised it, and so does
+  `ClearDivergence` in ADR 0160.
   `ProposeTimingContract` and `RaiseClusterVersion` name the contract or
   version they expect to replace. `Apply` refuses a mismatch with
   `ADMIN_PRECONDITION_FAILED`, so a stale click in an administration page
-  cannot clear an alarm raised since. `ClearDivergence` issued from a node
-  that the alarm names needs a second origin. Each operation has its
+  cannot clear an alarm raised since. **A precondition includes the
+  `LogIdentity` (R5-09):** an alarm id, an expected contract generation or an
+  expected cluster-version generation is meaningful only in its lineage. It
+  is validated before proposing and again in `Apply`. Each operation has its
   mutation test (D15);
 - `SaveSnapshot`, `Status`, `Health`, `Membership`, and the
   `LeadershipWatcher` sibling.
@@ -2116,10 +1916,15 @@ node, under the directory lock.
     by mistake.
   - **The probe cannot detect a partition, and the text says so (R4-04).** A
     seed cut off from this node still runs, and can still serve. So
-    `Recover` requires an operator attestation, recorded in
-    `RecoverOptions.FencedAttestation`, that names each old node and how it
-    is FENCED: stopped; its `wg0` peer removed; or its old-cluster
-    certificates revoked and `MaxConnectionAge` elapsed.
+    `Recover` requires an operator attestation,
+    `RecoverOptions.FencedAttestation`, with one entry per old voter: the
+    node, and the method that FENCED it. **Only methods that stop the old
+    majority from serving count (R5-11):**
+    - stopped, or powered off;
+    - cut from the edge (Traefik and Cloudflare) AND from each other.
+    Certificate revocation is not a method: the TLS sibling ADR does not
+    check revocation. It becomes one only if that ADR adds revocation
+    checking. The attestation is written into the audit record.
   - The replacement machine is kept stopped until `Recover` has run.
   - It refuses while any seed of the old cluster still answers. A force
     option overrides that refusal, and the override is logged. **"Answers" is
@@ -2162,18 +1967,18 @@ node, under the directory lock.
     bounds, and the codecs it accepts.
   - It writes the same audit record as `Recover`, refuses with
     `RESTORE_REFUSED`, and is tested without a running `Node`.
-  - **It founds the new log with an anchor-validation record (R4-15)**,
-    identical on every node: the snapshot's state hash and the `Expected`
-    digest the operator confirmed. The restored snapshot is therefore a
-    verified anchor from the first entry, and a cold restart can verify it.
-    A test restores three nodes, then cold-restarts all three.
+  - The restored snapshot's `Expected` digest, confirmed by the operator, is
+    recorded in the audit record. A test restores three nodes, then
+    cold-restarts all three (R4-15). The anchor-validation record that R4-15
+    also wrote moves to ADR 0160 (Q12).
   - Backups are encrypted at rest; the product's backup path says how.
   - **The product's command (R3-26, R4-05).** For the first consumer,
     `forgejo cluster snapshot save` reaches the live server through the ADR
-    0148 private socket, or a Unix listener that checks `SO_PEERCRED`. It
-    never goes through `/api/internal/manager`, and no function of this
-    section is added to Forgejo's `private.Routes()`. A test asserts that
-    `/api/internal` has no cluster route. It writes the snapshot and its SHA-256 side by side. The
+    0148 private socket, and nothing else (R5-15). It never goes through
+    `/api/internal/manager`, and no function of this section is added to
+    Forgejo's `private.Routes()`. A test asserts that `/api/internal` has no
+    cluster route.
+  - It writes the snapshot and its SHA-256 side by side. The
     making.codes backup role calls it before it backs up the repositories, as
     it already does for `consul`, `vault` and `nomad snapshot save`.
   - A restore pairs a ref snapshot with a PostgreSQL backup taken AFTER it, so
@@ -2186,12 +1991,17 @@ node, under the directory lock.
     backup is sure to hold. **The snapshot's object closure stays pinned
     until the repository backup is verified**, and a backup manifest records
     which snapshot pairs with which repository backup (R3-13).
-  - **A coordinated backup boundary (R4-26).** The SQL backup, the ref
-    snapshot and the repository backup are taken at one boundary recorded in
-    the manifest. Repository creations, renames and deletions that fall
-    between the three are either paused across that boundary, or reconciled
-    by a tested restore procedure for each temporal mismatch: a repository
-    the database knows and the table does not, and the reverse.
+  - **Reconciliation at restore is MANDATORY (R4-26, R5-08).** The SQL
+    backup, the ref snapshot and the repository backup are never atomic
+    together. Pausing repository creations, renames and deletions during
+    the backup only narrows the gaps; it is optional. The restore runbook
+    names a step for each mismatch:
+    - refs ahead of SQL: a ref the table holds for a repository or pull
+      request the database does not know;
+    - SQL ahead of refs: the database names a ref or a merge the table lacks;
+    - repository lifecycle: a repository created, renamed or deleted between
+      the three backups.
+    Vault comes first in the restore runbook, for the new node certificates.
 - **`Inspect`** reports a data directory read-only: its stamp and
   incarnation, segments, hard state, snapshot metadata, versions, quarantine
   marker (R2-01) and the first corruption found.
@@ -2203,19 +2013,16 @@ node, under the directory lock.
   free space (`statfs`) falling under the reserve. A full disk shared with Git
   must raise it as surely as the quota does.
 - While the alarm is committed, the leader refuses ordinary proposals with
-  `NO_SPACE`, and keeps admitting the alarm itself, `ClearNoSpace` and
-  membership changes, so the cluster can still be repaired. Snapshots and
+  `NO_SPACE`, and keeps admitting the alarm itself, `ClearNoSpace`,
+  membership changes, `TransferLeadership`, and the control entries of D3
+  (the check and digest kinds ADR 0160 uses), so the cluster can still be
+  repaired (R5-12). Snapshots and
   compaction keep running.
 - A FOLLOWER that enters its reserve forwards the alarm proposal to the leader,
   like any other proposal (R3-24). The node with the full disk is often not
   the leader.
 
 **Other operations.**
-- **Hardware evidence (R3-28).** Each node exports its EDAC/MCE memory and
-  machine-check counters when the platform exposes them, and logs its CPU
-  model and microcode at start. Whether OVH's hosts use ECC memory is a
-  question to ask OVH. A hash fault on a node without ECC is read in that
-  light.
 - **Poison entry.** A committed entry that crashes every `Apply` stops every
   node, by D3. The runbook: `Inspect` the entry, fix the state machine, deploy,
   restart. The log is never edited.
@@ -2241,12 +2048,9 @@ node, under the directory lock.
   verifies durable OBJECT coverage on the prospective membership (R3-13):** a
   majority of the voters that would remain must hold every object the table
   references. Otherwise the change could leave committed refs whose objects
-  exist on a minority only.
-- **Withdrawn nodes (R4-10).** The runbook covers a node withdrawn for
-  `HASHER_FAULT` or `SELF_TEST_FAILED`: restart it, and if its self-test
-  passes it returns; otherwise replace its hardware or its binary. When a
-  majority fails the same way, the binary is at fault, and the runbook
-  downgrades it while the cluster version has not been raised.
+  exist on a minority only. The first consumer runs it with
+  `forgejo cluster objects verify` over every repository, and fills any gap
+  with `forgejo cluster objects backfill` (R5-12).
 
 ### D18 — Versioning (R1-22)
 
@@ -2286,10 +2090,9 @@ The rules:
   `VERSION_UNSUPPORTED`. It is never skipped: skipping an entry is a fork.
 - **Apply version gate.** An entry whose `Version` is above what the local
   state machine supports stops the node the same way, before `Apply` is
-  called. The entry's version SELECTS the frozen `applyVn` that applies it,
-  and new semantics begin only at the index of a gate entry, included in the
-  hash. The `Apply` fingerprint, the third-fingerprint refusal and the replay
-  gate are in D3 (R3-28).
+  called. The entry's version SELECTS the frozen code path that applies it.
+  The `Apply` fingerprint, the gate entry and the replay gate are in ADR 0160
+  (Q12).
 - **Downgrade.** A node may run an older binary only while the committed
   cluster version is within its range. Raising the cluster version is the
   point of no return, and the operator guide says so.
@@ -2306,12 +2109,16 @@ being used soundly.
 
 - **A replicated ref table (Q1, R1-01).** The state machine is a ref table:
   `(repository, ref) → (SHA, revision)`, with tombstones for deleted refs.
+  **`HEAD` and every symbolic ref are in the table too (R5-06)**, as
+  `(repository, ref) → (target ref name, revision)`. They are versioned with
+  the payload, and carried in snapshots. The projector writes them like any
+  other ref. No other authority decides a repository's default branch.
   `Apply` is pure: it validates and updates the table, nothing else.
 - **The table is held in memory (Q9, R3-05, R3-29).** It is never in
   Forgejo's shared SQL database: a shared database would give three replicas
   one copy, and its own failover would decide what the log already decided.
   And it has no mutable store on disk at all. At start it is rebuilt from the
-  latest verified anchor (D3, R3-28 point 7) and the log after it. On disk
+  latest snapshot whose checksums pass, and the log after it (R5-01). On disk
   there are only the log and the snapshots, both immutable and checksummed.
   - The first consumer declares `Durability = false`. The durable applied
     position (R1-02, R2-09) and the lineage of applied positions (R3-01) are
@@ -2320,14 +2127,21 @@ being used soundly.
   - The table serves a point-in-time read for snapshots, as D3 requires.
   - Its RAM and the start-up replay count in D14's budget, and are to be
     measured.
-- **The table's hash (R3-28, point 1).**
+- **The table's checksum (R3-28 point 1, R5-07).** It stays in ADR 0152,
+  because the projection verifier below uses it. The consensus digest check
+  built on it is ADR 0160's.
   - A **leaf** is the SHA-256 of a fixed, length-prefixed, big-endian
     encoding of: the hash algorithm's version, the repository, the ref, the
     object format, the binary SHA, the revision and the tombstone flag.
     Nothing local to the node enters it.
   - A **repository's hash** is the sum of its leaves modulo 2^256, so an
     update costs one subtraction and one addition.
-  - The **root** hashes the sorted list of repository hashes.
+  - **The root is maintained incrementally (R5-07).** It is the sum modulo
+    2^256 of `SHA-256(repository id ‖ repository hash)` over every
+    repository. An update changes one term: O(1), whatever the number of
+    repositories. The round-3 root, a hash over the sorted list of
+    repository hashes, cost O(n) per update. A benchmark against the
+    repository count pins the claim (D15).
   - A mismatch names the repository.
 - **The projector is the ONLY authority over Git (R2-35).**
   - Each node runs a projector that makes the local repositories match the
@@ -2352,37 +2166,44 @@ being used soundly.
     an ABA. The projector tracks native publications in flight, waits for
     them to complete, and reconciles them before it certifies a repository's
     watermark.
-  - **How native publications are tracked (R4-24).**
-    - *Registration atomic with certification.* The hook registers its
-      transaction in the replicator's registry before it answers `prepared`.
-      The projector certifies a watermark under the same lock that guards the
-      registry, so certification and registration cannot interleave.
-    - *Transaction identity.* Each hook invocation draws a nonce, carried in
-      its proposal and its registration, so two transactions on one ref are
-      never confused.
-    - *Self-rejection cleanup.* When git reports `aborted`, the hook
-      deregisters its transaction.
-    - *Process-death detection.* The hook holds its socket connection open
-      until git reports `committed` or `aborted`. A connection closed
-      without either means the git process died. That registration is
-      reconciled from the table's state.
-    - *Restart fencing.* After the replicator restarts, its registry is
-      empty. No watermark is certified until every repository has been
-      reconciled against the table once.
-    - *Reconciliation.* The ref is set to the table's value (R2-35).
-    - The mechanism is tested: an integration test kills git between
-      `prepared` and `committed`, and one restarts the replicator with
-      publications in flight.
+  - **How native git transactions are tracked (R4-24, R5-04).**
+    - *One identity per transaction.* A 128-bit nonce from `crypto/rand`,
+      bound to `(repository, refs)`, is passed through the environment to
+      every phase of the hook, so `prepared`, `committed` and `aborted` of
+      one git transaction share it.
+    - *The owning git process is identified* from the socket's
+      `SO_PEERCRED` and the hook's parent PID, and supervised independently
+      of the hook's connections, which come and go between phases.
+    - *Registration is atomic with certification.* The hook registers in
+      `prepared`. The projector certifies a watermark under the same lock.
+    - *Bounded lifetime.* A registration lives at most git's ref-lock timeout
+      plus a margin. When that expires, or when the owning process dies, the
+      repository is reconciled from the table.
+    - *Caps.* Registrations are capped per repository and in total. Above
+      the cap, the hook refuses the transaction before git publishes
+      anything.
+    - *Explicit cleanup.* When the hook itself rejects a transaction, it
+      deregisters it before answering git.
+    - *Restart fencing* is kept: after a restart, no watermark is certified
+      until every repository has been reconciled once.
+    - *Reconciliation:* the ref is set to the table's value (R2-35).
+    - *Tests:* git killed between `prepared` and `committed`; a hook
+      rejection; a registration that expires; the replicator restarted with
+      transactions in flight.
   - The projector's own git writes bypass the replication hook, so it never
     proposes what it is projecting.
   - After log compaction, the projector rebuilds from the table, never from
     the log. A node far behind therefore needs only the table.
-  - **Paused during the start-up replay (R4-19).** The projector and git's
-    garbage collection stay paused until the table has replayed to the larger
-    of each repository's cursor and the commit index persisted at shutdown. A
-    repository whose cursor is AHEAD of the table waits; the projector never
-    "reconciles" it backwards. A simulator case restarts all three nodes with
-    a scheduled `gc`, under an oracle that checks the object closure.
+  - **Paused during the start-up replay (R4-19, R5-03).** The projector and
+    git's garbage collection stay FENCED until the node has applied a commit
+    boundary CONFIRMED BY A QUORUM after the restart (a `Barrier` that
+    succeeds). The commit index persisted at shutdown is only a lower bound:
+    entries may have committed elsewhere while the node was down. Until that
+    barrier, durable object pins are kept for everything a pending or
+    uncertain entry could name. A repository whose cursor is AHEAD of the
+    table waits; the projector never "reconciles" it backwards. A simulator
+    case crashes all three nodes at once with a scheduled `gc`, under an
+    oracle that checks the object closure.
 - **The hook proposes in `prepared`.** The `preparing` reservation of the
   design document is removed (A10): nothing is ordered before the entry
   itself.
@@ -2392,7 +2213,8 @@ being used soundly.
 - **Revisions against ABA (R1-04).** Each ref carries a revision that only
   grows. A proposal states the expected SHA and the expected revision. After
   `OUTCOME_UNKNOWN`, the replicator reads the table and never retries blindly.
-- **The Git projection stays outside the consensus hash (R3-28, point 8).**
+- **The Git projection has its own digest, outside the consensus hash (R3-28
+  point 8).**
   - **The projection has its own digest (R4-25).** It hashes the observable
     Git state: the refs listed by `for-each-ref` and `HEAD`. A deleted ref is
     its absence, never a tombstone. `HEAD` and every symbolic ref are
@@ -2451,10 +2273,12 @@ being used soundly.
   the replication path. The node refuses to start the replicator without it.
 - **Administration is Forgejo's (Q5, Q7, Q8).** The site administration calls
   the online functions of D17 with the administrator as `Operator`, on
-  whichever node the load balancer chose (R3-03). The offline ones are
-  `forgejo cluster bootstrap --members`, `forgejo cluster init --cluster
-  --node-id` (which prints the incarnation), `recover`, `restore` and
-  `inspect` (R3-02). The Forgejo server never calls `Bootstrap`.
+  whichever node the load balancer chose (R3-03). The subcommands of the
+  `forgejo` binary are every one D17 lists (R5-12): `cluster bootstrap
+  --members`, `cluster init --cluster --node-id` (which prints the
+  incarnation), `recover`, `restore`, `inspect`, `snapshot save`,
+  `reproject`, `quarantine clear` and `objects verify|backfill`. The Forgejo
+  server never calls `Bootstrap`.
 - **No internal route reaches the engine (R3-14).** `Propose` and every
   function of D17 are never exposed under Forgejo's `/api/internal`. The hook
   reaches the replicator only through the ADR 0148 socket. Traefik denies
@@ -2464,15 +2288,15 @@ being used soundly.
   `wg0`. The making.codes deployment lists both ports in
   `common_container_denied_mesh_ports`. This is the only place the ADR names a
   making.codes setting.
-- **Memory (R3-24).** Forgejo runs with `GOMEMLIMIT` leaving about 0.8 GiB for
-  the replicator (D14). `GOMEMLIMIT` is soft (R4-18).
+- **Memory (R3-24, R5-15).** Forgejo runs with `GOMEMLIMIT` leaving the
+  replicator the headroom D14 computes from the measured table. `GOMEMLIMIT` is soft (R4-18).
 - **Ready means ready (R4-18).** Forgejo's health endpoint reports ready only
   when `Health` is ready: the table is rebuilt, the projector has caught up
   and the objects are present. The load balancer routes nothing to a node
   before that.
-- **Outbox identities change across a lineage (R4-29).** After a `Recover` or
-  a `RestoreSnapshot`, webhook and CI outbox identities belong to the new
-  lineage (R3-22). The guide tells receivers to expect that change.
+- **Outbox identities across a lineage (R4-29, R5-10).** Items that survive a
+  `Recover` keep their original identity. Only new commands carry the new
+  lineage (D10). The guide tells receivers to expect both.
 - **Two upgrade procedures (R3-25).**
   - A Forgejo release WITHOUT a schema migration is rolled: one node at a
     time, leadership transferred away first.
@@ -2517,9 +2341,10 @@ being used soundly.
 - **Administration is any-node (Q8, R3-03).** No product has to find the
   leader to administer the cluster.
 - **This version is not yet reviewed.** The first review run stopped at its
-  cap of three rounds. A second run reviewed the R3 version, and its round-1
-  objections are applied here as R4. No reviewer has read the R4 version yet.
-  The next step is that review, not the implementation.
+  cap of three rounds. A second run reviewed the R3 version (round 1, applied
+  as R4) and the R4 version (round 2, applied as R5). Round 2 also split the
+  divergence work into ADR 0160 (Q12). No reviewer has read the R5 version
+  yet. The next step is round 3, on this ADR alone.
 - The root `CLAUDE.md` domain list, the error-code mirror and
   `codeRangeOwners` change in the implementing change set, not in this one.
 
