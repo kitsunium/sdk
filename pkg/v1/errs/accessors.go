@@ -36,9 +36,12 @@
 // # What's shipped
 //
 // Seven accessors, four predicates, two code helpers, four mask presets, one
-// matcher constructor, and the two methods that read a [Field]. All are
-// re-exported over internal/kernel/errs; HasAnyCode and HasAnyReason are
-// composed here from HasCode and HasReason.
+// matcher constructor, and the two methods that read a [Field]. Each function
+// forwards to internal/kernel/errs — a function, never a variable a consumer
+// could reassign for the whole process — and HasAnyCode and HasAnyReason are
+// composed here from HasCode and HasReason. One exception: [ReasonOf] is still
+// a variable bound to the kernel accessor, because its forwarder measured
+// slower; never assign to it.
 //
 //	| Symbol                                | Kind       | Returns / role                                            |
 //	|---------------------------------------|------------|------------------------------------------------------------|
@@ -78,13 +81,13 @@
 //	func HTTPStatusOf(err error) int             // 500 default
 //	func ExitCodeOf(err error)   int             // 70 (EX_SOFTWARE) default
 //	func FieldsOf(err error)     []Field         // nil if none — oldest cause first
-//	func HasCode(err error, c Code) bool
+//	func HasCode(err error, code Code) bool
 //	func HasReason(err error, reason string) bool
 //
 // Octets are reached on the typed [Code] itself: code.Major(),
 // code.Layer(), code.Package(), code.Serial(). No separate LayerOf
 // accessor exists — the kernel exports exactly one accessor per field
-// and this package re-exports it verbatim.
+// and this package forwards it unchanged.
 //
 // # Quick start
 //
@@ -215,59 +218,98 @@ const (
 	MaskExact Code = kerrs.MaskExact
 )
 
-// Re-exports of the internal accessors. Grouped to satisfy the repo-wide
-// var-grouping convention while keeping each helper's godoc on its own line.
+// CodeOf returns the deepest *errs.Error's typed Code in err's chain,
+// or (0, false) when no *errs.Error is present.
+func CodeOf(err error) (code Code, ok bool) {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.CodeOf(err)
+}
+
+// The one function this package still holds in a variable.
 var (
-	// CodeOf returns the deepest *errs.Error's typed Code in err's chain,
-	// or (0, false) when no *errs.Error is present.
-	CodeOf = kerrs.CodeOf
-
 	// ReasonOf returns the deepest *errs.Error reason in err's chain, or ("", false).
-	ReasonOf = kerrs.ReasonOf
-
-	// PublicOf returns the deepest *errs.Error Public message, or "" when no
-	// *errs.Error is in the chain.
-	PublicOf = kerrs.PublicOf
-
-	// PrivateOf returns the deepest *errs.Error Private message. DIAGNOSTIC-ONLY.
-	PrivateOf = kerrs.PrivateOf
-
-	// HTTPStatusOf returns the HTTP status mapped from the deepest *errs.Error,
-	// defaulting to 500 when no *errs.Error is present.
-	HTTPStatusOf = kerrs.HTTPStatusOf
-
-	// ExitCodeOf returns the sysexits code mapped from the deepest *errs.Error,
-	// defaulting to 70 (EX_SOFTWARE) when no *errs.Error is present.
-	ExitCodeOf = kerrs.ExitCodeOf
-
-	// FieldsOf returns every Field attached along err's chain, oldest cause
-	// first and newest wrapper last, as a copy the caller owns — nil when no
-	// *errs.Error is present. Read each with Key and StringValue.
 	//
-	// The values are clauses the emitters chose to attach — names, positions,
-	// reasons — never secrets: no SDK emitter attaches a value it was given to
-	// protect (mail.ParseURL never quotes the URL), which is what makes reading
-	// them safe. They are diagnostics nonetheless, like PrivateOf — keep them
-	// off the wire.
-	FieldsOf = kerrs.FieldsOf
-
-	// HasCode walks the chain (including errors.Join subtrees) and reports
-	// whether any *errs.Error carries code (origin or trail entry).
-	HasCode = kerrs.HasCode
-
-	// HasReason walks the chain and reports whether any *errs.Error carries reason.
-	HasReason = kerrs.HasReason
-
-	// NewPrefixMatcher builds an errors.Is target for CIDR-style Code matching.
-	NewPrefixMatcher = kerrs.NewPrefixMatcher
-
-	// Pack constructs a Code from its four octets. Runtime only — sentinel
-	// constants in caller code MUST use hex literals to stay const-expressible.
-	Pack = kerrs.Pack
-
-	// ParseCode parses the canonical "M.L.P.S" textual form.
-	ParseCode = kerrs.ParseCode
+	// It is a variable bound to the kernel accessor rather than a forwarder like
+	// its siblings: the forwarder cannot inline — the accessor it would inline
+	// already costs 75 of the inliner's 80 — and in two of four measured runs it
+	// was slower than the indirect call through this variable by more than the
+	// 3 % a forwarder may cost (BENCH.md). Assigning to it would change it for
+	// every caller in the process: never do.
+	ReasonOf = kerrs.ReasonOf
 )
+
+// PublicOf returns the deepest *errs.Error Public message, or "" when no
+// *errs.Error is in the chain.
+func PublicOf(err error) string {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.PublicOf(err)
+}
+
+// PrivateOf returns the deepest *errs.Error Private message. DIAGNOSTIC-ONLY.
+func PrivateOf(err error) string {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.PrivateOf(err)
+}
+
+// HTTPStatusOf returns the HTTP status mapped from the deepest *errs.Error,
+// defaulting to 500 when no *errs.Error is present.
+func HTTPStatusOf(err error) int {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.HTTPStatusOf(err)
+}
+
+// ExitCodeOf returns the sysexits code mapped from the deepest *errs.Error,
+// defaulting to 70 (EX_SOFTWARE) when no *errs.Error is present.
+func ExitCodeOf(err error) int {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.ExitCodeOf(err)
+}
+
+// FieldsOf returns every Field attached along err's chain, oldest cause
+// first and newest wrapper last, as a copy the caller owns — nil when no
+// *errs.Error is present. Read each with Key and StringValue.
+//
+// The values are clauses the emitters chose to attach — names, positions,
+// reasons — never secrets: no SDK emitter attaches a value it was given to
+// protect (mail.ParseURL never quotes the URL), which is what makes reading
+// them safe. They are diagnostics nonetheless, like PrivateOf — keep them
+// off the wire.
+func FieldsOf(err error) []Field {
+	//: the walk and the defensive copy are the kernel's; this facade only forwards.
+	return kerrs.FieldsOf(err)
+}
+
+// HasCode walks the chain (including errors.Join subtrees) and reports
+// whether any *errs.Error carries code (origin or trail entry).
+func HasCode(err error, code Code) bool {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.HasCode(err, code)
+}
+
+// HasReason walks the chain and reports whether any *errs.Error carries reason.
+func HasReason(err error, reason string) bool {
+	//: the walk is the kernel's; this facade only forwards.
+	return kerrs.HasReason(err, reason)
+}
+
+// NewPrefixMatcher builds an errors.Is target for CIDR-style Code matching.
+func NewPrefixMatcher(prefix, mask Code) *PrefixMatcher {
+	//: the matcher is the kernel's; this facade only forwards.
+	return kerrs.NewPrefixMatcher(prefix, mask)
+}
+
+// Pack constructs a Code from its four octets. Runtime only — sentinel
+// constants in caller code MUST use hex literals to stay const-expressible.
+func Pack(major Major, layer Layer, pkg PkgCode, serial Serial) Code {
+	//: the layout is the kernel's; this facade only forwards.
+	return kerrs.Pack(major, layer, pkg, serial)
+}
+
+// ParseCode parses the canonical "M.L.P.S" textual form.
+func ParseCode(text string) (code Code, err error) {
+	//: the grammar is the kernel's; this facade only forwards.
+	return kerrs.ParseCode(text)
+}
 
 // HasAnyCode walks err's chain and reports whether any *errs.Error
 // carries a Code matching ANY of the supplied codes. Convenience
