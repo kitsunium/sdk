@@ -133,12 +133,14 @@
 // result of. A caller whose context ends gets StoreUnavailable, carrying its
 // own context error.
 //
-// Those guarantees rest on flock(2) and on a filesystem that enforces Unix
-// permissions. Where they do not exist — Windows, wasip1, and any other GOOS
-// without flock(2) — [NewFileStore] returns the SDK's [UnsupportedPlatform]
-// sentinel AT CONSTRUCTION rather than building a store that would report
-// success while providing neither (ADR 0018). Use [NewMemoryStore], an external
-// store, or another host.
+// Those guarantees rest on flock(2), on a filesystem that enforces Unix
+// permissions, and on a directory that can be flushed so a rename or an unlink
+// survives a power cut. Where they do not exist — Windows, which has no
+// directory flush and on which the SDK builds no owner-only access control
+// list, wasip1, and any other GOOS without flock(2) — [NewFileStore] returns
+// the SDK's [UnsupportedPlatform] sentinel AT CONSTRUCTION rather than
+// building a store that would report success while providing none of it (ADR
+// 0018). Use [NewMemoryStore], an external store, or another host.
 //
 // # Sweeping is yours to schedule
 //
@@ -256,8 +258,8 @@ func NewMemoryStore(cfg Config) (store Store, err error) {
 // NewFileStore returns a Store keeping one sealed file per session in cfg.Dir.
 // It refuses — at construction — an unusable configuration, an unsafe
 // directory, a location reached through a link anybody could have planted
-// ([PathRedirected]), and a platform without flock(2) and enforced Unix
-// permissions.
+// ([PathRedirected]), and a platform without flock(2), enforced Unix
+// permissions and a directory flush.
 func NewFileStore(cfg FileConfig) (store Store, err error) {
 	//: delegate to the service constructor.
 	return svcsession.NewFileStore(cfg)

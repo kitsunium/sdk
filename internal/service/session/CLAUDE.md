@@ -29,7 +29,7 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | `file_store.go` / `file_ops.go` / `file_write.go` / `file_publish.go` | `fileStore`: construction (`openStoreDir` → the held `os.Root`, `assertHeldDir`, `openLockFile`), the record path, publication |
 | `chain.go` | `checkChain` — the components ABOVE the store directory, audited through `pathchain` before anything is created (§The location) |
 | `file_entry.go` | `openEntry` / `readEntry` — the look before every open and the proof after it, so nothing is read or locked through a link (§The location) |
-| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), `plantable` (the mode rule, Unix only), and the honest refusal |
+| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), `plantable` (the mode rule, Unix only), and the honest refusal — with the reason Windows is refused, corrected |
 | `sealer.go` | `sealer` + `NewSealer` |
 | `codes.go` / `errors.go` | `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` (`0.3.46.6`) |
 
@@ -69,7 +69,7 @@ refusal arrives where the program is wired rather than at the first login.
 | Platform | Verdict |
 |---|---|
 | linux, darwin, freebsd, openbsd, netbsd, dragonfly | native |
-| **windows** | `UnsupportedPlatform` — `os.Chmod` maps a `FileMode` to the read-only attribute and nothing else, so `0600` does not describe an ACL. The right call is `CreateFileW` with a `SECURITY_ATTRIBUTES` security descriptor, which stdlib `syscall` does not expose. **Gap, with a known closure** (`advapi32` via `syscall.NewLazyDLL`), deliberately deferred: an untested implementation of a security boundary is worth less than an honest refusal |
+| **windows** | `UnsupportedPlatform` — see §Why Windows is still refused. Not because stdlib `syscall` cannot reach `advapi32` (the reason this row used to give, stale since ADR 0081/0084), but because three things are missing: an owner-only DACL that is BUILT and verified, a directory flush, and a lane that runs the package there |
 | wasip1, solaris, illumos, aix | `UnsupportedPlatform` — `syscall.Flock` is absent from the stdlib there, or file ownership means nothing |
 | plan9, js | outside the SDK's build matrix entirely, and not because of this package: `internal/core/proc` does not compile on either (`syscall.Note` on plan9, no signal constants on js). Measured, pre-existing, and unchanged by this domain — `internal/service/session` itself compiles on both `GOOS` values in isolation |
 
@@ -77,6 +77,25 @@ Both `fsguard_*.go` files compile on every `GOOS` the SDK targets, so the
 package always clears ADR 0018's **build bar**; only behaviour degrades. Verified
 by cross-compiling the package for all seven matrix platforms plus wasip1,
 solaris, illumos, android and ios.
+
+### Why Windows is still refused
+
+This row used to say the right DACL needs `CreateFileW` with a security
+descriptor "which stdlib `syscall` does not expose". That stopped being true
+with ADR 0081 and ADR 0084: `internal/service/lock` binds `LockFileEx` from
+`kernel32` and `GetNamedSecurityInfoW` + `GetAce` from `advapi32` through
+`syscall.NewLazyDLL`, no new dependency. Reusing that code does not get this
+store there, because three things are still missing:
+
+| Missing | Why lock's code does not supply it |
+|---|---|
+| an owner-only DACL, BUILT and then verified | lock's reader (`GrantsAnyone`, ADR 0084/0086/0095) builds nothing, and answers a weaker question: does an identifier meaning ANYBODY — Everyone, Authenticated Users, BUILTIN\Users — hold a right. `0700`/`0600` exclude every other account, a named colleague included; a directory granting read to one named principal passes the reader and fails the Unix rule. Applying a protected owner-only DACL at creation is new ABI (`SetNamedSecurityInfoW`, or a `SECURITY_ATTRIBUTES` on the create) with its own tests |
+| a directory flush | none exists: `FlushFileBuffers` on a directory handle returns `ERROR_ACCESS_DENIED` (ADR 0056 D10) — the reason `internal/service/vfs` refuses Windows too. Without it a power cut can undo a `Destroy` |
+| a lane that runs it | no Windows job runs this package; a green cross-compile is not ADR 0018's runtime bar |
+
+`LockFileEx` (ADR 0081) is the one piece that exists, and it is not enough on
+its own. `GOOS=windows go vet ./internal/service/session/...` is clean, which
+is the build bar and only that.
 
 ### Requesting a mode is not getting one
 
