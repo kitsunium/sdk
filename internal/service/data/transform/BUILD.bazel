@@ -6,11 +6,10 @@ go_library(
     name = "transform",
     srcs = [
         "bounded.go",
-        "codes.go",
-        "errors.go",
         "flate.go",
         "gzip.go",
         "pool.go",
+        "wrap.go",
         "zlib.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/transform",
@@ -52,12 +51,4 @@ go_test(
         "//internal/core/data/transform",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
-# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

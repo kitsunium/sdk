@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcsql "github.com/kitsunium/sdk/internal/service/data/sql"
 )
@@ -96,11 +97,11 @@ func TestWithheldRendersNoneOfTheDriversWords(t *testing.T) {
 		if got := withheld.Error(); got != tc.want {
 			t.Errorf("%s: Error() = %q, want %q", tc.name, got, tc.want)
 		}
-		joined := errors.Join(errs.Wrap(svcsql.CommitFailed, errs.WrapParams{}), withheld)
+		joined := errors.Join(errs.Wrap(coresql.CommitFailed, errs.WrapParams{}), withheld)
 		if strings.Contains(joined.Error(), quotedRow) {
 			t.Errorf("%s: the joined error quotes the row: %s", tc.name, joined.Error())
 		}
-		if !errs.HasCode(joined, svcsql.CodeCommitFailed) {
+		if !errs.HasCode(joined, coresql.CodeCommitFailed) {
 			t.Errorf("%s: the verdict's code is lost beside the driver's error: %v", tc.name, joined)
 		}
 		if !errors.Is(joined, tc.cause) {
@@ -142,7 +143,7 @@ func TestWithheldKeepsTheDriversErrorOneAsAway(t *testing.T) {
 		if !tc.check(withheld) {
 			t.Errorf("%s: not reachable through Withheld", tc.name)
 		}
-		if !tc.check(errors.Join(errs.Wrap(svcsql.CommitFailed, errs.WrapParams{}), withheld)) {
+		if !tc.check(errors.Join(errs.Wrap(coresql.CommitFailed, errs.WrapParams{}), withheld)) {
 			t.Errorf("%s: not reachable through the join a package returns", tc.name)
 		}
 	}

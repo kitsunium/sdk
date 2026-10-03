@@ -36,7 +36,7 @@ func TestConsumeRefusesAHandlerWhoseAuthorHasNotAssertedIdempotence(t *testing.T
 		Handler: func(context.Context, corequeue.DeliveryValue) error { return nil },
 		//: HandlerIsIdempotent deliberately left at its zero value.
 	})
-	if !errs.HasCode(err, svcqueue.CodeConsumerMisconfigured) {
+	if !errs.HasCode(err, corequeue.CodeConsumerMisconfigured) {
 		t.Fatalf("Consume() = %v, want CodeConsumerMisconfigured", err)
 	}
 }
@@ -48,7 +48,7 @@ func TestConsumeRefusesANilHandler(t *testing.T) {
 	t.Parallel()
 	broker := makeMemory(t, clock.NewManualClock(epoch), defaultPolicy())
 	err := svcqueue.Consume(t.Context(), broker, svcqueue.ConsumerConfig{HandlerIsIdempotent: true})
-	if !errs.HasCode(err, svcqueue.CodeConsumerMisconfigured) {
+	if !errs.HasCode(err, corequeue.CodeConsumerMisconfigured) {
 		t.Fatalf("Consume() = %v, want CodeConsumerMisconfigured", err)
 	}
 }
@@ -290,7 +290,7 @@ type refusingBroker struct {
 // Receive refuses, as a durable broker does when its medium is gone.
 func (refusingBroker) Receive(context.Context, int) ([]corequeue.DeliveryValue, error) {
 	//: the code a durable broker's storage refusal carries.
-	return nil, errs.Wrap(svcqueue.QueueBackendFailed, errs.WrapParams{}, errs.String("op", "receive"))
+	return nil, errs.Wrap(corequeue.QueueBackendFailed, errs.WrapParams{}, errs.String("op", "receive"))
 }
 
 // TestAStorageFailureStopsEveryWorkerAndIsReturned pins the one error Consume
@@ -324,7 +324,7 @@ func TestAStorageFailureStopsEveryWorkerAndIsReturned(t *testing.T) {
 		}()
 		select {
 		case err := <-done:
-			if !errs.HasCode(err, svcqueue.CodeQueueBackendFailed) {
+			if !errs.HasCode(err, corequeue.CodeQueueBackendFailed) {
 				t.Fatalf("Consume() = %v, want the storage's QUEUE_BACKEND_FAILED", err)
 			}
 			if errors.Is(err, context.Canceled) {

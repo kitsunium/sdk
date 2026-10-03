@@ -11,8 +11,9 @@ import (
 	"path"
 	"strings"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
+	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
 
 // filePerm is the mode of every file the store writes: the owner's data, and
@@ -102,7 +103,7 @@ func (s *Store[T]) persist(key string, raw json.RawMessage, deleted bool, versio
 	//: unreachable while the document is json.Marshal's own output.
 	if encodeErr != nil {
 		//: PersistFailed, naming the step.
-		return kerrs.Wrap(PersistFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
 			kerrs.String("store", s.path), kerrs.String("step", "entry"), kerrs.String("cause", encodeCause(encodeErr)))
 	}
 	//: one file, published whole or not at all.
@@ -123,12 +124,12 @@ func (s *Store[T]) publish(name string, data []byte, step string) error {
 		kerrs.String("store", s.path), kerrs.String("step", step), kerrs.String("cause", publishErr.Error()),
 	}
 	//: the rename happened: the write took effect, its durability is in doubt.
-	if kerrs.HasCode(publishErr, svcvfs.CodeDirectorySyncFailed) {
+	if kerrs.HasCode(publishErr, corevfs.CodeDirectorySyncFailed) {
 		//: WriteUnconfirmed.
-		return kerrs.Wrap(WriteUnconfirmed, kerrs.WrapParams{}, fields...)
+		return kerrs.Wrap(coredocstore.WriteUnconfirmed, kerrs.WrapParams{}, fields...)
 	}
 	//: nothing changed.
-	return kerrs.Wrap(PersistFailed, kerrs.WrapParams{}, fields...)
+	return kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{}, fields...)
 }
 
 // maybeFold folds the overlay when the write just made reached the
@@ -178,7 +179,7 @@ func (s *Store[T]) Fold() error {
 	//: a closed store folded when it closed.
 	if s.closed {
 		//: StoreClosed.
-		return kerrs.Wrap(StoreClosed, kerrs.WrapParams{})
+		return kerrs.Wrap(coredocstore.StoreClosed, kerrs.WrapParams{})
 	}
 	//: the fold, under the writers' lock.
 	return s.fold()
@@ -231,7 +232,7 @@ func (s *Store[T]) fold() error {
 	snapshot, encodeErr := encodeSnapshot(s.docs)
 	//: unreachable while every document is json.Marshal's own output.
 	if encodeErr != nil {
-		foldErr := kerrs.Wrap(PersistFailed, kerrs.WrapParams{},
+		foldErr := kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
 			kerrs.String("store", s.path), kerrs.String("step", "snapshot"), kerrs.String("cause", encodeCause(encodeErr)))
 		s.recordFold(foldErr, nil)
 		//: PersistFailed.
@@ -272,7 +273,7 @@ func (s *Store[T]) removeFolded() (removed []string, err error) {
 		return removed, nil
 	}
 	//: PersistFailed, counting what is left and quoting the first cause.
-	return removed, kerrs.Wrap(PersistFailed, kerrs.WrapParams{},
+	return removed, kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
 		kerrs.String("store", s.path), kerrs.String("step", "remove folded entries"),
 		kerrs.Int("remaining", len(failures)), kerrs.String("cause", failures[0].Error()))
 }
@@ -316,7 +317,7 @@ func (s *Store[T]) foldVersions() error {
 	//: unreachable while every document is JSON the store checked.
 	if encodeErr != nil {
 		//: PersistFailed, naming the step.
-		return kerrs.Wrap(PersistFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.PersistFailed, kerrs.WrapParams{},
 			kerrs.String("store", s.path), kerrs.String("step", "versions"), kerrs.String("cause", encodeCause(encodeErr)))
 	}
 	//: published whole, before the snapshot.

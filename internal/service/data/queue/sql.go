@@ -96,7 +96,7 @@ type sqlReceipt struct {
 //
 // It refuses, at construction rather than at first use, a policy it cannot
 // honour (core/data/queue.QueueMisconfigured) and a transactor, dialect or table it
-// cannot use ([SQLQueueMisconfigured]).
+// cannot use ([corequeue.SQLQueueMisconfigured]).
 func NewSQL(cfg SQLConfig) (broker corequeue.Broker, err error) {
 	parts, invalid := cfg.validate()
 	//: refused before anything is built.
@@ -450,7 +450,7 @@ func (b *sqlBroker) failed(step string, cause error) error {
 	//: the verdict names the table and the step; the cause is reachable, and
 	//: silent.
 	return errors.Join(
-		kerrs.Wrap(QueueBackendFailed, kerrs.WrapParams{}, kerrs.String("op", step), kerrs.String("table", b.table)),
+		kerrs.Wrap(corequeue.QueueBackendFailed, kerrs.WrapParams{}, kerrs.String("op", step), kerrs.String("table", b.table)),
 		svcsql.NewWithheld(cause))
 }
 

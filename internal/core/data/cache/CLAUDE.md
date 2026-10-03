@@ -9,7 +9,10 @@ admitted by **ADR 0049**, which amends ADR 0025. The concrete stores — memory
 and chain — live in `internal/service/data/cache`; this package owns only the
 contract, the domain value, and the typed sentinels.
 
-Code range: `0.2.18.*` (ADR 0049).
+Code range: `0.2.18.*` (ADR 0049), and since ADR 0160 also `0.3.48.*` —
+`CACHE_CHAIN_MISCONFIGURED` and `CACHE_TIER_FAILED`, which the chain in
+`internal/service/data/cache` emits, declared here under the service layer's
+`LL = 3` they were allocated with (ADR 0160 §3).
 
 ## This is not `internal/kernel/collections/cache`
 
@@ -29,7 +32,7 @@ tier chaining.
 | `cache.go` | the FROZEN `Store[V]` port (`Fetch`/`Set`/`Delete`), alone in the file that names the package |
 | `cache_interface.go` | the ADR 0039 siblings — `EntryFetcher[V]` / `Tagger` / `Loader[V]` — plus the `Fill[V]` func port |
 | `entry.go` | `EntryValue[V]` (Value / TTL / Tags) + `NoExpiry` |
-| `codes.go` / `errors.go` | `0.2.18.*` — CACHE_MISCONFIGURED, CACHE_BACKEND_FAILED, CACHE_FILL_FAILED, CACHE_ENTRY_REJECTED |
+| `codes.go` / `errors.go` | `0.2.18.*` — CACHE_MISCONFIGURED, CACHE_BACKEND_FAILED, CACHE_FILL_FAILED, CACHE_ENTRY_REJECTED; `0.3.48.*` — CACHE_CHAIN_MISCONFIGURED, CACHE_TIER_FAILED |
 
 ## Conventions
 

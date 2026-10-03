@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # pkg/v1/data/vfs/
 
 ## Purpose
@@ -22,7 +22,7 @@ either replaces it completely or changes nothing at all.
 | `NewOS(root)` | func | confined to one tree; refuses at construction; the filesystem also answers `io.Closer` by type assertion, releasing its directory descriptor |
 | `NewMem()` | func | a filesystem in a map; takes no arguments, on purpose |
 | `InvalidPath`, `InvalidPermission`, `PathEscaped`, `ReadFailed`, `WriteFailed`, `PublishFailed`, `NotRegularFile`, `DirectoryNotEmpty` | sentinels | re-exported from `internal/core/data/vfs` |
-| `RootUnavailable`, `DirectorySyncFailed` | sentinels | re-exported from `internal/service/data/vfs` |
+| `RootUnavailable`, `DirectorySyncFailed` | sentinels | the concrete filesystems' two (`0.3.55.*`), re-exported from `internal/core/data/vfs`, which declares them since ADR 0160 |
 
 Every type is an **alias**, never a copy. A value crossing between `pkg/v1` and
 `internal/*` therefore needs no conversion, and a stdlib walker takes an SDK

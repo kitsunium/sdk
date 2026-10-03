@@ -117,7 +117,7 @@ func TestNewChainRefusesAnIncompleteTierSet(t *testing.T) {
 			if chain != nil {
 				t.Fatal("NewChain returned a chain alongside its error")
 			}
-			if !errs.HasCode(err, svccache.CodeCacheChainMisconfigured) {
+			if !errs.HasCode(err, corecache.CodeCacheChainMisconfigured) {
 				t.Fatalf("NewChain returned %v, want CACHE_CHAIN_MISCONFIGURED", err)
 			}
 		})
@@ -199,7 +199,7 @@ func TestChainSetWritesTheAuthorityFirst(t *testing.T) {
 	}
 
 	setErr := chain.Set(t.Context(), "k", entry("v", time.Minute))
-	if !errs.HasCode(setErr, svccache.CodeCacheTierFailed) {
+	if !errs.HasCode(setErr, corecache.CodeCacheTierFailed) {
 		t.Fatalf("chain Set returned %v, want CACHE_TIER_FAILED", setErr)
 	}
 	if _, found := held(t, near, "k"); found {
@@ -221,7 +221,7 @@ func TestChainDeleteAttemptsEveryTier(t *testing.T) {
 
 	far.fails = failDelete
 	deleteErr := chain.Delete(t.Context(), "k")
-	if !errs.HasCode(deleteErr, svccache.CodeCacheTierFailed) {
+	if !errs.HasCode(deleteErr, corecache.CodeCacheTierFailed) {
 		t.Fatalf("chain Delete returned %v, want CACHE_TIER_FAILED", deleteErr)
 	}
 	if _, found := held(t, near, "k"); found {
@@ -273,7 +273,7 @@ func TestAFailedTierStopsTheWalk(t *testing.T) {
 	if found {
 		t.Fatal("the chain served a far value past a broken near tier")
 	}
-	if !errs.HasCode(fetchErr, svccache.CodeCacheTierFailed) {
+	if !errs.HasCode(fetchErr, corecache.CodeCacheTierFailed) {
 		t.Fatalf("chain Fetch returned %v, want CACHE_TIER_FAILED", fetchErr)
 	}
 }
@@ -294,7 +294,7 @@ func TestAnUntypedTierErrorKeepsItsIdentity(t *testing.T) {
 		t.Fatalf("NewChain: %v", err)
 	}
 	_, _, fetchErr := chain.Fetch(t.Context(), "k")
-	if !errs.HasCode(fetchErr, svccache.CodeCacheTierFailed) {
+	if !errs.HasCode(fetchErr, corecache.CodeCacheTierFailed) {
 		t.Fatalf("chain Fetch returned %v, want CACHE_TIER_FAILED", fetchErr)
 	}
 	if !errors.Is(fetchErr, reset) {
@@ -319,7 +319,7 @@ func TestATypedTierErrorBehindAWrapperKeepsTheTierVerdict(t *testing.T) {
 		t.Fatalf("NewChain: %v", err)
 	}
 	_, _, fetchErr := chain.Fetch(t.Context(), "k")
-	if code, _ := errs.CodeOf(fetchErr); code != svccache.CodeCacheTierFailed {
+	if code, _ := errs.CodeOf(fetchErr); code != corecache.CodeCacheTierFailed {
 		t.Fatalf("chain Fetch returned %v (code %v), want CACHE_TIER_FAILED as the verdict", fetchErr, code)
 	}
 }

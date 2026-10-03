@@ -46,7 +46,7 @@ func (t *transactor) Transact(ctx context.Context, opts coresql.TxOptionsValue, 
 	//: a nil unit of work is a wiring fault, refused before anything opens.
 	if fn == nil {
 		//: the missing field names which half is absent.
-		return kerrs.Wrap(ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "fn"))
+		return kerrs.Wrap(coresql.ConfigInvalid, kerrs.WrapParams{}, kerrs.String("missing", "fn"))
 	}
 	//: OUR transaction on this context, if any — another manager's does not
 	//: count, because it is another database.
@@ -64,7 +64,7 @@ func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn c
 	//: a transaction the driver would not open ran nothing at all.
 	if err != nil {
 		//: the driver's error travels beside the verdict.
-		return failed(BeginFailed, err)
+		return failed(coresql.BeginFailed, err)
 	}
 	state := &txState{tx: tx, dialect: t.cfg.dialect}
 	scoped := newScopedExecutor(state)
@@ -89,7 +89,7 @@ func (t *transactor) root(ctx context.Context, opts coresql.TxOptionsValue, fn c
 		//: to a connection database/sql has already discarded.
 		if rbErr := tx.Rollback(); rbErr != nil && !txEnded(rbErr) {
 			//: the transaction's real state is unknown from here.
-			state.poison(failed(RollbackFailed, rbErr))
+			state.poison(failed(coresql.RollbackFailed, rbErr))
 		}
 	}()
 	err = fn(withScope(ctx, &txScope{owner: t, state: state, exec: scoped, id: rootScope}), scoped)
@@ -124,12 +124,12 @@ func (t *transactor) settle(state *txState, cause error) error {
 	//: undid is the one outcome worse than failing.
 	if poison := state.poisonedErr(); poison != nil {
 		//: report the poison and undo everything.
-		return errors.Join(failed(TxPoisoned, poison), rollback(state))
+		return errors.Join(failed(coresql.TxPoisoned, poison), rollback(state))
 	}
 	//: the only COMMIT in this package.
 	if err := state.tx.Commit(); err != nil {
 		//: says out loud that the unit of work had no effect.
-		return failed(CommitFailed, err)
+		return failed(coresql.CommitFailed, err)
 	}
 	//: committed.
 	return nil
@@ -145,7 +145,7 @@ func rollback(state *txState) error {
 		return nil
 	}
 	//: the driver refused; database/sql discards the connection.
-	return failed(RollbackFailed, err)
+	return failed(coresql.RollbackFailed, err)
 }
 
 // cleanup returns a context for a statement that must run BECAUSE the
@@ -196,7 +196,7 @@ func (t *transactor) nested(
 	//: refuse to open a scope inside a transaction that is already unusable.
 	if poison := scope.state.poisonedErr(); poison != nil {
 		//: the original cause travels beside the verdict.
-		return failed(TxPoisoned, poison)
+		return failed(coresql.TxPoisoned, poison)
 	}
 	id, name := scope.state.nextSavepoint()
 	create, undo, release := savepointSQL(scope.state.dialect, name)
@@ -204,7 +204,7 @@ func (t *transactor) nested(
 	//: executor: it is the SDK's own bookkeeping, not the unit of work.
 	if _, err := scope.state.tx.ExecContext(ctx, create); err != nil {
 		//: the nested scope never started, so the outer one is untouched.
-		return failed(SavepointFailed, err,
+		return failed(coresql.SavepointFailed, err,
 			kerrs.String("statement", "SAVEPOINT"), kerrs.String("savepoint", name))
 	}
 	//: run the unit of work, then release or roll back to the savepoint.
@@ -236,7 +236,7 @@ func (t *transactor) runNested(
 		//: panic itself is already carrying the diagnosis upward.
 		if _, undoErr := scope.state.tx.ExecContext(cleanup(ctx), sp.undo); undoErr != nil {
 			//: the engine's state is unknown; nothing may be committed.
-			scope.state.poison(failed(SavepointFailed, undoErr,
+			scope.state.poison(failed(coresql.SavepointFailed, undoErr,
 				kerrs.String("statement", "ROLLBACK TO"), kerrs.String("savepoint", sp.name)))
 		}
 	}()
@@ -272,7 +272,7 @@ func (t *transactor) settleNested(
 		}
 		//: a RELEASE that fails leaves a savepoint the SDK believes is gone,
 		//: and the transaction's state no longer matches its bookkeeping.
-		verdict := failed(SavepointFailed, err,
+		verdict := failed(coresql.SavepointFailed, err,
 			kerrs.String("statement", "RELEASE"), kerrs.String("savepoint", sp.name))
 		scope.state.poison(verdict)
 		//: the outer scope will refuse to commit.
@@ -309,7 +309,7 @@ func (t *transactor) undoSavepoint(ctx context.Context, scope *txScope, sp savep
 	}
 	//: the recovery statement failed — the SDK no longer knows what the
 	//: engine kept, so nothing on this transaction may be committed.
-	verdict := failed(SavepointFailed, err,
+	verdict := failed(coresql.SavepointFailed, err,
 		kerrs.String("statement", "ROLLBACK TO"), kerrs.String("savepoint", sp.name))
 	scope.state.poison(verdict)
 	//: joined with the cause by settleNested; the outer commit now refuses.

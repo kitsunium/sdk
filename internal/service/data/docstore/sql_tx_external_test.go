@@ -10,9 +10,9 @@ import (
 	"slices"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
 
 // errWork is the failure a test's unit of work returns to roll it back.
@@ -38,7 +38,7 @@ func TestSQLJoinsTheCallersTransaction(t *testing.T) {
 			if a, lookErr := fx.store.Lookup(ctx, "email", "ada@x.dev"); lookErr != nil || a.ID != "acc_1" {
 				t.Errorf("the transaction does not read its own index row: %+v, %v", a, lookErr)
 			}
-			if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+			if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 				t.Errorf("the pool saw an uncommitted write: %v", getErr)
 			}
 			if len(written) != 0 {
@@ -86,7 +86,7 @@ func TestSQLARolledBackTransactionLeavesNothing(t *testing.T) {
 		if a, getErr := fx.store.Get(t.Context(), "kept"); getErr != nil || a.Name != "before" {
 			t.Fatalf("a rolled-back transaction changed a document: %+v, %v", a, getErr)
 		}
-		if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("a rolled-back insertion is there: %v", getErr)
 		}
 		if len(written)+len(deleted) != 0 {
@@ -107,9 +107,9 @@ func TestSQLARefusedWriteLeavesTheCallersTransactionUsable(t *testing.T) {
 		fx.store.OnWrite(func(key string) { written = append(written, key) })
 		err := fx.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
 			must(t, fx.store.Insert(ctx, account{ID: "acc_1", Email: "ada@x.dev"}))
-			requireCode(t, fx.store.Insert(ctx, account{ID: "acc_1"}), docstore.CodeDocumentExists, "a taken key, caught")
+			requireCode(t, fx.store.Insert(ctx, account{ID: "acc_1"}), coredocstore.CodeDocumentExists, "a taken key, caught")
 			requireCode(t, fx.store.Insert(ctx, account{ID: "acc_2", Email: "ada@x.dev"}),
-				docstore.CodeUniqueKeyTaken, "a taken unique key, caught")
+				coredocstore.CodeUniqueKeyTaken, "a taken unique key, caught")
 			return fx.store.Put(ctx, account{ID: "acc_3"})
 		})
 		must(t, err)
@@ -146,7 +146,7 @@ func TestSQLANestedFailureUndoesOnlyItsWrites(t *testing.T) {
 			return nil
 		})
 		must(t, err)
-		if _, getErr := fx.store.Get(t.Context(), "inner"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		if _, getErr := fx.store.Get(t.Context(), "inner"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("the failed savepoint's write is there: %v", getErr)
 		}
 		if !slices.Equal(written, []string{"outer"}) {
@@ -200,10 +200,10 @@ func raceCollisions(t *testing.T, dialect coresql.Dialect, joined bool) {
 	} else {
 		write(t.Context())
 	}
-	requireCode(t, uniqueErr, docstore.CodeUniqueKeyTaken, "a unique key raced in")
+	requireCode(t, uniqueErr, coredocstore.CodeUniqueKeyTaken, "a unique key raced in")
 	quotesNothing(t, uniqueErr, "ada@x.dev")
-	requireCode(t, existsErr, docstore.CodeDocumentExists, "a store key raced in")
-	if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+	requireCode(t, existsErr, coredocstore.CodeDocumentExists, "a store key raced in")
+	if _, getErr := fx.store.Get(t.Context(), "acc_1"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("joined=%v: the collided write left its document: %v", joined, getErr)
 	}
 }
@@ -225,7 +225,7 @@ func TestSQLAFailedStatementWithholdsTheDriversText(t *testing.T) {
 		} {
 			fx.engine.failNext(role, driverErr)
 			err := call()
-			requireCode(t, err, docstore.CodeStatementFailed, role)
+			requireCode(t, err, coredocstore.CodeStatementFailed, role)
 			quotesNothing(t, err, "ada@x.dev")
 			if dup, reachable := errors.AsType[errDuplicate](err); !reachable || dup.key != "ada@x.dev" {
 				t.Fatalf("%s: the driver's own error is not reachable through errors.As", role)
@@ -237,7 +237,7 @@ func TestSQLAFailedStatementWithholdsTheDriversText(t *testing.T) {
 		cancelled, cancel := context.WithCancel(t.Context())
 		cancel()
 		_, err := fx.store.Get(cancelled, "acc_1")
-		requireCode(t, err, docstore.CodeStatementFailed, "a cancelled read")
+		requireCode(t, err, coredocstore.CodeStatementFailed, "a cancelled read")
 		if !errors.Is(err, context.Canceled) {
 			t.Fatalf("a cancelled read = %v, want errors.Is(context.Canceled)", err)
 		}
@@ -257,7 +257,7 @@ func TestSQLRoundTripsPerCall(t *testing.T) {
 			begin = "BEGIN READ COMMITTED"
 		}
 		fx := openSQL(t, dialect)
-		bare := openSQL(t, dialect, []docstore.IndexSpec[account]{}...)
+		bare := openSQL(t, dialect, []coredocstore.IndexSpec[account]{}...)
 		for name, tc := range map[string]struct {
 			call func(ctx context.Context) error
 			fx   *sqlFixture
@@ -323,17 +323,17 @@ func TestSQLRoundTripsPerCall(t *testing.T) {
 func TestSQLAFailedWriteLeavesTheCallersTransactionUsable(t *testing.T) {
 	t.Parallel()
 	eachDialect(t, func(t *testing.T, dialect coresql.Dialect) {
-		fx := openSQL(t, dialect, []docstore.IndexSpec[account]{}...)
+		fx := openSQL(t, dialect, []coredocstore.IndexSpec[account]{}...)
 		fx.engine.failNext("upsert", errors.New("the statement was cancelled"))
 		err := fx.tm.Transact(t.Context(), coresql.TxOptionsValue{}, func(ctx context.Context, _ coresql.Executor) error {
-			requireCode(t, fx.store.Put(ctx, account{ID: "failed"}), docstore.CodeStatementFailed, "a failed statement, caught")
+			requireCode(t, fx.store.Put(ctx, account{ID: "failed"}), coredocstore.CodeStatementFailed, "a failed statement, caught")
 			return fx.store.Put(ctx, account{ID: "kept"})
 		})
 		must(t, err)
 		if _, getErr := fx.store.Get(t.Context(), "kept"); getErr != nil {
 			t.Fatalf("the write after the caught failure was not committed: %v", getErr)
 		}
-		if _, getErr := fx.store.Get(t.Context(), "failed"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+		if _, getErr := fx.store.Get(t.Context(), "failed"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 			t.Fatalf("the failed write is there: %v", getErr)
 		}
 	})

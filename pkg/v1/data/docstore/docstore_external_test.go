@@ -170,3 +170,42 @@ func TestFacadeVersions(t *testing.T) {
 		t.Fatalf("SQLVersionsMigration() = %v", err)
 	}
 }
+
+// The engines implement the ports a caller's double stands in for, checked
+// through public names only: a consumer that depends on a port compiles
+// against the engine it is handed in production.
+var (
+	_ docstore.Collection[member]        = (*docstore.Store[member])(nil)
+	_ docstore.Versioned[member]         = (*docstore.Store[member])(nil)
+	_ docstore.CollectionContext[member] = (*docstore.SQLStore[member])(nil)
+	_ docstore.VersionedContext[member]  = (*docstore.SQLStore[member])(nil)
+	_ docstore.Announcer                 = (*docstore.SQLStore[member])(nil)
+)
+
+// TestAStoreServesThroughItsPort holds the file engine as the port a double
+// stands in for, and finds through it the documents, the index, the refusal
+// and the hook the engine answers directly.
+func TestAStoreServesThroughItsPort(t *testing.T) {
+	t.Parallel()
+	store := open(t, vfs.NewMem())
+	defer func() {
+		if err := store.Close(); err != nil {
+			t.Errorf("Close() = %v", err)
+		}
+	}()
+	var docs docstore.Collection[member] = store
+	var written []string
+	defer docs.OnWrite(func(key string) { written = append(written, key) })()
+	if err := docs.Insert(member{ID: "m1", Email: "ada@example.com"}); err != nil {
+		t.Fatalf("Insert through the port = %v", err)
+	}
+	if got, err := docs.Lookup("email", "ada@example.com"); err != nil || got.ID != "m1" {
+		t.Fatalf("Lookup through the port = (%+v, %v), want m1", got, err)
+	}
+	if _, err := docs.Get("absent"); !errs.HasCode(err, docstore.CodeDocumentNotFound) {
+		t.Fatalf("Get of an absent key through the port = %v, want DocumentNotFound", err)
+	}
+	if !slices.Equal(written, []string{"m1"}) {
+		t.Fatalf("OnWrite through the port was told %q, want [m1]", written)
+	}
+}

@@ -227,7 +227,7 @@ func (m *migrator) assertNoUnknown(applied map[uint64]bool, target uint64) error
 			continue
 		}
 		//: the database knows a migration this binary does not.
-		return kerrs.Wrap(MigrationUnknownVersion, kerrs.WrapParams{},
+		return kerrs.Wrap(coresql.MigrationUnknownVersion, kerrs.WrapParams{},
 			kerrs.String("version", strconv.FormatUint(version, decimalBase)))
 	}
 	//: every remaining version is either intentional or reversible.
@@ -252,7 +252,7 @@ func (m *migrator) applyOne(ctx context.Context, migration coresql.MigrationValu
 	//: nothing applied, nothing recorded.
 	if err != nil {
 		//: the step's own error travels beside the verdict.
-		return failed(MigrationFailed, err, versionField(migration), directionField(directionUp))
+		return failed(coresql.MigrationFailed, err, versionField(migration), directionField(directionUp))
 	}
 	//: applied and recorded.
 	return nil
@@ -273,7 +273,7 @@ func (m *migrator) revertOne(ctx context.Context, migration coresql.MigrationVal
 	//: nothing reversed, nothing forgotten.
 	if err != nil {
 		//: the step's own error travels beside the verdict.
-		return failed(MigrationFailed, err, versionField(migration), directionField(directionDown))
+		return failed(coresql.MigrationFailed, err, versionField(migration), directionField(directionDown))
 	}
 	//: reversed and forgotten.
 	return nil

@@ -168,7 +168,7 @@ func TestSQLiteGivesUpWhenTheFileStaysLocked(t *testing.T) {
 	manual.BlockUntil(1)
 	manual.Advance(lockRetry)
 	err := <-verdict
-	if !errs.HasCode(err, svcsql.CodeMigrationLockTimeout) {
+	if !errs.HasCode(err, coresql.CodeMigrationLockTimeout) {
 		t.Fatalf("Up = %v, want MIGRATION_LOCK_TIMEOUT", err)
 	}
 	if len(applied) != 0 || f.sent(sqliteRecordRow) || f.sent("COMMIT") {
@@ -193,7 +193,7 @@ func TestABusyAttemptWhoseRollbackFailsIsNotRetried(t *testing.T) {
 	for {
 		select {
 		case err := <-verdict:
-			if !errs.HasCode(err, svcsql.CodeRollbackFailed) {
+			if !errs.HasCode(err, coresql.CodeRollbackFailed) {
 				t.Fatalf("Up = %v, want ROLLBACK_FAILED beside the busy answer", err)
 			}
 			return
@@ -216,10 +216,10 @@ func TestABeginRefusedForAnotherReasonNamesTheLockPhase(t *testing.T) {
 	f.beginErr = errScripted
 	runner := newSQLiteMigrator(t, f, clock.NewManualClock(time.Unix(0, 0)))
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED in the lock phase", err)
 	}
-	if !errs.HasCode(err, svcsql.CodeBeginFailed) {
+	if !errs.HasCode(err, coresql.CodeBeginFailed) {
 		t.Fatal("the transactor's own verdict did not travel beside the run's")
 	}
 }
@@ -232,7 +232,7 @@ func TestASQLiteRefusalThatIsNotBusyStopsAtOnce(t *testing.T) {
 	f := newFakeDB().failOn(fileLock)
 	runner := newSQLiteMigrator(t, f, clock.NewManualClock(time.Unix(0, 0)))
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "lock" {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED in the lock phase", err)
 	}
 	if !errors.Is(err, errScripted) {
@@ -253,7 +253,7 @@ func TestASQLiteMigrationThatFailsKeepsTheOnesBeforeIt(t *testing.T) {
 		coresql.MigrationValue{Version: 3, Name: "three", Up: step(&applied, "UP 3"), Down: coresql.Irreversible},
 	)
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "version") != "2" {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "version") != "2" {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED naming version 2", err)
 	}
 	want := []string{
@@ -283,10 +283,10 @@ func TestASQLiteRunWhoseCommitFailsSaysItLostTheRun(t *testing.T) {
 		coresql.MigrationValue{Version: 1, Name: "one", Up: step(&applied, "UP 1"), Down: coresql.Irreversible},
 	)
 	err := runner.Up(t.Context())
-	if !errs.HasCode(err, svcsql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "commit" {
+	if !errs.HasCode(err, coresql.CodeMigrationFailed) || fieldValue(errs.FieldsOf(err), "phase") != "commit" {
 		t.Fatalf("Up = %v, want MIGRATION_FAILED in the commit phase", err)
 	}
-	if !errs.HasCode(err, svcsql.CodeCommitFailed) {
+	if !errs.HasCode(err, coresql.CodeCommitFailed) {
 		t.Fatal("the transaction's own verdict did not travel beside the run's")
 	}
 }

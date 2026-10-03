@@ -39,6 +39,7 @@ go_test(
         "registry_external_test.go",
         "registry_guard_external_test.go",
         "registry_internal_test.go",
+        "service_range_external_test.go",
         "transform_external_test.go",
     ],
     embed = [":transform"],

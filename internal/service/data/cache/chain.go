@@ -45,8 +45,9 @@ type chainStore[V any] struct {
 // is consulted first, the last is the authority.
 //
 // Every tier MUST implement [corecache.EntryFetcher] and [corecache.Tagger].
-// That is checked here, once, and refused with [CacheChainMisconfigured]
-// rather than discovered per call — see that sentinel for the reasoning.
+// That is checked here, once, and refused with
+// [corecache.CacheChainMisconfigured] rather than discovered per call — see
+// that sentinel for the reasoning.
 //
 // The returned value is a [corecache.Store] and also implements
 // [corecache.EntryFetcher], [corecache.Tagger] and [corecache.Loader].
@@ -57,7 +58,7 @@ func NewChain[V any](cfg ChainConfig, stores ...corecache.Store[V]) (chain corec
 	//: certainly meant to pass a second tier.
 	if len(stores) < minChainTiers {
 		//: refuse rather than build a pointless wrapper.
-		return nil, kerrs.Wrap(CacheChainMisconfigured, kerrs.WrapParams{},
+		return nil, kerrs.Wrap(corecache.CacheChainMisconfigured, kerrs.WrapParams{},
 			kerrs.Int("tiers", len(stores)),
 			kerrs.String("problem", "fewer than two tiers"))
 	}
@@ -104,7 +105,7 @@ func newTier[V any](position int, store corecache.Store[V]) (built tier[V], err 
 // chainRefusal builds the construction-time refusal for one tier.
 func chainRefusal(position int, problem string) error {
 	//: origin-wins keeps the sentinel's code; the fields say which tier.
-	return kerrs.Wrap(CacheChainMisconfigured, kerrs.WrapParams{},
+	return kerrs.Wrap(corecache.CacheChainMisconfigured, kerrs.WrapParams{},
 		kerrs.Int("position", position),
 		kerrs.String("problem", problem))
 }
@@ -300,16 +301,16 @@ func tierFailure(position int, operation, key string, cause error) error {
 	//: a typed cause would take over the code if wrapped; label it instead.
 	if typedErr, typed := errors.AsType[*kerrs.Error](cause); typed {
 		//: CACHE_TIER_FAILED, the cause's text and its own code in fields.
-		return kerrs.Wrap(CacheTierFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(corecache.CacheTierFailed, kerrs.WrapParams{},
 			append(fields, kerrs.String("cause_code", typedErr.Code().String()))...)
 	}
 	//: an untyped cause, IN the chain: HasCode sees CACHE_TIER_FAILED and
 	//: errors.Is sees the cause. The identity is read from the sentinel so it
 	//: cannot drift from it.
 	return kerrs.Wrap(cause, kerrs.WrapParams{
-		Code:    CacheTierFailed.Code(),
-		Reason:  CacheTierFailed.Reason(),
-		Public:  CacheTierFailed.Public(),
-		Private: CacheTierFailed.Private(),
+		Code:    corecache.CacheTierFailed.Code(),
+		Reason:  corecache.CacheTierFailed.Reason(),
+		Public:  corecache.CacheTierFailed.Public(),
+		Private: corecache.CacheTierFailed.Private(),
 	}, fields...)
 }

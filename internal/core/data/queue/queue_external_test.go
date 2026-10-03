@@ -179,14 +179,17 @@ func TestMaxDeliveriesOfOneIsALegitimatePolicy(t *testing.T) {
 }
 
 // TestEverySentinelCarriesAWireSafePublic enforces CLAUDE.md rule 4 on this
-// package's own sentinels, and — the part that matters for a queue — that no
-// Public mentions a payload.
+// package's own sentinels — the port's, and since ADR 0160 the brokers' and the
+// consumer engine's — and, the part that matters for a queue, that no Public
+// mentions a payload.
 func TestEverySentinelCarriesAWireSafePublic(t *testing.T) {
 	t.Parallel()
 	sentinels := []*errs.Error{
 		corequeue.QueueMisconfigured, corequeue.MessageTooLarge, corequeue.UnknownReceipt,
 		corequeue.LeaseExpired, corequeue.InvalidBatchSize, corequeue.NotRetryable,
 		corequeue.DeadLetterNotFound,
+		corequeue.QueueBackendFailed, corequeue.QueueDirectoryUnusable, corequeue.ConsumerMisconfigured,
+		corequeue.HandlerPanicked, corequeue.SQLQueueMisconfigured,
 	}
 	for _, sentinel := range sentinels {
 		public := errs.PublicOf(sentinel)

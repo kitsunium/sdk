@@ -11,6 +11,7 @@ import (
 	"os"
 	"path"
 
+	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -84,7 +85,7 @@ type atomicOps struct {
 //
 // Steps 1–4 failing means nothing was published: the temporary is removed and
 // the previous bytes are untouched. Step 5 failing means the opposite and gets
-// its own code, [DirectorySyncFailed].
+// its own code, [corevfs.DirectorySyncFailed].
 func (o *osFS) WriteAtomic(name string, data []byte, perm fs.FileMode) error {
 	//: the same guard WriteFile runs — a publication must not land on a
 	//: symbolic link's target either.
@@ -158,7 +159,7 @@ func syncPublished(ops atomicOps, dir, name string) error {
 	//: reader now sees the new content, and undoing it would mean a second
 	//: non-atomic write to repair a durability problem.
 	return kerrs.Wrap(syncErr, kerrs.WrapParams{
-		Code:     CodeDirectorySyncFailed,
+		Code:     corevfs.CodeDirectorySyncFailed,
 		Reason:   "DIRECTORY_SYNC_FAILED",
 		Public:   "The file was published but the directory entry was not flushed",
 		Private:  "service/data/vfs: fsync on the parent directory failed AFTER a successful rename; the content is visible and may not survive a power loss — deliberately not rolled back",

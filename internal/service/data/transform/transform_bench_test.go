@@ -193,7 +193,7 @@ func benchDecompressAppending(dst, src []byte) (decoded []byte, err error) {
 	//: an over-cap stream is a failure, never an OOM.
 	if overflow {
 		//: the sentinel production returns here.
-		return dst, GzipFailed
+		return dst, coretransform.GzipFailed
 	}
 	//: the append-to-dst contract, honoured.
 	return append(dst, plain...), nil
@@ -229,7 +229,7 @@ func benchDecompressRefusedFastPath(dst, src []byte) (decoded []byte, err error)
 	//: an over-cap stream is a failure, never an OOM.
 	if overflow {
 		//: the sentinel production returns here.
-		return dst, GzipFailed
+		return dst, coretransform.GzipFailed
 	}
 	//: THE REFUSED BRANCH — nothing to append to, so skip the copy entirely.
 	if cap(dst) == 0 {

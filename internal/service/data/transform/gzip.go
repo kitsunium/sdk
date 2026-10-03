@@ -119,7 +119,7 @@ func gzipDecompress(dst, src []byte, max int64) (decoded []byte, err error) {
 	//: over the layer's own ceiling — the scheme's failure sentinel.
 	if tooLarge {
 		//: GzipFailed is the sentinel for any gzip-direction failure.
-		return dst, GzipFailed
+		return dst, coretransform.GzipFailed
 	}
 	//: within bounds.
 	return out, nil

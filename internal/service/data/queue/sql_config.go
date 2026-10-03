@@ -141,13 +141,13 @@ func validateSQLTable(table string) error {
 		return nil
 	}
 	//: SQLQueueMisconfigured; the name is the caller's own configuration.
-	return kerrs.Wrap(SQLQueueMisconfigured, kerrs.WrapParams{},
+	return kerrs.Wrap(corequeue.SQLQueueMisconfigured, kerrs.WrapParams{},
 		kerrs.String("setting", "Table"), kerrs.String("problem", problem), kerrs.String("table", table))
 }
 
 // sqlMisconfigured is SQLQueueMisconfigured naming a setting and its problem.
 func sqlMisconfigured(setting, problem string) error {
 	//: which setting, and what is wrong with it.
-	return kerrs.Wrap(SQLQueueMisconfigured, kerrs.WrapParams{},
+	return kerrs.Wrap(corequeue.SQLQueueMisconfigured, kerrs.WrapParams{},
 		kerrs.String("setting", setting), kerrs.String("problem", problem))
 }

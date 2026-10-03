@@ -33,6 +33,7 @@ import (
 	"strconv"
 	"testing"
 
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -262,7 +263,7 @@ func gzipReaderCase(tb testing.TB) readerSchemeCase {
 		//: gzip's magic is two fixed bytes, so any non-frame refuses at once.
 		bad:        []byte("this is emphatically not an RFC 1952 header"),
 		decompress: gzipDecompressAtCeiling,
-		code:       CodeGzipFailed,
+		code:       coretransform.CodeGzipFailed,
 	}
 }
 
@@ -285,7 +286,7 @@ func flateReaderCase(tb testing.TB) readerSchemeCase {
 		//: fails "flate: corrupt input before offset 5".
 		bad:        poolFrame(tb, "zlib", zlibCompressor{level: zlib.DefaultCompression}.Compress),
 		decompress: flateDecompressAtCeiling,
-		code:       CodeFlateFailed,
+		code:       coretransform.CodeFlateFailed,
 	}
 }
 
@@ -307,7 +308,7 @@ func zlibReaderCase(tb testing.TB) readerSchemeCase {
 		//: it, and says so here rather than anywhere subtler.
 		bad:        poolFrame(tb, "flate", flateCompressor{}.Compress),
 		decompress: zlibDecompressAtCeiling,
-		code:       CodeZlibFailed,
+		code:       coretransform.CodeZlibFailed,
 	}
 }
 

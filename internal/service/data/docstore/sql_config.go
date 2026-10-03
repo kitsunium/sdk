@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"strings"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -58,7 +59,7 @@ var tablePattern = regexp.MustCompile(`^[a-z_][a-z0-9_]*$`)
 
 // SQLConfig configures [OpenSQL]. Key, Transactor, Dialect and Table are
 // required. The secondary indexes are OpenSQL's other arguments, declared
-// with [Unique] and [Index] exactly as for [Open].
+// with [coredocstore.Unique] and [coredocstore.Index] exactly as for [Open].
 type SQLConfig[T any] struct {
 	// Key returns the key a document is stored under, as for [Open]: a pure
 	// function of the document, compared byte for byte.
@@ -118,7 +119,7 @@ type txParts struct {
 // validate refuses a configuration no SQL store could honour, with the indexes
 // OpenSQL was given, before any statement is sent, and returns what the store
 // needs of its transactor.
-func (c *SQLConfig[T]) validate(indexes []IndexSpec[T]) (txParts, error) {
+func (c *SQLConfig[T]) validate(indexes []coredocstore.IndexSpec[T]) (txParts, error) {
 	//: a store that cannot key a document cannot store one.
 	if c.Key == nil {
 		//: StoreMisconfigured, naming the setting.
@@ -156,7 +157,7 @@ func (c *SQLConfig[T]) validate(indexes []IndexSpec[T]) (txParts, error) {
 
 // validateSQLIndexes refuses what every engine refuses, and an index name
 // longer than the column every one of its rows stores it in.
-func validateSQLIndexes[T any](indexes []IndexSpec[T]) error {
+func validateSQLIndexes[T any](indexes []coredocstore.IndexSpec[T]) error {
 	//: no name, a name twice, no key function.
 	if err := validateIndexes(indexes); err != nil {
 		//: StoreMisconfigured, naming the index.
@@ -167,7 +168,7 @@ func validateSQLIndexes[T any](indexes []IndexSpec[T]) error {
 		//: longer than the column.
 		if len(spec.Name) > MaxSQLIndexNameLen {
 			//: StoreMisconfigured, naming the index and the limit.
-			return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+			return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 				kerrs.String("setting", "Indexes"), kerrs.String("problem", "a name longer than "+strconv.Itoa(MaxSQLIndexNameLen)+" bytes"),
 				kerrs.String("index", spec.Name))
 		}
@@ -203,13 +204,13 @@ func validateTable(table string) error {
 	//: the shape, which is the injection defence.
 	if !tablePattern.MatchString(table) {
 		//: StoreMisconfigured; the name is the caller's own configuration.
-		return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Table"), kerrs.String("problem", "not a lower-case SQL identifier"), kerrs.String("table", table))
 	}
 	//: room for the longest derived name within every engine's limit.
 	if len(table) > MaxSQLTableLen {
 		//: StoreMisconfigured, naming the limit.
-		return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Table"), kerrs.String("problem", "longer than "+strconv.Itoa(MaxSQLTableLen)+" bytes"),
 			kerrs.String("table", table))
 	}
@@ -217,13 +218,13 @@ func validateTable(table string) error {
 	//: table be another store's documents.
 	if strings.Contains(table, derivedSeparator) {
 		//: StoreMisconfigured, naming the rule.
-		return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Table"), kerrs.String("problem", "holds three underscores in a row"), kerrs.String("table", table))
 	}
 	//: SQLite's own names.
 	if strings.HasPrefix(table, reservedTablePrefix) {
 		//: StoreMisconfigured, naming the rule.
-		return kerrs.Wrap(StoreMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.StoreMisconfigured, kerrs.WrapParams{},
 			kerrs.String("setting", "Table"), kerrs.String("problem", "starts with sqlite_, which SQLite reserves"), kerrs.String("table", table))
 	}
 	//: a table name every engine takes.

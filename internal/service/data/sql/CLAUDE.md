@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:24:48Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/service/data/sql/
 
 ## Purpose
@@ -14,7 +14,9 @@ It ships **no driver** and imports none. `database/sql` is the stdlib's driver
 interface; a *driver* is a vendor connector and lives under `third-party/`
 (ADR 0012 / ADR 0055 §D2).
 
-Code range: `0.3.54.*` (ADR 0055).
+Code range: `0.3.54.*` (ADR 0055) — the 17 run outcomes this package emits,
+declared since ADR 0160 with the port's `0.2.24.*` in `internal/core/data/sql`,
+under the values this package allocated. This package declares no code.
 
 ## Contents
 
@@ -38,9 +40,7 @@ Code range: `0.3.54.*` (ADR 0055).
 | `migrate_lock.go` | `advisoryLock` — acquisition, retry loop, release |
 | `migrate_filelock.go` | SQLite's run: ONE transaction holding the file's write lock, `lockBusy`, the retry on the injected clock — ADR 0140 |
 | `migrate_table.go` | version-table DDL, reads, `record` / `forget`, `scanVersions` |
-| `codes.go` | `Code*` constants — range 0.3.54.* |
 | `savepoint_stmts.go` | `savepointStmts` — one savepoint's three rendered statements |
-| `errors.go` | the 17 `errs.Define` sentinels |
 | `withheld.go` | `Withheld` + `NewWithheld` — a driver's error kept for `errors.Is` / `errors.As` and out of every rendering, which `docstore` and `queue` join beside their own verdicts (pinned by `withheld_external_test.go`) |
 | `sql_bench_test.go` + `BENCH.md` | the measurements (rule 9) |
 

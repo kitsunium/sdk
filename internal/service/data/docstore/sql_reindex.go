@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"slices"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -152,7 +153,7 @@ func (s *SQLStore[T]) keysForRebuild(v T) (rows []indexRow, err error) {
 			return
 		}
 		//: the value travels as a field, never as the origin.
-		rows, err = nil, kerrs.Wrap(IndexBroken, kerrs.WrapParams{},
+		rows, err = nil, kerrs.Wrap(coredocstore.IndexBroken, kerrs.WrapParams{},
 			kerrs.String("problem", "a key function panicked"), kerrs.String("panic", fmt.Sprint(recovered)))
 	}()
 	//: the rows a write would file.
@@ -187,7 +188,7 @@ func (s *SQLStore[T]) constrainUnique(ctx context.Context, ex coresql.Executor) 
 		//: a unique index that does not hold would be a lie every Lookup tells.
 		if spec.Unique && slices.Contains(shared, spec.Name) {
 			//: IndexBroken, naming the index and never the key.
-			return kerrs.Wrap(IndexBroken, kerrs.WrapParams{},
+			return kerrs.Wrap(coredocstore.IndexBroken, kerrs.WrapParams{},
 				kerrs.String("problem", "two documents share a unique key"), kerrs.String("store", s.table), kerrs.String("index", spec.Name))
 		}
 	}

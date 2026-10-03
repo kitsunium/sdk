@@ -180,9 +180,9 @@ var (
 	EntryRejected = corecache.CacheEntryRejected
 	// ChainMisconfigured is returned by [NewChain] for a tier set it cannot
 	// honour.
-	ChainMisconfigured = svccache.CacheChainMisconfigured
+	ChainMisconfigured = corecache.CacheChainMisconfigured
 	// TierFailed is returned when a chained operation failed inside one tier.
 	// Its fields name the position, because a chain's caller holds one Store
 	// and would otherwise have no way to tell which backend broke.
-	TierFailed = svccache.CacheTierFailed
+	TierFailed = corecache.CacheTierFailed
 )

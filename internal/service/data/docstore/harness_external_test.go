@@ -10,6 +10,7 @@ import (
 	"sync"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -31,10 +32,10 @@ func accountKey(a account) string { return a.ID }
 
 // accountIndexes are the accounts store's indexes: a unique "email" and a
 // multi-valued "team".
-func accountIndexes() []docstore.IndexSpec[account] {
-	return []docstore.IndexSpec[account]{
-		docstore.Unique("email", func(a account) string { return a.Email }),
-		docstore.Index("team", func(a account) []string { return a.Teams }),
+func accountIndexes() []coredocstore.IndexSpec[account] {
+	return []coredocstore.IndexSpec[account]{
+		coredocstore.Unique("email", func(a account) string { return a.Email }),
+		coredocstore.Index("team", func(a account) []string { return a.Teams }),
 	}
 }
 
@@ -171,7 +172,7 @@ func (f *faultyFS) WriteAtomic(name string, data []byte, perm fs.FileMode) error
 		return err
 	}
 	if unconfirmed {
-		return errs.Wrap(svcvfs.DirectorySyncFailed, errs.WrapParams{}, errs.String("path", name))
+		return errs.Wrap(corevfs.DirectorySyncFailed, errs.WrapParams{}, errs.String("path", name))
 	}
 	return nil
 }

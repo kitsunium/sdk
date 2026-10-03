@@ -77,6 +77,10 @@ The document is kept as the bytes the store encoded, never as the engine's JSON 
 
 A failure of the database is StatementFailed, which a caller answers with a 503: the driver's error is joined beside it for errors.Is and errors.As, and withheld from its text, because a driver quotes the row a constraint refused and that row holds a key.
 
+### The ports, for a double
+
+[Store](<#Store>) and [SQLStore](<#SQLStore>) are engines. A caller that must stand a double in for one depends instead on the port it implements: [Collection](<#Collection>) and [Versioned](<#Versioned>) for a [Store](<#Store>), whose calls take no context, [CollectionContext](<#CollectionContext>) and [VersionedContext](<#VersionedContext>) for a [SQLStore](<#SQLStore>), whose every call takes one, and [Announcer](<#Announcer>) — OnWrite and OnDelete — for either. Each pair carries the same methods, the same documents and the same refusals; there is no single port over both, because the file engine waits on nothing a context could abandon while the SQL engine waits on a database \(ADR 0160\).
+
 ### Versions
 
 A store opened with [Config](<#Config>).Versions — or [SQLConfig](<#SQLConfig>).Versions — keeps the last versions of each document, as a content system keeps a page's revisions \(ADR 0143\):
@@ -98,6 +102,9 @@ The file store keeps them in memory, in each write's overlay entry and, at rest,
 - [Variables](<#variables>)
 - [func SQLMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLMigration>)
 - [func SQLVersionsMigration\(dialect sql.Dialect, table string, version uint64\) \(sql.Migration, error\)](<#SQLVersionsMigration>)
+- [type Announcer](<#Announcer>)
+- [type Collection](<#Collection>)
+- [type CollectionContext](<#CollectionContext>)
 - [type Config](<#Config>)
 - [type Entry](<#Entry>)
 - [type IndexSpec](<#IndexSpec>)
@@ -111,6 +118,8 @@ The file store keeps them in memory, in each write's overlay entry and, at rest,
 - [type Store](<#Store>)
   - [func Open\[T any\]\(cfg Config\[T\], indexes ...IndexSpec\[T\]\) \(\*Store\[T\], error\)](<#Open>)
 - [type Version](<#Version>)
+- [type Versioned](<#Versioned>)
+- [type VersionedContext](<#VersionedContext>)
 
 
 ## Constants
@@ -121,45 +130,45 @@ The file store keeps them in memory, in each write's overlay entry and, at rest,
 const (
     // CodeDocumentNotFound: no document under the key, or nobody holds the
     // key in a unique index.
-    CodeDocumentNotFound errs.Code = svcdocstore.CodeDocumentNotFound
+    CodeDocumentNotFound errs.Code = coredocstore.CodeDocumentNotFound
     // CodeDocumentExists: Insert over a taken key.
-    CodeDocumentExists errs.Code = svcdocstore.CodeDocumentExists
+    CodeDocumentExists errs.Code = coredocstore.CodeDocumentExists
     // CodeUniqueKeyTaken: a unique index refused the write.
-    CodeUniqueKeyTaken errs.Code = svcdocstore.CodeUniqueKeyTaken
+    CodeUniqueKeyTaken errs.Code = coredocstore.CodeUniqueKeyTaken
     // CodeDocumentKeyEmpty: the key function returned the empty string.
-    CodeDocumentKeyEmpty errs.Code = svcdocstore.CodeDocumentKeyEmpty
+    CodeDocumentKeyEmpty errs.Code = coredocstore.CodeDocumentKeyEmpty
     // CodeDocumentKeyChanged: an Update's function changed the key.
-    CodeDocumentKeyChanged errs.Code = svcdocstore.CodeDocumentKeyChanged
+    CodeDocumentKeyChanged errs.Code = coredocstore.CodeDocumentKeyChanged
     // CodeIndexUnknown: a read named an index the store never declared.
-    CodeIndexUnknown errs.Code = svcdocstore.CodeIndexUnknown
+    CodeIndexUnknown errs.Code = coredocstore.CodeIndexUnknown
     // CodeIndexNotUnique: Lookup on a multi-valued index.
-    CodeIndexNotUnique errs.Code = svcdocstore.CodeIndexNotUnique
+    CodeIndexNotUnique errs.Code = coredocstore.CodeIndexNotUnique
     // CodeDocumentUndecodable: a stored document no longer fits the type.
-    CodeDocumentUndecodable errs.Code = svcdocstore.CodeDocumentUndecodable
+    CodeDocumentUndecodable errs.Code = coredocstore.CodeDocumentUndecodable
     // CodeDocumentUnencodable: encoding/json refused the value.
-    CodeDocumentUnencodable errs.Code = svcdocstore.CodeDocumentUnencodable
+    CodeDocumentUnencodable errs.Code = coredocstore.CodeDocumentUnencodable
     // CodePersistFailed: the filesystem refused the write; nothing changed.
-    CodePersistFailed errs.Code = svcdocstore.CodePersistFailed
+    CodePersistFailed errs.Code = coredocstore.CodePersistFailed
     // CodeLoadFailed: the store's files cannot be read or are not a store's.
-    CodeLoadFailed errs.Code = svcdocstore.CodeLoadFailed
+    CodeLoadFailed errs.Code = coredocstore.CodeLoadFailed
     // CodeIndexBroken: the stored documents break a unique index.
-    CodeIndexBroken errs.Code = svcdocstore.CodeIndexBroken
+    CodeIndexBroken errs.Code = coredocstore.CodeIndexBroken
     // CodeStoreClosed: a call after Close.
-    CodeStoreClosed errs.Code = svcdocstore.CodeStoreClosed
+    CodeStoreClosed errs.Code = coredocstore.CodeStoreClosed
     // CodeStoreMisconfigured: Open refused its configuration.
-    CodeStoreMisconfigured errs.Code = svcdocstore.CodeStoreMisconfigured
+    CodeStoreMisconfigured errs.Code = coredocstore.CodeStoreMisconfigured
     // CodeWriteUnconfirmed: the write stands, its durability is in doubt.
-    CodeWriteUnconfirmed errs.Code = svcdocstore.CodeWriteUnconfirmed
+    CodeWriteUnconfirmed errs.Code = coredocstore.CodeWriteUnconfirmed
     // CodeStatementFailed: the SQL store's database did not complete a call.
-    CodeStatementFailed errs.Code = svcdocstore.CodeStatementFailed
+    CodeStatementFailed errs.Code = coredocstore.CodeStatementFailed
     // CodeKeyTooLong: a key is longer than the SQL store's key columns hold.
-    CodeKeyTooLong errs.Code = svcdocstore.CodeKeyTooLong
+    CodeKeyTooLong errs.Code = coredocstore.CodeKeyTooLong
     // CodeVersionsNotKept: a call on versions to a store that keeps none.
-    CodeVersionsNotKept errs.Code = svcdocstore.CodeVersionsNotKept
+    CodeVersionsNotKept errs.Code = coredocstore.CodeVersionsNotKept
     // CodeVersionNotFound: the document keeps no version of that number.
-    CodeVersionNotFound errs.Code = svcdocstore.CodeVersionNotFound
+    CodeVersionNotFound errs.Code = coredocstore.CodeVersionNotFound
     // CodeVersionsRewriteRefused: a rewrite returned what a rewrite may not.
-    CodeVersionsRewriteRefused errs.Code = svcdocstore.CodeVersionsRewriteRefused
+    CodeVersionsRewriteRefused errs.Code = coredocstore.CodeVersionsRewriteRefused
 )
 ```
 
@@ -194,52 +203,52 @@ const MaxSQLTableLen int = svcdocstore.MaxSQLTableLen
 ```go
 var (
     // DocumentNotFound is a miss.
-    DocumentNotFound = svcdocstore.DocumentNotFound
+    DocumentNotFound = coredocstore.DocumentNotFound
     // DocumentExists refuses an insertion over a taken key.
-    DocumentExists = svcdocstore.DocumentExists
+    DocumentExists = coredocstore.DocumentExists
     // UniqueKeyTaken refuses a write a unique index cannot file.
-    UniqueKeyTaken = svcdocstore.UniqueKeyTaken
+    UniqueKeyTaken = coredocstore.UniqueKeyTaken
     // DocumentKeyEmpty refuses a document whose key is empty.
-    DocumentKeyEmpty = svcdocstore.DocumentKeyEmpty
+    DocumentKeyEmpty = coredocstore.DocumentKeyEmpty
     // DocumentKeyChanged refuses an update that renames.
-    DocumentKeyChanged = svcdocstore.DocumentKeyChanged
+    DocumentKeyChanged = coredocstore.DocumentKeyChanged
     // IndexUnknown refuses a read of an undeclared index.
-    IndexUnknown = svcdocstore.IndexUnknown
+    IndexUnknown = coredocstore.IndexUnknown
     // IndexNotUnique refuses a Lookup on a multi-valued index.
-    IndexNotUnique = svcdocstore.IndexNotUnique
+    IndexNotUnique = coredocstore.IndexNotUnique
     // DocumentUndecodable reports a stored document the type no longer fits.
-    DocumentUndecodable = svcdocstore.DocumentUndecodable
+    DocumentUndecodable = coredocstore.DocumentUndecodable
     // DocumentUnencodable refuses a value encoding/json cannot encode.
-    DocumentUnencodable = svcdocstore.DocumentUnencodable
+    DocumentUnencodable = coredocstore.DocumentUnencodable
     // PersistFailed reports a write the filesystem refused.
-    PersistFailed = svcdocstore.PersistFailed
+    PersistFailed = coredocstore.PersistFailed
     // LoadFailed refuses files that are not a store's.
-    LoadFailed = svcdocstore.LoadFailed
+    LoadFailed = coredocstore.LoadFailed
     // IndexBroken refuses documents that break a unique index.
-    IndexBroken = svcdocstore.IndexBroken
+    IndexBroken = coredocstore.IndexBroken
     // StoreClosed refuses a call after Close.
-    StoreClosed = svcdocstore.StoreClosed
+    StoreClosed = coredocstore.StoreClosed
     // StoreMisconfigured refuses a configuration no store could honour.
-    StoreMisconfigured = svcdocstore.StoreMisconfigured
+    StoreMisconfigured = coredocstore.StoreMisconfigured
     // WriteUnconfirmed reports a write that stands but may not survive a
     // power loss.
-    WriteUnconfirmed = svcdocstore.WriteUnconfirmed
+    WriteUnconfirmed = coredocstore.WriteUnconfirmed
     // StatementFailed reports a call the SQL store's database did not
     // complete; the driver's error is joined beside it, its text withheld.
-    StatementFailed = svcdocstore.StatementFailed
+    StatementFailed = coredocstore.StatementFailed
     // KeyTooLong refuses a key longer than the SQL store's key columns hold.
-    KeyTooLong = svcdocstore.KeyTooLong
+    KeyTooLong = coredocstore.KeyTooLong
     // VersionsNotKept refuses a call on versions to a store that keeps none.
-    VersionsNotKept = svcdocstore.VersionsNotKept
+    VersionsNotKept = coredocstore.VersionsNotKept
     // VersionNotFound is a miss on a version: never made, or pruned.
-    VersionNotFound = svcdocstore.VersionNotFound
+    VersionNotFound = coredocstore.VersionNotFound
     // VersionsRewriteRefused refuses what a rewrite's function returned.
-    VersionsRewriteRefused = svcdocstore.VersionsRewriteRefused
+    VersionsRewriteRefused = coredocstore.VersionsRewriteRefused
 )
 ```
 
 <a name="SQLMigration"></a>
-## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L340>)
+## func [SQLMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L377>)
 
 ```go
 func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -248,7 +257,7 @@ func SQLMigration(dialect sql.Dialect, table string, version uint64) (sql.Migrat
 SQLMigration returns the migration that creates the two tables a SQL store named table keeps on dialect, numbered version for the caller's own version table. Its Down drops both, and every document in them. Every statement does nothing when its table exists, so a run MySQL's implicit commit stopped halfway completes when it runs again.
 
 <a name="SQLVersionsMigration"></a>
-## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L350>)
+## func [SQLVersionsMigration](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L387>)
 
 ```go
 func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sql.Migration, error)
@@ -256,8 +265,35 @@ func SQLVersionsMigration(dialect sql.Dialect, table string, version uint64) (sq
 
 SQLVersionsMigration returns the migration that creates the table a SQL store named table keeps its versions in on dialect, numbered version for the caller's own version table, beside [SQLMigration](<#SQLMigration>)'s. A store opened with [SQLConfig](<#SQLConfig>).Versions needs it. Its Down drops the table, and every version in it: run it to turn versions off for good.
 
+<a name="Announcer"></a>
+## type [Announcer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L353>)
+
+Announcer is the public alias for the pair of hooks both engines answer exactly as they are: OnWrite and OnDelete.
+
+```go
+type Announcer = coredocstore.Announcer
+```
+
+<a name="Collection"></a>
+## type [Collection](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L335>)
+
+Collection is the public alias for the port of a store whose calls take no context, which [Store](<#Store>) implements: Get, List, Filter, Entries, Lookup and Find; Put, Insert, Replace, Update and Delete; OnWrite and OnDelete. It is what a caller depends on to stand a double in for a [Store](<#Store>); Stats, Fold and Close are the engine's own.
+
+```go
+type Collection[T any] = coredocstore.Collection[T]
+```
+
+<a name="CollectionContext"></a>
+## type [CollectionContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L345>)
+
+CollectionContext is the public alias for [Collection](<#Collection>) with a context on every call, which [SQLStore](<#SQLStore>) implements; Count and Reindex are the engine's own.
+
+```go
+type CollectionContext[T any] = coredocstore.CollectionContext[T]
+```
+
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L283>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L295>)
 
 Config is the public alias for a store's configuration: Key \(required\), FS and Path \(both, or neither for a memory store\), FoldAt, and Versions with its Clock and Held.
 
@@ -266,25 +302,25 @@ type Config[T any] = svcdocstore.Config[T]
 ```
 
 <a name="Entry"></a>
-## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L299>)
+## type [Entry](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L311>)
 
 Entry is the public alias for one stored document as JSON, with its key.
 
 ```go
-type Entry = svcdocstore.EntryValue
+type Entry = coredocstore.EntryValue
 ```
 
 <a name="IndexSpec"></a>
-## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L296>)
+## type [IndexSpec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L308>)
 
 IndexSpec is the public alias for one secondary index's declaration, built by [Unique](<#Unique>) or [Index](<#Index>) and given to [Open](<#Open>).
 
 ```go
-type IndexSpec[T any] = svcdocstore.IndexSpec[T]
+type IndexSpec[T any] = coredocstore.IndexSpec[T]
 ```
 
 <a name="Index"></a>
-### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L364>)
+### func [Index](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L401>)
 
 ```go
 func Index[T any](name string, keys func(T) []string) IndexSpec[T]
@@ -293,7 +329,7 @@ func Index[T any](name string, keys func(T) []string) IndexSpec[T]
 Index declares an index where a document may have several keys and a key several documents. Empty keys are not indexed.
 
 <a name="Unique"></a>
-### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L357>)
+### func [Unique](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L394>)
 
 ```go
 func Unique[T any](name string, key func(T) string) IndexSpec[T]
@@ -302,7 +338,7 @@ func Unique[T any](name string, key func(T) string) IndexSpec[T]
 Unique declares a unique index over the one key key returns. An empty key is not indexed, so any number of documents may have none.
 
 <a name="SQLConfig"></a>
-## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L316>)
+## type [SQLConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L328>)
 
 SQLConfig is the public alias for a SQL store's configuration: Key, Transactor, Dialect and Table \(required\), IndexKey, and Versions with its Clock and Held.
 
@@ -311,7 +347,7 @@ type SQLConfig[T any] = svcdocstore.SQLConfig[T]
 ```
 
 <a name="SQLStore"></a>
-## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L311>)
+## type [SQLStore](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L323>)
 
 SQLStore is the public alias for the document store over SQL: Get, List, Filter, Entries, Count, Lookup and Find read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions, Version and RewriteVersions as for [Store](<#Store>); OnWrite and OnDelete announce once the write's transaction commits; Reindex files the stored documents again. Every call takes a context.
 
@@ -320,7 +356,7 @@ type SQLStore[T any] = svcdocstore.SQLStore[T]
 ```
 
 <a name="OpenSQL"></a>
-### func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L330>)
+### func [OpenSQL](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L367>)
 
 ```go
 func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error)
@@ -329,16 +365,16 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 OpenSQL builds a store over SQL from cfg with the secondary indexes given, declared as for [Open](<#Open>). It sends no statement: its tables are [SQLMigration](<#SQLMigration>)'s, run by the caller's Migrator before the store is used.
 
 <a name="Stamp"></a>
-## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L292>)
+## type [Stamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L304>)
 
 Stamp is the public alias for what a Stamped write says about the version it makes: the Meta the version records, or InPlace — no version.
 
 ```go
-type Stamp = svcdocstore.StampValue
+type Stamp = coredocstore.StampValue
 ```
 
 <a name="Stats"></a>
-## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L303>)
+## type [Stats](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L315>)
 
 Stats is the public alias for what a store says about itself: documents, pending overlay entries, folds, and the last automatic fold's failure.
 
@@ -347,7 +383,7 @@ type Stats = svcdocstore.StatsValue
 ```
 
 <a name="Store"></a>
-## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L278>)
+## type [Store](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L290>)
 
 Store is the public alias for the document store: Get, List, Filter, Entries, Lookup, Find and Stats read; Put, Insert, Replace, Update and Delete write, and their Stamped forms say what the version they make records; Versions and Version read a document's versions, RewriteVersions rewrites its former ones; OnWrite and OnDelete announce; Fold and Close bring it to rest.
 
@@ -356,7 +392,7 @@ type Store[T any] = svcdocstore.Store[T]
 ```
 
 <a name="Open"></a>
-### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L322>)
+### func [Open](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L359>)
 
 ```go
 func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
@@ -365,12 +401,30 @@ func Open[T any](cfg Config[T], indexes ...IndexSpec[T]) (*Store[T], error)
 Open builds a store from cfg with the secondary indexes given: in memory without a filesystem, otherwise loaded from it — the snapshot, the overlay replayed on top, the indexes rebuilt. It creates the directories the store lives in, 0700, and writes its files 0600.
 
 <a name="Version"></a>
-## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L288>)
+## type [Version](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L300>)
 
 Version is the public alias for one version of a document: its Number from 1, the instant At the write that made it ran, the Meta that write carried, and the document as JSON.
 
 ```go
-type Version = svcdocstore.VersionValue
+type Version = coredocstore.VersionValue
+```
+
+<a name="Versioned"></a>
+## type [Versioned](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L340>)
+
+Versioned is the public alias for the sibling of [Collection](<#Collection>) that reads and writes a document's versions without a context, which [Store](<#Store>) implements: the four Stamped writes, Versions, Version and RewriteVersions.
+
+```go
+type Versioned[T any] = coredocstore.Versioned[T]
+```
+
+<a name="VersionedContext"></a>
+## type [VersionedContext](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/docstore/docstore.go#L349>)
+
+VersionedContext is the public alias for [Versioned](<#Versioned>) with a context on every call, which [SQLStore](<#SQLStore>) implements beside [CollectionContext](<#CollectionContext>).
+
+```go
+type VersionedContext[T any] = coredocstore.VersionedContext[T]
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

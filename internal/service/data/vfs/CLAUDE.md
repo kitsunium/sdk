@@ -6,9 +6,11 @@ Implements the filesystem port declared in `internal/core/data/vfs` (**ADR 0056*
 two concrete filesystems — `NewOS` (confined to one directory tree) and
 `NewMem` (held in a map) — plus the atomic publication both of them promise.
 
-Code range: `0.3.55.*` (ADR 0056). Only the two outcomes a *concrete*
-filesystem can produce and an abstract one cannot are declared here;
-the port's verdicts stay in `internal/core/data/vfs`.
+Code range: `0.3.55.*` (ADR 0056) — the two outcomes a *concrete* filesystem
+can produce and an abstract one cannot, `RootUnavailable` and
+`DirectorySyncFailed`. Since ADR 0160 they are declared with the port's verdicts
+in `internal/core/data/vfs`, under the values this package allocated; this
+package declares no code and restates them in its wrap helpers.
 
 ## Contents
 
@@ -22,7 +24,6 @@ the port's verdicts stay in `internal/core/data/vfs`.
 | `mem.go` | `NewMem`, the read half, the locked helpers |
 | `mem_write.go` | the memory write verbs, including `WriteAtomic` |
 | `mem_node.go` / `mem_info.go` / `mem_file.go` / `mem_dir.go` | the tree entry, its `fs.FileInfo`, and the two open handles |
-| `codes.go` / `errors.go` | `RootUnavailable` (`0.3.55.1`), `DirectorySyncFailed` (`0.3.55.2`) |
 | `BENCH.md` | what publication costs, and what it is that costs |
 
 ## Atomic publication — the five steps and why each one is there

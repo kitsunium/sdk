@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/service/data/cache/
 
 ## Purpose
@@ -11,7 +11,10 @@ The concrete cache stores implementing `internal/core/data/cache` (ADR 0049):
 - **`NewChain[V]`** — puts one store in front of another (L1/L2), promoting a
   far hit into every nearer tier with its **remaining** TTL and its tags.
 
-Stdlib-only, cross-OS. Code range `0.3.48.*` (plus core sentinels `0.2.18.*`).
+Stdlib-only, cross-OS. Code range `0.3.48.*` — `CACHE_CHAIN_MISCONFIGURED` and
+`CACHE_TIER_FAILED`, which the chain emits — declared since ADR 0160 with the
+port's `0.2.18.*` in `internal/core/data/cache`, under the values this package
+allocated. This package declares no code.
 
 ## Contents
 
@@ -26,7 +29,6 @@ Stdlib-only, cross-OS. Code range `0.3.48.*` (plus core sentinels `0.2.18.*`).
 | `tier.go` | `tier[V]` — one level, with its three capabilities resolved once |
 | `refuse.go` | `validateEntry` / `primitiveTTL` / the `CACHE_ENTRY_REJECTED` and fill-error wrapping |
 | `cache_compliance.go` | the compile-time assertions that both stores still answer all four contracts |
-| `codes.go` / `errors.go` | `0.3.48.*` — CACHE_CHAIN_MISCONFIGURED, CACHE_TIER_FAILED |
 
 ## One process, and only one
 

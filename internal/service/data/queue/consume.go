@@ -228,7 +228,7 @@ func guard(
 			//: leave failure as the handler returned it.
 			return
 		}
-		failure = kerrs.Wrap(HandlerPanicked, kerrs.WrapParams{},
+		failure = kerrs.Wrap(corequeue.HandlerPanicked, kerrs.WrapParams{},
 			kerrs.String("message", delivery.Message.ID),
 			kerrs.String("panic", fmt.Sprint(value)), kerrs.String("stack", string(debug.Stack())))
 	}()

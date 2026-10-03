@@ -95,7 +95,7 @@ func TestTheDurableBrokerRefusesADirectoryAnyAccountCouldDrain(t *testing.T) {
 		t.Fatalf("Chmod() = %v, want nil", err)
 	}
 	_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: dir, Policy: defaultPolicy()})
-	if !errs.HasCode(err, svcqueue.CodeQueueDirectoryUnusable) {
+	if !errs.HasCode(err, corequeue.CodeQueueDirectoryUnusable) {
 		t.Fatalf("NewFile(world-writable) = %v, want CodeQueueDirectoryUnusable", err)
 	}
 	//: the sticky bit makes it acceptable again, because that is exactly the
@@ -185,7 +185,7 @@ func TestTheDurableBrokerRefusesAStateDirectoryItCannotTrust(t *testing.T) {
 			mkdirMode(t, root, 0o700)
 			tc.plant(t, filepath.Join(root, tc.state))
 			_, err := svcqueue.NewFile(svcqueue.FileConfig{Dir: root, Policy: defaultPolicy()})
-			if !errs.HasCode(err, svcqueue.CodeQueueDirectoryUnusable) {
+			if !errs.HasCode(err, corequeue.CodeQueueDirectoryUnusable) {
 				t.Fatalf("NewFile() = %v, want CodeQueueDirectoryUnusable", err)
 			}
 			//: the refusal names the state and the reason, so an operator can
@@ -290,7 +290,7 @@ func fieldValue(err error, key string) string {
 func TestTheDurableBrokerRefusesAnEmptyDirectory(t *testing.T) {
 	t.Parallel()
 	_, err := svcqueue.NewFile(svcqueue.FileConfig{Policy: defaultPolicy()})
-	if !errs.HasCode(err, svcqueue.CodeQueueDirectoryUnusable) {
+	if !errs.HasCode(err, corequeue.CodeQueueDirectoryUnusable) {
 		t.Fatalf("NewFile(no Dir) = %v, want CodeQueueDirectoryUnusable", err)
 	}
 }
@@ -383,7 +383,7 @@ func TestADurableBrokerRefusesWorkAfterClose(t *testing.T) {
 	if err := broker.(io.Closer).Close(); err != nil {
 		t.Fatalf("Close() = %v, want nil", err)
 	}
-	if _, err := broker.Publish(t.Context(), []byte("late")); !errs.HasCode(err, svcqueue.CodeQueueBackendFailed) {
+	if _, err := broker.Publish(t.Context(), []byte("late")); !errs.HasCode(err, corequeue.CodeQueueBackendFailed) {
 		t.Fatalf("Publish after Close = %v, want QUEUE_BACKEND_FAILED", err)
 	}
 }

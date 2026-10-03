@@ -62,7 +62,7 @@ func (c *checker) Check(ctx context.Context) error {
 		//: its own and its answer is discarded by the buffered channel.
 		cancel()
 		//: a hang is a different operational fact from a refusal.
-		return failed(HealthCheckTimeout, nil)
+		return failed(coresql.HealthCheckTimeout, nil)
 	}
 }
 
@@ -75,5 +75,5 @@ func pingVerdict(err error) error {
 	}
 	//: the driver's error travels beside the verdict; the verdict's Public
 	//: never repeats it, because a dial failure names the host and the user.
-	return failed(HealthCheckFailed, err)
+	return failed(coresql.HealthCheckFailed, err)
 }

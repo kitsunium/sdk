@@ -9,6 +9,7 @@ import (
 	"sync"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
@@ -22,11 +23,11 @@ func TestUniqueIndex(t *testing.T) {
 	store := openAccounts(t, nil)
 	must(t, store.Insert(account{ID: "acc_1", Email: "ada@example.com", Name: "Ada"}))
 	err := store.Insert(account{ID: "acc_2", Email: "ada@example.com", Name: "Impostor"})
-	requireCode(t, err, docstore.CodeUniqueKeyTaken, "a second holder of a unique key")
+	requireCode(t, err, coredocstore.CodeUniqueKeyTaken, "a second holder of a unique key")
 	if quotes(err.Error()+errs.PublicOf(err)+errs.PrivateOf(err)+fieldsText(err), "ada@example.com") {
 		t.Errorf("the refusal quotes the index key: %v %s", err, fieldsText(err))
 	}
-	if _, getErr := store.Get("acc_2"); !errs.HasCode(getErr, docstore.CodeDocumentNotFound) {
+	if _, getErr := store.Get("acc_2"); !errs.HasCode(getErr, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("the refused insert was stored: %v", getErr)
 	}
 	got, err := store.Lookup("email", "ada@example.com")
@@ -37,13 +38,13 @@ func TestUniqueIndex(t *testing.T) {
 	//: a rewrite moves the document in the index.
 	must(t, store.Put(account{ID: "acc_1", Email: "ada@lovelace.dev", Name: "Ada"}))
 	_, oldKey := store.Lookup("email", "ada@example.com")
-	requireCode(t, oldKey, docstore.CodeDocumentNotFound, "the old key after a rewrite")
+	requireCode(t, oldKey, coredocstore.CodeDocumentNotFound, "the old key after a rewrite")
 	must(t, store.Insert(account{ID: "acc_2", Email: "ada@example.com", Name: "Second"}))
 
 	//: an update into a key another document holds is refused, and changes
 	//: nothing.
 	_, err = store.Update("acc_2", func(a *account) error { a.Email = "ada@lovelace.dev"; a.Name = "Thief"; return nil })
-	requireCode(t, err, docstore.CodeUniqueKeyTaken, "an update into a held key")
+	requireCode(t, err, coredocstore.CodeUniqueKeyTaken, "an update into a held key")
 	if a, getErr := store.Get("acc_2"); getErr != nil || a.Name != "Second" || a.Email != "ada@example.com" {
 		t.Fatalf("the refused update changed the document: %+v, %v", a, getErr)
 	}
@@ -53,14 +54,14 @@ func TestUniqueIndex(t *testing.T) {
 	//: a deletion frees the key.
 	must(t, store.Delete("acc_1"))
 	_, freed := store.Lookup("email", "ada@lovelace.dev")
-	requireCode(t, freed, docstore.CodeDocumentNotFound, "a deleted document's key")
+	requireCode(t, freed, coredocstore.CodeDocumentNotFound, "a deleted document's key")
 	must(t, store.Insert(account{ID: "acc_3", Email: "ada@lovelace.dev"}))
 
 	//: empty keys are not indexed: any number of documents may have none.
 	must(t, store.Insert(account{ID: "acc_4"}))
 	must(t, store.Insert(account{ID: "acc_5"}))
 	_, empty := store.Lookup("email", "")
-	requireCode(t, empty, docstore.CodeDocumentNotFound, "the empty key")
+	requireCode(t, empty, coredocstore.CodeDocumentNotFound, "the empty key")
 }
 
 // TestFindAndFilter pins the multi-valued index and the full scan: Find
@@ -95,11 +96,11 @@ func TestFindAndFilter(t *testing.T) {
 		t.Errorf("Find on a unique index = %v, %v", ids(one), err)
 	}
 	_, notUnique := store.Lookup("team", "blue")
-	requireCode(t, notUnique, docstore.CodeIndexNotUnique, "Lookup on a multi-valued index")
+	requireCode(t, notUnique, coredocstore.CodeIndexNotUnique, "Lookup on a multi-valued index")
 	_, unknown := store.Find("nope", "x")
-	requireCode(t, unknown, docstore.CodeIndexUnknown, "Find on an undeclared index")
+	requireCode(t, unknown, coredocstore.CodeIndexUnknown, "Find on an undeclared index")
 	_, unknownLookup := store.Lookup("nope", "x")
-	requireCode(t, unknownLookup, docstore.CodeIndexUnknown, "Lookup on an undeclared index")
+	requireCode(t, unknownLookup, coredocstore.CodeIndexUnknown, "Lookup on an undeclared index")
 	blue, err := store.Filter(func(a account) bool { return slices.Contains(a.Teams, "blue") })
 	if err != nil || !slices.Equal(ids(blue), []string{"acc_b", "acc_c"}) {
 		t.Errorf("Filter() = %v, %v", ids(blue), err)
@@ -131,7 +132,7 @@ func TestUniqueIndexUnderContention(t *testing.T) {
 					switch {
 					case err == nil:
 						wins++
-					case errs.HasCode(err, docstore.CodeUniqueKeyTaken):
+					case errs.HasCode(err, coredocstore.CodeUniqueKeyTaken):
 						conflicts++
 					default:
 						t.Errorf("unexpected %v", err)
@@ -176,7 +177,7 @@ func TestIndexesAreRebuiltOnOpen(t *testing.T) {
 	broken := `{"acc_1":{"id":"acc_1","email":"twice@x.dev"},"acc_2":{"id":"acc_2","email":"twice@x.dev"}}`
 	must(t, fsys.WriteAtomic("members/accounts.json", []byte(broken), 0o600))
 	_, err = openWith(accountConfig(fsys))
-	requireCode(t, err, docstore.CodeIndexBroken, "an open over documents breaking a unique index")
+	requireCode(t, err, coredocstore.CodeIndexBroken, "an open over documents breaking a unique index")
 	if strings.Contains(errs.PublicOf(err), "twice@x.dev") || strings.Contains(fieldsText(err), "twice@x.dev") {
 		t.Errorf("the refusal quotes the key: %q %s", errs.PublicOf(err), fieldsText(err))
 	}
@@ -193,8 +194,8 @@ func TestAKeyFunctionThatPanicsOnOpen(t *testing.T) {
 	must(t, plain.Put(account{ID: "acc_1"}))
 	must(t, plain.Close())
 	cfg := docstore.Config[account]{Key: accountKey, FS: fsys, Path: "members/accounts.json"}
-	_, err = docstore.Open(cfg, docstore.Index("boom", func(account) []string { panic("key function panicked") }))
-	requireCode(t, err, docstore.CodeIndexBroken, "an open whose key function panics")
+	_, err = docstore.Open(cfg, coredocstore.Index("boom", func(account) []string { panic("key function panicked") }))
+	requireCode(t, err, coredocstore.CodeIndexBroken, "an open whose key function panics")
 }
 
 // TestIndexDeclarationProblems pins every configuration Open refuses before a
@@ -205,15 +206,15 @@ func TestIndexDeclarationProblems(t *testing.T) {
 	for _, c := range []struct {
 		name    string
 		cfg     docstore.Config[account]
-		indexes []docstore.IndexSpec[account]
+		indexes []coredocstore.IndexSpec[account]
 	}{
 		{name: "no key function", cfg: docstore.Config[account]{}},
-		{name: "an index without a name", cfg: docstore.Config[account]{Key: accountKey}, indexes: []docstore.IndexSpec[account]{docstore.Index("", keys)}},
-		{name: "an index declared twice", cfg: docstore.Config[account]{Key: accountKey}, indexes: []docstore.IndexSpec[account]{
-			docstore.Unique("email", func(a account) string { return a.Email }), docstore.Index("email", keys),
+		{name: "an index without a name", cfg: docstore.Config[account]{Key: accountKey}, indexes: []coredocstore.IndexSpec[account]{coredocstore.Index("", keys)}},
+		{name: "an index declared twice", cfg: docstore.Config[account]{Key: accountKey}, indexes: []coredocstore.IndexSpec[account]{
+			coredocstore.Unique("email", func(a account) string { return a.Email }), coredocstore.Index("email", keys),
 		}},
-		{name: "a multi-valued index without a function", cfg: docstore.Config[account]{Key: accountKey}, indexes: []docstore.IndexSpec[account]{docstore.Index[account]("team", nil)}},
-		{name: "a unique index without a function", cfg: docstore.Config[account]{Key: accountKey}, indexes: []docstore.IndexSpec[account]{docstore.Unique[account]("email", nil)}},
+		{name: "a multi-valued index without a function", cfg: docstore.Config[account]{Key: accountKey}, indexes: []coredocstore.IndexSpec[account]{coredocstore.Index[account]("team", nil)}},
+		{name: "a unique index without a function", cfg: docstore.Config[account]{Key: accountKey}, indexes: []coredocstore.IndexSpec[account]{coredocstore.Unique[account]("email", nil)}},
 		{name: "a path without a filesystem", cfg: docstore.Config[account]{Key: accountKey, Path: "members/accounts.json"}},
 		{name: "a filesystem without a path", cfg: docstore.Config[account]{Key: accountKey, FS: memFS()}},
 		{name: "a path that climbs out", cfg: docstore.Config[account]{Key: accountKey, FS: memFS(), Path: "../accounts.json"}},
@@ -221,7 +222,7 @@ func TestIndexDeclarationProblems(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 			store, err := docstore.Open(c.cfg, c.indexes...)
-			requireCode(t, err, docstore.CodeStoreMisconfigured, c.name)
+			requireCode(t, err, coredocstore.CodeStoreMisconfigured, c.name)
 			if store != nil {
 				t.Fatal("a refused configuration returned a store")
 			}

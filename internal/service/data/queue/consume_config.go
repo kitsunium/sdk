@@ -77,8 +77,8 @@ type ConsumerConfig struct {
 	// than once for the same message.
 	//
 	// It must be true. Its zero value is false and is REFUSED
-	// ([ConsumerMisconfigured]), and that refusal is the domain's one piece
-	// of deliberate ceremony.
+	// ([corequeue.ConsumerMisconfigured]), and that refusal is the domain's
+	// one piece of deliberate ceremony.
 	//
 	// The reason is that this queue delivers AT LEAST ONCE and cannot do
 	// otherwise. A consumer that dies between finishing the work and
@@ -102,13 +102,13 @@ func (c ConsumerConfig) validate() error {
 	//: a nil handler is a consumer that leases messages and drops them.
 	if c.Handler == nil {
 		//: ConsumerMisconfigured, naming the field.
-		return kerrs.Wrap(ConsumerMisconfigured, kerrs.WrapParams{}, kerrs.String("field", "Handler"))
+		return kerrs.Wrap(corequeue.ConsumerMisconfigured, kerrs.WrapParams{}, kerrs.String("field", "Handler"))
 	}
 	//: THE assertion. Its zero value is the conservative reading, so a caller
 	//: cannot acquire the promise by omission.
 	if !c.HandlerIsIdempotent {
 		//: ConsumerMisconfigured, naming the field.
-		return kerrs.Wrap(ConsumerMisconfigured, kerrs.WrapParams{},
+		return kerrs.Wrap(corequeue.ConsumerMisconfigured, kerrs.WrapParams{},
 			kerrs.String("field", "HandlerIsIdempotent"), kerrs.Bool("value", c.HandlerIsIdempotent))
 	}
 	//: runnable.

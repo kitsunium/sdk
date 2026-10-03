@@ -1,4 +1,6 @@
-// Package vfs — range 0.2.25.* (ADR 0056 core/data/vfs block).
+// Package vfs — range 0.2.25.* (ADR 0056 core/data/vfs block), and the
+// concrete filesystem's 0.3.55.* (ADR 0056 service/data/vfs block, declared
+// here since ADR 0160).
 package vfs
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -42,3 +44,21 @@ const CodeNotRegularFile errs.Code = 0x00_02_19_07 // 0.2.25.7
 // CodeDirectoryNotEmpty identifies a Remove aimed at a directory that still
 // has entries. RemoveAll is the call that was wanted.
 const CodeDirectoryNotEmpty errs.Code = 0x00_02_19_08 // 0.2.25.8
+
+// range: 0.3.55.0 - 0.3.55.255 — the two outcomes a CONCRETE filesystem can
+// produce and an abstract one cannot, allocated by the service layer (LL = 3)
+// and declared here since ADR 0160: a code keeps the value its layer allocated
+// when its declaration moves.
+
+// CodeRootUnavailable identifies a root directory that could not be opened, or
+// that is not a directory at all. It is reported by the constructor, so the
+// refusal arrives where the program is wired rather than at the first write.
+const CodeRootUnavailable errs.Code = 0x00_03_37_01 // 0.3.55.1
+
+// CodeDirectorySyncFailed identifies the ONE failure that arrives after a
+// successful rename: the directory entry could not be flushed to the device.
+//
+// It is a separate code from PublishFailed because it means the opposite
+// thing. PublishFailed says nothing changed; this says the new content IS
+// visible and may not survive a power loss.
+const CodeDirectorySyncFailed errs.Code = 0x00_03_37_02 // 0.3.55.2

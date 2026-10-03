@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
 )
@@ -155,9 +156,9 @@ func TestSQLMigrationCreatesBothTables(t *testing.T) {
 func TestSQLMigrationRefusals(t *testing.T) {
 	t.Parallel()
 	_, err := docstore.SQLMigration(coresql.DialectUnknown, accountsTable, 1)
-	requireCode(t, err, docstore.CodeStoreMisconfigured, "no dialect")
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "no dialect")
 	_, err = docstore.SQLMigration(coresql.DialectSQLite, "Members; DROP", 1)
-	requireCode(t, err, docstore.CodeStoreMisconfigured, "a table name that is not one")
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "a table name that is not one")
 	_, err = docstore.SQLMigration(coresql.DialectSQLite, accountsTable, 0)
 	requireCode(t, err, coresql.CodeInvalidMigration, "version zero")
 }
@@ -249,9 +250,9 @@ func TestSQLVersionsMigrationCreatesTheVersionsTable(t *testing.T) {
 		}
 	}
 	_, err := docstore.SQLVersionsMigration(coresql.DialectUnknown, accountsTable, 1)
-	requireCode(t, err, docstore.CodeStoreMisconfigured, "no dialect")
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "no dialect")
 	_, err = docstore.SQLVersionsMigration(coresql.DialectSQLite, "Members; DROP", 1)
-	requireCode(t, err, docstore.CodeStoreMisconfigured, "a table name that is not one")
+	requireCode(t, err, coredocstore.CodeStoreMisconfigured, "a table name that is not one")
 	_, err = docstore.SQLVersionsMigration(coresql.DialectSQLite, accountsTable, 0)
 	requireCode(t, err, coresql.CodeInvalidMigration, "version zero")
 }

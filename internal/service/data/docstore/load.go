@@ -10,6 +10,7 @@ import (
 	"path"
 	"strings"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -88,7 +89,7 @@ func (s *Store[T]) readSnapshot() (found bool, err error) {
 	//: not a JSON object from key to document.
 	if decodeErr := json.Unmarshal(raw, &object); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
-		return false, kerrs.Wrap(LoadFailed, kerrs.WrapParams{},
+		return false, kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
 			kerrs.String("file", s.path), kerrs.String("problem", "not a snapshot"), kerrs.String("cause", jsonCause(decodeErr)))
 	}
 	//: a JSON null decodes without an error into no map at all: a file that
@@ -155,7 +156,7 @@ func (s *Store[T]) replay(name string) error {
 	//: not an overlay entry.
 	if decodeErr := json.Unmarshal(raw, &record); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
-		return kerrs.Wrap(LoadFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
 			kerrs.String("file", file), kerrs.String("problem", "not an overlay entry"), kerrs.String("cause", jsonCause(decodeErr)))
 	}
 	//: the name is the key's digest: an entry under another key's name was
@@ -251,7 +252,7 @@ func (s *Store[T]) readVersions() error {
 	//: not a JSON object from key to versions.
 	if decodeErr := json.Unmarshal(raw, &records); decodeErr != nil {
 		//: LoadFailed, saying where the JSON broke and never what it held.
-		return kerrs.Wrap(LoadFailed, kerrs.WrapParams{},
+		return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{},
 			kerrs.String("file", s.versionsPath), kerrs.String("problem", "not a versions file"), kerrs.String("cause", jsonCause(decodeErr)))
 	}
 	//: a JSON null decodes into no map at all.
@@ -372,7 +373,7 @@ func loadFailed(file, problem string, cause error) error {
 		fields = append(fields, kerrs.String("cause", cause.Error()))
 	}
 	//: LoadFailed.
-	return kerrs.Wrap(LoadFailed, kerrs.WrapParams{}, fields...)
+	return kerrs.Wrap(coredocstore.LoadFailed, kerrs.WrapParams{}, fields...)
 }
 
 // swallowLeftover discards the failure to remove a crashed publication's

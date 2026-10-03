@@ -5,12 +5,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "queue",
     srcs = [
-        "codes.go",
         "consume.go",
         "consume_config.go",
         "dirtrust_posix.go",
         "dirtrust_windows.go",
-        "errors.go",
         "file.go",
         "file_config.go",
         "file_dead.go",
@@ -94,11 +92,4 @@ go_test(
         "//internal/kernel/errs",
         "//internal/service/data/sql",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

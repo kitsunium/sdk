@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # pkg/v1/data/cache/
 
 ## Purpose
@@ -25,7 +25,7 @@ dep-light; cross-OS portable.
 | `NewMemory[V](cfg)` | the memory store; implements all three siblings; a non-positive `MaxEntries` is refused, never defaulted |
 | `NewChain[V](cfg, tiers...)` | `tiers[0]` first, the last is the authority; every tier must implement `EntryFetcher` and `Tagger` |
 | `Misconfigured` / `BackendFailed` / `FillFailed` / `EntryRejected` | sentinels of `internal/core/data/cache` (`0.2.18.1`–`0.2.18.4`) |
-| `ChainMisconfigured` / `TierFailed` | sentinels of `internal/service/data/cache` (`0.3.48.1`–`0.3.48.2`) |
+| `ChainMisconfigured` / `TierFailed` | the chain's sentinels (`0.3.48.1`–`0.3.48.2`), declared in `internal/core/data/cache` since ADR 0160 |
 
 ## Conventions
 

@@ -156,51 +156,51 @@ var (
     MigrationIrreversible = coresql.MigrationIrreversible
     // ConfigInvalid is returned by every constructor for a Config that could
     // never produce a working port.
-    ConfigInvalid = svcsql.ConfigInvalid
+    ConfigInvalid = coresql.ConfigInvalid
     // PoolMisconfigured refuses a pool policy whose zero value database/sql
     // would read as a decision nobody made — a non-positive MaxOpen.
-    PoolMisconfigured = svcsql.PoolMisconfigured
+    PoolMisconfigured = coresql.PoolMisconfigured
     // BeginFailed reports a transaction the driver would not open.
-    BeginFailed = svcsql.BeginFailed
+    BeginFailed = coresql.BeginFailed
     // CommitFailed reports a transaction that had NO effect.
-    CommitFailed = svcsql.CommitFailed
+    CommitFailed = coresql.CommitFailed
     // RollbackFailed travels alongside the error that triggered the rollback.
-    RollbackFailed = svcsql.RollbackFailed
+    RollbackFailed = coresql.RollbackFailed
     // SavepointFailed reports a rejected savepoint statement; the "statement"
     // field names which of the three.
-    SavepointFailed = svcsql.SavepointFailed
+    SavepointFailed = coresql.SavepointFailed
     // TxPoisoned refuses every operation on a transaction whose savepoint
     // rollback failed. It is never committed.
-    TxPoisoned = svcsql.TxPoisoned
+    TxPoisoned = coresql.TxPoisoned
     // TxClosed reports an Executor used after the scope that lent it
     // returned.
-    TxClosed = svcsql.TxClosed
+    TxClosed = coresql.TxClosed
     // HealthCheckFailed reports a database that answered the probe with an
     // error.
-    HealthCheckFailed = svcsql.HealthCheckFailed
+    HealthCheckFailed = coresql.HealthCheckFailed
     // HealthCheckTimeout reports a database that did not answer in time.
-    HealthCheckTimeout = svcsql.HealthCheckTimeout
+    HealthCheckTimeout = coresql.HealthCheckTimeout
     // MigrationFailed reports a migration that did not apply; it was rolled
     // back.
-    MigrationFailed = svcsql.MigrationFailed
+    MigrationFailed = coresql.MigrationFailed
     // MigrationOutOfOrder refuses a pending migration older than one already
     // applied.
-    MigrationOutOfOrder = svcsql.MigrationOutOfOrder
+    MigrationOutOfOrder = coresql.MigrationOutOfOrder
     // MigrationLockUnsupported refuses a Migrator on a dialect with no lock
     // that dies with its holder. No dialect this SDK speaks answers it since
     // SQLite's runner serialises on its file's write lock (ADR 0140).
-    MigrationLockUnsupported = svcsql.MigrationLockUnsupported
+    MigrationLockUnsupported = coresql.MigrationLockUnsupported
     // MigrationLockTimeout reports another process holding the migration lock
     // for the whole budget. Nothing was applied.
-    MigrationLockTimeout = svcsql.MigrationLockTimeout
+    MigrationLockTimeout = coresql.MigrationLockTimeout
     // MigrationUnknownVersion refuses a Down over a version this build does
     // not carry.
-    MigrationUnknownVersion = svcsql.MigrationUnknownVersion
+    MigrationUnknownVersion = coresql.MigrationUnknownVersion
     // VersionTableInvalid refuses a version-table name that is not a plain
     // SQL identifier.
-    VersionTableInvalid = svcsql.VersionTableInvalid
+    VersionTableInvalid = coresql.VersionTableInvalid
     // DuplicateMigration refuses two migrations declaring the same version.
-    DuplicateMigration = svcsql.DuplicateMigration
+    DuplicateMigration = coresql.DuplicateMigration
 )
 ```
 

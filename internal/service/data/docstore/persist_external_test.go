@@ -12,6 +12,7 @@ import (
 	"slices"
 	"testing"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/docstore"
@@ -208,7 +209,7 @@ func TestFilesThatAreNotAStore(t *testing.T) {
 			_, indexed := openWith(accountConfig(fsys))
 			_, plain := docstore.Open(accountConfig(fsys))
 			for _, err := range []error{indexed, plain} {
-				requireCode(t, err, docstore.CodeLoadFailed, c.name)
+				requireCode(t, err, coredocstore.CodeLoadFailed, c.name)
 				if quotes(err.Error()+errs.PublicOf(err)+errs.PrivateOf(err)+fieldsText(err), secret) {
 					t.Errorf("%s: the refusal quotes the file: %s", c.name, fieldsText(err))
 				}
@@ -233,7 +234,7 @@ func TestARefusedOpenWritesNothing(t *testing.T) {
 	must(t, fsys.WriteAtomic(snapshotPath, []byte(edited), 0o600))
 	pending := overlayEntries(t, fsys)
 	_, err := openWith(accountConfig(fsys))
-	requireCode(t, err, docstore.CodeIndexBroken, "an open over documents breaking a unique index")
+	requireCode(t, err, coredocstore.CodeIndexBroken, "an open over documents breaking a unique index")
 	if after := readFile(t, fsys, snapshotPath); after != edited {
 		t.Fatalf("the refused open rewrote the snapshot:\n%s", after)
 	}
@@ -305,12 +306,12 @@ func TestAWriteTheDiskRefusedChangesNothing(t *testing.T) {
 	store.OnWrite(func(string) { calls++ })
 	store.OnDelete(func(string) { calls++ })
 	faulty.set("", true, false)
-	requireCode(t, store.Put(account{ID: "acc_2", Email: "b@x.dev"}), docstore.CodePersistFailed, "a refused Put")
-	requireCode(t, store.Delete("acc_1"), docstore.CodePersistFailed, "a refused Delete")
+	requireCode(t, store.Put(account{ID: "acc_2", Email: "b@x.dev"}), coredocstore.CodePersistFailed, "a refused Put")
+	requireCode(t, store.Delete("acc_1"), coredocstore.CodePersistFailed, "a refused Delete")
 	_, updateErr := store.Update("acc_1", func(a *account) error { a.Email = "c@x.dev"; return nil })
-	requireCode(t, updateErr, docstore.CodePersistFailed, "a refused Update")
+	requireCode(t, updateErr, coredocstore.CodePersistFailed, "a refused Update")
 	faulty.set("", false, false)
-	if _, err := store.Get("acc_2"); !errs.HasCode(err, docstore.CodeDocumentNotFound) {
+	if _, err := store.Get("acc_2"); !errs.HasCode(err, coredocstore.CodeDocumentNotFound) {
 		t.Fatalf("a refused Put was applied: %v", err)
 	}
 	if a, err := store.Lookup("email", "a@x.dev"); err != nil || a.ID != "acc_1" {
@@ -334,7 +335,7 @@ func TestAWriteTheDiskCouldNotConfirmStands(t *testing.T) {
 	var written []string
 	store.OnWrite(func(key string) { written = append(written, key) })
 	faulty.set("", false, true)
-	requireCode(t, store.Put(account{ID: "acc_1", Email: "a@x.dev"}), docstore.CodeWriteUnconfirmed, "an unconfirmed Put")
+	requireCode(t, store.Put(account{ID: "acc_1", Email: "a@x.dev"}), coredocstore.CodeWriteUnconfirmed, "an unconfirmed Put")
 	faulty.set("", false, false)
 	if a, err := store.Lookup("email", "a@x.dev"); err != nil || a.ID != "acc_1" {
 		t.Fatalf("an unconfirmed write was not applied: %+v, %v", a, err)
@@ -362,10 +363,10 @@ func TestAFoldThatFailsKeepsItsEntries(t *testing.T) {
 	must(t, store.Put(account{ID: "acc_1"}))
 	must(t, store.Put(account{ID: "acc_2"}))
 	stats := store.Stats()
-	if !errs.HasCode(stats.FoldError, docstore.CodePersistFailed) || stats.Pending != 2 {
+	if !errs.HasCode(stats.FoldError, coredocstore.CodePersistFailed) || stats.Pending != 2 {
 		t.Fatalf("after a failed fold: %+v", stats)
 	}
-	requireCode(t, store.Close(), docstore.CodePersistFailed, "Close over a snapshot the disk refuses")
+	requireCode(t, store.Close(), coredocstore.CodePersistFailed, "Close over a snapshot the disk refuses")
 	faulty.set("", false, false)
 	if got := documentIDs(t, faulty); !slices.Equal(got, []string{"acc_1", "acc_2"}) {
 		t.Fatalf("after a reopen the store holds %v", got)

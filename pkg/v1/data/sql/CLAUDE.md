@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:24:48Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # pkg/v1/data/sql/
 
 ## Purpose
@@ -21,7 +21,7 @@ re-exports, thin delegating constructors, and one ergonomic helper.
 | Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite` |
 | Constructors | `NewTransactor`, `NewChecker`, `NewMigrator` |
 | Functions | `ParseDialect`, `Irreversible`, `Statements`, `Transact` |
-| Sentinels | the 5 core + 17 service `errs.Define` values, re-exported |
+| Sentinels | the 22 `errs.Define` values of `internal/core/data/sql` — the port's 5 and the 17 run outcomes `internal/service/data/sql` emits, declared in the core since ADR 0160 — re-exported |
 
 ## Conventions
 

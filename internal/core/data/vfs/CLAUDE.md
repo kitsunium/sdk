@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # internal/core/data/vfs/
 
 ## Purpose
@@ -14,7 +14,10 @@ SDK's answer for reading is the standard library's answer for reading. The
 concrete filesystems — memory and operating-system — live in
 `internal/service/data/vfs`.
 
-Code range: `0.2.25.*` (ADR 0056).
+Code range: `0.2.25.*` (ADR 0056), and since ADR 0160 also `0.3.55.*` — the two
+outcomes a CONCRETE filesystem in `internal/service/data/vfs` can produce and an
+abstract one cannot, `RootUnavailable` and `DirectorySyncFailed`, declared here
+under the service layer's `LL = 3` they were allocated with (ADR 0160 §3).
 
 ## Contents
 
@@ -24,8 +27,8 @@ Code range: `0.2.25.*` (ADR 0056).
 | `vfs_interface.go` | `WritableFS`, `AtomicWriter`, `FullFS` |
 | `path.go` | `ValidatePath` (the `fs.ValidPath` grammar) and `ValidateWritePath` (plus the root refusal) |
 | `perm.go` | `ValidatePerm` — the zero-mode and out-of-`ModePerm` refusals |
-| `codes.go` | the eight `Code` constants, `0.2.25.1` … `0.2.25.8` |
-| `errors.go` | the eight sentinels, each var named for its `Define` reason |
+| `codes.go` | the eight `Code` constants, `0.2.25.1` … `0.2.25.8`, then `0.3.55.1` and `0.3.55.2` |
+| `errors.go` | the ten sentinels, each var named for its `Define` reason — the port's eight, then `RootUnavailable` and `DirectorySyncFailed` |
 | `BENCH.md` | guard cost and, more importantly, guard *allocation* |
 
 ## Reading is io/fs, and that is a decision, not an omission

@@ -8,6 +8,7 @@ import (
 	stdsql "database/sql"
 	"errors"
 
+	coredocstore "github.com/kitsunium/sdk/internal/core/data/docstore"
 	coresql "github.com/kitsunium/sdk/internal/core/data/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -54,13 +55,13 @@ type SQLStore[T any] struct {
 	held func(ctx context.Context, key string) bool
 	// byName finds an index by its name. It and indexes never change after
 	// OpenSQL.
-	byName map[string]IndexSpec[T]
+	byName map[string]coredocstore.IndexSpec[T]
 	// table is the documents' table, which every refusal names.
 	table string
 	// stmts are the rendered statements.
 	stmts sqlStatements
 	// indexes are the secondary indexes, in declaration order.
-	indexes []IndexSpec[T]
+	indexes []coredocstore.IndexSpec[T]
 	// onWrite and onDelete are the hooks called after a write or a deletion.
 	onWrite, onDelete hooks
 	// own are the options of a transaction the store opens itself.
@@ -76,9 +77,9 @@ type SQLStore[T any] struct {
 //
 //	cases, err := docstore.OpenSQL(
 //	    docstore.SQLConfig[Case]{Key: Case.Key, Transactor: tm, Dialect: sql.DialectPostgres, Table: "moderation_intake__cases"},
-//	    docstore.Unique("reference", func(c Case) string { return c.Reference }),
+//	    coredocstore.Unique("reference", func(c Case) string { return c.Reference }),
 //	)
-func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], error) {
+func OpenSQL[T any](cfg SQLConfig[T], indexes ...coredocstore.IndexSpec[T]) (*SQLStore[T], error) {
 	parts, err := cfg.validate(indexes)
 	//: everything decidable without a database is decided here.
 	if err != nil {
@@ -92,7 +93,7 @@ func OpenSQL[T any](cfg SQLConfig[T], indexes ...IndexSpec[T]) (*SQLStore[T], er
 		indexKey: cfg.IndexKey,
 		clock:    cfg.Clock,
 		held:     cfg.Held,
-		byName:   make(map[string]IndexSpec[T], len(indexes)),
+		byName:   make(map[string]coredocstore.IndexSpec[T], len(indexes)),
 		table:    cfg.Table,
 		stmts:    renderStatements(cfg.Dialect, cfg.Table),
 		indexes:  indexes,
@@ -140,7 +141,7 @@ func (s *SQLStore[T]) Get(ctx context.Context, key string) (T, error) {
 	//: no row is the miss; anything else is the database's failure.
 	if errors.Is(err, stdsql.ErrNoRows) {
 		//: DocumentNotFound, naming no key.
-		return zero, kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
+		return zero, kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table))
 	}
 	//: the read did not complete.
 	if err != nil {
@@ -182,7 +183,7 @@ func (s *SQLStore[T]) Filter(ctx context.Context, keep func(T) bool) ([]T, error
 // Entries returns up to limit stored documents as JSON, in key order — every
 // one when limit is not positive — for a caller that shows documents rather
 // than decoding them. Each JSON is the bytes the store wrote.
-func (s *SQLStore[T]) Entries(ctx context.Context, limit int) (entries []EntryValue, err error) {
+func (s *SQLStore[T]) Entries(ctx context.Context, limit int) (entries []coredocstore.EntryValue, err error) {
 	ex, _ := s.tx.join.Join(ctx)
 	query, args := s.stmts.entries, []any(nil)
 	//: a positive limit caps the answer in the database.
@@ -197,10 +198,10 @@ func (s *SQLStore[T]) Entries(ctx context.Context, limit int) (entries []EntryVa
 	}
 	//: rows are this call's, so this call closes them.
 	defer func() { err = s.finishRows(rows, "list the entries", err) }()
-	entries = make([]EntryValue, 0, rowsHint)
+	entries = make([]coredocstore.EntryValue, 0, rowsHint)
 	//: one entry per row, in key order.
 	for rows.Next() {
-		var entry EntryValue
+		var entry coredocstore.EntryValue
 		//: a row the driver cannot hand over fails the read.
 		if scanErr := rows.Scan(&entry.Key, &entry.JSON); scanErr != nil {
 			//: StatementFailed.
@@ -239,7 +240,7 @@ func (s *SQLStore[T]) Lookup(ctx context.Context, index, key string) (T, error) 
 	//: one document is only meaningful from a unique index.
 	if !spec.Unique {
 		//: IndexNotUnique, naming the index.
-		return zero, kerrs.Wrap(IndexNotUnique, kerrs.WrapParams{}, kerrs.String("index", index))
+		return zero, kerrs.Wrap(coredocstore.IndexNotUnique, kerrs.WrapParams{}, kerrs.String("index", index))
 	}
 	indexed := s.fileKey(index, key)
 	//: the empty key is filed under no document.
@@ -349,12 +350,12 @@ func (s *SQLStore[T]) finishRows(rows rowSet, step string, err error) error {
 }
 
 // declared returns the index named index, or IndexUnknown.
-func (s *SQLStore[T]) declared(index string) (IndexSpec[T], error) {
+func (s *SQLStore[T]) declared(index string) (coredocstore.IndexSpec[T], error) {
 	spec, found := s.byName[index]
 	//: an index the store never declared.
 	if !found {
 		//: IndexUnknown, naming the index.
-		return spec, kerrs.Wrap(IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
+		return spec, kerrs.Wrap(coredocstore.IndexUnknown, kerrs.WrapParams{}, kerrs.String("index", index))
 	}
 	//: the declaration.
 	return spec, nil
@@ -381,7 +382,7 @@ func (s *SQLStore[T]) fileKey(index, key string) []byte {
 // notFoundIn is DocumentNotFound for a lookup in index.
 func (s *SQLStore[T]) notFoundIn(index string) error {
 	//: the table and the index, never the key.
-	return kerrs.Wrap(DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("index", index))
+	return kerrs.Wrap(coredocstore.DocumentNotFound, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("index", index))
 }
 
 // failed is StatementFailed for step, with the driver's error beside it and
@@ -390,6 +391,6 @@ func (s *SQLStore[T]) failed(step string, cause error) error {
 	//: the verdict names the table and the step; the cause is reachable, and
 	//: silent.
 	return errors.Join(
-		kerrs.Wrap(StatementFailed, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("step", step)),
+		kerrs.Wrap(coredocstore.StatementFailed, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("step", step)),
 		svcsql.NewWithheld(cause))
 }

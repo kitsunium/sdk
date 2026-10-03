@@ -1,9 +1,10 @@
-<!-- updated: 2026-09-28T23:30:00Z -->
+<!-- updated: 2026-10-03T09:00:00Z -->
 # pkg/v1/data/docstore/
 
 ## Purpose
 
-Public facade over `internal/service/data/docstore` (ADR 0110): typed, keyed JSON
+Public facade over `internal/service/data/docstore` and its contract,
+`internal/core/data/docstore` (ADR 0110, ADR 0160): typed, keyed JSON
 documents with unique and multi-valued secondary indexes, in memory or
 persisted through a `vfs.FullFS` — every write durable before it returns, and
 a write's cost independent of how many documents the store holds — and the same
@@ -20,10 +21,10 @@ durable write as the document (ADR 0143).
 | `Unique[T](name, key)` / `Index[T](name, keys)` | func | index declarations |
 | `Store[T]` | type alias | `Get`, `List`, `Filter`, `Entries`, `Lookup`, `Find`, `Stats`; `Put`, `Insert`, `Replace`, `Update`, `Delete`; `PutStamped`, `InsertStamped`, `ReplaceStamped`, `UpdateStamped`; `Versions`, `Version`, `RewriteVersions`; `OnWrite`, `OnDelete`; `Fold`, `Close` |
 | `Config[T]` | type alias | `Key` (required), `FS` + `Path` (both or neither), `FoldAt`, `Versions` + `Clock` + `Held` |
-| `Version` | type alias | `= svcdocstore.VersionValue` — `Number` (from 1), `At`, `Meta`, `JSON` (compact, the caller's copy) |
-| `Stamp` | type alias | `= svcdocstore.StampValue` — `Meta` (who, which command), `InPlace` (no version) |
-| `IndexSpec[T]` | type alias | `Keys`, `Name`, `Unique` |
-| `Entry` | type alias | `= svcdocstore.EntryValue` — `Key`, `JSON` (the caller's copy) |
+| `Version` | type alias | `= coredocstore.VersionValue` — `Number` (from 1), `At`, `Meta`, `JSON` (compact, the caller's copy) |
+| `Stamp` | type alias | `= coredocstore.StampValue` — `Meta` (who, which command), `InPlace` (no version) |
+| `IndexSpec[T]` | type alias | `= coredocstore.IndexSpec[T]` — `Keys`, `Name`, `Unique` |
+| `Entry` | type alias | `= coredocstore.EntryValue` — `Key`, `JSON` (the caller's copy) |
 | `Stats` | type alias | `= svcdocstore.StatsValue` — `Documents`, `Pending`, `Folds`, `FoldError` |
 | `DefaultFoldAt` | const | 1024 |
 | `OpenSQL[T](cfg, indexes...)` | func | a `*SQLStore[T]` over `cfg.Transactor`; sends no statement |
@@ -32,11 +33,19 @@ durable write as the document (ADR 0143).
 | `SQLMigration(dialect, table, version)` | func | the two tables as one idempotent `sql.Migration` |
 | `SQLVersionsMigration(dialect, table, version)` | func | the versions table `<table>___vs`, which a store opened with `Versions` needs; its Down drops it |
 | `MaxSQLTableLen` / `MaxSQLKeyLen` / `MaxSQLIndexNameLen` | const | 58 / 1024 / 64 bytes |
+| `Collection[T]` / `Versioned[T]` | type alias | `= coredocstore.Collection[T]` / `Versioned[T]` — the ports `*Store[T]` implements, a call taking no context |
+| `CollectionContext[T]` / `VersionedContext[T]` | type alias | `= coredocstore.CollectionContext[T]` / `VersionedContext[T]` — the same calls each taking a context, which `*SQLStore[T]` implements |
+| `Announcer` | type alias | `= coredocstore.Announcer` — `OnWrite`, `OnDelete`, which both engines implement |
 | `Code*` | const | `0.3.80.1`–`0.3.80.20` |
 | `DocumentNotFound` … `WriteUnconfirmed`, `StatementFailed`, `KeyTooLong`, `VersionsNotKept`, `VersionNotFound`, `VersionsRewriteRefused` | var | the twenty sentinels |
 
-All types are aliases onto the service: there is no port, and the values are
-the engines' (ADR 0074, ADR 0139 §D2). The SQL signatures name `pkg/v1/data/sql`'s
+Every type is an alias. The engines, their configurations and `Stats` alias
+the service (ADR 0074); the values both engines share, the index declaration,
+the ports and the sentinels alias `internal/core/data/docstore`, where ADR 0160
+put them. The ports are two families because the engines differ on a context
+(ADR 0139 §D2): a caller that wants a double depends on `Collection` for a
+`Store`, on `CollectionContext` for a `SQLStore`, and on `Announcer` for
+either. The SQL signatures name `pkg/v1/data/sql`'s
 aliases (`sql.Dialect`, `sql.Migration`), so a consumer's documentation never
 shows an internal package.
 

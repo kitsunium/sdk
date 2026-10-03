@@ -52,7 +52,7 @@ func TestAPerScopeTimeoutDoesNotCondemnTheOuterTransaction(t *testing.T) {
 		}
 		//: the savepoint must have been undone on a context that outlived
 		//: the one that caused the failure.
-		if errs.HasCode(nested, svcsql.CodeSavepointFailed) {
+		if errs.HasCode(nested, coresql.CodeSavepointFailed) {
 			t.Errorf("nested Transact = %v, want no SAVEPOINT_FAILED — "+
 				"the undo must not travel on the dead context", nested)
 		}
@@ -112,7 +112,7 @@ func TestACancelledRootTransactionRollsBackAndReportsTheCancellation(t *testing.
 	}
 	//: ErrTxDone is the normal outcome here and must not be dressed up as a
 	//: ROLLBACK_FAILED — the transaction really did roll back.
-	if errs.HasCode(err, svcsql.CodeRollbackFailed) {
+	if errs.HasCode(err, coresql.CodeRollbackFailed) {
 		t.Fatalf("Transact = %v, want no ROLLBACK_FAILED for an already-settled transaction", err)
 	}
 	if f.sent("COMMIT") {
@@ -146,7 +146,7 @@ func TestAnAlreadyFinishedTransactionIsNotPoisoned(t *testing.T) {
 	if !errors.Is(nested, errWork) {
 		t.Fatalf("nested Transact = %v, want the unit of work's error", nested)
 	}
-	if errs.HasCode(nested, svcsql.CodeTxPoisoned) {
+	if errs.HasCode(nested, coresql.CodeTxPoisoned) {
 		t.Fatalf("nested Transact = %v, want no TX_POISONED — a retired transaction is a KNOWN state", nested)
 	}
 	if !errors.Is(err, errWork) {
