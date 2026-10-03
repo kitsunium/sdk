@@ -1,5 +1,7 @@
-// Package sql — hosts the only place in the SDK that renders dialect-specific
-// SQL. Every statement this domain sends is built here.
+// Package sql — hosts the only place in this domain that renders
+// dialect-specific SQL. Every statement it sends is built here, spelled with
+// the vocabulary core/sql's Dialect owns: the bind markers, the quoting and the
+// row-lock clauses.
 package sql
 
 import (
@@ -51,21 +53,6 @@ func savepointSQL(_ coresql.Dialect, name string) (create, rollback, release str
 		"RELEASE SAVEPOINT " + name
 }
 
-// placeholder renders the n-th bind marker (1-based) for the dialect.
-//
-// This is the divergence that makes a "portable" hand-written query a fiction:
-// PostgreSQL numbers its parameters, MySQL and SQLite do not. Every statement
-// this package binds arguments to goes through here.
-func placeholder(dialect coresql.Dialect, n int) string {
-	//: PostgreSQL's ordinal form.
-	if dialect == coresql.DialectPostgres {
-		//: $1, $2, … — the position is part of the marker.
-		return "$" + strconv.Itoa(n)
-	}
-	//: MySQL and SQLite both use the positional question mark.
-	return "?"
-}
-
 // tryLockSQL renders the statement that attempts the advisory lock WITHOUT
 // blocking, and the argument to bind to it.
 //
@@ -79,11 +66,11 @@ func tryLockSQL(dialect coresql.Dialect, key string) (query string, arg any) {
 	//: is folded into one.
 	if dialect == coresql.DialectPostgres {
 		//: returns true when the lock was taken, false when it was not.
-		return "SELECT pg_try_advisory_lock(" + placeholder(dialect, 1) + ")", lockKey(key)
+		return "SELECT pg_try_advisory_lock(" + dialect.Placeholder(1) + ")", lockKey(key)
 	}
 	//: MySQL's GET_LOCK is keyed by a string and takes its own timeout; 0
 	//: makes it the same non-blocking try.
-	return "SELECT GET_LOCK(" + placeholder(dialect, 1) + ", 0)", key
+	return "SELECT GET_LOCK(" + dialect.Placeholder(1) + ", 0)", key
 }
 
 // unlockSQL renders the statement that releases the advisory lock, and the
@@ -94,10 +81,10 @@ func unlockSQL(dialect coresql.Dialect, key string) (query string, arg any) {
 	//: would release nothing and report success.
 	if dialect == coresql.DialectPostgres {
 		//: unlocks the bigint key held by this session.
-		return "SELECT pg_advisory_unlock(" + placeholder(dialect, 1) + ")", lockKey(key)
+		return "SELECT pg_advisory_unlock(" + dialect.Placeholder(1) + ")", lockKey(key)
 	}
 	//: unlocks the named lock held by this session.
-	return "SELECT RELEASE_LOCK(" + placeholder(dialect, 1) + ")", key
+	return "SELECT RELEASE_LOCK(" + dialect.Placeholder(1) + ")", key
 }
 
 // fileLockSQL renders the statement that makes a SQLite transaction take the

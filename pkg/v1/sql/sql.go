@@ -208,7 +208,15 @@ type Migration = coresql.MigrationValue
 type Step = coresql.Step
 
 // Dialect is the public alias for the closed set of SQL engines this SDK can
-// spell.
+// spell. For SQL you write yourself, it spells the engine's vocabulary — the
+// tokens the SDK's own statements are spelled with, never a statement:
+// [Dialect].Placeholder renders a bind marker ($1 on PostgreSQL, ? on MySQL and
+// SQLite), [Dialect].QuoteIdent a delimited name, its delimiter doubled
+// inside, and [Dialect].ForUpdate and [Dialect].ForUpdateSkipLocked a row-lock
+// clause, which SQLite — whose exclusion is its one write lock — renders as
+// nothing. QuoteIdent validates nothing: check a name before you interpolate
+// it. An unset Dialect renders no marker and no name, so a statement built
+// from it fails rather than passing for another engine's.
 type Dialect = coresql.Dialect
 
 // Config is the public alias for the parameters every port is built from.

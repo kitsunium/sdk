@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T00:24:48Z -->
 # internal/service/sql/
 
 ## Purpose
@@ -30,7 +30,7 @@ Code range: `0.3.54.*` (ADR 0055).
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
 | `statements.go` | `Statements(...string) coresql.Step` |
-| `dialect_sql.go` | **the only place dialect-specific SQL is rendered** — savepoints, placeholders, advisory lock, SQLite's `fileLockSQL` |
+| `dialect_sql.go` | **the only place this package renders dialect-specific SQL** — savepoints, advisory lock, SQLite's `fileLockSQL`; the bind markers are `core/sql`'s `Dialect.Placeholder` |
 | `health.go` | `NewChecker`, `checker` — bounded ping on the injected clock |
 | `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down`, `serialised` — the work under whichever lock the dialect has |
 | `migrate_config.go` | `MigrateConfig`, `Default{VersionTable,LockTimeout,LockRetryInterval}` |
@@ -221,8 +221,13 @@ never because a finding was inconvenient:
   design.
 - **Render dialect-specific SQL anywhere but `dialect_sql.go`.** The
   version-table statements `migrate_table.go` builds read the same on all
-  three engines and take their placeholders from `dialect_sql.go`. Adding a
+  three engines and take their bind markers from `core/sql`'s
+  `Dialect.Placeholder`, as every SQL renderer of the SDK does. Adding a
   fourth engine must not be possible by forgetting a file.
+- **Spell a bind marker by hand.** It was this package's own `placeholder`
+  until it became `Dialect.Placeholder`; docstore and queue carried
+  byte-identical copies of it, and a copy is how a fourth engine gets
+  forgotten in one of three places.
 - **Use `time.Now`, `time.After` or `time.Sleep`.** Take the injected clock.
 - **Read a driver error into a `Public`.** Join it; never rephrase it.
 - **Interpolate anything a caller supplied into SQL** other than the

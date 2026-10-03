@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T23:30:00Z -->
+<!-- updated: 2026-10-03T00:24:48Z -->
 # internal/service/docstore/
 
 ## Purpose
@@ -41,7 +41,7 @@ that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
 | `load.go` | `load`: the directories, `readSnapshot`, `replayOverSnapshot` → `readVersions` (refused by a store that keeps none), `readOverlay` / `replay` / `checkEntryVersions`, `versionsWithoutDocument`, `checkRecord`, `compacted`, the crash leftovers removed; it reports whether `open` must fold, and folds nothing itself |
 | `hooks.go` | `OnWrite` / `OnDelete`, called with the key after the write is durable (file engine) or committed (SQL engine), outside every lock |
 | `sql_config.go` | `SQLConfig[T]` (`Key`, `Clock`, `Held`, `Transactor`, `IndexKey`, `Table`, `Dialect`, `Versions`), `MaxSQLTableLen`, `MaxSQLKeyLen`, `MaxSQLIndexNameLen`, the table-name rule, `indexTable`, `versionsTable`, the refusals |
-| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `forUpdateClause`, the pruning), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables |
+| `sql_dialect.go` | **the only place the SQL engine renders SQL**: every statement per dialect, rendered once at `OpenSQL` (`sqlStatements`: the claim, the version rows' reads under `Dialect.ForUpdate`, the pruning), the five rendered per call (a write's index rows and unique-key check, its version rows, `Reindex`'s shared-key check and unique marking), the DDL of the three tables; every marker, quoted name and row lock is `core/sql.Dialect`'s, and `shareLockClause` — MySQL's `LOCK IN SHARE MODE`, the one clause whose choice is this store's isolation reasoning rather than an engine's grammar — is the store's own |
 | `sql_store.go` | `OpenSQL`, `SQLStore[T]`; the reads — `Get`, `List`, `Filter`, `Entries`, `Count`, `Lookup`, `Find`; `OnWrite` / `OnDelete`; `failed` (STATEMENT_FAILED + the withheld cause) |
 | `sql_write.go` | `Put` / `Insert` / `Replace`, `Update`, `UpdateStamped`, `Delete`; `run` (a savepoint of the caller's transaction, a transaction of the store's own, or one statement), `several`, `claimRow` / `lockedReplace` (a store that keeps versions reads what it replaces first), `announce` (hooks through `Deferrer`), the unique check, `mayConflict` and `classify` (a raced collision asked about after the rollback) |
 | `sql_version.go` | the SQL engine's `PutStamped` / `InsertStamped` / `ReplaceStamped`, `Versions` (one LEFT JOIN), `Version`, `RewriteVersions`; `keepVersions` (the version rows a write leaves, in its transaction), `readHead`, `prune`, `insertVersionRows` (150 a statement), `versionOf` |
@@ -198,7 +198,9 @@ that can fail — so the values are the engines' (ADR 0074, ADR 0139 §D2).
 - **Run a caller's function under `mu`.** Key functions run before any lock;
   `Update`'s function runs under `writing` only, so it can read the store.
 - **Render SQL outside `sql_dialect.go`**, or interpolate anything but the
-  validated table name.
+  validated table name. Spell no marker, quote or row lock by hand there
+  either: they are `core/sql.Dialect`'s (`Placeholder`, `QuoteIdent`,
+  `ForUpdate`), which this file used to copy.
 - **Parse a driver's error** to recognise a collision: ask the database after
   the rollback. The SQL engine imports no driver (ADR 0055 §D2).
 - **Run a write outside a savepoint of the caller's transaction** when the

@@ -68,6 +68,29 @@ func TestMigrationValidatesThroughTheAlias(t *testing.T) {
 	}
 }
 
+// TestTheDialectSpellsItsVocabularyThroughTheAlias pins the claim the Dialect
+// alias's comment makes: a consumer writing its own SQL reaches the engine's
+// marker, quoting and row-lock clauses without importing anything internal,
+// and gets the text the SDK's own statements are spelled with.
+func TestTheDialectSpellsItsVocabularyThroughTheAlias(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name, got, want string
+	}{
+		{"PostgreSQL's second marker", sql.DialectPostgres.Placeholder(2), "$2"},
+		{"MySQL's second marker", sql.DialectMySQL.Placeholder(2), "?"},
+		{"MySQL's quoted keyword", sql.DialectMySQL.QuoteIdent("order"), "`order`"},
+		{"SQLite's quoted keyword", sql.DialectSQLite.QuoteIdent("order"), `"order"`},
+		{"PostgreSQL's row lock", sql.DialectPostgres.ForUpdate(), " FOR UPDATE"},
+		{"SQLite's row lock, which is its write lock", sql.DialectSQLite.ForUpdateSkipLocked(), ""},
+	}
+	for _, tc := range cases {
+		if tc.got != tc.want {
+			t.Errorf("%s = %q, want %q", tc.name, tc.got, tc.want)
+		}
+	}
+}
+
 // TestIrreversibleIsMatchableFromTheFacade pins that a caller can route on the
 // declaration without importing anything internal.
 func TestIrreversibleIsMatchableFromTheFacade(t *testing.T) {

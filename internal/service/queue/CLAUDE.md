@@ -33,7 +33,7 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
 | `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter` on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
-| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL |
+| `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/sql` migration the caller numbers |
 | `sql_withheld.go` | `withheld`: the driver's error for `errors.Is`/`errors.As`, its text out of every rendering |
 | `consume.go` | `Consume`, the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
@@ -403,7 +403,8 @@ delivery count incremented. That is a contract now: a broker that answered
   that: it tells the consumer WHEN to look, and the look is still a `Receive`.
 - Render SQL outside `sql_dialect.go`, interpolate anything but the validated
   table name, or read the database's `NOW()`: every instant is the broker's
-  clock.
+  clock. Spell no marker, quote or row lock by hand there either: they are
+  `core/sql.Dialect`'s, which this file used to copy.
 - Parse a driver's error, or let its text into a rendering — join it through
   `withheld`. The service module imports no driver (ADR 0055 §D2).
 - Fire the SQL broker's wake before the transaction a publication joined has

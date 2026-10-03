@@ -1,5 +1,7 @@
 // Package docstore — the only place the SQL store renders SQL. Every statement
-// it sends is built here, once, at OpenSQL, for its dialect and its tables.
+// it sends is built here, once, at OpenSQL, for its dialect and its tables,
+// spelled with the vocabulary core/sql's Dialect owns: the bind markers, the
+// quoting and the row lock.
 package docstore
 
 import (
@@ -87,9 +89,14 @@ type sqlStatements struct {
 // renderStatements renders every fixed statement of the store keeping its
 // documents in table, on dialect. The table name was validated at OpenSQL.
 func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
-	docs, ix, vs := quoteIdent(dialect, table), quoteIdent(dialect, indexTable(table)), quoteIdent(dialect, versionsTable(table))
-	p1, p2, p3 := placeholder(dialect, 1), placeholder(dialect, 2), placeholder(dialect, 3)
-	lock := forUpdateClause(dialect)
+	docs, ix, vs := dialect.QuoteIdent(table), dialect.QuoteIdent(indexTable(table)), dialect.QuoteIdent(versionsTable(table))
+	p1, p2, p3 := dialect.Placeholder(1), dialect.Placeholder(2), dialect.Placeholder(3)
+	//: ends a read of version rows made inside a write: it locks them where
+	//: the engine locks rows and — what matters on MySQL inside a caller's
+	//: REPEATABLE READ transaction — reads the latest committed rows rather
+	//: than the transaction's snapshot. SQLite needs nothing: its writer
+	//: holds the database's only write lock.
+	lock := dialect.ForUpdate()
 	join := "SELECT d.doc FROM " + ix + " i JOIN " + docs + " d ON d.doc_key = i.doc_key" +
 		" WHERE i.index_name = " + p1 + " AND i.index_key = " + p2
 	s := sqlStatements{
@@ -147,12 +154,12 @@ func renderStatements(dialect coresql.Dialect, table string) sqlStatements {
 // Its insertion is a plain INSERT: INSERT IGNORE would also turn a truncation
 // into a warning, and a truncated key is another key.
 func writeModes(dialect coresql.Dialect, docs string) (upsert, insert string) {
-	p1, p2 := placeholder(dialect, 1), placeholder(dialect, 2)
+	p1, p2 := dialect.Placeholder(1), dialect.Placeholder(2)
 	values := "INSERT INTO " + docs + " (doc_key, rev, doc) VALUES (" + p1 + ", 1, " + p2 + ")"
 	//: MySQL and MariaDB.
 	if dialect == coresql.DialectMySQL {
 		//: the document bound a second time as the third argument.
-		return values + " ON DUPLICATE KEY UPDATE rev = rev + 1, doc = " + placeholder(dialect, 3), values
+		return values + " ON DUPLICATE KEY UPDATE rev = rev + 1, doc = " + dialect.Placeholder(3), values
 	}
 	//: PostgreSQL names the existing row by its table; SQLite reads an
 	//: unqualified column as the existing row's.
@@ -179,11 +186,11 @@ func updateStatements(dialect coresql.Dialect, docs, replace string) (lockDoc, w
 	//: SQLite: lock by writing, read what the write kept.
 	if dialect == coresql.DialectSQLite {
 		//: the revision moved once, by the locking read.
-		return "UPDATE " + docs + " SET rev = rev + 1 WHERE doc_key = ? RETURNING doc",
-			"UPDATE " + docs + " SET doc = ? WHERE doc_key = ?"
+		return "UPDATE " + docs + " SET rev = rev + 1 WHERE doc_key = " + dialect.Placeholder(1) + " RETURNING doc",
+			"UPDATE " + docs + " SET doc = " + dialect.Placeholder(1) + " WHERE doc_key = " + dialect.Placeholder(2)
 	}
 	//: the row lock both engines take on a locking read.
-	return "SELECT doc FROM " + docs + " WHERE doc_key = " + placeholder(dialect, 1) + " FOR UPDATE", replace
+	return "SELECT doc FROM " + docs + " WHERE doc_key = " + dialect.Placeholder(1) + dialect.ForUpdate(), replace
 }
 
 // claimStatement renders the first statement of a Put on a store that keeps
@@ -200,7 +207,7 @@ func updateStatements(dialect coresql.Dialect, docs, replace string) (lockDoc, w
 // since the revision always changes — and the document is read after, under
 // the lock this statement took.
 func claimStatement(dialect coresql.Dialect, docs string) string {
-	p1, p2 := placeholder(dialect, 1), placeholder(dialect, 2)
+	p1, p2 := dialect.Placeholder(1), dialect.Placeholder(2)
 	values := "INSERT INTO " + docs + " (doc_key, rev, doc) VALUES (" + p1 + ", 1, " + p2 + ")"
 	//: MySQL and MariaDB.
 	if dialect == coresql.DialectMySQL {
@@ -241,27 +248,12 @@ func (s *sqlStatements) insertVersions(n int) string {
 			if col > 1 {
 				b.WriteString(", ")
 			}
-			b.WriteString(placeholder(s.dialect, row*versionRowArgs+col))
+			b.WriteString(s.dialect.Placeholder(row*versionRowArgs + col))
 		}
 		b.WriteString(")")
 	}
 	//: n rows in one round trip.
 	return b.String()
-}
-
-// forUpdateClause ends a read of version rows made inside a write: it locks
-// them where the engine locks rows, and — what matters on MySQL inside a
-// caller's REPEATABLE READ transaction — reads the latest committed rows
-// rather than the transaction's snapshot. SQLite has no such clause and needs
-// none: its writer holds the database's only write lock.
-func forUpdateClause(dialect coresql.Dialect) string {
-	//: PostgreSQL, MySQL and MariaDB.
-	if dialect != coresql.DialectSQLite {
-		//: the row lock, which reads the latest committed rows.
-		return " FOR UPDATE"
-	}
-	//: SQLite: nothing to add.
-	return ""
 }
 
 // upsertArgs binds the upsert's arguments: the key and the document, and on
@@ -308,7 +300,7 @@ func (s *sqlStatements) insertIndexRows(n int) string {
 			if col > 1 {
 				b.WriteString(", ")
 			}
-			b.WriteString(placeholder(s.dialect, row*indexRowArgs+col))
+			b.WriteString(s.dialect.Placeholder(row*indexRowArgs + col))
 		}
 		b.WriteString(")")
 	}
@@ -323,15 +315,15 @@ func (s *sqlStatements) insertIndexRows(n int) string {
 // shareLockClause — which a check made after a refused write needs.
 func (s *sqlStatements) uniqueTaken(n int, shared bool) string {
 	var b strings.Builder
-	b.WriteString("SELECT index_name FROM " + s.ixTable + " WHERE uniq = 1 AND doc_key <> " + placeholder(s.dialect, 1) + " AND (")
+	b.WriteString("SELECT index_name FROM " + s.ixTable + " WHERE uniq = 1 AND doc_key <> " + s.dialect.Placeholder(1) + " AND (")
 	//: one equality pair per unique key.
 	for pair := range n {
 		//: pairs are alternatives.
 		if pair > 0 {
 			b.WriteString(" OR ")
 		}
-		b.WriteString("(index_name = " + placeholder(s.dialect, 2+2*pair) +
-			" AND index_key = " + placeholder(s.dialect, 3+2*pair) + ")")
+		b.WriteString("(index_name = " + s.dialect.Placeholder(2+2*pair) +
+			" AND index_key = " + s.dialect.Placeholder(3+2*pair) + ")")
 	}
 	b.WriteString(")")
 	//: a check after a refusal reads past the transaction's snapshot.
@@ -362,7 +354,7 @@ func (s *sqlStatements) list(n int) string {
 	marks := make([]string, n)
 	//: one per argument.
 	for i := range marks {
-		marks[i] = placeholder(s.dialect, i+1)
+		marks[i] = s.dialect.Placeholder(i + 1)
 	}
 	//: $1, $2 … or ?, ? …
 	return strings.Join(marks, ", ")
@@ -377,6 +369,12 @@ func (s *sqlStatements) list(n int) string {
 // to it, while a locking read sees it. PostgreSQL's default, READ COMMITTED,
 // sees it with a plain read, and a SQLite writer holds the database's only
 // write lock, so there is nothing newer to see.
+//
+// It is this store's decision rather than a core/sql Dialect method because
+// what it renders is not an engine's shared lock: PostgreSQL has one, FOR
+// SHARE, which this store deliberately does not send. Which engine needs a
+// locking read here follows from the isolation each one defaults to, and that
+// reasoning is the store's.
 func shareLockClause(dialect coresql.Dialect) string {
 	//: MySQL and MariaDB both spell the shared lock this way.
 	if dialect == coresql.DialectMySQL {
@@ -385,30 +383,6 @@ func shareLockClause(dialect coresql.Dialect) string {
 	}
 	//: a plain read already sees it.
 	return ""
-}
-
-// placeholder renders the n-th bind marker (1-based) for the dialect:
-// PostgreSQL numbers its parameters, MySQL and SQLite do not.
-func placeholder(dialect coresql.Dialect, n int) string {
-	//: PostgreSQL's ordinal form.
-	if dialect == coresql.DialectPostgres {
-		//: $1, $2, … — the position is part of the marker.
-		return "$" + strconv.Itoa(n)
-	}
-	//: MySQL and SQLite both use the positional question mark.
-	return "?"
-}
-
-// quoteIdent quotes a validated identifier for the dialect, so a table name
-// that is also a keyword — "order", "user" — is still a table name.
-func quoteIdent(dialect coresql.Dialect, name string) string {
-	//: MySQL quotes with backticks, whatever ANSI_QUOTES says.
-	if dialect == coresql.DialectMySQL {
-		//: `name`
-		return "`" + name + "`"
-	}
-	//: the standard's double quotes, which PostgreSQL and SQLite share.
-	return `"` + name + `"`
 }
 
 // createTableStatements renders the DDL that creates a store's two tables, in
@@ -429,7 +403,7 @@ func quoteIdent(dialect coresql.Dialect, name string) string {
 // UNIQUE constraint is the unique indexes' guarantee, since uniq is 1 on a
 // unique index's rows and NULL on the others, and NULLs never collide.
 func createTableStatements(dialect coresql.Dialect, table string) []string {
-	docs, ix := quoteIdent(dialect, table), quoteIdent(dialect, indexTable(table))
+	docs, ix := dialect.QuoteIdent(table), dialect.QuoteIdent(indexTable(table))
 	//: the types and the table options are each engine's.
 	switch dialect {
 	//: MySQL and MariaDB: InnoDB, for transactions, named rather than assumed.
@@ -476,7 +450,7 @@ func createTableStatements(dialect coresql.Dialect, table string) []string {
 // has no index but its primary key: versions are read by document, never
 // looked up by what they hold.
 func createVersionsTableStatements(dialect coresql.Dialect, table string) []string {
-	vs := quoteIdent(dialect, versionsTable(table))
+	vs := dialect.QuoteIdent(versionsTable(table))
 	//: the types and the table options are each engine's.
 	switch dialect {
 	//: MySQL and MariaDB: InnoDB, for transactions.
@@ -502,7 +476,7 @@ func createVersionsTableStatements(dialect coresql.Dialect, table string) []stri
 // createVersionsTableStatements, doing nothing when the table is gone.
 func dropVersionsTableStatements(dialect coresql.Dialect, table string) []string {
 	//: every engine spells it alike.
-	return []string{"DROP TABLE IF EXISTS " + quoteIdent(dialect, versionsTable(table))}
+	return []string{"DROP TABLE IF EXISTS " + dialect.QuoteIdent(versionsTable(table))}
 }
 
 // dropTableStatements renders the reversal of createTableStatements: the index
@@ -510,7 +484,7 @@ func dropVersionsTableStatements(dialect coresql.Dialect, table string) []string
 func dropTableStatements(dialect coresql.Dialect, table string) []string {
 	//: every engine spells it alike.
 	return []string{
-		"DROP TABLE IF EXISTS " + quoteIdent(dialect, indexTable(table)),
-		"DROP TABLE IF EXISTS " + quoteIdent(dialect, table),
+		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(indexTable(table)),
+		"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table),
 	}
 }
