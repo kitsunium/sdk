@@ -74,29 +74,43 @@ type Field = kerrs.FieldValue
 // params.Code is appended to the wrap trail (ADR 0005).
 type WrapParams = kerrs.WrapParams
 
-// Re-exported construction helpers. Grouped to satisfy the repo var-grouping
-// convention while keeping each helper's godoc on its own line.
-var (
-	// String builds a Field holding a string value.
-	String = kerrs.String
+// String builds a Field holding a string value.
+func String(key, val string) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.String(key, val)
+}
 
-	// Int builds a Field from a plain int (widened to int64 internally),
-	// matching the slog / zap Int(key, int) convention.
-	Int = kerrs.Int
+// Int builds a Field from a plain int (widened to int64 internally),
+// matching the slog / zap Int(key, int) convention.
+func Int(key string, val int) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.Int(key, val)
+}
 
-	// Int64 builds a Field from a 64-bit integer (no upcast at the call site).
-	Int64 = kerrs.Int64
+// Int64 builds a Field from a 64-bit integer (no upcast at the call site).
+func Int64(key string, val int64) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.Int64(key, val)
+}
 
-	// Bool builds a Field holding a boolean value.
-	Bool = kerrs.Bool
+// Bool builds a Field holding a boolean value.
+func Bool(key string, val bool) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.Bool(key, val)
+}
 
-	// Float builds a Field holding a float64 value (shortest round-trip render).
-	Float = kerrs.Float
+// Float builds a Field holding a float64 value (shortest round-trip render).
+func Float(key string, val float64) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.Float(key, val)
+}
 
-	// NewFieldValue builds a string-typed Field. Provided for tooling that
-	// expects a New-prefixed factory; prefer String for the common case.
-	NewFieldValue = kerrs.NewFieldValue
-)
+// NewFieldValue builds a string-typed Field. Provided for tooling that
+// expects a New-prefixed factory; prefer String for the common case.
+func NewFieldValue(key, val string) Field {
+	//: the Field is the kernel's; this facade only forwards.
+	return kerrs.NewFieldValue(key, val)
+}
 
 // New constructs a typed SDK error at runtime. On success the returned error
 // carries code / reason / public / private plus any fields. On a structural

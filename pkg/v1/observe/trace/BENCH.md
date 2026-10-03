@@ -124,3 +124,29 @@ BenchmarkSpan_AddEvent-8                        531.0 ns/op      518 B/op     1 
 BenchmarkSpan_SpanContext-8                       5.7 ns/op        0 B/op     0 allocs/op
 BenchmarkSampler_Ratio-8                        454.1 ns/op      201 B/op     3 allocs/op
 ```
+
+## The attribute constructors — a function variable against a forwarder
+
+`facade_bench_test.go` prices one call to each of `String`, `Bool`, `Int64` and
+`Float64`, made from a consumer's own package with every argument read from a
+variable. Until the forwarders change the four were `var String =
+coreotel.String` and its siblings; they are now forwarders, as
+`pkg/v1/observe/metrics`'s already were. Each inlines (`go build -gcflags=-m=2`:
+cost 13, 21, 14 and 18), so a call compiles to the shared model's own body at
+the call site.
+
+Measured the way `pkg/v1/errs/BENCH.md` §"Every forwarded name" describes —
+Apple M1 Pro, go1.27.1 darwin/arm64, 2026-10-03, on a machine shared with other
+builds, so in CPU time: the minimum of 25 windows of 20 ms per sample, ten
+samples per shape, the two builds alternating, compared by benchstat.
+
+```
+name        variable (ns/op)   forwarder (ns/op)   change
+String           4.668              2.893           -38.01% (p=0.000)
+Bool             4.349              2.793           -35.78% (p=0.000)
+Int64            4.348              2.792           -35.79% (p=0.000)
+Float64          4.750              2.774           -41.60% (p=0.000)
+```
+
+Neither shape allocates. Attributes are built at the call site that starts or
+annotates a span, so the saving is per attribute, per span: 1.6 to 2.0 ns each.

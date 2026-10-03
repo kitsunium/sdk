@@ -39,21 +39,15 @@ func emit(p *doc.Package, fset *token.FileSet, packageShort string, opts *indexO
 	}
 
 	var out []symbol
-	//: functions first, then types with their methods, then package values —
-	//: the order a reader scans a package doc page in.
+	//: functions first, then types with their constructors and methods, then
+	//: package values — the order a reader scans a package doc page in.
 	for _, f := range p.Funcs {
 		out = append(out, ctx.funcRow(f))
 	}
-	//: each type carries its methods and its attached constants and variables.
+	//: each type carries its constructors, its methods and its attached
+	//: constants and variables.
 	for _, t := range p.Types {
-		out = append(out, ctx.typeRow(t))
-		//: methods are indexed under their own name so a search for the method
-		//: finds it without knowing the receiver.
-		for _, m := range t.Methods {
-			out = append(out, ctx.methodRow(t, m))
-		}
-		out = append(out, ctx.valueRows(t.Consts, "const")...)
-		out = append(out, ctx.valueRows(t.Vars, "var")...)
+		out = append(out, ctx.typeRows(t)...)
 	}
 	out = append(out, ctx.valueRows(p.Consts, "const")...)
 	out = append(out, ctx.valueRows(p.Vars, "var")...)
@@ -84,9 +78,11 @@ func packageURL(urlBase, packageShort string) string {
 	return out + "/"
 }
 
-// funcRow builds the row for a package-level function.
+// funcRow builds the row for a package-level function, whether go/doc lists it
+// with the package or files it under the type it returns.
 func (c *rowContext) funcRow(f *doc.Func) symbol {
-	//: a function is addressed by its bare name within the package.
+	//: a function is addressed by its bare name within the package — one filed
+	//: under a type too, which the docs page anchors by name beneath that type.
 	return symbol{
 		Kind:         "func",
 		Name:         f.Name,
@@ -118,6 +114,33 @@ func (c *rowContext) typeRow(t *doc.Type) symbol {
 		Obsolete:     isDeprecated(t.Doc),
 		SourceURL:    sourceLinkOf(c.opts, c.fset, t.Decl),
 	}
+}
+
+// typeRows builds the rows of one type: the type itself, the functions go/doc
+// files under it, its methods, then its constants and variables.
+//
+// go/doc files a function under a type when that type is the only result type
+// of the package the function names — T, *T or []T, beside any number of
+// predeclared or imported ones such as an error or a bool — so a constructor, a
+// parser and an accessor returning a facade alias all land in t.Funcs rather
+// than in the package's Funcs. They are still package-level functions, so each
+// gets the row a package-level function gets. Reading p.Funcs alone kept 303 of
+// pkg/v1's 444 functions out of the index.
+func (c *rowContext) typeRows(t *doc.Type) []symbol {
+	out := []symbol{c.typeRow(t)}
+	//: the functions filed under the type, by their own name.
+	for _, f := range t.Funcs {
+		out = append(out, c.funcRow(f))
+	}
+	//: methods are indexed under their own name so a search for the method
+	//: finds it without knowing the receiver.
+	for _, m := range t.Methods {
+		out = append(out, c.methodRow(t, m))
+	}
+	out = append(out, c.valueRows(t.Consts, "const")...)
+	out = append(out, c.valueRows(t.Vars, "var")...)
+	//: the type and everything go/doc attached to it.
+	return out
 }
 
 // methodRow builds the row for a method attached to a type.

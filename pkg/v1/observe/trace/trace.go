@@ -261,20 +261,37 @@ var (
 	OTLPExportUnavailable = coretrace.OTLPExportUnavailable
 	// OTLPPartialSuccess reports an accepted request with rejected spans.
 	OTLPPartialSuccess = coretrace.OTLPPartialSuccess
-
-	// The four attribute constructors below are the shared model's own, the
-	// ones [github.com/kitsunium/sdk/pkg/v1/observe/metrics] delegates to, so a value
-	// built by either package is accepted by both.
-
-	// String returns a string-valued attribute.
-	String = coreotel.String
-	// Bool returns a bool-valued attribute.
-	Bool = coreotel.Bool
-	// Int64 returns a signed-integer attribute.
-	Int64 = coreotel.Int64
-	// Float64 returns a double attribute.
-	Float64 = coreotel.Float64
 )
+
+// ── Attributes ───────────────────────────────────────────────────────────────
+
+// The four attribute constructors below forward to the shared model's own, the
+// ones [github.com/kitsunium/sdk/pkg/v1/observe/metrics] forwards to as well, so a
+// value built by either package is accepted by both.
+
+// String returns a string-valued attribute.
+func String(key, value string) Attr {
+	//: the attribute model is the shared one; this facade only forwards.
+	return coreotel.String(key, value)
+}
+
+// Bool returns a bool-valued attribute.
+func Bool(key string, value bool) Attr {
+	//: the attribute model is the shared one; this facade only forwards.
+	return coreotel.Bool(key, value)
+}
+
+// Int64 returns a signed-integer attribute.
+func Int64(key string, value int64) Attr {
+	//: the attribute model is the shared one; this facade only forwards.
+	return coreotel.Int64(key, value)
+}
+
+// Float64 returns a double attribute.
+func Float64(key string, value float64) Attr {
+	//: the attribute model is the shared one; this facade only forwards.
+	return coreotel.Float64(key, value)
+}
 
 // ── The ports ────────────────────────────────────────────────────────────────
 
