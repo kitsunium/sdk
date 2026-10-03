@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
@@ -129,7 +130,7 @@ func TestTheWindowsDirectoryRuleIsTheRightToReplaceSomebodyElsesEntry(t *testing
 			//: and the code, because an operator acts on
 			//: LOCK_DIRECTORY_UNSAFE by changing an ACL and on anything else
 			//: by filing a bug against this package.
-			if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+			if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 				t.Fatalf("NewFileLocker on a directory granting %s %q = %v, want LOCK_DIRECTORY_UNSAFE", c.sid, c.grant, err)
 			}
 			//: verdict pinned.
@@ -180,7 +181,7 @@ func TestADirectoryCreatedUnderAWritableParentIsRefused(t *testing.T) {
 	}
 	//: the same code the existing-directory path reports, because it is the
 	//: same fault found one branch earlier.
-	if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+	if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 		t.Fatalf("NewFileLocker on a fresh directory under an Everyone-writable parent = %v, want LOCK_DIRECTORY_UNSAFE", err)
 	}
 }
@@ -233,7 +234,7 @@ func TestAnIndirectionAboveTheLockFileIsRefusedWhenAnybodyCanWriteItsContainer(t
 	//: the code matters as much as the refusal: an operator acts on
 	//: LOCK_PATH_REDIRECTED by looking at the path, and on anything else by
 	//: filing a bug against this package.
-	if !errs.HasCode(err, svclock.CodeLockPathRedirected) {
+	if !errs.HasCode(err, corelock.CodeLockPathRedirected) {
 		t.Fatalf("NewFileLocker under a junction in an Everyone-writable container = %v, want LOCK_PATH_REDIRECTED", err)
 	}
 	//: and nothing was created inside the redirect target: the audit runs
@@ -308,7 +309,7 @@ func TestProgramDataIsAcceptedAsALockDirectoryAndRefusedAsAContainer(t *testing.
 		t.Fatalf("a junction planted under ProgramData was accepted — every local account can create one there")
 	}
 	//: the code, because the two refusals have different remedies.
-	if !errs.HasCode(redirectErr, svclock.CodeLockPathRedirected) {
+	if !errs.HasCode(redirectErr, corelock.CodeLockPathRedirected) {
 		t.Fatalf("NewFileLocker under a junction planted in ProgramData = %v, want LOCK_PATH_REDIRECTED", redirectErr)
 	}
 }
@@ -346,7 +347,7 @@ func TestTheSystemTemporaryDirectoryIsRefused(t *testing.T) {
 		t.Fatalf("%s was accepted as a lock directory — BUILTIN\\Users holds full control on it, which is the exposure ADR 0084 §Consequences said was refused", systemTemp)
 	}
 	//: the code, because the remedy is an ACL and not a retry.
-	if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+	if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 		t.Fatalf("NewFileLocker on %s = %v, want LOCK_DIRECTORY_UNSAFE", systemTemp, err)
 	}
 }

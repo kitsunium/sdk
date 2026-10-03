@@ -28,6 +28,7 @@ import (
 	"io/fs"
 	"log"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/fs/winacl"
 )
@@ -122,7 +123,7 @@ func checkDir(dir string, _ fs.FileInfo) error {
 	}
 	//: LOCK_DIRECTORY_UNSAFE, naming the identifier and the rights rather than
 	//: a mode that would have meant nothing on this platform.
-	return kerrs.Wrap(LockDirectoryUnsafe, kerrs.WrapParams{},
+	return kerrs.Wrap(corelock.LockDirectoryUnsafe, kerrs.WrapParams{},
 		kerrs.String("path", dir),
 		kerrs.String("mode", observed))
 }

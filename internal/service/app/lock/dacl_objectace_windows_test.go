@@ -10,6 +10,7 @@ import (
 	"testing"
 	"unsafe"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
@@ -201,7 +202,7 @@ func TestAnObjectTypeAceIsJudgedRatherThanSkipped(t *testing.T) {
 			t.Fatalf("a directory granting Everyone FILE_DELETE_CHILD through an object-type ACE carrying %d GUID(s) was accepted", c.guids)
 		}
 		//: the code, because the remedy is an ACL and not a retry.
-		if !errs.HasCode(err, svclock.CodeLockDirectoryUnsafe) {
+		if !errs.HasCode(err, corelock.CodeLockDirectoryUnsafe) {
 			t.Fatalf("NewFileLocker on a directory whose object-type ACE carries %d GUID(s) = %v, want LOCK_DIRECTORY_UNSAFE", c.guids, err)
 		}
 	}

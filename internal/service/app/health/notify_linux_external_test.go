@@ -171,7 +171,7 @@ func TestAFailedReadyIsSentAgain(t *testing.T) {
 	serving := switchableReadiness(t, registry)
 	ctx := context.Background()
 	registry.Probe(ctx, corehealth.ProbeReadiness)
-	if len(failures) != 1 || !errs.HasCode(failures[0], svchealth.CodeNotifyFailed) {
+	if len(failures) != 1 || !errs.HasCode(failures[0], corehealth.CodeNotifyFailed) {
 		t.Fatalf("a READY=1 nobody received: the hook saw %v, want one NOTIFY_FAILED", failures)
 	}
 	//: the supervisor is reachable from here on.
