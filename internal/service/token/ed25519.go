@@ -5,7 +5,7 @@ import (
 	"crypto/ed25519"
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
-	"github.com/kitsunium/sdk/internal/service/crypto/ed25519sig"
+	"github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig"
 )
 
 // ed25519Signing is Ed25519 signing. It carries its algorithm as a field

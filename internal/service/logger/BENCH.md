@@ -255,15 +255,15 @@ way anyone would ever find out; wire it.
 The most expensive middleware by two orders of magnitude. `-memprofile`:
 
 ```
-   1936397 17.90%  crypto/aesgcm.aesGCM.Seal  .../aesgcm/aesgcm.go:74
-   1850498 17.11%  encwrite.frame             .../encwrite/encwrite.go:174
+   1936397 17.90%  crypto/aead/aesgcm.aesGCM.Seal  .../aesgcm/aesgcm.go:74
+   1850498 17.11%  encwrite.frame                  .../encwrite/encwrite.go:174
    1842500 17.03%  crypto/internal/fips140/aes/gcm.New       (inline)
-   1835036 16.96%  crypto/aesgcm.aesGCM.Seal  .../aesgcm/aesgcm.go:62
+   1835036 16.96%  crypto/aead/aesgcm.aesGCM.Seal  .../aesgcm/aesgcm.go:62
    1741650 16.10%  crypto/internal/fips140/aes.New           (inline)
    1572911 14.54%  bytes.Clone
 ```
 
-**Five of the six allocations are inside `internal/service/crypto/aesgcm`, and
+**Five of the six allocations are inside `internal/service/crypto/aead/aesgcm`, and
 the dominant one is that `aes.NewCipher` + `cipher.NewGCM` run on EVERY
 record** — a full AES key schedule expansion per log line, plus a `bytes.Clone`
 of the key. A cached `cipher.AEAD` held beside the subkey would remove four of
@@ -399,7 +399,7 @@ is recorded here for whoever measures that.
   linear or constant. Nothing to reclaim.
 
 **Reported to other owners:**
-- `internal/service/crypto/aesgcm.Seal` builds a fresh AES cipher and GCM AEAD
+- `internal/service/crypto/aead/aesgcm.Seal` builds a fresh AES cipher and GCM AEAD
   **per call** — 5 of `encwrite`'s 6 allocations and most of its 1 318 ns.
 - `async`'s `ringMu` costs ~33 % of a 196 ns hand-off, and an unpaced producer
   starves the drainer into dropping 93 % of records.

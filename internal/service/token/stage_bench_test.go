@@ -12,8 +12,8 @@ import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
-	"github.com/kitsunium/sdk/internal/service/crypto/ed25519sig"
-	"github.com/kitsunium/sdk/internal/service/crypto/hmacsha2"
+	"github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2"
+	"github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig"
 )
 
 // stageIssuer is the issuer string the white-box token carries.

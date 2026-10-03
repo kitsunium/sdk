@@ -57,8 +57,9 @@ mix: a digest carries no secret, `Open`/`Verify`/`MACVerify` are constant-time
 or non-oracle, `Subkey` rejects passwords by contract, password hashing is the
 one deliberately-slow surface, the raw `Shared` secret is never handed back
 un-KDF'd, and `SealStream`/`OpenStream` reuse the AEAD `UnknownAlgorithm` miss
-because streaming extends the AEAD domain. `pkg/v1/{crypto,hash,sign,kdf,password,mac,agree}`
-re-export these surfaces (the streaming verbs ride `pkg/v1/crypto`).
+because streaming extends the AEAD domain. `pkg/v1/crypto` and its children
+`pkg/v1/crypto/{hash,sign,kdf,password,mac,agree}` re-export these surfaces
+(the streaming verbs ride `pkg/v1/crypto`).
 
 ## Wire format
 

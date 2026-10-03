@@ -11,7 +11,7 @@ import (
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 )
 

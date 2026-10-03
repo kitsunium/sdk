@@ -174,7 +174,7 @@ export default [
     title: "Content hashing",
     blurb:
       "Sum / SumHex / New across 5 stdlib algorithms (SHA-256/512, SHA3-256, CRC32C, FNV-1a) for cache keys, content IDs and dedup — one-shot or streaming.",
-    anchor: "pkg/v1/hash/hash.go",
+    anchor: "pkg/v1/crypto/hash/hash.go",
     links: { adr: "0013" },
   },
   {
@@ -183,7 +183,7 @@ export default [
     title: "Content-addressed I/O",
     blurb:
       "DigestWriter tees writes while hashing; VerifyingReader checks an expected digest on EOF — content addressing without a second pass.",
-    anchor: "pkg/v1/hash/hash.go",
+    anchor: "pkg/v1/crypto/hash/hash.go",
     links: { adr: "0013" },
   },
 
@@ -194,7 +194,7 @@ export default [
     title: "Detached signatures",
     blurb:
       "GenerateKey / Sign / Verify with Ed25519 or ECDSA-P256 — constant-time verify, non-oracle (an invalid signature is (false, nil)).",
-    anchor: "pkg/v1/sign/sign.go",
+    anchor: "pkg/v1/crypto/sign/sign.go",
     links: { adr: "0013" },
   },
 
@@ -205,7 +205,7 @@ export default [
     title: "Message authentication",
     blurb:
       "Tag / Verify under a shared secret (HMAC-SHA256) with constant-time comparison for detached integrity + authenticity.",
-    anchor: "pkg/v1/mac/mac.go",
+    anchor: "pkg/v1/crypto/mac/mac.go",
     links: { adr: "0014" },
   },
 
@@ -216,7 +216,7 @@ export default [
     title: "Key derivation (HKDF)",
     blurb:
       "Subkey expands one strong secret into independent, purpose-bound subkeys (HKDF-SHA256) for key separation.",
-    anchor: "pkg/v1/kdf/kdf.go",
+    anchor: "pkg/v1/crypto/kdf/kdf.go",
     links: { adr: "0013" },
   },
   {
@@ -225,7 +225,7 @@ export default [
     title: "Hierarchical key tree",
     blurb:
       "NewKeyTree + Child(...).DeriveKey() derive path-addressed subkeys for structured key hierarchies.",
-    anchor: "pkg/v1/kdf/kdf.go",
+    anchor: "pkg/v1/crypto/kdf/kdf.go",
     links: { adr: "0014" },
   },
 
@@ -236,7 +236,7 @@ export default [
     title: "Key agreement (ECDH)",
     blurb:
       "GenerateKey / SharedKey (X25519) let two parties derive the same symmetric Key without transmitting it — the raw DH secret is HKDF'd, never returned.",
-    anchor: "pkg/v1/agree/agree.go",
+    anchor: "pkg/v1/crypto/agree/agree.go",
     links: { adr: "0014" },
   },
 
@@ -247,7 +247,7 @@ export default [
     title: "Password hashing + verify",
     blurb:
       "Hash / Verify / NeedsRehash with deliberately-slow PBKDF2-SHA256 and a self-describing PHC string for transparent upgrades.",
-    anchor: "pkg/v1/password/password.go",
+    anchor: "pkg/v1/crypto/password/password.go",
     links: { adr: "0013" },
   },
 ];

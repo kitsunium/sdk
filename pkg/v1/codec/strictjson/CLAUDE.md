@@ -22,9 +22,12 @@ never quote the input.
 
 `pkg/v1/codec` blank-imports all sixteen codecs, so importing it for one strict
 decoder would link BSON, CBOR, MessagePack, TOML and YAML into a server that
-reads JSON bodies. This is a separate facade for that reason, the way
-`pkg/v1/hash` and `pkg/v1/sign` are separate from `pkg/v1/crypto`. It is not a
-codec Format: `codec.Unmarshal(codec.JSON, …)` keeps meaning what it meant.
+reads JSON bodies. This is a separate facade for that reason — a child of
+`pkg/v1/codec` that does not link it, because Go links what a package imports
+and never its parent directory, exactly as `pkg/v1/crypto/hash` and
+`pkg/v1/crypto/sign` are children of `pkg/v1/crypto` that do not link it
+(ADR 0155). It is not a codec Format: `codec.Unmarshal(codec.JSON, …)` keeps
+meaning what it meant.
 
 ## README is generated
 

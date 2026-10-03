@@ -10,7 +10,7 @@ import (
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 )
 
@@ -21,7 +21,7 @@ import (
 var benchJWKSSizes = []int{1, 4, 16, 64}
 
 // benchJWKSKid renders a FIXED-WIDTH kid, for the reason recorded in
-// internal/service/crypto/jwk's benchKid: Go compares strings by length
+// internal/service/crypto/key/jwk's benchKid: Go compares strings by length
 // first, so ragged kids make a lookup's cost depend on how many digits the
 // index happens to have rather than on where the match sits.
 func benchJWKSKid(index int) string {

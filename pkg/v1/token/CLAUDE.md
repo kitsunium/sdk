@@ -5,7 +5,7 @@
 The public facade for the SDK's security-token domain (ADR 0042): JWT over JWS
 Compact Serialization (RFC 7519) and PASETO v4.public. Type aliases onto
 `internal/core/token` + thin delegates onto `internal/service/token` and — for
-loading a published key — `internal/service/crypto/jwk`, plus two generic
+loading a published key — `internal/service/crypto/key/jwk`, plus two generic
 helpers (`PrivateClaim` / `SetPrivateClaim`) that keep `encoding/json` out of
 the core value type. Stdlib-only, so a consumer gains no dependency.
 
@@ -20,7 +20,7 @@ half.
 | `token.go` | package doc + the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`) + `NewClaims` / `PrivateClaim` / `SetPrivateClaim` |
 | `constants.go` | the four `Algorithm*` values, the seven `Claim*` names, and the JWK vocabulary: three `KeyType*` and four `Curve*` values |
 | `constructors.go` | `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve` aliases + the ten issuer/verifier `New*` delegates + the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet` |
-| `sentinels.go` | the 29 verdict vars, re-exported from core, service and `service/crypto/jwk` (the six `JWK*` parse refusals) |
+| `sentinels.go` | the 29 verdict vars, re-exported from core, service and `service/crypto/key/jwk` (the six `JWK*` parse refusals) |
 | `codes.go` | the 29 `Code*` constants, re-exported for `errs.HasCode` |
 
 ## Why the codes are re-exported
@@ -28,7 +28,7 @@ half.
 `codes.go` declares `const CodeExpired errs.Code = coretoken.CodeExpired` and
 twenty-eight siblings. These are **re-exports, not declarations**: the ranges
 `0.2.13.*`, `0.3.44.*` and `0.3.42.*` stay owned by `internal/core/token`,
-`internal/service/token` and `internal/service/crypto/jwk`, and the ADR 0035
+`internal/service/token` and `internal/service/crypto/key/jwk`, and the ADR 0035
 ownership audit skips a cross-package selector for exactly this case ("pkg/v1
 aliasing an internal sentinel does not make it an owner"). For the same reason
 `scripts/gen-error-codes.sh` never lists them: it matches literal `= 0x…`
@@ -43,12 +43,12 @@ is ever removed.
 
 ## Why the JWK loaders are here
 
-`JWK` and `JWKSet` alias `service/crypto/jwk.KeyValue` / `Set`, whose fields are
+`JWK` and `JWKSet` alias `service/crypto/key/jwk.KeyValue` / `Set`, whose fields are
 all unexported, so the alias alone publishes a type no consumer can BUILD: every
 function that constructs one lives under `internal/`, which Go forbids a
 consumer to import. `NewVerifierFromJWK` and `NewSetVerifier` shipped in exactly
 that state — taking an argument nothing public could produce — and
-`wiring_external_test.go` hid it by importing `internal/service/crypto/jwk` to
+`wiring_external_test.go` hid it by importing `internal/service/crypto/key/jwk` to
 build its keys. ADR 0042 excludes FETCHING a key document, not PARSING one: its
 D2 has the relying party fetch the document and hand it over.
 
@@ -105,7 +105,7 @@ reason `Claims` aliases `ClaimsValue`.
   defect above shipped.
 - Do not add an `UnmarshalJSON`, or any second decoding route, for `JWK` or
   `JWKSet`. `ParseJWK` / `ParseJWKSet` delegate to `jwk.Parse`, the single place
-  its checks live — see `internal/service/crypto/jwk/CLAUDE.md` §Why there is no
+  its checks live — see `internal/service/crypto/key/jwk/CLAUDE.md` §Why there is no
   `UnmarshalJSON`.
 
 ## Verification

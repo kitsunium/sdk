@@ -14,8 +14,8 @@ import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/encwrite"
 )
 

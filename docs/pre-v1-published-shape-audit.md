@@ -173,12 +173,12 @@ change; a plain shape is as exposed as group B.
 | `Conn` | `Conn` | `corenet` | `pkg/v1/server/server.go` |
 | `Conn` | `Conn` | `svcws` | `pkg/v1/server/websocket/websocket.go` |
 | `ManualClock` | `ManualClock` | `kclock` | `pkg/v1/clock/clock.go` |
-| `DigestWriter` | `DigestWriter` | `stdhash` | `pkg/v1/hash/hash.go` |
+| `DigestWriter` | `DigestWriter` | `stdhash` | `pkg/v1/crypto/hash/hash.go` |
 | `Group` | `Group` | `coreproc` | `pkg/v1/cgroup/cgroup.go` |
 | `Handler` | `Handler` | `svcev` | `pkg/v1/events/events.go` |
 | `ID` | `ID` | `coresession` | `pkg/v1/session/session.go` |
-| `Key` | `Key` | `corecrypto` | `pkg/v1/agree/agree.go` |
-| `KeyTree` | `KeyTree` | `keytree` | `pkg/v1/kdf/kdf.go` |
+| `Key` | `Key` | `corecrypto` | `pkg/v1/crypto/agree/agree.go` |
+| `KeyTree` | `KeyTree` | `keytree` | `pkg/v1/crypto/kdf/kdf.go` |
 | `Listener` | `Listener` | `coreproc` | `pkg/v1/sdnotify/sdnotify.go` |
 | `Listener` | `Listener` | `corev` | `pkg/v1/events/events.go` |
 | `MemorySink` | `Memory` | `memory` | `pkg/v1/logger/memory.go` |
@@ -190,7 +190,7 @@ change; a plain shape is as exposed as group B.
 | `Group` | `StreamGroup` | `svcserver` | `pkg/v1/server/server.go` |
 | `Tracer` | `Tracer` | `coretrace` | `pkg/v1/trace/trace.go` |
 | `LevelVar` | `Var` | `level` | `pkg/v1/logger/levelvar.go` |
-| `VerifyingReader` | `VerifyingReader` | `stdhash` | `pkg/v1/hash/hash.go` |
+| `VerifyingReader` | `VerifyingReader` | `stdhash` | `pkg/v1/crypto/hash/hash.go` |
 
 ## Regenerating
 

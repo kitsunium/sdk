@@ -108,7 +108,7 @@ And the same profile's crypto line, extracted by name because it does not reach
 the top eighteen:
 
 ```
-         0     0% 21.02%      0.33s  4.82%  ...crypto/hmacsha2.hmacSHA256.Verify
+         0     0% 21.02%      0.33s  4.82%  ...crypto/mac/hmacsha2.hmacSHA256.Verify
 ```
 
 **That single line is the report's first finding.** The signature — the thing a
@@ -761,7 +761,7 @@ denominator it always was.
 
 Same method as §Method: median of nine across three processes, `-benchtime=1s`,
 typed sinks, pprof first. Full machine stamp and the complete jwk-side
-decomposition are in **`internal/service/crypto/jwk/BENCH.md`**, which was
+decomposition are in **`internal/service/crypto/key/jwk/BENCH.md`**, which was
 written with this section and holds the profiles verbatim.
 
 ### 16.1 The finding
@@ -781,7 +781,7 @@ The allocation profile, verbatim:
 
 ```
          0     0%  2.31%     120635 28.24%  ...token.bindJWK
-         0     0% 17.27%      73857 17.29%  ...crypto/jwk.KeyValue.ECDSAPublic
+         0     0% 17.27%      73857 17.29%  ...crypto/key/jwk.KeyValue.ECDSAPublic
       2531  0.59% 18.44%      63204 14.80%  crypto/x509.MarshalPKIXPublicKey
       4991  1.17% 20.18%      50549 11.83%  encoding/asn1.MarshalWithParams
       2531  0.59% 37.18%      27841  6.52%  crypto/x509.ParsePKIXPublicKey
@@ -853,7 +853,7 @@ Every mechanical claim in it is true — no map index, `KeyValue` is 176 B, one
 match is one allocation — and it is **0.53 % of a JWK Set verification's
 allocations and half a percent of its latency.** Refuted as a cost, and
 measured rather than dismissed; the slope (**10.12 ns per set member**) and its
-decomposition are in `internal/service/crypto/jwk/BENCH.md` §4.
+decomposition are in `internal/service/crypto/key/jwk/BENCH.md` §4.
 
 End to end, sweeping 1 → 64 keys moved a whole verification by **2 215 ns
 (1.4 %)** before and **783 ns (0.55 %)** after — both smaller than the rows'
@@ -948,7 +948,7 @@ against the end-to-end delta's **8.05 %** — **2.7 % apart** as a share, which 
 the only directly comparable form. The same code costs 8 434 ns timed alone and
 12 953 ns timed between a P-256 scalar multiplication and an
 eighty-one-allocation JSON decode — **1.48×**, and it is cache locality, not
-collection. `internal/service/crypto/jwk/BENCH.md` §7 has the table.
+collection. `internal/service/crypto/key/jwk/BENCH.md` §7 has the table.
 
 **The allocation column does not inflate**: 49, 50.1 and 50 across the three
 instruments that report it. That asymmetry is why the regression gate counts

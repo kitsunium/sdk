@@ -4,7 +4,7 @@ package token
 import (
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
-	"github.com/kitsunium/sdk/internal/service/crypto/hmacsha2"
+	"github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2"
 )
 
 // hs256Binding is HMAC-SHA-256 over a 256-bit shared secret. It is the only

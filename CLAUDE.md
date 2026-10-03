@@ -9,7 +9,7 @@ Go SDK providing a normed, performant toolbox for downstream applications: the m
 |---|---|---|---|
 | `errs` | root | Typed errors: `Define` / `Wrap`, dotted-quad `MM.LL.PP.SS` codes, a wire-safe `Public` and a log-only `Private`, origin wins on wrap | 0002, 0005, 0006, 0019, 0020, 0035, 0160, 0161 |
 | `clock` | root | The time port — `Clock`, `Waiter`, `Timed`, `System`, `ManualClock`; every SDK wait runs on an injected clock | 0039, 0090 |
-| `crypto` | crypto | AEAD `Seal` / `Open` with a hidden nonce, and beside it hashes, MACs, KDFs, signatures, key agreement, password hashing (with `IsCommon`) and JWK/JWKS | 0013, 0014, 0143 |
+| `crypto` | crypto | AEAD `Seal` / `Open` with a hidden nonce at the family's root, and as its children hashes, MACs, KDFs, signatures, key agreement, password hashing (with `IsCommon`) and JWK/JWKS | 0013, 0014, 0143 |
 | `secret` | security | A `Value` no rendering writes down; versioned stores (memory, environment, sealed file), a keyring and a rotator; one key per subject, destroyed to erase | 0096, 0142 |
 | `redact` | security | Display redaction of values, JSON, text and log attributes — names, declared fields, URL credentials — within an exact byte bound | 0101 |
 | `token` | security | JWT over JWS Compact and PASETO v4.public; the algorithm is bound by the constructor, never read from the token | 0042 |
@@ -88,9 +88,12 @@ internal/
                                          recover,route,sample,tee})
                    writer (console, dbsink, file, journald, levelgate,
                            nettransport, rotfile)
-                   crypto (aesgcm, commonpw, ecdsasig, ed25519sig,
-                           hkdfsha256, hmacsha2, jwk, keyenvelope, keytree,
-                           pbkdf2pw, stdhash, streamaead, x25519)
+                   crypto (the schemes by role — ADR 0155:
+                           aead/{aesgcm, streamaead}, agree/{x25519},
+                           hash/{stdhash}, kdf/{hkdfsha256, keytree},
+                           key/{jwk, keyenvelope}, mac/{hmacsha2},
+                           password/{commonpw, pbkdf2pw},
+                           sign/{ecdsasig, ed25519sig})
                    codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
                            form, json, msgpack, multipart, ndjson, pem, tlv, toml,
                            xml, yaml; + strictjson, a decoder and not a Format;
@@ -158,7 +161,8 @@ pkg/
     │                 + jsonpatch/ — two documents' difference — ADR 0143;
     │                 + json/, yaml/, toml/, bson/ — one format each — ADR 0134;
     │                 bson/ also names BSON's value types)
-    ├── crypto/    (AEAD and keys; its scheme facades are siblings, not children:
+    ├── crypto/    (AEAD and keys at the family's root; its scheme facades are
+    │                 its children — a child never links its parent, ADR 0155:
     │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
     │                 since ADR 0143)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)

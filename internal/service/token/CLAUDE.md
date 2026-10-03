@@ -6,8 +6,8 @@
 The two concrete security-token formats behind the `core/token` ports: **JWT
 over JWS Compact Serialization** (RFC 7519 + RFC 7515) and **PASETO v4.public**.
 Stdlib-only, composing the SDK's own crypto schemes rather than reimplementing
-them — HMAC-SHA-256 from `service/crypto/hmacsha2`, Ed25519 from
-`service/crypto/ed25519sig`, key material from `service/crypto/jwk`. No
+them — HMAC-SHA-256 from `service/crypto/mac/hmacsha2`, Ed25519 from
+`service/crypto/sign/ed25519sig`, key material from `service/crypto/key/jwk`. No
 dependency is added to `internal/service`.
 
 Code range: `0.3.44.*` (ADR 0042). The domain verdicts a caller matches on live
@@ -73,7 +73,7 @@ exactly as trustworthy as the key itself.
 | §3.2 Use Appropriate Algorithms | **covered** | Closed set: HS256, ES256, EdDSA, PASETO v4.public. `none` has no representation in the `Algorithm` enum. Agility is a new constructor, not a config string. |
 | §3.3 Validate All Cryptographic Operations | **covered** | One verdict, whole-token: a failed signature returns `SignatureInvalid` and the ZERO claim set. There is no partial-acceptance path. |
 | §3.4 Validate Cryptographic Inputs | **covered** | EC public keys are validated as curve points via `(*ecdsa.PublicKey).ECDH()`, not merely measured; an ES256 private key's scalar must be present, in range, and derive exactly its declared public point (go1.27's `ecdsa` dereferences a nil `D` on the first `Sign`, and signs with a mismatched one without comparing); Ed25519 key lengths are checked before the stdlib would panic; ES256 signatures must be exactly 64 octets. |
-| §3.5 Sufficient Key Entropy | **partial** | The LENGTH half is structural: HS256 takes a `core/crypto.Key`, fixed at 256 bits, so a short passphrase cannot become one. The ENTROPY half is **not measurable here** — a 32-byte key of ASCII is still 32 bytes. Derive one (`pkg/v1/kdf`); do not type one. |
+| §3.5 Sufficient Key Entropy | **partial** | The LENGTH half is structural: HS256 takes a `core/crypto.Key`, fixed at 256 bits, so a short passphrase cannot become one. The ENTROPY half is **not measurable here** — a 32-byte key of ASCII is still 32 bytes. Derive one (`pkg/v1/crypto/kdf`); do not type one. |
 | §3.6 Avoid Compression of Encryption Inputs | **not applicable** | No JWE, no compression. |
 | §3.7 Use UTF-8 | **covered on both paths** | An issuer refuses every string it would write that is not valid UTF-8: `iss`/`sub`/`jti`/each `aud` and every private claim's name and bytes at `Issue` (`ISSUE_FAILED`), and the configured `Issuer`/`Type`/`KeyID` at construction (`POLICY_MISCONFIGURED`). Nothing downstream would: `quoteJSONString` passes bytes through, `json.Marshal` REWRITES a bad map key to U+FFFD, and `encoding/json`'s decoder turns `a\xff` and `a\xfe` into one string — so two subjects the caller kept apart would verify as one. A token some OTHER issuer wrote is held to the same rule on the way in: `parseJOSEHeader` and `decodeClaims` refuse a header or claims object that is not UTF-8 (`MALFORMED`) before `encoding/json` can replace a bad byte — without it, subjects `a\xff` and `a\xfe` both verified as `a\ufffd` (`TestTextThatIsNotUTF8IsRefusedOnVerify`). It costs 20–30 ns on a realistic claims object. The base64url decoder is strict, so there is no second encoding to admit either. |
 | §3.8 Validate Issuer and Subject | **partial** | `VerifierConfig.Issuer` is checked when set. The section's stronger requirement — that the KEY belongs to the claimed issuer — is the caller's: this package verifies against the key it was handed and cannot know whose it is. `NewSetVerifier` narrows it (the set comes from one publisher), it does not close it. **`sub` is not validated**: only the application knows what a subject may be. |
@@ -156,7 +156,7 @@ profiles and the reconciliation.
 
 `jwk.Set.AllByKid`'s O(n) scan was measured too and is **refuted as a cost**:
 **10.12 ns per set member** and one 176 B allocation, i.e. 0.53 % of a JWK Set
-verification's allocations and half a percent of its latency. See `internal/service/crypto/jwk/BENCH.md` §4.
+verification's allocations and half a percent of its latency. See `internal/service/crypto/key/jwk/BENCH.md` §4.
 
 **"Is verification mostly crypto?" has two opposite answers.** HS256 is
 **4.5 % signature, 95.5 % this package**; every asymmetric option is
@@ -285,7 +285,7 @@ Two more PASETO decisions:
   test row, and each exists so one token has exactly one spelling.
 - Do not reach for `bytes.Equal` on a tag. The only secret comparison in this
   package is `hmacsha2.MAC.Verify`, which is `hmac.Equal`.
-- Do not fetch a JWKS here. Same rule as `service/crypto/jwk`: retrieval is a
+- Do not fetch a JWKS here. Same rule as `service/crypto/key/jwk`: retrieval is a
   connector with its own failure modes (SSRF, TTL, retries), and none of them
   are token concerns.
 
@@ -349,7 +349,7 @@ sides).
 ## Linter exemptions
 
 Two scoped entries in `.ktn-linter.yaml`, both justified there and both the
-same class already granted to `service/crypto/jwk` and `core/net`:
+same class already granted to `service/crypto/key/jwk` and `core/net`:
 
 - `KTN-VAR-BIGSTRUCT` — `ClaimsValue` (152 B) and the four config structs are
   passed by value because immutability and redaction are the point.

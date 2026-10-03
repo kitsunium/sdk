@@ -4,14 +4,15 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 52 at the top level, plus twelve nested ones
+`pkg/v1` ships **64 packages**: 46 at the top level, plus eighteen nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
 `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
-`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`), and links the standard
-library and nothing else (ADR 0156). They are grouped below by the job they do,
-and each links to its own generated `README.md`. The distribution mechanisms
-that close the list are the framework's packages, imported from
-`github.com/kitsunium/sdk/framework/…` (ADR 0158).
+`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, and the six scheme
+facades under `crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign`),
+and links the standard library and nothing else (ADR 0156). They are grouped
+below by the job they do, and each links to its own generated `README.md`. The
+distribution mechanisms that close the list are the framework's packages,
+imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ### Observability
 
@@ -58,7 +59,7 @@ that close the list are the framework's packages, imported from
 |---|---|
 | [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) / [`bson`](./pkg/v1/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links the SDK's own YAML reader and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
-| [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
+| [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/crypto/hash), [`sign`](./pkg/v1/crypto/sign), [`mac`](./pkg/v1/crypto/mac), [`kdf`](./pkg/v1/crypto/kdf), [`agree`](./pkg/v1/crypto/agree), [`password`](./pkg/v1/crypto/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
 | [`secret`](./pkg/v1/secret) | A secret is a value no rendering writes down: `secret.Value` prints `<redacted>` under every fmt verb, JSON, text and slog, reveals its bytes only through `Reveal`, and decodes from a configuration string like any field. Versioned stores — memory, the environment with the Docker/Kubernetes `NAME_FILE` convention, a 0700 directory of atomically published records sealed with AES-256-GCM — a `Keyring` whose boxes name the version that sealed them so a rotation never breaks what came before it, and a `Rotator` that keeps at least two. `SubjectKeys`: one data key per subject under that rotating root, so a rotation re-wraps one small key per subject and never a field, and destroying a subject's key erases every copy it sealed. |
 | [`session`](./pkg/v1/session) | Server-side sessions. `Regenerate` is the only call that binds a subject and always mints a new identifier, so session fixation is prevented by the **absence** of any other spelling rather than by remembering a step. |

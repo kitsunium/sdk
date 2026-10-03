@@ -1,8 +1,8 @@
 // Package token implements the two concrete security-token formats behind the
 // core/token ports: JWT over JWS Compact Serialization (RFC 7519 + RFC 7515)
 // and PASETO v4.public. It is stdlib-only and composes the SDK's own crypto
-// schemes — HMAC-SHA-256 from service/crypto/hmacsha2, Ed25519 from
-// service/crypto/ed25519sig — so it adds no dependency to internal/service.
+// schemes — HMAC-SHA-256 from service/crypto/mac/hmacsha2, Ed25519 from
+// service/crypto/sign/ed25519sig — so it adds no dependency to internal/service.
 //
 // # Algorithm confusion is prevented by the constructor set, not by a check
 //

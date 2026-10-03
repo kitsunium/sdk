@@ -29,8 +29,8 @@ import (
 	"github.com/kitsunium/sdk/internal/service/logger/sink/memory"
 	"github.com/kitsunium/sdk/internal/service/logger/sink/syslog"
 
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
 
 const (

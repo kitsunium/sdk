@@ -10,9 +10,9 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/kdf"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/mac"
 	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/kdf"
-	"github.com/kitsunium/sdk/pkg/v1/mac"
 	"github.com/kitsunium/sdk/pkg/v1/secret"
 )
 

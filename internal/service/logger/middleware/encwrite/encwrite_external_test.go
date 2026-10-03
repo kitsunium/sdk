@@ -12,8 +12,8 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/logger/middleware/encwrite"
 
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
 
 // recordingSink captures the bytes handed to it for assertions.

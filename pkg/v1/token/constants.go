@@ -3,7 +3,7 @@ package token
 
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
 
 // AlgorithmHS256 is JOSE "HS256" — HMAC-SHA-256 over a 256-bit shared secret

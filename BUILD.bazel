@@ -95,7 +95,7 @@ filegroup(
         "//internal/service/codec/xml:audit_srcs",
         "//internal/service/codec/yaml:audit_srcs",
         "//internal/service/config:audit_srcs",
-        "//internal/service/crypto/jwk:audit_srcs",
+        "//internal/service/crypto/key/jwk:audit_srcs",
         "//internal/service/docstore:audit_srcs",
         "//internal/service/events:audit_srcs",
         "//internal/service/health:audit_srcs",

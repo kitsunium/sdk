@@ -38,10 +38,10 @@ go_library(
         "//framework/internal/core/selfupdate",
         "//internal/kernel/errs",
         "//pkg/v1/clock",
-        "//pkg/v1/hash",
+        "//pkg/v1/crypto/hash",
+        "//pkg/v1/crypto/sign",
         "//pkg/v1/proc",
         "//pkg/v1/semver",
-        "//pkg/v1/sign",
     ],
 )
 

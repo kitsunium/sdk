@@ -975,7 +975,7 @@ rules:
       # records.
       - "**/internal/service/net/sse/**"
       - "internal/service/net/sse/**"
-      # crypto/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
+      # crypto/key/jwk.KeyValue has no from-parts constructor ON PURPOSE. Every
       # KeyValue comes out of Parse or a From* bridge, and each of those
       # validates the material — coordinates at the curve's fixed length, the
       # point actually on the curve, "d" actually deriving the declared "x"/"y".
@@ -983,8 +983,8 @@ rules:
       # of it, i.e. exactly the "poorly initialized struct" the rule exists to
       # prevent. (The rule's own message here reads "constructor
       # NewNewKeyValue()", which is not a name anything could satisfy.)
-      - "**/internal/service/crypto/jwk/**"
-      - "internal/service/crypto/jwk/**"
+      - "**/internal/service/crypto/key/jwk/**"
+      - "internal/service/crypto/key/jwk/**"
       # core/otel.AttrValue is built by FOUR kind-specific constructors —
       # String / Bool / Int64 / Float64 — and by nothing else: the value payload
       # is unexported precisely so a struct literal cannot produce an attribute
@@ -1461,7 +1461,7 @@ rules:
       # ADR 0016 avoids for process.Spec above.
       - "**/pkg/v1/authz/**"
       - "pkg/v1/authz/**"
-      # crypto/jwk.KeyValue (176 B) — the value receiver is the security
+      # crypto/key/jwk.KeyValue (176 B) — the value receiver is the security
       # mechanism, not a style choice, and it is the SAME precedent as
       # core/net.IdentityValue and core/crypto.Key above.
       #
@@ -1478,8 +1478,8 @@ rules:
       # The type is 176 B because a JWK genuinely carries three strings of
       # metadata plus three octet slices; shrinking it under the 64 B threshold
       # would mean dropping members the format defines.
-      - "**/internal/service/crypto/jwk/**"
-      - "internal/service/crypto/jwk/**"
+      - "**/internal/service/crypto/key/jwk/**"
+      - "internal/service/crypto/key/jwk/**"
       # The token domain, for the same two reasons as jwk and core/net above.
       #
       # ClaimsValue (152 B) is immutable by construction: the With* setters

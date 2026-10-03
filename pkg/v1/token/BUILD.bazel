@@ -16,7 +16,7 @@ go_library(
     deps = [
         "//internal/core/crypto",
         "//internal/core/token",
-        "//internal/service/crypto/jwk",
+        "//internal/service/crypto/key/jwk",
         "//internal/service/token",
         "//pkg/v1/errs",
     ],

@@ -7,13 +7,13 @@ import (
 	"bytes"
 	"fmt"
 
-	agree "github.com/kitsunium/sdk/pkg/v1/agree"
 	crypto "github.com/kitsunium/sdk/pkg/v1/crypto"
-	hash "github.com/kitsunium/sdk/pkg/v1/hash"
-	kdf "github.com/kitsunium/sdk/pkg/v1/kdf"
-	mac "github.com/kitsunium/sdk/pkg/v1/mac"
-	password "github.com/kitsunium/sdk/pkg/v1/password"
-	sign "github.com/kitsunium/sdk/pkg/v1/sign"
+	agree "github.com/kitsunium/sdk/pkg/v1/crypto/agree"
+	hash "github.com/kitsunium/sdk/pkg/v1/crypto/hash"
+	kdf "github.com/kitsunium/sdk/pkg/v1/crypto/kdf"
+	mac "github.com/kitsunium/sdk/pkg/v1/crypto/mac"
+	password "github.com/kitsunium/sdk/pkg/v1/crypto/password"
+	sign "github.com/kitsunium/sdk/pkg/v1/crypto/sign"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 )

@@ -16,7 +16,7 @@ import (
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
 
 // NewVerifierFromJWK returns a JWT verifier bound to the algorithm key's own
@@ -82,7 +82,7 @@ func NewVerifierFromJWK(key jwk.KeyValue, cfg VerifierConfig) (verifier coretoke
 // round trip — `x509.MarshalPKIXPublicKey` immediately re-parsed by
 // `x509.ParsePKIXPublicKey` — measured at 8.3 % of an ES256 JWKS
 // verification's CPU and 28.2 % of its allocated objects. See
-// `internal/service/crypto/jwk/BENCH.md`.
+// `internal/service/crypto/key/jwk/BENCH.md`.
 //
 // What deliberately did NOT move is the ORDER. Which key is selected, the
 // candidate bound, and the algorithm comparison against the binding all still

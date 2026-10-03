@@ -9,13 +9,13 @@ import (
 	"crypto/ed25519"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 )
 
 // Key is the public alias for the SDK's opaque, redacting 256-bit symmetric
 // key — the only type NewHS256Issuer / NewHS256Verifier accept. Build one with
-// pkg/v1/crypto.NewKey, or derive one with pkg/v1/kdf; never type one.
+// pkg/v1/crypto.NewKey, or derive one with pkg/v1/crypto/kdf; never type one.
 type Key = corecrypto.Key
 
 // JWK is the public alias for a parsed JSON Web Key (RFC 7517). Obtain one

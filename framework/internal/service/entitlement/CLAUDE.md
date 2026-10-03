@@ -24,7 +24,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
-| `crypto.go` | the crypto domain's operations, asked through `pkg/v1/sign` and `pkg/v1/hash` (ADR 0158 §2): `verifiedBy`, the package's one ed25519 check (roster, bundle, Roughtime); `payloadDigest`, the SHA-256 a mark compares; `sha512Prefix`, a Roughtime Merkle node. RS256 is not here — see `oidc.go` |
+| `crypto.go` | the crypto domain's operations, asked through `pkg/v1/crypto/sign` and `pkg/v1/crypto/hash` (ADR 0158 §2): `verifiedBy`, the package's one ed25519 check (roster, bundle, Roughtime); `payloadDigest`, the SHA-256 a mark compares; `sha512Prefix`, a Roughtime Merkle node. RS256 is not here — see `oidc.go` |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
 | `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance; `DefaultCacheDir`, `WithCache` |
 | `cache_lock.go` | exclusion over the cache directory — what rename does not give; `holdCacheForWrite` skips a write it cannot guard |
@@ -407,7 +407,7 @@ and lives in a module of its own because `golang.org/x/crypto/ssh` reaches
 ## Where ADR 0158 §2 is not followed, and why
 
 ADR 0158 §2 sends this package's signatures, digests, JSON, HTTP, locks and
-waits through `pkg/v1`. Signatures (`pkg/v1/sign`), digests (`pkg/v1/hash`)
+waits through `pkg/v1`. Signatures (`pkg/v1/crypto/sign`), digests (`pkg/v1/crypto/hash`)
 and the cache lock (`pkg/v1/lock`) go through it — `crypto.go` and
 `cache_lock.go`. Four things do not, each for a reason measured on this tree,
 and each is said again at its code site:

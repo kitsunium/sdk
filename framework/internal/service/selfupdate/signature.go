@@ -113,7 +113,7 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 		return err
 	}
 
-	//: STEP 1 — authenticity. An ed25519 verification, through pkg/v1/sign,
+	//: STEP 1 — authenticity. An ed25519 verification, through pkg/v1/crypto/sign,
 	//: over the manifest's exact bytes; `string(raw)` in fetchChecksums
 	//: round-trips byte-for-byte, so the signed payload and the parsed
 	//: payload are provably the same sequence.

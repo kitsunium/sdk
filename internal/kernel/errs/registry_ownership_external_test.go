@@ -113,7 +113,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_27_00: "internal/service/id",
 	0x00_03_28_00: "internal/service/codec/form",
 	0x00_03_29_00: "internal/service/codec/multipart",
-	0x00_03_2A_00: "internal/service/crypto/jwk",
+	0x00_03_2A_00: "internal/service/crypto/key/jwk",
 	0x00_03_2B_00: "internal/service/scheduler",
 	0x00_03_2C_00: "internal/service/token",
 	0x00_03_2D_00: "internal/service/metrics",

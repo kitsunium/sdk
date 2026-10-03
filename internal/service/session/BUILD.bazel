@@ -39,7 +39,7 @@ go_library(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
         "//internal/kernel/fs/pathchain",
-        "//internal/service/crypto/aesgcm",
+        "//internal/service/crypto/aead/aesgcm",
     ],
 )
 

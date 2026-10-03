@@ -31,7 +31,7 @@ go_test(
     deps = [
         "//internal/core/crypto",
         "//internal/kernel/errs",
-        "//internal/service/crypto/pbkdf2pw",
+        "//internal/service/crypto/password/pbkdf2pw",
         "@org_golang_x_crypto//argon2",
     ],
 )

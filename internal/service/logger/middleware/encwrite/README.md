@@ -16,7 +16,7 @@ Requires blank-importing the AEAD and deriver implementations:
 
 ```go
 import (
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
 ```

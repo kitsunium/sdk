@@ -47,9 +47,9 @@ go_library(
         "//internal/core/token",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-        "//internal/service/crypto/ed25519sig",
-        "//internal/service/crypto/hmacsha2",
-        "//internal/service/crypto/jwk",
+        "//internal/service/crypto/key/jwk",
+        "//internal/service/crypto/mac/hmacsha2",
+        "//internal/service/crypto/sign/ed25519sig",
     ],
 )
 
@@ -87,9 +87,9 @@ go_test(
         "//internal/core/token",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
-        "//internal/service/crypto/ed25519sig",
-        "//internal/service/crypto/hmacsha2",
-        "//internal/service/crypto/jwk",
+        "//internal/service/crypto/key/jwk",
+        "//internal/service/crypto/mac/hmacsha2",
+        "//internal/service/crypto/sign/ed25519sig",
     ],
 )
 

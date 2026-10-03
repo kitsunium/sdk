@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/token"
 
 Package token — the dotted\-quad codes a consumer routes on.
 
-These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\*, 0.3.44.\* and 0.3.42.\* are owned by internal/core/token, internal/service/token and internal/service/crypto/jwk, and the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
+These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\*, 0.3.44.\* and 0.3.42.\* are owned by internal/core/token, internal/service/token and internal/service/crypto/key/jwk, and the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
 
 ```
 switch {
@@ -673,7 +673,7 @@ The "keys" member is required — absent or null is refused with [CodeJWKMissing
 <a name="Key"></a>
 ## type [Key](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/token/constructors.go#L19>)
 
-Key is the public alias for the SDK's opaque, redacting 256\-bit symmetric key — the only type NewHS256Issuer / NewHS256Verifier accept. Build one with pkg/v1/crypto.NewKey, or derive one with pkg/v1/kdf; never type one.
+Key is the public alias for the SDK's opaque, redacting 256\-bit symmetric key — the only type NewHS256Issuer / NewHS256Verifier accept. Build one with pkg/v1/crypto.NewKey, or derive one with pkg/v1/crypto/kdf; never type one.
 
 ```go
 type Key = corecrypto.Key

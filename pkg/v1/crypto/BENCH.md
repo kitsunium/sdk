@@ -29,19 +29,19 @@ second column.
 **The table spans 1.2 million to one**, from a 121 ns checksum to a 145 ms
 password hash, and every step of that span is a decision someone made
 deliberately. The last two rows are slow BECAUSE they are slow: a passphrase
-stretcher that got faster would be weaker. See `pkg/v1/password/BENCH.md`.
+stretcher that got faster would be weaker. See `pkg/v1/crypto/password/BENCH.md`.
 
 Two rows are traps worth naming here rather than in a footnote. `crypto.WrapKey`
 lives in *this* package, next to verbs that cost a microsecond, and costs
 **143 milliseconds** — it stretches its passphrase with PBKDF2-SHA256 at 600 000
 iterations, exactly like a password hash. And `hash.Sum(FNV1a64)`, sold as the
 fast non-cryptographic fingerprint, is **slower than SHA-256 above 256 bytes**
-on this CPU; that one has its own section in `pkg/v1/hash/BENCH.md`.
+on this CPU; that one has its own section in `pkg/v1/crypto/hash/BENCH.md`.
 
 ## What the SDK costs over the bare primitive: nothing measurable
 
 This is the number that judges the facade, so it is measured directly rather
-than argued. `BenchmarkBareGCMFreshCipher*` is `service/crypto/aesgcm.Seal`
+than argued. `BenchmarkBareGCMFreshCipher*` is `service/crypto/aead/aesgcm.Seal`
 transcribed onto the stdlib with the registry lookup, the interface dispatch and
 the typed-error wrapping removed, writing the same box framing.
 
@@ -169,8 +169,8 @@ all.
 Five orders of magnitude above every other verb in this package, and correct: a
 key envelope is opened with a human passphrase, so its cost must be an
 attacker's cost too. The KEK is stretched with PBKDF2-SHA256 at **600 000
-iterations** (`service/crypto/keyenvelope`), which is the OWASP fallback figure
-and is the parameter that sets this number — `pkg/v1/password/BENCH.md` measures
+iterations** (`service/crypto/key/keyenvelope`), which is the OWASP fallback figure
+and is the parameter that sets this number — `pkg/v1/crypto/password/BENCH.md` measures
 the per-iteration cost so an operator can compute a different budget without
 re-running anything.
 

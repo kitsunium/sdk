@@ -2,7 +2,7 @@
 //
 // These are RE-EXPORTS, not declarations: the ranges 0.2.13.*, 0.3.44.* and
 // 0.3.42.* are owned by internal/core/token, internal/service/token and
-// internal/service/crypto/jwk, and the errs ownership audit skips a
+// internal/service/crypto/key/jwk, and the errs ownership audit skips a
 // cross-package selector for exactly this reason (ADR 0035). Matching on a code
 // rather than on a reason string is the stronger contract — a code is a number
 // in docs/error-codes.yaml, a reason is a spelling.
@@ -22,7 +22,7 @@ package token
 
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
-	"github.com/kitsunium/sdk/internal/service/crypto/jwk"
+	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )

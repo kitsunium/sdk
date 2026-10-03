@@ -137,7 +137,7 @@ var (
 	// non-oracle DecryptionFailed instead, so this is no key/password oracle.
 	InvalidKeyEnvelope = errs.Define(CodeInvalidKeyEnvelope, "INVALID_KEY_ENVELOPE",
 		"Key envelope is malformed",
-		"service/crypto/keyenvelope.UnwrapKey: $kenv$ string is not well-formed",
+		"service/crypto/key/keyenvelope.UnwrapKey: $kenv$ string is not well-formed",
 		errs.WithExitCode(exitDataErr))
 
 	// DigestMismatch is returned by a VerifyingReader on its final (EOF) read when
@@ -145,7 +145,7 @@ var (
 	// so the comparison is non-oracle and surfaces only at the terminal read.
 	DigestMismatch = errs.Define(CodeDigestMismatch, "DIGEST_MISMATCH",
 		"Stream digest does not match the expected value",
-		"service/crypto/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF",
+		"service/crypto/hash/stdhash.VerifyingReader: computed digest differs from the expected hex at EOF",
 		errs.WithExitCode(exitDataErr))
 
 	// DuplicateRegistration is the conflict every registrar refuses at boot: a

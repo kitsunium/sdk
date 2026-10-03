@@ -12,7 +12,7 @@
 // Activate the schemes by blank-importing the AEAD and deriver packages:
 //
 //	import (
-//		_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-//		_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+//		_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+//		_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 //	)
 package encwrite

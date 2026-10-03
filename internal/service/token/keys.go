@@ -48,7 +48,7 @@ type verifyingKey interface {
 //
 // It wraps the SENTINEL rather than the underlying cause, and that is not a
 // stylistic choice: several of these causes are themselves *errs.Error values
-// out of internal/service/crypto/jwk, and Wrap's origin-wins rule would make
+// out of internal/service/crypto/key/jwk, and Wrap's origin-wins rule would make
 // the RESULT carry the jwk package's code (0.3.42.*) instead of this domain's
 // KeyUnsuitable. A caller routing on the code would then be reading a verdict
 // about a key format where they asked about a token.
@@ -64,7 +64,7 @@ func keyUnsuitable(detail string) error {
 //
 // core/crypto.Key is fixed at 256 bits, so a short passphrase cannot become
 // one — which covers the LENGTH half of RFC 8725 §3.5. The ENTROPY half is not
-// something this package can measure: derive the key (pkg/v1/kdf) rather than
+// something this package can measure: derive the key (pkg/v1/crypto/kdf) rather than
 // typing one.
 func bindSecret(secret corecrypto.Key) (binding hs256Binding, err error) {
 	//: the zero Key holds no material; Bytes() would hand back nil.

@@ -81,7 +81,7 @@ func TestEveryConstructorIsWired(t *testing.T) {
 // the two verifiers built from what they load. Its key reaches the facade the
 // only way a consumer's can — as a JWK document, parsed by ParseJWK — because
 // this file imports nothing under internal/. It used to import
-// internal/service/crypto/jwk to build that key, which is how a facade whose
+// internal/service/crypto/key/jwk to build that key, which is how a facade whose
 // JWK constructors took an argument no consumer could build passed its own
 // wiring test.
 //

@@ -236,7 +236,7 @@ func TestAPublishedKeyVerifiesThroughThePublicAPI(t *testing.T) {
 // base64url)`. Both restored; codes.go and sentinels.go are byte-identical to
 // the pre-mutation files by SHA-256.
 //
-// MUTATION (2026-09-11), made in internal/service/crypto/jwk because that is
+// MUTATION (2026-09-11), made in internal/service/crypto/key/jwk because that is
 // where a lenient set decoder would live: parseMembers was made to skip a
 // refused member instead of refusing the document. Observed, on every row:
 // `ParseJWKSet kept 1 key(s) out of a refused document`. Restored; set.go's

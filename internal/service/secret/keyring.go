@@ -12,13 +12,13 @@ import (
 
 	// Activates the stdlib AES-256-GCM scheme the keyring and the sealed file
 	// store seal with. Stdlib-only.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 	// Activates the stdlib HKDF-SHA256 scheme the keyring derives its two
 	// purpose-bound subkeys with. Stdlib-only.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 	// Activates the stdlib HMAC-SHA256 scheme the keyring signs with.
 	// Stdlib-only.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hmacsha2"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2"
 )
 
 // boxFormat is the first byte of every box and every signature a Keyring

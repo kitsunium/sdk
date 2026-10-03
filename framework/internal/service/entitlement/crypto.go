@@ -5,8 +5,8 @@
 package entitlement
 
 import (
-	"github.com/kitsunium/sdk/pkg/v1/hash"
-	"github.com/kitsunium/sdk/pkg/v1/sign"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/hash"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/sign"
 )
 
 // sha256Size is the width of a SHA-256 digest, in bytes.

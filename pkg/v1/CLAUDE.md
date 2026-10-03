@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-03T03:40:00Z -->
 # pkg/v1/
 
 ## Purpose
@@ -50,13 +50,13 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `server/static/` | A file tree served over HTTP (ADR 0130): `New(fsys, Config)` → an `http.Handler` that cleans the name from the root, never lists a directory, falls back to the SPA shell for extension-less routes only, sends CSP / nosniff / Referrer-Policy on every response, caches content-hashed names for good, pins the web types, and answers a refused NAME 404 and a failing tree 500. stdlib-only | `pkg/v1/server/static/README.md` |
 | `view/` | Server-side rendering (ADR 0058): `New(Config{FS: …})` → a `Renderer` you `Render(ctx, name, data)`, returning the complete document or nothing — it never takes an `io.Writer`, because a mid-execution failure would already have flushed the status line and half the page. The engine is the stdlib `html/template`, USED and not reimplemented: it is the only Go engine that escapes according to CONTEXT, and a hand-written escaper would be the security regression this domain exists to prevent. `text/template` has no representation at all and an AST audit fails the build on the import. **`TrustHTML` is the one bypass and the only spelling the SDK offers**; the other six html/template trust types are REFUSED in render data with the path named. **What it does NOT prevent is stated out loud: `TrustedHTML` is a type alias, so a `Trusted` the caller built wrongly is an XSS the SDK cannot see** — the domain prevents an accidental bypass and gives the deliberate one one greppable word. **Parse once**: reparsing per request costs 34× on a realistic tree. Stdlib-only, cross-OS | `pkg/v1/view/README.md` |
 | `logger/writer/` | Blank-import activation of the dependency-free logger writers `"console"`, `"file"` and `"rotfile"` (ADR 0012), so `logger.NewMulti` resolves those names; no exported symbols | `pkg/v1/logger/writer/README.md` |
-| `crypto/` | Authenticated encryption (ADR 0013): `NewKey` (exactly 32 bytes, redacting), `Seal` / `Open` with the nonce generated and hidden in the box, AES-256-GCM by default and `SealAs` for another `Algorithm` (`XChaCha20Poly1305` activates through its own blank import), `SealStream` / `OpenStream`, `WrapKey` / `UnwrapKey` passphrase envelopes (ADR 0014) | `pkg/v1/crypto/README.md` |
-| `agree/` | Key agreement (ADR 0014): `GenerateKey(X25519)` and `SharedKey(a, priv, peerPub, info)` → a `Key` of `KeyLen` bytes | `pkg/v1/agree/README.md` |
-| `hash/` | Digests: `New` / `Sum` / `SumHex` over `SHA256`, `SHA512`, `SHA3256`, `CRC32C` and `FNV1a64`, plus the streaming `NewDigestWriter` / `NewVerifyingReader` | `pkg/v1/hash/README.md` |
-| `kdf/` | Key derivation (ADR 0014): `Subkey(HKDFSHA256, …)` and `NewKeyTree`, a key hierarchy under one master `Key` | `pkg/v1/kdf/README.md` |
-| `mac/` | Message authentication (ADR 0014): `Tag` / `Verify` with `HMACSHA256` over a `Key` | `pkg/v1/mac/README.md` |
-| `password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id`; `IsCommon`, one of the ten thousand most common passwords, case-insensitively (ADR 0143) | `pkg/v1/password/README.md` |
-| `sign/` | Signatures: `GenerateKey` / `Sign` / `Verify` over `Ed25519` and `ECDSAP256` | `pkg/v1/sign/README.md` |
+| `crypto/` | Authenticated encryption (ADR 0013): `NewKey` (exactly 32 bytes, redacting), `Seal` / `Open` with the nonce generated and hidden in the box, AES-256-GCM by default and `SealAs` for another `Algorithm` (`XChaCha20Poly1305` activates through its own blank import), `SealStream` / `OpenStream`, `WrapKey` / `UnwrapKey` passphrase envelopes (ADR 0014). The crypto family's root: the six scheme facades below are its children, and importing one never links it (ADR 0155) | `pkg/v1/crypto/README.md` |
+| `crypto/agree/` | Key agreement (ADR 0014): `GenerateKey(X25519)` and `SharedKey(a, priv, peerPub, info)` → a `Key` of `KeyLen` bytes | `pkg/v1/crypto/agree/README.md` |
+| `crypto/hash/` | Digests: `New` / `Sum` / `SumHex` over `SHA256`, `SHA512`, `SHA3256`, `CRC32C` and `FNV1a64`, plus the streaming `NewDigestWriter` / `NewVerifyingReader` | `pkg/v1/crypto/hash/README.md` |
+| `crypto/kdf/` | Key derivation (ADR 0014): `Subkey(HKDFSHA256, …)` and `NewKeyTree`, a key hierarchy under one master `Key` | `pkg/v1/crypto/kdf/README.md` |
+| `crypto/mac/` | Message authentication (ADR 0014): `Tag` / `Verify` with `HMACSHA256` over a `Key` | `pkg/v1/crypto/mac/README.md` |
+| `crypto/password/` | Password hashing: `Hash` → a PHC string (`PBKDF2SHA256`), `Verify`, `NeedsRehash`; argon2id is the opt-in scheme under `third-party/x-crypto/argon2id`; `IsCommon`, one of the ten thousand most common passwords, case-insensitively (ADR 0143) | `pkg/v1/crypto/password/README.md` |
+| `crypto/sign/` | Signatures: `GenerateKey` / `Sign` / `Verify` over `Ed25519` and `ECDSAP256` | `pkg/v1/crypto/sign/README.md` |
 | `client/` | The outbound half of the network domain (ADR 0029): `New(cfg, tlsid.Identity, Policy, CallHook)` → a `Client` whose `Policy` (`AllowMethods` / `AllowPaths` / `DenyPaths` / `Policies`) is enforced in the transport; a refusal is `RequestDenied` | `pkg/v1/client/README.md` |
 | `tlsid/` | TLS and mutual-TLS identities shared by `server` and `client` (ADR 0029): `New` for material in memory, `Load` for material on disk; `MaterialInvalid` | `pkg/v1/tlsid/README.md` |
 | `server/` | The inbound engine (ADR 0029): `New` → a `Server` of stream `Group`s and `PacketGroup`s configured by `GroupOption`s (`Listen`, `TLS`, the timeouts, `MaxConns`, `Shards`, …), `Chain` / `ChainPacket` middlewares, and a drain announced through `DrainSignal` rather than imposed (ADR 0043) under `WithDrainTimeout` | `pkg/v1/server/README.md` |
@@ -182,12 +182,12 @@ GOWORK=off go test -race -cover ./v1/...
 - `server/static/` — see `pkg/v1/server/static/CLAUDE.md`
 - `logger/writer/` — see `pkg/v1/logger/writer/CLAUDE.md`
 - `crypto/` — see `pkg/v1/crypto/CLAUDE.md`
-- `agree/` — see `pkg/v1/agree/CLAUDE.md`
-- `hash/` — see `pkg/v1/hash/CLAUDE.md`
-- `kdf/` — see `pkg/v1/kdf/CLAUDE.md`
-- `mac/` — see `pkg/v1/mac/CLAUDE.md`
-- `password/` — see `pkg/v1/password/CLAUDE.md`
-- `sign/` — see `pkg/v1/sign/CLAUDE.md`
+- `crypto/agree/` — see `pkg/v1/crypto/agree/CLAUDE.md`
+- `crypto/hash/` — see `pkg/v1/crypto/hash/CLAUDE.md`
+- `crypto/kdf/` — see `pkg/v1/crypto/kdf/CLAUDE.md`
+- `crypto/mac/` — see `pkg/v1/crypto/mac/CLAUDE.md`
+- `crypto/password/` — see `pkg/v1/crypto/password/CLAUDE.md`
+- `crypto/sign/` — see `pkg/v1/crypto/sign/CLAUDE.md`
 - `client/` — see `pkg/v1/client/CLAUDE.md`
 - `tlsid/` — see `pkg/v1/tlsid/CLAUDE.md`
 - `server/` — see `pkg/v1/server/CLAUDE.md`

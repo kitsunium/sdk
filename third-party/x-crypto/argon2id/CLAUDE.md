@@ -6,7 +6,7 @@
 Registers the **"argon2id"** password-hashing scheme (ADR 0013) — the memory-hard,
 OWASP-first-choice password hash. It depends on `golang.org/x/crypto/argon2`, so
 it lives under `third-party/x-crypto` as an **opt-in** scheme (same precedent as
-xchacha vs the stdlib aesgcm default): `pkg/v1/password` does NOT blank-import it,
+xchacha vs the stdlib aesgcm default): `pkg/v1/crypto/password` does NOT blank-import it,
 keeping that facade dep-light. Consumers who can take the x/crypto dependency
 blank-import this package, then `password.Hash("argon2id", …)` resolves and
 `password.Verify` routes any stored hash back to its scheme by PHC id.

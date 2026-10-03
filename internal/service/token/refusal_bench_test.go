@@ -8,7 +8,7 @@ import (
 
 	coretoken "github.com/kitsunium/sdk/internal/core/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
-	"github.com/kitsunium/sdk/internal/service/crypto/hmacsha2"
+	"github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2"
 	svctoken "github.com/kitsunium/sdk/internal/service/token"
 )
 

@@ -31,7 +31,7 @@ const MaxSubjectLen int = 128
 // A subject is a REFERENCE, never an identity: it is kept in clear in the
 // store and in every box, so it must not be the e-mail address or the name it
 // stands for. An HMAC of the identity under a key the caller keeps
-// (pkg/v1/mac), written in hexadecimal, fits the grammar and tells whoever
+// (pkg/v1/crypto/mac), written in hexadecimal, fits the grammar and tells whoever
 // reads the store nothing.
 //
 // The refusal names the clause and never the rejected string: the string most

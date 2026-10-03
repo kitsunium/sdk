@@ -9,9 +9,9 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/crypto",
-        "//internal/service/crypto/aesgcm",
-        "//internal/service/crypto/keyenvelope",
-        "//internal/service/crypto/streamaead",
+        "//internal/service/crypto/aead/aesgcm",
+        "//internal/service/crypto/aead/streamaead",
+        "//internal/service/crypto/key/keyenvelope",
     ],
 )
 

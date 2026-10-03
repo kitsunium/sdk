@@ -11,8 +11,8 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
-	_ "github.com/kitsunium/sdk/internal/service/crypto/hkdfsha256"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
 
 // countingSink counts Write/Close calls under its own lock so concurrent

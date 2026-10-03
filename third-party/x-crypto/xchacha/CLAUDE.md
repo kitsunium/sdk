@@ -23,7 +23,7 @@ import — the same pattern as the AWS writers under `third-party/aws/*`
 A 192-bit (24-byte) random nonce eliminates the birthday-bound message-count
 limit that AES-256-GCM's 96-bit random nonce imposes (~2^32 safe messages/key).
 Preferred for high-volume random-nonce workloads. AES-256-GCM (`internal/service/
-crypto/aesgcm`, `alg-id 0x01`) remains the dep-free default.
+crypto/aead/aesgcm`, `alg-id 0x01`) remains the dep-free default.
 
 ## Contents
 
@@ -48,7 +48,7 @@ the single non-oracle `DecryptionFailed` for **every** failure.
 
 ## Cost
 
-Measured in `BENCH.md` against `internal/service/crypto/aesgcm` —
+Measured in `BENCH.md` against `internal/service/crypto/aead/aesgcm` —
 the dep-free default — through the same port, in the same run.
 
 | plaintext | XChaCha `Seal` | AES-GCM `Seal` | verdict |

@@ -21,7 +21,7 @@ import (
 
 	//: the sealer resolves "aes-256-gcm" through the core AEAD registry, and a
 	//: scheme is only in that registry once its package has been imported.
-	_ "github.com/kitsunium/sdk/internal/service/crypto/aesgcm"
+	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 )
 
 // wrapAs returns the given session sentinel as the error ORIGIN — its code,

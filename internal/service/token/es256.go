@@ -26,7 +26,7 @@ func (es256Signing) algorithm() coretoken.Algorithm {
 // sign hashes input with SHA-256 and emits the fixed-width R||S signature.
 //
 // This is the one algorithm here that does NOT go through the SDK's registered
-// signer: service/crypto/ecdsasig speaks ASN.1/DER, which is the right shape
+// signer: service/crypto/sign/ecdsasig speaks ASN.1/DER, which is the right shape
 // for X.509 and the wrong shape for JOSE. Transcoding DER to R||S would mean
 // re-parsing an attacker-supplied structure on the verify path, so the JOSE
 // encoding is produced directly from crypto/ecdsa instead — one primitive, one
