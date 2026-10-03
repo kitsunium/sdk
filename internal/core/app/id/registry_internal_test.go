@@ -1,7 +1,8 @@
-// Package id — white-box tests for the registry's publish path. Both helpers
-// below are reachable only from inside the package, and both encode decisions
-// (idempotent republish, snapshot cloning) that Register's panic-on-conflict
-// surface cannot distinguish from the outside.
+// Package id — white-box tests for the registry's publish path. The helper is
+// reachable only from inside the package, and it encodes a decision —
+// idempotent republish — that Register's panic-on-conflict surface cannot
+// distinguish from the outside. The copy a publish makes is the kernel table's
+// and is tested there (internal/kernel/plugin).
 package id
 
 import (
@@ -97,70 +98,6 @@ func Test_publishGenerator(t *testing.T) {
 		}
 		if got != c.first {
 			t.Errorf("Lookup(%q) = %v, want the first-registered %v", c.scheme, got, c.first)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
-}
-
-// Test_cloneGeneratorMap pins that publishing copies rather than mutates. The
-// registry hands out snapshots to lock-free readers, so a writer that edited
-// the live map in place would let a reader observe a half-built one.
-func Test_cloneGeneratorMap(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name    string
-		src     map[Scheme]Generator
-		insert  Scheme
-		wantLen int
-	}
-	tests := []tc{
-		{"a nil source starts a map of one", nil, "clone-a", 1},
-		{"an empty source starts a map of one", map[Scheme]Generator{}, "clone-a", 1},
-		{
-			"an existing source grows by one",
-			map[Scheme]Generator{"clone-x": fakeGen{name: "clone-x"}},
-			"clone-a", 2,
-		},
-		{
-			"inserting a present key does not grow it",
-			map[Scheme]Generator{"clone-a": fakeGen{name: "clone-a", tag: 1}},
-			"clone-a", 1,
-		},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		g := fakeGen{name: c.insert, tag: 9}
-		//: a nil map and a nil *map are different inputs; the helper takes the
-		//: pointer form the snapshot hands it.
-		var src *map[Scheme]Generator
-		if c.src != nil {
-			src = &c.src
-		}
-		before := len(c.src)
-
-		next := cloneGeneratorMap(src, c.insert, g)
-
-		if len(next) != c.wantLen {
-			t.Fatalf("clone has %d entries, want %d", len(next), c.wantLen)
-		}
-		if next[c.insert] != g {
-			t.Errorf("clone[%q] = %v, want the inserted generator", c.insert, next[c.insert])
-		}
-		//: the source must be untouched — a reader may be walking it.
-		if len(c.src) != before {
-			t.Errorf("the source grew to %d entries, want %d", len(c.src), before)
-		}
-		for k, v := range c.src {
-			//: every pre-existing entry must survive the copy unchanged, except
-			//: the one deliberately overwritten.
-			if k != c.insert && next[k] != v {
-				t.Errorf("clone lost the entry %q", k)
-			}
 		}
 	}
 	for _, c := range tests {

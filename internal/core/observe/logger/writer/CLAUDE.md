@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T05:20:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/observe/logger/writer/
 
 ## Purpose
@@ -29,7 +29,7 @@ Code range: `0.2.3.*` (ADR 0012).
 | `writer.go`   | `Name` (typed key + `String`/`Known`), `Config = any`, `Factory` interface (`Name` / `Open`) |
 | `writer_spec.go` | `Spec` value type (`Name` + `Config`); re-exported as `logger.WriterSpec` |
 | `config_decoder.go` | `Decoder` **optional** Factory extension (`Decode(map[string]any) (Config, error)`) — mirrors codec's `Appender`; detected by type assertion (ADR 0014 §D5) |
-| `registry.go` | `snapshot.Value[map[Name]Factory]` registry: `Register` / `Lookup` / `Open` / `Available` (mirrors `core/data/codec/registry.go`) |
+| `registry.go` | the registry, an instance of `kernel/plugin.Registry[Name, Factory]` (ADR 0159): `Register` / `Lookup` / `Open` / `Available`; what stays here is the refusal — `WRITER_NIL`, `WRITER_NAME_EMPTY` and the `DUPLICATE_REGISTRATION` conflict |
 | `config_console.go` | `ConsoleConfig` (`Stream` / `MinLevel`) + `ConsoleStream`: `ConsoleStderr` is the zero value, because stdout may be the process's protocol channel (ADR 0030); `ConsoleStdout` is reached only by naming it |
 | `config_file.go` | `FileConfig` (`Path` / `MinLevel`) for `"file"` |
 | `config_rotfile.go` | `RotFileConfig` for `"rotfile"` — `Path`, size cap, backups, compression, age, time-based rotation, injectable clock, `OnError`, `MinLevel` |
@@ -108,9 +108,10 @@ hot path (`Build().Send()`), never to a batching `Write` (ADR 0015 §D5).
 
 ## Conventions
 
-- **`snapshot.Value`, not `sync.Map`** — factories register once at import, then
-  it is read-many (ADR 0011). `Register` publishes via `Value.Update` (mutex-
-  serialised); `Lookup` is lock-free.
+- **The table is the kernel's `plugin.Registry`, not a copy of it** — factories
+  register once at import, then it is read-many: `Register` publishes through
+  `Publish` (check and insert one atomic step), `Lookup` is a lock-free
+  snapshot read (ADR 0011, ADR 0159).
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var Writer = writer.Register(&fileFactory{})` in each concrete package.
 - **Idempotent re-registration** of the same `Name` is fine; a *distinct*

@@ -5,66 +5,33 @@ package codec
 
 import (
 	"fmt"
-	"maps"
 	"mime"
-	"slices"
 	"strings"
 
-	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // Package-level indexes.
 //
-// snapshot.Value[map[K]V] is the deliberate choice here over sync.Map:
-// codec packages register themselves exactly ONCE at package import time
-// (their package-level var initializer calls Register), and every other
-// access is a read (Lookup / LookupMIME / LookupExt). A frozen-after-init
-// map read via Value.Load (one atomic.Pointer load) is ~30% faster than
-// sync.Map.Load + the interface-to-Codec type assertion (microbench: 9.1 ns
-// vs 12.8 ns) and avoids the dirty-map fallback machinery sync.Map carries
-// for the write-mostly workloads we never trigger.
+// Each is the kernel's read-mostly, copy-on-write table (kernel/plugin.Registry,
+// ADR 0159): codec packages register themselves exactly ONCE at package import
+// time (their package-level var initializer calls Register), and every other
+// access is a read (Lookup / LookupMIME / LookupExt) — one atomic pointer load
+// and a map read, no lock. A frozen-after-init map read that way is ~30% faster
+// than sync.Map.Load + the interface-to-Codec type assertion (microbench: 9.1 ns
+// vs 12.8 ns) and avoids the dirty-map fallback machinery sync.Map carries for
+// the write-mostly workloads we never trigger.
 //
-// snapshot.Value (ADR 0011) serialises writers on a mutex, so Register's
-// read-modify-write publish is race-free WITHOUT the hand-rolled CAS loop this
-// package carried before; readers stay lock-free via Value.Load. The
-// copy-on-write mechanism lives in internal/kernel/concur/snapshot — only the domain
-// clone logic (cloneFormatMap / cloneAliasMap) stays here.
+// The MIME and extension indexes are the codec's own, kept BESIDE the Format
+// table rather than inside it (the kernel table has no second index); what is
+// shared is the mechanism, and what stays here is the domain: the strict rule on
+// a Format name, the alias normalisation, and the conflict's code and fields.
 var (
-	registry  snapshot.Value[map[Format]Codec]
-	mimeIndex snapshot.Value[map[string]Format]
-	extIndex  snapshot.Value[map[string]Format]
+	registry  plugin.Registry[Format, Codec]
+	mimeIndex plugin.Registry[string, Format]
+	extIndex  plugin.Registry[string, Format]
 )
-
-// loadRegistry returns the current registry snapshot, or nil when no codec
-// has registered yet (rare — service codec init order runs before any
-// application code).
-func loadRegistry() map[Format]Codec {
-	//: load the current snapshot pointer; nil before first Register call.
-	current := registry.Load()
-	//: nil snapshot means no codec registered yet — empty result.
-	if current == nil {
-		//: hand back nil so callers see a clean miss.
-		return nil
-	}
-	//: dereference the snapshot for caller reads.
-	return *current
-}
-
-// loadAliasIndex returns the current alias-index snapshot for mime or
-// extension lookup. Same nil-handling as loadRegistry.
-func loadAliasIndex(p *snapshot.Value[map[string]Format]) map[string]Format {
-	//: load the snapshot pointer; nil before first Register call.
-	current := p.Load()
-	//: nil snapshot — no aliases registered yet.
-	if current == nil {
-		//: hand back nil so callers see a clean miss.
-		return nil
-	}
-	//: dereference for caller reads.
-	return *current
-}
 
 // Register inserts c into the registry and returns it so callers can bind
 // the singleton to a typed package-level variable like
@@ -90,7 +57,7 @@ func Register(c Codec) Codec {
 	}
 	//: the canonical Format is the primary key.
 	name := Format(c.Name())
-	//: publish the codec under the writer lock; duplicate Name is a hard conflict.
+	//: publish the codec; any prior registration of the Name is a hard conflict.
 	if err := publishCodec(name, c); err != nil {
 		//: the typed conflict's dotted-quad header, then the name that collided.
 		panic(conflictText(err))
@@ -108,66 +75,30 @@ func Register(c Codec) Codec {
 	return c
 }
 
-// publishCodec inserts (name → c) into the registry snapshot under the writer
-// lock. Returns a non-nil error when name is already registered to a different
-// codec — the caller turns the error into a panic so the boot-time failure is
-// loud and grep-friendly.
+// publishCodec claims name for c. Returns a non-nil error when name is already
+// registered — to ANY codec, the same one included: a Format registers once,
+// whereas the alias indexes and the other core registries accept the identical
+// value again as a no-op. The caller turns the error into a panic so the
+// boot-time failure is loud and grep-friendly. The check and the insert are one
+// atomic step.
 func publishCodec(name Format, c Codec) error {
-	//: dupErr escapes the Update closure to signal a conflicting registration.
-	var dupErr error
-	//: Update serialises writers on the snapshot mutex, so the duplicate check
-	//: and the publish are atomic against any concurrent Register.
-	registry.Update(func(current *map[Format]Codec) *map[Format]Codec {
-		//: duplicate detection runs on the current snapshot before any allocation.
-		if current != nil {
-			//: any prior registration of name is a hard conflict.
-			if _, dup := (*current)[name]; dup {
-				//: the typed sentinel is the origin; the fields say who refused
-				//: what, since Error() renders none of them (rule 4).
-				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
-					errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
-				//: no-op publish — republish the current snapshot unchanged.
-				return current
-			}
-		}
-		//: clone the snapshot + insert the new entry, then publish atomically.
-		//: new(expr) is Go 1.26+ form — heap-allocates the cloned map in one shot.
-		return new(cloneFormatMap(current, name, c))
-	})
-	//: surface any conflict to Register, which panics with the doc code.
-	return dupErr
-}
-
-// cloneFormatMap copies the source snapshot and inserts (name → c). Register
-// is called once per codec at package import, so this clone is init-time,
-// one-shot work — not a per-request hot path.
-func cloneFormatMap(src *map[Format]Codec, name Format, c Codec) map[Format]Codec {
-	//: size hint = source size + 1 for the new entry; nil source → 1.
-	var size int
-	//: nil source is the very-first-Register case; size stays zero so
-	//: the new map allocates just the one slot for the new entry.
-	if src != nil {
-		//: source has entries; pre-size for them plus one.
-		size = len(*src)
+	//: Claim reports a taken name whoever holds it — the strict rule needs
+	//: nothing more than taken.
+	if _, taken := registry.Claim(name, c); !taken {
+		//: the Name was free and is now c's.
+		return nil
 	}
-	//: allocate the new snapshot with the exact required capacity.
-	next := make(map[Format]Codec, size+1)
-	//: maps.Copy handles the nil-source case implicitly (no-op).
-	if src != nil {
-		//: bulk-copy every existing entry.
-		maps.Copy(next, *src)
-	}
-	//: insert the new entry.
-	next[name] = c
-	//: caller publishes the snapshot via Value.Update.
-	return next
+	//: the typed sentinel is the origin; the fields say who refused what,
+	//: since Error() renders none of them (rule 4).
+	return errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+		errs.String("registrar", "codec.Register"), errs.String("name", string(name)))
 }
 
 // indexAliases stores every alias (MIME or extension) in dst, panicking
 // when a distinct codec already claims the same key. normalize reduces each
 // raw alias to its index key — strings.ToLower for extensions, normalizeMIME
 // for MIME types so registration and LookupMIME agree on the key (issue #36).
-func indexAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string, normalize func(string) string) {
+func indexAliases(dst *plugin.Registry[string, Format], aliases []string, name Format, kind string, normalize func(string) string) {
 	//: iterate over every alias and publish it atomically.
 	for _, alias := range aliases {
 		//: reduce to the canonical index key the matching Lookup* will compute.
@@ -199,63 +130,24 @@ func normalizeMIME(raw string) string {
 	return mediaType
 }
 
-// publishAlias inserts (key → name) into an alias index snapshot under the
-// writer lock. Returns a non-nil error when key is already claimed by a
-// different Format; idempotent re-registration by the same Format is accepted.
-func publishAlias(dst *snapshot.Value[map[string]Format], key string, name Format, kind, alias string) error {
-	//: conflictErr escapes the Update closure to signal a clashing alias.
-	var conflictErr error
-	//: Update serialises writers; the conflict check and publish are atomic.
-	dst.Update(func(current *map[string]Format) *map[string]Format {
-		//: conflict + idempotent-reregistration detection on the current snapshot.
-		if current != nil {
-			//: any prior alias under key is checked against name.
-			if prev, exists := (*current)[key]; exists {
-				//: idempotent same-codec re-registration is fine.
-				if prev == name {
-					//: no-op publish — alias already points at us.
-					return current
-				}
-				//: distinct-codec conflict — the typed sentinel, carrying the
-				//: alias, the codec holding it and the codec asking.
-				conflictErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
-					errs.String("registrar", "codec.Register"), errs.String("kind", kind),
-					errs.String("alias", alias), errs.String("owner", string(prev)),
-					errs.String("requester", string(name)))
-				//: no-op publish — republish the current snapshot unchanged.
-				return current
-			}
-		}
-		//: clone + insert via the hoisted helper, then publish atomically.
-		//: Go 1.26+ new(expr) form.
-		return new(cloneAliasMap(current, key, name))
-	})
-	//: surface any conflict to indexAliases, which panics with the doc code.
-	return conflictErr
-}
-
-// cloneAliasMap mirrors cloneFormatMap for the MIME / extension alias indexes:
-// copies the source snapshot and inserts (key → name). Same init-time,
-// one-shot call shape (once per codec at package import).
-func cloneAliasMap(src *map[string]Format, key string, name Format) map[string]Format {
-	//: size hint = source size + 1 for the new entry; nil source → 1.
-	var size int
-	//: nil source is the very-first-Register case; size stays zero.
-	if src != nil {
-		//: source has entries; pre-size for them plus one.
-		size = len(*src)
+// publishAlias inserts (key → name) into an alias index. Returns a non-nil
+// error when key is already claimed by a different Format; idempotent
+// re-registration by the same Format is accepted. The check, the insert and
+// the owner the error names are one atomic step.
+func publishAlias(dst *plugin.Registry[string, Format], key string, name Format, kind, alias string) error {
+	//: Claim reports the Format holding a taken key, read by the same step.
+	owner, taken := dst.Claim(key, name)
+	//: a free key, or one that already points at us: nothing to refuse.
+	if !taken || owner == name {
+		//: published, or the idempotent same-codec re-registration.
+		return nil
 	}
-	//: allocate the new snapshot with the exact required capacity.
-	next := make(map[string]Format, size+1)
-	//: maps.Copy handles the nil-source case implicitly (no-op).
-	if src != nil {
-		//: bulk-copy every existing entry.
-		maps.Copy(next, *src)
-	}
-	//: insert the new entry.
-	next[key] = name
-	//: caller publishes the snapshot via Value.Update.
-	return next
+	//: distinct-codec conflict — the typed sentinel, carrying the alias, the
+	//: codec holding it and the codec asking.
+	return errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+		errs.String("registrar", "codec.Register"), errs.String("kind", kind),
+		errs.String("alias", alias), errs.String("owner", string(owner)),
+		errs.String("requester", string(name)))
 }
 
 // Lookup returns the codec registered under f.
@@ -263,18 +155,8 @@ func cloneAliasMap(src *map[string]Format, key string, name Format) map[string]F
 // IFACE-PLUGIN: the registry stores plug-in codec instances behind the Codec
 // interface — concrete types are intentionally unexported per-format.
 func Lookup(f Format) (c Codec, ok bool) {
-	//: snapshot-pointer read + map lookup; no interface assertion needed
-	//: because the snapshot stores typed Codec values directly.
-	m := loadRegistry()
-	//: absence path.
-	if m == nil {
-		//: no codec registered under this Format.
-		return nil, false
-	}
-	//: typed map read.
-	codec, found := m[f]
-	//: hand back the typed codec + lookup outcome.
-	return codec, found
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return registry.Lookup(f)
 }
 
 // LookupMIME returns the codec whose MIME list matches. MIME parameters
@@ -291,19 +173,10 @@ func LookupMIME(raw string) (c Codec, ok bool) {
 	}
 	//: reduce to the canonical key via the SAME helper registration indexes on,
 	//: so any registered MIME (parameters and case notwithstanding) resolves.
-	mediaType := normalizeMIME(raw)
-	//: snapshot-pointer read + map lookup.
-	m := loadAliasIndex(&mimeIndex)
-	//: absence path.
-	if m == nil {
-		//: nothing registered yet.
-		return nil, false
-	}
-	//: typed alias-index read.
-	name, found := m[mediaType]
+	name, found := mimeIndex.Lookup(normalizeMIME(raw))
 	//: absence path.
 	if !found {
-		//: MIME unrecognised.
+		//: MIME unrecognised, or nothing registered yet.
 		return nil, false
 	}
 	//: delegate to Lookup so the typed Codec value comes from the same path.
@@ -321,38 +194,19 @@ func LookupExt(ext string) (c Codec, ok bool) {
 		return nil, false
 	}
 	//: normalise and look up the index.
-	m := loadAliasIndex(&extIndex)
-	//: absence path.
-	if m == nil {
-		//: nothing registered yet.
-		return nil, false
-	}
-	//: typed alias-index read.
-	name, found := m[strings.ToLower(ext)]
+	name, found := extIndex.Lookup(strings.ToLower(ext))
 	//: absence path.
 	if !found {
-		//: extension unrecognised.
+		//: extension unrecognised, or nothing registered yet.
 		return nil, false
 	}
 	//: delegate to Lookup so the typed Codec value comes from the same path.
 	return Lookup(name)
 }
 
-// Available returns the sorted list of registered Formats.
+// Available returns the sorted list of registered Formats, or nil before any
+// Register.
 func Available() []Format {
-	//: snapshot the registry pointer; nil before any Register.
-	m := loadRegistry()
-	//: empty result when nothing registered yet.
-	if m == nil {
-		//: nil slice is the documented zero value.
-		return nil
-	}
-	//: slices.Collect(maps.Keys()) avoids the manual range loop the
-	//: linter's COLLECTKEYS rule flags; same allocation cost as the
-	//: hand-rolled loop but expresses intent at the call site.
-	formats := slices.Collect(maps.Keys(m))
-	//: slices.Sort avoids reflection compared to sort.Slice.
-	slices.Sort(formats)
-	//: hand back the freshly ordered slice.
-	return formats
+	//: sorted ascending, the caller's own slice.
+	return registry.Names()
 }

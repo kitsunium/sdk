@@ -30,8 +30,9 @@ if m := routes.Load(); m != nil {
 
 `Value[T]` holds a `*T` behind an `atomic.Pointer[T]`: `Load` is lock-free and
 allocation-free, while `Store` / `Swap` / `Update` serialise on a mutex so a
-read-modify-write publish is race-free. The codec registry
-(`internal/core/data/codec`) is built on it — three `atomic.Pointer[map]` fields with
-hand-rolled CAS loops collapse to three `Value[map]` fields.
+read-modify-write publish is race-free. The core registries
+(`internal/core/data/codec` and the others) are built on it through
+`kernel/plugin.Registry` — the three `atomic.Pointer[map]` fields with
+hand-rolled CAS loops the codec registry once carried are three tables of it.
 
 See ADR 0011 for the design rationale and the layering contract.

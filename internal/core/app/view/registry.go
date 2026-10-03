@@ -4,21 +4,15 @@
 package view
 
 import (
-	"maps"
-	"slices"
-
-	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// registry maps each [Engine] to its [Factory].
-//
-// snapshot.Value is the deliberate choice over sync.Map, for the same reason
-// core/observe/logger/writer gives: an engine package registers exactly ONCE at import time
-// and every other access is a lock-free Load (ADR 0011). Update serialises
-// writers on a mutex so Register's read-modify-write publish is race-free;
-// Lookup stays lock-free.
+// registry maps each [Engine] to its [Factory] — the kernel's read-mostly,
+// copy-on-write table (kernel/plugin.Registry, ADR 0159), for the same reason
+// core/observe/logger/writer gives: an engine package registers exactly ONCE at
+// import time and every other access is a lock-free Lookup (ADR 0011). What
+// stays here is the domain's refusal: the empty name and the conflict.
 //
 // # Why this domain HAS a registry when proc, resilience, net, scheduler,
 // # token, session, lock and lifecycle do not
@@ -52,19 +46,7 @@ import (
 // contextual escaping for the content type an engine reports, no non-escaping
 // engine has a name here, and a named AST audit in internal/service/app/view fails
 // the build if text/template is imported anywhere in the domain.
-var registry snapshot.Value[map[Engine]Factory]
-
-// loadRegistry returns the current snapshot, or nil before any registration.
-func loadRegistry() map[Engine]Factory {
-	//: nil pointer means no engine has registered yet.
-	current := registry.Load()
-	if current == nil {
-		//: hand back nil so callers see a clean miss.
-		return nil
-	}
-	//: dereference the published snapshot for caller reads.
-	return *current
-}
+var registry plugin.Registry[Engine, Factory]
 
 // Register inserts f under f.Engine() and returns it, so an engine package can
 // bind the singleton to a typed package-level variable:
@@ -95,7 +77,7 @@ func Register(f Factory) Factory {
 		//: panic so the offending factory is visible at boot.
 		panic(EngineInvalid.Error())
 	}
-	//: publish under the snapshot's writer lock; a duplicate name is a conflict.
+	//: publish; a duplicate name is a conflict.
 	if err := publish(name, f); err != nil {
 		//: surface the dotted-quad code in the panic for grep-friendly boot logs.
 		panic(err.Error())
@@ -104,53 +86,18 @@ func Register(f Factory) Factory {
 	return f
 }
 
-// publish inserts (name → f) under the snapshot writer lock, returning a
-// non-nil error when name is already taken by a different factory.
+// publish inserts (name → f) into the registry, returning a non-nil error when
+// name is already taken by a different factory. The check and the insert are
+// one atomic step of the kernel table.
 func publish(name Engine, f Factory) error {
-	//: dupErr escapes the Update closure to signal a conflicting registration.
-	var dupErr error
-	//: Update serialises writers, so the duplicate check and the publish are
-	//: atomic against any concurrent Register.
-	registry.Update(func(current *map[Engine]Factory) *map[Engine]Factory {
-		//: nil snapshot is the very-first-Register case; nothing to collide with.
-		if current != nil {
-			//: an existing binding is either the same factory or a hard conflict.
-			if existing, taken := (*current)[name]; taken {
-				//: re-registering the SAME factory is an idempotent no-op.
-				if existing == f {
-					//: republish unchanged — nothing to add, nothing to report.
-					return current
-				}
-				dupErr = errs.Wrap(DuplicateEngine, errs.WrapParams{},
-					errs.String("engine", string(name)))
-				//: republish unchanged; the caller turns dupErr into a panic.
-				return current
-			}
-		}
-		//: clone + insert, then publish atomically. Registration is import-time,
-		//: one-shot work — this clone never lands on a request path.
-		next := make(map[Engine]Factory, registrySize(current)+1)
-		//: copy the previous bindings forward so no engine is lost on republish.
-		if current != nil {
-			maps.Copy(next, *current)
-		}
-		next[name] = f
-		//: hand the new map back for the snapshot to publish atomically.
-		return &next
-	})
-	//: non-nil only when a DISTINCT factory already claimed the name.
-	return dupErr
-}
-
-// registrySize returns len of the snapshot, treating nil as empty.
-func registrySize(current *map[Engine]Factory) int {
-	//: nil snapshot is the very-first-Register case.
-	if current == nil {
-		//: an unpublished registry holds nothing.
-		return 0
+	//: a free name or the same factory under its own name: nothing to refuse.
+	if !registry.Publish(name, f) {
+		//: published, or already there — re-registering is an idempotent no-op.
+		return nil
 	}
-	//: the published map's size is the allocation hint for the clone.
-	return len(*current)
+	//: a DISTINCT factory already claimed the name; the caller panics with it.
+	return errs.Wrap(DuplicateEngine, errs.WrapParams{},
+		errs.String("engine", string(name)))
 }
 
 // Lookup returns the [Factory] registered under name.
@@ -159,17 +106,16 @@ func registrySize(current *map[Engine]Factory) int {
 // each engine keeps its concrete type unexported; the stable contract is the
 // Factory interface itself.
 func Lookup(name Engine) (factory Factory, found bool) {
-	//: a lock-free read of the published snapshot.
-	factory, found = loadRegistry()[name]
-	//: an absent name is a clean miss, never an error — Open turns it into one.
-	return factory, found
+	//: a lock-free read of the published snapshot; an absent name is a clean
+	//: miss, never an error — Open turns it into one.
+	return registry.Lookup(name)
 }
 
 // Available returns every registered [Engine], sorted, so a caller can print
-// what its imports actually wired up.
+// what its imports actually wired up. It is nil before any Register.
 func Available() []Engine {
 	//: sorted output keeps logs and tests deterministic.
-	return slices.Sorted(maps.Keys(loadRegistry()))
+	return registry.Names()
 }
 
 // Open resolves name and builds a [Renderer] from cfg.
@@ -188,7 +134,7 @@ func Open(name Engine, cfg Config) (renderer Renderer, err error) {
 		//: name the registered engines: the usual cause is an unimported package.
 		return nil, errs.Wrap(EngineUnknown, errs.WrapParams{},
 			errs.String("engine", string(name)),
-			errs.Int("registered", len(loadRegistry())))
+			errs.Int("registered", len(registry.Names())))
 	}
 	//: the factory owns every Config check; the registry adds none of its own.
 	return factory.New(cfg)

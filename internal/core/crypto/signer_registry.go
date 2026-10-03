@@ -1,12 +1,6 @@
 // Package crypto — the process-wide Signer registry + GenerateKey / Sign / Verify dispatch.
 package crypto
 
-import (
-	"fmt"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
-
 // signers maps each Algorithm to its Signer. Backed by the shared read-mostly
 // schemeRegistry — register once at import, dispatch is lock-free.
 var signers = schemeRegistry[Signer]{verb: "RegisterSigner"}
@@ -23,19 +17,9 @@ var signers = schemeRegistry[Signer]{verb: "RegisterSigner"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterSigner(s Signer) Signer {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(s); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterSigner [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := signers.publish(s.Algorithm(), s); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(conflictText(err))
-	}
-	//: returning the signer lets callers bind it to a typed singleton var.
-	return s
+	//: refuse an unusable signer, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return signers.register(s)
 }
 
 // LookupSigner returns the Signer registered under name.
@@ -43,14 +27,14 @@ func RegisterSigner(s Signer) Signer {
 // IFACE-PLUGIN: the registry stores plug-in Signer instances behind the Signer
 // interface — concrete types are intentionally unexported per scheme.
 func LookupSigner(name Algorithm) (s Signer, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return signers.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return signers.table.Lookup(name)
 }
 
 // AvailableSigners returns the sorted list of registered signature Algorithms.
 func AvailableSigners() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return signers.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return signers.table.Names()
 }
 
 // GenerateKey draws a fresh keypair for the Signer registered as name. A name

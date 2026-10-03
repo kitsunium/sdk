@@ -5,37 +5,18 @@ package writer
 
 import (
 	"fmt"
-	"maps"
-	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
-	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
-// registry maps each writer Name to its Factory.
-//
-// snapshot.Value[map[Name]Factory] is the deliberate choice over sync.Map:
-// writer packages register exactly ONCE at import time and every other access
-// is a lock-free Load (ADR 0011) — the same read-mostly shape that justifies
-// it for the codec registry. Update serialises writers on a mutex so Register's
-// read-modify-write publish is race-free; Lookup stays lock-free.
-var registry snapshot.Value[map[Name]Factory]
-
-// loadRegistry returns the current registry snapshot, or nil when no writer
-// has registered yet.
-func loadRegistry() map[Name]Factory {
-	//: load the current snapshot pointer; nil before first Register call.
-	current := registry.Load()
-	//: nil snapshot means no factory registered yet — empty result.
-	if current == nil {
-		//: hand back nil so callers see a clean miss.
-		return nil
-	}
-	//: dereference the snapshot for caller reads.
-	return *current
-}
+// registry maps each writer Name to its Factory — the kernel's read-mostly,
+// copy-on-write table (kernel/plugin.Registry, ADR 0159): writer packages
+// register exactly ONCE at import time and every other access is a lock-free
+// Lookup (ADR 0011) — the same read-mostly shape the codec registry has. What
+// stays here is the domain's refusal: the empty Name and the conflict's code.
+var registry plugin.Registry[Name, Factory]
 
 // Register inserts f into the registry under f.Name() and returns it so callers
 // can bind the singleton to a typed package-level variable like
@@ -64,7 +45,7 @@ func Register(f Factory) Factory {
 		//: panic so the offending factory is visible at boot.
 		panic(fmt.Sprintf("writer.Register [%s WRITER_NAME_EMPTY]: empty Name", CodeWriterNameEmpty))
 	}
-	//: publish the factory under the writer lock; duplicate Name is a hard conflict.
+	//: publish the factory; a distinct factory under a taken Name is a hard conflict.
 	if err := publishFactory(name, f); err != nil {
 		//: the typed conflict's dotted-quad header, then the Name that collided.
 		panic(conflictText(err))
@@ -73,62 +54,21 @@ func Register(f Factory) Factory {
 	return f
 }
 
-// publishFactory inserts (name → f) into the registry snapshot under the writer
-// lock. Returns a non-nil error when name is already registered to a different
-// factory; the caller turns it into a boot-time panic.
+// publishFactory inserts (name → f) into the registry. Returns a non-nil error
+// when name is already registered to a different factory; the caller turns it
+// into a boot-time panic. Re-registering the SAME factory is idempotent
+// (interface == compares the factory pointers). The check and the insert are
+// one atomic step of the kernel table.
 func publishFactory(name Name, f Factory) error {
-	//: dupErr escapes the Update closure to signal a conflicting registration.
-	var dupErr error
-	//: Update serialises writers on the snapshot mutex, so the duplicate check
-	//: and the publish are atomic against any concurrent Register.
-	registry.Update(func(current *map[Name]Factory) *map[Name]Factory {
-		//: duplicate detection runs on the current snapshot before any allocation.
-		if current != nil {
-			//: an existing entry under name decides idempotent vs conflict.
-			if existing, dup := (*current)[name]; dup {
-				//: re-registering the SAME factory is idempotent — a no-op
-				//: republish (interface == compares the factory pointers).
-				if existing == f {
-					//: nothing changes; keep the current snapshot.
-					return current
-				}
-				//: a DISTINCT factory under a taken Name is the hard conflict:
-				//: the typed sentinel, the fields naming the registrar and Name.
-				dupErr = errs.Wrap(DuplicateRegistration, errs.WrapParams{},
-					errs.String("registrar", "writer.Register"), errs.String("name", string(name)))
-				//: no-op publish — republish the current snapshot unchanged.
-				return current
-			}
-		}
-		//: clone the snapshot + insert the new entry, then publish atomically.
-		return new(cloneFactoryMap(current, name, f))
-	})
-	//: surface any conflict to Register, which panics with the doc code.
-	return dupErr
-}
-
-// cloneFactoryMap copies the source snapshot and inserts (name → f). Register
-// is called once per writer at package import, so this clone is init-time,
-// one-shot work — not a per-request hot path.
-func cloneFactoryMap(src *map[Name]Factory, name Name, f Factory) map[Name]Factory {
-	//: size hint = source size + 1 for the new entry; nil source → 1.
-	var size int
-	//: nil source is the very-first-Register case; size stays zero.
-	if src != nil {
-		//: source has entries; pre-size for them plus one.
-		size = len(*src)
+	//: a free name or the same factory under its own name: nothing to refuse.
+	if !registry.Publish(name, f) {
+		//: published, or already there.
+		return nil
 	}
-	//: allocate the new snapshot with the exact required capacity.
-	next := make(map[Name]Factory, size+1)
-	//: maps.Copy handles the nil-source case implicitly (no-op).
-	if src != nil {
-		//: bulk-copy every existing entry.
-		maps.Copy(next, *src)
-	}
-	//: insert the new entry.
-	next[name] = f
-	//: caller publishes the snapshot via Value.Update.
-	return next
+	//: a DISTINCT factory under a taken Name is the hard conflict: the typed
+	//: sentinel, the fields naming the registrar and Name.
+	return errs.Wrap(DuplicateRegistration, errs.WrapParams{},
+		errs.String("registrar", "writer.Register"), errs.String("name", string(name)))
 }
 
 // Lookup returns the factory registered under n.
@@ -136,17 +76,8 @@ func cloneFactoryMap(src *map[Name]Factory, name Name, f Factory) map[Name]Facto
 // IFACE-PLUGIN: the registry stores plug-in factory instances behind the
 // Factory interface — concrete types are intentionally unexported per writer.
 func Lookup(n Name) (f Factory, ok bool) {
-	//: snapshot-pointer read + map lookup; no interface assertion needed.
-	m := loadRegistry()
-	//: absence path.
-	if m == nil {
-		//: no factory registered under this Name.
-		return nil, false
-	}
-	//: typed map read.
-	factory, found := m[n]
-	//: hand back the typed factory + lookup outcome.
-	return factory, found
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return registry.Lookup(n)
 }
 
 // Open resolves n to its factory and builds a Sink from cfg. It is the
@@ -164,20 +95,9 @@ func Open(n Name, cfg Config) (sink corelogger.Sink, err error) {
 	return factory.Open(cfg)
 }
 
-// Available returns the sorted list of registered Names.
+// Available returns the sorted list of registered Names, or nil before any
+// Register.
 func Available() []Name {
-	//: snapshot the registry pointer; nil before any Register.
-	m := loadRegistry()
-	//: empty result when nothing registered yet.
-	if m == nil {
-		//: nil slice is the documented zero value.
-		return nil
-	}
-	//: slices.Collect(maps.Keys()) avoids the manual range loop the linter's
-	//: COLLECTKEYS rule flags; same allocation cost as the hand-rolled loop.
-	names := slices.Collect(maps.Keys(m))
-	//: slices.Sort avoids reflection compared to sort.Slice.
-	slices.Sort(names)
-	//: hand back the freshly ordered slice.
-	return names
+	//: sorted ascending, the caller's own slice.
+	return registry.Names()
 }

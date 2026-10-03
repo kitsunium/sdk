@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/data/transform/
 
 ## Purpose
@@ -31,7 +31,7 @@ Code range: `0.2.5.*` (ADR 0014).
 | File | Surface |
 |---|---|
 | `transform.go` | `Algorithm` typed string (`String` / `Known`) + `Compressor` interface (`Algorithm` / `Compress` / `Decompress`) + `BoundedDecompressor`, the optional extension adding `DecompressBounded(dst, src, max)`, detected by type assertion |
-| `registry.go`  | `snapshot.Value`-backed Compressor registry: `Register` / `Lookup` / `Available` |
+| `registry.go`  | the Compressor registry, an instance of `kernel/plugin.Registry` (ADR 0159): `Register` / `Lookup` / `Available`; what stays here is the refusal — `DUPLICATE_REGISTRATION` and its `algorithm` field |
 | `codes.go`     | `Code*` constants — range 0.2.5.\* |
 | `errors.go`    | `UnknownCompressor` (0.2.5.1), `CompressionFailed` (0.2.5.2), `DecompressionFailed` (0.2.5.3), `CompressedFrameInvalid` (0.2.5.4), `DuplicateRegistration` (0.2.5.5), `DecompressedTooLarge` (0.2.5.6) |
 
@@ -44,9 +44,10 @@ stream was well formed, because the decode stops before the trailer.
 
 ## Conventions
 
-- **`snapshot.Value`, not `sync.Map`** — schemes register once at import, then
-  it is read-many (ADR 0011). `Register` publishes via `Value.Update`
-  (mutex-serialised); `Lookup` is lock-free.
+- **The table is the kernel's `plugin.Registry`, not a copy of it** — schemes
+  register once at import, then it is read-many: `Register` publishes through
+  `Publish` (check and insert one atomic step), `Lookup` is a lock-free snapshot
+  read (ADR 0011, ADR 0159). The registry keeps only its domain's refusal.
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var GzipCompressor = transform.Register(gzipCompressor{})` in each scheme.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme
