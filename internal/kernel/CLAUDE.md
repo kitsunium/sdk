@@ -24,6 +24,7 @@ The SDK's lowest layer: **stdlib-only AND generic** primitives. A package qualif
 | `heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
 | `pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because the two callers in view want opposite verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
 | `plugin/` | `Unusable(v)` — the one question every process-wide registry asks before publishing: a typed nil and a non-comparable value both satisfy a port and neither can serve (ADR 0071) — and `Registry[K, V]`, the name-keyed copy-on-write table the entry is then published into, which reports a conflict rather than building an error (first users: the metrics and trace exporter registries) | (none — returns a reason string, and a conflict bool, the registrar puts behind its own code) |
+| `semver/` | SemVer 2.0.0 precedence with Go's leading `v`, and Go pseudo-versions: `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` — the six functions the SDK called on `golang.org/x/mod`, which it replaces (ADR 0156 §4); one pass, no allocation, published as `pkg/v1/semver` | (none — answers with values and `bool`s; an invalid string orders below every version) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -68,6 +69,18 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   no verdict: `/var/run` being a symbolic link is a distribution's decision and
   `/tmp/myapp` being one may be an attack, so the primitive measures and the
   domain decides.
+- `semver` admitted on rule 1, and as a REPLACEMENT rather than a new
+  capability: it takes the place of `golang.org/x/mod` (ADR 0156 §4), which
+  was the one module outside the standard library the service layer required
+  for something other than a codec. Its signatures take a version string and
+  answer about it — no release, no update, no product — and its vocabulary is
+  SemVer's and the Go toolchain's, which every Go program shares. It ships with
+  one in-tree consumer, `internal/service/proc/self` (pseudo-versions); the two
+  callers of `x/mod/semver`, `selfupdate` and `entitlement`, move to the
+  framework (ADR 0158) and reach it through `pkg/v1/semver`, the alias that
+  exists for exactly that reason (ADR 0159 §4). Written from the
+  specifications, not from x/mod's source; x/mod's test vectors are what the
+  suite borrows, so the two are shown to agree.
 - `group` and `heap` admitted on **rule 1 alone**, which is the only
   admission criterion there has ever been: stdlib-only AND generic. Each is
   domain-neutral down to its signatures — `Go`/`Wait`/`Collect` with no `Job` or
@@ -131,3 +144,4 @@ GOWORK=off go test -race -cover ./...
 - `heap/` — see `internal/kernel/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
 - `plugin/` — see `internal/kernel/plugin/CLAUDE.md` (the registry entry guard and the table behind it — why both answer the registrar rather than refusing for it)
 - `pathchain/` — see `internal/kernel/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)
+- `semver/` — see `internal/kernel/semver/CLAUDE.md` (version precedence and pseudo-versions without `x/mod` — why the surface is six functions, and the oracles the suite holds it to)
