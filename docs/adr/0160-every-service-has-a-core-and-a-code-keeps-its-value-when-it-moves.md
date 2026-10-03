@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
-- **Amends**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md) §Layout (what `LL` records), [ADR 0035](0035-pp-range-ownership-enforcement.md) (where a range's declaration lives, and a second check), [ADR 0047](0047-sdk-net-websocket.md) (the WebSocket wire format in `internal/core/net`), [ADR 0051](0051-sdk-trace-domain.md) (the W3C format in `internal/core/trace`), [ADR 0063](0063-sdk-i18n-domain.md) (the language-tag and pattern parsers in `internal/core/i18n`), [ADR 0064](0064-sdk-mail-domain.md) (message validation in `internal/core/mail`), [ADR 0101](0101-a-secret-shown-is-a-secret-replaced-and-the-bound-is-exact.md) §D5, [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) §D1, [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D2 (the document store's ports), [ADR 0121](0121-a-process-reads-its-own-profiles-and-the-attribution-is-the-callers.md) §D1, [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (four service packages with no core)
+- **Amends**: [ADR 0005](0005-sdk-error-codes-dotted-quad.md) §Layout (what `LL` records), [ADR 0035](0035-pp-range-ownership-enforcement.md) (where a range's declaration lives, and a second check), [ADR 0047](0047-sdk-net-websocket.md) (the WebSocket wire format in `internal/core/net`), [ADR 0051](0051-sdk-trace-domain.md) (the W3C format in the trace core), [ADR 0063](0063-sdk-i18n-domain.md) (the language-tag and pattern parsers in the i18n core), [ADR 0064](0064-sdk-mail-domain.md) (message validation in the mail core), [ADR 0101](0101-a-secret-shown-is-a-secret-replaced-and-the-bound-is-exact.md) §D5, [ADR 0110](0110-a-document-store-writes-one-entry-and-rests-as-one-file.md) §D1, [ADR 0139](0139-a-document-store-over-sql-joins-the-transaction-its-context-carries.md) §D2 (the document store's ports), [ADR 0121](0121-a-process-reads-its-own-profiles-and-the-attribution-is-the-callers.md) §D1, [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (four service packages with no core)
 - **Related**: [ADR 0001](0001-sdk-go-multimodule-layout.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (ownership decides where a type lives), [ADR 0141](0141-a-mail-spool-keeps-an-identifier-its-caller-minted.md) (`IsDotAtom`'s home), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (layer `4`), [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (principles 3 and 7), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (one path in every layer), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) (ranges that move to the framework), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md) (the generic registry)
 
 ## Context
@@ -116,8 +116,11 @@ before and after: **327 codes** changed declaring package, every one from
 `internal/service` to `internal/core` — data 117, app 93, observe 69,
 security 28, crypto 11, proc 9 — and the 735 (code, constant, value) triples
 are identical, so §3 held. No code is declared under `internal/service` any
-more, and every `codeRangeOwners` range of the SDK names an `internal/core`
-directory.
+more, and no `codeRangeOwners` range names an `internal/service` directory:
+the SDK's ranges name `internal/core` directories — 93 of them — but for the
+kernel's two (`collections/ring`, `concur/batcher`) and the three `pkg/v1`
+facades that own a `MM = 1` range (the logger, its `slog` bridge and the codec
+umbrella).
 
 - **§1, the four cores, at their family paths (ADR 0155).**
   `internal/core/data/docstore` holds `0.3.80.*`, the entry, version and stamp
@@ -215,4 +218,5 @@ directory.
 
 - `internal/kernel/errs/registry_ownership_external_test.go` — `codeRangeOwners`,
   and its comment: never renumber a published code to make the table fit.
-- `internal/service/selfupdate/codes.go` — `CodeProbeFailed`, a literal.
+- `framework/internal/service/selfupdate/codes.go` — `CodeProbeFailed`, a literal,
+  `0x00_03_42_08`: a layer-3 value declared in the framework since ADR 0158.

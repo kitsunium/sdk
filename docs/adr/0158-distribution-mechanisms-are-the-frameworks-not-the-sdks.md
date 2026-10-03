@@ -114,7 +114,7 @@ in the framework:
 
 - **The guarded HTTP client.** The roster fetch and the CI token mint
   (`entitlement`) and the release client (`selfupdate`) stay `net/http` over
-  `http.DefaultTransport`, because `pkg/v1/client`'s transport sets no `Proxy`:
+  `http.DefaultTransport`, because `pkg/v1/net/client`'s transport sets no `Proxy`:
   measured with `HTTP_PROXY` set, the default client went through the proxy and
   the guarded one dialled the host directly, so adopting it would cut every
   customer behind a proxy off their licence checks and updates. It also
@@ -122,7 +122,7 @@ in the framework:
   requires. The way forward is the net domain's: a proxy option — honouring
   `HTTP(S)_PROXY` and `NO_PROXY` — and a documented no-redirect setting in
   `core/net`'s `ClientConfig`, under its own ADR, after which the three clients
-  adopt `pkg/v1/client` and the guarded policy re-states `selfupdate`'s
+  adopt `pkg/v1/net/client` and the guarded policy re-states `selfupdate`'s
   https-only, bounded hops.
 - **RS256.** The CI seat's GitHub Actions token is RS256, and the crypto domain
   registers Ed25519 and ECDSA P-256 and no RSA scheme. As §2 says, it is
@@ -142,6 +142,7 @@ in the framework:
 
 - `framework/internal/kit/build.go` — the one importer outside the four
   domains' own trees.
-- `internal/service/entitlement/{roster_parse,roughtime_verify,oidc,jwks,jsonnames,service,ci,roughtime}.go`,
-  `internal/service/selfupdate/{keys,signature,transport,checksum}.go` — the
-  re-implemented mechanisms.
+- `framework/internal/service/entitlement/{roster_parse,roughtime_verify,oidc,jwks,jsonnames,service,ci,roughtime}.go`,
+  `framework/internal/service/selfupdate/{keys,signature,transport,checksum}.go` —
+  the re-implemented mechanisms, in the framework now; what each one adopted
+  from `pkg/v1`, and what it kept and why, is in the engines' `CLAUDE.md`.

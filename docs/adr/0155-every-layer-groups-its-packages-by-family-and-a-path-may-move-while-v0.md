@@ -139,8 +139,8 @@ is on disk, never on a number someone maintains.
 - **Implemented by the reorganisation series**, one family per pull request:
   the moves in `internal/core`, `internal/service` and `pkg/v1`, the
   `concur` / `collections` packages, and the guard of §6. This record changes
-  no code; until a family's pull request lands, the tree on disk is the
-  authority and the table above is the target.
+  no code; the tree on disk is the authority, and §As built records where it
+  settled a detail the table above left open or departed from it.
 - **As implemented in the kernel**, which took a family wherever one applies
   rather than only where `pkg/v1` publishes one: `buffer` joined `concur`
   beside the `recycler` it specialises, `cache` joined `collections`, and
@@ -165,6 +165,68 @@ is on disk, never on a number someone maintains.
 Every import path under `pkg/v1` except `errs`, `clock`, `crypto` and `proc`,
 once per family, with no alias left behind — permitted only because the module is v0, under §4.
 No shape, no behaviour and no error code changes.
+
+## As built
+
+Measured from disk on the series' integrated tree: a package is a directory
+holding a non-test `.go` file, counted per layer.
+
+| Layer | Packages | At its root | Families |
+|---|---|---|---|
+| `internal/kernel` | 18 | `backoff`, `clock`, `errs`, `plugin`, `semver` | `concur` 7 (`batcher`, `buffer`, `group`, `recycler`, `singleflight`, `snapshot`, `worker`), `collections` 3 (`cache`, `heap`, `ring`), `fs` 3 (`flock`, `pathchain`, `winacl`) |
+| `internal/core` | 72 | — | `crypto` 2 (the family's root, `key/jwk`), `security` 5, `net` 1 (the family's root), `proc` 2 (the family's root, `ipc`), `observe` 21, `data` 26, `app` 15 |
+| `internal/service` | 103 | — | `crypto` 13 (in eight role directories: `aead`, `agree`, `hash`, `kdf`, `key`, `mac`, `password`, `sign`), `security` 5, `net` 6, `proc` 12, `observe` 26, `data` 26, `app` 15 |
+| `pkg/v1` | 87 | `errs`, `clock` | `concur` 6, `collections` 2, `crypto` 7 (the AEAD at the family's root and six scheme facades), `security` 5, `net` 6, `proc` 10 (the capability preflight at the family's root and nine facades), `observe` 6, `data` 28, `app` 15 |
+
+`pkg/v1` has eleven top-level directories where it had 55. `internal/core`
+and `internal/service` hold the same seven families and no package outside
+them — the core's `crypto`, `net` and `proc` are their families' root
+packages; the kernel and `pkg/v1` add the families only they need. Where the code
+settled what the record left open, or departed from it:
+
+- **The logger keeps its name.** It is `observe/logger` in every layer, not
+  §2's `observe/log`: a Go package is named after its directory, so the move
+  would have renamed the package every importer spells `logger.` and set it
+  against the standard library's `log` in every file that needs both.
+- **`semver` is `pkg/v1/data/semver`**, in the `data` family rather than at
+  the root §1 gave it (ADR 0159, as implemented): the root of `pkg/v1` holds
+  `errs` and `clock` alone.
+- **The kernel took three families**, where §2 expected only `concur` and
+  `collections` (ADR 0159, as implemented): `buffer` joined `concur`, `cache`
+  joined `collections`, and `fs` holds the filesystem measurements.
+- **A child is a sibling when it never needed its parent.** `sse`,
+  `websocket` and `static` were children of `server` in the old tree and
+  imported nothing of it; they are siblings under `pkg/v1/net`, as their
+  engines already were under `internal/service/net`. `sdnotify` and
+  `sdlisten` are `proc/systemd/notify` and `proc/systemd/listen` in both
+  layers that hold them, and their packages are named `notify` and `listen`.
+- **A domain's parts nest beneath it.** The core's writer registry is
+  `observe/logger/writer`, beside `observe/logger/level`, and the engines'
+  writers, sinks and middlewares sit under `internal/service/observe/logger`.
+  The OpenTelemetry model `metrics` and `trace` share is
+  `internal/core/observe/otel`; the helpers two engines share sit where Go's
+  `internal/` rule admits exactly those engines —
+  `internal/service/observe/internal/otlp`,
+  `internal/service/observe/logger/internal/logfile`,
+  `internal/service/proc/internal/rlim`.
+- **Every codec is in one tree** (§3): the sixteen formats, `strictjson` (its
+  request-body form in `strictjson/httpbody`), `jsonshape` and `jsonpatch`
+  under `data/codec` in the service and the facades, and `data/transform` a
+  sibling with a facade of its own.
+- **One family per commit, not per pull request** (§5): each family moved in
+  one rename-only commit on the series' integration branch — `git mv`, the
+  path substitution, regenerated `BUILD.bazel` files and READMEs, and the
+  hand-kept tables — and the families reach `main` together, in the series'
+  one pull request, which names the paths it moves and is sized by the
+  `release:minor` label a maintainer sets (ADR 0135).
+- **The measurement of §Context, re-run on the final tree**: `go list -deps`
+  of `pkg/v1/data/codec/strictjson` holds neither `pkg/v1/data/codec` nor any
+  codec, that of `pkg/v1/net/websocket` holds no `pkg/v1/net/server`, and no
+  child of `pkg/v1/crypto` or of `pkg/v1/proc` links its family's root.
+- **§6 as built**: `check-domain-docs.sh` reads the root `CLAUDE.md`'s one
+  `core/` block — a family's packages may be written `family/{a, b}` — and
+  compares it with every directory under `internal/core` that holds Go code,
+  at any depth.
 
 ## Alternatives considered
 
@@ -191,5 +253,8 @@ No shape, no behaviour and no error code changes.
 ## References
 
 - `go list -deps ./pkg/v1/codec/strictjson`, `go list -deps ./pkg/v1/server/websocket`
-  — the measurement that a child does not link its parent.
+  — the measurement that a child does not link its parent, on the tree this
+  record was written against; on the final tree,
+  `go list -deps ./v1/data/codec/strictjson` and
+  `go list -deps ./v1/net/websocket`, run from `pkg/`.
 - [Go modules reference — v0 major version](https://go.dev/ref/mod#v0-major).

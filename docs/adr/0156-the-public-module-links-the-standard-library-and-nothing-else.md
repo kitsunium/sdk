@@ -65,8 +65,8 @@ suite.
 ### 3. YAML is a named subset; the full grammar is opt-in
 
 The Format `yaml` becomes a native YAML 1.2.2 subset sized for configuration
-(`internal/service/codec/yaml`; the table is what it reads and refuses, as
-built):
+(`internal/service/data/codec/yaml`; the table is what it reads and refuses,
+as built):
 
 | Read | Refused by name (code) |
 |---|---|
@@ -125,10 +125,10 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
     sorted by encoded key (RFC 8949 §4.2.1); BSON keeps the driver's v1
     mapping, gains two codes in its own range (`0.3.36.4`
     `BSON_DEPTH_EXCEEDED`, `0.3.36.5` `BSON_VALUE_INVALID`) and a facade,
-    `pkg/v1/codec/bson`, which registers BSON alone and aliases its value types
+    `pkg/v1/data/codec/bson`, which registers BSON alone and aliases its value types
     because a program reading BSON holds them (ADR 0074, ADR 0134); TOML's
     `LocalDate`, `LocalTime` and `LocalDateTime` are the SDK's own types,
-    re-exported by `pkg/v1/codec/toml`, and its decoder still accepts the four
+    re-exported by `pkg/v1/data/codec/toml`, and its decoder still accepts the four
     TOML 1.1.0 relaxations the replaced library accepted while its encoder
     writes 1.0.0.
   - The native YAML subset reads and refuses exactly §3's table and keeps
@@ -140,18 +140,29 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
     which claims no MIME type and no extension.
   - `kernel/semver` replaced `golang.org/x/mod` in `proc/self`, and the
     framework's `entitlement` and `selfupdate` call it through
-    `pkg/v1/semver`.
+    `pkg/v1/data/semver` — in the `data` family, not at the root §4's
+    reference to ADR 0159 implied (ADR 0155, as built).
   - Measured on the merged tree with `GOWORK=off`: `go list -m all` in `pkg`
     names the SDK's own four modules (`pkg`, `internal/core`,
     `internal/kernel`, `internal/service`) and nothing else, and
     `go list -deps -test ./...` reaches no package outside
     `github.com/kitsunium/sdk` — nor does it in `internal/kernel`,
-    `internal/core`, `internal/service` or the framework. No `go.mod` of the
-    SDK or the framework requires a codec library or `golang.org/x/mod`;
-    `gopkg.in/yaml.v3` is required by `third-party/codec/yaml` alone.
-- **Not yet mechanical**: no gate fails when a vendor module enters `pkg`'s
-  graph. Until one does, §1 is checked in review with `go list -m all`; see
-  §Deferred.
+    `internal/core`, `internal/service` or the framework. No `go.mod` of
+    `pkg`, `internal/*` or the framework requires a codec library or
+    `golang.org/x/mod`. Of the vendor modules, `third-party/codec/yaml` alone
+    requires `gopkg.in/yaml.v3`, and `third-party/codec/hcl` lists
+    `golang.org/x/mod` as an indirect requirement of HCL's own graph (through
+    `x/tools`); the auxiliary `e2e` lists `yaml.v3` indirectly too, through the
+    test helpers of a database driver its integration suites import.
+- **Mechanical for the codecs only.** Each per-format facade under
+  `pkg/v1/data/codec` and `pkg/v1/data/transform` — seventeen packages —
+  carries `TestItLinksNoModuleOutsideTheSDK`, which reads its own test
+  binary's build information and fails on a module outside
+  `github.com/kitsunium/sdk`. Bazel builds without module information and
+  skips it; `go test` runs it — the 32-bit lane (`test-386`) over the whole
+  census, and the whole-suite steps of `e2e-cross` on macOS and Windows. No
+  gate covers the rest of `pkg`: there §1 is still checked in review with
+  `go list -m all`; see §Deferred.
 - A service whose configuration uses a refused construct fails at load, with
   the construct and its line named, instead of loading something its author did
   not write. The way out is one import and one Format name.
@@ -170,7 +181,7 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
   `off` into a `bool` are refused, `1_000`, `0b101` and a timestamp are text in
   an untyped target, a float decodes into an integer only when it is whole,
   `UnmarshalYAML(*yaml.Node)` is refused, and a mapping with non-string keys
-  reads as `map[string]any`; `internal/service/codec/yaml/CLAUDE.md` lists them.
+  reads as `map[string]any`; `internal/service/data/codec/yaml/CLAUDE.md` lists them.
   `yaml-full` reads every one of them as before.
 - Bytes written by the native MessagePack, CBOR, BSON and TOML codecs may differ
   from the library's wherever the specification leaves a choice; each
@@ -200,15 +211,16 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
 
 ## Deferred
 
-- **A gate for §1**: a lint step asserting that `go list -deps ./...` in `pkg`
-  reaches no module outside the SDK and the standard library.
+- **A gate for §1 over the whole of `pkg`**: a lint step asserting that
+  `go list -deps ./...` in `pkg` reaches no module outside the SDK and the
+  standard library, where today only the codec facades' own tests look.
 - Formats ADR 0003 and 0023 deferred (Avro, Cap'n Proto) stay deferred.
 
 ## References
 
 - `go list -deps ./...` and `go list -m all` in `pkg`, on the tree this record
   was written against — the table in §Context.
-- `internal/service/config/file_source.go` — a configuration file is decoded
+- `internal/service/app/config/file_source.go` — a configuration file is decoded
   through the codec registry.
 - [MessagePack specification](https://github.com/msgpack/msgpack/blob/master/spec.md),
   [RFC 8949 (CBOR)](https://www.rfc-editor.org/rfc/rfc8949),
