@@ -33,6 +33,8 @@ go_library(
         "stdio.go",
         "trampoline_unix.go",
         "wrap.go",
+        "zombie_darwin.go",
+        "zombie_other.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/proc/exec",
     visibility = [
