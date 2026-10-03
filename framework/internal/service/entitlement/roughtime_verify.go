@@ -167,7 +167,7 @@ func verifyRoughtimeCert(cert []byte, longTerm ed25519.PublicKey) (delegation ro
 		return roughtimeDelegation{}, annotate(innerErr, errs.String("document", "roughtime delegation body"))
 	}
 	key := inner[roughtimeTag("PUBK")]
-	//: A delegated key of the wrong length would panic ed25519.Verify.
+	//: A delegated key of the wrong length verifies nothing; say so by name.
 	if len(key) != ed25519.PublicKeySize {
 		//: Report the malformed answer.
 		return roughtimeDelegation{}, refuse(coreent.ErrCIUnverifiable,
@@ -194,8 +194,8 @@ func verifyRoughtimeCert(cert []byte, longTerm ed25519.PublicKey) (delegation ro
 // The context string is what stops a signature made for one purpose being
 // replayed as another — a delegation presented as a response, say.
 func checkRoughtimeSignature(key ed25519.PublicKey, context string, signed, signature []byte) error {
-	//: A signature of the wrong length verifies nothing and must not reach
-	//: ed25519.Verify, which is entitled to assume its own sizes.
+	//: A signature of the wrong length verifies nothing; refused by name, with
+	//: both lengths, before the verifier is asked.
 	if len(signature) != ed25519.SignatureSize {
 		//: Report the malformed answer.
 		return refuse(coreent.ErrCIUnverifiable,
@@ -206,7 +206,7 @@ func checkRoughtimeSignature(key ed25519.PublicKey, context string, signed, sign
 	}
 	//: Context first, then the signed bytes: the domain separation IS part of
 	//: the message.
-	if !ed25519.Verify(key, append([]byte(context), signed...), signature) {
+	if !verifiedBy(key, append([]byte(context), signed...), signature) {
 		//: Report the refusal.
 		return refuse(coreent.ErrCIUnverifiable,
 			errs.String("stage", "roughtime_signature"),

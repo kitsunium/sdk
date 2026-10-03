@@ -22,7 +22,7 @@ semver of its own, which ADR 0158 §2 routes every version through.
 |---|---|
 | `updater.go` | `Service`, the update flow, the atomic replacement |
 | `source.go` | `SourceValue` — the whole of what the original hard-coded |
-| `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey` |
+| `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/sign` |
 | `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` |
 | `probe.go` | ADR 0150: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
 | `checksum.go` | integrity: SHA-256 against the ALREADY-AUTHENTICATED manifest |

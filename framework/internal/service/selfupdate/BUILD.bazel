@@ -38,6 +38,7 @@ go_library(
         "//framework/internal/core/selfupdate",
         "//internal/kernel/errs",
         "//pkg/v1/proc",
+        "//pkg/v1/sign",
         "@org_golang_x_mod//semver",
     ],
 )

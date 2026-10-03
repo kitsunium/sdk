@@ -11,6 +11,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/sign"
 )
 
 // maxVendorKeys bounds the key list, as ADR 0091 bounds the entitlement
@@ -75,9 +76,18 @@ func (u *Service) WithSignatureDomain(domain string) *Service {
 
 // verifiedByAnyKey reports whether one of the linked keys verifies signature
 // over message.
+//
+// Each key is asked through the crypto domain's signing facade (ADR 0158 §2),
+// the verifier the rest of the SDK uses. The facade answers a key or a
+// signature of the wrong length with false, and an error only for an algorithm
+// it does not register — which Ed25519 always is, since importing the facade
+// registers it — so an error counts as "this key did not verify".
 func (u *Service) verifiedByAnyKey(message, signature []byte) bool {
 	for _, k := range u.keys() {
-		if len(k) == ed25519.PublicKeySize && ed25519.Verify(k, message, signature) {
+		if len(k) != ed25519.PublicKeySize {
+			continue
+		}
+		if verified, verifyErr := sign.Verify(sign.Ed25519, k, message, signature); verifyErr == nil && verified {
 			return true
 		}
 	}

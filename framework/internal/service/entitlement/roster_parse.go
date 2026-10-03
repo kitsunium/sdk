@@ -11,9 +11,25 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/sign"
 
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
 )
+
+// verifiedBy reports whether signature is key's ed25519 signature over message.
+//
+// It asks the crypto domain's signing facade (ADR 0158 §2) rather than calling
+// crypto/ed25519 itself: one verifier for the vendor's roster, the self-update
+// manifest and a Roughtime answer, and the one the rest of the SDK uses. The
+// facade answers a key or a signature of the wrong length with false rather
+// than a panic, and an error only for an algorithm it does not register —
+// which Ed25519 always is, since importing the facade registers it. An error
+// therefore reads as "not verified": nothing that failed to verify is believed.
+func verifiedBy(key, message, signature []byte) bool {
+	verified, verifyErr := sign.Verify(sign.Ed25519, key, message, signature)
+	//: Verified, and by the scheme the facade was asked for.
+	return verifyErr == nil && verified
+}
 
 // ParseRoster decodes and authenticates a roster. Signature verification runs
 // before any field is trusted, and `now` is passed in rather than read from
@@ -69,17 +85,17 @@ func ParseRoster(raw, sig []byte, vendor ed25519.PublicKey, now time.Time) (rost
 // field is decoded, exactly as before. What is missing is only the judgement
 // about NOW, which is what the caller with a clock to doubt cannot use.
 func authenticateRoster(raw, sig []byte, vendor ed25519.PublicKey) (roster *coreent.RosterValue, err error) {
-	//: A malformed vendor key can only come from a broken build; refuse
-	//: rather than let ed25519.Verify panic on a short slice.
+	//: A malformed vendor key can only come from a broken build; refuse it
+	//: by name, with its length, rather than report every roster a forgery.
 	if len(vendor) != ed25519.PublicKeySize {
-		//: Refuse rather than risk a panic inside ed25519.Verify.
+		//: Refuse, naming the key's length.
 		return nil, refuse(coreent.ErrRosterUnsigned,
 			errs.String("condition", "the linked vendor key is not an ed25519 public key"),
 			errs.Int("key_bytes", len(vendor)))
 	}
 	//: Authenticate the bytes before decoding them: a forged roster must
 	//: never reach the JSON parser, let alone the authorization decision.
-	if !ed25519.Verify(vendor, raw, sig) {
+	if !verifiedBy(vendor, raw, sig) {
 		//: Unsigned or forged — the spoofing case.
 		return nil, coreent.ErrRosterUnsigned
 	}

@@ -92,8 +92,8 @@ func (u *Service) WithVendorKey(key []byte) *Service {
 // mean hostile bytes had already been through the tar/zip readers.
 func (u *Service) verifyArchive(tag string, archive []byte) error {
 	//: Re-checked here even though downloadAndReplace already refused: this
-	//: is the function that would otherwise hand a short slice to
-	//: ed25519.Verify, and that panics rather than returning false.
+	//: is the function that would otherwise verify against no usable key, and
+	//: a build that cannot authenticate is told so by name, not as a forgery.
 	if err := u.canAuthenticate(tag); err != nil {
 		//: Bare bubble — canAuthenticate names the tag.
 		return err
@@ -113,9 +113,10 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 		return err
 	}
 
-	//: STEP 1 — authenticity. ed25519.Verify over the manifest's exact bytes;
-	//: `string(raw)` in fetchChecksums round-trips byte-for-byte, so the
-	//: signed payload and the parsed payload are provably the same sequence.
+	//: STEP 1 — authenticity. An ed25519 verification, through pkg/v1/sign,
+	//: over the manifest's exact bytes; `string(raw)` in fetchChecksums
+	//: round-trips byte-for-byte, so the signed payload and the parsed
+	//: payload are provably the same sequence.
 	//: With a signature domain the signed bytes are the domain, a NUL and the
 	//: manifest, and any linked key may have signed them (ADR 0150).
 	if !u.verifiedByAnyKey([]byte(u.signedMessage(manifest)), signature) {
@@ -140,9 +141,9 @@ func (u *Service) verifyArchive(tag string, archive []byte) error {
 //
 // It is called at the TOP of downloadAndReplace, before the archive is even
 // requested: an unanchored build refusing after a 30MB download would be a
-// confusing way to say "this binary cannot install releases". ed25519.Verify
-// panics on a key of the wrong length, so the length test is also what keeps
-// the verification path total.
+// confusing way to say "this binary cannot install releases". The length test
+// is what tells a build with no usable key from a release whose signature does
+// not verify.
 func (u *Service) canAuthenticate(tag string) error {
 	//: A build can verify a release when ONE linked key has the ed25519
 	//: public size (ADR 0150): a list of broken keys is no anchor at all.

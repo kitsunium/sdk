@@ -23,7 +23,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 |---|---|
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
-| `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
+| `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature; `verifiedBy`, the package's one ed25519 check (roster, bundle, Roughtime), through `pkg/v1/sign` |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
 | `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance; `DefaultCacheDir`, `WithCache` |
 | `cache_lock.go` | exclusion over the cache directory — what rename does not give; `holdCacheForWrite` skips a write it cannot guard |

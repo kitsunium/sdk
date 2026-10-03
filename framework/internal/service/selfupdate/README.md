@@ -440,7 +440,7 @@ func (u *Service) WithProbe(args []string, timeout time.Duration) *Service
 WithProbe makes a replacement stand only once the NEW binary, run with args, exits 0 within timeout \(zero: five seconds\). Before the rename the previous binary is kept as \<binary\>.prev — a hard link, so the binary's own name is never absent —, and a probe that fails puts it back and reports ProbeFailed. A daemon that updates itself declares the argument its binary answers cheaply \("version", "\-\-probe"\).
 
 <a name="Service.WithSignatureDomain"></a>
-### func \(\*Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L68>)
+### func \(\*Service\) [WithSignatureDomain](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L69>)
 
 ```go
 func (u *Service) WithSignatureDomain(domain string) *Service
@@ -467,7 +467,7 @@ WithVendorKey pins the ed25519 public half every release must be signed with, an
 A Service built WITHOUT this call authenticates nothing and therefore installs nothing: verifyArchive refuses with coreupd.NoVendorKey before a single byte is fetched. That default is deliberate. The alternative — treat an absent key as "verification not required" — would mean any construction site that forgot the call silently reverted to the unauthenticated behaviour this file exists to end, and nothing would ever fail to point it out.
 
 <a name="Service.WithVendorKeys"></a>
-### func \(\*Service\) [WithVendorKeys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L35>)
+### func \(\*Service\) [WithVendorKeys](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/keys.go#L36>)
 
 ```go
 func (u *Service) WithVendorKeys(keys ...[]byte) *Service

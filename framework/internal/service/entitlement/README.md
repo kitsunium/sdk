@@ -249,7 +249,7 @@ ParseJWKS decodes a key set and builds the usable RSA keys from it.
 Unusable entries are skipped rather than fatal: GitHub may publish a key type or use this package does not verify, and refusing the whole set over one of them would take down every CI seat for a reason unrelated to any of them. A set with NO usable key is an error, because that is indistinguishable from having no keys at all.
 
 <a name="ParseRoster"></a>
-## func [ParseRoster](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/roster_parse.go#L21>)
+## func [ParseRoster](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/roster_parse.go#L37>)
 
 ```go
 func ParseRoster(raw, sig []byte, vendor ed25519.PublicKey, now time.Time) (roster *coreent.RosterValue, err error)
