@@ -21,7 +21,7 @@ improvement remains identified, so the loop's 3-cycle cap was not needed.
 
 | Lever | Verdict |
 |---|---|
-| tlv `encodeInt/encodeUint` inline-split | escape annotation is **benign** — the appends write into a pre-sized pooled scratch, so 0 runtime alloc (Marshal/scalar = 3 allocs, none from these fns) |
+| tlv `encodeInt/encodeUint` inline-split | escape annotation is **benign** — into a sized `Append` destination or the streaming encoder's pooled scratch the appends never grow, so 0 runtime alloc; `Marshal`/scalar's 2 allocs (24 B) ARE these appends growing its nil destination, and an inline split removes neither (corrected: this row first read "3 allocs, none from these fns" — the third was the alloc probe boxing its result) |
 | baseenc `encodeBytes` → `AppendEncode` | **deliberate** alloc — `Marshal` returns a fresh `[]byte`, there is no caller `dst` to append into |
 | csv Append-into-dst (promotion shape) | **unmeasurable** — the bench fixtures produce no promotion-shape Append rows |
 | tlv `decodeString` `unsafe.String` | **unsafe** — decoded values outlive the `Unmarshal` call while the caller may reuse `data` (use-after-free); the copy stays |

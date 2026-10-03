@@ -3,21 +3,25 @@
 package tlv_test
 
 import (
+	"io"
 	"testing"
 
 	corecodec "github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/service/codec/tlv"
 )
 
-// allocSink defeats dead-code elimination in the AllocsPerRun probes.
+// allocSink defeats dead-code elimination in the AllocsPerRun probes. Storing
+// a []byte in it boxes the slice header, so the marshal and append ceilings
+// carry that one allocation on top of the codec's own: Marshal of the scalar
+// below is 2 allocations by itself, and Append into the sized dst is 0.
 var allocSink any
 
 // TestAllocBudget pins TLV's per-call allocation ceilings for Marshal,
-// Unmarshal, and (when implemented) Append over a scalar int64 — the typed
-// fast-path Phases 6-8 optimised. Carries //go:build !race
-// (testing.AllocsPerRun is +1 under -race) and no t.Parallel (AllocsPerRun
-// reads a process-global counter). Budgets are ceilings — re-pin with intent
-// on a Go toolchain bump.
+// Unmarshal, and (when implemented) Append and the streaming Encoder over a
+// scalar int64 — the typed fast-path Phases 6-8 optimised. Carries
+// //go:build !race (testing.AllocsPerRun is +1 under -race) and no t.Parallel
+// (AllocsPerRun reads a process-global counter). Budgets are ceilings —
+// re-pin with intent on a Go toolchain bump.
 func TestAllocBudget(t *testing.T) {
 	payload := int64(-64_000_000_000)
 	c := tlv.New()
@@ -56,6 +60,20 @@ func TestAllocBudget(t *testing.T) {
 				t.Fatalf("Append: %v", aerr)
 			}
 			allocSink = out
+		}})
+	}
+	//: the streaming Encoder is the one path that rents the pooled encode
+	//: scratch, so its steady state IS the pool's zero-allocation claim: an
+	//: encoder that grew a fresh buffer per record would pay at least one.
+	//: The value is boxed once, here, so the caller's conversion is not
+	//: counted, and io.Discard keeps the writer out of the figure.
+	if streaming, ok := c.(corecodec.StreamingCodec); ok {
+		enc := streaming.NewEncoder(io.Discard)
+		var boxed any = payload
+		tests = append(tests, tc{"stream-encode", 0, func() {
+			if eerr := enc.Encode(boxed); eerr != nil {
+				t.Fatalf("Encode: %v", eerr)
+			}
 		}})
 	}
 	runCase := func(t *testing.T, tc tc) {

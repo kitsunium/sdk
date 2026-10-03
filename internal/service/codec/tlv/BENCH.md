@@ -193,7 +193,80 @@ callers. Recorded, not done — and it is the next thing to do here.
   price of a reflective decoder and there is nothing above them to remove.
 - **The encode scratch pool** is left exactly as documented: `Append` into a
   sized buffer is already 0 allocations, so there is nothing for a pool to
-  save on that path.
+  save on that path. The one path the pool does serve is the streaming
+  `Encoder`, measured in §7.
+
+## 7. The streaming encoder is the pool's only customer, and the pool is bounded
+
+None of the rows above touches the encode scratch pool: `Marshal` hands
+`Append` a nil destination and `Append` writes into the caller's. The one path
+that rents from it is the streaming `Encoder`, and until
+`BenchmarkEncoderStream` nothing measured it. An audit of the tree had flagged
+the pool as unbounded — a memory-retention bug. It is not, and the last row is
+the proof: a record twice the 256 KiB retain ceiling pays for a fresh buffer on
+**every** `Encode`, because the pool refuses to keep the one it grew. A pool
+with no ceiling would report that row at 0 B.
+
+| record (writer `io.Discard`, value boxed once) | ns/op, fastest of ten | B/op | allocs/op |
+|---|---:|---:|---:|
+| scalar `int64`, 10 wire bytes | 21.55 | 0 | **0** |
+| one `benchMixed` (five fields) | 78.39 | 0 | **0** |
+| 1 000 `benchMixed`, 63 890 wire bytes | 90 348 | 0 to 44 | **0** |
+| a 512 KiB `[]byte` — twice the ceiling | 96 151 | ≈ 533 000 | **3** |
+
+The first three are the pool working: in a steady state the buffer it hands
+back is already wide enough, so the record costs no allocation at all — the
+few bytes on the wide message are its first growth amortised over the run. The
+oversize row is the ceiling working: `append` grows the scratch to 532 480 B
+(the 524 292-byte record rounded up to whole pages), the pool orphans it, and
+since the orphaned buffer took its `*[]byte` with it, the next rent builds a
+256 B replacement — the other two allocations.
+
+Two gates pin both halves, and each was shown to fail on the defect it guards:
+`TestAllocBudget/stream-encode` (ceiling 0, race-off lane) reports
+**2 allocs/op** when `Encode` bypasses the pool, and `Test_tlvEncoder_Encode`
+rents the pool back after every case and caught a **532 480-byte** buffer
+handed out again once the ceiling was lifted, and a **`len=11`** one — the
+debris of a record that failed halfway — once the reset stopped truncating.
+
+### Moving the pool onto the kernel recycler
+
+The pool was then moved off its hand-rolled `sync.Pool` onto
+`recycler.CappedPool[*[]byte]`, bounded by `scratch.MaxRetainedBufBytes`
+instead of a local copy of `256 << 10`. Both builds were measured, interleaved
+run by run with the order alternating, so the machine's load fell on each alike.
+
+- **No allocation count moved, on any row.** Ten rounds each: 0, 0, 0 and 3
+  allocs/op before and after; the oversize row spent 532 960 to 533 066 B/op
+  before and 532 976 to 533 063 after. Two further rounds of the whole suite
+  agree on all twenty-three rows — and the nineteen rows of §1–§6 reproduce
+  the allocation columns published above exactly, on another OS and
+  architecture.
+- **The mechanism costs 3.5 ns more per rent and return.** Isolated in one
+  process — the old `getScratch`/`putScratch` copied verbatim into a temporary
+  benchmark beside `encodeScratch.Get`/`Put`, alternating, forty samples each —
+  a round trip is **10.17 ns** by hand and **13.66 ns** through `CappedPool`
+  (+34 %, p = 0.000), both at 0 allocations. `-gcflags=-m=2` says where it
+  goes: `CappedPool.Put` is too large to inline (cost 196) and makes its
+  `capOf` check and its `reset` as calls through function values, and `Get`
+  reaches the `sync.Pool` through a generic `Pool.Get` that misses the inline
+  budget by one (81 against 80). `internal/kernel/recycler/BENCH.md` §4 prices
+  the same indirection as what discard-before-reset costs on the happy path,
+  and every other `CappedPool` consumer — `kernel/buffer`, `scratch` — already
+  pays it. An `Encode` makes exactly one round trip.
+- **On a whole `Encode` the difference is below what this machine could
+  resolve.** Thirty further rounds put the medians at 60.98 → 72.41 ns for
+  `scalar` and 212.6 → 269.1 ns for `mixed`, with p = 0.57 and 0.44 and
+  intervals of ±36 to ±59 %; the fastest runs, which load can only slow down,
+  moved 20.40 → 21.90 ns and 75.51 → 81.80 ns. Read that as "under the noise",
+  not as "free": the isolated 3.5 ns is the cost.
+
+The trade is one recycling mechanism and one ceiling for the codec domain
+against 3.5 ns per streamed record, which writes to an `io.Writer` anyway.
+
+The nanoseconds in this section come from a different machine than §1–§6,
+under far heavier load, and carry a wide spread — see the envelope below. Only
+the allocation columns, and the isolated pool comparison, are claims.
 
 ## Reproducibility envelope
 
@@ -221,6 +294,38 @@ callers. Recorded, not done — and it is the next thing to do here.
 | Git commit         | `94dd6e7` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, `-count=3`, medians, machine under load |
+
+§7 was measured later, on another machine, while a dozen other build and test
+jobs shared it, so its figures come from interleaved runs. `before` is
+`b8fc1d08` (the hand-rolled pool, with the gates of §7 already in place);
+`after` is the move onto the recycler, built on top of it.
+
+- All four rows: ten rounds of `-benchtime=1s`, each round running both test
+  binaries, the order alternating; load average 47.3 to 69.0 on 10 cores. The
+  spread is extreme — 21.84 to 87.11 ns on `scalar` and 76 µs to 1.6 ms on
+  `oversize` for the same binary — so the table gives the fastest run, and
+  only the allocation columns are claims.
+- `scalar` and `mixed`: thirty more rounds of `-benchtime=300ms`, load 49.6 to
+  54.7.
+- The isolated pool round trip: one temporary binary, `-count=40
+  -benchtime=200ms`, its two sub-benchmarks alternating; load 35.2 to 42.6. The
+  temporary benchmark was not kept in the tree, since half of it was the code
+  this change removed.
+- The whole suite, for its allocation columns: two rounds of `-benchtime=1s`,
+  order alternating; load 32.6 to 51.7.
+
+| Dimension (§7) | Value |
+|---|---|
+| CPU cores          | 10 |
+| CPU                | Apple M1 Pro |
+| RAM                | 16 GiB |
+| OS / kernel        | macOS 26.6.2 (Darwin 25.6.0) |
+| Architecture       | arm64 |
+| Go toolchain       | go1.27.1 darwin/arm64 |
+| Git branch         | `refactor/sdk-tree-reorg--p1-s4-tlv` |
+| Git commit         | `b8fc1d08` (before) and `3ac1cf0f` (after) |
+| Generated (UTC)    | 2026-10-03 |
+| Bench wall-clock   | interleaved rounds as above, machine under heavy load |
 
 ## Results
 
@@ -250,4 +355,29 @@ BenchmarkTypeInfoHitParallel-8              	270113268	         3.712 ns/op	    
 BenchmarkTypeInfoBuild/1fields-8            	 4777681	       234.7 ns/op	     144 B/op	       4 allocs/op
 BenchmarkTypeInfoBuild/5fields-8            	 1345388	       896.1 ns/op	     632 B/op	      12 allocs/op
 BenchmarkTypeInfoBuild/16fields-8           	  486727	      2356 ns/op	    2200 B/op	      34 allocs/op
+```
+
+§7, verbatim: the lower-median run of the ten interleaved runs per row —
+before, then after — and the lower-median run of the forty pool round trips.
+(benchstat's median averages the two middle runs, which is why the text quotes
+10.17 and 13.66 ns for the last two.)
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/kitsunium/sdk/internal/service/codec/tlv
+cpu: Apple M1 Pro
+# before — hand-rolled sync.Pool (b8fc1d08)
+BenchmarkEncoderStream/scalar-10         	50424229	        33.71 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/mixed-10          	 8069724	       207.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/large-10          	   10000	    132314 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/oversize-10       	   10000	    219569 ns/op	  533039 B/op	       3 allocs/op
+# after — recycler.CappedPool[*[]byte]
+BenchmarkEncoderStream/scalar-10         	43825342	        39.32 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/mixed-10          	14339943	        88.25 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/large-10          	   12957	    128786 ns/op	      44 B/op	       0 allocs/op
+BenchmarkEncoderStream/oversize-10       	   10000	    197094 ns/op	  533060 B/op	       3 allocs/op
+# the pool round trip alone, one process, temporary benchmark
+BenchmarkZZPoolRoundTrip/handrolled-10         	26988400	        10.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkZZPoolRoundTrip/capped-10             	19111132	        13.65 ns/op	       0 B/op	       0 allocs/op
 ```

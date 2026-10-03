@@ -1,10 +1,13 @@
 package tlv
 
 import (
+	"io"
 	"reflect"
 	"runtime"
 	"strconv"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/core/codec/scratch"
 )
 
 // benchScratchCap pre-sizes the Append destination so the encode benchmarks
@@ -15,6 +18,10 @@ const benchScratchCap int = 1 << 16
 // A thousand rows is a page of a report — big enough that per-element cost
 // dominates the per-call overhead, small enough to stay off the 10 MiB cap.
 const benchLargeElems int = 1000
+
+// benchStreamScalar is wide enough that the narrowest-tag rule emits
+// tagInt64 — the same scalar TestAllocBudget probes.
+const benchStreamScalar int64 = -64_000_000_000
 
 // benchSinkBytes observes every encode result so the compiler cannot delete
 // the call the benchmark exists to time.
@@ -28,6 +35,15 @@ var benchSinkAny any
 
 // benchSinkInfo observes a type-info lookup.
 var benchSinkInfo *structTypeInfo
+
+// benchStreamCase is one row of the streaming-encoder benchmark.
+type benchStreamCase struct {
+	// name labels the sub-benchmark.
+	name string
+	// value is boxed once, when the table is built, so the loop measures
+	// the encoder and the pool and not the caller's interface conversion.
+	value any
+}
 
 // benchFields1 is the one-field baseline for the per-field cost sweep.
 // Every struct in the sweep uses the same field TYPE so the delta between
@@ -191,6 +207,37 @@ func BenchmarkAppendLarge(b *testing.B) {
 	}
 	b.StopTimer()
 	b.ReportMetric(float64(len(benchSinkBytes)), "wire-B")
+}
+
+// benchStreamCases builds the streaming rows, outside any timed region. The
+// first three records fit under the scratch pool's retain ceiling, so in a
+// steady state the pool hands back a buffer that is already wide enough. The
+// last one is twice that ceiling: the pool must refuse to keep the buffer it
+// grew, so every Encode pays for a fresh one — that row is the cap-discard
+// at work, and a pool with no ceiling would report it at zero bytes.
+func benchStreamCases() []benchStreamCase {
+	return []benchStreamCase{
+		{name: "scalar", value: benchStreamScalar},
+		{name: "mixed", value: benchMixed{ID: 9_007_199_254_740_993, Name: "kitsunium", Active: true, Ratio: 0.5, Count: 42}},
+		{name: "large", value: benchLargeSlice()},
+		{name: "oversize", value: make([]byte, 2*scratch.MaxRetainedBufBytes)},
+	}
+}
+
+// BenchmarkEncoderStream measures the streaming Encoder, the ONE encode path
+// that rents the pooled scratch: Marshal hands Append a nil destination and
+// Append writes into the caller's, so none of the benchmarks above touches
+// the pool. The writer is io.Discard, so the figure is not the writer either.
+func BenchmarkEncoderStream(b *testing.B) {
+	for _, row := range benchStreamCases() {
+		b.Run(row.name, func(b *testing.B) {
+			enc := &tlvEncoder{w: io.Discard}
+			b.ResetTimer()
+			for range b.N {
+				benchSinkErr = enc.Encode(row.value)
+			}
+		})
+	}
 }
 
 // BenchmarkUnmarshalTyped decodes the wide message straight into its Go type,

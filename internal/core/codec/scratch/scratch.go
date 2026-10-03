@@ -23,9 +23,12 @@ import (
 )
 
 // MaxRetainedBufBytes is the project-wide cap-discard threshold for pooled
-// *bytes.Buffer instances. A buffer whose capacity exceeds this is dropped on
-// release rather than re-pooled, so a one-off oversized payload cannot pin a
-// large allocation for the lifetime of the pool's GC window.
+// codec buffers. A buffer whose capacity exceeds this is dropped on release
+// rather than re-pooled, so a one-off oversized payload cannot pin a large
+// allocation for the lifetime of the pool's GC window. It bounds the shared
+// *bytes.Buffer pool below, and it is also the ceiling a codec passes to a
+// recycler.CappedPool of its own when it pools a buffer shape this package
+// does not offer — so the codec domain keeps one threshold, not one per codec.
 const MaxRetainedBufBytes int = 256 << 10
 
 // Shared recycling pools for the codecs, backed by the kernel recycler. One
