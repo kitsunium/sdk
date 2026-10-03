@@ -22,7 +22,7 @@ It refuses BY NAME, each with its own error code and the line and column it star
 
 Writing is deterministic block style, and a string is written plain only when every YAML reader reads it back as the same string.
 
-The whole of YAML stays available, opt\-in, through the root module's github.com/kitsunium/sdk/third\-party/codec/yaml, which registers gopkg.in/yaml.v3 as the Format "yaml\-full"; it claims no extension, so ".yaml" keeps meaning this codec.
+The whole of YAML stays available, opt\-in, through the module github.com/kitsunium/sdk/third\-party/codec/yaml, which registers gopkg.in/yaml.v3 as the Format "yaml\-full"; it claims no extension, so ".yaml" keeps meaning this codec.
 
 Importing both this package and pkg/v1/codec is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 

@@ -35,7 +35,7 @@
 // Writing is deterministic block style, and a string is written plain only
 // when every YAML reader reads it back as the same string.
 //
-// The whole of YAML stays available, opt-in, through the root module's
+// The whole of YAML stays available, opt-in, through the module
 // github.com/kitsunium/sdk/third-party/codec/yaml, which registers
 // gopkg.in/yaml.v3 as the Format "yaml-full"; it claims no extension, so
 // ".yaml" keeps meaning this codec.

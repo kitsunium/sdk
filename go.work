@@ -14,6 +14,7 @@ use (
 	./third-party/aws
 	./third-party/codec/hcl
 	./third-party/codec/protobuf
+	./third-party/codec/yaml
 	./third-party/db/writer/clickhouse
 	./third-party/db/writer/mysql
 	./third-party/db/writer/redis

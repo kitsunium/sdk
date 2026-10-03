@@ -11,9 +11,10 @@ keys, multi-document streams, YAML 1.1 booleans and octals.
 The SDK's own `"yaml"` Format is `internal/service/codec/yaml`: a native,
 standard-library-only reader of a **named subset** of YAML 1.2.2 sized for
 configuration, which refuses each of those constructs by name. This package is
-the way out for the program that genuinely needs one of them. It lives under
-`third-party/` (root module) so the public module stays standard-library-only
-(D6 of the tree reorganisation: `pkg` links no `gopkg.in/yaml.v3`). **Opt-in**:
+the way out for the program that genuinely needs one of them. It is a Go
+module of its own under `third-party/` (ADR 0157), so the public module stays
+standard-library-only (ADR 0156: `pkg` links no `gopkg.in/yaml.v3`) and only a
+consumer that names this module requires yaml.v3. **Opt-in**:
 blank-import this package to register `"yaml-full"`; `pkg/v1/codec` and
 `pkg/v1/codec/yaml` do NOT pull it.
 
@@ -91,7 +92,7 @@ this package for what it reads, never for speed.
 ```
 bazel test --config=race //third-party/codec/yaml:yaml_test
 bazel test --config=alloc //third-party/codec/yaml:yaml_test   # the !race budget test
-go test -race ./third-party/codec/yaml/
-go test -run='^$' -fuzz='^FuzzNativeAgreesWithYAMLv3$' -fuzztime=60s ./third-party/codec/yaml/
-go test -run='^$' -fuzz='^FuzzNativeOutputReadsTheSame$' -fuzztime=60s ./third-party/codec/yaml/
+cd third-party/codec/yaml && GOWORK=off go test -race ./...    # standalone: its own go.mod
+cd third-party/codec/yaml && go test -run='^$' -fuzz='^FuzzNativeAgreesWithYAMLv3$' -fuzztime=60s .
+cd third-party/codec/yaml && go test -run='^$' -fuzz='^FuzzNativeOutputReadsTheSame$' -fuzztime=60s .
 ```

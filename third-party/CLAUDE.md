@@ -12,6 +12,7 @@ package, `go get` names the module.
 | `third-party/aws` | `writer/s3`, `writer/cloudwatch` | `github.com/aws/aws-sdk-go-v2` (+ `smithy-go`) | `0.3.35.*` s3, `0.3.25.*` cloudwatch |
 | `third-party/codec/hcl` | the module root | `github.com/hashicorp/hcl/v2` | `0.3.37.*` |
 | `third-party/codec/protobuf` | the module root | `google.golang.org/protobuf` | `0.3.38.*` |
+| `third-party/codec/yaml` | the module root — the opt-in `"yaml-full"` Format, beside the SDK's native `"yaml"` subset (ADR 0156) | `gopkg.in/yaml.v3` | `0.3.77.*` |
 | `third-party/db/writer/clickhouse` | the module root | `github.com/ClickHouse/clickhouse-go/v2` | `0.3.33.*` |
 | `third-party/db/writer/mysql` | the module root | `github.com/go-sql-driver/mysql` | `0.3.32.*` |
 | `third-party/db/writer/redis` | the module root | `github.com/redis/go-redis/v9` | `0.3.34.*` |

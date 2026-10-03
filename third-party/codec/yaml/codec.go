@@ -4,10 +4,10 @@
 // multi-document streams — for the program that needs a construct the SDK's
 // own codec refuses by name.
 //
-// It lives under third-party/ (root module), NOT internal/service/codec,
-// because the SDK's own "yaml" Format is a native, standard-library-only reader
-// of a named subset (internal/service/codec/yaml) and the public module stays
-// free of gopkg.in/yaml.v3. It is opt-in: a consumer blank-imports this package
+// It is a module of its own under third-party/ (ADR 0157), NOT
+// internal/service/codec, because the SDK's own "yaml" Format is a native,
+// standard-library-only reader of a named subset (internal/service/codec/yaml)
+// and the public module stays free of gopkg.in/yaml.v3. It is opt-in: a consumer blank-imports this package
 // to register "yaml-full"; pkg/v1/codec does NOT pull it.
 //
 // It claims NO MIME type and NO file extension. ".yaml", ".yml" and
