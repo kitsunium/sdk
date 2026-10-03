@@ -10,7 +10,7 @@ pruned flame graph; `Goroutines` / `ParseGoroutines`, the runtime's dump read
 into goroutines, and `GroupGoroutines`; `CanonicalName`. Public facade:
 `pkg/v1/observe/profiling`.
 
-Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.System` from `CaptureCPU`, a `ManualClock` in `Test_captureCPU` — and `kernel/errs`). Code range `0.3.89.*`.
+Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.System` from `CaptureCPU`, a `ManualClock` in `Test_captureCPU` — `kernel/errs`, and the transform PORT `core/data/transform`, through which a gzipped profile is inflated). Code range `0.3.89.*`.
 
 ## Contents
 
@@ -20,7 +20,7 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 | `capture.go` | `CaptureCPU`, `CaptureHeap` |
 | `profile.go` | `ProfileValue`, `SampleTypeValue`, `SampleValue`, `FrameValue`; the default sample type |
 | `wire.go` | the protocol-buffer wire reader: varints (a tenth byte past the 64th bit refused), length-delimited fields, skips, packed or unpacked repeated varints — every read bounds-checked |
-| `parse.go` | `Parse`: the bound, gzip or raw, the Profile's top-level fields through a reader table |
+| `parse.go` | `Parse`: the bound, gzip or raw — gzip inflated through the registered `"gzip"` transform scheme, its refusal kept `PROFILE_MALFORMED` around the library's own error (`libraryCause`) — the Profile's top-level fields through a reader table |
 | `tables.go` | Sample, Label, Location, Line, Function; `resolve(frames)` |
 | `resolve.go` | string, location and function indexes checked and resolved; a location's frames built once and shared; the frame budget (`spend`) |
 | `fold.go` | `Fold`, `FoldConfig` and its defaults, `FoldedValue`, `OwnerCostValue`, `FunctionCostValue`, `FlameNodeValue`, `FlameRoot` |
@@ -44,8 +44,24 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 - **Strict and bounded.** A malformed profile is refused, never guessed at; a
   sample must carry one value per sample type (the fold indexes them, and
   refuses a hand-built profile that does not, or a nil one); a varint's tenth
-  byte carries the 64th bit alone; gzip is read through
-  `LimitReader(MaxProfileBytes+1)` and its trailer checked.
+  byte carries the 64th bit alone; gzip is inflated by the transform domain's
+  `"gzip"` scheme through its `BoundedDecompressor` port, asked for at most
+  `MaxProfileBytes` — the bounded drain, the trailer check and the reader pool
+  are that scheme's, written once (`internal/service/data/transform`), where
+  this package carried a `LimitReader(MaxProfileBytes+1)` copy of its own.
+- **The scheme is reached through the core port, not imported.** Importing
+  `internal/service/data/transform` would be an edge from one engine to
+  another for one function; `coretransform.Lookup("gzip")` is a dependency on
+  the contract, and the facade `pkg/v1/observe/profiling` links the scheme by a
+  blank import — as `pkg/v1/data/codec` does for its compressed frames — so
+  every program built on the facade has it. A program that reaches this
+  package WITHOUT it gets the transform domain's `UNKNOWN_COMPRESSOR` for a
+  gzipped profile, never a silent miss; the suite links the scheme the facade's
+  way, in `parse_external_test.go`. Its refusals stay this package's: an
+  over-cap stream (`DECOMPRESSED_TOO_LARGE`) is `PROFILE_TOO_LARGE`, and one
+  that does not decode is `PROFILE_MALFORMED` wrapping compress/gzip's own error,
+  never the scheme's `GZIP_FAILED` — a plain wrap would inherit it, origin wins
+  (`TestAGzipRefusalIsTheProfilesOwn`).
 - **The bytes do not bound the frames.** A sample names a location by its id
   and a location stands for all its inlined lines, so a small profile naming
   one deep location over and over would expand quadratically. `resolver.spend`
