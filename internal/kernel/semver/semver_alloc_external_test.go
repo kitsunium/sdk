@@ -36,10 +36,22 @@ const allocRuns int = 500
 // which records why: testing.AllocsPerRun divides as integers, so a defect
 // allocating less than once per call reports exactly 0. GOMAXPROCS is pinned
 // so no other P allocates into the count, collection is held off for the
-// window, and one call warms up first.
+// window, every goroutine the pin left runnable is let run to its park, and
+// one call warms up first.
+//
+// The yield is what the pin alone does not give. Each case runs in a subtest,
+// and the stop that pins GOMAXPROCS can catch the parent test between
+// `go tRunner` and the receive it parks on: it is then runnable on the one P
+// left, and the first time this goroutine is preempted inside the window it
+// runs there and allocates — once, in a count that must be zero. Measured
+// under Bazel's alloc config without the yield: 28 failing runs out of 900,
+// each "performed 1 allocations"; with it, none out of 900.
 func mallocsOver(runs int, f func()) uint64 {
 	defer runtime.GOMAXPROCS(runtime.GOMAXPROCS(1))
 	defer debug.SetGCPercent(debug.SetGCPercent(-1))
+	//: run whatever the pin left runnable until it parks, before the window
+	//: opens, rather than at the first preemption inside it.
+	runtime.Gosched()
 	f()
 	var before, after runtime.MemStats
 	runtime.ReadMemStats(&before)
