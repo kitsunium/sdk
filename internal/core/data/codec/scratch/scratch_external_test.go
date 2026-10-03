@@ -1,6 +1,7 @@
 package scratch_test
 
 import (
+	"bytes"
 	"io"
 	"sync"
 	"testing"
@@ -109,6 +110,50 @@ func TestReleaseNilIsNoOp(t *testing.T) {
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) { t.Parallel(); runCase(t, tc) })
+	}
+}
+
+// TestDetachBuffer pins the two releases DetachBuffer chooses between by size:
+// a buffer within the cap is cloned — the caller's bytes share nothing with a
+// buffer the pool may hand to the next encode — and an over-cap one is handed
+// over as it is, without paying a copy of a large payload. Both yield the
+// bytes that were written, and a nil buffer yields nil.
+func TestDetachBuffer(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		size      int
+		wantAlias bool
+	}
+	tests := []tc{
+		{"a small buffer is cloned and repooled", 32, false},
+		{"a buffer at the cap is cloned and repooled", scratch.MaxRetainedBufBytes, false},
+		{"an over-cap buffer is handed over", scratch.MaxRetainedBufBytes + 1, true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		buf := new(bytes.Buffer)
+		buf.Grow(c.size)
+		want := bytes.Repeat([]byte("A"), c.size)
+		buf.Write(want)
+		//: where the buffer's bytes live, read before the buffer is given up.
+		storage := &buf.Bytes()[0]
+		got := scratch.DetachBuffer(buf)
+		if !bytes.Equal(got, want) {
+			t.Fatalf("detached %d bytes, want the %d written", len(got), len(want))
+		}
+		if aliased := &got[0] == storage; aliased != c.wantAlias {
+			t.Errorf("the detached bytes alias the buffer: %v, want %v", aliased, c.wantAlias)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+	if got := scratch.DetachBuffer(nil); got != nil {
+		t.Errorf("DetachBuffer(nil) = %v, want nil", got)
 	}
 }
 

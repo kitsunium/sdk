@@ -4,7 +4,6 @@
 package pem
 
 import (
-	"bytes"
 	"encoding/base64"
 	stdpem "encoding/pem"
 	"slices"
@@ -117,26 +116,7 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: detach + release using the size-aware path (clone+repool small,
 	//: orphan oversize).
-	return detachAndRelease(buf), nil
-}
-
-// detachAndRelease pulls the encoded bytes out of buf and either clones-
-// and-repools the small case or orphans the buffer untouched on the
-// over-cap case (no full slices.Clone of a large payload).
-func detachAndRelease(buf *bytes.Buffer) []byte {
-	//: large buffers: orphan path — the returned slice IS the buffer's
-	//: storage (caller-owned now), no clone, GC reclaims the buffer.
-	if buf.Cap() > scratch.MaxRetainedBufBytes {
-		//: do NOT reset the buffer; it would zero the bytes we return.
-		return buf.Bytes()
-	}
-	//: small buffer path: clone so the caller's slice doesn't alias
-	//: the pooled buffer (next caller would overwrite it).
-	out := slices.Clone(buf.Bytes())
-	//: scratch.ReleaseBuffer resets + repools (cap is under the threshold).
-	scratch.ReleaseBuffer(buf)
-	//: caller-owned slice.
-	return out
+	return scratch.DetachBuffer(buf), nil
 }
 
 // marshalPromotionBlock emits the wire bytes for a "JSON"-typed PEM

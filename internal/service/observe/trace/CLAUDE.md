@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:31:45Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/observe/trace/
 
 ## Purpose
@@ -28,7 +28,7 @@ sentinels as `coretrace.X` and declares none.
 | `span.go` | the recording `span`: mutex-guarded attrs/events/status, idempotent `End`; `finish` TRANSFERS its slices to the exported value rather than cloning them, and `sortedIncoming` skips the clone `SortAttrs` makes when there is one attribute to merge — both in §Cost |
 | `noop_span.go` | the span an unsampled trace gets — and why it still carries a context |
 | `sampler.go` | `AlwaysSample` / `NeverSample` / `ParentBased` / `Ratio` |
-| `idgen.go` | `NewTraceID` / `NewSpanID` + `readRandom` |
+| `idgen.go` | `NewTraceID` / `NewSpanID` over `drawTraceID` / `drawSpanID`, which read `crypto/rand` directly: since Go 1.24 it never returns an error (a failing source crashes the program), so the published error is always nil, the tracer's mint cannot fail, and `EntropyFailed` stays declared and published but is returned by nothing |
 | `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
 | `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |

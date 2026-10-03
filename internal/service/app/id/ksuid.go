@@ -2,6 +2,7 @@
 package id
 
 import (
+	"crypto/rand"
 	"encoding/binary"
 	"math"
 	"time"
@@ -72,11 +73,9 @@ func (ksuidGen) New() (newID string, err error) {
 	}
 	//: the leading 4 bytes carry the epoch-relative seconds (big-endian).
 	binary.BigEndian.PutUint32(b[:ksuidTimeBytes], uint32(secs))
-	//: the remaining 16 bytes are secure random entropy.
-	if rerr := readRandom(b[ksuidTimeBytes:]); rerr != nil {
-		//: propagate the wrapped entropy failure.
-		return "", rerr
-	}
+	//: the remaining 16 bytes are secure random entropy; crypto/rand.Read
+	//: cannot fail (see the package doc).
+	_, _ = rand.Read(b[ksuidTimeBytes:])
 	//: render the canonical 27-char base62 form.
 	return base62Encode(b[:]), nil
 }

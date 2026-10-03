@@ -15,7 +15,7 @@ and raises the core's.
 
 | File | Scheme | Notes |
 |---|---|---|
-| `common.go` | — | shared consts + `readRandom`/`formatUUID`/`parseUUID`/`setUUIDBits`/`putUint48BE` + the Crockford base32 codec (`crockford32Encode`/`crockford32Decode`) shared by ULID and TypeID |
+| `common.go` | — | package doc (why `crypto/rand.Read` is called directly) + shared consts + `formatUUID`/`parseUUID`/`setUUIDBits`/`putUint48BE` + the Crockford base32 codec (`crockford32Encode`/`crockford32Decode`) shared by ULID and TypeID |
 | `uuidv4.go` | `uuidv4` | RFC 9562 §5.4, fully random |
 | `uuidv7.go` | `uuidv7` | RFC 9562 §5.7, 48-bit ms prefix (k-sortable) |
 | `ulid.go` | `ulid` | 48-bit ms + 80-bit random, UPPERCASE Crockford base32 (26 chars) |
@@ -29,7 +29,11 @@ and raises the core's.
 - **Registration via `var X = id.Register(...)`, never `init()`.**
 - Stateless singletons (uuidv4/v7/ulid/nanoid/ksuid) ; snowflake is per-instance
   stateful (mutex + sequence), with a default-node singleton + `NewSnowflake(node)`.
-- Entropy failures wrap `crypto/rand` via `errs.Wrap` (ID_ENTROPY_FAILED).
+- Random bytes come from `crypto/rand.Read`, called directly. Since Go 1.24 it
+  never returns an error and always fills its buffer — a failing source crashes
+  the program instead — so no generator fails for want of entropy and there is
+  no wrapping helper. `ID_ENTROPY_FAILED` (`EntropyFailed`) stays declared and
+  published by `pkg/v1/app/id`, but nothing returns it.
 - Parse refusals carry a `rule` field naming the clause that fired
   (`length` / `alphabet` / `overflow` / `charset` / …) and **never echo the
   input** — these errors are logged, and the input is unbounded caller data.

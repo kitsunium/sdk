@@ -2,6 +2,8 @@
 package id
 
 import (
+	"crypto/rand"
+
 	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
@@ -31,11 +33,9 @@ func (ulidGen) New() (newID string, err error) {
 	var b [uuidRawLen]byte
 	//: the leading 6 bytes carry the Unix-millisecond timestamp (big-endian).
 	putUint48BE(b[:], clock.System.Now().UnixMilli())
-	//: the remaining 10 bytes are secure random entropy.
-	if rerr := readRandom(b[tsBytes:]); rerr != nil {
-		//: propagate the wrapped entropy failure.
-		return "", rerr
-	}
+	//: the remaining 10 bytes are secure random entropy; crypto/rand.Read
+	//: cannot fail (see the package doc).
+	_, _ = rand.Read(b[tsBytes:])
 	//: render the canonical 26-char Crockford base32 form.
 	return crockford32(b[:]), nil
 }

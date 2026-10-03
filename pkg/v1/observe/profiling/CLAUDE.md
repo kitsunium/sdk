@@ -30,6 +30,13 @@ defaults alias the engine, whose parameters they are; the functions delegate
 to the engine. An alias points at the layer that owns its symbol (ADR 0074).
 There is no port: one engine, and the attribution is a function you pass.
 
+The facade also blank-imports `internal/service/data/transform`: `Parse` — and
+so every capture — inflates the runtime's gzipped profiles through the
+transform domain's `"gzip"` scheme, which that import registers (with `flate`
+and `zlib`), as `pkg/v1/data/codec` does. The package doc says so, because a
+program registering a `"gzip"` scheme of its own would meet the duplicate at
+boot.
+
 ## Why-this-shape
 
 - **The attribution is a function you pass**, because only you know what a

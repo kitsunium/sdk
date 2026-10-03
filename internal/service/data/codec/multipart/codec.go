@@ -171,7 +171,7 @@ func (c *multipartCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: detach the bytes; small buffers are cloned and repooled, large ones
 	//: are orphaned so the caller's slice IS the buffer's storage.
-	return detachAndRelease(buf), nil
+	return scratch.DetachBuffer(buf), nil
 }
 
 // Unmarshal parses a multipart/form-data body into v.
@@ -429,21 +429,4 @@ func readJSONMediated(dec *multipartDecoder, v any) error {
 		//: project the envelope onto the caller's value.
 		return assignPart(&part, v)
 	}
-}
-
-// detachAndRelease pulls the encoded bytes out of buf, cloning-and-repooling a
-// small buffer and orphaning an over-cap one so the large path pays no copy.
-func detachAndRelease(buf *bytes.Buffer) []byte {
-	//: an over-cap buffer would pay a huge clone AND pin the pool entry;
-	//: hand its storage to the caller and let GC reclaim the header.
-	if buf.Cap() > scratch.MaxRetainedBufBytes {
-		//: caller-owned slice — do NOT reset the buffer.
-		return buf.Bytes()
-	}
-	//: small buffer: clone so the caller's slice does not alias the pool.
-	out := slices.Clone(buf.Bytes())
-	//: reset + repool.
-	scratch.ReleaseBuffer(buf)
-	//: caller-owned copy.
-	return out
 }

@@ -34,7 +34,11 @@
 // [Parse] reads the pprof format — gzipped or not — written from
 // profile.proto, so the SDK carries no protobuf dependency. It is bounded by
 // [MaxProfileBytes] in what it reads and by [MaxFrames] in what it builds, and
-// refuses anything malformed with ProfileMalformed rather than guessing. A [Profile] is plain data: sample types, samples with
+// refuses anything malformed with ProfileMalformed rather than guessing. A
+// gzipped profile is inflated by the SDK's own gzip transform scheme, over
+// compress/gzip: importing this package links it, which registers "gzip",
+// "flate" and "zlib" under the transform registry, as importing the codec
+// package does. A [Profile] is plain data: sample types, samples with
 // their stacks — innermost frame first, an inlined call a frame of its own —
 // their values and their labels.
 //
@@ -74,6 +78,9 @@ import (
 
 	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	// registers "gzip": Parse, and so every capture, inflates the runtime's
+	// gzipped profiles through the transform scheme it names.
+	_ "github.com/kitsunium/sdk/internal/service/data/transform"
 	svcprof "github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
 

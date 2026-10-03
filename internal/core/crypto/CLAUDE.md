@@ -25,8 +25,8 @@ Code range: `0.2.4.*` (ADR 0013).
 | `algorithm.go` | `Algorithm` typed string (`String` / `Known`) |
 | `key.go`       | `Key` — opaque, redacting 256-bit key (`NewKey` / `Bytes` / `Zeroize`); `KeyLen` |
 | `aead.go`      | `AEAD` interface (`Algorithm` / `ID` / `Seal` / `Open`) |
-| `registry_generic.go` | `schemeRegistry[V comparable]` — the shared read-mostly registry (publish / lookup / available / clone) backing all eight capabilities; collapses what were eight duplicated publish*/clone* helpers |
-| `registry.go`  | AEAD registry: name side on the shared `schemeRegistry[AEAD]`, plus a bespoke `snapshot.Value` wire-id index (Open dispatches by byte id): `Register` / `Lookup` / `Available` + `lookupByID` |
+| `registry_generic.go` | `schemeRegistry[V scheme]` — the registrar all eight capabilities share: a `kernel/plugin.Registry[Algorithm, V]` table (ADR 0159) plus the verb its refusals name; `register` (the `Unusable` refusal, then the publish, both panicking with `0.2.4.1`) and `publish` (the typed conflict). Each `Register*` is one call to it |
+| `registry.go`  | AEAD registry: name side on the shared `schemeRegistry[AEAD]`, plus its own wire-id index, a `plugin.Registry[byte, AEAD]` kept beside it (Open dispatches by byte id): `Register` / `Lookup` / `Available` + `lookupByID` |
 | `seal.go`      | `Seal` / `Open` dispatch + the frozen box `Version` byte |
 | `hasher.go`    | `Hasher` interface (`Algorithm` / `New`) — the **non-authenticated** fingerprint port |
 | `hash_registry.go` | second `schemeRegistry`-backed registry mapping an `Algorithm` to a `Hasher`: `RegisterHasher` / `LookupHasher` / `AvailableHashers` + `Sum` / `SumHex` / `NewHash` dispatch |
@@ -76,14 +76,15 @@ known from the alg-id, so the reader strips it without a length prefix. Each
 
 ## Conventions
 
-- **`snapshot.Value`, not `sync.Map`** — schemes register once at import, then
-  it is read-many (ADR 0011). The eight capability registries share one generic
-  `schemeRegistry[V comparable]` (`registry_generic.go`) that owns the
-  publish/clone/lookup/available logic; each `*_registry.go` is a thin
-  `Register*`/`Lookup*`/`Available*` delegation plus its dispatch verbs. The AEAD
-  wire-id index stays bespoke (it is keyed by byte, not `Algorithm`). `Register`
-  publishes via `Value.Update` (mutex-serialised); `Lookup` / `lookupByID` are
-  lock-free.
+- **The tables are the kernel's `plugin.Registry`, not copies of it** — schemes
+  register once at import, then it is read-many (ADR 0011, ADR 0159). The eight
+  capability registries share one registrar, `schemeRegistry[V scheme]`
+  (`registry_generic.go`), which adds to the kernel table only the domain's
+  refusal — code, reason, the `registrar` and `algorithm` fields; each
+  `*_registry.go` is a one-line `Register*`, a `Lookup*` / `Available*` read of
+  the table, and its dispatch verbs. The AEAD wire-id index is a second table
+  of its own (it is keyed by byte, not `Algorithm`). A publish is one atomic
+  check-and-insert; `Lookup` / `lookupByID` are lock-free.
 - **Registration is a package-level `var`, never `init()`** (`KTN-FUNC-NOINIT`):
   `var AEAD = crypto.Register(aesGCM{})` in each scheme package.
 - **Idempotent re-registration** of the same scheme is fine; a *distinct* scheme

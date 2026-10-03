@@ -10,6 +10,7 @@ go_library(
     deps = [
         "//internal/core/observe/profiling",
         "//internal/kernel/errs",
+        "//internal/service/data/transform",
         "//internal/service/observe/profiling",
     ],
 )

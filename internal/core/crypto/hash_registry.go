@@ -3,10 +3,7 @@ package crypto
 
 import (
 	"encoding/hex"
-	"fmt"
 	"hash"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // hashers maps each Algorithm to its Hasher. Separate from the AEAD registry:
@@ -27,19 +24,9 @@ var hashers = schemeRegistry[Hasher]{verb: "RegisterHasher"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterHasher(h Hasher) Hasher {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(h); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterHasher [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := hashers.publish(h.Algorithm(), h); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(conflictText(err))
-	}
-	//: returning the hasher lets callers bind it to a typed singleton var.
-	return h
+	//: refuse an unusable hasher, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return hashers.register(h)
 }
 
 // LookupHasher returns the Hasher registered under name.
@@ -47,14 +34,14 @@ func RegisterHasher(h Hasher) Hasher {
 // IFACE-PLUGIN: the registry stores plug-in Hasher instances behind the Hasher
 // interface — concrete types are intentionally unexported per scheme.
 func LookupHasher(name Algorithm) (h Hasher, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return hashers.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return hashers.table.Lookup(name)
 }
 
 // AvailableHashers returns the sorted list of registered hash Algorithms.
 func AvailableHashers() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return hashers.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return hashers.table.Names()
 }
 
 // Sum returns the digest of data under the Hasher registered as name. A name

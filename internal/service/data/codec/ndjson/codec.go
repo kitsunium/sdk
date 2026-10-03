@@ -110,7 +110,7 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	//: reuse the buffer); cap > threshold → orphan the buffer untouched
 	//: (the slice header IS the caller's bytes — no extra copy on the
 	//: large path, GC reclaims the buffer next cycle).
-	out, _ := detachAndRelease(buf)
+	out := scratch.DetachBuffer(buf)
 	//: hand back the detached bytes.
 	return out, nil
 }
@@ -137,28 +137,6 @@ func encodeSliceInto(buf *bytes.Buffer, n int, getElem func(int) any) error {
 	}
 	//: every record written successfully.
 	return nil
-}
-
-// detachAndRelease pulls the encoded bytes out of buf and decides
-// whether to clone-and-repool (small payload) or orphan-without-clone
-// (over-cap payload). The ok return is true when the buffer made it
-// back into the pool, false on the orphan path — tests use it; callers
-// don't need it on the hot path.
-func detachAndRelease(buf *bytes.Buffer) (encoded []byte, repooled bool) {
-	//: large buffers would pay a huge slices.Clone AND pin the pool
-	//: entry. Orphan path: the returned slice IS the buffer's storage
-	//: (caller-owned now), the *bytes.Buffer header is GC'd next cycle.
-	if buf.Cap() > scratch.MaxRetainedBufBytes {
-		//: caller-owned slice — do NOT reset the buffer (would zero it).
-		return buf.Bytes(), false
-	}
-	//: small buffer path: clone so the caller's slice doesn't alias
-	//: the pooled buffer (next caller would overwrite it).
-	out := slices.Clone(buf.Bytes())
-	//: scratch.ReleaseBuffer resets + repools (cap is under the threshold).
-	scratch.ReleaseBuffer(buf)
-	//: signal the clone-and-repool path.
-	return out, true
 }
 
 // marshalRawSliceTo writes a pre-encoded slice (one of []json.RawMessage

@@ -1,4 +1,4 @@
-// Package id — white-box tests for the shared identifier primitives. All four
+// Package id — white-box tests for the shared identifier primitives. All three
 // helpers below are one step of a byte layout, and a mistake in any of them
 // produces an identifier that LOOKS right: the wrong length, the wrong version
 // nibble, or a timestamp that sorts backwards are all invisible until something
@@ -25,46 +25,6 @@ func fieldValue(err error, key string) string {
 		}
 	}
 	return ""
-}
-
-// Test_readRandom pins that the buffer is filled and that a CSPRNG fault
-// arrives typed. Silence here would be the worst outcome: an identifier full of
-// zeros is still 36 characters long and still parses.
-func Test_readRandom(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		size int
-	}
-	tests := []tc{
-		{"a full UUID", uuidRawLen},
-		{"the ULID random tail", uuidRawLen - tsBytes},
-		{"a single byte", 1},
-		{"an empty buffer", 0},
-	}
-	runCase := func(t *testing.T, c tc) {
-		t.Helper()
-		//: two independent draws of the same width; identical output would
-		//: mean the source is not random at all.
-		first := make([]byte, c.size)
-		second := make([]byte, c.size)
-		if err := readRandom(first); err != nil {
-			t.Fatalf("readRandom(%d) = %v, want nil", c.size, err)
-		}
-		if err := readRandom(second); err != nil {
-			t.Fatalf("readRandom(%d) = %v, want nil", c.size, err)
-		}
-		//: a zero-width draw is trivially equal; anything else must differ.
-		if c.size >= uuidRawLen && string(first) == string(second) {
-			t.Errorf("two draws of %d bytes were identical", c.size)
-		}
-	}
-	for _, c := range tests {
-		t.Run(c.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, c)
-		})
-	}
 }
 
 // Test_formatUUID pins the canonical rendering. The dashes are not decoration:
@@ -239,7 +199,8 @@ func Test_putUint48BE(t *testing.T) {
 	if string(small[:tsBytes]) >= string(large[:tsBytes]) {
 		t.Error("a later millisecond did not produce a lexically larger prefix")
 	}
-	//: and the entropy code must exist for readRandom to wrap onto.
+	//: and the entropy sentinel keeps its code: nothing returns it since
+	//: crypto/rand.Read stopped failing (Go 1.24), but it stays published.
 	if _, ok := errs.CodeOf(coreid.EntropyFailed); !ok {
 		t.Error("the entropy sentinel carries no code")
 	}

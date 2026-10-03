@@ -1,12 +1,6 @@
 // Package crypto — the process-wide MAC registry + MACTag / MACVerify dispatch.
 package crypto
 
-import (
-	"fmt"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
-
 // macs maps each Algorithm to its MAC. Backed by the shared read-mostly
 // schemeRegistry — register once at import, dispatch is lock-free.
 var macs = schemeRegistry[MAC]{verb: "RegisterMAC"}
@@ -22,19 +16,9 @@ var macs = schemeRegistry[MAC]{verb: "RegisterMAC"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterMAC(m MAC) MAC {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(m); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterMAC [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := macs.publish(m.Algorithm(), m); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(conflictText(err))
-	}
-	//: returning the MAC lets callers bind it to a typed singleton var.
-	return m
+	//: refuse an unusable MAC, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return macs.register(m)
 }
 
 // LookupMAC returns the MAC registered under name.
@@ -42,14 +26,14 @@ func RegisterMAC(m MAC) MAC {
 // IFACE-PLUGIN: the registry stores plug-in MAC instances behind the MAC
 // interface — concrete types are intentionally unexported per scheme.
 func LookupMAC(name Algorithm) (m MAC, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return macs.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return macs.table.Lookup(name)
 }
 
 // AvailableMACs returns the sorted list of registered MAC Algorithms.
 func AvailableMACs() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return macs.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return macs.table.Names()
 }
 
 // MACTag returns the authentication tag over message under key for the MAC

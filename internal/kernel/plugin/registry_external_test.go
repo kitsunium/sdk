@@ -1,6 +1,6 @@
 // Package plugin_test — Registry from the outside: the three outcomes of a
-// publish, the two answers of a lookup, the order of Names, and the race a
-// copy-on-write table exists to win.
+// publish, the holder a claim reports, the two answers of a lookup, the order
+// of Names, and the races a copy-on-write table exists to win.
 package plugin_test
 
 import (
@@ -65,6 +65,52 @@ func TestPublishHasThreeOutcomes(t *testing.T) {
 		got, found := registry.Lookup("key")
 		if !found || got != c.first {
 			t.Errorf("Lookup = %v, %v; want the first-registered %v", got, found, c.first)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// TestClaimReportsTheHolder pins what Claim answers where Publish answers a
+// verdict: a free name is taken by the claim, and a taken one — by the
+// identical value or by another — is reported with the value holding it and
+// left as it was. The identical value reported as taken is the property a
+// registrar that refuses every second registration relies on; the holder is
+// what a refusal that names the owner reads.
+func TestClaimReportsTheHolder(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		first     identifier
+		second    identifier
+		wantTaken bool
+	}
+	tests := []tc{
+		{name: "a free name is claimed", first: plug{id: 1}},
+		{name: "the identical value is reported as taken", first: plug{id: 1}, second: plug{id: 1}, wantTaken: true},
+		{name: "a different value is reported as taken", first: plug{id: 1}, second: plug{id: 2}, wantTaken: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		var registry plugin.Registry[string, identifier]
+		if holder, taken := registry.Claim("key", c.first); taken || holder != nil {
+			t.Fatalf("the first claim of a free name = %v, %v; want nil, false", holder, taken)
+		}
+		//: a single-claim case has only resolution left to assert.
+		if c.second != nil {
+			holder, taken := registry.Claim("key", c.second)
+			if taken != c.wantTaken || holder != c.first {
+				t.Fatalf("the second claim = %v, %v; want the first %v, %v", holder, taken, c.first, c.wantTaken)
+			}
+		}
+		//: whatever happened, the FIRST claim still resolves.
+		got, found := registry.Lookup("key")
+		if !found || got != c.first {
+			t.Errorf("Lookup = %v, %v; want the first-claimed %v", got, found, c.first)
 		}
 	}
 	for _, c := range tests {
@@ -141,5 +187,46 @@ func TestConcurrentPublishesLoseNothing(t *testing.T) {
 		if got, found := registry.Lookup(fmt.Sprintf("plug-%02d", i)); !found || got.ID() != i {
 			t.Errorf("plug-%02d resolved to %v, %v", i, got, found)
 		}
+	}
+}
+
+// TestConcurrentClaimsHaveOneWinner pins that the check and the insert are one
+// step: writers claiming ONE name with different values at once, and exactly
+// one of them takes it, while every other is told it is taken and by the
+// winner's value. A check made before the lock, or a holder read by a second
+// lookup, would let two writers both believe they won.
+func TestConcurrentClaimsHaveOneWinner(t *testing.T) {
+	t.Parallel()
+	var registry plugin.Registry[string, identifier]
+	holders := make([]identifier, writers)
+	takens := make([]bool, writers)
+	var wg sync.WaitGroup
+	for i := range writers {
+		wg.Go(func() {
+			holders[i], takens[i] = registry.Claim("contested", plug{id: i})
+		})
+	}
+	wg.Wait()
+	winner, found := registry.Lookup("contested")
+	if !found {
+		t.Fatal("no claim took the contested name")
+	}
+	var won int
+	for i := range writers {
+		//: the one claim that found the name free.
+		if !takens[i] {
+			won++
+			if winner.ID() != i {
+				t.Errorf("claim %d took the name but %v holds it", i, winner)
+			}
+			continue
+		}
+		//: every other claim names the winner as the holder.
+		if holders[i] != winner {
+			t.Errorf("claim %d was told %v holds the name, but %v does", i, holders[i], winner)
+		}
+	}
+	if won != 1 {
+		t.Fatalf("%d claims took the contested name, want exactly 1", won)
 	}
 }

@@ -148,29 +148,9 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: detach + release using the size-aware path: small payload clones
 	//: + repools, oversize orphans the buffer untouched (no extra copy).
-	out := detachAndRelease(buf)
+	out := scratch.DetachBuffer(buf)
 	//: hand back the detached bytes.
 	return out, nil
-}
-
-// detachAndRelease pulls the encoded bytes out of buf and decides
-// whether to clone-and-repool (small payload) or orphan-without-clone
-// (over-cap payload). Avoids paying a full slices.Clone on oversized
-// payloads where the pool would skip the entry anyway.
-func detachAndRelease(buf *bytes.Buffer) []byte {
-	//: large buffers: orphan path — the returned slice IS the buffer's
-	//: storage (caller-owned), no clone, GC reclaims the buffer.
-	if buf.Cap() > scratch.MaxRetainedBufBytes {
-		//: do NOT reset the buffer; it would zero the bytes we return.
-		return buf.Bytes()
-	}
-	//: small buffer path: clone so the caller's slice doesn't alias
-	//: the pooled buffer (next caller would overwrite it).
-	out := slices.Clone(buf.Bytes())
-	//: scratch.ReleaseBuffer resets + repools (cap is under the threshold).
-	scratch.ReleaseBuffer(buf)
-	//: caller-owned slice.
-	return out
 }
 
 // escapeFormulaCells returns a defensive copy of records with every cell

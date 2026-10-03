@@ -3,10 +3,14 @@
 // Blank-importing this package self-registers every scheme that needs no
 // configuration; snowflake, NanoID and TypeID also offer explicit constructors.
 // No init() — registration is package-level var.
+//
+// Randomness is read with crypto/rand.Read, which since Go 1.24 never returns
+// an error and always fills its buffer — a failing source crashes the program
+// instead — so no generator here fails for want of entropy. EntropyFailed stays
+// declared, and published, but nothing returns it.
 package id
 
 import (
-	"crypto/rand"
 	"encoding/hex"
 	"strings"
 
@@ -74,25 +78,6 @@ const (
 	// uuidDash4 is the fourth separator offset (23) — three dashes precede it.
 	uuidDash4 int = hexSeg4End + dashWidth + dashWidth + dashWidth
 )
-
-// readRandom fills b with cryptographically-secure random bytes, wrapping any
-// CSPRNG fault in the EntropyFailed sentinel.
-func readRandom(b []byte) error {
-	//: crypto/rand.Read fills b fully or returns an error (never short).
-	_, err := rand.Read(b)
-	//: success fast-path.
-	if err == nil {
-		//: b now holds len(b) secure random bytes.
-		return nil
-	}
-	//: wrap the CSPRNG fault with the dotted-quad entropy code.
-	return errs.Wrap(err, errs.WrapParams{
-		Code:    coreid.CodeIDEntropyFailed,
-		Reason:  "ID_ENTROPY_FAILED",
-		Public:  "Identifier generation failed to read secure random bytes",
-		Private: "service/app/id: crypto/rand.Read returned an error",
-	})
-}
 
 // formatUUID renders the 16-byte raw form b as the canonical 36-char dashed hex
 // (8-4-4-4-12). b MUST be uuidRawLen bytes.

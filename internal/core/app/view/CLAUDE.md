@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/app/view/
 
 ## Purpose
@@ -59,7 +59,7 @@ choosing stderr, but by having no destination in the port at all.
 | `TrustedHTML` / `TrustHTML` | the ONE bypass, and the only spelling the SDK offers for it |
 | `ContentTypeHTML` | carries `charset=utf-8` — a charset-less response is sniffed |
 | `DefaultMaxBytes` / `MaxPooledBytes` | 8 MiB render ceiling; 1 MiB pool ceiling |
-| `Register` / `Lookup` / `Available` / `Open` | the process-wide registry |
+| `Register` / `Lookup` / `Available` / `Open` | the process-wide registry — an instance of `kernel/plugin.Registry` (ADR 0159); what stays here is its refusals and `Open` |
 | `ViewMisconfigured` `0.2.27.1` | constructor refusal — a nil FS, an unparseable tree, an unresolvable escaping context |
 | `TemplateNotFound` `0.2.27.2` | a name the engine does not hold, including `""` |
 | `RenderFailed` `0.2.27.3` | execution started and could not finish |

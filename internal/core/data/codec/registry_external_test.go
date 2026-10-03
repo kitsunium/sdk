@@ -274,13 +274,13 @@ func TestRegistryHitPaths(t *testing.T) {
 	}
 }
 
-// TestRegistryEmptyMisses covers the nil-snapshot arms of every reader:
-// before any Register (the documented init-order edge), loadRegistry and
-// loadAliasIndex return nil so each lookup is a clean miss and Available is
-// nil. Sequential — parallel tables only resume after the sequential phase,
-// so resetting the global here never races a concurrent reader.
+// TestRegistryEmptyMisses covers the empty arms of every reader: before any
+// Register (the documented init-order edge), the three tables hold nothing, so
+// each lookup is a clean miss and Available is nil. Sequential — parallel
+// tables only resume after the sequential phase, so resetting the global here
+// never races a concurrent reader.
 func TestRegistryEmptyMisses(t *testing.T) {
-	//: drive all three snapshots back to nil to hit the absence branches.
+	//: drive all three tables back to empty to hit the absence branches.
 	codec.ResetForTest()
 	type tc struct {
 		name   string

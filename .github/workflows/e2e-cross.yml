@@ -69,9 +69,15 @@ env:
   # `proc/ipc` joins them because its endpoint IS the platform: a Unix socket gated
   # by its directory, SO_PEERCRED on Linux, a named pipe with its own DACL on
   # Windows (ADR 0148).
+  #
+  # `proc/internal/rlim` joins them because the struct it builds IS the platform:
+  # FreeBSD and DragonFly declare syscall.Rlimit's fields int64, every other Unix
+  # uint64, and its signed variant and that variant's test compile on those two
+  # kernels alone. It is the constructor `exec` and `rlimit` share; its tests ran
+  # here inside those two packages before it moved.
   KERNEL_PKGS: "./fs/pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
+  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one

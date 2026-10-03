@@ -5,8 +5,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/plugin"
 )
 
 // Test_indexAliases covers fresh-alias, idempotent, and conflict paths of
@@ -34,14 +34,10 @@ func Test_indexAliases(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		var dst snapshot.Value[map[string]Format]
-		//: seed the snapshot with the existing aliases via the same publish path.
-		if len(tc.existing) > 0 {
-			seed := make(map[string]Format, len(tc.existing))
-			for _, a := range tc.existing {
-				seed[strings.ToLower(a)] = tc.existName
-			}
-			dst.Store(&seed)
+		var dst plugin.Registry[string, Format]
+		//: seed the index with the existing aliases, keyed as Register keys them.
+		for _, a := range tc.existing {
+			dst.Publish(strings.ToLower(a), tc.existName)
 		}
 		//: wrap the call so we can inspect panics inside a recover.
 		panicked, r := callRecoverAliases(&dst, []string{tc.newAlias}, tc.newName, tc.kind)
@@ -61,7 +57,7 @@ func Test_indexAliases(t *testing.T) {
 // subtests can assert panic behaviour without using defer — t.Cleanup is
 // not usable here because we want the panic-recovery to happen before the
 // assertion runs.
-func callRecoverAliases(dst *snapshot.Value[map[string]Format], aliases []string, name Format, kind string) (panicked bool, recovered any) {
+func callRecoverAliases(dst *plugin.Registry[string, Format], aliases []string, name Format, kind string) (panicked bool, recovered any) {
 	//: classic recover pattern isolated in a helper so the caller stays flat.
 	defer func() {
 		//: capture the recover value inline.
@@ -83,15 +79,16 @@ func callRecoverAliases(dst *snapshot.Value[map[string]Format], aliases []string
 // so the external test package (codec_test) can isolate registry mutations: the
 // registry is package-global and `go test -count=N` reuses the process (package
 // state is NOT re-initialised between iterations), so a test that calls Register
-// must reset first or a later iteration panics on a duplicate Name. Test-only.
+// must reset first or a later iteration panics on a duplicate Name. Test-only,
+// and only from a test that runs alone: it replaces the tables rather than
+// storing into them, which nothing may race.
 func ResetForTest() {
-	//: store a nil snapshot into each Value; loadRegistry / loadAliasIndex then
-	//: report empty (Load returns nil → callers see a clean miss).
-	registry.Store(nil)
+	//: a fresh, empty Format table; Lookup then reports a clean miss.
+	registry = plugin.Registry[Format, Codec]{}
 	//: MIME alias index back to empty.
-	mimeIndex.Store(nil)
+	mimeIndex = plugin.Registry[string, Format]{}
 	//: extension alias index back to empty.
-	extIndex.Store(nil)
+	extIndex = plugin.Registry[string, Format]{}
 }
 
 // Test_publish_conflictIsTyped proves both conflicts the registry can meet are
@@ -105,7 +102,7 @@ func Test_publish_conflictIsTyped(t *testing.T) {
 	if err := publishCodec("typed-a", first); err != nil {
 		t.Fatalf("the first publish = %v, want nil", err)
 	}
-	var aliases snapshot.Value[map[string]Format]
+	var aliases plugin.Registry[string, Format]
 	if err := publishAlias(&aliases, "m/typed", "typed-a", "MIME", "m/typed"); err != nil {
 		t.Fatalf("the first alias = %v, want nil", err)
 	}
@@ -116,6 +113,48 @@ func Test_publish_conflictIsTyped(t *testing.T) {
 	for name, err := range conflicts {
 		if !errs.HasCode(err, CodeDuplicateRegistration) || !errors.Is(err, DuplicateRegistration) {
 			t.Errorf("%s: conflict = %v, want the typed DuplicateRegistration", name, err)
+		}
+	}
+}
+
+// Test_publishCodec_isStrictOnTheName pins the one rule this registry keeps
+// that the kernel table's Publish does not: a Format registers once, so the
+// SAME codec claimed twice is a conflict here, where an alias, and every other
+// core registry, would accept it again as a no-op.
+func Test_publishCodec_isStrictOnTheName(t *testing.T) {
+	ResetForTest()
+	t.Cleanup(ResetForTest)
+	same := &stubCodec{name: "strict"}
+	if err := publishCodec("strict", same); err != nil {
+		t.Fatalf("the first publish = %v, want nil", err)
+	}
+	if err := publishCodec("strict", same); !errs.HasCode(err, CodeDuplicateRegistration) {
+		t.Fatalf("the same codec published twice = %v, want DUPLICATE_REGISTRATION", err)
+	}
+	//: the refused second claim left the first in place.
+	if got, ok := Lookup("strict"); !ok || got != same {
+		t.Fatalf("Lookup after the refusal = %v, %v; want the first codec", got, ok)
+	}
+}
+
+// Test_publishAlias_namesTheOwner pins what a conflict on an alias reports: the
+// Format already holding the key and the one asking, read by the same step that
+// refused the claim — the fields an operator needs to find the two imports.
+func Test_publishAlias_namesTheOwner(t *testing.T) {
+	t.Parallel()
+	var aliases plugin.Registry[string, Format]
+	if err := publishAlias(&aliases, "m/owned", "holder", "MIME", "m/owned"); err != nil {
+		t.Fatalf("the first alias = %v, want nil", err)
+	}
+	//: the same Format claiming its own alias again is the accepted no-op.
+	if err := publishAlias(&aliases, "m/owned", "holder", "MIME", "m/owned"); err != nil {
+		t.Fatalf("the holder re-claiming its alias = %v, want nil", err)
+	}
+	err := publishAlias(&aliases, "m/owned", "asker", "MIME", "M/Owned")
+	text := conflictText(err)
+	for _, want := range []string{`owner="holder"`, `requester="asker"`, `alias="M/Owned"`, `kind="MIME"`} {
+		if !strings.Contains(text, want) {
+			t.Errorf("conflictText = %q, want it to say %s", text, want)
 		}
 	}
 }

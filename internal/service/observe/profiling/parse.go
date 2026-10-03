@@ -5,10 +5,9 @@ package profiling
 
 import (
 	"bytes"
-	"compress/gzip"
-	"io"
 	"time"
 
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -28,6 +27,10 @@ const (
 	fieldComment       uint64 = 13
 	fieldDefaultType   uint64 = 14
 )
+
+// gzipAlgorithm is the transform scheme a gzip profile is inflated through:
+// the one internal/service/data/transform registers, which the facade links.
+const gzipAlgorithm coretransform.Algorithm = "gzip"
 
 var (
 	// gzipMagic opens every gzip stream; runtime/pprof compresses what it
@@ -133,36 +136,62 @@ func Parse(data []byte) (*coreprofiling.ProfileValue, error) {
 }
 
 // inflate returns data decompressed when it is gzip, unchanged otherwise.
+//
+// A gzip stream is inflated through the transform port rather than by a
+// decoder of this package's own: the scheme registered as "gzip" is asked for
+// at most MaxProfileBytes, so the bounded drain, the trailer check and the
+// reader pool are that scheme's (internal/service/data/transform), reached
+// through internal/core/data/transform — a core port, not an edge to another
+// engine. The facade links the scheme; a program that reaches this package
+// without it is told so by the transform domain's UNKNOWN_COMPRESSOR.
 func inflate(data []byte) ([]byte, error) {
 	//: an uncompressed stream is read as it is.
 	if !bytes.HasPrefix(data, gzipMagic) {
 		//: nothing to inflate.
 		return data, nil
 	}
-	zr, err := gzip.NewReader(bytes.NewReader(data))
-	//: a gzip header that does not parse.
-	if err != nil {
-		//: the stream is not what its first bytes claim.
-		return nil, errs.Wrap(err, malformedParams("gzip"))
+	scheme, found := coretransform.Lookup(gzipAlgorithm)
+	bounded, isBounded := scheme.(coretransform.BoundedDecompressor)
+	//: no gzip scheme linked, or one that cannot be told a ceiling.
+	if !found || !isBounded {
+		//: a wiring fault, named as the transform domain names it.
+		return nil, errs.Wrap(coretransform.UnknownCompressor, errs.WrapParams{},
+			errs.String("algorithm", string(gzipAlgorithm)))
 	}
-	out, err := io.ReadAll(io.LimitReader(zr, int64(MaxProfileBytes)+1))
-	//: a corrupt or truncated stream.
-	if err != nil {
-		//: the inflation failed.
-		return nil, errs.Wrap(err, malformedParams("gzip"))
+	out, err := bounded.DecompressBounded(nil, data, int64(MaxProfileBytes))
+	//: inflated within the bound, checksum and trailer checked.
+	if err == nil {
+		//: the protocol-buffer bytes.
+		return out, nil
 	}
 	//: a stream that inflates past the bound is refused whole.
-	if len(out) > MaxProfileBytes {
+	if errs.HasCode(err, coretransform.CodeDecompressedTooLarge) {
 		//: nothing past the bound was kept.
 		return nil, coreprofiling.ProfileTooLarge
 	}
-	//: the checksum and the trailer are checked on close.
-	if err := zr.Close(); err != nil {
-		//: a stream whose trailer does not match.
-		return nil, errs.Wrap(err, malformedParams("gzip"))
+	//: a header, a body or a trailer that does not decode.
+	return nil, errs.Wrap(libraryCause(err), malformedParams("gzip"))
+}
+
+// libraryCause returns the decoding library's own error beneath the transform
+// scheme's sentinel, nil when it carried none. A wrap's origin wins (rule 6),
+// so wrapping the scheme's *errs.Error would leave the refusal under the
+// scheme's code; the library's error is what this package wrapped before the
+// scheme did the decoding, and the refusal stays PROFILE_MALFORMED around it.
+func libraryCause(err error) error {
+	cause := err
+	//: peel the SDK layers until the library's error, or nothing, is left.
+	for {
+		sdkErr, isSDK := cause.(*errs.Error)
+		//: not an SDK error (the library's own, or nil), or a typed nil one,
+		//: which Wrap treats as no cause at all.
+		if !isSDK || sdkErr == nil {
+			//: what compress/gzip reported.
+			return cause
+		}
+		//: one layer down.
+		cause = sdkErr.Source()
 	}
-	//: the protocol-buffer bytes.
-	return out, nil
 }
 
 // malformedParams wraps a decoding library's error as ProfileMalformed.

@@ -7,7 +7,7 @@ import (
 	coreotel "github.com/kitsunium/sdk/internal/core/observe/otel"
 )
 
-// noopSpan is the core/observe/trace.Span an unsampled — or unmintable — span becomes.
+// noopSpan is the core/observe/trace.Span an unsampled span becomes.
 //
 // It still CARRIES a context, and that is the whole reason it is not nil. Three
 // things depend on it:
@@ -26,8 +26,8 @@ import (
 // It is a value type with no pointer receiver, so it allocates nothing: an
 // unsampled span costs one interface conversion and no heap.
 type noopSpan struct {
-	// context is the identity — valid and unsampled, or the invalid zero
-	// value when the CSPRNG refused.
+	// context is the identity — valid and unsampled, minted as every span's
+	// is (minting cannot fail).
 	context coretrace.SpanContextValue
 }
 

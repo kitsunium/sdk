@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/proc/rlimit/
 
 ## Purpose
@@ -7,8 +7,9 @@ Applies per-process **setrlimit(2)** / **prlimit64(2)** resource ceilings for th
 OS process-supervision domain (ADR 0016). It maps the abstract
 `core/proc.Resource` enum to the platform `RLIMIT_*` constant and issues the
 syscall, wrapping failures in the central `core/proc` sentinels. **Stdlib-only**
-(`syscall`, `unsafe`) plus `internal/core/proc` and `internal/kernel/errs` — no
-`golang.org/x/sys`.
+(`syscall`, `unsafe`) plus `internal/core/proc`, `internal/kernel/errs` and the
+family's own `internal/service/proc/internal/rlim`, which builds the
+`syscall.Rlimit` both engines hand the kernel — no `golang.org/x/sys`.
 
 ## Contents
 
@@ -18,7 +19,6 @@ syscall, wrapping failures in the central `core/proc` sentinels. **Stdlib-only**
 | `rlimit_linux.go` | Linux impl: full `Resource → RLIMIT_*` table (incl. `NPROC`/`MEMLOCK`), `setrlimit`/`prlimit64`, error wrapping |
 | `rlimit_unix.go` | Darwin/BSD impl (`unix && !linux`): native `setrlimit(2)` on self; a foreign pid → `UnsupportedPlatform` (no portable `prlimit64`) |
 | `rlimit_table_as.go` / `rlimit_table_openbsd.go` | per-platform `RLIMIT_AS` split — present everywhere except OpenBSD (absent from its ABI → `UnknownResource`) |
-| `rlimit_value_signed.go` / `rlimit_value_default.go` | `syscall.Rlimit` constructor: `int64` fields on FreeBSD/DragonFly, `uint64` elsewhere |
 | `rlimit_other.go` | `!unix` stub (Windows, plan9, js/wasm): every entry point returns `UnsupportedPlatform` |
 
 No `codes.go` / `errors.go` — every error is a `core/proc` sentinel

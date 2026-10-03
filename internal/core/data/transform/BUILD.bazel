@@ -16,7 +16,6 @@ go_library(
         "//internal/core:core_consumers",
     ],
     deps = [
-        "//internal/kernel/concur/snapshot",
         "//internal/kernel/errs",
         "//internal/kernel/plugin",
     ],
@@ -43,7 +42,10 @@ go_test(
         "transform_external_test.go",
     ],
     embed = [":transform"],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/kernel/plugin",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST

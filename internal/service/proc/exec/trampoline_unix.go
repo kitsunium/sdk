@@ -22,6 +22,7 @@ import (
 	"syscall"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
+	"github.com/kitsunium/sdk/internal/service/proc/internal/rlim"
 )
 
 // trampolineEnv is the sentinel environment variable carrying the encoded
@@ -257,7 +258,7 @@ func applyRlimitToken(s string) string {
 	}
 	//: setrlimit applies the soft/hard pair to the resource pre-exec; new() takes
 	//: the address of the platform-typed Rlimit without a named temporary.
-	if err := syscall.Setrlimit(num, new(makeRlimit(soft, hard))); err != nil {
+	if err := syscall.Setrlimit(num, new(rlim.Make(soft, hard))); err != nil {
 		//: a refused limit (e.g. raising the hard cap unprivileged) fails the spawn;
 		//: name the soft/hard pair so a per-kernel rejection is diagnosable.
 		return "setrlimit(" + numStr + ",soft=" + softStr + ",hard=" + hardStr +

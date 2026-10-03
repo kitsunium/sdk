@@ -46,7 +46,6 @@ go_test(
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/multipart",
-        "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
 )

@@ -28,8 +28,6 @@ go_library(
         "maxrss_rss32_unix.go",
         "maxrss_rss64_unix.go",
         "procfile_unix.go",
-        "rlimit_value_default.go",
-        "rlimit_value_signed.go",
         "stdio.go",
         "trampoline_unix.go",
         "wrap.go",
@@ -48,46 +46,57 @@ go_library(
         "@rules_go//go/platform:aix": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:android": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:darwin": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:dragonfly": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:freebsd": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:illumos": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:ios": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:linux": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:netbsd": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:openbsd": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:solaris": [
             "//internal/kernel/clock",
             "//internal/service/proc/childwait",
+            "//internal/service/proc/internal/rlim",
         ],
         "@rules_go//go/platform:windows": [
             "//internal/kernel/clock",
@@ -125,7 +134,6 @@ go_test(
         "lookpath_unix_internal_test.go",
         "maxrss_rss64_unix_internal_test.go",
         "procfile_unix_internal_test.go",
-        "rlimit_value_default_internal_test.go",
         "stdio_internal_test.go",
         "trampoline_unix_internal_test.go",
         "wrap_internal_test.go",

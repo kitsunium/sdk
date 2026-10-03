@@ -5,10 +5,16 @@ package profiling_test
 import (
 	"bytes"
 	"compress/gzip"
+	"errors"
+	"io"
+	"strings"
 	"testing"
 
 	coreprofiling "github.com/kitsunium/sdk/internal/core/observe/profiling"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	// registers "gzip", the scheme Parse inflates through; pkg/v1's facade
+	// links it the same way.
+	_ "github.com/kitsunium/sdk/internal/service/data/transform"
 	"github.com/kitsunium/sdk/internal/service/observe/profiling"
 )
 
@@ -150,6 +156,59 @@ func TestParseReadsGzipAndRawAlike(t *testing.T) {
 	b, errB := profiling.Parse(z.Bytes())
 	if errA != nil || errB != nil || len(a.Samples) != len(b.Samples) || a.Samples[0].Stack[2] != b.Samples[0].Stack[2] {
 		t.Fatalf("raw %v, gzip %v", errA, errB)
+	}
+}
+
+// TestAGzipRefusalIsTheProfilesOwn pins what reaching the gzip scheme through
+// the transform port must not change: a stream that does not decode is refused
+// under PROFILE_MALFORMED as the ORIGIN — never under the scheme's own
+// GZIP_FAILED, which a plain wrap of its error would have inherited — with the
+// library's error still in the chain, exactly as when this package decoded
+// gzip itself.
+func TestAGzipRefusalIsTheProfilesOwn(t *testing.T) {
+	t.Parallel()
+	var z bytes.Buffer
+	zw := gzip.NewWriter(&z)
+	if _, err := zw.Write(fixture(nil)); err != nil {
+		t.Fatal(err)
+	}
+	if err := zw.Close(); err != nil {
+		t.Fatal(err)
+	}
+	//: the CRC-32 is the trailer's first four bytes; flip one of its bits.
+	badSum := bytes.Clone(z.Bytes())
+	badSum[len(badSum)-8] ^= 0x01
+	type tc struct {
+		name  string
+		data  []byte
+		cause error
+	}
+	cases := []tc{
+		{"a header cut short", []byte{0x1f, 0x8b, 0x08, 0x00, 0x01}, io.ErrUnexpectedEOF},
+		{"a header with an unknown method", []byte{0x1f, 0x8b, 0x07, 0, 0, 0, 0, 0, 0, 0xff}, gzip.ErrHeader},
+		{"a trailer whose checksum does not match", badSum, gzip.ErrChecksum},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		p, err := profiling.Parse(c.data)
+		if p != nil {
+			t.Fatalf("Parse() = %v, want no profile", p)
+		}
+		if code, _ := errs.CodeOf(err); code != coreprofiling.CodeProfileMalformed {
+			t.Fatalf("Parse() code = %v (%v), want PROFILE_MALFORMED as the origin", code, err)
+		}
+		if strings.Contains(err.Error(), "GZIP_FAILED") {
+			t.Errorf("Parse() = %v, which names the scheme's refusal, not the profile's", err)
+		}
+		if !errors.Is(err, c.cause) {
+			t.Errorf("Parse() = %v, want %v in the chain", err, c.cause)
+		}
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

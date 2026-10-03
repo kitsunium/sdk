@@ -120,10 +120,19 @@ published, which is why §2 comes first.
     unset.
   - `plugin.Registry[K cmp.Ordered, V comparable]` landed with the metrics and
     trace exporter registries as its first instances. It REPORTS a conflict
-    (`Publish` returns false) instead of taking the caller's codes at
+    (`Publish` returns true) instead of taking the caller's codes at
     construction: the registrar asks `Unusable` before publishing and refuses
-    with its own code, so the kernel table builds no error. The codec, writer,
-    crypto, transform, id and view registries are still their own copies.
+    with its own code, so the kernel table builds no error. The six core
+    registries followed — codec, writer, crypto, transform, id and view are
+    instances, each keeping its codes, reasons and fields — and settled two
+    details. `Claim` reports the holder of a taken name rather than a verdict,
+    because codec refuses a second registration of a `Format` even by the
+    identical codec, and names an alias's owner from the step that refused it.
+    Crypto's eight capabilities share one registrar over the table,
+    `schemeRegistry`, so each `Register*` is one call. Codec's MIME and
+    extension indexes and the AEAD wire-id index are tables of their own,
+    beside the main one. `Lookup` costs what the hand-written read cost
+    (`internal/kernel/plugin/BENCH.md`).
   - `semver` landed in the kernel and is published as `pkg/v1/data/semver`.
   - The kernel's families, as moved: `concur/{batcher, buffer, group,
     recycler, singleflight, snapshot, worker}`, `collections/{cache, heap,

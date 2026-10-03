@@ -5,7 +5,6 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -87,37 +86,6 @@ func successfulBodyLen(t *testing.T) int {
 		t.Fatalf("successfulBodyLen: Close err=%v", err)
 	}
 	return buf.Len()
-}
-
-// TestDetachAndReleaseOrphansLargeBuffers pins the two release paths: a small
-// buffer is cloned and repooled, an over-cap one is handed to the caller
-// without a copy. Both must yield the same bytes.
-func TestDetachAndReleaseOrphansLargeBuffers(t *testing.T) {
-	t.Parallel()
-	type tc struct {
-		name string
-		size int
-	}
-	tests := []tc{
-		{"small buffer is cloned and repooled", 32},
-		{"over-cap buffer is orphaned", scratch.MaxRetainedBufBytes + 1},
-	}
-	runCase := func(t *testing.T, tc tc) {
-		t.Helper()
-		buf := scratch.AcquireBuffer()
-		want := bytes.Repeat([]byte("A"), tc.size)
-		buf.Write(want)
-		got := detachAndRelease(buf)
-		if !bytes.Equal(got, want) {
-			t.Errorf("%s: detached %d bytes want %d", tc.name, len(got), len(want))
-		}
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			runCase(t, tc)
-		})
-	}
 }
 
 // TestPartHeader pins the RFC 7578 header block: the field name is always

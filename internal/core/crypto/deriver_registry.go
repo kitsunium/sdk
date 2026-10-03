@@ -1,12 +1,6 @@
 // Package crypto — the process-wide Deriver registry + Subkey dispatch.
 package crypto
 
-import (
-	"fmt"
-
-	"github.com/kitsunium/sdk/internal/kernel/plugin"
-)
-
 // derivers maps each Algorithm to its Deriver. A distinct capability beside
 // AEAD/Hasher/Signer; backed by the shared read-mostly schemeRegistry — register
 // once at import, dispatch is lock-free.
@@ -25,19 +19,9 @@ var derivers = schemeRegistry[Deriver]{verb: "RegisterDeriver"}
 // plug-in whose type is not comparable both satisfy the port and neither can
 // serve one call (see internal/kernel/plugin).
 func RegisterDeriver(d Deriver) Deriver {
-	//: a typed nil and a non-comparable plug-in both satisfy the port and
-	//: neither can serve — refuse at import, where the offender is named.
-	if why := plugin.Unusable(d); why != "" {
-		//: panic so the offender is visible at boot.
-		panic(fmt.Sprintf("crypto.RegisterDeriver [%s DUPLICATE_REGISTRATION]: %s", CodeDuplicateRegistration, why))
-	}
-	//: publish via the shared registry; a distinct duplicate Name is a hard conflict.
-	if err := derivers.publish(d.Algorithm(), d); err != nil {
-		//: surface the doc code for grep-friendly panic messages.
-		panic(conflictText(err))
-	}
-	//: returning the deriver lets callers bind it to a typed singleton var.
-	return d
+	//: refuse an unusable deriver, then publish it under its Algorithm; both
+	//: refusals panic at boot with the dotted-quad code.
+	return derivers.register(d)
 }
 
 // LookupDeriver returns the Deriver registered under name.
@@ -45,14 +29,14 @@ func RegisterDeriver(d Deriver) Deriver {
 // IFACE-PLUGIN: the registry stores plug-in Deriver instances behind the Deriver
 // interface — concrete types are intentionally unexported per scheme.
 func LookupDeriver(name Algorithm) (d Deriver, ok bool) {
-	//: delegate to the shared registry's typed lookup.
-	return derivers.lookup(name)
+	//: a lock-free snapshot read; a miss hands back nil AND false.
+	return derivers.table.Lookup(name)
 }
 
 // AvailableDerivers returns the sorted list of registered KDF Algorithms.
 func AvailableDerivers() []Algorithm {
-	//: delegate to the shared registry's sorted key list.
-	return derivers.available()
+	//: sorted ascending, the caller's own slice; nil before any registration.
+	return derivers.table.Names()
 }
 
 // Subkey derives a length-byte subkey from secret (with optional salt and the

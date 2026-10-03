@@ -13,7 +13,9 @@ process that already exists.
   `time`, `strconv`, `strings`, `errors`, `io`, `io/fs`, `path/filepath`, and
   `unsafe` in `joblimits_windows.go`) + `internal/core/proc` +
   `internal/kernel/errs` + `internal/kernel/clock` (the handles' grace timer,
-  Unix and Windows) + `internal/service/proc/childwait` (Unix files only).
+  Unix and Windows) + `internal/service/proc/childwait` (Unix files only) +
+  `internal/service/proc/internal/rlim` (the trampoline's `syscall.Rlimit`, the
+  constructor `rlimit` shares).
   No `golang.org/x/sys`, no `pkg/*`.
 - Returns `coreproc.Process` (the port interface); the concrete `handle` type is
   unexported.
@@ -43,7 +45,6 @@ process that already exists.
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
 | `limittable_as.go` / `limittable_openbsd.go` | `unix && !openbsd` / `openbsd` | `addPlatformLimits`: `RLIMIT_AS` where the stdlib exports it; nothing on OpenBSD, whose kernel has none, so `ResourceAS` is `UnknownResource` there |
 | `maxrss_rss64_unix.go` / `maxrss_rss32_unix.go` | `unix` except / only on `386 \|\| arm \|\| mips \|\| mipsle` | `maxRSSKB`: `Rusage.Maxrss` as `int64`, widened from the `int32` those four 32-bit targets declare |
-| `rlimit_value_default.go` / `rlimit_value_signed.go` | `unix && !freebsd && !dragonfly` / `freebsd \|\| dragonfly` | `makeRlimit`: the `syscall.Rlimit` field type (see Cross-platform below) |
 | `procfile_unix.go` | `unix` | `os.WriteFile` shim for `oom_score_adj` |
 | `wrap.go` | all | `wrap{Spawn,Wait,Signal,Stop,Rlimit,CgroupUnavailable,StdioCapture,UnknownUser,UnknownGroup}` — restate each sentinel's exact fields once |
 
@@ -197,9 +198,10 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
 
 Cross-platform: the trampoline is `//go:build unix` (Linux, Darwin, the BSDs);
 the only platform-divergent piece is the `syscall.Rlimit` field type — `int64` on
-FreeBSD/DragonFly (`rlimit_value_signed.go`), `uint64` elsewhere
-(`rlimit_value_default.go`). Non-Unix targets never reach it (`exec_other.go`
-returns `UnsupportedPlatform`).
+FreeBSD/DragonFly, `uint64` elsewhere — and the trampoline never names it: it
+calls `rlim.Make` (`internal/service/proc/internal/rlim`), the build-tagged
+constructor it shares with `rlimit`. Non-Unix targets never reach it
+(`exec_other.go` returns `UnsupportedPlatform`).
 
 Footgun: a binary linking this package that is run with the sentinel env var set
 will re-exec. `Start` sets it only on the trampoline child and strips it before

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/app/id/
 
 ## Purpose
@@ -32,13 +32,15 @@ moves.
 | File | Surface |
 |---|---|
 | `id.go` | `Scheme` typed string (`String`/`Known`) + `Generator` interface + `New(scheme)` dispatch |
-| `registry.go` | `snapshot.Value`-backed registry: `Register` / `Lookup` / `Available` |
+| `registry.go` | the registry, an instance of `kernel/plugin.Registry` (ADR 0159): `Register` / `Lookup` / `Available`; what stays here is the refusal — the reserved empty `Scheme` and the conflict, both `DUPLICATE_REGISTRATION` with a `scheme` field |
 | `codes.go` | `Code*` constants — ranges 0.2.7.* and 0.3.39.* |
-| `errors.go` | `UnknownScheme`, `DuplicateRegistration`, and the schemes' `EntropyFailed` / `ClockBackwards` / `ClockStalled` / `InvalidSize` / `InvalidPrefix` / `Malformed` / `TimestampRange` sentinels (`errs.Define`) |
+| `errors.go` | `UnknownScheme`, `DuplicateRegistration`, and the schemes' `EntropyFailed` / `ClockBackwards` / `ClockStalled` / `InvalidSize` / `InvalidPrefix` / `Malformed` / `TimestampRange` sentinels (`errs.Define`); nothing returns `EntropyFailed` since `crypto/rand.Read` stopped failing (Go 1.24), and it stays published with its value |
 
 ## Conventions
 
-- **`snapshot.Value`, not `sync.Map`** — register once at import, read-many (ADR 0011).
+- **The table is the kernel's `plugin.Registry`, not a copy of it** — register
+  once at import, read-many: the check and the insert are one atomic step and a
+  `Lookup` is a lock-free snapshot read (ADR 0011, ADR 0159).
 - **Registration via package-level `var`, never `init()`**.
 - **`Scheme("")` is the reserved invalid zero value** (`Known()` is false).
 - Idempotent re-registration of the same generator is a no-op; a distinct

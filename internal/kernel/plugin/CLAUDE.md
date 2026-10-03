@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/kernel/plugin/
 
 ## Purpose
@@ -13,13 +13,16 @@ through the boxing. ADR 0071.
 
 And, once that question is answered, **where the entry goes**: `Registry[K, V]`
 is the read-mostly, name-keyed, copy-on-write table a registrar publishes into
-— `Publish` / `Lookup` / `Names`. It REPORTS a conflict and never builds an
-error, for the reason `Unusable` returns a string: the registrar refuses with
-its own code. Its first two users are the metrics and trace exporter registries,
-which were one mechanism written twice (`publishExporter` + a map clone, in
-`core/observe/metrics` and `core/observe/trace`); the core registries that still carry their own
-copy of it — codec, writer, crypto's `schemeRegistry`, transform, id, view — are
-the next candidates.
+— `Publish` / `Claim` / `Lookup` / `Names`. It REPORTS a conflict and never
+builds an error, for the reason `Unusable` returns a string: the registrar
+refuses with its own code. Every process-wide registry in the core is an
+instance of it (ADR 0159): the metrics and trace exporter registries first,
+then the six that each carried a copy of the mechanism — `core/data/codec`
+(its `Format` table and, beside it, its MIME and extension indexes),
+`core/observe/logger/writer`, `core/crypto` (through its one registrar,
+`schemeRegistry`, and the AEAD wire-id index), `core/data/transform`,
+`core/app/id` and `core/app/view`. What each kept is its refusal: its code, its
+reason, the fields that name the key.
 
 Code range: none. The answer is a string, not an error — see below.
 
@@ -28,10 +31,11 @@ Code range: none. The answer is a string, not an error — see below.
 | File | Surface |
 |---|---|
 | `plugin.go` | `Unusable` — the entry guard |
-| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/concur/snapshot` |
+| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Claim` (the holder of a taken name reported, the identical value included — for a registrar strict on every second registration, or naming the holder), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice, one allocation) — over `kernel/concur/snapshot` |
 | `plugin_external_test.go` | both refusals, both acceptances, and the comparison a caller is about to make |
-| `registry_external_test.go` | the three publish outcomes, the two misses, the order of `Names`, and racing writers losing nothing |
+| `registry_external_test.go` | the three publish outcomes, the holder a claim reports, the two misses, the order of `Names`, racing writers losing nothing, and racing claims on one name having one winner |
 | `registry_internal_test.go` | the copy a publish makes leaves the source a reader may be walking untouched |
+| `registry_bench_test.go` | `Lookup` hit, miss and parallel, each beside the hand-written snapshot read the core registries carried; `Names` — see `BENCH.md` |
 
 ## The two shapes the compiler accepts and a registry cannot store
 
@@ -88,16 +92,21 @@ Superseded by ADR 0154 (the charter); ADR 0071 stays as the incident's record, a
 
 - **Add a "well-known port" check.** This package has no vocabulary: it never
   learns what a Codec or a Compressor is, which is why it can serve all of them.
-- **Teach `Registry` a domain's refusal.** It reports a conflict; the
-  registrar panics or returns with ITS code, and asks `Unusable` before it
-  publishes, because `==` on a non-comparable dynamic value panics inside the
-  duplicate check with Go's message instead of the registrar's.
+- **Teach `Registry` a domain's refusal.** It reports a conflict (`Publish`)
+  or the holder (`Claim`); the registrar panics or returns with ITS code, and
+  asks `Unusable` before it publishes, because `==` on a non-comparable dynamic
+  value panics inside the duplicate check with Go's message instead of the
+  registrar's.
+- **Read a holder back with a second `Lookup` to name it in a refusal.** `Claim`
+  reports it from the step that refused; a `Lookup` after the fact reads
+  another snapshot.
 - **Grow `Registry` an index a single registry needs.** Registries differ in
   extra indexes (codec's MIME and extension tables) and in their error codes;
   what they share is the name-keyed copy-on-write table, and a registry with a
   second index keeps it beside this one rather than inside it.
 - **Call `Unusable` on a hot path.** It is an import-time guard. (`Lookup` is
-  the read every dispatch makes: one atomic load and a map read, no lock.)
+  the read every dispatch makes: one atomic load and a map read, no lock — at
+  the cost of the hand-written read it replaced, `BENCH.md`.)
 
 ## Verification
 
@@ -105,4 +114,6 @@ Superseded by ADR 0154 (the charter); ADR 0071 stays as the incident's record, a
 bazel test --config=race //internal/kernel/plugin:plugin_test
 # OR
 cd internal/kernel && GOWORK=off go test -race ./plugin
+# the numbers in BENCH.md
+cd internal/kernel && GOWORK=off go test -run='^$' -bench=. -benchmem -count=10 ./plugin
 ```
