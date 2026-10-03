@@ -74,3 +74,59 @@ PrefixMatcher-12              23.79    21.3%   21.12 – 26.19      0           
 - Median of 5 repeats (`-count=5`); the per-row `spread` column is the
   within-run min-max. Between-run variance on this box is larger than that
   spread — see the envelope note above before citing any ns/op.
+
+## Every forwarded name, one call each
+
+`facade_bench_test.go` prices one call to each of the eighteen names this
+package re-exports from `internal/kernel/errs`, made from a consumer's own
+package with every argument read from a variable, so nothing folds and nothing
+is dropped. Here each name is still a function variable
+(`var CodeOf = kerrs.CodeOf`): these benchmarks are the baseline the forwarder
+shape is measured against.
+
+| Dimension | Value |
+|---|---|
+| CPU                | Apple M1 Pro, 10 cores (8 performance, 2 efficiency) |
+| RAM                | 16 GiB |
+| OS / kernel        | macOS 26.6.2 (Darwin 25.6.0) |
+| Architecture       | arm64 |
+| Go toolchain       | go1.27.1 darwin/arm64 |
+| Generated (UTC)    | 2026-10-03 |
+| Machine load       | shared with other builds: 1-minute load average 36 to 186 during the runs |
+
+**Method — CPU time, because the machine was shared.** On that load a
+wall-clock `go test -bench` run of ten samples had confidence intervals up to
+±1,314 % (one `HasCode` sample at 82.8 ns beside others at 6.8 ns). So each
+sample is CPU time: the same `b.Loop` bodies, built in a scratch module, one
+window being one `testing.Benchmark` run of 20 ms wall time costed as the
+process's CPU time (`getrusage`, user + system) over `b.N`; a sample is the
+minimum of 25 windows, which discards the windows the scheduler gave an
+efficiency core, and preemption cannot inflate CPU time at all. Ten samples;
+the median is shown.
+
+```
+name                variable (ns/op)
+CodeOf                   7.543
+ReasonOf                 7.761
+PublicOf                 7.782
+PrivateOf                7.732
+HTTPStatusOf             7.441
+ExitCodeOf               7.442
+FieldsOf                42.12
+HasCode                  7.478
+HasReason                7.486
+NewPrefixMatcher         7.546
+Pack                     2.252
+ParseCode               22.54
+String                   5.481
+Int                      5.051
+Int64                    5.068
+Bool                     5.061
+Float                    5.042
+NewFieldValue            8.087
+```
+
+`FieldsOf` allocates 64 B once (its defensive copy) and `NewPrefixMatcher` 8 B
+once (the matcher, kept alive by the benchmark's sink); every other name
+allocates nothing. Reproduce the wall-clock form with
+`cd pkg && GOWORK=off go test -run='^$' -bench=Facade -benchmem -count=10 ./v1/errs`.

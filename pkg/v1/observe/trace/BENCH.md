@@ -124,3 +124,26 @@ BenchmarkSpan_AddEvent-8                        531.0 ns/op      518 B/op     1 
 BenchmarkSpan_SpanContext-8                       5.7 ns/op        0 B/op     0 allocs/op
 BenchmarkSampler_Ratio-8                        454.1 ns/op      201 B/op     3 allocs/op
 ```
+
+## The attribute constructors, one call each
+
+`facade_bench_test.go` prices one call to each of `String`, `Bool`, `Int64` and
+`Float64`, made from a consumer's own package with every argument read from a
+variable. Here they are still function variables (`var String =
+coreotel.String`): these benchmarks are the baseline the forwarder shape is
+measured against.
+
+Measured the way `pkg/v1/errs/BENCH.md` §"Every forwarded name, one call each"
+describes — Apple M1 Pro, go1.27.1 darwin/arm64, 2026-10-03, on a machine
+shared with other builds, so in CPU time: the minimum of 25 windows of 20 ms per
+sample, ten samples, the median shown.
+
+```
+name        variable (ns/op)
+String           4.668
+Bool             4.349
+Int64            4.348
+Float64          4.750
+```
+
+None of them allocates.
