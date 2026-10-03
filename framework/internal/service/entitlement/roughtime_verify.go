@@ -11,7 +11,6 @@ package entitlement
 import (
 	"bytes"
 	"crypto/ed25519"
-	"crypto/sha512"
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -313,16 +312,14 @@ func verifyRoughtimeMerkle(fields map[uint32][]byte, nonce, root []byte) error {
 
 // hashRoughtimeLeaf hashes a client nonce into a tree leaf.
 func hashRoughtimeLeaf(nonce []byte) []byte {
-	sum := sha512.Sum512(append([]byte{roughtimeLeafPrefix}, nonce...))
 	//: Truncated to the node width the format uses throughout.
-	return sum[:roughtimeHashSize]
+	return sha512Prefix(append([]byte{roughtimeLeafPrefix}, nonce...), roughtimeHashSize)
 }
 
 // hashRoughtimeNode hashes two children into their parent.
 func hashRoughtimeNode(left, right []byte) []byte {
 	joined := make([]byte, 0, 1+len(left)+len(right))
 	joined = append(append(append(joined, roughtimeNodePrefix), left...), right...)
-	sum := sha512.Sum512(joined)
 	//: Truncated to the node width the format uses throughout.
-	return sum[:roughtimeHashSize]
+	return sha512Prefix(joined, roughtimeHashSize)
 }

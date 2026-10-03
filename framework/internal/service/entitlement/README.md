@@ -42,6 +42,8 @@ Package entitlement \- authorising a CI run instead of a device.
 
 A proven CI run costs no device seat, so it is tried before the device path. Every failure here is silent and falls through: not being in CI, having no token, not being covered are all ordinary situations, and the device check is what answers next. Only a device failure is ever reported to a human, because only a device failure is something they can act on.
 
+Package entitlement — the crypto domain's operations this engine uses: a signature check and two digests, asked through pkg/v1 rather than crypto/\* \(ADR 0158 §2\). RS256, which the crypto domain has no scheme for, is not here: it is oidc.go's, and its doc comment says why it stays local.
+
 Package entitlement — the one error code this IMPLEMENTATION owns and the sentinel that carries it, as opposed to the fifteen the CONTRACT declares in framework/internal/core/entitlement.
 
 The split is the same one ADR 0079 drew through the domain: core names the operator situations every implementation of the port must be able to report — revoked, expired, unreachable, no possession — and this range names the failures that exist only because this engine has a cache, a network and a filesystem. A caller matching on the contract's codes is unaffected by anything declared here.
@@ -249,7 +251,7 @@ ParseJWKS decodes a key set and builds the usable RSA keys from it.
 Unusable entries are skipped rather than fatal: GitHub may publish a key type or use this package does not verify, and refusing the whole set over one of them would take down every CI seat for a reason unrelated to any of them. A set with NO usable key is an error, because that is indistinguishable from having no keys at all.
 
 <a name="ParseRoster"></a>
-## func [ParseRoster](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/roster_parse.go#L37>)
+## func [ParseRoster](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/roster_parse.go#L21>)
 
 ```go
 func ParseRoster(raw, sig []byte, vendor ed25519.PublicKey, now time.Time) (roster *coreent.RosterValue, err error)
@@ -510,7 +512,7 @@ type ProductValue struct {
 ```
 
 <a name="ProductValue.DefaultCacheDir"></a>
-### func \(\*ProductValue\) [DefaultCacheDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/cache.go#L93>)
+### func \(\*ProductValue\) [DefaultCacheDir](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/cache.go#L92>)
 
 ```go
 func (p *ProductValue) DefaultCacheDir() string
@@ -678,7 +680,7 @@ WithBearerFetch replaces the transport used for the Actions token mint.
 Only a test should need this. The default refuses redirects, which is what keeps the runner's credential from being forwarded to a destination checkTokenURL never vouched for.
 
 <a name="Service.WithCache"></a>
-### func \(\*Service\) [WithCache](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/cache.go#L110>)
+### func \(\*Service\) [WithCache](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/cache.go#L109>)
 
 ```go
 func (s *Service) WithCache(dir string) *Service

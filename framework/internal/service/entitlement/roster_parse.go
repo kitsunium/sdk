@@ -11,25 +11,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sign"
 
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
 )
-
-// verifiedBy reports whether signature is key's ed25519 signature over message.
-//
-// It asks the crypto domain's signing facade (ADR 0158 §2) rather than calling
-// crypto/ed25519 itself: one verifier for the vendor's roster, the self-update
-// manifest and a Roughtime answer, and the one the rest of the SDK uses. The
-// facade answers a key or a signature of the wrong length with false rather
-// than a panic, and an error only for an algorithm it does not register —
-// which Ed25519 always is, since importing the facade registers it. An error
-// therefore reads as "not verified": nothing that failed to verify is believed.
-func verifiedBy(key, message, signature []byte) bool {
-	verified, verifyErr := sign.Verify(sign.Ed25519, key, message, signature)
-	//: Verified, and by the scheme the facade was asked for.
-	return verifyErr == nil && verified
-}
 
 // ParseRoster decodes and authenticates a roster. Signature verification runs
 // before any field is trusted, and `now` is passed in rather than read from

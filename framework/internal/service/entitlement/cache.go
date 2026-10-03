@@ -27,7 +27,6 @@ package entitlement
 
 import (
 	"crypto/ed25519"
-	"crypto/sha256"
 	"errors"
 	"io/fs"
 	"log"
@@ -775,7 +774,7 @@ type markRecord struct {
 	issued time.Time
 	// payload is the SHA-256 of the bytes the signature covers, so two
 	// readings of one statement compare equal and two statements never do.
-	payload [sha256.Size]byte
+	payload [sha256Size]byte
 	// present is whether this record proves anything at all.
 	present bool
 }
@@ -826,7 +825,7 @@ func rosterMark(roster *coreent.RosterValue, payload []byte) markRecord {
 		return markRecord{}
 	}
 	//: A roster, and therefore evidence.
-	return markRecord{issued: roster.IssuedAt, payload: sha256.Sum256(payload), present: true}
+	return markRecord{issued: roster.IssuedAt, payload: payloadDigest(payload), present: true}
 }
 
 // bundleMark reads what a signed bundle proves about time.

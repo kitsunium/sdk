@@ -9,7 +9,6 @@
 package selfupdate
 
 import (
-	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"io"
@@ -19,6 +18,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/pkg/v1/hash"
 )
 
 // Checksum verification constants.
@@ -32,9 +32,9 @@ const (
 	// maxChecksumsBytes caps the checksums.txt manifest read. The real
 	// manifest is a few hundred bytes; 1MB is defence-in-depth.
 	maxChecksumsBytes int64 = 1 << 20
-	// sha256HexLen is the hex-encoded length of a SHA-256 digest: two hex
-	// characters per byte, so 64 characters total.
-	sha256HexLen int = sha256.Size * 2
+	// sha256HexLen is the hex-encoded length of a SHA-256 digest: 32 bytes,
+	// two hex characters each, so 64 characters total.
+	sha256HexLen int = 64
 )
 
 // bufferArchive reads the whole release archive into memory, refusing
@@ -90,9 +90,19 @@ func (u *Service) matchArchiveDigest(tag, manifest string, archive []byte) error
 			errs.String("manifest", checksumsAssetName),
 			errs.String("tag", tag))
 	}
-	// Hash the buffered archive bytes before any extraction happens.
-	sum := sha256.Sum256(archive)
-	gotHex := hex.EncodeToString(sum[:])
+	//: Hash the buffered archive bytes before any extraction happens, through
+	//: the crypto domain's hash facade (ADR 0158 §2) and in its lowercase hex.
+	gotHex, sumErr := hash.SumHex(hash.SHA256, archive)
+	//: Unreachable while the facade registers SHA-256 on import, which it
+	//: does before this package runs; were it reached, nothing could vouch for
+	//: the archive, so it is refused rather than installed.
+	if sumErr != nil {
+		//: Refuse: the digest the manifest names cannot be compared.
+		return refuse(coreupd.ChecksumMismatch,
+			errs.String("condition", "digest_unavailable"),
+			errs.String("asset", asset),
+			errs.String("tag", tag))
+	}
 	//: Plain (case-insensitive) string equality is sufficient here: both
 	//: digests are public data — the manifest is a public release asset and
 	//: the archive bytes are attacker-visible — so a timing side-channel has

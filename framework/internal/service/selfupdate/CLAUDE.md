@@ -25,7 +25,7 @@ semver of its own, which ADR 0158 §2 routes every version through.
 | `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/sign` |
 | `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` |
 | `probe.go` | ADR 0150: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
-| `checksum.go` | integrity: SHA-256 against the ALREADY-AUTHENTICATED manifest |
+| `checksum.go` | integrity: SHA-256, through `pkg/v1/hash`, against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
 | `consent_product.go` | ADR 0150: `Service.WithAutomaticConsent` (the product's consent; an explicit `<PREFIX>_AUTO_UPGRADE=0` still refuses) `Service.WithoutElevation` (never escalate), and `Service.AuthoriseUnattendedUpgrade` (the environment's answer, then the product's, then the source's prompt) |
