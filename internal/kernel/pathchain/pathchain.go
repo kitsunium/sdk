@@ -241,7 +241,7 @@ func (w *walkState) step(name, abs string) (done bool, err error) {
 		//: the target's components go to the front of the queue.
 		return false, w.follow(described.Target, abs)
 	}
-	return w.enter(name, *described)
+	return w.enter(name, described)
 }
 
 // enter descends into a component already known not to be an indirection.
@@ -254,7 +254,7 @@ func (w *walkState) step(name, abs string) (done bool, err error) {
 // permission fault worth reporting or, worse, an entry swapped for an
 // indirection between the Lstat and this call, where reporting success would
 // hand the caller a chain describing a component that no longer exists.
-func (w *walkState) enter(name string, described StepValue) (done bool, err error) {
+func (w *walkState) enter(name string, described *StepValue) (done bool, err error) {
 	enterErr := w.stack.push(name)
 	//: entered; the next component will be looked up in the right directory.
 	if enterErr == nil {
@@ -330,6 +330,7 @@ func describe(stack *rootStack, name string) (step *StepValue, err error) {
 		Name:      name,
 		Container: container.Mode(),
 		Mode:      info.Mode(),
+		Info:      info,
 		Indirect:  indirect(info.Mode()),
 	}
 	//: an ordinary component says everything about itself in its mode.

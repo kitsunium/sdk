@@ -50,9 +50,10 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/cache` and `internal/service/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
 - `plugin` admitted by ADR 0071 — `Unusable(v any) (why string)` names no domain and knows no port; what it judges is the VALUE, and the two shapes it refuses are properties of Go's interfaces, not of any registry. It has **fifteen** in-tree consumers on day one, in eight core packages, which is unusual here and is the consolidation argument ADR 0010 made for `recycler`: the guard existed fifteen times as `if x == nil` and was wrong in the same way fifteen times.
 - `pathchain` admitted on rule 1: stdlib-only, and its signatures name a path
-  and its components — no lock, no directory role, no policy. It ships with one
-  in-tree consumer, `internal/service/lock`, and that is stated rather than
-  dressed up; three neighbours ask a related question with hand-rolled checks
+  and its components — no lock, no directory role, no policy. It shipped with
+  one in-tree consumer, `internal/service/lock`, and that was stated rather than
+  dressed up; `internal/service/ipc` is the second (its socket directory's
+  parents); three neighbours ask a related question with hand-rolled checks
   today (`internal/service/queue`'s symlinked state directory,
   `internal/core/vfs`'s `PathEscaped`, `internal/service/writer/rotfile`'s
   `refuseSymlink`) and none of them can ask THIS one. It deliberately produces

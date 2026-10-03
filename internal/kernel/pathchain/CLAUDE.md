@@ -12,13 +12,16 @@ parent is traversed by every open whatever flags it carries (ADR 0083).
 `internal/service/lock` is its first consumer: ADR 0082 closed the final
 component and named the parents as deferred, on the grounds that closing them
 "needs a directory-handle API the SDK does not have". This is that API.
+`internal/service/ipc` is the second: the components above a private socket's
+directory, judged by lock's rule for links plus the OWNER `StepValue.Info`
+carries (see `internal/service/ipc/chain_unix.go`).
 
 ## Contents
 
 | Symbol | Surface | Use case |
 |---|---|---|
 | `Resolve` | `Resolve(path string) ([]StepValue, error)` | audit every component of a path whose identity is a security property |
-| `StepValue` | `Path` / `Name` / `Container` / `Mode` / `Target` / `Indirect` | one component, described rather than traversed |
+| `StepValue` | `Path` / `Name` / `Container` / `Mode` / `Info` / `Target` / `Indirect` | one component, described rather than traversed |
 
 ## Conventions
 
@@ -34,6 +37,11 @@ component and named the parents as deferred, on the grounds that closing them
 - **`Container` is read by `fstat` on a handle**, not by a second lookup of a
   path string, so the mode belongs to the directory the component was actually
   found in.
+- **`Info` is the component's own `lstat`**, read relative to that same handle:
+  the link itself, never its target, and `Mode` is `Info.Mode()`. It is there
+  for what a mode does not say — on Unix `Info.Sys()` is the `*syscall.Stat_t`
+  naming the component's owner — and the primitive interprets nothing in it.
+  Pinned by `TestResolveCarriesEachComponentsOwnLstat`.
 - **`Path` reflects the indirections already followed.** Given
   `/pub/app -> /srv/app`, walking `/pub/app/locks` describes the third
   component as `/srv/app/locks`, because that is where it lives and where the
