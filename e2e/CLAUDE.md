@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:53:59Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # e2e/
 
 ## Purpose
@@ -89,3 +89,9 @@ e2e/
 - Import `integration/` from the binary, or drop a suite's `integration` tag.
 - Assert on a nil error alone — read the observable effect back.
 - Add it to `go.work` or a Bazel target (it breaks `go_deps`; keep it go-build-only).
+
+## Subtree
+
+- `checks/` — see `checks/CLAUDE.md` (each conformance group and what it proves on the host)
+- `harness/` — see `harness/CLAUDE.md` (the runner: statuses, the watchdog, the table)
+- `integration/` — see `integration/CLAUDE.md` (the Docker-backed suites; `sql/` and each `writer/<engine>/` has its own)

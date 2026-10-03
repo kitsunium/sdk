@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T09:00:00Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # pkg/v1/data/vfs/
 
 ## Purpose
@@ -46,9 +46,9 @@ filesystem directly. `TestTheFacadePublishesAliasesAndNotCopies` pins it.
 ## Do NOT
 
 - **Do NOT hand-edit `README.md`.** It is generated; the README drift gate
-  (`scripts/pre-commit/check-readme-drift.sh`, run by the pre-commit hook and
-  CI's `bazel` job) blocks any commit where the file on disk differs from what
-  `gomarkdoc` would produce.
+  (`scripts/pre-commit/check-readme-drift.sh`, a step of CI's `bazel` job)
+  fails a change whose file on disk differs from what `gomarkdoc` would
+  produce.
 - **Do NOT declare a new interface here.** The port lives in
   `internal/core/data/vfs`; this package re-exports it. A second declaration would
   break the alias property that makes stdlib walkers apply.

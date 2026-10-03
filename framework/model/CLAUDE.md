@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:57:17Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # framework/model — the Product Graph
 
 ## Purpose
@@ -60,6 +60,7 @@ Two packages, one API:
 | `graph.go` | `NodeID`, `EdgeID`, `Normalize`, `Revision`, `Merge`, `Files` |
 | `module.go` | `Module`, `QualifiedService`, `UnderPrefix`, `File` |
 | `mermaid.go` | the architecture as a Mermaid flowchart |
+| `table.go` | `TableName(service, node, suffix)` — the table a database keeps a kit table in: `<service>__<node><suffix>`, lower case, `-` and `.` written `_`; a name the rule cannot keep as it is (upper case, past `MaxTableLen`, three underscores in a row, SQLite's `sqlite_` prefix) is cut and ends with a digest of the whole — and `MaxTableLen` (58: the SQL document store's `___ix` index table must fit PostgreSQL's 63). The runtime and the analyzer both name tables with it |
 | `errors.go` | `0.4.1.*`: the codes and their sentinels |
 
 ## Sentinels

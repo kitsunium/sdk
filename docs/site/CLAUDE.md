@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T10:41:22Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # docs/site/
 
 ## Purpose
@@ -31,6 +31,11 @@ Run `make docs` / `make serve` from the repo root (they call the above); `make d
 | `src/data/` | `features.mjs`, the curated feature catalogue; the generated JSON lands beside it |
 | `src/pages/` | `index.astro`, `404.astro`, `rss.xml.js`, and `[release]/index.astro` + `[release]/[major]/[...slug].astro` rendering the synced content |
 | `src/components/`, `src/layouts/`, `src/styles/` | the Astro components, `Default.astro`, `global.css` |
+
+Each of these directories has its own `CLAUDE.md` but `src/pages/`: Astro
+publishes every `.md` file under `src/pages/` as a route — under `[release]/`
+a dynamic one without `getStaticPaths`, which fails the build — so the routes
+are described in `src/CLAUDE.md` instead.
 
 ## Deployment + base path
 

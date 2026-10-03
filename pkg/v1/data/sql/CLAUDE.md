@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T09:00:00Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # pkg/v1/data/sql/
 
 ## Purpose
@@ -60,8 +60,8 @@ re-exports, thin delegating constructors, and one ergonomic helper.
 ## Do NOT
 
 - **Hand-edit `README.md`.** It is generated (rule 10); the README drift gate
-  (`scripts/pre-commit/check-readme-drift.sh`, pre-commit hook and CI's `bazel`
-  job) blocks a commit where it differs from what `gomarkdoc` would produce now.
+  (`scripts/pre-commit/check-readme-drift.sh`, a step of CI's `bazel` job)
+  fails a change where it differs from what `gomarkdoc` would produce now.
 - **Add behaviour here.** A constructor in this package delegates and does
   nothing else. Logic belongs in `internal/service/data/sql`, shapes in
   `internal/core/data/sql`.

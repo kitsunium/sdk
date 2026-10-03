@@ -1,20 +1,19 @@
-<!-- updated: 2026-10-02T19:59:08Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/observe/metrics/
 
 ## Purpose
 
-In-memory `Meter` + lock-free instruments
-(`Counter`/`UpDownCounter`/`Gauge`/`Histogram` and the three observable
-families) implementing `core/observe/metrics`, plus three stdlib Exporters — a **text**
-diagnostic that renders the whole OTel model, a **Prometheus** text-exposition
-**connector** that deliberately does not, and **OTLP/JSON**, the native wire the
-model was adopted for, which loses nothing. All three are registered to
-**stderr** on import (ADR 0030); the OTLP/**HTTP** emitter is constructed
-explicitly and never registered. Stdlib-only, cross-OS. ADR 0027 / ADR 0044 /
-ADR 0048 / ADR 0067. Emits core sentinels `0.2.9.*` and the block `0.3.45.*` it was
-allocated for what a wire format refuses — both declared in
-`internal/core/observe/metrics` since ADR 0160 §2; this package declares none and
-names them `coremetrics.X`.
+In-memory `Meter` + lock-free instruments (`Counter`, `UpDownCounter`, `Gauge`,
+`Histogram` and the three observable families) implementing
+`core/observe/metrics`, plus three stdlib Exporters — a **text** diagnostic that
+renders the whole OTel model, a **Prometheus** text-exposition **connector**
+that deliberately does not, and **OTLP/JSON**, the native wire the model was
+adopted for, which loses nothing. All three are registered to **stderr** on
+import (ADR 0030); the OTLP/**HTTP** emitter is constructed explicitly and never
+registered. Stdlib-only, cross-OS. ADR 0027 / ADR 0044 / ADR 0048 / ADR 0067.
+Emits core sentinels `0.2.9.*` and the block `0.3.45.*` it was allocated for
+what a wire format refuses — both declared in `internal/core/observe/metrics`
+since ADR 0160 §2; this package declares none and names them `coremetrics.X`.
 
 Instruments are keyed by name **and typed attribute set** — one name plus one
 attribute set is one **series** — with a per-name cardinality bound that folds
@@ -86,7 +85,6 @@ SDK told the caller to stop thinking about.
 ## Temporality: what `Collect` does
 
 `MeterConfig.Temporality` is resolved once, at construction (§Configuration).
-
 **Cumulative** — the default and what an unconfigured meter *does*: every
 accumulator is READ, `SnapshotValue.StartTime` repeats across collections, and a
 reader differences successive scrapes itself.
@@ -175,11 +173,9 @@ otherwise deadlock behind its own collection.
 name** may hold — per name, so one exploding attribute on `http_requests_total`
 cannot starve `db_queries_total` of the series it needs. Default
 `DefaultMaxSeriesPerInstrument = 2000` (the figure the OpenTelemetry SDKs
-settled on for the same problem).
-
-**Non-positive clamps to the default.** It does not mean unbounded, and there is
-no setting that does (ADR 0031); a caller who wants a huge bound types a huge
-number, where a reviewer can see it.
+settled on for the same problem). **Non-positive clamps to the default**: no
+setting means unbounded (ADR 0031), and a caller who wants a huge bound types a
+huge number, where a reviewer can see it.
 
 **Past the bound, a new attribute set is FOLDED, not rejected and not dropped.**
 It goes into one aggregated series per name carrying
@@ -341,7 +337,8 @@ that knows which exporter a snapshot is going to.
 
 This exporter is a **deliberately lossy connector**, not a rendering of the
 SDK's data model. The model is OpenTelemetry's; the exposition format predates
-most of it and has no field for the rest. It is kept because a Prometheus
+most of it and has no field for the rest; the description (`# HELP`) is the one
+part of the OTel Metric this connector carries. It is kept because a Prometheus
 deployment is a real destination — on the condition that its losses are named.
 Each row below has an executable test.
 
@@ -354,23 +351,19 @@ Each row below has an executable test.
 | **OTel-conventional attribute KEYS** | `http.request.method` is **REFUSED** by name (`INVALID_LABEL_NAME`) | the sharpest consequence of adopting the model: the dotted spelling is what the semantic conventions specify, and this wire cannot carry it. The refusal is loud and deterministic — a key is a literal at the call site — which is the whole reason refusing beats mangling |
 | **Exemplars** | none | the SDK produces none at all (ADR 0044 §Deferred); the trace domain (ADR 0051) now gives one a trace id to hold, and they remain unimplemented |
 
-The description is the one part of the OTel Metric this connector carries
-(`# HELP`).
-
 ## The transport is shared, the vocabulary is not
 
 Everything OTLP that is not this signal's payload lives in
-`internal/service/observe/internal/otlp`, shared with `internal/service/observe/trace`: the
+`internal/service/observe/internal/otlp`, shared with `observe/trace`: the
 proto3-JSON scalars, the `KeyValue`/`AnyValue`/`ResourceMessage`/`ScopeMessage`
 messages, the single-document marshal, the NDJSON stream, the lenient
-`rejected` decode and the whole OTLP/HTTP sender. The two signals carried
-near-copies of all of it; they differed only in their codes, their wording and
-the name a partial success is counted under, and those three are handed to the
-shared code as `otlpSignal` (an `otlp.SignalSpec`) and the two `EXPORT_FAILED`
-wraps. Every error therefore still reads `0.3.45.*` and this package's words,
-byte for byte — the tests below that assert both ran unchanged across the move.
-The rules this section and the next describe are enforced THERE; they are
-restated here because this is where a metrics reader looks.
+`rejected` decode and the whole OTLP/HTTP sender. The two signals differed only
+in their codes, their wording and the name a partial success is counted under,
+which reach the shared code as `otlpSignal` (an `otlp.SignalSpec`) and the two
+`EXPORT_FAILED` wraps — so every error still reads `0.3.45.*` and this
+package's words, byte for byte, and the tests asserting both ran unchanged
+across the move. The rules this section and the next describe are enforced
+THERE, and restated here because this is where a metrics reader looks.
 
 ## The OTLP/JSON encoder
 
@@ -549,15 +542,8 @@ exporter per collector, once — one per export holds a pool per call.
 honour `Retry-After` and otherwise back off exponentially; `resilience` already
 ships that policy, and a backoff hidden inside `Export` would be one a caller
 cannot see, tune or cancel. The exporter supplies the **classification** instead,
-in exactly the shape `resilience.RetryConfig.Retryable` wants:
-
-```go
-resilience.NewRetry(resilience.RetryConfig{
-    MaxAttempts: 3,
-    BaseDelay:   time.Second,
-    Retryable:   metrics.OTLPRetryable,
-})
-```
+in exactly the shape `resilience.RetryConfig.Retryable` wants: a caller passes
+`metrics.OTLPRetryable` there and keeps the attempts and the delay its own.
 
 **Three verdicts, from the specification's own sections.**
 
@@ -638,22 +624,20 @@ cloned at construction so a later caller mutation cannot change the wire.
   (the meter's own series tally), yielded through a range-over-func; growing
   each name's slice instead costs an allocation per name plus doubling copies,
   scaling with cardinality on every scrape.
-- **`Collect` is serialised against itself** by `collectMu`: it is a mutation
-  under delta temporality and a mutation under any temporality once an
-  observable is registered.
+- **`Collect` is serialised against itself** by `collectMu`: it mutates under
+  delta temporality, and under any temporality once an observable is registered.
 - **Registration via `var Text = metrics.RegisterExporter(...)`** (and
   `var Prometheus = …`, `var OTLPJSON = …`) — no `init()`.
 - **An OTLP surface never touches the observation path.** `EncodeOTLPJSON`
   hands a message tree to `encoding/json` at SCRAPE rate; the allocation budget
   is per OBSERVATION. Do not hand-append bytes: `encoding/json`'s escaping is a
   correctness property, and no measurement asks for the trade.
-- **All three registered defaults write to `os.Stderr`** (ADR 0030). Importing a
-  package must not arm a writer on a stream the process may be using as a
-  protocol channel; stdout is reachable only explicitly, e.g.
-  `NewTextExporter(name, os.Stdout)`. That holds for the Prometheus exporter too:
-  a scrape endpoint hands it its `http.ResponseWriter` and never touches the
-  registered default. One regression test per surface. The OTLP/HTTP emitter is
-  **not registered at all** (§The OTLP/HTTP emitter).
+- **All three registered defaults write to `os.Stderr`** (ADR 0030): an import
+  must not arm a writer on a stream the process may use as a protocol channel.
+  stdout is reachable only explicitly (`NewTextExporter(name, os.Stdout)`), a
+  scrape endpoint hands the Prometheus exporter its `http.ResponseWriter`, and
+  the OTLP/HTTP emitter is **not registered at all**. One regression test per
+  surface.
 - **The two TEXT exporters escape STRING attribute values** (`\\`, `\"`, `\n`)
   through the shared `appendEscapedValue`; the OTLP encoder does not need it,
   because `encoding/json` owns JSON string escaping and doing it twice would
@@ -665,50 +649,45 @@ cloned at construction so a later caller mutation cannot change the wire.
 
 - Discard writer errors — each exporter buffers into `[]byte` then does one
   `Write` with a wrapped `EXPORT_FAILED` on failure.
-- Add an `init()`.
-- Point a *registered* exporter at `os.Stdout`. The import is invisible at the
-  call site, so the default must be the stream nobody parses.
-- Transliterate a metric or attribute key in the Prometheus connector (`_`
-  merges distinct instruments), or emit a `target_info` metric to smuggle the
-  Resource through (the same mangling, on `service.name`).
-- Let a delta snapshot reach the Prometheus wire, or an unresolved one pass as
-  cumulative. Both are refused, on purpose.
-- Invent a fourth escape sequence (the 0.0.4 parser rejects anything but `\\`,
-  `\"` and `\n`, so a `\r` costs the whole scrape), or escape a double quote in a
-  `# HELP` docstring (not a quoted token).
-- Emit a placeholder `# HELP`, or one for an empty description.
+- Add an `init()`, or point a *registered* exporter at `os.Stdout`: the import
+  is invisible at the call site, so the default must be the stream nobody parses.
+- In the Prometheus connector: transliterate a metric or attribute key (`_`
+  merges distinct instruments), emit a `target_info` metric to smuggle the
+  Resource through (the same mangling, on `service.name`), let a delta or an
+  unresolved snapshot reach the wire, invent a fourth escape sequence (the 0.0.4
+  parser rejects anything but `\\`, `\"` and `\n`, so a `\r` costs the whole
+  scrape), escape a double quote in a `# HELP` docstring (not a quoted token), or
+  emit a `# HELP` for an empty description.
 - Put a description on a data POINT or in the series key (it is
   non-identifying), or thread it through `Counter`/`Gauge`/`Histogram` (a second
   string on the variadic call the compiler must prove non-escaping, and two call
   sites could disagree about one metric's documentation).
 - Convert a series key to a `string` before a map read. `m[string(b)]` does not
   allocate; `k := string(b); m[k]` does, once per observation.
-- Clone a series' attribute set inside `Collect`. It is shared with the snapshot
-  on purpose (see `internal/core/observe/metrics/CLAUDE.md` §The snapshot shape).
-- Swap an OBSERVED series to zero during a delta collection. Its callback
-  already stored the window.
+- Inside `Collect`, clone a series' attribute set (it is shared with the
+  snapshot on purpose — `internal/core/observe/metrics/CLAUDE.md` §The snapshot
+  shape) or swap an OBSERVED series to zero under delta (its callback already
+  stored the window).
 - Grow `NewMeter` / `NewMeterWithConfig` past the inlining budget (§Conventions),
   or add an "unbounded" cardinality setting.
-- Register the OTLP/**HTTP** emitter, or give it a default endpoint.
-- Build the default client without its own `Transport` (a nil one is
-  `http.DefaultTransport`, which any code in the process can empty), or
-  replace, wrap or clone the `Transport` of a caller-SUPPLIED client.
-- Drain a response without a bound, or bound the drain by the configured
-  `MaxResponseBytes`: that knob caps what is read into memory, and a caller
-  who lowered it must not lose connection reuse on a conforming response.
-- Retry inside `Export`. `resilience` owns backoff; this package classifies
-  (`OTLPRetryable`), and `Export` has no `context` to cancel a hidden loop with.
-- Emit `AGGREGATION_TEMPORALITY_UNSPECIFIED` (0), an enum by NAME, or a 64-bit
-  integer as a JSON number (it loses the low bits past 2⁵³).
-- Omit `asInt`/`asDouble`, the histogram `sum`, or `isMonotonic` when they hold
-  their zero. Presence is the meaning — see §The OTLP/JSON encoder.
-- Skip a non-finite histogram bound the way the Prometheus connector does. It
-  breaks `len(bucketCounts) == len(explicitBounds) + 1`.
-- Turn HTML escaping back on in the OTLP encoder, or reach for `json.Marshal`
-  instead of the configured `json.Encoder`.
-- Attach a collector's `errorMessage`, a `Retry-After` HTTP-date, or the
-  endpoint to an error. All three are remote-controlled or secret; a Field goes
-  into structured logs.
+- Break an OTLP/JSON rule (§The OTLP/JSON encoder): emit
+  `AGGREGATION_TEMPORALITY_UNSPECIFIED` (0), an enum by NAME or a 64-bit integer
+  as a JSON number (it loses the low bits past 2⁵³); omit `asInt`/`asDouble`,
+  the histogram `sum` or `isMonotonic` at their zero; skip a non-finite bound the
+  way the Prometheus connector does (it breaks
+  `len(bucketCounts) == len(explicitBounds) + 1`); turn HTML escaping back on, or
+  reach for `json.Marshal` instead of the configured `json.Encoder`.
+- Loosen the OTLP/HTTP emitter (§The OTLP/HTTP emitter): register it or give it
+  a default endpoint; build its default client without a `Transport` of its own
+  (a nil one is `http.DefaultTransport`, which any code in the process can
+  empty), or replace, wrap or clone a caller-SUPPLIED client's `Transport`;
+  drain a response without a bound, or bound the drain by `MaxResponseBytes`
+  (that knob caps what is read into memory, and a caller who lowered it must
+  not lose connection reuse on a conforming response); retry inside `Export` (`resilience` owns backoff, `OTLPRetryable`
+  classifies, and `Export` has no `context` to cancel a hidden loop with); attach
+  the collector's `errorMessage`, a `Retry-After` HTTP-date or the endpoint to an
+  error — all three are remote-controlled or secret, and a Field goes into
+  structured logs.
 
 ## Verification
 

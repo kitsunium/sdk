@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-03T13:06:04Z -->
 # e2e/integration/
 
 ## Purpose
@@ -63,3 +64,8 @@ move.
 - Move a suite back into a module of the `go.work` chain: its test imports
   would put testcontainers in that module's `go.mod`, and so in its consumers'
   graph.
+
+## Subtree
+
+- `sql/` — see `sql/CLAUDE.md`
+- `writer/clickhouse/`, `writer/mysql/`, `writer/redis/` — see each one's `CLAUDE.md` (the case, the server, what is open)

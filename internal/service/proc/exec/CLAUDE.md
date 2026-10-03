@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T12:00:00Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -39,7 +39,7 @@ process that already exists.
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
 | `zombie_darwin.go` / `zombie_other.go` | `darwin` / `unix && !darwin` | `leaderIsZombie`: on darwin, `getpgid(2)` answers ESRCH for an exited, unreaped child (see §Stop); `false` on every other kernel, which never needs it |
-| `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
+| `limits_unix.go` | `unix` | `checkLimits`, before the spawn: `UnknownResource` for a resource with no stdlib `RLIMIT_*` mapping; every mapped one and a `Umask` pass, applied by the trampoline — a limit the kernel then refuses is `RlimitFailed`, through the handshake |
 | `cgroup_placement_linux.go` | `linux` | `validateCgroupPath` (pre-spawn: missing/not-a-cgroup ⇒ `CgroupUnavailable`) + `applyCgroupPlacement` (trampoline writes pid → `cgroup.procs`) |
 | `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
 | `limittable_unix.go` | `unix` | `Resource` → `RLIMIT_*` table (stdlib constants only) |
@@ -164,8 +164,12 @@ a **re-exec trampoline** (`trampoline_unix.go`), stdlib-pure and dependency-free
   the sentinel, then `syscall.Exec`s the real target. The pid is preserved across
   the `execve`, so `Wait`/`Signal`/`Stop` and the stdio pipes all still apply.
 - An `Rlimits` key naming a resource with no stdlib `RLIMIT_*` mapping
-  (`ResourceNProc`, `ResourceMemLock` — only in `golang.org/x/sys`, banned) is
-  rejected with `UnknownResource` **before** the spawn (`checkLimits`).
+  (`ResourceNProc`, `ResourceMemLock` — absent from `syscall`, and
+  `golang.org/x/sys` is banned) is rejected with `UnknownResource` **before** the
+  spawn (`checkLimits`). `proc/rlimit` spells both by their Linux generic-ABI
+  numbers (`rlimit_linux.go`), so on Linux `rlimit.Apply` honours a limit this
+  package refuses — an open disagreement, which moving one `Resource` →
+  `RLIMIT_*` table into `proc/internal/rlim` for both would settle.
 - A limit the kernel **refuses** (e.g. an invalid soft>hard pair, or raising a
   hard cap unprivileged), or a failed `execve` of the target, is reported through
   a **handshake pipe** (`handshake_unix.go`): the trampoline inherits the pipe

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:06:22Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # scripts/
 
 ## Purpose
@@ -12,7 +12,7 @@ here is a Go package.
 
 | Path | What it is |
 |---|---|
-| `pre-commit/` | the guards `make lint` and `bazel-ci.yml` run (ADR 0153), each an executable `check-*.sh` taking the workspace path and defaulting to the repository root; `test-pre-commit-guards.bats` pins them, and keeps them runnable on a Mac as shipped |
+| `pre-commit/` | the guards `make lint` and `bazel-ci.yml` run (ADR 0153), each an executable `check-*.sh` that finds the repository root from its own path (seven also take the workspace path as their first argument); `test-pre-commit-guards.bats` pins them, and keeps them runnable on a Mac as shipped |
 | `release/` | `compute-bumps.sh` (WHETHER to release), `cut-tags.sh` (HOW BIG, from `release:*` labels — ADR 0135), `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
 | `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137), and `vuln-check.sh`, the govulncheck gate over it (ADR 0136) |
 | `check-layer-deps.sh` | the layer firewall on the build graph: seven `bazel query` expressions that must be empty (ADR 0068; the last three are the framework's, ADR 0147) |
@@ -82,3 +82,9 @@ Superseded by ADR 0154 (the charter); ADR 0137 stays as the incident's record, a
 - Add a suite nothing runs: a new `*.bats` beside the others is picked up by its
   runner's glob, and a new runner needs a `make` target listed in
   `ci-gates-check.sh` (ADR 0088).
+
+## Subtree
+
+- `ci/` — see `ci/CLAUDE.md` (the census and the vulnerability gate)
+- `pre-commit/` — see `pre-commit/CLAUDE.md` (each guard, what fails it and what runs it)
+- `release/` — see `release/CLAUDE.md` (whether, how big, the tags) and `release/lib/CLAUDE.md` (the rules the release scripts share)

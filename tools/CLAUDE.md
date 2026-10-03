@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:53:42Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # tools/
 
 ## Purpose
@@ -10,7 +10,7 @@ Single-purpose scripts, data files and small Go programs the build tooling calls
 | Path | Called by | Emits |
 |---|---|---|
 | `workspace_status.sh` | `bazel build --stamp` (via `workspace_status_command` in `.bazelrc`) | `STABLE_VERSION <git-sha>` to stdout, falling back to `STABLE_VERSION dev` outside a git checkout |
-| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform of the cross-build lane that compiles the file (ADR 0138) |
+| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform that compiles the file — ten of the cross-build lane's twelve cells, illumos and solaris not among them (ADR 0138; see `genindex/CLAUDE.md`) |
 | `sdkguard/` (Go program, stdlib-only) | a consumer's CI / `make`, or `go run github.com/kitsunium/sdk/tools/sdkguard@latest` | diagnostics on stderr in `file:line:col` form; exit 1 on findings, 2 on tool error — see `tools/sdkguard/CLAUDE.md` |
 | `alloc-lane-targets.txt` (plain list, `#` comments) | `make test-alloc`, the `bazel-ci.yml` alloc step, and `scripts/pre-commit/check-alloc-lane-coverage.sh` | nothing — it IS the data: one Bazel test target per line for `bazel test --config=alloc` |
 
@@ -18,7 +18,7 @@ Single-purpose scripts, data files and small Go programs the build tooling calls
 
 A test file carrying `//go:build !race` is dropped at compile time by the race suite (`bazel test --config=ci //...`, race on by default), so it runs in exactly one place: the race-off alloc lane. A `!race` test whose package is missing from this list therefore runs in **no lane at all** — it compiles, it is never executed, and nothing reports it as skipped.
 
-Keeping the list in one file (rather than duplicated in the Makefile and the workflow) is what lets `check-alloc-lane-coverage.sh` verify the invariant mechanically: every directory holding a `//go:build !race` test must be covered by an entry here, directly or via a `/...` prefix. The guard runs in the pre-commit chain, in `make lint`, and as its own CI step.
+Keeping the list in one file (rather than duplicated in the Makefile and the workflow) is what lets `check-alloc-lane-coverage.sh` verify the invariant mechanically: every directory holding a `//go:build !race` test must be covered by an entry here, directly or via a `/...` prefix. The guard runs in `make lint` and as its own step of CI's `bazel` job (the pre-commit hook that also ran it went with ADR 0153).
 
 ## How they wire in
 
@@ -46,7 +46,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 
 ## Conventions
 
-- Tools here MUST be self-contained. No third-party binaries beyond what the dev container guarantees (`bash`, `git`, `go`).
+- Tools here MUST be self-contained. No third-party binaries beyond `bash`, `git` and `go`.
 - Shell scripts: keep them small enough to read end-to-end. If a tool exceeds ~80 lines, split it into a helper package elsewhere and keep the entry point thin.
 - Go programs (e.g. `genindex/`) live in their own subdirectory with `go.mod` OUTSIDE `go.work` (`GOWORK=off`) so the workspace invariant is preserved: every module `go.work` names but the root is tagged by the release chain (ADR 0147 §9), and a tool is not published.
 - Stdlib-only for Go tools. Pulling extra deps would pollute the build dependency graph for what is essentially a one-shot script.
@@ -75,5 +75,5 @@ cat $(bazel info output_path)/volatile-status.txt $(bazel info output_path)/stab
 cd tools/genindex && GOWORK=off go vet ./...
 GOWORK=off go run . -check-doclinks "$(git rev-parse --show-toplevel)"   # = make doclinks
 GOWORK=off go run . -input ../../pkg/v1 -module github.com/kitsunium/sdk/pkg/v1 \
-  -url-base /local/v1 -repo-root /workspace -source-url-prefix https://github.com/kitsunium/sdk/blob/main
+  -url-base /local/v1 -repo-root ../.. -source-url-prefix https://github.com/kitsunium/sdk/blob/main
 ```

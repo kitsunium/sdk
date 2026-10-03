@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # pkg/v1/proc/signal
 
 Public, stable facade for the typed **signal toolbox**: parse, subscribe, and
@@ -28,9 +28,9 @@ cd pkg/v1/proc/signal && gomarkdoc --output README.md \
   --repository.default-branch main --repository.path /pkg/v1/proc/signal .
 ```
 
-(or `make docs-readme`). `scripts/pre-commit/check-readme-drift.sh` — run by
-the pre-commit hook and CI's `bazel` job — blocks any commit where the file on
-disk drifts from what gomarkdoc would emit. Maintainer rationale stays here;
+(or `make docs-readme`). `scripts/pre-commit/check-readme-drift.sh` — a step
+of CI's `bazel` job — fails a change whose file on disk drifts from what
+gomarkdoc would emit. Maintainer rationale stays here;
 consumer prose belongs in the package doc comment.
 
 ## Platform

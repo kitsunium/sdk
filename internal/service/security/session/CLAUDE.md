@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T07:14:15Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/security/session/
 
 ## Purpose
@@ -113,8 +113,8 @@ Every permission the store depends on is **narrowed and then asserted**, because
 three different things can silently widen it:
 
 - a **default POSIX ACL** on the parent makes `MkdirAll(0700)` and the record
-  temporary's `0600` come back wider — this happens on this repository's own
-  devcontainer, where `t.TempDir()` yields `0775`;
+  temporary's `0600` come back wider — it happened on the devcontainer this
+  repository carried until ADR 0153, where `t.TempDir()` yielded `0775`;
 - a **filesystem that does not implement Unix permissions** (exFAT, SMB, a
   container mount with a blanket `file_mode=`) accepts the `chmod` and changes
   nothing;

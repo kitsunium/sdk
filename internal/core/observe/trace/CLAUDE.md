@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/core/observe/trace/
 
 ## Purpose
@@ -38,7 +38,7 @@ and declares none; `codeRangeOwners` maps both keys to this directory.
 | `carrier.go` | `Carrier` (2 methods, FROZEN) — `Inject` / `Extract` are the engine's |
 | `context.go` | `ContextWithSpanContext` / `SpanContextFromContext` |
 | `span_kind.go` | `SpanKind` + the five values + `Resolved` |
-| `status_value.go` | `StatusValue` + `StatusCode` (`Unset`/`OK`/`Error`) + `Resolved` / `IsUnset` |
+| `status_value.go` | `StatusValue` + `StatusCode` (`StatusUnset`/`StatusOK`/`StatusError`) + `Resolved` / `IsUnset` |
 | `event_value.go` | `EventValue` + the `exception.*` convention constants |
 | `link_value.go` | `LinkValue` — a whole `SpanContextValue` plus attributes — and `SpanParams`, the facts a span is born with (the zero value is an INTERNAL span starting now) |
 | `span_value.go` | `SpanValue` — one FINISHED span; `Duration` / `IsRoot` |

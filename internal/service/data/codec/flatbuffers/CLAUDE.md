@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/data/codec/flatbuffers/
 
 ## Purpose
@@ -31,7 +31,7 @@ No third-party dependency — pure stdlib.
 | `BytesAcceptor` (`SetBytes([]byte)`)   | Unmarshal        | lets generated FlatBuffer types accept the buffer with their own ownership semantics |
 
 The `Provider` / `Acceptor` suffixes are registered as legitimate
-adapter-role vocabulary in `/workspace/.ktn-linter.yaml`
+adapter-role vocabulary in the root `.ktn-linter.yaml`
 (per kodflow/ktn-linter#337), so `KTN-INTERFACE-ERNAME` does not fire
 on these names.
 

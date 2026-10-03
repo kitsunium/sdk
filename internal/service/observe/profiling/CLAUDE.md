@@ -1,3 +1,4 @@
+<!-- updated: 2026-10-03T13:06:04Z -->
 # internal/service/observe/profiling/
 
 ## Purpose
@@ -22,7 +23,7 @@ Stdlib only (plus `kernel/clock` — the CPU window is a timer on it, `clock.Sys
 | `parse.go` | `Parse`: the bound, gzip or raw — gzip inflated through the registered `"gzip"` transform scheme, its refusal kept `PROFILE_MALFORMED` around the library's own error (`libraryCause`) — the Profile's top-level fields through a reader table |
 | `tables.go` | Sample, Label, Location, Line, Function; `resolve(frames)` |
 | `resolve.go` | string, location and function indexes checked and resolved; a location's frames built once and shared; the frame budget (`spend`) |
-| `fold.go` | `Fold`, `FoldConfig` and its defaults; `sampleTypeIndex` / `defaultSampleType`, the lookups that were methods of the profile value |
+| `fold.go` | `Fold`, `FoldConfig` and its defaults; `resolveSampleType` — the sample type a fold reads (the caller's, else the profile's default, else its last, pprof's convention) and its index — the lookup that was two methods of the profile value before the values moved to the core |
 | `goroutine.go` | `Goroutines` (over `goroutinesFrom`, the writer injectable), `ParseGoroutines` and the dump parser; `readState`, the header's bracket read into a goroutine |
 | `labels.go` | the labels in a dump header (the runtime's quoting) and in the counted profile (`%q`), and their matching by stack |
 | `group.go` | `GroupGoroutines`, `GroupConfig`, the length-prefixed group key, the top frame |
