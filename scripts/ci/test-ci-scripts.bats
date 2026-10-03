@@ -127,7 +127,8 @@ job_body() {
 # ── vuln-check.sh ───────────────────────────────────────────────────────────
 
 # stub_scanner — a govulncheck that answers per module: <module>/.vuln-rc holds
-# the exit status to give (default 0), and every call is logged.
+# the exit status to give (default 0), <module>/.vuln-msg a line to print, and
+# every call is logged.
 stub_scanner() {
   cat >"$BATS_TEST_TMPDIR/govulncheck" <<'STUB'
 #!/usr/bin/env bash
@@ -138,6 +139,7 @@ fi
 printf '%s %s\n' "$PWD" "$*" >>"$BATS_TEST_TMPDIR/scans.log"
 rc=0
 [ -f .vuln-rc ] && rc="$(cat .vuln-rc)"
+[ -f .vuln-msg ] && cat .vuln-msg
 [ "$rc" -eq 3 ] && echo "Vulnerability #1: GO-2026-0001 — found in example.com/dep@v1.0.0"
 exit "$rc"
 STUB
@@ -189,6 +191,49 @@ scans() {
   run bash scripts/ci/vuln-check.sh
   [ "$status" -eq 1 ]
   [[ "$output" == *"govulncheck did not complete for . (exit 1)"* ]]
+}
+
+# ADR 0157 §5: the root module is the workspace's anchor and holds no package,
+# and govulncheck answers that with exit 2. For the root, and for that answer
+# only, it is nothing to scan — not an incomplete scan.
+@test "vuln: the root module holding no package is nothing to scan, and passes" {
+  fixture_repo
+  module .
+  module a
+  echo 2 >.vuln-rc
+  echo "govulncheck: no packages matched the provided patterns" >.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"vuln-check: . holds no package — nothing to scan"* ]]
+  [[ "$output" == *"1 module(s) scanned, no reachable vulnerability"* ]]
+  [ "$(scans)" -eq 2 ]
+}
+
+# The exception is the root's alone: a chain module that lost its packages is a
+# defect, and the same answer from it fails as a scan that did not complete.
+@test "vuln: any other module holding no package still fails as incomplete" {
+  fixture_repo
+  module .
+  module a
+  echo 2 >a/.vuln-rc
+  echo "govulncheck: no packages matched the provided patterns" >a/.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"govulncheck did not complete for a (exit 2)"* ]]
+}
+
+# And for the root it is that answer only: any other exit 2 is still incomplete.
+@test "vuln: the root failing for another reason still fails" {
+  fixture_repo
+  module .
+  echo 2 >.vuln-rc
+  echo "govulncheck: loading packages: there are errors" >.vuln-msg
+  stub_scanner
+  run bash scripts/ci/vuln-check.sh
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"govulncheck did not complete for . (exit 2)"* ]]
 }
 
 @test "vuln: a scanner that is not the pinned build is refused" {

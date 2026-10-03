@@ -158,6 +158,15 @@ jobs:
           modules="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
           for mod in $modules; do
             echo "::group::$mod"
+            # The root module is the workspace's anchor and holds no package
+            # (ADR 0157 §5), and `go test ./...` exits 1 on a pattern that
+            # matches nothing. It is skipped by name, and only while `go list`
+            # says it is empty: a package added there is tested again.
+            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
+              echo "skip: the root module holds no package"
+              echo "::endgroup::"
+              continue
+            fi
             (cd "$mod" && go test -count=1 -short ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
             echo "::endgroup::"
           done
