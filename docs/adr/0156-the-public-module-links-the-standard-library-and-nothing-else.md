@@ -103,6 +103,19 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
   native YAML subset and the `yaml-full` module, `kernel/semver`, and the
   removal of the six requirements from `internal/service/go.mod`. After the
   last of them, `go list -m all` in `pkg` names the SDK's own modules only.
+- **As implemented so far**: the four native codecs have landed, each with its
+  consumer-visible deviations listed in its package `CLAUDE.md` and pinned by
+  its own suite — CBOR writes map pairs sorted by encoded key (RFC 8949
+  §4.2.1); BSON keeps the driver's v1 mapping, gains two codes in its own range
+  (`0.3.36.4` `BSON_DEPTH_EXCEEDED`, `0.3.36.5` `BSON_VALUE_INVALID`) and a
+  facade, `pkg/v1/codec/bson`, which registers BSON alone and aliases its value
+  types because a program reading BSON holds them (ADR 0074, ADR 0134); TOML's
+  `LocalDate`, `LocalTime` and `LocalDateTime` are the SDK's own types,
+  re-exported by `pkg/v1/codec/toml`, and its decoder still accepts the four
+  TOML 1.1.0 relaxations the replaced library accepted while its encoder writes
+  1.0.0. `go list -m all` in `pkg` names 12 modules instead of 35, and
+  `go list -deps ./...` links two outside the SDK, `gopkg.in/yaml.v3` and
+  `golang.org/x/mod` — what §3 and §4 remove.
 - **Not yet mechanical**: no gate fails when a vendor module enters `pkg`'s
   graph. Until one does, §1 is checked in review with `go list -m all`; see
   §Deferred.

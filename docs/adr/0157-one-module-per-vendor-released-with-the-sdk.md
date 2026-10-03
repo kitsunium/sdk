@@ -24,6 +24,10 @@ wants the S3 writer requires the root module and takes every one of those
 requirements into its own module graph. And the root module has never been
 tagged — `pkg`, the three `internal/` modules and the framework's have — so it
 does so at a pseudo-version, with nothing a consumer can pin to a release.
+ADR 0012 had expected the opposite ("releasing the AWS writers tags the root
+module"); the release chain was built without it (ADR 0079: "the root module
+is never tagged"), so no `third-party/` package has ever been published under
+a version.
 
 Two of the root's packages are not integrations at all: `third-party/db/sql`
 holds no production code, only the suites that run the SQL mechanisms on real
@@ -68,6 +72,18 @@ edited. It is in the module census (ADR 0137) because git tracks its `go.mod`,
 so every lane that loops over modules builds, vets, tests on 32 bits and scans
 it.
 
+What the release scripts learn is the tag's shape and a token, not a list:
+`lib/tag-format.sh` accepts `third-party/<dir>/vX.Y.Z` (`THIRD_PARTY_TAG_REGEX`)
+and `chain_modules` orders the vendor modules after the framework's, by name;
+`compute-bumps.sh` emits the token `third-party` for a change under
+`third-party/` (its rule 1c), which `cut-tags.sh` and the SDK Release dispatch
+accept; and the vendor tags are listed among the consumer-facing ones, each of
+which gets a GitHub Release. A path that can cut a release can size it (ADR
+0089): `lib/release-scope.sh` counts `third-party/` paths — and `framework/`
+ones, which ADR 0147 had left out, so `cut-tags.sh` walked past a
+framework-only merge when it sized a range, and a `release:minor` label on one
+shipped as a patch.
+
 ### 4. Suites against real engines live in `e2e`
 
 A module's tests count in its `go.mod`: a writer module whose integration test
@@ -78,7 +94,12 @@ writers' Docker-backed tests — move to the `e2e` module, the auxiliary module
 outside `go.work` that nothing requires and where the SDK is already exercised
 against real kernels. They keep their `integration` tag, so the lanes that
 build and test `e2e` on every platform compile none of them, and a vendor
-module requires its vendor and the SDK alone.
+module requires its vendor and the SDK alone. `third-party/db/sql` becomes
+`e2e/integration/sql` and each `third-party/db/writer/<engine>/*_integration_test.go`
+becomes `e2e/integration/writer/<engine>`, moved unchanged; their run procedure
+is `e2e/integration/CLAUDE.md` (rule 12). The AWS writers' `localstack` suites
+stay in `third-party/aws`: they need nothing that module does not already
+require.
 
 ### 5. The root module carries no vendor
 
@@ -89,10 +110,41 @@ what it was before ADR 0012: the workspace's anchor beside `go.work`,
 
 ## Consequences / Semantics
 
-- **Implemented by the reorganisation series**: the nine modules, their
-  `go.work` entries and Bazel wiring, the move of the suites against real
-  engines to `e2e`, and the release automation that tags them. This record changes no
-  code.
+- **Implemented by the reorganisation series.** Its vendor-module step created
+  eight of the nine modules — every one but `third-party/codec/yaml`, which
+  arrives with the YAML subset (ADR 0156) — with their `go.work` entries and
+  Bazel wiring (a module-root `BUILD.bazel` carrying its `gazelle:prefix`; for
+  `third-party/aws` and `third-party/x-crypto`, which hold no package at their
+  root, a `BUILD.bazel` whose only purpose is that `go_deps` can load their
+  `go.mod`), moved the suites against real engines to `e2e`, and taught the
+  release automation the new tags. Until the ssh identity leaves (ADR 0158),
+  the root module still requires `x/crypto` for it.
+- **What a consumer's module graph holds**, measured with
+  `GOWORK=off go list -m all` in each module (the module itself and the SDK's
+  `internal/*` included). The root module named 174 before the split. At the
+  split, while `internal/service` still required the vendor codecs, and on the
+  integrated tree once ADR 0156 had made them native:
+
+  | Module | At the split | With the native codecs |
+  |---|---|---|
+  | `third-party/aws` | 30 | 21 |
+  | `third-party/codec/hcl` | 37 | 31 |
+  | `third-party/codec/protobuf` | 20 | 12 |
+  | `third-party/db/writer/clickhouse` | 94 | 88 — the driver's own graph, which lists testcontainers it never builds |
+  | `third-party/db/writer/mysql` | 20 | 11 |
+  | `third-party/db/writer/redis` | 27 | 20 |
+  | `third-party/transform` | 19 | 10 |
+  | `third-party/x-crypto` | 23 | 14 |
+  | the root (the ssh identity) | 24 | 15 |
+  | `e2e` (auxiliary: the suites, testcontainers, `moby`, the drivers) | 159 | 147 |
+- testcontainers and `moby` are required by `e2e` alone: they leave `go.work`,
+  and `bazel mod tidy` drops them from `use_repo`.
+- `cut-tags.sh` publishes eight more tags and eight more GitHub Releases per
+  release — nine once `third-party/codec/yaml` exists.
+- A pattern does not cross a module boundary. From the repository root,
+  `go test ./third-party/aws/...` works in workspace mode; with `GOWORK=off` it
+  reaches nothing, and each package's verification command runs from its
+  module's directory.
 - A consumer of the S3 writer requires `github.com/kitsunium/sdk/third-party/aws`
   at a release tag, and its module graph gains the AWS SDK and the SDK's own
   modules — not ClickHouse, not Redis, not testcontainers.
@@ -108,7 +160,9 @@ what it was before ADR 0012: the workspace's anchor beside `go.work`,
 
 An importer of a `third-party/` package now requires that package's module
 instead of the root module — the import path is unchanged, the `require` line
-changes. Nothing outside `third-party/` changes.
+changes (`go get github.com/kitsunium/sdk/third-party/aws@<version>`). No
+tagged release is affected: the root module never had one. Nothing outside
+`third-party/` changes.
 
 ## Alternatives considered
 
@@ -119,14 +173,40 @@ changes. Nothing outside `third-party/` changes.
   the same graph, released and scanned twice.
 - **Move the integrations into `pkg` behind build tags.** Rejected by ADR 0012
   already: a tag still records the requirement in `go.mod`.
+- **Keep the writers' integration tests in their modules.** testcontainers would
+  sit in each writer module's `go.mod`, and therefore in its consumers' graph.
+- **A dedicated, test-only auxiliary module for the suites.** Every file in it
+  is behind the `integration` tag, so under the default tags it holds no
+  package: `go vet ./...` and `go test ./...` exit 1 on "no packages", and each
+  census lane (ADR 0137) would need a named skip — five places. `e2e` is
+  auxiliary already, and its default build is unaffected by tagged files.
 
 ## Deferred
 
 - Independent versions for a vendor module, released apart from the chain —
   the same deferral as ADR 0147's for the framework.
+- A generated `README.md` per vendor module, for pkg.go.dev.
+
+## Verification
+
+```sh
+bash scripts/ci/go-modules.sh            # the vendor modules are in the census
+bash scripts/ci/go-modules.sh | while IFS= read -r m; do
+  (cd "$m" && GOWORK=off go build ./... && GOWORK=off go vet ./...)
+done
+cd third-party/aws && GOWORK=off go list -m all | grep -c testcontainers   # 0
+bazel build //... && bash scripts/check-layer-deps.sh
+bats scripts/release/test-compute-bumps.bats scripts/release/test-cut-tags.bats
+cd e2e && GOWORK=off go vet -tags integration ./integration/...
+```
 
 ## References
 
 - The root `go.mod` and `go list -m all` in the root module, on the tree this
   record was written against.
 - `git tag` — no tag names the root module.
+- `third-party/CLAUDE.md` — the modules, their rules, how each is tested.
+- `e2e/integration/CLAUDE.md` — the suites against real engines and their run
+  procedure.
+- `scripts/release/lib/tag-format.sh` — `THIRD_PARTY_TAG_REGEX`, `chain_modules`;
+  `scripts/release/lib/release-scope.sh` — `rs_releasable`.
