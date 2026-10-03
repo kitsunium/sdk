@@ -162,7 +162,10 @@ where a line starts and keeps as text elsewhere (`\uFEFF` writes it).
   is narrower, `uint64` past `int64`), `float64`, `string`, `[]any` and
   `map[string]any` — a mapping keyed by each key's TEXT, whatever the key's
   type (yaml.v3 built a `map[any]any` for a non-string key). A timestamp
-  stays a string.
+  stays a string. The `int64` reading is reached only where an `int` is 32
+  bits wide, so CI's `test-386` lane is what checks it: a test spells such an
+  expectation through `untypedInt`, never `math.MaxInt`/`math.MinInt`, which
+  are 32-bit values there.
 - A float decodes into an integer target only when it holds a whole number
   exactly; `[]byte` is written as a flow sequence of integers.
 - The encoder writes block style indented by two spaces, struct fields in

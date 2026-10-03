@@ -71,7 +71,7 @@ func TestTheSubsetReads(t *testing.T) {
 		{name: "nulls", doc: "[~, null, Null, NULL, ]", want: []any{nil, nil, nil, nil}},
 		{name: "booleans", doc: "[true, True, TRUE, false, False, FALSE]", want: []any{true, true, true, false, false, false}},
 		{name: "YAML 1.1 booleans are text", doc: "[yes, no, on, off, y, n]", want: []any{"yes", "no", "on", "off", "y", "n"}},
-		{name: "integers", doc: "[0, -1, +7, 0o17, 0x1F, 9223372036854775807, 18446744073709551615]", want: []any{0, -1, 7, 15, 31, math.MaxInt, maxUint64}},
+		{name: "integers", doc: "[0, -1, +7, 0o17, 0x1F, 9223372036854775807, 18446744073709551615]", want: []any{0, -1, 7, 15, 31, untypedInt(maxInt64), maxUint64}},
 		{name: "floats", doc: "[1.5, -0.5, .5, 1., 1e3, 2.5E-2, .inf, -.Inf, +.INF]", want: []any{1.5, -0.5, 0.5, 1.0, 1000.0, 0.025, math.Inf(1), math.Inf(-1), math.Inf(1)}},
 		{name: "numbers in other dialects are text", doc: "[1_000, 0b101, 0X1F, -0x1F, 1:30, 2024-01-15]", want: []any{"1_000", "0b101", "0X1F", "-0x1F", "1:30", "2024-01-15"}},
 		{name: "quoted numbers are text", doc: `["1", '2', "true", "null"]`, want: []any{"1", "2", "true", "null"}},

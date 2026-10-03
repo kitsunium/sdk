@@ -56,9 +56,27 @@ nil: null
 const (
 	// minInt64 is math.MinInt64 as an int64.
 	minInt64 int64 = math.MinInt64
+	// maxInt64 is math.MaxInt64 as an int64.
+	maxInt64 int64 = math.MaxInt64
 	// maxUint64 is math.MaxUint64 as a uint64.
 	maxUint64 uint64 = math.MaxUint64
 )
+
+// untypedInt is what an untyped decode yields for the integer i, by yaml.v3's
+// own rule — an int when i fits one, the int64 itself when it does not — so
+// an expectation holds on every word size. The 64-bit extremes are an int
+// where an int is 64 bits wide and an int64 where it is 32: spelled
+// math.MaxInt or math.MinInt, the expectation is a 32-bit value on linux/386
+// while the decoder, rightly, returns the exact 64-bit one.
+func untypedInt(i int64) any {
+	//: an int holds i on this platform.
+	if int64(int(i)) == i {
+		//: int.
+		return int(i)
+	}
+	//: an int is narrower than i: the int64.
+	return i
+}
 
 // goldenInner is a nested struct of goldenOuter.
 type goldenInner struct {
@@ -264,7 +282,7 @@ func TestNumbersReadBackAsNumbers(t *testing.T) {
 	}
 	tests := []tc{
 		{name: "int", value: 42, want: "42\n", back: 42},
-		{name: "negative int64", value: minInt64, want: "-9223372036854775808\n", back: math.MinInt},
+		{name: "negative int64", value: minInt64, want: "-9223372036854775808\n", back: untypedInt(minInt64)},
 		{name: "uint64 past int64", value: maxUint64, want: "18446744073709551615\n", back: maxUint64},
 		{name: "whole float", value: 1.0, want: "1.0\n", back: 1.0},
 		{name: "big float", value: 1e21, want: "1.0e+21\n", back: 1e21},
