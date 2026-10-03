@@ -8,7 +8,10 @@ the `EntryValue` / `ResultValue` domain values and the typed sentinels. The
 12th core sibling, admitted by **ADR 0041**. The cron parser and the engine are
 concrete and live in `internal/service/app/scheduler`.
 
-Code range: `0.2.12.*` (ADR 0041).
+Code ranges: `0.2.12.*` (ADR 0041) for the registration refusals, and
+`0.3.43.*` for the cron parser's refusals — allocated to
+`internal/service/app/scheduler`, which raises them, and declared here since
+ADR 0160. A code keeps its value when its declaration moves.
 
 ## Contents
 
@@ -17,8 +20,8 @@ Code range: `0.2.12.*` (ADR 0041).
 | `scheduler.go` | `Job func(ctx) error`, `Schedule func(after time.Time) (time.Time, bool)`, `Scheduler interface { Add(EntryValue) error; Run(ctx) error }` |
 | `scheduler_entry.go` | `EntryValue` — `Name` / `Schedule` / `Job` / `AllowOverlap` |
 | `scheduler_result.go` | `ResultValue` — `Name` / `Scheduled` / `Started` / `Finished` / `Missed` / `Skipped` / `Err` |
-| `codes.go` | `Code*` constants — range 0.2.12.* |
-| `errors.go` | `InvalidEntry` / `DuplicateJob` / `SchedulerRunning` / `JobPanicked` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.12.* and 0.3.43.* |
+| `errors.go` | `InvalidEntry` / `DuplicateJob` / `SchedulerRunning` / `JobPanicked`, and the parser's `InvalidExpression` / `UnsupportedSyntax` / `UnreachableSchedule` / `InvalidLocation` / `InvalidInterval` (`errs.Define`) |
 
 ## Conventions
 
@@ -35,9 +38,11 @@ Code range: `0.2.12.*` (ADR 0041).
   The engine calls it repeatedly, several times in one pass when fires were
   missed, and a non-advancing `Schedule` would spin that walk forever — which
   the engine defends against by disarming the entry, but the contract is here.
-- **Cron vocabulary does not appear here.** The port knows about instants. The
-  parser's own failure modes own `0.3.43.*` in `service/app/scheduler`, so this
-  package never has to know what an expression is.
+- **Cron grammar does not appear here.** The port knows about instants. The
+  parser's own failure modes are `0.3.43.*`, raised by `service/app/scheduler`
+  alone; they are DECLARED here only because every code of a domain lives in
+  its core (ADR 0160), and no function of this package parses or names an
+  expression.
 - **`ResultValue` reports decisions, not just runs.** A skipped fire produces
   one too, with zero `Started`/`Finished`. A scheduler that reported only runs
   would make a permanently-skipping entry look like a healthy one — and, in the

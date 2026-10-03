@@ -9,7 +9,6 @@ import (
 
 	corecli "github.com/kitsunium/sdk/internal/core/app/cli"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
-	svccli "github.com/kitsunium/sdk/internal/service/app/cli"
 )
 
 // TestHelpNamesEveryDeclaredCommandAndFlag is CLAUDE.md rule 11 applied to the
@@ -120,7 +119,7 @@ func TestAHelpNobodyReceivedIsNotASuccess(t *testing.T) {
 			t.Fatalf("New: %v", err)
 		}
 		got := app.Execute(t.Context(), []string{"-h"})
-		if !kerrs.HasCode(got, svccli.CodeHelpWriteFailed) {
+		if !kerrs.HasCode(got, corecli.CodeHelpWriteFailed) {
 			t.Fatalf("%s: Execute = %v, want HELP_WRITE_FAILED", c.name, got)
 		}
 		if !errors.Is(got, c.cause) {
@@ -150,7 +149,7 @@ func TestAFailedHelpWriteKeepsTheUsageVerdict(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := app.Execute(t.Context(), []string{"nope"})
-	if !kerrs.HasCode(got, svccli.CodeUnknownCommand) {
+	if !kerrs.HasCode(got, corecli.CodeUnknownCommand) {
 		t.Fatalf("Execute = %v, want UNKNOWN_COMMAND to stay the verdict", got)
 	}
 	//: the verdict stays, and the page nobody received is still visible.
@@ -174,7 +173,7 @@ func TestATypedStreamErrorDoesNotTakeOverTheHelpVerdict(t *testing.T) {
 		t.Fatalf("New: %v", err)
 	}
 	got := app.Execute(t.Context(), []string{"-h"})
-	if code, _ := kerrs.CodeOf(got); code != svccli.CodeHelpWriteFailed {
+	if code, _ := kerrs.CodeOf(got); code != corecli.CodeHelpWriteFailed {
 		t.Fatalf("Execute = %v, want HELP_WRITE_FAILED as the verdict, not the stream's code", got)
 	}
 	if status := kerrs.ExitCodeOf(got); status != 74 {

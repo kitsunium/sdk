@@ -5,9 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "lifecycle",
     srcs = [
-        "codes.go",
         "config.go",
-        "errors.go",
         "lifecycle.go",
         "run.go",
         "start.go",
@@ -68,7 +66,10 @@ go_test(
     ],
 )
 
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+# audit_srcs ships this package's .go files through //:audit_sources. The package
+# declares no error code (ADR 0160: they are in its core mirror); it stays listed
+# because this package's own test reads its sources at runtime, and under Bazel
+# they reach it only as those runfiles.
 filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),

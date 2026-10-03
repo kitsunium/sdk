@@ -85,17 +85,17 @@ var (
     JobPanicked = coresched.JobPanicked
     // InvalidExpression is returned by Parse for a malformed or out-of-range
     // cron field.
-    InvalidExpression = svcsched.InvalidExpression
+    InvalidExpression = coresched.InvalidExpression
     // UnsupportedSyntax is returned by Parse for a construct from another cron
     // dialect — a seconds field, @reboot, @every, L / W / # / ?.
-    UnsupportedSyntax = svcsched.UnsupportedSyntax
+    UnsupportedSyntax = coresched.UnsupportedSyntax
     // UnreachableSchedule is returned by Parse for a valid expression that
     // matches no date on the calendar, such as "0 0 30 2 *".
-    UnreachableSchedule = svcsched.UnreachableSchedule
+    UnreachableSchedule = coresched.UnreachableSchedule
     // InvalidLocation is returned by ParseInLocation for a nil location.
-    InvalidLocation = svcsched.InvalidLocation
+    InvalidLocation = coresched.InvalidLocation
     // InvalidInterval is returned by Every for a non-positive period.
-    InvalidInterval = svcsched.InvalidInterval
+    InvalidInterval = coresched.InvalidInterval
 )
 ```
 

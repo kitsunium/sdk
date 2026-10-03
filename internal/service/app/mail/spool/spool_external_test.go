@@ -11,6 +11,7 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
@@ -123,7 +124,7 @@ func TestSendRefusesAnIdentifierNewIDGotWrong(t *testing.T) {
 			From:      coremail.AddressValue{Addr: "members@example.com"},
 			NewID:     func() (string, error) { return minted, nil },
 		})
-		if _, err := s.Send(context.Background(), message("Hi")); !errs.HasCode(err, spool.CodeSpoolMisconfigured) {
+		if _, err := s.Send(context.Background(), message("Hi")); !errs.HasCode(err, corespool.CodeSpoolMisconfigured) {
 			t.Fatalf("Send() with NewID minting %q = %v, want SpoolMisconfigured", minted, err)
 		}
 		select {
@@ -148,7 +149,7 @@ func TestRetriesOnTheBackoffThenDeadLetters(t *testing.T) {
 	}
 	queued := rec.expect(t, spool.EventQueued)
 	first := rec.expect(t, spool.EventRetrying)
-	if first.Attempt != 1 || first.Next.Sub(first.At) != time.Second || !errs.HasCode(first.Err, svcmail.CodeDialFailed) {
+	if first.Attempt != 1 || first.Next.Sub(first.At) != time.Second || !errs.HasCode(first.Err, coremail.CodeDialFailed) {
 		t.Fatalf("the first retry %+v", first)
 	}
 	notEarly(t, clk, transport, time.Second, 1)
@@ -163,8 +164,8 @@ func TestRetriesOnTheBackoffThenDeadLetters(t *testing.T) {
 	}
 	letters := eventuallyDeadLetters(t, s, 1)
 	letter := letters[0]
-	if letter.ID != id || letter.Attempts != 3 || letter.Reason != "DIAL_FAILED" || letter.Code != uint32(svcmail.CodeDialFailed) ||
-		letter.Cause != errs.PublicOf(svcmail.DialFailed) || letter.Message.Subject != "Hello" || !letter.QueuedAt.Equal(queued.QueuedAt) {
+	if letter.ID != id || letter.Attempts != 3 || letter.Reason != "DIAL_FAILED" || letter.Code != uint32(coremail.CodeDialFailed) ||
+		letter.Cause != errs.PublicOf(coremail.DialFailed) || letter.Message.Subject != "Hello" || !letter.QueuedAt.Equal(queued.QueuedAt) {
 		t.Fatalf("the dead letter %+v", letter)
 	}
 	messages, _ := transport.seen()
@@ -309,7 +310,7 @@ func TestAPanickingTransportFailsTheAttempt(t *testing.T) {
 	}
 	rec.expect(t, spool.EventQueued)
 	retry := rec.expect(t, spool.EventRetrying)
-	if !errs.HasCode(retry.Err, spool.CodeTransportPanicked) || strings.Contains(errs.PublicOf(retry.Err), "do-not-leak") {
+	if !errs.HasCode(retry.Err, corespool.CodeTransportPanicked) || strings.Contains(errs.PublicOf(retry.Err), "do-not-leak") {
 		t.Fatalf("the panicking attempt failed with %v (%q)", retry.Err, errs.PublicOf(retry.Err))
 	}
 }
@@ -328,7 +329,7 @@ func TestNewRefuses(t *testing.T) {
 		{"a negative bound", spool.Config{Transport: transport, MaxAttempts: 3, MaxMessageBytes: -1}},
 		{"a sender that is not an address", spool.Config{Transport: transport, MaxAttempts: 3, From: coremail.AddressValue{Addr: "not an address"}}},
 	} {
-		if s, err := spool.New(c.cfg); !errs.HasCode(err, spool.CodeSpoolMisconfigured) || s != nil {
+		if s, err := spool.New(c.cfg); !errs.HasCode(err, corespool.CodeSpoolMisconfigured) || s != nil {
 			t.Errorf("%s: New() = %v, %v", c.name, s, err)
 		}
 	}
@@ -347,10 +348,10 @@ func TestAClosedSpoolRefusesMail(t *testing.T) {
 	}
 	msg := message("Late")
 	msg.From = coremail.AddressValue{Addr: "members@example.com"}
-	if _, err := s.Send(context.Background(), msg); !errs.HasCode(err, spool.CodeSpoolClosed) {
+	if _, err := s.Send(context.Background(), msg); !errs.HasCode(err, corespool.CodeSpoolClosed) {
 		t.Fatalf("Send() after Close = %v, want SpoolClosed", err)
 	}
-	if err := s.SendWithID(context.Background(), "mail_late", msg); !errs.HasCode(err, spool.CodeSpoolClosed) {
+	if err := s.SendWithID(context.Background(), "mail_late", msg); !errs.HasCode(err, corespool.CodeSpoolClosed) {
 		t.Fatalf("SendWithID() after Close = %v, want SpoolClosed", err)
 	}
 }

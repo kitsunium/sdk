@@ -9,7 +9,10 @@ keeps its per-entity records in, and the values those ports speak —
 `RecordValue`, `StepValue`, `Trigger`, `CreateEvent`. The engine lives in
 `internal/service/app/statemachine`; the facade is `pkg/v1/app/statemachine`.
 
-Code range: `0.2.56.*` (ADR 0120) — one code, `TriggerUnknown`.
+Code ranges: `0.2.56.*` (ADR 0120) — the contract's one code,
+`TriggerUnknown` — and `0.3.88.*`, the engine's twenty-one, allocated to
+`internal/service/app/statemachine`, which raises them, and declared here
+since ADR 0160. A code keeps its value when its declaration moves.
 
 ## Contents
 
@@ -17,7 +20,9 @@ Code range: `0.2.56.*` (ADR 0120) — one code, `TriggerUnknown`.
 |---|---|
 | `statemachine.go` | package doc; `Store[E]` (frozen at five), `Journal[S]` (frozen at three) |
 | `record.go` | `CreateEvent`, `RecordValue[S]`, `StepValue[S]` (JSON-tagged, so a file journal can store them as they are) |
-| `trigger.go` | `Trigger` + its five values, `String`, `ParseTrigger`; `CodeTriggerUnknown` / `TriggerUnknown` |
+| `trigger.go` | `Trigger` + its five values, `String`, `ParseTrigger` |
+| `codes.go` | `CodeTriggerUnknown` (0.2.56.1) and the engine's `CodeTransitionRefused` … `CodeLoopPanicked` (0.3.88.1 – 0.3.88.21) |
+| `errors.go` | `TriggerUnknown` and the engine's twenty-one sentinels (`errs.Define`); the HTTP statuses three of them carry are integer literals (404, 409, 503) |
 
 ## Why this shape
 

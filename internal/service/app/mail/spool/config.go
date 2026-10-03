@@ -7,9 +7,11 @@ import (
 	"time"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	kbackoff "github.com/kitsunium/sdk/internal/kernel/backoff"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 )
 
 // The defaults a zero field clamps to (ADR 0031: each zero has one reading —
@@ -112,9 +114,9 @@ func (c *Config) validate() error {
 	//: a default sender every mail would be refused for.
 	if !c.From.IsZero() {
 		//: the mail domain's own verdict on the address.
-		if addrErr := coremail.ValidateAddress(coremail.HeaderFrom, c.From); addrErr != nil {
+		if addrErr := svcmail.ValidateAddress(coremail.HeaderFrom, c.From); addrErr != nil {
 			//: SpoolMisconfigured, with the address verdict's reason.
-			return kerrs.Wrap(SpoolMisconfigured, kerrs.WrapParams{},
+			return kerrs.Wrap(corespool.SpoolMisconfigured, kerrs.WrapParams{},
 				kerrs.String("setting", "From"), kerrs.String("problem", kerrs.PublicOf(addrErr)))
 		}
 	}
@@ -125,6 +127,6 @@ func (c *Config) validate() error {
 // misconfigured is SpoolMisconfigured naming a setting and its problem.
 func misconfigured(setting, problem string) error {
 	//: the two fields every configuration refusal carries.
-	return kerrs.Wrap(SpoolMisconfigured, kerrs.WrapParams{},
+	return kerrs.Wrap(corespool.SpoolMisconfigured, kerrs.WrapParams{},
 		kerrs.String("setting", setting), kerrs.String("problem", problem))
 }

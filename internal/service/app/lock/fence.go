@@ -31,7 +31,7 @@ const maxFenceBytes int = 64
 // The mint is previous+1 on a uint64, so on this value it wraps to zero and the
 // counter starts again from the bottom — reissuing, in order, every token the
 // protected resource has already accepted. That is the same failure
-// [LockFenceCorrupt] refuses a wrecked file for, reached by arithmetic instead
+// [corelock.LockFenceCorrupt] refuses a wrecked file for, reached by arithmetic instead
 // of by bad bytes, so it carries the same verdict.
 const exhaustedFence uint64 = math.MaxUint64
 
@@ -58,7 +58,7 @@ type fenceFile interface {
 // An EMPTY file is 0, and that is the only lenient case: a lock file is
 // created empty by the first acquisition, so 0 is the honest reading of "no
 // acquisition has happened yet". Any other unparseable content is REFUSED,
-// never reset — see [LockFenceCorrupt] for why a restarted counter is worse
+// never reset — see [corelock.LockFenceCorrupt] for why a restarted counter is worse
 // than no counter.
 //
 // [exhaustedFence] is refused for that same reason even though it parses
@@ -89,7 +89,7 @@ func readFence(file fenceFile, path string) (fence uint64, err error) {
 	if parseErr != nil {
 		//: LOCK_FENCE_CORRUPT, naming the path and the length only — the bytes
 		//: themselves are not echoed, because a lock name is caller data.
-		return 0, kerrs.Wrap(LockFenceCorrupt, kerrs.WrapParams{},
+		return 0, kerrs.Wrap(corelock.LockFenceCorrupt, kerrs.WrapParams{},
 			kerrs.String("path", path),
 			kerrs.Int("bytes", len(raw)),
 			kerrs.String("condition", "unparseable"))
@@ -103,7 +103,7 @@ func readFence(file fenceFile, path string) (fence uint64, err error) {
 	if parsed == exhaustedFence {
 		//: LOCK_FENCE_CORRUPT, with the field that tells the two refusals
 		//: apart for whoever reads the log.
-		return 0, kerrs.Wrap(LockFenceCorrupt, kerrs.WrapParams{},
+		return 0, kerrs.Wrap(corelock.LockFenceCorrupt, kerrs.WrapParams{},
 			kerrs.String("path", path),
 			kerrs.Int("bytes", len(raw)),
 			kerrs.String("condition", "exhausted"))

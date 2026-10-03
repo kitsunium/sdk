@@ -660,7 +660,7 @@ const (
     CodeMailQueue  errs.Code = 0x00_04_02_15 // 0.4.2.21 — the outbox could not be opened, or refused a mail
     // Deprecated: kit no longer returns it. The outbox is the SDK's mail
     // spool, which dead-letters a record that does not decode itself
-    // (mail.SpooledMailUndecodable).
+    // (MessageUndecodable, in pkg/v1/app/mail/spool).
     CodeMailUndecodable errs.Code = 0x00_04_02_16 // 0.4.2.22
     CodeMailPanic       errs.Code = 0x00_04_02_17 // 0.4.2.23 — a delivery attempt panicked
 
@@ -2335,7 +2335,7 @@ WakeOn wakes the loop whenever a message is published on topic. It is a nudge, n
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="Mailer"></a>
-## type [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L94-L114>)
+## type [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L95-L115>)
 
 Mailer is outbound mail: a durable outbox and the transport that empties it. [Mailer.Send](<#Mailer.Send>) only queues — it returns once the message is safely in the outbox — and the mailer's own loop hands each message to the transport, retrying a failure and dead\-lettering a message after its last attempt.
 
@@ -2348,7 +2348,7 @@ type Mailer struct {
 ```
 
 <a name="NewMailer"></a>
-### func [NewMailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L952>)
+### func [NewMailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L953>)
 
 ```go
 func NewMailer() *Mailer
@@ -2357,7 +2357,7 @@ func NewMailer() *Mailer
 NewMailer is a mailer no service declares yet, with the default attempts: [Service.Mailer](<#Service.Mailer>) makes one and declares it, which is how a product gets one.
 
 <a name="Mailer.Captured"></a>
-### func \(\*Mailer\) [Captured](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L311>)
+### func \(\*Mailer\) [Captured](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L312>)
 
 ```go
 func (m *Mailer) Captured() []model.MailMessage
@@ -2366,7 +2366,7 @@ func (m *Mailer) Captured() []model.MailMessage
 Captured returns the messages the capture transport kept, oldest first: what a test reads a verification link from. It is empty with SMTP. A mail appears once the outbox has delivered it — shortly after Send.
 
 <a name="Mailer.Send"></a>
-### func \(\*Mailer\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L223>)
+### func \(\*Mailer\) [Send](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L224>)
 
 ```go
 func (m *Mailer) Send(ctx context.Context, msg mail.Message) (string, error)
@@ -2377,7 +2377,7 @@ Send validates msg with the SDK's mail rules — a header carrying a line break,
 A message without a sender gets the mailer's \([From](<#From>)\); without a date, the app's time; without a Message\-ID, one made of its outbox ID, which every attempt keeps, so a receiver can tell a retried delivery from a new mail.
 
 <a name="MailerConfigurer"></a>
-## type [MailerConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L117-L119>)
+## type [MailerConfigurer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L118-L120>)
 
 MailerConfigurer configures a mailer.
 
@@ -2388,7 +2388,7 @@ type MailerConfigurer interface {
 ```
 
 <a name="From"></a>
-### func [From](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L179>)
+### func [From](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L180>)
 
 ```go
 func From(name, addr string) MailerConfigurer
@@ -2399,7 +2399,7 @@ From sets the sender of every message that names none.
 IFACE\-OPAQUE: the option is sealed — its method is unexported — so a caller only hands it to the declaration it configures.
 
 <a name="MailAttempts"></a>
-### func [MailAttempts](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L188>)
+### func [MailAttempts](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L189>)
 
 ```go
 func MailAttempts(n int) MailerConfigurer
@@ -3240,7 +3240,7 @@ Loop declares a loop run by kit: run is called once at start, then on every wake
 Runs never overlap: wakes that come while the function runs are gathered into one run after it. A run that fails or panics is counted, and the next one waits a backoff — one second, doubling up to a minute — unless it is a [Loop.Nudge](<#Loop.Nudge>). A deadline already past wakes the loop at once, but never sooner than a second after the previous run: a WakeAt that keeps answering the past costs a run a second, not a spinning core.
 
 <a name="Service.Mailer"></a>
-### func \(\*Service\) [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L195>)
+### func \(\*Service\) [Mailer](<https://github.com/kitsunium/sdk/blob/main/framework/internal/kit/mailer.go#L196>)
 
 ```go
 func (s *Service) Mailer(name string, opts ...MailerConfigurer) *Mailer

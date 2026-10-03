@@ -87,11 +87,11 @@ func startupGate(registry corehealth.Health) corelc.Start {
 func startupUnexplained(status string) error {
 	//: read from the sentinel so the identity cannot drift from it.
 	return kerrs.Wrap(nil, kerrs.WrapParams{
-		Code:     StartupPending.Code(),
-		Reason:   StartupPending.Reason(),
-		Public:   StartupPending.Public(),
+		Code:     corehealth.StartupPending.Code(),
+		Reason:   corehealth.StartupPending.Reason(),
+		Public:   corehealth.StartupPending.Public(),
 		Private:  "service/app/health: the startup probe did not report serving and no result carried an error; the field carries the status it reported",
-		ExitCode: StartupPending.ExitCode(),
+		ExitCode: corehealth.StartupPending.ExitCode(),
 	}, kerrs.String("probe", corehealth.ProbeStartup.String()), kerrs.String("status", status))
 }
 

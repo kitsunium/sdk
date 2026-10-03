@@ -224,22 +224,22 @@ var (
 	// UnsupportedLanguage is returned when a catalogue or a printer names a
 	// language this SDK has no reviewed CLDR plural rule for. It is the
 	// domain's central refusal — see the package comment.
-	UnsupportedLanguage = svci18n.UnsupportedLanguage
+	UnsupportedLanguage = corei18n.UnsupportedLanguage
 	// CatalogInvalid is returned for a catalogue that cannot be compiled: an
 	// unset or unserved fallback, a duplicate tag, or an entry of the wrong
 	// shape.
-	CatalogInvalid = svci18n.CatalogInvalid
+	CatalogInvalid = corei18n.CatalogInvalid
 	// CatalogLoadFailed is returned when a catalogue directory cannot be read
 	// or its bytes cannot be decoded. The cause stays in the chain, so
 	// errors.Is(err, fs.ErrNotExist) still answers.
-	CatalogLoadFailed = svci18n.CatalogLoadFailed
+	CatalogLoadFailed = corei18n.CatalogLoadFailed
 	// TranslationIncomplete is returned for a counted message missing a
 	// category its language can produce — the one catalogue defect a
 	// translator cannot see by reading their own file.
-	TranslationIncomplete = svci18n.TranslationIncomplete
+	TranslationIncomplete = corei18n.TranslationIncomplete
 	// NegotiationEmpty is returned by [NewNegotiator] for an empty supported
 	// set, which is an unfinished wiring rather than "accept anything".
-	NegotiationEmpty = svci18n.NegotiationEmpty
+	NegotiationEmpty = corei18n.NegotiationEmpty
 )
 
 // ParseTag canonicalises text into a [Tag], or returns [InvalidTag].
@@ -249,8 +249,8 @@ var (
 // refused by name rather than parsed and dropped — a dropped subtag changes
 // which language answers without changing anything a reader can see.
 func ParseTag(text string) (tag Tag, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.ParseTag(text)
+	//: delegate to the service parser, which assembles the core value.
+	return svci18n.ParseTag(text)
 }
 
 // ParseForm returns the [Form] named by a CLDR category spelling — "zero",
@@ -288,19 +288,19 @@ func ValidateKey(key Key) error {
 
 // NewMessage compiles an uncounted message, or returns [InvalidPattern].
 func NewMessage(text string) (message Message, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.NewMessage(text)
+	//: delegate to the service compiler, which assembles the core value.
+	return svci18n.NewMessage(text)
 }
 
 // NewPluralMessage compiles a counted message from one pattern per category,
-// or returns [InvalidPattern] or [PluralFormMissing]. The map MUST contain
-// [FormOther].
+// or returns [InvalidPattern], [InvalidForm] or [PluralFormMissing]. The map
+// MUST contain [FormOther].
 //
 // It does not check the map against any language's rules — it does not know
 // the language. [NewStore] does, and refuses there.
 func NewPluralMessage(forms map[Form]string) (message Message, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.NewPluralMessage(forms)
+	//: delegate to the service compiler, which assembles the core value.
+	return svci18n.NewPluralMessage(forms)
 }
 
 // Plain returns an uncounted [Entry].

@@ -9,9 +9,11 @@ identifier its caller minted (ADR 0141); `Run` hands each mail to a
 mail after its last attempt with that failure, and drops a redelivery of a
 mail it delivered — the one resend left is a crash between the relay's
 acceptance and the acknowledgement, under the same Message-ID. The queue is `internal/service/data/queue` — `NewFile` with a
-`Dir`, `NewMemory` without. Public facade: `pkg/v1/app/mail` (`NewSpool`).
+`Dir`, `NewMemory` without. Public facade: `pkg/v1/app/mail/spool` (`New`).
 
-Code range `0.3.81.*`.
+Code range `0.3.81.*`, declared with its sentinels in
+`internal/core/app/mail/spool` (ADR 0160). This package declares no code and
+raises the core's.
 
 ## Contents
 
@@ -23,7 +25,6 @@ Code range `0.3.81.*`.
 | `deliver.go` | the queue handler: the record read back, a duplicate dropped, the attempt bounded on the spool's clock with its `AttemptValue` in the context, a transport panic recovered, a failure parked (`LeaseExtender.Extend` by `Backoff.Delay(attempt)`) or — on the last attempt — nacked into the dead letter |
 | `ledger.go` | the delivered-ID ring (`DeliveredMemory` entries) |
 | `event.go` | `EventKind` (`queued`, `sent`, `retrying`, `dead-lettered`, `duplicate`), `EventValue`, `AttemptValue` + `AttemptFrom`, `DeadLetterValue` |
-| `codes.go` / `errors.go` | `SpoolMisconfigured`, `SpoolClosed`, `MessageUndecodable`, `MessageUnencodable`, `TransportPanicked`, `InvalidMailID` |
 
 ## Why-this-shape
 
@@ -54,7 +55,7 @@ Code range `0.3.81.*`.
   and an empty string meaning "mint one" would give the zero a second
   reading. Every identifier becomes the left half of a Message-ID, so every
   one — the caller's, and `Config.NewID`'s since ADR 0141 — is non-empty, at
-  most `MaxIDBytes` and a dot-atom (`core/app/mail.IsDotAtom`, the grammar's one
+  most `MaxIDBytes` and a dot-atom (`service/app/mail.IsDotAtom`, the grammar's one
   home). A caller's that breaks it is `INVALID_MAIL_ID`, which names the rule
   and never the identifier; a generator's is `SPOOL_MISCONFIGURED`.
 - **A repeated identifier is not refused; the ledger meets it.** The spool

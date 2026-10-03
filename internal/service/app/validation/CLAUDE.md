@@ -10,7 +10,8 @@ per type. ADR 0046.
 
 Code range: `0.3.47.*` (the built-in rule identities + the tag compiler's
 refusals). It also emits core sentinels `0.2.15.*` for every constructor
-refusal.
+refusal. Both ranges are declared in `internal/core/app/validation`
+(ADR 0160); this package declares no code.
 
 ## Contents
 
@@ -37,7 +38,6 @@ refusal.
 | `reject.go` | the refusal helpers (`rejectConstraint` / `rejectRule` / `rejectTarget`) |
 | `violate.go` | `one` — the single place a `ViolationValue` is minted |
 | `rule_names.go` | the closed set of reported rule names |
-| `codes.go` / `errors.go` | `0.3.47.1`–`0.3.47.5`, the built-in rules' identities; `InvalidRule` (`0.3.47.6`) and `UnsupportedTarget` (`0.3.47.7`, a `Struct[T]` whose `T` is not a struct) |
 | `BENCH.md` | the measured cost of the two front ends and of the plan cache |
 
 ## The constraint set is a decision, not a list

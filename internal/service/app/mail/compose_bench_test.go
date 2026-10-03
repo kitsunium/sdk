@@ -156,7 +156,7 @@ func BenchmarkValidateOnly(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for range b.N {
-		if err := coremail.Validate(msg); err != nil {
+		if err := svcmail.Validate(msg); err != nil {
 			b.Fatalf("Validate: %v", err)
 		}
 	}

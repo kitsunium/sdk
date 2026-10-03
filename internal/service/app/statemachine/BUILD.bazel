@@ -8,10 +8,8 @@ go_library(
         "agenda.go",
         "blueprint.go",
         "book.go",
-        "codes.go",
         "config.go",
         "definition.go",
-        "errors.go",
         "locks.go",
         "loop.go",
         "machine.go",
@@ -59,11 +57,4 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

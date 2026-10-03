@@ -61,7 +61,7 @@ func NewComposer(cfg ComposerConfig) *Composer {
 func (c *Composer) Compose(msg coremail.MessageValue) (raw []byte, err error) {
 	//: the whole-message gate first: nothing is rendered from a message that
 	//: will be refused, so a header-injection attempt costs no allocation.
-	if validationErr := coremail.Validate(msg); validationErr != nil {
+	if validationErr := Validate(msg); validationErr != nil {
 		//: the core verdict, unchanged.
 		return nil, validationErr
 	}
@@ -96,7 +96,7 @@ func (c *Composer) Compose(msg coremail.MessageValue) (raw []byte, err error) {
 	//: and the body itself.
 	if bodyErr := body.writeBody(&buf); bodyErr != nil {
 		//: wrapped so a caller can tell a composition defect from a refusal.
-		return nil, wrapAs(ComposeFailed, bodyErr)
+		return nil, wrapAs(coremail.ComposeFailed, bodyErr)
 	}
 	//: the complete message.
 	return buf.Bytes(), nil
@@ -105,9 +105,9 @@ func (c *Composer) Compose(msg coremail.MessageValue) (raw []byte, err error) {
 // writeMessageHeaders emits the RFC 5322 header block, in a fixed order.
 //
 // Bcc is absent, and its absence is the domain's headline decision: the blind
-// recipients reach RCPT TO through [coremail.MessageValue.Envelope] and no
-// header names them. See that method for why the other two treatments
-// RFC 5322 §3.6.3 permits are not taken.
+// recipients reach RCPT TO through [Envelope] and no header names them. See
+// that function for why the other two treatments RFC 5322 §3.6.3 permits are
+// not taken.
 func (c *Composer) writeMessageHeaders(dst io.Writer, msg coremail.MessageValue) error {
 	//: the originator field, always present (RFC 5322 §3.6.2).
 	fields := []coremail.HeaderFieldValue{{Name: coremail.HeaderFrom, Value: formatAddress(msg.From)}}

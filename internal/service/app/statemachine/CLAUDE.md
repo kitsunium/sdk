@@ -14,7 +14,9 @@ until the next transition due and wakes on a write. Public facade:
 
 Stdlib plus `core/app/statemachine` and `kernel/{backoff,clock,errs,collections/heap}` —
 `kernel/backoff` is the one backoff curve (ADR 0103), so the engine depends on
-no other service domain. Code range `0.3.88.*`.
+no other service domain. Code range `0.3.88.*`, twenty-one codes, declared
+with their sentinels in `core/app/statemachine` (ADR 0160); this package
+declares none and raises the core's.
 
 ## Contents
 
@@ -30,7 +32,6 @@ no other service domain. Code range `0.3.88.*`.
 | `agenda.go` | the heap with lazy deletion and its rebuild bound, the dirty set, the per-key backoff, the wake token |
 | `loop.go` | `Run`, `Step`, `Wake`, `LoopEvent`; `run`/`wait`/`sleep`/`retarget`, `step`/`guarded`/`process`/`look`/`inspect`/`fire`/`outcome` |
 | `locks.go` | the per-key lock table (a one-token channel each, abandonable by `acquire`), the reentrancy mark (`within` / `inside`) |
-| `codes.go` / `errors.go` | `0.3.88.*`, twenty-one codes |
 
 ## Why-this-shape
 

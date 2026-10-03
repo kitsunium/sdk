@@ -116,7 +116,7 @@ func (l *lifecycle) stopped(name string, begun time.Time, err error) error {
 	//: the sentinel and the component's own error travel side by side, for
 	//: the same reason joinStartFailure gives: origin-wins would otherwise
 	//: relabel STOP_FAILED with whatever the component returned.
-	return errors.Join(kerrs.Wrap(StopFailed, kerrs.WrapParams{},
+	return errors.Join(kerrs.Wrap(corelc.StopFailed, kerrs.WrapParams{},
 		kerrs.String("component", name)), err)
 }
 
@@ -132,7 +132,7 @@ func (l *lifecycle) stopped(name string, begun time.Time, err error) error {
 func (l *lifecycle) abandoned(cancel context.CancelFunc, name string, begun time.Time) error {
 	//: tell the component its time is up; it decides what that means.
 	cancel()
-	err := kerrs.Wrap(StopTimeout, kerrs.WrapParams{},
+	err := kerrs.Wrap(corelc.StopTimeout, kerrs.WrapParams{},
 		kerrs.String("component", name), kerrs.String("budget", l.budget.String()))
 	l.emit(corelc.TransitionValue{
 		Name: name, Phase: corelc.PhaseStop, Begun: begun, TimedOut: true, Err: err,

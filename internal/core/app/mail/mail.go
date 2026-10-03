@@ -16,23 +16,12 @@
 // is told everything succeeded. This domain refuses instead, with a typed error
 // that names the FIELD and never the value.
 //
-// Composition of the MIME body, and the SMTP transport that delivers it, live
-// in internal/service/app/mail. Nothing here writes a byte to a socket.
+// The guards that enforce it — Validate and the per-field checks it runs —
+// live in internal/service/app/mail with the composition of the MIME body and
+// the SMTP transport that delivers it: checking a header, an address or an
+// attachment against its grammar is a mechanism (ADR 0160). This package holds
+// the values, the port, the header names and the refusals. Nothing here
+// writes a byte to a socket.
 //
 // Code range: 0.2.31.* (ADR 0064).
 package mail
-
-// The octet boundaries the RFC 5322 grammars are expressed in. They are named
-// because a bare 0x21 in a comparison is a number a reader has to look up, and
-// because the same four bounds are used by three different guards.
-const (
-	// minPrintableASCII is "!", the first character RFC 5322 §3.6.8 admits in a
-	// field name.
-	minPrintableASCII byte = 0x21
-	// maxPrintableASCII is "~", the last one.
-	maxPrintableASCII byte = 0x7E
-	// spaceOctet is the space, which ends an atom rather than belonging to one.
-	spaceOctet byte = 0x20
-	// delOctet is DEL, the first octet above the printable range.
-	delOctet byte = 0x7F
-)

@@ -7,6 +7,8 @@ import (
 	"errors"
 	"net/http"
 	"testing"
+
+	corehealth "github.com/kitsunium/sdk/internal/core/app/health"
 )
 
 // TestLoopbackForEveryUnspecifiedSpelling pins the listen-to-dial mapping over
@@ -170,11 +172,11 @@ func TestAStalledBodyIsATimeoutNotAnAnswer(t *testing.T) {
 	go func() {
 		//: the drain is blocked on the stalled body; now the budget ends.
 		<-started
-		cancel(AskTimeout)
+		cancel(corehealth.AskTimeout)
 	}()
 	status, err := request.exchange(ctx, client)
 	//: no whole answer within the bound: no status, and the budget as the reason.
-	if status != 0 || !errors.Is(err, AskTimeout) {
+	if status != 0 || !errors.Is(err, corehealth.AskTimeout) {
 		t.Fatalf("exchange() = %d, %v; want 0 and ASK_TIMEOUT", status, err)
 	}
 }

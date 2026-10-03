@@ -24,7 +24,7 @@ Importing this package is what wires the `html` engine: the facade imports
 | `Register(f)` / `Available()` | the extension point a third-party engine uses |
 | `TrustHTML(s)` | the ONE bypass, and the only spelling the SDK offers |
 | `ViewMisconfigured` / `TemplateNotFound` / `RenderFailed` / `RenderTooLarge` / `UnsafeValue` / `EngineUnknown` / `EngineInvalid` / `DuplicateEngine` | core sentinels |
-| `TemplateSourceFailed` / `TemplateParseFailed` | service sentinels |
+| `TemplateSourceFailed` / `TemplateParseFailed` | the engine's construction failures (`0.3.57.*`), declared in `core/app/view` |
 
 ## Conventions
 

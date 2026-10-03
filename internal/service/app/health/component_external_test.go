@@ -79,7 +79,7 @@ func TestStartupGatesTheLifecycle(t *testing.T) {
 	}
 	//: and it still carries the SDK's identity, so a caller who routes on
 	//: codes rather than on sentinels gets an answer too.
-	if !errs.HasCode(err, svchealth.CodeCheckFailed) {
+	if !errs.HasCode(err, corehealth.CodeCheckFailed) {
 		t.Errorf("Start = %v, want CHECK_FAILED as well", err)
 	}
 }
@@ -134,7 +134,7 @@ func TestAnUnexplainedFailingStartupStillFailsStart(t *testing.T) {
 	}
 	for _, tc := range unexplained {
 		err := svchealth.Component(scriptedHealth{report: tc.report}, "health").Start(context.Background())
-		if !errs.HasCode(err, svchealth.CodeStartupPending) || !errors.Is(err, svchealth.StartupPending) {
+		if !errs.HasCode(err, corehealth.CodeStartupPending) || !errors.Is(err, corehealth.StartupPending) {
 			t.Errorf("%s: Start = %v, want STARTUP_PENDING — a report that is not serving declared the application up", tc.name, err)
 		}
 	}
@@ -144,7 +144,7 @@ func TestAnUnexplainedFailingStartupStillFailsStart(t *testing.T) {
 		Results: []corehealth.ResultValue{{Name: "migrations", Status: corehealth.StatusUnhealthy, Err: errDependency}},
 	}
 	err := svchealth.Component(scriptedHealth{report: explained}, "health").Start(context.Background())
-	if !errors.Is(err, errDependency) || errs.HasCode(err, svchealth.CodeStartupPending) {
+	if !errors.Is(err, errDependency) || errs.HasCode(err, corehealth.CodeStartupPending) {
 		t.Errorf("a failure with the caller's own error: Start = %v, want the caller's own error through errors.Is", err)
 	}
 }

@@ -22,7 +22,10 @@ prefix. `Lookup("typeid")` misses and `New("typeid")` returns `UnknownScheme` �
 the correct answer, not a gap (ADR 0038, applying ADR 0031; see
 `internal/service/app/id/CLAUDE.md`).
 
-Code range: `0.2.7.*` (ADR 0024).
+Code ranges: `0.2.7.*` (ADR 0024) for the registry, and `0.3.39.*` for the
+schemes' outcomes — allocated to `internal/service/app/id`, which raises them,
+and declared here since ADR 0160. A code keeps its value when its declaration
+moves.
 
 ## Contents
 
@@ -30,8 +33,8 @@ Code range: `0.2.7.*` (ADR 0024).
 |---|---|
 | `id.go` | `Scheme` typed string (`String`/`Known`) + `Generator` interface + `New(scheme)` dispatch |
 | `registry.go` | `snapshot.Value`-backed registry: `Register` / `Lookup` / `Available` |
-| `codes.go` | `Code*` constants — range 0.2.7.* |
-| `errors.go` | `UnknownScheme`, `DuplicateRegistration` sentinels (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.7.* and 0.3.39.* |
+| `errors.go` | `UnknownScheme`, `DuplicateRegistration`, and the schemes' `EntropyFailed` / `ClockBackwards` / `ClockStalled` / `InvalidSize` / `InvalidPrefix` / `Malformed` / `TimestampRange` sentinels (`errs.Define`) |
 
 ## Conventions
 

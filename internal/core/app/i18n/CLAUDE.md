@@ -4,13 +4,19 @@
 ## Purpose
 
 Declares the **message-translation port**: `Catalog` (frozen at two methods),
-the `TagValue` that names a language, the `MessageValue` a translator wrote,
-the CLDR plural `Form` a quantity falls in, the `CountValue` that decides
-which, and the `Args` that fill a message's holes. The 27th core sibling,
-admitted by **ADR 0063**. The CLDR rule table, the concrete catalogue, the
-Accept-Language negotiation and the renderer live in `internal/service/app/i18n`.
+the `TagValue` that names a language, the `MessageValue` a translator wrote —
+held as compiled `PatternValue`s of `PartValue` spans — the CLDR plural `Form`
+a quantity falls in, the `CountValue` that decides which, and the `Args` that
+fill a message's holes. The 27th core sibling, admitted by **ADR 0063**. The
+tag PARSER, the pattern COMPILER, the CLDR rule table, the concrete
+catalogue, the Accept-Language negotiation and the renderer live in
+`internal/service/app/i18n`: reading text into these values is a mechanism
+(ADR 0160 §4), and what stays here is each value and its own invariants.
 
-Code range: `0.2.30.*` (ADR 0063).
+Code ranges: `0.2.30.*` (ADR 0063) for the port's verdicts, and `0.3.60.*` for
+the outcomes only a concrete catalogue can produce — allocated to
+`internal/service/app/i18n`, which raises them, and declared here since
+ADR 0160. A code keeps its value when its declaration moves.
 
 ## Contents
 
@@ -18,16 +24,13 @@ Code range: `0.2.30.*` (ADR 0063).
 |---|---|
 | `i18n.go` | package doc · `PluralRule func(CountValue) Form` · `Args map[string]string` |
 | `i18n_interface.go` | `Catalog` (frozen) + the ADR 0039 siblings `KeyLister` and `Fallbacker` |
-| `tag_value.go` | `TagValue` + `ParseTag` + `String` / `IsZero` / `Language` / `Script` / `Region` / `Parent` |
+| `tag_value.go` | `TagValue` + `NewTag(language, script, region)` — each subtag's shape checked and its case canonicalised — + `String` / `IsZero` / `Language` / `Script` / `Region` / `Parent` |
 | `count_value.go` | `CountValue` + `Int` / `Decimal` + `IntegerPart` / `FractionValue` / `VisibleFractionDigits` / `IsIntegerValued` |
 | `form.go` | `Form` + the six categories + `ParseForm` / `String` / `Valid` |
-| `message_value.go` | `Key` + `ValidateKey` + `MessageValue` + `NewMessage` / `NewPluralMessage` / `Format` / `HasForm` / `IsPlural` |
-| `form_pattern.go` | `formPattern` — one category paired with its compiled body |
-| `pattern.go` | `pattern` + `compilePattern` + `literal` / `expand` + the placeholder grammar |
-| `pattern_compiler.go` | `patternCompiler` — the one-pass parser run at catalogue load |
-| `part.go` | `part` — one span of a compiled pattern |
-| `codes.go` | `Code*` constants — range 0.2.30.* |
-| `errors.go` | `InvalidTag` / `InvalidKey` / `InvalidPattern` / `ArgumentMissing` / `MessageNotFound` / `PluralFormMissing` / `InvalidCount` / `InvalidForm` (`errs.Define`) |
+| `message_value.go` | `Key` + `ValidateKey` + `MessageValue` + `FormPatternValue` + `NewCompiledMessage` / `Format` / `HasForm` / `IsPlural` |
+| `pattern.go` | `PartValue` (one span: literal `Text` or placeholder `Name`) + `PatternValue` + `NewPattern` + `literal` / `expand` + `ValidPlaceholder`, the placeholder-name grammar |
+| `codes.go` | `Code*` constants — ranges 0.2.30.* and 0.3.60.* |
+| `errors.go` | `InvalidTag` / `InvalidKey` / `InvalidPattern` / `ArgumentMissing` / `MessageNotFound` / `PluralFormMissing` / `InvalidCount` / `InvalidForm`, and the catalogue's `UnsupportedLanguage` / `CatalogInvalid` / `CatalogLoadFailed` / `TranslationIncomplete` / `NegotiationEmpty` (`errs.Define`) |
 
 ## The frontier
 
@@ -66,9 +69,19 @@ application's, because it needs to know what the product says.
 - **`Args` is `map[string]string`, never `map[string]any`.** The values are
   substituted verbatim; a caller who wants a locale-formatted number formats
   it, and learns at the call site that this SDK does not ship a formatter.
-- **A pattern is compiled ONCE**, at catalogue load. A render never parses,
-  which is why a malformed translation fails at startup and the hot path has
-  nothing to fail at.
+- **A pattern is compiled ONCE**, at catalogue load, by the compiler in
+  `internal/service/app/i18n`. A render never parses, which is why a malformed
+  translation fails at startup and the hot path has nothing to fail at. What
+  the compiler hands over is held to the value's invariants here: a span is
+  literal text or a placeholder and never both, a placeholder name passes
+  `ValidPlaceholder`, `other` is always carried, the plural categories are
+  ascending and distinct. `NewPattern` and `NewCompiledMessage` RETAIN the
+  slices they are given — the compiler builds a fresh one per pattern, and a
+  copy would cost an allocation per message at every load.
+- **A tag is assembled by `NewTag` alone.** The parser in
+  `internal/service/app/i18n` splits the written form and places each subtag;
+  `NewTag` checks each one's shape and canonicalises its case, so no path
+  into `TagValue` skips the subset.
 - **Substitution is single-pass and literal.** A value containing `{other}`
   produces those seven characters. `TestMessageFormatNeverRescansASubstitutedValue`
   is the guard, and it is a security property: patterns are trusted, values are
@@ -103,10 +116,14 @@ application's, because it needs to know what the product says.
 - **Put a plural rule, a language table or a negotiation policy in this
   package.** They are facts about the world, not contracts, and they live in
   `internal/service/app/i18n`.
-- **Give `TagValue`, `CountValue` or `MessageValue` a from-parts constructor.**
-  Every one of them comes out of a call that VALIDATES — `ParseTag`, `Int` /
-  `Decimal`, `NewMessage` / `NewPluralMessage` — and a second way in would skip
-  it.
+- **Give `TagValue`, `CountValue`, `PatternValue` or `MessageValue` a
+  constructor that does not validate.** Every one of them comes out of a call
+  that does — `NewTag`, `Int` / `Decimal`, `NewPattern`, `NewCompiledMessage`
+  — and a way in that skipped it would let a value break the invariant every
+  reader of it relies on.
+- **Parse text here.** A written tag, a pattern's braces and escapes, an
+  `Accept-Language` header are wire formats; their readers are the service's
+  (ADR 0160 §4).
 - **Read a zero `TagValue` as a default language**, anywhere.
 
 ## Verification

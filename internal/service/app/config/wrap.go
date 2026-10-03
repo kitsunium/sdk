@@ -4,22 +4,34 @@
 package config
 
 import (
+	"errors"
+
 	coreconfig "github.com/kitsunium/sdk/internal/core/app/config"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// wrapAs returns the given config sentinel as the error origin (its
-// code/reason/public win), attaching the cause's message as a structured field
-// so it stays diagnosable without an *errs.Error cause hijacking the code. A nil
-// cause yields the bare sentinel.
+// wrapAs returns the given config sentinel as the error origin — its code,
+// reason, public message and statuses win, so an *errs.Error cause from a
+// codec or a source someone else wrote cannot hijack the code — with the
+// cause kept IN THE CHAIN beside it and its message in the `cause` field. A
+// nil cause yields the bare sentinel.
+//
+// In the chain is the point. errs.Wrap of a typed cause is origin-wins and
+// would hand the caller the codec's code; a cause flattened into a field
+// alone loses its identity, so errs.HasCode on a codec's refusal code — or
+// errors.Is against fs.ErrNotExist — stopped answering through config. The
+// sentinel and the cause are joined, and the join wrapped: Wrap finds the
+// sentinel first, so it is the origin and Error() renders it alone, while
+// errors.Is and errs.HasCode walk the join and reach the cause.
 func wrapAs(sentinel *kerrs.Error, cause error) error {
 	//: a nil cause needs no field — return the sentinel as-is.
 	if cause == nil {
 		//: the bare typed sentinel.
 		return sentinel
 	}
-	//: the cause's message rides in the same field a stated refusal uses.
-	return withCause(sentinel, cause.Error())
+	//: the sentinel is the origin, the cause rides beside it in the chain,
+	//: and its message in the same field a stated refusal uses.
+	return kerrs.Wrap(errors.Join(sentinel, cause), kerrs.WrapParams{}, kerrs.String("cause", cause.Error()))
 }
 
 // withCause returns the given config sentinel as the error origin with cause as

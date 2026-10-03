@@ -69,6 +69,25 @@ func Test_wrapAs(t *testing.T) {
 		if c.cause == nil && got != error(c.sentinel) {
 			t.Error("wrapAs with a nil cause did not return the bare sentinel")
 		}
+		if c.cause == nil {
+			return
+		}
+		//: the cause stays in the chain: errors.Is reaches it, and so does
+		//: errs.HasCode when it is typed — its code is not the origin, and it
+		//: is not lost either.
+		if !errors.Is(got, c.cause) {
+			t.Errorf("errors.Is(err, cause) = false for %v", got)
+		}
+		if causeCode, typed := kerrs.CodeOf(c.cause); typed && !kerrs.HasCode(got, causeCode) {
+			t.Errorf("errs.HasCode(err, %v) = false: the typed cause's code was lost", causeCode)
+		}
+		//: the origin, and the wire form, are the sentinel's alone.
+		if origin, _ := kerrs.CodeOf(got); origin != wantCode {
+			t.Errorf("errs.CodeOf = %v, want the sentinel's %v", origin, wantCode)
+		}
+		if got.Error() != c.sentinel.Error() {
+			t.Errorf("Error() = %q, want the sentinel's %q", got.Error(), c.sentinel.Error())
+		}
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {

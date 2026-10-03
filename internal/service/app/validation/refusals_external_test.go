@@ -4,6 +4,7 @@ import (
 	"strings"
 	"testing"
 
+	corevalidation "github.com/kitsunium/sdk/internal/core/app/validation"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcvalidation "github.com/kitsunium/sdk/internal/service/app/validation"
 )
@@ -148,7 +149,7 @@ func TestTheDialectRefusesByName(t *testing.T) {
 			if err == nil {
 				t.Fatal("must be refused at compile time, not accepted and quietly ignored")
 			}
-			if !errs.HasCode(err, svcvalidation.CodeInvalidRule) {
+			if !errs.HasCode(err, corevalidation.CodeInvalidRule) {
 				t.Fatalf("err = %v, want INVALID_RULE", err)
 			}
 			//: the refusal must NAME the fix; the field carrying it is what a

@@ -9,4 +9,4 @@ relay's acceptance and the acknowledgement, carries the same Message-ID.
 `SendWithID` queues a mail under an identifier its caller minted, which must be
 a dot-atom of at most `MaxIDBytes` (`INVALID_MAIL_ID` otherwise); a repeated
 one is dropped at delivery once its mail was delivered.
-Public facade: `pkg/v1/app/mail` (`NewSpool`). ADR 0111, ADR 0141. See `CLAUDE.md`.
+Public facade: `pkg/v1/app/mail/spool` (`New`). ADR 0111, ADR 0141. See `CLAUDE.md`.

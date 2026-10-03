@@ -17,7 +17,7 @@
 // # What a budget expiring means
 //
 // Exactly three things: the run's context is cancelled (an announcement), the
-// registry stops waiting, and a [CheckTimeout] result is recorded. No
+// registry stops waiting, and a [corehealth.CheckTimeout] result is recorded. No
 // goroutine is killed — Go cannot — and nothing the check holds is closed on
 // its behalf. A check that outlives its budget keeps ONE goroutine until it
 // returns, and the next probe joins that same run instead of starting another;
@@ -116,7 +116,7 @@ func (h *health) AddReadiness(check corehealth.ReadinessCheckValue) error {
 	//: and answering a question the caller did not ask (see MaxCacheAge).
 	if check.MaxAge > MaxCacheAge {
 		//: the fields carry both numbers so the fix needs no lookup.
-		return kerrs.Wrap(StaleCacheWindow, kerrs.WrapParams{},
+		return kerrs.Wrap(corehealth.StaleCacheWindow, kerrs.WrapParams{},
 			kerrs.String("check", check.Name),
 			kerrs.String("max_age", check.MaxAge.String()),
 			kerrs.String("ceiling", MaxCacheAge.String()))

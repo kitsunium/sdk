@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -110,8 +111,8 @@ func Test_typeIDGen_zeroValue(t *testing.T) {
 	if got != "" {
 		t.Errorf("New() = %q alongside its refusal, want an empty string", got)
 	}
-	if !errs.HasCode(err, CodeIDInvalidPrefix) {
-		t.Errorf("New() = %v, want code %s", err, CodeIDInvalidPrefix)
+	if !errs.HasCode(err, coreid.CodeIDInvalidPrefix) {
+		t.Errorf("New() = %v, want code %s", err, coreid.CodeIDInvalidPrefix)
 	}
 }
 
@@ -163,8 +164,8 @@ func Test_validateTypePrefix(t *testing.T) {
 		if err == nil {
 			t.Fatalf("validateTypePrefix(%q) = nil, want ID_INVALID_PREFIX", c.prefix)
 		}
-		if !errs.HasCode(err, CodeIDInvalidPrefix) {
-			t.Errorf("validateTypePrefix(%q) = %v, want code %s", c.prefix, err, CodeIDInvalidPrefix)
+		if !errs.HasCode(err, coreid.CodeIDInvalidPrefix) {
+			t.Errorf("validateTypePrefix(%q) = %v, want code %s", c.prefix, err, coreid.CodeIDInvalidPrefix)
 		}
 		if got := fieldValue(err, "rule"); got != c.rule {
 			t.Errorf("validateTypePrefix(%q) rule = %q, want %q", c.prefix, got, c.rule)
@@ -265,8 +266,8 @@ func Test_crockford32Decode_rejects(t *testing.T) {
 		if err == nil {
 			t.Fatalf("crockford32Decode(%q) = nil error, want ID_MALFORMED", c.in)
 		}
-		if !errs.HasCode(err, CodeIDMalformed) {
-			t.Errorf("crockford32Decode(%q) = %v, want code %s", c.in, err, CodeIDMalformed)
+		if !errs.HasCode(err, coreid.CodeIDMalformed) {
+			t.Errorf("crockford32Decode(%q) = %v, want code %s", c.in, err, coreid.CodeIDMalformed)
 		}
 		if got := fieldValue(err, "rule"); got != c.rule {
 			t.Errorf("crockford32Decode(%q) rule = %q, want %q", c.in, got, c.rule)
@@ -330,8 +331,8 @@ func Test_parseUUID(t *testing.T) {
 		if err == nil {
 			t.Fatalf("parseUUID(%q) = nil error, want ID_MALFORMED", c.in)
 		}
-		if !errs.HasCode(err, CodeIDMalformed) {
-			t.Errorf("parseUUID(%q) = %v, want code %s", c.in, err, CodeIDMalformed)
+		if !errs.HasCode(err, coreid.CodeIDMalformed) {
+			t.Errorf("parseUUID(%q) = %v, want code %s", c.in, err, coreid.CodeIDMalformed)
 		}
 		if got := fieldValue(err, "rule"); got != c.rule {
 			t.Errorf("parseUUID(%q) rule = %q, want %q", c.in, got, c.rule)

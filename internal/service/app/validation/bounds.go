@@ -26,7 +26,7 @@ func AtLeast[T cmp.Ordered](lo T) corevalidation.Constraint[T] {
 			return nil
 		}
 		//: below the floor.
-		return one(path, ruleMin, message, CodeOutOfRange)
+		return one(path, ruleMin, message, corevalidation.CodeOutOfRange)
 	}
 }
 
@@ -45,7 +45,7 @@ func AtMost[T cmp.Ordered](hi T) corevalidation.Constraint[T] {
 			return nil
 		}
 		//: above the ceiling.
-		return one(path, ruleMax, message, CodeOutOfRange)
+		return one(path, ruleMax, message, corevalidation.CodeOutOfRange)
 	}
 }
 
@@ -79,6 +79,6 @@ func Between[T cmp.Ordered](lo, hi T) (constraint corevalidation.Constraint[T], 
 		//: outside the interval; the message does not say which end, because
 		//: telling the caller "too large" for a value they must not see back
 		//: adds nothing they cannot infer from the bounds.
-		return one(path, ruleBetween, message, CodeOutOfRange)
+		return one(path, ruleBetween, message, corevalidation.CodeOutOfRange)
 	}, nil
 }

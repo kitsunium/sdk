@@ -38,19 +38,19 @@ type Store struct {
 //
 // # Everything it refuses, and why each is refused HERE
 //
-//   - A zero fallback [corei18n.TagValue] — [CatalogInvalid]. ADR 0031's
+//   - A zero fallback [corei18n.TagValue] — [corei18n.CatalogInvalid]. ADR 0031's
 //     refuse half: there is no language the SDK could pick, and picking
 //     English would mean a Japanese-only product silently shipping English.
-//   - A fallback the catalogues do not hold — [CatalogInvalid]. A fallback
+//   - A fallback the catalogues do not hold — [corei18n.CatalogInvalid]. A fallback
 //     that resolves to nothing is not a fallback; every miss would return the
 //     key, and the misconfiguration would look exactly like a missing
 //     translation.
-//   - A language with no reviewed CLDR rule — [UnsupportedLanguage].
+//   - A language with no reviewed CLDR rule — [corei18n.UnsupportedLanguage].
 //   - An empty or control-bearing key — [corei18n.InvalidKey].
 //   - A malformed pattern — [corei18n.InvalidPattern].
 //   - An unknown CLDR category name — [corei18n.InvalidForm].
 //   - A counted message missing a category its language can produce —
-//     [TranslationIncomplete].
+//     [corei18n.TranslationIncomplete].
 //
 // Every one of them is a startup failure. That is the whole design: at startup
 // a human is present, the catalogue file is in front of them, and the fix is
@@ -60,13 +60,13 @@ func NewStore(fallback corei18n.TagValue, catalogues map[corei18n.TagValue]Catal
 	//: a fallback is mandatory and is never guessed.
 	if fallback.IsZero() {
 		//: ADR 0031: refuse where any SDK-chosen value would be arbitrary.
-		return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the fallback tag is unset"))
+		return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{}, errs.String("detail", "the fallback tag is unset"))
 	}
 	//: the fallback must be a language the store can actually answer in.
 	if _, ok := catalogues[fallback]; !ok {
 		//: otherwise every miss returns the key and looks like a translation
 		//: gap rather than a wiring fault.
-		return nil, errs.Wrap(CatalogInvalid, errs.WrapParams{},
+		return nil, errs.Wrap(corei18n.CatalogInvalid, errs.WrapParams{},
 			errs.String("tag", fallback.String()), errs.String("detail", "the fallback language has no catalogue"))
 	}
 	//: compile every language, refusing at the first defect.
@@ -153,7 +153,7 @@ func compileEntry(tag corei18n.TagValue, key corei18n.Key, entry EntryValue, rul
 // compilePlain compiles an uncounted entry.
 func compilePlain(tag corei18n.TagValue, key corei18n.Key, text string) (message corei18n.MessageValue, err error) {
 	//: parse the placeholders once, here.
-	message, err = corei18n.NewMessage(text)
+	message, err = NewMessage(text)
 	//: a malformed pattern is a catalogue defect.
 	if err != nil {
 		//: add the coordinates a maintainer needs to find the line.
@@ -175,7 +175,7 @@ func compileCounted(tag corei18n.TagValue, key corei18n.Key, forms map[string]st
 		return corei18n.MessageValue{}, err
 	}
 	//: compile every declared category.
-	message, err = corei18n.NewPluralMessage(byForm)
+	message, err = NewPluralMessage(byForm)
 	//: a missing `other`, or a malformed pattern.
 	if err != nil {
 		//: add the coordinates.
@@ -218,7 +218,7 @@ func parseForms(tag corei18n.TagValue, key corei18n.Key, forms map[string]string
 	return byForm, nil
 }
 
-// requireComplete reports [TranslationIncomplete] for the first category the
+// requireComplete reports [corei18n.TranslationIncomplete] for the first category the
 // language's rules can produce and the message does not carry.
 func requireComplete(tag corei18n.TagValue, key corei18n.Key, message corei18n.MessageValue, rules PluralValue) error {
 	//: converted once, outside the loop that may report it.
@@ -230,7 +230,7 @@ func requireComplete(tag corei18n.TagValue, key corei18n.Key, message corei18n.M
 		if !message.HasForm(form) {
 			//: name the language, the key and the missing category — the
 			//: three things needed to fix the file.
-			return errs.Wrap(TranslationIncomplete, errs.WrapParams{},
+			return errs.Wrap(corei18n.TranslationIncomplete, errs.WrapParams{},
 				errs.String("tag", tag.String()), errs.String("key", keyText), errs.String("form", form.String()))
 		}
 	}

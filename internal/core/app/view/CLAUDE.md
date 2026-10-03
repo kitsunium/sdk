@@ -9,7 +9,10 @@ resolves one implementation by name, and the single trust type through which a
 caller can deliberately bypass escaping. Admitted by **ADR 0058**. The one
 engine that ships — stdlib `html/template` — lives in `internal/service/app/view`.
 
-Code range: `0.2.27.*` (ADR 0058).
+Code ranges: `0.2.27.*` (ADR 0058) for the port, and `0.3.57.*` for the
+html/template engine's construction failures — allocated to
+`internal/service/app/view`, which raises them, and declared here since
+ADR 0160. A code keeps its value when its declaration moves.
 
 ## Why this shape
 
@@ -65,6 +68,8 @@ choosing stderr, but by having no destination in the port at all.
 | `EngineUnknown` `0.2.27.6` | `Open` for a name no factory claims |
 | `EngineInvalid` `0.2.27.7` | boot-time panic: an unusable `Factory` — nil, a typed nil pointer or a non-comparable value (`internal/kernel/plugin`, ADR 0071) — or an empty `Engine` |
 | `DuplicateEngine` `0.2.27.8` | boot-time panic: two DISTINCT factories under one name |
+| `TemplateSourceFailed` `0.3.57.1` | the html/template engine could not READ its tree — a walk or an open failed |
+| `TemplateParseFailed` `0.3.57.2` | the engine refused a template at parse time, or could not resolve its escaping context |
 
 ## Conventions
 

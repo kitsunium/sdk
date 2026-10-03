@@ -8,6 +8,7 @@ import (
 	"io/fs"
 	"os"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -40,7 +41,7 @@ func checkDir(dir string, info fs.FileInfo) error {
 		return nil
 	}
 	//: world-writable and not sticky: the lock file can be swapped underneath.
-	return kerrs.Wrap(LockDirectoryUnsafe, kerrs.WrapParams{},
+	return kerrs.Wrap(corelock.LockDirectoryUnsafe, kerrs.WrapParams{},
 		kerrs.String("path", dir),
 		kerrs.String("mode", mode.Perm().String()))
 }

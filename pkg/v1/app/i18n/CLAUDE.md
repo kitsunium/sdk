@@ -32,7 +32,7 @@ never fails a request.
 | `NewMessage` / `NewPluralMessage` / `Plain` / `PluralForms` | funcs | message and entry constructors |
 | `NewStore` / `LoadFS` / `NewPrinter` / `NewNegotiator` | funcs | the four construction points, and where every refusal happens |
 | `Rules` / `SupportedTags` | funcs | the CLDR table, at runtime |
-| 13 `errs.Define` sentinels | vars | 8 from core, 5 from service (`NegotiationEmpty` among them) |
+| 13 `errs.Define` sentinels | vars | all aliases of `core/app/i18n`'s (ADR 0160): the port's 8, and the 5 a concrete catalogue raises (`NegotiationEmpty` among them) |
 
 ## How a consumer wires it
 

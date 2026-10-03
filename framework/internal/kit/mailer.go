@@ -17,6 +17,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
+	mailspool "github.com/kitsunium/sdk/pkg/v1/app/mail/spool"
 	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
@@ -103,7 +104,7 @@ type Mailer struct {
 	// problem found with the URL since, logged once.
 	relay   smtpRelay
 	problem string
-	spool   *mail.Spool
+	spool   *mailspool.Spool
 	cancel  context.CancelFunc
 	done    chan struct{}
 	loop    *loopState
@@ -282,11 +283,11 @@ func (m *Mailer) spooled(err error) error {
 	switch {
 	case err == nil:
 		return nil
-	case errors.Is(err, mail.SpoolClosed):
+	case errors.Is(err, mailspool.Closed):
 		return Unavailable(fmt.Sprintf("mailer %q is not running", m.name))
 	case errs.HasReason(err, "MESSAGE_TOO_LARGE"):
 		return Invalid(fmt.Sprintf("the mail is larger than the outbox accepts (%s)", humanBytes(maxMailBytes))).Wrap(err)
-	case errors.Is(err, mail.SpooledMailUnencodable):
+	case errors.Is(err, mailspool.MessageUnencodable):
 		return failure(CodeMailEncode, "MAIL_ENCODE", "the mail cannot be encoded for the outbox", err, errs.String("mailer", m.id))
 	}
 	return failure(CodeMailQueue, "MAIL_QUEUE", "the mail could not be put in the outbox", err, errs.String("mailer", m.id))
@@ -437,10 +438,10 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 	if a.dataDir != "" {
 		dir = filepath.Join(a.dataDir, m.svc.name, "outbox", m.name)
 	}
-	spool, err := mail.NewSpool(mail.SpoolConfig{
+	spool, err := mailspool.New(mailspool.Config{
 		Transport:       outboxTransport{m: m, a: a},
 		Clock:           a.clock,
-		Observe:         func(e mail.SpoolEvent) { m.observe(a, &e) },
+		Observe:         func(e mailspool.Event) { m.observe(a, &e) },
 		Annotate:        annotate,
 		NewID:           func() (string, error) { return NewID("mail"), nil },
 		Dir:             dir,
@@ -593,7 +594,7 @@ func (m *Mailer) current(ctx context.Context, a *App, transport mail.Transport, 
 // attempt's span; the spool retries it, or dead-letters it after the last.
 func (t outboxTransport) Send(ctx context.Context, msg mail.Message) (err error) {
 	m, a := t.m, t.a
-	attempt, _ := mail.SpoolAttemptFrom(ctx)
+	attempt, _ := mailspool.AttemptFrom(ctx)
 	if header := attempt.Meta[metaTrace]; header != "" {
 		if sc, perr := trace.ParseTraceParent(header); perr == nil {
 			ctx = trace.ContextWithSpanContext(ctx, sc)
@@ -630,7 +631,7 @@ func (t outboxTransport) Send(ctx context.Context, msg mail.Message) (err error)
 
 // failed logs a failed attempt: a warning while attempts remain, an error on
 // the last one, after which the spool gives the mail up.
-func (m *Mailer) failed(ctx context.Context, a *App, attempt mail.SpoolAttempt, err error) {
+func (m *Mailer) failed(ctx context.Context, a *App, attempt mailspool.Attempt, err error) {
 	fields := []logger.Attr{logger.String("node", m.id), logger.String("mail", attempt.ID), logger.Int("attempt", attempt.Attempt), logger.String("error", err.Error())}
 	if attempt.Attempt >= m.opts.maxAttempts {
 		logger.Error(ctx, a.log, "a mail was abandoned after its last attempt", fields...)
@@ -667,8 +668,8 @@ func (m *Mailer) transmit(ctx context.Context, a *App, msg *mail.Message) ([]byt
 // observe keeps the mailbox in step with what the spool reports — each
 // mail's status and the counts — and streams the mail's new status. The
 // spool reports a mail an earlier run queued too: the mailbox learns it then.
-func (m *Mailer) observe(a *App, e *mail.SpoolEvent) {
-	if e.Kind == mail.SpoolDuplicate {
+func (m *Mailer) observe(a *App, e *mailspool.Event) {
+	if e.Kind == mailspool.EventDuplicate {
 		// A redelivery of a mail already sent, dropped: nothing changed.
 		return
 	}
@@ -680,9 +681,9 @@ func (m *Mailer) observe(a *App, e *mail.SpoolEvent) {
 		rec = m.ring.add(m.messageOf(e, m.ring.full))
 	}
 	switch e.Kind {
-	case mail.SpoolQueued:
+	case mailspool.EventQueued:
 		m.ring.pending[e.ID] = true
-	case mail.SpoolSent:
+	case mailspool.EventSent:
 		rec.Attempts, rec.Status, rec.Error, rec.SentAt = e.Attempt, model.MailSent, "", new(e.At.UTC())
 		if raw, ok := m.composed[e.ID]; ok {
 			rec.Raw = rawText(raw)
@@ -690,10 +691,10 @@ func (m *Mailer) observe(a *App, e *mail.SpoolEvent) {
 		}
 		delete(m.ring.pending, e.ID)
 		m.ring.sent++
-	case mail.SpoolRetrying:
+	case mailspool.EventRetrying:
 		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailRetrying, publicText(e.Err)
 		m.ring.pending[e.ID] = true
-	case mail.SpoolDeadLettered:
+	case mailspool.EventDeadLettered:
 		rec.Attempts, rec.Status, rec.Error = e.Attempt, model.MailDead, publicText(e.Err)
 		delete(m.ring.pending, e.ID)
 		m.ring.dead++
@@ -707,7 +708,7 @@ func (m *Mailer) observe(a *App, e *mail.SpoolEvent) {
 
 // messageOf is the mailbox's record of a mail the spool reports; full keeps
 // the bodies and headers.
-func (m *Mailer) messageOf(e *mail.SpoolEvent, full bool) model.MailMessage {
+func (m *Mailer) messageOf(e *mailspool.Event, full bool) model.MailMessage {
 	msg := e.Message
 	traceID, _ := traceIDOf(e.Meta[metaTrace])
 	out := model.MailMessage{

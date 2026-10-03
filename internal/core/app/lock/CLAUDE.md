@@ -8,7 +8,10 @@ through which a lease says whether it can expire at all. The 19th core sibling,
 admitted by **ADR 0052**. The concrete lockers — in-process and file-backed —
 live in `internal/service/app/lock`.
 
-Code range: `0.2.21.*` (ADR 0052).
+Code ranges: `0.2.21.*` (ADR 0052) for the port, and `0.3.51.*` for the
+concrete lockers' outcomes — allocated to `internal/service/app/lock`, which
+raises them, and declared here since ADR 0160. A code keeps its value when its
+declaration moves.
 
 ## Why this shape
 
@@ -56,6 +59,11 @@ service constructor's configuration and is refused there (ADR 0031).
 | `LockNotHeld` `0.2.21.2` | `Extend`/`Release` from a holder that no longer owns the lock |
 | `LockBackendFailed` `0.2.21.3` | the locker could not answer. A lock merely being HELD is **not** this |
 | `LockNameRejected` `0.2.21.4` | empty or unrepresentable name |
+| `LockFenceCorrupt` `0.3.51.1` | the file locker's fence ledger cannot yield a next token — refused, never reset |
+| `LockDirectoryUnsafe` `0.3.51.2` | a lock directory whose entries any account can replace |
+| `LockKeepaliveLost` `0.3.51.3` | a background renewal failed; a context CAUSE, never a return value |
+| `LockPathRedirected` `0.3.51.4` | the lock path is a link or a reparse point, not a file |
+| `LockFileReplaced` `0.3.51.5` | the file a lease holds is no longer the one its name leads to — detected, not prevented |
 
 ## Conventions
 

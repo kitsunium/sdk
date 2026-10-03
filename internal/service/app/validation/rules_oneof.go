@@ -87,7 +87,7 @@ func stringOneOf(values []string) fieldCheck {
 			return nil
 		}
 		//: outside the set.
-		return one(path, ruleOneOf, message, CodeNotInSet)
+		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
 	}
 }
 
@@ -123,7 +123,7 @@ func signedOneOf(name string, values []string, typ reflect.Type) (check fieldChe
 			return nil
 		}
 		//: outside the set.
-		return one(path, ruleOneOf, message, CodeNotInSet)
+		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
 	}, nil
 }
 
@@ -157,6 +157,6 @@ func unsignedOneOf(name string, values []string, typ reflect.Type) (check fieldC
 			return nil
 		}
 		//: outside the set.
-		return one(path, ruleOneOf, message, CodeNotInSet)
+		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
 	}, nil
 }

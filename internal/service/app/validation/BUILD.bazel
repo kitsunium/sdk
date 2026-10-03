@@ -6,12 +6,10 @@ go_library(
     name = "validation",
     srcs = [
         "bounds.go",
-        "codes.go",
         "compile.go",
         "descend.go",
         "dive.go",
         "element_plan.go",
-        "errors.go",
         "json_level.go",
         "json_reach.go",
         "pattern.go",
@@ -67,11 +65,4 @@ go_test(
         "//internal/core/app/validation",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

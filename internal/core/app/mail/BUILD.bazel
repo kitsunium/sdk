@@ -5,18 +5,14 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "mail",
     srcs = [
-        "address.go",
         "address_value.go",
-        "attachment.go",
         "attachment_value.go",
         "codes.go",
         "errors.go",
         "header.go",
-        "header_field_value.go",
         "mail.go",
         "message_value.go",
         "transport_interface.go",
-        "validate.go",
         "value.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/mail",
@@ -39,14 +35,8 @@ alias(
 go_test(
     name = "mail_test",
     size = "small",
-    srcs = [
-        "mail_external_test.go",
-        "port_external_test.go",
-    ],
-    deps = [
-        ":mail",
-        "//internal/kernel/errs",
-    ],
+    srcs = ["port_external_test.go"],
+    deps = [":mail"],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

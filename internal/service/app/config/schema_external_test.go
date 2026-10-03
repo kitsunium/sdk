@@ -12,7 +12,6 @@ import (
 	corevalidation "github.com/kitsunium/sdk/internal/core/app/validation"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/app/config"
-	svcvalidation "github.com/kitsunium/sdk/internal/service/app/validation"
 
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/json" // register "json"
 )
@@ -678,7 +677,7 @@ func TestARefusedTagKeepsTheValidationDomainsDiagnosis(t *testing.T) {
 	if err == nil {
 		t.Fatal("NewSchema accepted a tag-borne regexp")
 	}
-	if !errs.HasCode(err, svcvalidation.CodeInvalidRule) {
+	if !errs.HasCode(err, corevalidation.CodeInvalidRule) {
 		t.Errorf("code = %v, want the validation domain's INVALID_RULE", err)
 	}
 }

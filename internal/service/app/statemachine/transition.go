@@ -53,20 +53,20 @@ type pending[E any, S comparable] struct {
 // OnTransition hooks. The step recorded is core/app/statemachine.CreateEvent.
 //
 // It returns the entity as stored. It refuses an entity whose key is empty
-// ([KeyEmpty]) or already taken ([EntityExists]), and a call made through the
-// context an OnEnter hook of this machine was given ([Reentrant]).
+// ([corestm.KeyEmpty]) or already taken ([corestm.EntityExists]), and a call made through the
+// context an OnEnter hook of this machine was given ([corestm.Reentrant]).
 func (m *StateMachine[E, S]) Start(ctx context.Context, entity E) (E, error) {
 	var zero E
 	//: a hook of this machine holds a lock the call would wait for.
 	if inside(ctx, m.locks) {
 		//: refused rather than deadlocked.
-		return zero, Reentrant
+		return zero, corestm.Reentrant
 	}
 	key := m.store.Key(entity)
 	//: every entity with no key would be the same entity.
 	if key == "" {
 		//: nothing was stored.
-		return zero, KeyEmpty
+		return zero, corestm.KeyEmpty
 	}
 	release, err := m.locks.acquire(ctx, key)
 	//: the caller stopped waiting for another transition of this key.
@@ -91,17 +91,17 @@ func (m *StateMachine[E, S]) Start(ctx context.Context, entity E) (E, error) {
 // Fire moves the entity under key along the event transition by that name
 // leaving its current state, and returns it as stored.
 //
-// It refuses a key the store does not hold ([EntityMissing]), an event no
-// transition takes from the entity's state ([TransitionRefused] — returned
+// It refuses a key the store does not hold ([corestm.EntityMissing]), an event no
+// transition takes from the entity's state ([corestm.TransitionRefused] — returned
 // with the entity, whose state says why), and a call made through the context
-// an OnEnter hook of this machine was given ([Reentrant]). On any other
+// an OnEnter hook of this machine was given ([corestm.Reentrant]). On any other
 // failure — a hook, the store — it returns the entity as it was read.
 func (m *StateMachine[E, S]) Fire(ctx context.Context, key, event string) (E, error) {
 	var zero E
 	//: a hook of this machine holds a lock the call would wait for.
 	if inside(ctx, m.locks) {
 		//: refused rather than deadlocked.
-		return zero, Reentrant
+		return zero, corestm.Reentrant
 	}
 	release, err := m.locks.acquire(ctx, key)
 	//: the caller stopped waiting for another transition of this key.
@@ -122,7 +122,7 @@ func (m *StateMachine[E, S]) Fire(ctx context.Context, key, event string) (E, er
 	//: no transition by that name leaves the entity's state.
 	if !ok {
 		//: the entity comes back with the refusal: its state says why.
-		return entity, errs.Wrap(TransitionRefused, errs.WrapParams{}, errs.String("key", key),
+		return entity, errs.Wrap(corestm.TransitionRefused, errs.WrapParams{}, errs.String("key", key),
 			errs.String("event", event), errs.String("state", fmt.Sprint(from)))
 	}
 	p := pending[E, S]{entity: entity, key: key, arrow: x}
@@ -145,7 +145,7 @@ func missingOr(err error, key string) error {
 		return storeFailure(err, "get")
 	}
 	//: the store answered, and holds nothing under key.
-	return errs.Wrap(EntityMissing, errs.WrapParams{}, errs.String("key", key))
+	return errs.Wrap(corestm.EntityMissing, errs.WrapParams{}, errs.String("key", key))
 }
 
 // transition stores p, releases the entity's lock and runs the OnTransition
@@ -222,12 +222,12 @@ func (m *StateMachine[E, S]) unchanged(entity E, p pending[E, S]) error {
 	//: the history would say one state and the store hold another.
 	if *m.plan.state(&entity) != p.arrow.to {
 		//: named after the transition.
-		return errs.Wrap(HookChangedState, errs.WrapParams{}, errs.String("event", p.arrow.event))
+		return errs.Wrap(corestm.HookChangedState, errs.WrapParams{}, errs.String("event", p.arrow.event))
 	}
 	//: storing it would write another entity.
 	if m.store.Key(entity) != p.key {
 		//: named after the transition.
-		return errs.Wrap(HookChangedKey, errs.WrapParams{}, errs.String("event", p.arrow.event))
+		return errs.Wrap(corestm.HookChangedKey, errs.WrapParams{}, errs.String("event", p.arrow.event))
 	}
 	//: the hooks stayed within bounds.
 	return nil
@@ -262,11 +262,11 @@ func refusedWrite(create bool, key string) error {
 	//: an insert over a taken key.
 	if create {
 		//: the creation collided.
-		return errs.Wrap(EntityExists, errs.WrapParams{}, errs.String("key", key))
+		return errs.Wrap(corestm.EntityExists, errs.WrapParams{}, errs.String("key", key))
 	}
 	//: a replace of an entity deleted while the transition ran: never a
 	//: resurrection.
-	return errs.Wrap(EntityMissing, errs.WrapParams{}, errs.String("key", key))
+	return errs.Wrap(corestm.EntityMissing, errs.WrapParams{}, errs.String("key", key))
 }
 
 // settle ends f, the entity's flight; when the entity was written meanwhile,
@@ -299,7 +299,7 @@ func (m *StateMachine[E, S]) enter(ctx context.Context, hook func(context.Contex
 	//: a returned error cancels the transition, joined beside the verdict.
 	if herr := hook(ctx, entity); herr != nil {
 		//: both errors.Is and errs.HasCode answer.
-		return errors.Join(errs.Wrap(HookFailed, errs.WrapParams{}, errs.String("hook", hookOnEnter),
+		return errors.Join(errs.Wrap(corestm.HookFailed, errs.WrapParams{}, errs.String("hook", hookOnEnter),
 			errs.String("event", p.arrow.event), errs.String("state", fmt.Sprint(p.arrow.to))), herr)
 	}
 	//: the hook accepted the transition.
@@ -332,7 +332,7 @@ func (m *StateMachine[E, S]) notify(ctx context.Context, hook func(context.Conte
 	//: a returned error is reported beside the verdict.
 	if herr := hook(ctx, change); herr != nil {
 		//: both errors.Is and errs.HasCode answer.
-		return errors.Join(errs.Wrap(HookFailed, errs.WrapParams{}, errs.String("hook", hookOnTransition),
+		return errors.Join(errs.Wrap(corestm.HookFailed, errs.WrapParams{}, errs.String("hook", hookOnTransition),
 			errs.String("event", change.Event), errs.String("key", change.Key)), herr)
 	}
 	//: the hook ran.
@@ -345,6 +345,6 @@ func (m *StateMachine[E, S]) notify(ctx context.Context, hook func(context.Conte
 func hookPanic(kind, event string, value any) error {
 	//: the value travels as a field, never as the wrap origin, so a panic
 	//: carrying an SDK error cannot pass for another code.
-	return errs.Wrap(HookPanicked, errs.WrapParams{}, errs.String("hook", kind), errs.String("event", event),
+	return errs.Wrap(corestm.HookPanicked, errs.WrapParams{}, errs.String("hook", kind), errs.String("event", event),
 		errs.String("panic", fmt.Sprint(value)), errs.String("stack", string(debug.Stack())))
 }

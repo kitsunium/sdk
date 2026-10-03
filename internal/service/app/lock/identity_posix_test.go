@@ -121,7 +121,7 @@ func TestExtendRefusesOnceTheLockFileIsNoLongerTheOneItsNameLeadsTo(t *testing.T
 		//: the refusing half: the holder is inside a section it no longer
 		//: owns, and the only thing the SDK can still do is say so.
 		if c.refuse {
-			if !errs.HasCode(err, svclock.CodeLockFileReplaced) {
+			if !errs.HasCode(err, corelock.CodeLockFileReplaced) {
 				t.Fatalf("Extend after %q = %v, want LOCK_FILE_REPLACED", c.name, err)
 			}
 			//: verdict pinned.
@@ -191,7 +191,7 @@ func TestTheSplitIsDetectedAndNotPrevented(t *testing.T) {
 		t.Fatalf("the new holder's fence = %d, which is ahead of the victim's %d — the ledger survived the swap and this test is asserting the wrong thing", taken.Fence(), victim.Fence())
 	}
 	//: detected.
-	if !errs.HasCode(victim.Extend(t.Context()), svclock.CodeLockFileReplaced) {
+	if !errs.HasCode(victim.Extend(t.Context()), corelock.CodeLockFileReplaced) {
 		t.Fatalf("the victim's Extend after the swap = %v, want LOCK_FILE_REPLACED", victim.Extend(t.Context()))
 	}
 }
@@ -226,10 +226,10 @@ func TestAKeepaliveCancelsTheProtectedWorkWhenTheLockFileIsReplaced(t *testing.T
 	cause := context.Cause(guarded)
 	//: origin wins (ADR 0005): the cause IS the replaced file, and the
 	//: keepalive's own code rides the wrap trail, so both are recoverable.
-	if !errs.HasCode(cause, svclock.CodeLockFileReplaced) {
+	if !errs.HasCode(cause, corelock.CodeLockFileReplaced) {
 		t.Fatalf("context.Cause = %v, want LOCK_FILE_REPLACED", cause)
 	}
-	if !errs.HasCode(cause, svclock.CodeLockKeepaliveLost) {
+	if !errs.HasCode(cause, corelock.CodeLockKeepaliveLost) {
 		t.Fatalf("context.Cause = %v, want the keepalive code on the wrap trail too", cause)
 	}
 }

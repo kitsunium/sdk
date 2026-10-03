@@ -108,6 +108,6 @@ func announce(enabled bool, send func() error, state string) error {
 	}
 	//: side by side rather than wrapped: origin-wins would relabel
 	//: READINESS_FAILED with whatever systemd/notify reported.
-	return errors.Join(kerrs.Wrap(ReadinessFailed, kerrs.WrapParams{},
+	return errors.Join(kerrs.Wrap(corelc.ReadinessFailed, kerrs.WrapParams{},
 		kerrs.String("state", state)), err)
 }

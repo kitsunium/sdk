@@ -45,6 +45,6 @@ func Matches(pattern string) (constraint corevalidation.Constraint[string], err 
 			return nil
 		}
 		//: no match.
-		return one(path, rulePattern, message, CodePatternMismatch)
+		return one(path, rulePattern, message, corevalidation.CodePatternMismatch)
 	}, nil
 }

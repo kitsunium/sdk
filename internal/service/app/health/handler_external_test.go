@@ -49,7 +49,7 @@ func TestTheBodyNeverCarriesInfrastructureDetail(t *testing.T) {
 	}
 	//: and it still says something useful — a body with no reason at all is
 	//: the least actionable thing a probe can return.
-	if !strings.Contains(body, svchealth.CheckFailed.Public()) {
+	if !strings.Contains(body, corehealth.CheckFailed.Public()) {
 		t.Errorf("the body carries no reason at all:\n%s", body)
 	}
 }

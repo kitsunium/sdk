@@ -10,7 +10,6 @@ go_library(
     deps = [
         "//internal/core/app/mail",
         "//internal/service/app/mail",
-        "//internal/service/app/mail/spool",
     ],
 )
 
@@ -26,7 +25,6 @@ go_test(
     srcs = ["mail_external_test.go"],
     deps = [
         ":mail",
-        "//pkg/v1/app/id",
         "//pkg/v1/errs",
     ],
 )

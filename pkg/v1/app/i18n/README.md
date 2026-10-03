@@ -129,22 +129,22 @@ var (
     // UnsupportedLanguage is returned when a catalogue or a printer names a
     // language this SDK has no reviewed CLDR plural rule for. It is the
     // domain's central refusal — see the package comment.
-    UnsupportedLanguage = svci18n.UnsupportedLanguage
+    UnsupportedLanguage = corei18n.UnsupportedLanguage
     // CatalogInvalid is returned for a catalogue that cannot be compiled: an
     // unset or unserved fallback, a duplicate tag, or an entry of the wrong
     // shape.
-    CatalogInvalid = svci18n.CatalogInvalid
+    CatalogInvalid = corei18n.CatalogInvalid
     // CatalogLoadFailed is returned when a catalogue directory cannot be read
     // or its bytes cannot be decoded. The cause stays in the chain, so
     // errors.Is(err, fs.ErrNotExist) still answers.
-    CatalogLoadFailed = svci18n.CatalogLoadFailed
+    CatalogLoadFailed = corei18n.CatalogLoadFailed
     // TranslationIncomplete is returned for a counted message missing a
     // category its language can produce — the one catalogue defect a
     // translator cannot see by reading their own file.
-    TranslationIncomplete = svci18n.TranslationIncomplete
+    TranslationIncomplete = corei18n.TranslationIncomplete
     // NegotiationEmpty is returned by [NewNegotiator] for an empty supported
     // set, which is an unfinished wiring rather than "accept anything".
-    NegotiationEmpty = svci18n.NegotiationEmpty
+    NegotiationEmpty = corei18n.NegotiationEmpty
 )
 ```
 
@@ -346,7 +346,7 @@ NewMessage compiles an uncounted message, or returns [InvalidPattern](<#InvalidT
 func NewPluralMessage(forms map[Form]string) (message Message, err error)
 ```
 
-NewPluralMessage compiles a counted message from one pattern per category, or returns [InvalidPattern](<#InvalidTag>) or [PluralFormMissing](<#InvalidTag>). The map MUST contain [FormOther](<#FormOther>).
+NewPluralMessage compiles a counted message from one pattern per category, or returns [InvalidPattern](<#InvalidTag>), [InvalidForm](<#InvalidTag>) or [PluralFormMissing](<#InvalidTag>). The map MUST contain [FormOther](<#FormOther>).
 
 It does not check the map against any language's rules — it does not know the language. [NewStore](<#NewStore>) does, and refuses there.
 

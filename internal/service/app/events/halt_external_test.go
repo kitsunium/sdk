@@ -86,7 +86,7 @@ func TestAHaltWithoutTheAuthorityDoesNotStopAnything(t *testing.T) {
 	if report.Halted {
 		t.Fatalf("report: an unauthorised halt stopped the dispatch: %+v", report)
 	}
-	if !kerrs.HasCode(err, svcev.CodeHaltNotPermitted) {
+	if !kerrs.HasCode(err, corev.CodeHaltNotPermitted) {
 		t.Fatalf("HasCode(CodeHaltNotPermitted): got false for %v", err)
 	}
 	if report.Failed != 1 || report.Delivered != 3 {

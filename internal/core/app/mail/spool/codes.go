@@ -1,9 +1,16 @@
-// Package spool — range 0.3.81.* (ADR 0111 service/app/mail/spool block).
+// Package spool — range 0.3.81.* (ADR 0111 service/app/mail/spool block,
+// declared here since ADR 0160).
 package spool
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // range: 0.3.81.0 - 0.3.81.255
+//
+// The range was allocated to internal/service/app/mail/spool, which raises
+// these codes, and it is declared here, in the core mirror of that package's
+// path, so that a domain's codes are never in the service layer (ADR 0160). A
+// code keeps the value its allocation gave it whichever layer declares it, so
+// the layer byte still reads 3.
 
 // CodeSpoolMisconfigured identifies a spool refused at construction — no
 // transport, no attempt budget, a default sender that is not an address — or

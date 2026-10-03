@@ -142,7 +142,7 @@ func TestAFileThatDoesNotParseIsRefusedAtConstruction(t *testing.T) {
 	if renderer != nil {
 		t.Fatal("NewHTML returned a Renderer over an unparseable tree")
 	}
-	if !errors.Is(err, svcview.TemplateParseFailed) {
+	if !errors.Is(err, coreview.TemplateParseFailed) {
 		t.Fatalf("err = %v, want TemplateParseFailed", err)
 	}
 }
@@ -166,7 +166,7 @@ func TestTheEscapingProbeMovesLazyFailuresToBootTime(t *testing.T) {
 			if renderer != nil {
 				t.Fatal("NewHTML accepted a template whose escaping cannot be resolved")
 			}
-			if !errors.Is(err, svcview.TemplateParseFailed) {
+			if !errors.Is(err, coreview.TemplateParseFailed) {
 				t.Fatalf("err = %v, want TemplateParseFailed", err)
 			}
 		})
@@ -209,7 +209,7 @@ func TestASelfRecursiveTemplateIsRefusedAtConstruction(t *testing.T) {
 			if renderer != nil {
 				t.Fatal("NewHTML accepted a template that never returns")
 			}
-			if !errors.Is(err, svcview.TemplateParseFailed) {
+			if !errors.Is(err, coreview.TemplateParseFailed) {
 				t.Fatalf("err = %v, want TemplateParseFailed", err)
 			}
 		})
@@ -224,10 +224,10 @@ func TestASelfRecursiveTemplateIsRefusedAtConstruction(t *testing.T) {
 // different fixes, so they carry different codes.
 func TestASourceFailureIsNotAParseFailure(t *testing.T) {
 	_, err := svcview.NewHTML(coreview.Config{FS: failingFS{}})
-	if !errors.Is(err, svcview.TemplateSourceFailed) {
+	if !errors.Is(err, coreview.TemplateSourceFailed) {
 		t.Fatalf("err = %v, want TemplateSourceFailed", err)
 	}
-	if errors.Is(err, svcview.TemplateParseFailed) {
+	if errors.Is(err, coreview.TemplateParseFailed) {
 		t.Fatal("a source failure was reported as a parse failure")
 	}
 }

@@ -23,7 +23,7 @@ alias to its internal type rather than by reading: `scheduler.Config`,
 `session.FileConfig`, `sql.Config`, `health.Config`, `lifecycle.Config`,
 `queue.ConsumerConfig`, then `health.AskConfig`, `lifecycle.SupervisorConfig`,
 `resilience.RetryConfig`, `secret.FileConfig`, `secret.RotatorConfig`,
-`statemachine.Config` and `mail.SpoolConfig` — none of them deterministically
+`statemachine.Config` and `spool.Config` (`app/mail/spool`) — none of them deterministically
 testable by a downstream consumer without this package. Twenty-one more carry a
 `clock.Clock`, which a two-method double can always satisfy structurally; what
 those lack without this package is a NAME for the type and any way to reach

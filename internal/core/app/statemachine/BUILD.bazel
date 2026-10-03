@@ -5,6 +5,8 @@ package(default_visibility = ["//internal/core:core_consumers"])
 go_library(
     name = "statemachine",
     srcs = [
+        "codes.go",
+        "errors.go",
         "record.go",
         "statemachine.go",
         "trigger.go",

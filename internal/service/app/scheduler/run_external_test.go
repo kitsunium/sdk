@@ -641,7 +641,7 @@ func TestEveryRefusesANonPositivePeriod(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			schedule, err := svcsched.Every(tc.period)
-			if !kerrs.HasCode(err, svcsched.CodeInvalidInterval) {
+			if !kerrs.HasCode(err, coresched.CodeInvalidInterval) {
 				t.Errorf("Every(%s) = %v, want INVALID_INTERVAL", tc.period, err)
 			}
 			if schedule != nil {

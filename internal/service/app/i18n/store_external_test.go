@@ -13,7 +13,7 @@ import (
 func mustTag(t *testing.T, text string) corei18n.TagValue {
 	t.Helper()
 
-	tag, err := corei18n.ParseTag(text)
+	tag, err := svci18n.ParseTag(text)
 	if err != nil {
 		t.Fatalf("ParseTag(%q) = %v", text, err)
 	}
@@ -93,7 +93,7 @@ func TestNewStoreRefusesAnIncompletePluralTranslation(t *testing.T) {
 			}),
 		},
 	})
-	if !errs.HasCode(err, svci18n.CodeTranslationIncomplete) {
+	if !errs.HasCode(err, corei18n.CodeTranslationIncomplete) {
 		t.Fatalf("NewStore = %v, want CodeTranslationIncomplete", err)
 	}
 
@@ -144,7 +144,7 @@ func TestACountedEntryWithOnlyOtherIsStillChecked(t *testing.T) {
 			"cart.items": svci18n.PluralForms(map[string]string{"other": "{n} produktu"}),
 		},
 	})
-	if !errs.HasCode(err, svci18n.CodeTranslationIncomplete) {
+	if !errs.HasCode(err, corei18n.CodeTranslationIncomplete) {
 		t.Fatalf("NewStore = %v, want CodeTranslationIncomplete", err)
 	}
 }
@@ -158,7 +158,7 @@ func TestNewStoreRefusesAnUnsupportedLanguageByName(t *testing.T) {
 		english: englishCatalogue(),
 		czech:   {"greeting": svci18n.Plain("Ahoj")},
 	})
-	if !errs.HasCode(err, svci18n.CodeUnsupportedLanguage) {
+	if !errs.HasCode(err, corei18n.CodeUnsupportedLanguage) {
 		t.Fatalf("NewStore = %v, want CodeUnsupportedLanguage", err)
 	}
 
@@ -183,13 +183,13 @@ func TestNewStoreRefusesAFallbackItCannotServe(t *testing.T) {
 
 	// ADR 0031's refuse half: the SDK does not pick a language.
 	var unset corei18n.TagValue
-	if _, err := svci18n.NewStore(unset, map[corei18n.TagValue]svci18n.Catalogue{english: englishCatalogue()}); !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if _, err := svci18n.NewStore(unset, map[corei18n.TagValue]svci18n.Catalogue{english: englishCatalogue()}); !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Errorf("NewStore with an unset fallback = %v, want CodeCatalogInvalid", err)
 	}
 
 	// A fallback with no catalogue turns every miss into a returned key, and
 	// the wiring fault would look exactly like a missing translation.
-	if _, err := svci18n.NewStore(polish, map[corei18n.TagValue]svci18n.Catalogue{english: englishCatalogue()}); !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if _, err := svci18n.NewStore(polish, map[corei18n.TagValue]svci18n.Catalogue{english: englishCatalogue()}); !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Errorf("NewStore with an unserved fallback = %v, want CodeCatalogInvalid", err)
 	}
 }

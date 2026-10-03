@@ -1,4 +1,5 @@
-// Package events — range 0.2.22.* (ADR 0053 core/app/events block).
+// Package events — ranges 0.2.22.* (ADR 0053 core/app/events block) and
+// 0.3.52.* (ADR 0053 service/app/events block, declared here since ADR 0160).
 package events
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -30,3 +31,21 @@ const CodeListenerPanicked errs.Code = 0x00_02_16_05 // 0.2.22.5
 // dispatch. It is the one code in this range that never reaches a caller: the
 // bus consumes it and reports the halt through DispatchValue instead.
 const CodeHalt errs.Code = 0x00_02_16_06 // 0.2.22.6
+
+// range: 0.3.52.0 - 0.3.52.255
+//
+// The bus's verdicts on a dispatch. The range was allocated to
+// internal/service/app/events, which raises these codes while it publishes,
+// and it is declared here with the registration refusals so that every code
+// of the domain is in one place (ADR 0160). A code keeps the value its
+// allocation gave it whichever layer declares it, so the layer byte still
+// reads 3.
+
+// CodeListenerFailed identifies the bus's own verdict on a listener that
+// returned an error. It travels ALONGSIDE that error, never around it.
+const CodeListenerFailed errs.Code = 0x00_03_34_01 // 0.3.52.1
+
+// CodeHaltNotPermitted identifies a listener that returned the Halt control
+// sentinel without having declared MayHalt at registration. The dispatch was
+// NOT stopped and the refusal was collected.
+const CodeHaltNotPermitted errs.Code = 0x00_03_34_02 // 0.3.52.2

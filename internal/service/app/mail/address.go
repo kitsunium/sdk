@@ -5,16 +5,30 @@ package mail
 import (
 	"strings"
 
+	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
-// RFC 5321 §4.5.3.1 octet ceilings. They are the protocol's, not this domain's:
-// a longer local part or domain is not merely unusual, it is undeliverable, and
-// discovering that after the DATA command has been accepted is worse than
-// discovering it in a constructor.
+// The octet bounds the address and header grammars are written in.
 const (
+	// maxLocalPartOctets and maxDomainOctets are the RFC 5321 §4.5.3.1
+	// ceilings. They are the protocol's, not this domain's: a longer local part
+	// or domain is not merely unusual, it is undeliverable, and discovering
+	// that after the DATA command has been accepted is worse than discovering
+	// it in a constructor.
 	maxLocalPartOctets int = 64
 	maxDomainOctets    int = 255
+	// minPrintableASCII is "!", the first character RFC 5322 §3.6.8 admits in
+	// a field name. It and the three below are named because a bare 0x21 in a
+	// comparison is a number a reader has to look up, and because the same
+	// four bounds are used by three different guards.
+	minPrintableASCII byte = 0x21
+	// maxPrintableASCII is "~", the last one.
+	maxPrintableASCII byte = 0x7E
+	// spaceOctet is the space, which ends an atom rather than belonging to one.
+	spaceOctet byte = 0x20
+	// delOctet is DEL, the first octet above the printable range.
+	delOctet byte = 0x7F
 )
 
 // specials is RFC 5322 §3.2.3's "specials" production. A display name
@@ -41,7 +55,7 @@ const specials string = `()<>[]:;@\,."`
 //     The alternatives are worse than a refusal: punycoding the domain or
 //     stripping accents from the local part both produce an address that
 //     delivers, to somebody else.
-func ValidateAddress(field string, a AddressValue) error {
+func ValidateAddress(field string, a coremail.AddressValue) error {
 	//: the display name reaches a header, so it faces the injection gate first.
 	if nameErr := ValidateHeaderValue(field, a.Name); nameErr != nil {
 		//: HeaderInjection.
@@ -51,7 +65,7 @@ func ValidateAddress(field string, a AddressValue) error {
 	//: reports it as invalid, and From has its own verdict in Validate.
 	if a.Addr == "" {
 		//: the field position is diagnostic, the (empty) value is not secret.
-		return errs.Wrap(InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+		return errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
 	}
 	//: the addr-spec faces the injection gate too — an unvalidated "@" split
 	//: would happily accept a CRLF on either side of it.
@@ -79,14 +93,14 @@ func refuseUnsupportedAddress(field, addr string) error {
 		//: byte-wise: a multi-byte rune has every continuation byte up there.
 		if addr[index] > maxPrintableASCII {
 			//: named, not transliterated.
-			return errs.Wrap(UnsupportedAddress, errs.WrapParams{},
+			return errs.Wrap(coremail.UnsupportedAddress, errs.WrapParams{},
 				errs.String("field", field), errs.String("form", "smtputf8"))
 		}
 	}
 	//: a leading quote is the quoted-string local-part form of RFC 5322 §3.4.1.
 	if strings.HasPrefix(addr, `"`) {
 		//: named, not unquoted.
-		return errs.Wrap(UnsupportedAddress, errs.WrapParams{},
+		return errs.Wrap(coremail.UnsupportedAddress, errs.WrapParams{},
 			errs.String("field", field), errs.String("form", "quoted-local-part"))
 	}
 	//: a carriable form.
@@ -103,14 +117,14 @@ func validateAddrSpec(field, addr string) error {
 	//: a second "@" anywhere after the first is fatal.
 	if at <= 0 || at == len(addr)-1 || strings.IndexByte(addr[at+1:], '@') >= 0 {
 		//: the field position travels, the address does not.
-		return errs.Wrap(InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+		return errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
 	}
 	local, domain := addr[:at], addr[at+1:]
 	//: the protocol's ceilings, checked before anything is sent rather than
 	//: after a server rejects the RCPT.
 	if len(local) > maxLocalPartOctets || len(domain) > maxDomainOctets {
 		//: the length is diagnostic and reveals nothing about the address.
-		return errs.Wrap(InvalidAddress, errs.WrapParams{},
+		return errs.Wrap(coremail.InvalidAddress, errs.WrapParams{},
 			errs.String("field", field), errs.Int("local_octets", len(local)),
 			errs.Int("domain_octets", len(domain)))
 	}
@@ -118,7 +132,7 @@ func validateAddrSpec(field, addr string) error {
 	//: and no empty label at either end or in the middle.
 	if !IsDotAtom(local) || !IsDotAtom(domain) {
 		//: invalid, and the caller's own literal is the only thing they need.
-		return errs.Wrap(InvalidAddress, errs.WrapParams{}, errs.String("field", field))
+		return errs.Wrap(coremail.InvalidAddress, errs.WrapParams{}, errs.String("field", field))
 	}
 	//: a deliverable, unambiguous mailbox.
 	return nil
@@ -131,8 +145,9 @@ func validateAddrSpec(field, addr string) error {
 // fall outside it.
 //
 // It is exported because the grammar is not the address's alone: the left
-// half of a Message-ID (RFC 5322 §3.6.4, id-left) is written in it too, and a
-// package that builds one from an identifier checks the identifier here.
+// half of a Message-ID (RFC 5322 §3.6.4, id-left) is written in it too, and the
+// spool, which builds one from an identifier, checks the identifier here — the
+// grammar's one home (ADR 0141, ADR 0160).
 func IsDotAtom(s string) bool {
 	//: an empty half cannot be an atom; a leading, trailing or doubled dot is
 	//: an empty label, which no MTA accepts. One guard, one verdict.
@@ -168,11 +183,11 @@ func isAtextRun(s string) bool {
 // NeedsQuotedDisplayName reports whether name must be emitted as an RFC 5322
 // §3.2.4 quoted-string rather than as a bare sequence of atoms.
 //
-// It is exported because the composer is in another package and this is a
-// property of the GRAMMAR, not of the writer. Getting it wrong is the classic
-// address bug: an unquoted "Doe, John" makes the comma a list separator, so a
-// message to one person is parsed as a message to two, one of which is not an
-// address at all.
+// It is a property of the GRAMMAR, not of the writer, so it sits with the
+// address guards rather than inside the composer. Getting it wrong is the
+// classic address bug: an unquoted "Doe, John" makes the comma a list
+// separator, so a message to one person is parsed as a message to two, one of
+// which is not an address at all.
 func NeedsQuotedDisplayName(name string) bool {
 	//: an empty name is omitted entirely rather than quoted.
 	if name == "" {

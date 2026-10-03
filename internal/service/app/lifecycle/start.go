@@ -90,7 +90,7 @@ func (l *lifecycle) abort(ctx context.Context, name string, index int, cause err
 // errs.HasCode(err, CodeStartFailed) and the caller's own errors.Is answer.
 func joinStartFailure(name string, index, unwound int, cause error, failures []error) error {
 	parts := make([]error, 0, len(failures)+fixedAggregateParts)
-	parts = append(parts, kerrs.Wrap(StartFailed, kerrs.WrapParams{},
+	parts = append(parts, kerrs.Wrap(corelc.StartFailed, kerrs.WrapParams{},
 		kerrs.String("component", name),
 		kerrs.Int("index", index),
 		kerrs.Int("unwound", unwound)), cause)
@@ -98,7 +98,7 @@ func joinStartFailure(name string, index, unwound int, cause error, failures []e
 	if len(failures) > 0 {
 		//: a broken teardown is a SECOND defect and is reported as one; it
 		//: never replaces the start failure that triggered it.
-		parts = append(parts, kerrs.Wrap(UnwindFailed, kerrs.WrapParams{},
+		parts = append(parts, kerrs.Wrap(corelc.UnwindFailed, kerrs.WrapParams{},
 			kerrs.String("component", name), kerrs.Int("failed", len(failures))))
 		parts = append(parts, failures...)
 	}

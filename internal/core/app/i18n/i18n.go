@@ -45,7 +45,11 @@
 // This package owns the values, the ports and the typed refusals. The plural
 // rule TABLE, the concrete catalogue, the Accept-Language negotiation and the
 // renderer live in internal/service/app/i18n, because a table of thirteen
-// languages is a fact about the world rather than a contract.
+// languages is a fact about the world rather than a contract — and so do the
+// parser of a written tag and the compiler of a pattern's text, because
+// reading a format is a mechanism (ADR 0160). What they produce is assembled
+// here, by [NewTag], [NewPattern] and [NewCompiledMessage], which hold every
+// value to its own invariants whoever builds it.
 package i18n
 
 // PluralRule reports which CLDR category a quantity falls in for ONE language.

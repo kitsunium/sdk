@@ -6,10 +6,12 @@
 The **command-line engine**: it validates a whole command tree once, resolves
 an argument vector against it, renders the help the declarations imply, and
 returns a typed error carrying an exit status. It also holds the one seam to
-`config`. Admitted by **ADR 0065**; the ports and declaration sentinels live
-in `internal/core/app/cli`.
+`config`. Admitted by **ADR 0065**; the ports, the values and every sentinel
+it raises live in `internal/core/app/cli`.
 
-Code range: `0.3.62.*` (ADR 0065).
+Code range: `0.3.62.*` (ADR 0065) — the engine's verdicts, declared in
+`internal/core/app/cli` with the declaration refusals (ADR 0160). This package
+declares no code; it raises the core's sentinels.
 
 ## Contents
 
@@ -20,8 +22,7 @@ Code range: `0.3.62.*` (ADR 0065).
 | `execute.go` | `Execute` — the resolution loop, the parse verdict, the panic guard |
 | `help.go` | the generated help: usage line, sub-command table, `PrintDefaults` |
 | `flagsource.go` | `FlagSource(InvocationValue) *FlagSourceValue` — a `config.Source` over `flag.Visit` |
-| `codes.go` | `Code*` constants — range 0.3.62.* |
-| `errors.go` | `UnknownCommand` / `MissingCommand` / `InvalidFlags` / `CommandPanicked` / `HelpWriteFailed` (`errs.Define`) |
+| `errors.go` | `helpWriteWrap` — the `WrapParams` that raise `HELP_WRITE_FAILED` over the writer's own error (the sentinels are `corecli`'s) |
 | `BENCH.md` | the numbers, and the conclusion that nothing here is worth optimising |
 
 ## Conventions

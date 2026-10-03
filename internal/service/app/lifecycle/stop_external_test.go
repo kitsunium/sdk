@@ -39,7 +39,7 @@ func TestAnExpiredBudgetAbandonsTheComponentAndKeepsGoing(t *testing.T) {
 	clk.Advance(budget)
 
 	err := <-stopped
-	assertHasCode(t, err, svclc.CodeStopTimeout, "an overrun component")
+	assertHasCode(t, err, corelc.CodeStopTimeout, "an overrun component")
 	//: db was stopped AFTER cache was abandoned — the shutdown continued.
 	assertCalls(t, rec.snapshot(), []string{
 		"start:db", "start:cache", "start:http", "stop:http", "stop:db",
@@ -82,7 +82,7 @@ func TestEachComponentGetsItsOwnBudget(t *testing.T) {
 	clk.Advance(budget)
 
 	err := <-stopped
-	assertHasCode(t, err, svclc.CodeStopTimeout, "two overrun components")
+	assertHasCode(t, err, corelc.CodeStopTimeout, "two overrun components")
 	//: db is the proof: a shared budget was exhausted twice over by now, and
 	//: db would never have been asked.
 	assertCalls(t, rec.snapshot(), []string{"start:db", "start:cache", "start:http", "stop:db"})
@@ -154,7 +154,7 @@ func TestTheClampedBudgetIsTheDocumentedOne(t *testing.T) {
 	stopped := stopAsync(lc)
 	<-entered
 	clk.Advance(svclc.DefaultStopTimeout)
-	assertHasCode(t, <-stopped, svclc.CodeStopTimeout, "the clamped budget")
+	assertHasCode(t, <-stopped, corelc.CodeStopTimeout, "the clamped budget")
 	close(release)
 }
 
@@ -225,7 +225,7 @@ func TestAPanickingStopDoesNotAbandonTheRest(t *testing.T) {
 
 	err := lc.Stop(context.Background())
 	assertHasCode(t, err, corelc.CodeComponentPanicked, "a panicking Stop")
-	assertHasCode(t, err, svclc.CodeStopFailed, "the stop verdict")
+	assertHasCode(t, err, corelc.CodeStopFailed, "the stop verdict")
 	//: db was still taken down.
 	assertCalls(t, rec.snapshot(), []string{"start:db", "start:http", "stop:db"})
 }
@@ -265,7 +265,7 @@ func TestTransitionsReportEveryDecisionIncludingTheAbandonedOne(t *testing.T) {
 	if abandoned.Name != "cache" || abandoned.Phase != corelc.PhaseStop || !abandoned.TimedOut {
 		t.Fatalf("the abandoned transition reads %+v", abandoned)
 	}
-	if !kerrs.HasCode(abandoned.Err, svclc.CodeStopTimeout) {
+	if !kerrs.HasCode(abandoned.Err, corelc.CodeStopTimeout) {
 		t.Fatalf("the abandoned transition carries %v, want STOP_TIMEOUT", abandoned.Err)
 	}
 	//: Ended is when the budget expired, which the ManualClock puts exactly

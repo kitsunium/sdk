@@ -350,7 +350,7 @@ func TestBccIsNeverInTheComposedBytes(t *testing.T) {
 	if bytes.Contains(raw, []byte("blind@fake.example")) || bytes.Contains(raw, []byte("Auditor")) {
 		t.Fatalf("the composed message discloses a Bcc recipient:\n%s", raw)
 	}
-	envelope, envelopeErr := msg.Envelope()
+	envelope, envelopeErr := svcmail.Envelope(msg)
 	if envelopeErr != nil {
 		t.Fatalf("Envelope = %v", envelopeErr)
 	}

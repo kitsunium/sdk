@@ -52,7 +52,7 @@ func OneOf[T comparable](allowed ...T) (constraint corevalidation.Constraint[T],
 			return nil
 		}
 		//: outside the set.
-		return one(path, ruleOneOf, message, CodeNotInSet)
+		return one(path, ruleOneOf, message, corevalidation.CodeNotInSet)
 	}, nil
 }
 

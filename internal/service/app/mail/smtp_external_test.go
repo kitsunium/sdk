@@ -66,7 +66,7 @@ func TestSMTPRefusesToDowngradeWhenSTARTTLSIsNotOffered(t *testing.T) {
 		t.Fatalf("NewSMTP = %v, want nil", buildErr)
 	}
 	err := transport.Send(context.Background(), simpleMessage())
-	if !errs.HasCode(err, svcmail.CodeTLSRequired) {
+	if !errs.HasCode(err, coremail.CodeTLSRequired) {
 		t.Fatalf("Send = %v, want CodeTLSRequired — the session must not continue in the clear", err)
 	}
 	for _, line := range server.allLines() {
@@ -119,7 +119,7 @@ func TestSMTPNeverSendsCredentialsOverCleartext(t *testing.T) {
 		cfg.Username, cfg.Password = username, password
 		//: refused at CONSTRUCTION: the fix is one line in the wiring, and the
 		//: transport never exists to be called at three in the morning.
-		if _, buildErr := svcmail.NewSMTP(cfg); !errs.HasCode(buildErr, svcmail.CodeAuthInsecure) {
+		if _, buildErr := svcmail.NewSMTP(cfg); !errs.HasCode(buildErr, coremail.CodeAuthInsecure) {
 			t.Fatalf("NewSMTP(TLSDisabled + credentials) = %v, want CodeAuthInsecure", buildErr)
 		}
 	})
@@ -213,7 +213,7 @@ func TestSMTPRefusesAnUntrustedCertificate(t *testing.T) {
 	if buildErr != nil {
 		t.Fatalf("NewSMTP = %v, want nil", buildErr)
 	}
-	if err := transport.Send(context.Background(), simpleMessage()); !errs.HasCode(err, svcmail.CodeTLSFailed) {
+	if err := transport.Send(context.Background(), simpleMessage()); !errs.HasCode(err, coremail.CodeTLSFailed) {
 		t.Fatalf("Send = %v, want CodeTLSFailed against an untrusted certificate", err)
 	}
 }
@@ -256,7 +256,7 @@ func TestSMTPReportsARefusedRecipient(t *testing.T) {
 		t.Fatalf("NewSMTP = %v, want nil", buildErr)
 	}
 	err := transport.Send(context.Background(), simpleMessage())
-	if !errs.HasCode(err, svcmail.CodeSendRefused) {
+	if !errs.HasCode(err, coremail.CodeSendRefused) {
 		t.Fatalf("Send = %v, want CodeSendRefused", err)
 	}
 	if public := errs.PublicOf(err); strings.Contains(public, "no such user") {
@@ -270,16 +270,16 @@ func TestSMTPRefusesAnInvalidConfiguration(t *testing.T) {
 	t.Parallel()
 	base := svcmail.SMTPConfig{Host: "relay.example", Port: 587, TLS: svcmail.TLSStartTLS}
 	cases := []configCase{
-		{"unset TLS mode", func(c *svcmail.SMTPConfig) { c.TLS = svcmail.TLSUnset }, svcmail.CodeInvalidConfig},
-		{"empty host", func(c *svcmail.SMTPConfig) { c.Host = "" }, svcmail.CodeInvalidConfig},
-		{"port zero", func(c *svcmail.SMTPConfig) { c.Port = 0 }, svcmail.CodeInvalidConfig},
-		{"port too high", func(c *svcmail.SMTPConfig) { c.Port = 70000 }, svcmail.CodeInvalidConfig},
-		{"unknown mode", func(c *svcmail.SMTPConfig) { c.TLS = svcmail.TLSMode(9) }, svcmail.CodeInvalidConfig},
-		{"password without user", func(c *svcmail.SMTPConfig) { c.Password = "x" }, svcmail.CodeInvalidConfig},
+		{"unset TLS mode", func(c *svcmail.SMTPConfig) { c.TLS = svcmail.TLSUnset }, coremail.CodeInvalidConfig},
+		{"empty host", func(c *svcmail.SMTPConfig) { c.Host = "" }, coremail.CodeInvalidConfig},
+		{"port zero", func(c *svcmail.SMTPConfig) { c.Port = 0 }, coremail.CodeInvalidConfig},
+		{"port too high", func(c *svcmail.SMTPConfig) { c.Port = 70000 }, coremail.CodeInvalidConfig},
+		{"unknown mode", func(c *svcmail.SMTPConfig) { c.TLS = svcmail.TLSMode(9) }, coremail.CodeInvalidConfig},
+		{"password without user", func(c *svcmail.SMTPConfig) { c.Password = "x" }, coremail.CodeInvalidConfig},
 		{"credentials without TLS", func(c *svcmail.SMTPConfig) {
 			c.TLS = svcmail.TLSDisabled
 			c.Username = "u"
-		}, svcmail.CodeAuthInsecure},
+		}, coremail.CodeAuthInsecure},
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {

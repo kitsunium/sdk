@@ -18,7 +18,7 @@ import corei18n "github.com/kitsunium/sdk/internal/core/app/i18n"
 // The consequence is stated plainly and is not a defect: a language absent
 // from the table is REFUSED at catalogue construction, by name, with the
 // supported set beside it. It does not silently borrow English's rules. See
-// ADR 0063 §D1 and [UnsupportedLanguage].
+// ADR 0063 §D1 and [corei18n.UnsupportedLanguage].
 //
 // # The one operand that is not implemented
 //

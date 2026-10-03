@@ -19,51 +19,55 @@ const maxPublicRunes int = 120
 // and something an operator would be sorry to find in a log.
 const secret string = "sk-live-4f9a2c8e-EXFILTRATE-ME"
 
-func TestParseTagCanonicalises(t *testing.T) {
+func TestNewTagCanonicalises(t *testing.T) {
 	t.Parallel()
 
 	type tc struct {
-		name                    string
-		in                      string
-		want                    string
-		lang, script, region    string
-		wantParent, wantHasPare string
+		name                          string
+		lang, script, region          string
+		want                          string
+		wantLang, wantScript, wantReg string
+		wantParent                    string
+		hasParent                     bool
 	}
 
+	// The value's own case rule: lowercase language, Titlecase script,
+	// UPPERCASE alpha region. Reading a WRITTEN tag — the separator, the
+	// refusals by name — is internal/service/app/i18n's ParseTag, tested there.
 	cases := []tc{
-		{name: "bare language", in: "fr", want: "fr", lang: "fr"},
-		{name: "uppercased language", in: "FR", want: "fr", lang: "fr"},
-		{name: "three letter language", in: "fil", want: "fil", lang: "fil"},
-		{name: "language and region", in: "pt-br", want: "pt-BR", lang: "pt", region: "BR", wantParent: "pt", wantHasPare: "yes"},
-		{name: "language and script", in: "zh-hant", want: "zh-Hant", lang: "zh", script: "Hant", wantParent: "zh", wantHasPare: "yes"},
-		{name: "all three", in: "ZH-hAnT-tw", want: "zh-Hant-TW", lang: "zh", script: "Hant", region: "TW", wantParent: "zh-Hant", wantHasPare: "yes"},
-		{name: "numeric region", in: "es-419", want: "es-419", lang: "es", region: "419", wantParent: "es", wantHasPare: "yes"},
+		{name: "bare language", lang: "fr", want: "fr", wantLang: "fr"},
+		{name: "uppercased language", lang: "FR", want: "fr", wantLang: "fr"},
+		{name: "three letter language", lang: "fil", want: "fil", wantLang: "fil"},
+		{name: "language and region", lang: "pt", region: "br", want: "pt-BR", wantLang: "pt", wantReg: "BR", wantParent: "pt", hasParent: true},
+		{name: "language and script", lang: "zh", script: "hant", want: "zh-Hant", wantLang: "zh", wantScript: "Hant", wantParent: "zh", hasParent: true},
+		{name: "all three", lang: "ZH", script: "hAnT", region: "tw", want: "zh-Hant-TW", wantLang: "zh", wantScript: "Hant", wantReg: "TW", wantParent: "zh-Hant", hasParent: true},
+		{name: "numeric region", lang: "es", region: "419", want: "es-419", wantLang: "es", wantReg: "419", wantParent: "es", hasParent: true},
 	}
 
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			t.Parallel()
 
-			tag, err := i18n.ParseTag(c.in)
+			tag, err := i18n.NewTag(c.lang, c.script, c.region)
 			if err != nil {
-				t.Fatalf("ParseTag(%q) = %v, want a tag", c.in, err)
+				t.Fatalf("NewTag(%q, %q, %q) = %v, want a tag", c.lang, c.script, c.region, err)
 			}
 			if got := tag.String(); got != c.want {
 				t.Errorf("String() = %q, want %q", got, c.want)
 			}
-			if got := tag.Language(); got != c.lang {
-				t.Errorf("Language() = %q, want %q", got, c.lang)
+			if got := tag.Language(); got != c.wantLang {
+				t.Errorf("Language() = %q, want %q", got, c.wantLang)
 			}
-			if got := tag.Script(); got != c.script {
-				t.Errorf("Script() = %q, want %q", got, c.script)
+			if got := tag.Script(); got != c.wantScript {
+				t.Errorf("Script() = %q, want %q", got, c.wantScript)
 			}
-			if got := tag.Region(); got != c.region {
-				t.Errorf("Region() = %q, want %q", got, c.region)
+			if got := tag.Region(); got != c.wantReg {
+				t.Errorf("Region() = %q, want %q", got, c.wantReg)
 			}
 
 			parent, ok := tag.Parent()
-			if ok != (c.wantHasPare == "yes") {
-				t.Fatalf("Parent() ok = %v, want %v", ok, c.wantHasPare == "yes")
+			if ok != c.hasParent {
+				t.Fatalf("Parent() ok = %v, want %v", ok, c.hasParent)
 			}
 			if ok && parent.String() != c.wantParent {
 				t.Errorf("Parent() = %q, want %q", parent.String(), c.wantParent)
@@ -72,43 +76,33 @@ func TestParseTagCanonicalises(t *testing.T) {
 	}
 }
 
-func TestParseTagRefusesEverythingOutsideTheSubset(t *testing.T) {
+func TestNewTagRefusesASubtagOfTheWrongShape(t *testing.T) {
 	t.Parallel()
 
-	// Each entry names a BCP 47 or RFC 4647 construct the domain refuses on
-	// purpose. A test that only checked "garbage is refused" would pass while
-	// the parser silently DROPPED an extension, which is the failure mode the
-	// refusal list exists to prevent.
-	cases := map[string]string{
-		"empty":                  "",
-		"POSIX separator":        "fr_FR",
-		"POSIX with charset":     "en_US.UTF-8",
-		"extended language":      "zh-cmn-Hans",
-		"variant":                "de-CH-1901",
-		"extension singleton":    "de-DE-u-co-phonebk",
-		"private use":            "x-pig-latin",
-		"private use suffix":     "en-x-custom",
-		"grandfathered":          "i-klingon",
-		"wildcard range":         "*",
-		"extended filter range":  "de-*-DE",
-		"single letter language": "e",
-		"reserved four letter":   "abcd",
-		"trailing separator":     "en-",
-		"leading separator":      "-en",
-		"doubled separator":      "en--US",
-		"region before script":   "fr-FR-Latn",
-		"two regions":            "fr-FR-CA",
-		"digits in language":     "f1",
-		"too long":               "fil-Hant-4199",
+	// Whoever assembles a tag, the value holds its subtags to the subset's
+	// shapes: no path into the type skips them.
+	cases := map[string][3]string{
+		"empty language":         {"", "", ""},
+		"single letter language": {"e", "", ""},
+		"reserved four letter":   {"abcd", "", ""},
+		"digits in language":     {"f1", "", ""},
+		"underscore in language": {"fr_FR", "", ""},
+		"short script":           {"zh", "Han", ""},
+		"digits in script":       {"zh", "H4nt", ""},
+		"long script":            {"zh", "Hantx", ""},
+		"one letter region":      {"fr", "", "F"},
+		"two digit region":       {"fr", "", "12"},
+		"letters as M.49":        {"es", "", "abc"},
+		"four digit region":      {"de", "", "1901"},
 	}
 
-	for name, in := range cases {
+	for name, parts := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			tag, err := i18n.ParseTag(in)
+			tag, err := i18n.NewTag(parts[0], parts[1], parts[2])
 			if err == nil {
-				t.Fatalf("ParseTag(%q) = %q, want a refusal", in, tag)
+				t.Fatalf("NewTag(%q) = %q, want a refusal", parts, tag)
 			}
 			if !errs.HasCode(err, i18n.CodeInvalidTag) {
 				t.Errorf("code = %v, want CodeInvalidTag", err)
@@ -312,13 +306,43 @@ func TestValidateKeyRefusesWhatCannotBeShown(t *testing.T) {
 	}
 }
 
+// compiled builds a message the way the compiler in internal/service/app/i18n
+// hands it over: spans for `other`, and spans per plural category.
+func compiled(t *testing.T, other []i18n.PartValue, plural map[i18n.Form][]i18n.PartValue) i18n.MessageValue {
+	t.Helper()
+
+	body, err := i18n.NewPattern(other)
+	if err != nil {
+		t.Fatalf("NewPattern(other) = %v", err)
+	}
+	var forms []i18n.FormPatternValue
+	for _, form := range []i18n.Form{i18n.FormZero, i18n.FormOne, i18n.FormTwo, i18n.FormFew, i18n.FormMany} {
+		parts, ok := plural[form]
+		if !ok {
+			continue
+		}
+		formBody, formErr := i18n.NewPattern(parts)
+		if formErr != nil {
+			t.Fatalf("NewPattern(%v) = %v", form, formErr)
+		}
+		forms = append(forms, i18n.FormPatternValue{Form: form, Body: formBody})
+	}
+	message, err := i18n.NewCompiledMessage(body, forms)
+	if err != nil {
+		t.Fatalf("NewCompiledMessage = %v", err)
+	}
+	return message
+}
+
+// lit and ph spell one literal span and one placeholder span.
+func lit(text string) i18n.PartValue { return i18n.PartValue{Text: text} }
+
+func ph(name string) i18n.PartValue { return i18n.PartValue{Name: name} }
+
 func TestMessageFormatSubstitutesNamedPlaceholders(t *testing.T) {
 	t.Parallel()
 
-	message, err := i18n.NewMessage("Welcome back, {name}. You have {count} messages.")
-	if err != nil {
-		t.Fatalf("NewMessage = %v", err)
-	}
+	message := compiled(t, []i18n.PartValue{lit("Welcome back, "), ph("name"), lit(". You have "), ph("count"), lit(" messages.")}, nil)
 
 	got, err := message.Format(i18n.FormOther, i18n.Args{"name": "Ada", "count": "3"})
 	if err != nil {
@@ -329,33 +353,13 @@ func TestMessageFormatSubstitutesNamedPlaceholders(t *testing.T) {
 	}
 }
 
-func TestMessageFormatEscapesDoubledBraces(t *testing.T) {
-	t.Parallel()
-
-	message, err := i18n.NewMessage("Use {{name}} to interpolate {name}")
-	if err != nil {
-		t.Fatalf("NewMessage = %v", err)
-	}
-
-	got, err := message.Format(i18n.FormOther, i18n.Args{"name": "Ada"})
-	if err != nil {
-		t.Fatalf("Format = %v", err)
-	}
-	if want := "Use {name} to interpolate Ada"; got != want {
-		t.Errorf("Format = %q, want %q", got, want)
-	}
-}
-
 func TestMessageFormatNeverRescansASubstitutedValue(t *testing.T) {
 	t.Parallel()
 
 	// A value is untrusted. If substitution were a second pass, a user whose
 	// display name is "{admin_token}" would read an argument the caller never
 	// meant to show them. It is one pass, and this is the proof.
-	message, err := i18n.NewMessage("Hello, {name}")
-	if err != nil {
-		t.Fatalf("NewMessage = %v", err)
-	}
+	message := compiled(t, []i18n.PartValue{lit("Hello, "), ph("name")}, nil)
 
 	got, err := message.Format(i18n.FormOther, i18n.Args{
 		"name":        "{admin_token}",
@@ -375,10 +379,7 @@ func TestMessageFormatNeverRescansASubstitutedValue(t *testing.T) {
 func TestMessageFormatRefusesAMissingArgumentAndIgnoresASurplusOne(t *testing.T) {
 	t.Parallel()
 
-	message, err := i18n.NewMessage("Hello, {name}")
-	if err != nil {
-		t.Fatalf("NewMessage = %v", err)
-	}
+	message := compiled(t, []i18n.PartValue{lit("Hello, "), ph("name")}, nil)
 
 	// Missing is a hole in the sentence being rendered now.
 	if _, err := message.Format(i18n.FormOther, i18n.Args{}); !errs.HasCode(err, i18n.CodeArgumentMissing) {
@@ -396,48 +397,84 @@ func TestMessageFormatRefusesAMissingArgumentAndIgnoresASurplusOne(t *testing.T)
 	}
 }
 
-func TestPatternRefusalsAreEachNamed(t *testing.T) {
+func TestNewPatternRefusesSpansThatAreNotAPattern(t *testing.T) {
 	t.Parallel()
 
-	cases := map[string]string{
-		"unclosed placeholder":  "Hello, {name",
-		"unmatched close":       "Hello, name}",
-		"empty placeholder":     "Hello, {}",
-		"format specifier":      "Hello, {name:>10}",
-		"positional index":      "Hello, {0}",
-		"ICU plural construct":  "{n, plural, one{# file} other{# files}}",
-		"filter call":           "Hello, {name|upper}",
-		"space in name":         "Hello, {first name}",
-		"leading digit in name": "Hello, {1st}",
+	// The compiler never produces these; the value refuses them anyway, so no
+	// path into a MessageValue carries a span a render could not honour.
+	cases := map[string][]i18n.PartValue{
+		"a span that is both":       {{Text: "Hello, ", Name: "name"}},
+		"a span that is neither":    {{}},
+		"a name with a space":       {ph("first name")},
+		"a positional name":         {ph("0")},
+		"a format specifier":        {ph("count:02d")},
+		"a name after good spans":   {lit("Hello, "), ph("name"), ph("x|upper")},
+		"an empty placeholder name": {lit("a"), {Name: ""}, lit("b")},
 	}
 
-	for name, text := range cases {
+	for name, parts := range cases {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 
-			if _, err := i18n.NewMessage(text); !errs.HasCode(err, i18n.CodeInvalidPattern) {
-				t.Errorf("NewMessage(%q) = %v, want CodeInvalidPattern", text, err)
+			if _, err := i18n.NewPattern(parts); !errs.HasCode(err, i18n.CodeInvalidPattern) {
+				t.Errorf("NewPattern(%v) = %v, want CodeInvalidPattern", parts, err)
 			}
 		})
 	}
 }
 
-func TestPluralMessageRequiresTheOtherForm(t *testing.T) {
+func TestValidPlaceholderIsTheNameGrammar(t *testing.T) {
 	t.Parallel()
 
-	// `other` is the only category every language defines, so a plural
-	// message without it has no pattern for the quantities no clause matches.
-	_, err := i18n.NewPluralMessage(map[i18n.Form]string{i18n.FormOne: "{n} file"})
-	if !errs.HasCode(err, i18n.CodePluralFormMissing) {
-		t.Fatalf("NewPluralMessage without other = %v, want CodePluralFormMissing", err)
+	for _, name := range []string{"n", "name", "_private", "count2", "A_B_c"} {
+		if !i18n.ValidPlaceholder(name) {
+			t.Errorf("ValidPlaceholder(%q) = false, want true", name)
+		}
+	}
+	for _, name := range []string{"", "1st", "0", "first name", "count:02d", "name|upper", "é"} {
+		if i18n.ValidPlaceholder(name) {
+			t.Errorf("ValidPlaceholder(%q) = true, want false", name)
+		}
+	}
+}
+
+func TestNewCompiledMessageRequiresOtherAndOrderedCategories(t *testing.T) {
+	t.Parallel()
+
+	files, err := i18n.NewPattern([]i18n.PartValue{ph("n"), lit(" files")})
+	if err != nil {
+		t.Fatalf("NewPattern = %v", err)
+	}
+	file, err := i18n.NewPattern([]i18n.PartValue{ph("n"), lit(" file")})
+	if err != nil {
+		t.Fatalf("NewPattern = %v", err)
 	}
 
-	message, err := i18n.NewPluralMessage(map[i18n.Form]string{
-		i18n.FormOne:   "{n} file",
-		i18n.FormOther: "{n} files",
-	})
+	// `other` is the only category every language defines, so a message whose
+	// other body was never compiled has no pattern for most quantities.
+	var never i18n.PatternValue
+	if _, err := i18n.NewCompiledMessage(never, nil); !errs.HasCode(err, i18n.CodePluralFormMissing) {
+		t.Errorf("NewCompiledMessage(zero other) = %v, want CodePluralFormMissing", err)
+	}
+
+	refusals := map[string][]i18n.FormPatternValue{
+		"other as a plural category": {{Form: i18n.FormOther, Body: file}},
+		"a category outside the six": {{Form: i18n.Form(200), Body: file}},
+		"categories out of order":    {{Form: i18n.FormMany, Body: file}, {Form: i18n.FormOne, Body: file}},
+		"a category twice":           {{Form: i18n.FormOne, Body: file}, {Form: i18n.FormOne, Body: file}},
+	}
+	for name, plural := range refusals {
+		if _, err := i18n.NewCompiledMessage(files, plural); !errs.HasCode(err, i18n.CodeInvalidForm) {
+			t.Errorf("%s: NewCompiledMessage = %v, want CodeInvalidForm", name, err)
+		}
+	}
+	if _, err := i18n.NewCompiledMessage(files, []i18n.FormPatternValue{{Form: i18n.FormOne, Body: never}}); !errs.HasCode(err, i18n.CodePluralFormMissing) {
+		t.Errorf("NewCompiledMessage(uncompiled one) = %v, want CodePluralFormMissing", err)
+	}
+
+	message, err := i18n.NewCompiledMessage(files, []i18n.FormPatternValue{{Form: i18n.FormOne, Body: file}})
 	if err != nil {
-		t.Fatalf("NewPluralMessage = %v", err)
+		t.Fatalf("NewCompiledMessage = %v", err)
 	}
 	if !message.IsPlural() {
 		t.Error("IsPlural() = false for a message with two categories")
@@ -448,6 +485,9 @@ func TestPluralMessageRequiresTheOtherForm(t *testing.T) {
 	if message.HasForm(i18n.FormFew) {
 		t.Error("HasForm reported a category the message does not carry")
 	}
+	if plain := compiled(t, []i18n.PartValue{lit("Hello")}, nil); plain.IsPlural() {
+		t.Error("IsPlural() = true for a message with only other")
+	}
 }
 
 func TestFormatRefusesAFormTheMessageDoesNotCarryRatherThanFallingBack(t *testing.T) {
@@ -456,13 +496,8 @@ func TestFormatRefusesAFormTheMessageDoesNotCarryRatherThanFallingBack(t *testin
 	// Falling back to `other` here is the silent wrong sentence the whole
 	// domain is built to refuse: a Polish reader would see a number agreement
 	// error, and nothing in the system would know.
-	message, err := i18n.NewPluralMessage(map[i18n.Form]string{
-		i18n.FormOne:   "{n} plik",
-		i18n.FormOther: "{n} pliku",
-	})
-	if err != nil {
-		t.Fatalf("NewPluralMessage = %v", err)
-	}
+	message := compiled(t, []i18n.PartValue{ph("n"), lit(" pliku")},
+		map[i18n.Form][]i18n.PartValue{i18n.FormOne: {ph("n"), lit(" plik")}})
 
 	got, err := message.Format(i18n.FormFew, i18n.Args{"n": "3"})
 	if !errs.HasCode(err, i18n.CodePluralFormMissing) {
@@ -486,10 +521,7 @@ func TestTheZeroMessageIsNotAnEmptyTranslation(t *testing.T) {
 
 	// A deliberately empty translation, by contrast, renders as empty and
 	// succeeds.
-	empty, err := i18n.NewMessage("")
-	if err != nil {
-		t.Fatalf("NewMessage(\"\") = %v", err)
-	}
+	empty := compiled(t, nil, nil)
 	got, err := empty.Format(i18n.FormOther, nil)
 	if err != nil || got != "" {
 		t.Errorf("empty message Format = %q, %v — want \"\", nil", got, err)
@@ -503,17 +535,9 @@ func TestNoErrorEverNamesAnArgumentValue(t *testing.T) {
 	// pattern is trusted (the developer wrote it) and an argument value is
 	// not (a user typed it). Identifiers may travel in an error; values never
 	// may — not in Error(), not in Public, not in Private, not in a field.
-	plural, err := i18n.NewPluralMessage(map[i18n.Form]string{
-		i18n.FormOne:   "{n} file",
-		i18n.FormOther: "{n} files",
-	})
-	if err != nil {
-		t.Fatalf("NewPluralMessage = %v", err)
-	}
-	plain, err := i18n.NewMessage("Hello, {name}")
-	if err != nil {
-		t.Fatalf("NewMessage = %v", err)
-	}
+	plural := compiled(t, []i18n.PartValue{ph("n"), lit(" files")},
+		map[i18n.Form][]i18n.PartValue{i18n.FormOne: {ph("n"), lit(" file")}})
+	plain := compiled(t, []i18n.PartValue{lit("Hello, "), ph("name")}, nil)
 
 	// Every error path in this package that can be reached with an Args map
 	// holding a secret.
@@ -568,6 +592,12 @@ func TestEveryPublicIsWireSafe(t *testing.T) {
 		"PluralFormMissing": i18n.PluralFormMissing,
 		"InvalidCount":      i18n.InvalidCount,
 		"InvalidForm":       i18n.InvalidForm,
+		// The five a concrete catalogue raises, declared here since ADR 0160.
+		"UnsupportedLanguage":   i18n.UnsupportedLanguage,
+		"CatalogInvalid":        i18n.CatalogInvalid,
+		"CatalogLoadFailed":     i18n.CatalogLoadFailed,
+		"TranslationIncomplete": i18n.TranslationIncomplete,
+		"NegotiationEmpty":      i18n.NegotiationEmpty,
 	}
 
 	for name, sentinel := range sentinels {

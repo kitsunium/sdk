@@ -6,7 +6,6 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
-	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 )
 
 // This file carries NO build constraint, because the two halves of the
@@ -37,7 +36,7 @@ func assertRefused(t *testing.T, what string, lease corelock.Lease, held bool, e
 	}
 	//: LOCK_BACKEND_FAILED would tell an operator to retry, which is the
 	//: single wrong response to a deliberate substitution.
-	if !errs.HasCode(err, svclock.CodeLockPathRedirected) {
+	if !errs.HasCode(err, corelock.CodeLockPathRedirected) {
 		t.Fatalf("TryAcquire over a %s = %v, want LOCK_PATH_REDIRECTED", what, err)
 	}
 }

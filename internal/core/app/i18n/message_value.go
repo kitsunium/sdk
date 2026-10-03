@@ -1,12 +1,7 @@
 // Package i18n — the message key, the compiled message, and its rendering.
 package i18n
 
-import (
-	"maps"
-	"slices"
-
-	"github.com/kitsunium/sdk/internal/kernel/errs"
-)
+import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // The two ASCII bounds that make a key unsafe to print.
 const (
@@ -74,116 +69,81 @@ func ValidateKey(key Key) error {
 // comment on why the plural rules follow the message.
 type MessageValue struct {
 	// other is the mandatory FormOther pattern.
-	other pattern
+	other PatternValue
 	// plural holds the remaining categories, ascending by Form. It is nil for
 	// a message with no plural forms, which is the common case and the one
 	// worth keeping small.
-	plural []formPattern
+	plural []FormPatternValue
 }
 
-// NewMessage compiles a message with no plural forms, or returns
-// [InvalidPattern].
+// FormPatternValue pairs a CLDR category with the compiled body that spells
+// it, as a plural message carries it.
 //
-// The pattern is text with named placeholders: "Welcome back, {name}". A
-// literal brace is written "{{" or "}}". Everything else about the syntax is
-// refused BY NAME — see [compilePattern].
-func NewMessage(text string) (message MessageValue, err error) {
-	//: compile once, here, so no render ever parses.
-	body, err := compilePattern(text)
-	//: a malformed pattern is a catalogue defect, refused at load.
-	if err != nil {
-		//: InvalidPattern, already carrying the position.
-		return MessageValue{}, err
-	}
-	//: a message with no plural forms carries only FormOther.
-	return MessageValue{other: body}, nil
+// It is a slice element rather than a map entry because a message carries at
+// most five of these: a linear scan over five values in one cache line beats a
+// hash, and it allocates nothing on the render path.
+type FormPatternValue struct {
+	// Form is the category. [FormOther] is never one of these: a message
+	// carries its `other` body out of line, and [NewCompiledMessage] refuses
+	// it here.
+	Form Form
+	// Body is the compiled pattern for the category.
+	Body PatternValue
 }
 
-// NewPluralMessage compiles a message with one pattern per CLDR category, or
-// returns [InvalidPattern] or [PluralFormMissing].
+// NewCompiledMessage assembles a [MessageValue] from bodies already compiled,
+// or returns [PluralFormMissing] or [InvalidForm].
 //
-// forms MUST contain [FormOther]: it is the category every language defines
-// and the only one a message is required to carry. A map without it is
-// refused here rather than at render time, because at render time the caller
-// is a request and the only available repair is to show something wrong.
+// other is the [FormOther] body every message carries — a message whose
+// other was never compiled is refused, because `other` is the category every
+// language defines and the only one a message is required to carry. plural
+// holds the remaining categories, ascending and distinct, and is empty for a
+// message with no plural forms. plural is RETAINED, not copied, like the
+// spans [NewPattern] keeps.
 //
-// This constructor does NOT check the map against a language's rules — it does
-// not know the language. Completeness against the rules of the language a
-// catalogue registers the message under is checked by
-// internal/service/app/i18n.NewStore, which does. Both checks are at load time;
-// neither is at render time.
-func NewPluralMessage(forms map[Form]string) (message MessageValue, err error) {
+// It compiles nothing: reading a pattern's text is the compiler's, in
+// internal/service/app/i18n, whose NewMessage and NewPluralMessage call this
+// (ADR 0160: a wire format is a mechanism). And it does NOT check the
+// categories against a language's rules — it does not know the language.
+// Completeness against the rules of the language a catalogue registers the
+// message under is checked by internal/service/app/i18n.NewStore, which does.
+func NewCompiledMessage(other PatternValue, plural []FormPatternValue) (message MessageValue, err error) {
 	//: the catch-all category is mandatory.
-	text, ok := forms[FormOther]
-	//: a plural message without `other` has no pattern for the quantities no
-	//: other clause matches, which in most languages is nearly all of them.
-	if !ok {
-		//: refuse at construction.
+	if !other.set {
+		//: refuse at construction rather than render a blank later.
 		return MessageValue{}, errs.Wrap(PluralFormMissing, errs.WrapParams{},
-			errs.String("form", FormOther.String()), errs.String("detail", "a plural message must carry the other form"))
+			errs.String("form", FormOther.String()), errs.String("detail", "a message must carry the other form"))
 	}
-	//: compile the mandatory pattern first, so its position is reported first.
-	other, err := compilePattern(text)
-	//: a malformed `other` pattern stops the compile.
-	if err != nil {
-		//: InvalidPattern.
-		return MessageValue{}, err
+	//: every other category: a real one, in a fixed order, compiled.
+	for index, entry := range plural {
+		//: `other` is carried out of line, and a value outside the six cannot
+		//: be asked for by any rule.
+		if entry.Form == FormOther || !entry.Form.Valid() {
+			//: refuse rather than store a category no rule can ask for.
+			return MessageValue{}, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", entry.Form.String()))
+		}
+		//: ascending and distinct, so two identical catalogues compile to
+		//: identical messages and the scan in patternFor meets each once.
+		if index > 0 && entry.Form <= plural[index-1].Form {
+			//: the category is CLDR vocabulary, not data.
+			return MessageValue{}, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", entry.Form.String()),
+				errs.String("detail", "the plural categories must be ascending and distinct"))
+		}
+		//: a category whose body was never compiled would render nothing.
+		if !entry.Body.set {
+			//: the category travels as a field.
+			return MessageValue{}, errs.Wrap(PluralFormMissing, errs.WrapParams{}, errs.String("form", entry.Form.String()),
+				errs.String("detail", "the category's pattern was never compiled"))
+		}
 	}
-	//: compile the remaining categories in a deterministic order.
-	plural, err := compileForms(forms)
-	//: a malformed sibling pattern stops it too.
-	if err != nil {
-		//: InvalidPattern or InvalidForm.
-		return MessageValue{}, err
+	//: nil, deliberately, for a message with only `other`: a nil slice is one
+	//: word, an empty one is three.
+	if len(plural) == 0 {
+		//: the common case.
+		return MessageValue{other: other}, nil
 	}
 	//: a compiled plural message.
 	return MessageValue{other: other, plural: plural}, nil
-}
-
-// compileForms compiles every category in forms except [FormOther], sorted
-// ascending so the stored order does not depend on Go's map iteration and two
-// identical catalogues compile to identical messages.
-func compileForms(forms map[Form]string) (compiled []formPattern, err error) {
-	//: nothing but `other` means no plural slice at all — the common case.
-	if len(forms) <= 1 {
-		//: nil, deliberately: a nil slice is one word, an empty one is three.
-		return nil, nil
-	}
-	//: a stable, value-ordered layout, independent of map iteration.
-	kinds := slices.Sorted(maps.Keys(forms))
-	//: compile in that order.
-	return compileSorted(kinds, forms)
-}
-
-// compileSorted compiles the already-ordered categories, skipping the
-// mandatory one its caller has already compiled.
-func compileSorted(kinds []Form, forms map[Form]string) (compiled []formPattern, err error) {
-	//: at most one entry per category, minus the mandatory one.
-	compiled = make([]formPattern, 0, len(kinds)-1)
-	//: in the fixed order.
-	for _, kind := range kinds {
-		//: `other` is already compiled by the caller.
-		if kind == FormOther {
-			//: skip.
-			continue
-		}
-		//: an out-of-range Form cannot be honoured.
-		if !kind.Valid() {
-			//: refuse rather than store a category no rule can ask for.
-			return nil, errs.Wrap(InvalidForm, errs.WrapParams{}, errs.String("form", kind.String()))
-		}
-		//: compile this category's pattern.
-		body, compileErr := compilePattern(forms[kind])
-		//: a malformed pattern is a catalogue defect.
-		if compileErr != nil {
-			//: InvalidPattern, carrying the position.
-			return nil, compileErr
-		}
-		//: store it.
-		compiled = append(compiled, formPattern{form: kind, body: body})
-	}
-	//: the compiled categories.
-	return compiled, nil
 }
 
 // Format renders the pattern registered for form, substituting args.
@@ -222,7 +182,7 @@ func (m MessageValue) Format(form Form, args Args) (rendered string, err error) 
 }
 
 // patternFor resolves a category to its compiled body.
-func (m MessageValue) patternFor(form Form) (body pattern, ok bool) {
+func (m MessageValue) patternFor(form Form) (body PatternValue, ok bool) {
 	//: the mandatory category is stored out of line, so it costs no scan.
 	if form == FormOther {
 		//: `set` is false for the zero message, which carries nothing.
@@ -231,13 +191,13 @@ func (m MessageValue) patternFor(form Form) (body pattern, ok bool) {
 	//: at most five entries — a scan beats a map and allocates nothing.
 	for _, candidate := range m.plural {
 		//: exact category match.
-		if candidate.form == form {
+		if candidate.Form == form {
 			//: found.
-			return candidate.body, true
+			return candidate.Body, true
 		}
 	}
 	//: the message does not carry this category.
-	return pattern{}, false
+	return PatternValue{}, false
 }
 
 // HasForm reports whether the message carries a pattern for form.

@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coresched "github.com/kitsunium/sdk/internal/core/app/scheduler"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 	svcsched "github.com/kitsunium/sdk/internal/service/app/scheduler"
 )
@@ -73,34 +74,34 @@ func TestParseRefusedExpressions(t *testing.T) {
 		expr string
 		code kerrs.Code
 	}{
-		{"empty", "", svcsched.CodeInvalidExpression},
-		{"blank", "   ", svcsched.CodeInvalidExpression},
-		{"four fields", "* * * *", svcsched.CodeInvalidExpression},
-		{"six fields with seconds", "0 0 0 12 * *", svcsched.CodeUnsupportedSyntax},
-		{"seven fields with year", "0 0 12 * * * 2031", svcsched.CodeUnsupportedSyntax},
-		{"reboot macro", "@reboot", svcsched.CodeUnsupportedSyntax},
-		{"every macro", "@every 5m", svcsched.CodeUnsupportedSyntax},
-		{"unknown macro", "@fortnightly", svcsched.CodeUnsupportedSyntax},
-		{"quartz last day", "0 0 L * *", svcsched.CodeUnsupportedSyntax},
-		{"quartz nearest weekday", "0 0 15W * *", svcsched.CodeUnsupportedSyntax},
-		{"quartz nth weekday", "0 0 * * MON#2", svcsched.CodeUnsupportedSyntax},
-		{"quartz no specific value", "0 0 ? * MON", svcsched.CodeUnsupportedSyntax},
-		{"step over a single value", "5/10 * * * *", svcsched.CodeUnsupportedSyntax},
-		{"minute out of range", "60 * * * *", svcsched.CodeInvalidExpression},
-		{"hour out of range", "* 24 * * *", svcsched.CodeInvalidExpression},
-		{"day zero", "0 0 0 * *", svcsched.CodeInvalidExpression},
-		{"month out of range", "0 0 * 13 *", svcsched.CodeInvalidExpression},
-		{"sunday as seven", "0 0 * * 7", svcsched.CodeInvalidExpression},
-		{"inverted range", "10-5 * * * *", svcsched.CodeInvalidExpression},
-		{"zero step", "*/0 * * * *", svcsched.CodeInvalidExpression},
-		{"negative step", "*/-1 * * * *", svcsched.CodeInvalidExpression},
-		{"non numeric", "abc * * * *", svcsched.CodeInvalidExpression},
-		{"unknown name", "0 0 * * FUNDAY", svcsched.CodeInvalidExpression},
-		{"empty list item", "0,,5 * * * *", svcsched.CodeInvalidExpression},
-		{"dangling range", "5- * * * *", svcsched.CodeInvalidExpression},
-		{"february thirtieth", "0 0 30 2 *", svcsched.CodeUnreachableSchedule},
-		{"april thirty first", "0 0 31 4 *", svcsched.CodeUnreachableSchedule},
-		{"thirty first of every short month", "0 0 31 2,4,6,9,11 *", svcsched.CodeUnreachableSchedule},
+		{"empty", "", coresched.CodeInvalidExpression},
+		{"blank", "   ", coresched.CodeInvalidExpression},
+		{"four fields", "* * * *", coresched.CodeInvalidExpression},
+		{"six fields with seconds", "0 0 0 12 * *", coresched.CodeUnsupportedSyntax},
+		{"seven fields with year", "0 0 12 * * * 2031", coresched.CodeUnsupportedSyntax},
+		{"reboot macro", "@reboot", coresched.CodeUnsupportedSyntax},
+		{"every macro", "@every 5m", coresched.CodeUnsupportedSyntax},
+		{"unknown macro", "@fortnightly", coresched.CodeUnsupportedSyntax},
+		{"quartz last day", "0 0 L * *", coresched.CodeUnsupportedSyntax},
+		{"quartz nearest weekday", "0 0 15W * *", coresched.CodeUnsupportedSyntax},
+		{"quartz nth weekday", "0 0 * * MON#2", coresched.CodeUnsupportedSyntax},
+		{"quartz no specific value", "0 0 ? * MON", coresched.CodeUnsupportedSyntax},
+		{"step over a single value", "5/10 * * * *", coresched.CodeUnsupportedSyntax},
+		{"minute out of range", "60 * * * *", coresched.CodeInvalidExpression},
+		{"hour out of range", "* 24 * * *", coresched.CodeInvalidExpression},
+		{"day zero", "0 0 0 * *", coresched.CodeInvalidExpression},
+		{"month out of range", "0 0 * 13 *", coresched.CodeInvalidExpression},
+		{"sunday as seven", "0 0 * * 7", coresched.CodeInvalidExpression},
+		{"inverted range", "10-5 * * * *", coresched.CodeInvalidExpression},
+		{"zero step", "*/0 * * * *", coresched.CodeInvalidExpression},
+		{"negative step", "*/-1 * * * *", coresched.CodeInvalidExpression},
+		{"non numeric", "abc * * * *", coresched.CodeInvalidExpression},
+		{"unknown name", "0 0 * * FUNDAY", coresched.CodeInvalidExpression},
+		{"empty list item", "0,,5 * * * *", coresched.CodeInvalidExpression},
+		{"dangling range", "5- * * * *", coresched.CodeInvalidExpression},
+		{"february thirtieth", "0 0 30 2 *", coresched.CodeUnreachableSchedule},
+		{"april thirty first", "0 0 31 4 *", coresched.CodeUnreachableSchedule},
+		{"thirty first of every short month", "0 0 31 2,4,6,9,11 *", coresched.CodeUnreachableSchedule},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -131,7 +132,7 @@ func TestParseInLocationRefusesNilLocation(t *testing.T) {
 	if schedule != nil {
 		t.Errorf("ParseInLocation returned a non-nil Schedule alongside its error")
 	}
-	if !kerrs.HasCode(err, svcsched.CodeInvalidLocation) {
+	if !kerrs.HasCode(err, coresched.CodeInvalidLocation) {
 		t.Errorf("err = %v; want INVALID_LOCATION", err)
 	}
 }

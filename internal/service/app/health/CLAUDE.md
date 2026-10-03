@@ -21,7 +21,6 @@ panic recovery, the staleness bound, the drain latch, and the HTTP handler
 | `component.go` | the `lifecycle` bridge; a not-serving startup report with no error to join still fails `Start` (`STARTUP_PENDING`) |
 | `notify.go` | opt-in `sd_notify`, delegating to `service/proc/systemd/notify`; a datagram counts as announced only once DELIVERED, decided and sent under one lock; the STATUS line follows the readiness verdict into a drain (`TestDrainingIsAnnouncedToTheSupervisor`), and a serving verdict measured before `Drain` is never announced after it — the phase is read under the same lock (`TestAVerdictMeasuredBeforeTheDrainIsNotAnnouncedAfterIt`). The send is BOUNDED by the probe's own deadline, else by the budget a check gets (ADR 0072), which is what makes serialising it affordable: an unbounded write to a deaf supervisor held that lock and stopped every later probe from answering |
 | `config.go` | timeouts and staleness, with their ADR 0031 clamps and refusals |
-| `codes.go` / `errors.go` | the `0.3.59.*` codes and their ten sentinels — see §Sentinels |
 | `ask.go` | `Ask` / `AskConfig` — the CLIENT half of a probe (ADR 0131): the listen address mapped to the loopback of its family, one GET over a fresh transport that never proxies, keeps nothing alive and follows no redirect, the budget armed on the injected clock and ended by a cancel whose cause is `AskTimeout`, at most `MaxAskDrainBytes` of the body read and closed, never a byte of it in an error. A drain the bound cut short — a process that sent 200 and then stalled — is `ASK_TIMEOUT` with status 0, not a readiness (found by review: the first version reported it ready; `TestAStalledBodyIsATimeoutNotAnAnswer`) |
 
 ## The three behaviours worth knowing
@@ -54,6 +53,10 @@ succeeds despite the cancellation keeps its success: a late answer is not a
 wrong one.
 
 ## Sentinels (`0.3.59.*`)
+
+The engine's ten verdicts. Their codes and sentinels are declared in
+`internal/core/app/health` with the registration refusals (ADR 0160); this
+package declares no code and raises the core's.
 
 `CHECK_FAILED` · `CHECK_TIMEOUT` · `STALE_CACHE_WINDOW` · `STARTUP_PENDING` ·
 `DRAINING` · `NOTIFY_FAILED` · `ASK_MISCONFIGURED` · `ASK_UNREACHABLE` ·

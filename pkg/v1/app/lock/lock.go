@@ -208,23 +208,23 @@ var (
 	// counter, or it is the one counter with no successor. Nothing is
 	// repaired: a restarted counter, or a wrapped one, reissues numbers the
 	// protected resource has already accepted.
-	LockFenceCorrupt = svclock.LockFenceCorrupt
+	LockFenceCorrupt = corelock.LockFenceCorrupt
 
 	// LockDirectoryUnsafe is returned by [NewFileLocker] for a world-writable,
 	// non-sticky directory, whose lock files any account could replace with a
 	// fresh inode — splitting one lock into two.
-	LockDirectoryUnsafe = svclock.LockDirectoryUnsafe
+	LockDirectoryUnsafe = corelock.LockDirectoryUnsafe
 
 	// LockKeepaliveLost is the context CAUSE published by [Keepalive] when a
 	// renewal fails.
-	LockKeepaliveLost = svclock.LockKeepaliveLost
+	LockKeepaliveLost = corelock.LockKeepaliveLost
 
 	// LockPathRedirected is returned by [NewFileLocker] when the lock path is
 	// an indirection rather than a file — a symbolic link on Unix, a reparse
 	// point on Windows. The lock and its fencing ledger would land on a file
 	// chosen by whoever planted it, so two processes would hold "the same"
 	// lock over different inodes with nothing reported on either side.
-	LockPathRedirected = svclock.LockPathRedirected
+	LockPathRedirected = corelock.LockPathRedirected
 
 	// LockFileReplaced is returned by Acquire, and by a held lease's Extend,
 	// when the lock file is no longer the file its name leads to: the entry
@@ -242,7 +242,7 @@ var (
 	// over the new file while the old one is still locked. The prevention is
 	// a lock directory no other account can write, which is what
 	// [NewFileLocker] creates when the directory is absent.
-	LockFileReplaced = svclock.LockFileReplaced
+	LockFileReplaced = corelock.LockFileReplaced
 )
 
 // NewMemory returns a [Locker] whose leases live in this process and DO

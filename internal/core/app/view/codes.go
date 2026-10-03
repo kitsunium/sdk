@@ -1,4 +1,5 @@
-// Package view — range 0.2.27.* (ADR 0058 core/app/view block).
+// Package view — ranges 0.2.27.* (ADR 0058 core/app/view block) and 0.3.57.*
+// (ADR 0058 service/app/view block, declared here since ADR 0160).
 package view
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -70,3 +71,31 @@ const CodeEngineInvalid errs.Code = 0x00_02_1B_07 // 0.2.27.7
 // matters more here than in a codec registry: silently letting the second
 // registration win could swap the engine that escapes for one that does not.
 const CodeDuplicateEngine errs.Code = 0x00_02_1B_08 // 0.2.27.8
+
+// range: 0.3.57.0 - 0.3.57.255
+//
+// The html/template engine's construction failures. The range was allocated to
+// internal/service/app/view, which raises these codes while it reads and
+// parses a template tree, and it is declared here with the port's so that
+// every code of the domain is in one place (ADR 0160). A code keeps the value
+// its allocation gave it whichever layer declares it, so the layer byte still
+// reads 3.
+
+// CodeTemplateSourceFailed identifies a template tree that could not be READ:
+// a walk that failed, a file that could not be opened.
+//
+// It is kept distinct from a parse failure because the two have different
+// operators and different fixes. A source failure is usually a packaging bug —
+// an embed pattern that matched nothing, an os.DirFS pointed at a path that
+// does not exist in the container — and it is answered by looking at the
+// build, not at the template.
+const CodeTemplateSourceFailed errs.Code = 0x00_03_39_01 // 0.3.57.1
+
+// CodeTemplateParseFailed identifies a template file html/template refused to
+// parse, or one it could not resolve a contextual escaping plan for.
+//
+// Both are construction-time on purpose. html/template resolves escaping
+// lazily, at a template's first execution, so an {{if}} whose branches end in
+// different contexts or a {{template}} naming something absent would otherwise
+// surface as a 500 on whichever request first reached that page.
+const CodeTemplateParseFailed errs.Code = 0x00_03_39_02 // 0.3.57.2

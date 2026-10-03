@@ -45,6 +45,7 @@ import (
 	"log"
 	"path/filepath"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -127,7 +128,7 @@ func noteUninspected(container, observed string) {
 	log.Printf("cannot read the access control list of %s (%s); an indirection planted there would not be refused", container, observed)
 }
 
-// parentRedirected builds the [LockPathRedirected] refusal for a component
+// parentRedirected builds the [corelock.LockPathRedirected] refusal for a component
 // ABOVE the lock file.
 //
 // It names both paths on purpose. The configured directory is what the
@@ -138,7 +139,7 @@ func parentRedirected(dir string, step pathchain.StepValue, observed string) err
 	//: the same sentinel the final component raises, because it is the same
 	//: condition and the same remedy: a human looks at the directory, and no
 	//: retry helps.
-	return kerrs.Wrap(LockPathRedirected, kerrs.WrapParams{},
+	return kerrs.Wrap(corelock.LockPathRedirected, kerrs.WrapParams{},
 		kerrs.String("path", step.Path),
 		kerrs.String("dir", dir),
 		kerrs.String("kind", kindIndirection),

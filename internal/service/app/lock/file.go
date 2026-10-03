@@ -72,7 +72,7 @@ type fileLocker struct {
 // It refuses, at construction rather than at first use: a configuration it
 // cannot honour ([corelock.LockMisconfigured]), a platform without flock(2)
 // ([coreproc.UnsupportedPlatform]), and a directory whose lock files any
-// account could replace ([LockDirectoryUnsafe]).
+// account could replace ([corelock.LockDirectoryUnsafe]).
 func NewFileLocker(cfg FileConfig) (locker corelock.Locker, err error) {
 	//: the directory and the poll interval are checked before anything
 	//: touches disk.

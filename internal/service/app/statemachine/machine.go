@@ -70,15 +70,15 @@ type StateMachine[E any, S comparable] struct {
 // the only moment the machine reads the whole store.
 //
 // A definition with problems is refused with every problem joined, a missing
-// Initial as [InitialMissing]; a nil or storeless cfg with [StoreMissing]; a
+// Initial as [corestm.InitialMissing]; a nil or storeless cfg with [corestm.StoreMissing]; a
 // journal that cannot be loaded, or a store that cannot be read, with
-// [JournalFailed] or [StoreFailed]. The machine keeps its own copy of def,
+// [corestm.JournalFailed] or [corestm.StoreFailed]. The machine keeps its own copy of def,
 // and reads cfg once.
 func NewStateMachine[E any, S comparable](ctx context.Context, def *MachineSpec[E, S], cfg *Config[E, S]) (*StateMachine[E, S], error) {
 	//: a nil definition has nothing to run.
 	if def == nil {
 		//: named like every other missing function.
-		return nil, errs.Wrap(FunctionMissing, errs.WrapParams{}, errs.String("function", "definition"))
+		return nil, errs.Wrap(corestm.FunctionMissing, errs.WrapParams{}, errs.String("function", "definition"))
 	}
 	//: a nil configuration is the zero one, which names no store.
 	if cfg == nil {
@@ -107,11 +107,11 @@ func checked[E any, S comparable](def *MachineSpec[E, S], cfg *Config[E, S]) []e
 	problems := def.Problems()
 	//: Initial is only a problem once the declaration is complete.
 	if _, set := def.InitialState(); !set {
-		problems = append(problems, InitialMissing)
+		problems = append(problems, corestm.InitialMissing)
 	}
 	//: a store is required.
 	if cfg.Store == nil {
-		problems = append(problems, StoreMissing)
+		problems = append(problems, corestm.StoreMissing)
 	}
 	//: every problem found.
 	return problems
@@ -251,6 +251,6 @@ func (m *StateMachine[E, S]) Records() []corestm.RecordValue[S] {
 func storeFailure(err error, operation string) error {
 	//: origin wins when the store's error is already an SDK error.
 	return errs.Wrap(err, errs.WrapParams{
-		Code: CodeStoreFailed, Reason: "STORE_FAILED", Public: StoreFailed.Public(), Private: StoreFailed.Private(),
+		Code: corestm.CodeStoreFailed, Reason: "STORE_FAILED", Public: corestm.StoreFailed.Public(), Private: corestm.StoreFailed.Private(),
 	}, errs.String("operation", operation))
 }

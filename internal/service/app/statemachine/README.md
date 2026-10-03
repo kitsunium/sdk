@@ -25,6 +25,9 @@ machine's own mutex. The loop keeps an agenda — one heap entry per entity — 
 sleeps until the next transition due or a write: O(log N) to the next due where
 re-reading the store is O(N) (see `BENCH.md`).
 
+The engine's codes, declared with their sentinels in
+`internal/core/app/statemachine` (ADR 0160) and raised here:
+
 | Code | Reason | When |
 |---|---|---|
 | `0.3.88.1` | `TRANSITION_REFUSED` | no event transition by that name leaves the state (409) |

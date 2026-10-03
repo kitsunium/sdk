@@ -60,7 +60,7 @@ func (h *health) announce(ctx context.Context, status corehealth.Status) {
 	//: NOTIFY_FAILED with whatever systemd/notify reported, and the hook is the
 	//: caller's own log, where both halves belong. It is called after the lock
 	//: is released, so a hook that probes again cannot deadlock on it.
-	h.cfg.OnNotifyError(errors.Join(kerrs.Wrap(NotifyFailed, kerrs.WrapParams{},
+	h.cfg.OnNotifyError(errors.Join(kerrs.Wrap(corehealth.NotifyFailed, kerrs.WrapParams{},
 		kerrs.String("state", state)), err))
 }
 

@@ -167,7 +167,7 @@ func TestAFailureCarriesBothTheVerdictAndTheCause(t *testing.T) {
 
 	_, err := bus.Publish(context.Background(), orderPlaced{id: 1})
 
-	if !kerrs.HasCode(err, svcev.CodeListenerFailed) {
+	if !kerrs.HasCode(err, corev.CodeListenerFailed) {
 		t.Fatalf("HasCode(CodeListenerFailed): got false for %v", err)
 	}
 	if !errors.Is(err, errDisk) {

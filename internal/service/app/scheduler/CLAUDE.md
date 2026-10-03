@@ -7,8 +7,10 @@ cron parser, a fixed-interval `Every` schedule, and the engine that fires
 `core/app/scheduler.Job` values on a `core/app/scheduler.Schedule`.
 
 Code range: `0.3.43.*` — the **parser's** failure modes. The engine emits core's
-`0.2.12.*` sentinels. The split is the layer boundary: `core` must not know what
-a cron expression is, so cron's refusals cannot live there.
+`0.2.12.*` sentinels. Both ranges are DECLARED in `core/app/scheduler` since
+ADR 0160 — every code of a domain lives in its core — but the grammar does
+not move with them: `core` still knows nothing of what a cron expression is,
+and only this package's parser raises the `0.3.43.*` refusals.
 
 ## Contents
 
@@ -22,7 +24,7 @@ a cron expression is, so cron's refusals cannot live there.
 | `config.go` | `Config` — `Clock clock.Timed` + `OnResult func(ResultValue)` |
 | `entry.go` | `entry` — per-registration run state, `arm`, `due` (the missed-deadline walk) |
 | `run.go` | `Run`, the wait/fire/re-arm loop, `fire`, `run`, `invoke` (panic recovery) |
-| `codes.go` / `errors.go` / `reject.go` | the `0.3.43.*` block, its sentinels, and the refusal helpers |
+| `reject.go` | the refusal helpers that raise the core's `0.3.43.*` sentinels |
 
 ## The accepted cron dialect
 

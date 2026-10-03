@@ -42,7 +42,7 @@ const minFoldTail int = 2
 // One thing this function does NOT do is protect against injection. Handed a
 // CRLF, mime.QEncoding.Encode returns "=0D=0A" — a deliverable header carrying
 // a value the caller never wrote, reported as success. Every value reaching
-// here has already passed coremail.ValidateHeaderValue, and writeHeader checks
+// here has already passed ValidateHeaderValue, and writeHeader checks
 // again at the point of writing.
 func encodeUnstructured(value string) string {
 	//: Q over B: for a mostly-ASCII value Q leaves the ASCII readable, and for
@@ -75,7 +75,7 @@ func formatAddress(a coremail.AddressValue) string {
 		return encoded + " <" + a.Addr + ">"
 	}
 	//: ASCII with a special must become a quoted-string or it becomes syntax.
-	if coremail.NeedsQuotedDisplayName(a.Name) {
+	if NeedsQuotedDisplayName(a.Name) {
 		//: quoted-string form, with backslash and quote escaped (§3.2.4).
 		return `"` + quoteEscaper.Replace(a.Name) + `" <` + a.Addr + ">"
 	}
@@ -124,12 +124,12 @@ func formatAddressList(list []coremail.AddressValue) string {
 // every path into it.
 func writeHeader(dst io.Writer, name, value string) error {
 	//: the name grammar, checked here too because this is the write point.
-	if nameErr := coremail.ValidateHeaderName(name); nameErr != nil {
+	if nameErr := ValidateHeaderName(name); nameErr != nil {
 		//: HeaderInjection.
 		return nameErr
 	}
 	//: and the value, for the same reason.
-	if valueErr := coremail.ValidateHeaderValue(name, value); valueErr != nil {
+	if valueErr := ValidateHeaderValue(name, value); valueErr != nil {
 		//: HeaderInjection.
 		return valueErr
 	}

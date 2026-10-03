@@ -112,7 +112,7 @@ func attachmentEntity(attachment *coremail.AttachmentValue, index int) (part ent
 	//: ComposeFailed.
 	if typeErr != nil {
 		//: the position is diagnostic.
-		return entity{}, errs.Wrap(ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
+		return entity{}, errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
 	}
 	disposition := "attachment"
 	//: one field decides both the disposition and the container.
@@ -124,7 +124,7 @@ func attachmentEntity(attachment *coremail.AttachmentValue, index int) (part ent
 	//: ComposeFailed.
 	if dispErr != nil {
 		//: the position is diagnostic.
-		return entity{}, errs.Wrap(ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
+		return entity{}, errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.Int("attachment", index))
 	}
 	leaf := entity{contentType: contentType, encoding: encodingBase64, disposition: rendered, content: attachment.Content}
 	//: an inline part needs the identifier its cid: URL resolves against.
@@ -161,7 +161,7 @@ func formatMediaType(mediaType string, params map[string]string) (rendered strin
 		return formatted, nil
 	}
 	//: refused rather than emitted empty.
-	return "", errs.Wrap(ComposeFailed, errs.WrapParams{}, errs.String("media_type", mediaType))
+	return "", errs.Wrap(coremail.ComposeFailed, errs.WrapParams{}, errs.String("media_type", mediaType))
 }
 
 // mediaTypeOnly strips the parameters from a rendered Content-Type value,

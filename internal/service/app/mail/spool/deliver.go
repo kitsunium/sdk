@@ -9,6 +9,7 @@ import (
 	"runtime/debug"
 	"time"
 
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	corequeue "github.com/kitsunium/sdk/internal/core/data/queue"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -28,7 +29,7 @@ func (s *Spool) deliver(ctx context.Context, delivery corequeue.DeliveryValue) e
 	//: a dead letter an investigator can still read.
 	if decodeErr := json.Unmarshal(delivery.Message.Payload, &record); decodeErr != nil {
 		//: MessageUndecodable, naming the queue message.
-		return kerrs.Wrap(MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID))
+		return kerrs.Wrap(corespool.MessageUndecodable, kerrs.WrapParams{}, kerrs.String("message", delivery.Message.ID))
 	}
 	attempt := delivery.Deliveries
 	event := EventValue{ID: record.ID, Message: record.Message, Meta: record.Meta, QueuedAt: record.QueuedAt, Attempt: attempt}
@@ -111,7 +112,7 @@ func (s *Spool) send(ctx context.Context, record *spooledValue) (err error) {
 			return
 		}
 		//: the value and the stack as fields, never the origin.
-		err = kerrs.Wrap(TransportPanicked, kerrs.WrapParams{},
+		err = kerrs.Wrap(corespool.TransportPanicked, kerrs.WrapParams{},
 			kerrs.String("mail", record.ID), kerrs.String("panic", fmt.Sprint(recovered)),
 			kerrs.String("stack", string(debug.Stack())))
 	}()

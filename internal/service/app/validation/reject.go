@@ -29,7 +29,7 @@ func rejectConstraint(rule, clause string) error {
 func rejectRule(field, rule, clause string) error {
 	//: naming the construct is the point — "invalid tag" would leave the
 	//: caller guessing whether the rule is wrong or merely unsupported here.
-	return errs.Wrap(InvalidRule, errs.WrapParams{},
+	return errs.Wrap(corevalidation.InvalidRule, errs.WrapParams{},
 		errs.String("field", clip(field)), errs.String("rule", clip(rule)),
 		errs.String("clause", clause))
 }
@@ -37,7 +37,7 @@ func rejectRule(field, rule, clause string) error {
 // rejectTarget refuses a Struct[T] whose T has no fields to walk.
 func rejectTarget(kind string) error {
 	//: the kind that was seen is the whole diagnosis.
-	return errs.Wrap(UnsupportedTarget, errs.WrapParams{}, errs.String("kind", kind))
+	return errs.Wrap(corevalidation.UnsupportedTarget, errs.WrapParams{}, errs.String("kind", kind))
 }
 
 // clip shortens text to maxEchoRunes runes, marking the truncation. It counts

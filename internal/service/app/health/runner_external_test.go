@@ -42,7 +42,7 @@ func TestABudgetExpiryIsAFailureAndSaysSo(t *testing.T) {
 		t.Error("the result is not marked TimedOut; a timeout must stay tellable " +
 			"apart from an ordinary failure")
 	}
-	if !errs.HasCode(result.Err, svchealth.CodeCheckTimeout) {
+	if !errs.HasCode(result.Err, corehealth.CodeCheckTimeout) {
 		t.Errorf("the result carries %v, want CHECK_TIMEOUT", result.Err)
 	}
 	if result.Took != budget {
@@ -118,7 +118,7 @@ func TestACancelledCallerStopsWaitingAndLeavesTheRunAlone(t *testing.T) {
 			t.Fatalf("the cancelled probe is still waiting — it would have sat out its %v budget for a caller that has gone", budget)
 		}
 		result := resultFor(t, first, "db")
-		if !errs.HasCode(result.Err, svchealth.CodeCheckTimeout) || !errors.Is(result.Err, context.Canceled) {
+		if !errs.HasCode(result.Err, corehealth.CodeCheckTimeout) || !errors.Is(result.Err, context.Canceled) {
 			t.Errorf("the departed probe reported %v, want CHECK_TIMEOUT caused by the caller's context", result.Err)
 		}
 		if !result.TimedOut || result.Took != 0 {
@@ -278,7 +278,7 @@ func TestAProbeJoiningAnExpiredRunReadsATimeout(t *testing.T) {
 	if !joined.TimedOut {
 		t.Errorf("a probe joining the expired run got TimedOut = %v, want true", joined.TimedOut)
 	}
-	if !errs.HasCode(joined.Err, svchealth.CodeCheckTimeout) {
+	if !errs.HasCode(joined.Err, corehealth.CodeCheckTimeout) {
 		t.Errorf("a probe joining the expired run got %v, want CHECK_TIMEOUT", joined.Err)
 	}
 	if got := calls.Load(); got != 1 {

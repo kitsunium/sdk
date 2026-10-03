@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
@@ -87,7 +88,7 @@ func TestSendWithIDRefusesAnIDNoMailCanKeep(t *testing.T) {
 		{"invalid UTF-8", "mail-7\xff"},
 	} {
 		err := s.SendWithID(context.Background(), c.id, message("Hi"))
-		if !errs.HasCode(err, spool.CodeInvalidMailID) {
+		if !errs.HasCode(err, corespool.CodeInvalidMailID) {
 			t.Errorf("%s: SendWithID() = %v, want InvalidMailID", c.name, err)
 			continue
 		}

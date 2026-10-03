@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -102,7 +103,7 @@ func TestAnIndirectionAboveTheLockFileIsRefusedOnlyWhenAnyoneCouldHavePlantedIt(
 			if locker != nil {
 				t.Fatalf("a link planted in a %v directory was accepted — every lock lands wherever it points", c.container)
 			}
-			if !errs.HasCode(err, svclock.CodeLockPathRedirected) {
+			if !errs.HasCode(err, corelock.CodeLockPathRedirected) {
 				t.Fatalf("NewFileLocker under a planted %v container = %v, want LOCK_PATH_REDIRECTED", c.container, err)
 			}
 			//: and nothing was created inside the planted tree: the audit runs

@@ -1,14 +1,9 @@
 // Package statemachine — hosts Trigger, the closed set of things that fire a
-// transition, with its text form, and the contract's one code: range 0.2.56.*
-// (ADR 0120 core/app/statemachine block).
+// transition, with its text form. Its one refusal, TriggerUnknown, is
+// declared in errors.go with the domain's other sentinels.
 package statemachine
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
-
-// range: 0.2.56.0 - 0.2.56.255
-
-// CodeTriggerUnknown identifies a name ParseTrigger does not know.
-const CodeTriggerUnknown errs.Code = 0x00_02_38_01 // 0.2.56.1
 
 // Trigger says what fired a transition. The set is closed: every transition a
 // machine can take is declared one of these ways, and a history names which.
@@ -36,18 +31,9 @@ const (
 	TriggerGuard
 )
 
-var (
-	// triggerNames spells each trigger, indexed by its value; index 0 is the
-	// zero value's, which has no name.
-	triggerNames = [...]string{"", "start", "event", "delay", "deadline", "guard"}
-
-	// TriggerUnknown refuses a name that is not one of the five triggers: a
-	// journal written by something else, or damaged. The refused name is
-	// never repeated — a journal is the caller's data.
-	TriggerUnknown = errs.Define(CodeTriggerUnknown, "TRIGGER_UNKNOWN",
-		"That is not a state-machine trigger",
-		"core/app/statemachine: a trigger is start, event, delay, deadline or guard; the name given is none of them")
-)
+// triggerNames spells each trigger, indexed by its value; index 0 is the zero
+// value's, which has no name.
+var triggerNames = [...]string{"", "start", "event", "delay", "deadline", "guard"}
 
 // String returns the trigger's name — "start", "event", "delay", "deadline"
 // or "guard" — or "" for a value outside the set, which is how a caller tells

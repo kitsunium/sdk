@@ -72,7 +72,7 @@ const (
 	CodeMailQueue  errs.Code = 0x00_04_02_15 // 0.4.2.21 — the outbox could not be opened, or refused a mail
 	// Deprecated: kit no longer returns it. The outbox is the SDK's mail
 	// spool, which dead-letters a record that does not decode itself
-	// (mail.SpooledMailUndecodable).
+	// (MessageUndecodable, in pkg/v1/app/mail/spool).
 	CodeMailUndecodable errs.Code = 0x00_04_02_16 // 0.4.2.22
 	CodeMailPanic       errs.Code = 0x00_04_02_17 // 0.4.2.23 — a delivery attempt panicked
 

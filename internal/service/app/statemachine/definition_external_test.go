@@ -82,38 +82,38 @@ func TestEveryDeclarationMistakeIsRefusedByCode(t *testing.T) {
 	cases := []tc{
 		{"no initial state", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).On("go", Draft, Live)
-		}, svcstm.CodeInitialMissing, true},
+		}, corestm.CodeInitialMissing, true},
 		{"an empty event name", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).On("", Draft, Live)
-		}, svcstm.CodeEventInvalid, true},
+		}, corestm.CodeEventInvalid, true},
 		{"the creation's name", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).On(corestm.CreateEvent, Draft, Live)
-		}, svcstm.CodeEventInvalid, true},
+		}, corestm.CodeEventInvalid, true},
 		{"one event twice from one state", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).On("go", Draft, Live).After("go", time.Minute, Draft, Sold)
-		}, svcstm.CodeTransitionDuplicate, true},
+		}, corestm.CodeTransitionDuplicate, true},
 		{"a zero delay", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).After("tick", 0, Draft, Live)
-		}, svcstm.CodeDelayInvalid, true},
+		}, corestm.CodeDelayInvalid, true},
 		{"a nil instant", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).At("due", Draft, Live, nil)
-		}, svcstm.CodeFunctionMissing, true},
+		}, corestm.CodeFunctionMissing, true},
 		{"a nil guard", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).When("ready", Draft, Live, nil)
-		}, svcstm.CodeFunctionMissing, true},
+		}, corestm.CodeFunctionMissing, true},
 		{"a nil OnEnter hook", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).OnEnter(Live, nil)
-		}, svcstm.CodeFunctionMissing, true},
+		}, corestm.CodeFunctionMissing, true},
 		{"a nil OnTransition hook", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).OnTransition(nil)
-		}, svcstm.CodeFunctionMissing, true},
+		}, corestm.CodeFunctionMissing, true},
 		{"a nil state accessor", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec[Item, State](nil).Initial(Draft)
-		}, svcstm.CodeFunctionMissing, true},
-		{"a nil definition", func() *svcstm.MachineSpec[Item, State] { return nil }, svcstm.CodeFunctionMissing, true},
+		}, corestm.CodeFunctionMissing, true},
+		{"a nil definition", func() *svcstm.MachineSpec[Item, State] { return nil }, corestm.CodeFunctionMissing, true},
 		{"no store", func() *svcstm.MachineSpec[Item, State] {
 			return svcstm.NewMachineSpec(stateOf).Initial(Draft).OnEnter(Live, nop)
-		}, svcstm.CodeStoreMissing, false},
+		}, corestm.CodeStoreMissing, false},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -141,11 +141,11 @@ func TestProblemsAreAllReportedAtOnce(t *testing.T) {
 	t.Parallel()
 	def := svcstm.NewMachineSpec(stateOf).On("", Draft, Live).After("tick", -time.Second, Draft, Live)
 	problems := def.Problems()
-	if len(problems) != 2 || !errs.HasCode(problems[0], svcstm.CodeEventInvalid) || !errs.HasCode(problems[1], svcstm.CodeDelayInvalid) {
+	if len(problems) != 2 || !errs.HasCode(problems[0], corestm.CodeEventInvalid) || !errs.HasCode(problems[1], corestm.CodeDelayInvalid) {
 		t.Fatalf("Problems() = %v", problems)
 	}
 	_, err := svcstm.NewStateMachine(t.Context(), def, &svcstm.Config[Item, State]{})
-	for _, code := range []errs.Code{svcstm.CodeEventInvalid, svcstm.CodeDelayInvalid, svcstm.CodeInitialMissing, svcstm.CodeStoreMissing} {
+	for _, code := range []errs.Code{corestm.CodeEventInvalid, corestm.CodeDelayInvalid, corestm.CodeInitialMissing, corestm.CodeStoreMissing} {
 		if !errs.HasCode(err, code) {
 			t.Errorf("NewStateMachine() = %v, missing %s", err, code)
 		}
@@ -162,7 +162,7 @@ func TestAMachineKeepsItsOwnCopyOfTheDeclaration(t *testing.T) {
 	if _, err := m.Start(t.Context(), Item{ID: "a"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := m.Fire(t.Context(), "a", "publish"); !errs.HasCode(err, svcstm.CodeTransitionRefused) {
+	if _, err := m.Fire(t.Context(), "a", "publish"); !errs.HasCode(err, corestm.CodeTransitionRefused) {
 		t.Fatalf("a transition declared after NewStateMachine fired: %v", err)
 	}
 }

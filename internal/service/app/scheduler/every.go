@@ -18,7 +18,7 @@ import (
 // its period the next fire is already late; the scheduler then applies the
 // domain's missed-deadline rule (skip and count) rather than queueing.
 //
-// A non-positive period is refused ([InvalidInterval]) rather than clamped: a
+// A non-positive period is refused ([coresched.InvalidInterval]) rather than clamped: a
 // schedule due infinitely often is not a slow schedule, it is a busy loop, and
 // no substitute value would be anything but a guess at the caller's intent
 // (ADR 0031). Sub-minute periods are accepted here — unlike cron, which stops

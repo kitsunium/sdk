@@ -8,8 +8,11 @@ insert, the synchronous dispatch with its panic guard and halt handling, and
 the typed `On[E]` / `Off[E]` front end that hides the erasure. Admitted by
 **ADR 0053**.
 
-Code range: `0.3.52.*` (ADR 0053). The registration refusals are core sentinels
-(`0.2.22.*`); this package owns only what the ENGINE decides at dispatch time.
+Code range: `0.3.52.*` (ADR 0053) — what the ENGINE decides at dispatch time
+(`LISTENER_FAILED`, `HALT_NOT_PERMITTED`). Like the registration refusals
+(`0.2.22.*`), those codes and their sentinels are declared in
+`internal/core/app/events` (ADR 0160); this package declares none and raises
+the core's.
 
 ## Contents
 
@@ -19,8 +22,6 @@ Code range: `0.3.52.*` (ADR 0053). The registration refusals are core sentinels
 | `state.go` | `state` — one published membership version — plus `cloneStateWith` / `cloneStateWithout` / `insertOrdered` |
 | `publish.go` | `Publish`, `dispatch`, `classify`, `joinListenerFailure`, `call` (the panic guard) |
 | `on.go` | `Handler[E]`, `On[E]`, `Off[E]`, and the unexported `erase[E]` |
-| `codes.go` | `CodeListenerFailed` / `CodeHaltNotPermitted` — range 0.3.52.* |
-| `errors.go` | `ListenerFailed` / `HaltNotPermitted` (`errs.Define`) |
 
 ## Why the registration is a FUNCTION and not a method
 

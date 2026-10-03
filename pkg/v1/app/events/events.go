@@ -161,10 +161,10 @@ var (
 	ListenerPanicked = corev.ListenerPanicked
 	// ListenerFailed is the bus's verdict on a listener that returned an
 	// error; it travels beside that error, never around it.
-	ListenerFailed = svcev.ListenerFailed
+	ListenerFailed = corev.ListenerFailed
 	// HaltNotPermitted reports a Halt from a listener without MayHalt. The
 	// dispatch continued.
-	HaltNotPermitted = svcev.HaltNotPermitted
+	HaltNotPermitted = corev.HaltNotPermitted
 )
 
 // New returns an empty in-process event bus. It cannot fail and takes no

@@ -105,7 +105,7 @@ func (p *parser) parseEntry(entry string, dirEntry fs.DirEntry, walkErr error) e
 	//: template problem and is reported as a source failure.
 	if walkErr != nil {
 		//: name the path that failed; the usual cause is a bad embed pattern.
-		return raise(TemplateSourceFailed, walkErr, errs.String("path", entry))
+		return raise(coreview.TemplateSourceFailed, walkErr, errs.String("path", entry))
 	}
 	//: directories carry no template text, and Ext filters the rest.
 	if dirEntry.IsDir() || !selected(entry, p.cfg.Ext) {
@@ -116,13 +116,13 @@ func (p *parser) parseEntry(entry string, dirEntry fs.DirEntry, walkErr error) e
 	//: a file the FS listed but will not open is still a source failure.
 	if readErr != nil {
 		//: name the path that failed.
-		return raise(TemplateSourceFailed, readErr, errs.String("path", entry))
+		return raise(coreview.TemplateSourceFailed, readErr, errs.String("path", entry))
 	}
 	//: set.New(entry) creates an ASSOCIATED template, so {{template
 	//: "partial/row.html"}} resolves across files in one namespace.
 	if _, parseErr := p.set.New(entry).Parse(string(source)); parseErr != nil {
 		//: name the template, never its source — the diagnostic is a Field.
-		return raise(TemplateParseFailed, parseErr, errs.String("template", entry))
+		return raise(coreview.TemplateParseFailed, parseErr, errs.String("template", entry))
 	}
 	p.count++
 	//: parsed; continue the walk.
@@ -171,7 +171,7 @@ func (p *parser) refuseEndlessRecursion() error {
 		//: depth-first from each template, the path so far kept on the side.
 		if reachesItself(name, name, calls, make(map[string]bool, len(names))) {
 			//: the template the cycle was found at; its members are its calls.
-			return raise(TemplateParseFailed, nil, errs.String("template", name),
+			return raise(coreview.TemplateParseFailed, nil, errs.String("template", name),
 				errs.String("why", "it calls itself through {{template}} with no condition on the way"))
 		}
 	}
@@ -255,7 +255,7 @@ func (p *parser) probeEscaping() error {
 		//: would make every template that reads its model unusable.
 		if escapeErr, isEscape := errors.AsType[*template.Error](execErr); isEscape {
 			//: name the template; the escaper's own state machine is a Field.
-			return raise(TemplateParseFailed, escapeErr, errs.String("template", each.Name()))
+			return raise(coreview.TemplateParseFailed, escapeErr, errs.String("template", each.Name()))
 		}
 	}
 	//: every template now carries a resolved escaping plan.

@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -239,7 +240,7 @@ func Test_putUint48BE(t *testing.T) {
 		t.Error("a later millisecond did not produce a lexically larger prefix")
 	}
 	//: and the entropy code must exist for readRandom to wrap onto.
-	if _, ok := errs.CodeOf(EntropyFailed); !ok {
+	if _, ok := errs.CodeOf(coreid.EntropyFailed); !ok {
 		t.Error("the entropy sentinel carries no code")
 	}
 }

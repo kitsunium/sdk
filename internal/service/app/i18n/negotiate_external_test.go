@@ -211,18 +211,18 @@ func TestNewNegotiatorRefusesAnUnfinishedWiring(t *testing.T) {
 	english := mustTag(t, "en")
 
 	// ADR 0031's refuse half: an empty set is not "accept anything".
-	if _, err := svci18n.NewNegotiator(nil, english); !errs.HasCode(err, svci18n.CodeNegotiationEmpty) {
+	if _, err := svci18n.NewNegotiator(nil, english); !errs.HasCode(err, corei18n.CodeNegotiationEmpty) {
 		t.Errorf("NewNegotiator(nil) = %v, want CodeNegotiationEmpty", err)
 	}
 
 	var unset corei18n.TagValue
-	if _, err := svci18n.NewNegotiator([]corei18n.TagValue{english}, unset); !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if _, err := svci18n.NewNegotiator([]corei18n.TagValue{english}, unset); !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Errorf("NewNegotiator with an unset fallback = %v, want CodeCatalogInvalid", err)
 	}
 
 	// A fallback outside the set would make the common path return a
 	// language the caller declared it does not serve.
-	if _, err := svci18n.NewNegotiator([]corei18n.TagValue{english}, mustTag(t, "fr")); !errs.HasCode(err, svci18n.CodeCatalogInvalid) {
+	if _, err := svci18n.NewNegotiator([]corei18n.TagValue{english}, mustTag(t, "fr")); !errs.HasCode(err, corei18n.CodeCatalogInvalid) {
 		t.Errorf("NewNegotiator with an unsupported fallback = %v, want CodeCatalogInvalid", err)
 	}
 }

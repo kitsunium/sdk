@@ -1,6 +1,6 @@
 // Package statemachine — declares the sentinel *errs.Error outcomes of the
-// engine. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
-// form.
+// domain: the contract's one refusal, and the engine's outcomes. Each var's
+// name equals its errs.Define Reason in SCREAMING_SNAKE form.
 //
 // No Public text names a key, an event or a state: those travel as log-only
 // fields, because a key is often an identifier a caller would rather not see
@@ -21,6 +21,17 @@ const httpConflict int = 409
 const httpUnavailable int = 503
 
 var (
+	// TriggerUnknown refuses a name that is not one of the five triggers: a
+	// journal written by something else, or damaged. The refused name is never
+	// repeated — a journal is the caller's data.
+	TriggerUnknown = errs.Define(CodeTriggerUnknown, "TRIGGER_UNKNOWN",
+		"That is not a state-machine trigger",
+		"core/app/statemachine: a trigger is start, event, delay, deadline or guard; the name given is none of them")
+
+	// The engine's outcomes, raised by internal/service/app/statemachine. They
+	// are declared here, with the contract's refusal, so that the domain's
+	// codes and sentinels are in one place (ADR 0160).
+
 	// TransitionRefused is returned by Fire for an event no declared
 	// transition takes from the entity's current state — including an event
 	// that exists but leaves another state, and a timer or guard transition,

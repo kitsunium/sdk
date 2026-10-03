@@ -2,7 +2,7 @@
 // it, because it becomes the left half of the mail's Message-ID.
 package spool
 
-import coremail "github.com/kitsunium/sdk/internal/core/app/mail"
+import svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
 
 // MaxIDBytes bounds a mail's identifier, whoever minted it. It is well above
 // every identifier the SDK mints — a UUID, a ULID, a TypeID under the longest
@@ -27,7 +27,7 @@ func checkID(id string) (problem string, ok bool) {
 		//: named, by the bound it broke.
 		return "longer than MaxIDBytes", false
 	//: a byte a Message-ID cannot carry, or an empty label.
-	case !coremail.IsDotAtom(id):
+	case !svcmail.IsDotAtom(id):
 		//: named, by the grammar it broke.
 		return "not an RFC 5322 dot-atom", false
 	//: an identifier a mail can keep.

@@ -6,18 +6,21 @@ go_library(
     name = "i18n",
     srcs = [
         "accept.go",
-        "codes.go",
         "entry_value.go",
         "errors.go",
         "load.go",
+        "message.go",
         "negotiate.go",
         "negotiator.go",
+        "pattern.go",
+        "pattern_compiler.go",
         "plural.go",
         "plural_value.go",
         "printer.go",
         "printer_link.go",
         "store.go",
         "store_compliance.go",
+        "tag.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/app/i18n",
     visibility = [
@@ -46,10 +49,12 @@ go_test(
     srcs = [
         "i18n_bench_test.go",
         "load_external_test.go",
+        "message_external_test.go",
         "negotiate_external_test.go",
         "plural_external_test.go",
         "printer_external_test.go",
         "store_external_test.go",
+        "tag_external_test.go",
     ],
     deps = [
         ":i18n",
@@ -57,11 +62,4 @@ go_test(
         "//internal/kernel/errs",
         "//internal/service/data/codec/json",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

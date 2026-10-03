@@ -6,6 +6,7 @@ import (
 	"strconv"
 	"time"
 
+	coresched "github.com/kitsunium/sdk/internal/core/app/scheduler"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -19,7 +20,7 @@ const maxEchoRunes int = 64
 func rejectExpression(detail, item, extra string) error {
 	//: detail says what is wrong, item shows the offending text, extra carries
 	//: whatever the specific check knows (an accepted range, a field count).
-	return kerrs.Wrap(InvalidExpression, kerrs.WrapParams{},
+	return kerrs.Wrap(coresched.InvalidExpression, kerrs.WrapParams{},
 		kerrs.String("detail", detail), kerrs.String("item", clip(item)),
 		kerrs.String("context", extra))
 }
@@ -28,7 +29,7 @@ func rejectExpression(detail, item, extra string) error {
 func rejectSyntax(detail, item string) error {
 	//: naming the dialect is the point — "not valid" would leave the caller
 	//: guessing whether their expression is wrong or merely unsupported here.
-	return kerrs.Wrap(UnsupportedSyntax, kerrs.WrapParams{},
+	return kerrs.Wrap(coresched.UnsupportedSyntax, kerrs.WrapParams{},
 		kerrs.String("detail", detail), kerrs.String("item", clip(item)))
 }
 
@@ -36,7 +37,7 @@ func rejectSyntax(detail, item string) error {
 func rejectUnreachable(expr string) error {
 	//: the horizon is part of the claim: "no match in N years" is falsifiable,
 	//: "never matches" is not.
-	return kerrs.Wrap(UnreachableSchedule, kerrs.WrapParams{},
+	return kerrs.Wrap(coresched.UnreachableSchedule, kerrs.WrapParams{},
 		kerrs.String("expression", clip(expr)),
 		kerrs.Int("horizon_years", horizonYears))
 }
@@ -44,14 +45,14 @@ func rejectUnreachable(expr string) error {
 // rejectLocation refuses a nil *time.Location.
 func rejectLocation() error {
 	//: no field to add — the fault is the absence of the argument itself.
-	return kerrs.Wrap(InvalidLocation, kerrs.WrapParams{})
+	return kerrs.Wrap(coresched.InvalidLocation, kerrs.WrapParams{})
 }
 
 // rejectInterval refuses a non-positive Every period.
 func rejectInterval(period time.Duration) error {
 	//: a duration is the caller's own literal, so echoing it is safe and it is
 	//: the one thing that makes the refusal self-explanatory.
-	return kerrs.Wrap(InvalidInterval, kerrs.WrapParams{},
+	return kerrs.Wrap(coresched.InvalidInterval, kerrs.WrapParams{},
 		kerrs.String("period", period.String()))
 }
 

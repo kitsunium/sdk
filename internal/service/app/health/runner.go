@@ -224,7 +224,7 @@ func (e *entry) verdict(err error) corehealth.Status {
 // a caller's own *errs.Error keeps its Code, Reason, Public and Private, so a
 // wire-safe message they wrote is what a stranger reads; a plain error — the
 // driver's `dial tcp 10.0.3.14:5432: connect: connection refused` — becomes
-// [CheckFailed] instead, and its text survives only in the Err a handler never
+// [corehealth.CheckFailed] instead, and its text survives only in the Err a handler never
 // renders and Config.OnReport does.
 func (h *health) wrapFailure(e *entry, err error) error {
 	//: the ordinary path.
@@ -235,10 +235,10 @@ func (h *health) wrapFailure(e *entry, err error) error {
 	//: read from the sentinel rather than repeating its literals, so the
 	//: fallback identity cannot drift from the sentinel it names.
 	return kerrs.Wrap(err, kerrs.WrapParams{
-		Code:    CheckFailed.Code(),
-		Reason:  CheckFailed.Reason(),
-		Public:  CheckFailed.Public(),
-		Private: CheckFailed.Private(),
+		Code:    corehealth.CheckFailed.Code(),
+		Reason:  corehealth.CheckFailed.Reason(),
+		Public:  corehealth.CheckFailed.Public(),
+		Private: corehealth.CheckFailed.Private(),
 	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
 }
 
@@ -256,7 +256,7 @@ func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
 	//: Through expire, so a body that returns its ctx.Err() is still reported
 	//: as a timeout to the probes that join this run afterwards.
 	run.expire()
-	err := kerrs.Wrap(CheckTimeout, kerrs.WrapParams{},
+	err := kerrs.Wrap(corehealth.CheckTimeout, kerrs.WrapParams{},
 		kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()),
 		kerrs.String("budget", e.budget.String()))
 	//: a timeout is a FAILURE, not an unknown — see the CheckTimeout sentinel
@@ -286,11 +286,11 @@ func (h *health) abandoned(e *entry, run *inflight) corehealth.ResultValue {
 func (h *health) departed(ctx context.Context, e *entry, waited time.Duration) corehealth.ResultValue {
 	//: read from the sentinel so the identity cannot drift from it.
 	err := kerrs.Wrap(ctx.Err(), kerrs.WrapParams{
-		Code:     CheckTimeout.Code(),
-		Reason:   CheckTimeout.Reason(),
-		Public:   CheckTimeout.Public(),
+		Code:     corehealth.CheckTimeout.Code(),
+		Reason:   corehealth.CheckTimeout.Reason(),
+		Public:   corehealth.CheckTimeout.Public(),
 		Private:  "service/app/health: the caller's context ended before the check answered; its run was left running for the next probe",
-		ExitCode: CheckTimeout.ExitCode(),
+		ExitCode: corehealth.CheckTimeout.ExitCode(),
 	}, kerrs.String("check", e.name), kerrs.String("probe", e.probe.String()))
 	//: a failure like any other, through the same criticality rule.
 	return corehealth.ResultValue{
