@@ -48,7 +48,7 @@ check "service depends on no pkg or third-party code" \
 	'kind("go_library", deps(//internal/service/...)) intersect (//pkg/... + //third-party/...)'
 check "pkg depends on no third-party code" \
 	'kind("go_library", deps(//pkg/...)) intersect //third-party/...'
-# The framework module sits above pkg/v1 (ADR 0147): nothing below reaches it,
+# The framework sits above pkg/v1 (ADR 0147): nothing below reaches it,
 # it reaches no third-party code, and its only DIRECT edge into internal/ is the
 # meta package errs, which is how a sentinel is defined — every other mechanism
 # it uses comes through pkg/v1, as it would for any product.

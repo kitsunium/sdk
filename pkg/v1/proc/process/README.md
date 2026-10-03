@@ -75,7 +75,7 @@ stats := process.Self()
 stats.Goroutines, stats.HeapBytes, stats.GCPauses.Quantile(0.99), stats.CPUTime
 
 build, ok := process.Build()
-sdk, found := build.Module("github.com/kitsunium/sdk/pkg")
+sdk, found := build.Module("github.com/kitsunium/sdk")
 // sdk.Version is a release ("v0.4.6"), or "" with sdk.Revision/sdk.Time
 // for a pseudo-version, or "" with sdk.Local for a directory.
 ```

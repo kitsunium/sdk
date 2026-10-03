@@ -121,6 +121,20 @@ job_body() {
   done
 }
 
+# ADR 0162: the root is the SDK module, so no census loop skips it. The skip
+# ADR 0157 §5 allowed while the root held no package — `[ "$mod" = "." ]` and
+# a `go list` that came back empty — must not survive the root's packages:
+# kept, it would skip the SDK the day `go list` fails.
+@test "lanes: no census loop skips the root module" {
+  for job in cross-build test-386; do
+    body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" "$job")"
+    [ -n "$body" ]
+    [[ "$body" != *'[ "$mod" = "." ]'* ]]
+  done
+  run grep -c '"$mod" = "."' "$REPO_ROOT/.github/workflows/e2e-cross.yml"
+  [ "$output" = "0" ]
+}
+
 @test "lanes: the local cross-platform audit reads the same census" {
   run grep -c 'scripts/ci/go-modules.sh' "$REPO_ROOT/scripts/cross-platform-audit.sh"
   [ "$output" != "0" ]
@@ -195,10 +209,11 @@ scans() {
   [[ "$output" == *"govulncheck did not complete for . (exit 1)"* ]]
 }
 
-# ADR 0157 §5: the root module is the workspace's anchor and holds no package,
-# and govulncheck answers that with exit 2. For the root, and for that answer
-# only, it is nothing to scan — not an incomplete scan.
-@test "vuln: the root module holding no package is nothing to scan, and passes" {
+# ADR 0162: the root is the SDK module — internal/, pkg/, framework/ — and no
+# longer the empty anchor ADR 0157 §5 excused. "No packages" from it is the SDK
+# module having lost its packages: a scan that did not complete, as for any
+# other module. Red against the script as it was, which passed it.
+@test "vuln: the root module holding no package fails, as any module does (ADR 0162)" {
   fixture_repo
   module .
   module a
@@ -206,15 +221,12 @@ scans() {
   echo "govulncheck: no packages matched the provided patterns" >.vuln-msg
   stub_scanner
   run bash scripts/ci/vuln-check.sh
-  [ "$status" -eq 0 ]
-  [[ "$output" == *"vuln-check: . holds no package — nothing to scan"* ]]
-  [[ "$output" == *"1 module(s) scanned, no reachable vulnerability"* ]]
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"govulncheck did not complete for . (exit 2)"* ]]
   [ "$(scans)" -eq 2 ]
 }
 
-# The exception is the root's alone: a chain module that lost its packages is a
-# defect, and the same answer from it fails as a scan that did not complete.
-@test "vuln: any other module holding no package still fails as incomplete" {
+@test "vuln: any other module holding no package fails as incomplete" {
   fixture_repo
   module .
   module a
@@ -226,7 +238,7 @@ scans() {
   [[ "$output" == *"govulncheck did not complete for a (exit 2)"* ]]
 }
 
-# And for the root it is that answer only: any other exit 2 is still incomplete.
+# Any other exit 2 from the root is incomplete too.
 @test "vuln: the root failing for another reason still fails" {
   fixture_repo
   module .

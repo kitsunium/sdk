@@ -12,7 +12,7 @@ import (
 const (
 	appPath      string = "github.com/acme/app"
 	frameworkMod string = "github.com/acme/framework"
-	sdkMod       string = "github.com/kitsunium/sdk/pkg"
+	sdkMod       string = "github.com/kitsunium/sdk"
 )
 
 // TestParseBuild pins how each shape the toolchain records reads: a release,

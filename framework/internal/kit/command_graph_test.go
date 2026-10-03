@@ -191,7 +191,7 @@ func commandSourcesPointAtTheirDeclarations(t *testing.T) {
 		"lab/command/keyed":            `LabKeyed = Lab.Command("keyed"`,
 	} {
 		n := g.Node(id)
-		if want := lineIn(t, "counter_product_test.go", text); n == nil || n.Source == nil || n.Source.File != "internal/kit/counter_product_test.go" || n.Source.Line != want {
+		if want := lineIn(t, "counter_product_test.go", text); n == nil || n.Source == nil || n.Source.File != "framework/internal/kit/counter_product_test.go" || n.Source.Line != want {
 			t.Errorf("%s is declared at %+v, want line %d", id, n, want)
 		}
 	}

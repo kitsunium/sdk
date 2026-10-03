@@ -13,14 +13,13 @@ import (
 )
 
 func TestBuildOfATodoOnALocalKit(t *testing.T) {
-	// The replacement is an absolute directory of this OS: "/src/platform" is
-	// not one on Windows, and a relative one is never asked of git.
-	local := filepath.Join(t.TempDir(), "platform")
+	// The replacement is an absolute directory of this OS: "/src/sdk" is not
+	// one on Windows, and a relative one is never asked of git.
+	local := filepath.Join(t.TempDir(), "sdk")
 	bi := &debug.BuildInfo{
 		Main: debug.Module{Path: "github.com/kitsunium/todo", Version: "v0.0.0-20260924095948-8cf38860b6ef"},
 		Deps: []*debug.Module{
-			{Path: frameworkModule, Version: "v0.0.0", Replace: &debug.Module{Path: local, Version: "(devel)"}},
-			{Path: sdkModule, Version: "v0.4.6"},
+			{Path: sdkModule, Version: "v0.0.0", Replace: &debug.Module{Path: local, Version: "(devel)"}},
 		},
 		Settings: []debug.BuildSetting{
 			{Key: "vcs.revision", Value: "8cf38860b6efa4146621893cc88085d66794a25c"},
@@ -41,8 +40,10 @@ func TestBuildOfATodoOnALocalKit(t *testing.T) {
 	if !b.Kit.Local || b.Kit.Version != "" || b.Kit.Revision != "814a8d1c0ffee" || b.Kit.Time == nil || !b.Kit.Time.Equal(at) || asked != local {
 		t.Errorf("kit %+v (git asked about %q)", b.Kit, asked)
 	}
-	if b.SDK.Version != "v0.4.6" || b.SDK.Local {
-		t.Errorf("sdk %+v", b.SDK)
+	// kit is a part of the SDK module (ADR 0162): the SDK says what kit says,
+	// in a copy of its own.
+	if b.SDK.Module != sdkModule || !b.SDK.Local || b.SDK.Revision != b.Kit.Revision || b.SDK.Time == nil || b.SDK.Time == b.Kit.Time {
+		t.Errorf("sdk %+v, want kit's %+v in a copy of its own", b.SDK, b.Kit)
 	}
 	// Outside dev, nothing runs git: the local module has no revision.
 	if b := buildOf(bi, nil); !b.Kit.Local || b.Kit.Revision != "" {
@@ -79,6 +80,21 @@ func TestAServiceDocSpeaksItsLanguages(t *testing.T) {
 	n := app.Graph().Node("bilingual")
 	if n == nil || n.Doc != "Accounts and sessions." || n.Docs["fr"] != "Comptes et sessions." {
 		t.Fatalf("service node %+v", n)
+	}
+}
+
+// A product on a released SDK says that release for kit and for the SDK: they
+// are one module (ADR 0162).
+func TestKitIsTheSDKsRelease(t *testing.T) {
+	bi := &debug.BuildInfo{
+		Main: debug.Module{Path: "github.com/kitsunium/todo", Version: "(devel)"},
+		Deps: []*debug.Module{{Path: sdkModule, Version: "v0.18.0"}},
+	}
+	b := buildOf(bi, nil)
+	for name, m := range map[string]model.ModuleVersion{"kit": b.Kit, "sdk": b.SDK} {
+		if m.Module != sdkModule || m.Version != "v0.18.0" || m.Local {
+			t.Errorf("%s %+v, want %s v0.18.0", name, m, sdkModule)
+		}
 	}
 }
 

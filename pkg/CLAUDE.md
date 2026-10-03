@@ -3,9 +3,9 @@
 
 ## Purpose
 
-The SDK's public API surface. It is a **single Go module** — the bare `github.com/kitsunium/sdk/pkg` (`go.mod` at `pkg/go.mod`); Go forbids a `/v1` module-path suffix, so the module cannot be `…/pkg/v1` (ADR 0017). Consumer packages live under the `v1/` directory and are imported as `pkg/v1/*`; the `v1/` is a directory, not a separate module. `internal/*` is blocked by Go's `internal/` rule, which is also what keeps consumers out under Bazel; the layer order inside the repository is checked on the build graph by `scripts/check-layer-deps.sh`, not by visibility (ADR 0068, amending ADR 0004).
+The SDK's public API surface. `pkg/` is a directory of the **one SDK module**, `github.com/kitsunium/sdk`, whose `go.mod` is at the repository root (ADR 0162): consumer packages live under the `v1/` directory and are imported as `github.com/kitsunium/sdk/pkg/v1/*`, and a consumer requires `github.com/kitsunium/sdk`. Until ADR 0162 `pkg/` was a module of its own, the bare `…/pkg` (ADR 0017 — Go forbids a `/v1` module-path suffix), released as `pkg/vX.Y.Z` up to v0.17.0; those tags stay, and a go.mod still on `…/pkg` migrates with the command ADR 0162 gives. `internal/*` is blocked by Go's `internal/` rule, which is also what keeps consumers out under Bazel; the layer order inside the repository is checked on the build graph by `scripts/check-layer-deps.sh`, not by visibility (ADR 0068, amending ADR 0004).
 
-The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change becomes a real second module `…/pkg/v2` (legal `/v2` suffix, `go.mod` at `pkg/v2/`), coexisting with this one.
+The SDK's major is carried by **semver**, one tag `vX.Y.Z` per release: `v0.x.x` while alpha, `v1.x.x` at first stable. A future breaking change of the public surface is a `pkg/v2/` beside `pkg/v1/`, packages of the same module, coexisting with it until deprecation.
 
 ## Contents
 
@@ -15,14 +15,14 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 ## Versioning policy
 
-- `pkg/v1` signatures are **frozen at the semver `v1.0.0` tag** (not the `v1/` directory name). Pre-1.0 (`v0.x.x` alpha) breaking changes are allowed; post-1.0 any breaking change goes into a new `…/pkg/v2` module (coexists with v1 until deprecation).
-- Security fixes in `internal/*` propagate via minor bumps on the module concerned — no `pkg/v1` changes required because it only re-exports.
-- Adding a `…/pkg/v2` module is a dedicated ADR.
+- `pkg/v1` signatures are **frozen at the SDK's semver `v1.0.0` tag** (not the `v1/` directory name). Pre-1.0 (`v0.x.x` alpha) breaking changes are allowed; post-1.0 any breaking change goes into `pkg/v2/` (coexists with v1 until deprecation).
+- Security fixes in `internal/*` ship in the SDK module's next release — no `pkg/v1` changes required because it only re-exports.
+- Adding `pkg/v2/` is a dedicated ADR.
 
 ### Sizing a release — the `release:*` label (ADR 0135)
 
-A change to `pkg/` (or to `internal/` that reaches it) cuts a **patch** by
-default. Anything that adds an exported symbol needs a **minor**, and the size is
+A change to `pkg/` (or to `internal/` that reaches it) cuts a **patch** of the
+SDK module by default — one tag `vX.Y.Z` (ADR 0162). Anything that adds an exported symbol needs a **minor**, and the size is
 set by a maintainer as a LABEL on the pull request — `release:minor` (or
 `release:major`, or `release:patch` to decline a request) — before the merge,
 never by text in a commit message. The release reads the label when it runs,
@@ -75,7 +75,7 @@ What still happens to a `Release-bump:` line:
 
 - Export the concrete `*errs.Error` type here; consumers should see `error` only.
 - Import from `pkg/v1` into `internal/*`. The public facade sits at the top of the dependency graph.
-- Rename or remove an exported identifier in `pkg/v1/*` without cutting `pkg/v2`.
+- Rename or remove an exported identifier in `pkg/v1/*` without adding `pkg/v2`.
 - Surface `PrivateOf(err)` output in HTTP/gRPC responses — Private is diagnostic-only.
 - Set `Version` at runtime from application code; use the ldflags recipe (or Bazel `--stamp`) so every binary commits its version at link time.
 

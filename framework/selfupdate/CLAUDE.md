@@ -9,8 +9,9 @@ service and `core/selfupdate` stay internal.
 
 It was `pkg/v1/selfupdate` until ADR 0158 made the distribution mechanisms the
 framework's: the surface is unchanged, the import path is
-`github.com/kitsunium/sdk/framework/selfupdate`, and a consumer requires the framework
-module rather than `pkg`. Every code keeps its value (ADR 0160).
+`github.com/kitsunium/sdk/framework/selfupdate`, and a consumer required the
+framework module rather than `pkg` — one module, the SDK's, since ADR 0162.
+Every code keeps its value (ADR 0160).
 
 ## Surface
 

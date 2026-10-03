@@ -100,11 +100,45 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ## Install
 
+The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework
+and the internals they are built on — and it links the standard library and
+nothing else (ADR 0156, ADR 0162):
+
 ```bash
-go get github.com/kitsunium/sdk/pkg/v1/data/codec
-go get github.com/kitsunium/sdk/pkg/v1/errs
-go get github.com/kitsunium/sdk/pkg/v1/observe/logger
+go get github.com/kitsunium/sdk@latest
 ```
+
+then import the packages you use — `github.com/kitsunium/sdk/pkg/v1/data/codec`,
+`…/pkg/v1/errs`, `…/framework/kit`. Require the module BEFORE a `go mod tidy`:
+Go resolves an import nothing in go.mod provides to the module with the longest
+path that provides it, and until you require `github.com/kitsunium/sdk` that is
+the retired `…/pkg` at v0.17.0. An integration that needs a vendor library
+is a module of its own, required by name, so you take that vendor and no
+other: `go get github.com/kitsunium/sdk/third-party/aws@latest`, or
+`…/framework/connectors/postgres`.
+
+### Migrating from `…/pkg` and `…/framework` (v0.17.0 and before)
+
+Up to v0.17.0 the SDK was split into modules — `…/pkg`, `…/framework` and
+three `…/internal/*` ones your go.mod lists as `// indirect`. Since v0.18.0 it
+is one; the import paths did not change, the requirement does. One command
+moves a go.mod over, and it must drop every old module, or each package is
+found in two modules of the build and it fails with an ambiguous import:
+
+```bash
+go get github.com/kitsunium/sdk@v0.18.0 \
+  github.com/kitsunium/sdk/pkg@none \
+  github.com/kitsunium/sdk/framework@none \
+  github.com/kitsunium/sdk/internal/kernel@none \
+  github.com/kitsunium/sdk/internal/core@none \
+  github.com/kitsunium/sdk/internal/service@none
+go mod tidy
+```
+
+Add `github.com/kitsunium/sdk/<module>@v0.18.0` to the same `go get` for each
+vendor or connector module your go.mod requires (`third-party/aws`,
+`framework/connectors/postgres`…). `sdkguard` prints this command when it finds
+a go.mod still on `…/pkg` (ADR 0162).
 
 ## Quick example
 
@@ -136,7 +170,7 @@ func main() {
   go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
   ```
   It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
-- **Multi-module workspace** — `go.work` holds nineteen modules: `internal/kernel`, `internal/core`, `internal/service`, `pkg`, the `framework` and its four connectors (three database engines and entitlement's ssh identity), nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157) — and the root, which holds no package. Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **One module, and a module per vendor** — the SDK is one module at the root (ADR 0162); `go.work` adds the thirteen modules that require a vendor library: the framework's four connectors (three database engines and entitlement's ssh identity) and nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157). Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 

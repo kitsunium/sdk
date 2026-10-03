@@ -14,16 +14,17 @@ rules (portability, the ADR 0088 and ADR 0137 rules, the Do NOT list) are in
 | File | What it does | Run by |
 |---|---|---|
 | `go-modules.sh` | the census: one directory per `go.mod` git tracks, `.` for the root, sorted; a `go.mod` under `testdata/` is a fixture and left out, an untracked one is not reported; exit 1 with the reason on stderr when git cannot answer or answers nothing | `bazel-ci.yml`'s `cross-build` and `test-386`, `e2e-cross.yml`, `make test-framework`, `scripts/cross-platform-audit.sh`, `vuln-check.sh` |
-| `vuln-check.sh` | govulncheck in source mode, `GOWORK=off`, one module at a time — the whole census, or the modules named as arguments. govulncheck's exit 3 (a reachable vulnerable symbol) fails and names the module; any other non-zero fails as a scan that did not complete; the root `.` answering "no packages matched" is reported as holding no package (ADR 0157 §5), and any other module answering it still fails. With `GOVULNCHECK_VERSION` set the scanner must report exactly that version | `make vuln-check` — a step of `bazel-ci.yml`'s `bazel` job and of the daily `vuln-scan.yml` |
-| `test-ci-scripts.bats` | the census in throwaway repositories (nesting, `testdata/`, untracked, empty, a failing git, this repository's tools), the lanes reading it, every govulncheck verdict through a stub scanner, and the guard half of `scripts/ci-gates-check.sh` | `make ci-scripts-check` (`scripts/ci-scripts-test.sh`), in `bazel-ci.yml`'s `shell-gates` job |
+| `vuln-check.sh` | govulncheck in source mode, `GOWORK=off`, one module at a time — the whole census, or the modules named as arguments. govulncheck's exit 3 (a reachable vulnerable symbol) fails and names the module; any other non-zero fails as a scan that did not complete; "no packages matched" fails as an incomplete scan from any module — the root `.` included, the SDK module since ADR 0162. With `GOVULNCHECK_VERSION` set the scanner must report exactly that version | `make vuln-check` — a step of `bazel-ci.yml`'s `bazel` job and of the daily `vuln-scan.yml` |
+| `test-ci-scripts.bats` | the census in throwaway repositories (nesting, `testdata/`, untracked, empty, a failing git, this repository's tools), the lanes reading it and skipping no module, every govulncheck verdict through a stub scanner, and the guard half of `scripts/ci-gates-check.sh` | `make ci-scripts-check` (`scripts/ci-scripts-test.sh`), in `bazel-ci.yml`'s `shell-gates` job |
 
 ## Rules
 
 - **A lane that loops over modules reads the census**, never a list of its own
   — four hand-written lists had drifted apart (#242). A module a lane must skip
-  is named next to the loop with the lane that covers it instead; the only one
-  today is the empty root `.`, skipped by every census loop while it holds no
-  package.
+  is named next to the loop with the lane that covers it instead; none is
+  today. The root `.` was, by every census loop, while it was the workspace's
+  empty anchor (ADR 0157 §5); it is the SDK module since ADR 0162, and the
+  suite asserts no loop skips it.
 - **An empty answer is an error.** A lane looping over nothing passes having
   built nothing, which is the defect the census exists to close.
 - **The census answers for what git tracks**: CI checks out exactly that, so a

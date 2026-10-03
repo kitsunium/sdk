@@ -2,10 +2,9 @@
 
 Bazel 9 dropped WORKSPACE; this file is the single source of truth for
 external dependencies. rules_go + gazelle read Go deps directly from the
-workspace's go.work file so the module-local go.mod files it names — the
-internal/* layers, pkg, the framework and its connectors, one module per
-vendor under third-party/ — stay the authoritative list for gopls / IDE
-tooling.
+workspace's go.work file so the go.mod files it names — the SDK module at the
+root (ADR 0162), the framework's four connectors and one module per vendor
+under third-party/ — stay the authoritative list for gopls / IDE tooling.
 """
 
 module(
@@ -44,11 +43,7 @@ use_repo(
     "com_github_go_sql_driver_mysql",
     "com_github_hashicorp_hcl_v2",
     "com_github_jackc_pgx_v5",
-    "com_github_kitsunium_sdk_framework",
-    "com_github_kitsunium_sdk_internal_core",
-    "com_github_kitsunium_sdk_internal_kernel",
-    "com_github_kitsunium_sdk_internal_service",
-    "com_github_kitsunium_sdk_pkg",
+    "com_github_kitsunium_sdk",
     "com_github_klauspost_compress",
     "com_github_redis_go_redis_v9",
     "in_gopkg_yaml_v3",

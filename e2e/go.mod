@@ -2,14 +2,6 @@ module github.com/kitsunium/sdk/e2e
 
 go 1.27.1
 
-replace github.com/kitsunium/sdk/pkg => ../pkg
-
-replace github.com/kitsunium/sdk/internal/core => ../internal/core
-
-replace github.com/kitsunium/sdk/internal/kernel => ../internal/kernel
-
-replace github.com/kitsunium/sdk/internal/service => ../internal/service
-
 replace github.com/kitsunium/sdk/third-party/db/writer/clickhouse => ../third-party/db/writer/clickhouse
 
 replace github.com/kitsunium/sdk/third-party/db/writer/mysql => ../third-party/db/writer/mysql
@@ -20,9 +12,7 @@ require (
 	github.com/ClickHouse/clickhouse-go/v2 v2.48.0
 	github.com/go-sql-driver/mysql v1.10.0
 	github.com/jackc/pgx/v5 v5.11.0
-	github.com/kitsunium/sdk/internal/core v0.1.16
-	github.com/kitsunium/sdk/internal/kernel v0.1.16
-	github.com/kitsunium/sdk/pkg v0.1.16
+	github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000
 	github.com/kitsunium/sdk/third-party/db/writer/clickhouse v0.1.16
 	github.com/kitsunium/sdk/third-party/db/writer/mysql v0.1.16
 	github.com/kitsunium/sdk/third-party/db/writer/redis v0.1.16
@@ -66,7 +56,6 @@ require (
 	github.com/jackc/pgpassfile v1.0.0 // indirect
 	github.com/jackc/pgservicefile v0.0.0-20240606120523-5a60cdf6a761 // indirect
 	github.com/jackc/puddle/v2 v2.2.2 // indirect
-	github.com/kitsunium/sdk/internal/service v0.1.16 // indirect
 	github.com/klauspost/compress v1.19.2 // indirect
 	github.com/lufia/plan9stats v0.0.0-20260330125221-c963978e514e // indirect
 	github.com/magiconair/properties v1.8.10 // indirect
@@ -112,3 +101,5 @@ require (
 	modernc.org/mathutil v1.7.1 // indirect
 	modernc.org/memory v1.12.1 // indirect
 )
+
+replace github.com/kitsunium/sdk => ..

@@ -3,7 +3,7 @@
 # third-party/aws is a Go module of its own (ADR 0157): the s3 and cloudwatch
 # logger writers and their one vendor, aws-sdk-go-v2, which both share. This
 # directory holds no package; the file marks the module root as a Bazel package
-# so gazelle's go_deps extension can load //third-party/aws:go.mod, as
-# pkg/BUILD.bazel does for the public module.
+# so gazelle's go_deps extension can load //third-party/aws:go.mod, which
+# go.work names.
 
 package(default_visibility = ["//visibility:public"])

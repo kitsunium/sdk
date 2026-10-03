@@ -1,4 +1,3 @@
-# gazelle:prefix github.com/kitsunium/sdk/internal/service
 # gazelle:go_visibility //internal/service:service_consumers
 # gazelle:default_visibility //internal/service:service_consumers
 

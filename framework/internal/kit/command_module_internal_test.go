@@ -16,7 +16,7 @@ type toolsEntry struct {
 	ID string `json:"id" path:"id"`
 }
 
-// toolsDesk is a module of another Go module — github.com/kitsunium/sdk/pkg, as its
+// toolsDesk is a module of another Go module — toolsModule, as its
 // declarations say — with a command and a query of its own.
 func toolsDesk(t *testing.T) (*Module, *Command[toolsEntry, toolsEntry], *Query[toolsEntry, toolsEntry]) {
 	t.Helper()

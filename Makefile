@@ -65,13 +65,17 @@ build:
 test:
 	bazel test --config=race //...
 
-# `test-framework` runs the framework modules' suites under `go test -race`,
-# one module at a time and GOWORK=off, as a product builds them. It is the
+# `test-framework` runs the framework's suites under `go test -race`,
+# GOWORK=off, as a product builds them: its packages in the SDK module
+# (./framework/..., which stops at the connector modules nested under it — ADR
+# 0162), then each connector module of the census, one at a time. It is the
 # gate of //framework/internal/kit:kit_test, `manual` under Bazel because the suite
 # reads its own sources and positions relative to the module root (rule 12,
 # ADR 0147).
 test-framework:
-	@set -e; for m in $$(bash scripts/ci/go-modules.sh | grep '^framework'); do \
+	@echo "→ framework (the SDK module)"
+	GOWORK=off go test -race -count=1 ./framework/...
+	@set -e; for m in $$(bash scripts/ci/go-modules.sh | grep '^framework/connectors/'); do \
 	  echo "→ $$m"; (cd $$m && GOWORK=off go test -race -count=1 ./...); \
 	done
 
@@ -409,7 +413,8 @@ release-dry-run:
 # package's Go doc comment via the `gomarkdoc` binary (ADR 0008).
 # The binary is installed with `go install
 # github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0` so it lives on
-# $PATH without polluting pkg/go.mod with ~50 indirect deps.
+# $PATH without adding ~50 indirect deps to the SDK module's go.mod,
+# which requires nothing (ADR 0156).
 #
 # The package list is NOT enumerated here. It was, and it went stale: the
 # enumeration named 15 packages while 27 carried a //go:generate directive,

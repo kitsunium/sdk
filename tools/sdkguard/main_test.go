@@ -96,6 +96,26 @@ func proxyStub(t *testing.T, versions ...string) probe {
 	return probe{proxy: srv.URL, client: srv.Client()}
 }
 
+// proxyStubFor answers @v/list for each module path from its own list, and a
+// module it does not name with a 404, as a proxy does for a path it has never
+// seen.
+func proxyStubFor(t *testing.T, lists map[string][]string) probe {
+	t.Helper()
+	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		module, isList := strings.CutSuffix(strings.TrimPrefix(r.URL.Path, "/"), "/@v/list")
+		versions, known := lists[module]
+		if !isList || !known {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if _, err := w.Write([]byte(strings.Join(versions, "\n") + "\n")); err != nil {
+			t.Errorf("stub write: %v", err)
+		}
+	}))
+	t.Cleanup(srv.Close)
+	return probe{proxy: srv.URL, client: srv.Client()}
+}
+
 // modDir writes a go.mod and returns its directory.
 func modDir(t *testing.T, gomod string) string {
 	t.Helper()
@@ -1717,7 +1737,7 @@ func Test_versionNotice(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		if got := versionNotice(c.cur, c.newer); !strings.Contains(got, c.want) {
+		if got := versionNotice(sdkModule, c.cur, c.newer); !strings.Contains(got, c.want) {
 			t.Errorf("notice lacks %q:\n%s", c.want, got)
 		}
 	}
@@ -1772,30 +1792,30 @@ func Test_parseGoMod(t *testing.T) {
 	tests := []tc{
 		{
 			"a require block",
-			"module x\n\ngo 1.27\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.24\n)\n",
+			"module x\n\ngo 1.27\n\nrequire (\n\tgithub.com/kitsunium/sdk v0.1.24\n)\n",
 			"v0.1.24", false, true,
 		},
 		{
 			"a single-line require",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.20\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.20\n",
 			"v0.1.20", false, true,
 		},
 		{
 			"a single-line replace",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.9\n" +
-				"replace github.com/kitsunium/sdk/pkg => ../sdk/pkg\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.9\n" +
+				"replace github.com/kitsunium/sdk => ../sdk\n",
 			"v0.1.9", true, true,
 		},
 		{
 			"a replace block",
-			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.24\n)\n\n" +
-				"replace (\n\tgithub.com/kitsunium/sdk/pkg => ../sdk/pkg\n)\n",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk v0.1.24\n)\n\n" +
+				"replace (\n\tgithub.com/kitsunium/sdk => ../sdk\n)\n",
 			"v0.1.24", true, true,
 		},
 		{
 			"the SDK as the TARGET of a replace is not a replacement of it",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.9\n" +
-				"replace example.com/fork => github.com/kitsunium/sdk/pkg v0.1.24\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.9\n" +
+				"replace example.com/fork => github.com/kitsunium/sdk v0.1.24\n",
 			"v0.1.9", false, true,
 		},
 		{
@@ -1804,40 +1824,40 @@ func Test_parseGoMod(t *testing.T) {
 			//: nudge still applies — reading it as a local checkout would
 			//: silence the check for a consumer who is genuinely behind.
 			"a replace scoped to a version this module does not require",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.24\n" +
-				"replace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.24\n" +
+				"replace github.com/kitsunium/sdk v0.1.9 => ../sdk\n",
 			"v0.1.24", false, true,
 		},
 		{
 			//: the same directive, for the version this module actually
 			//: requires: now the build really does use the local checkout.
 			"a replace scoped to the version this module requires",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.9\n" +
-				"replace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.9\n" +
+				"replace github.com/kitsunium/sdk v0.1.9 => ../sdk\n",
 			"v0.1.9", true, true,
 		},
 		{
 			//: the replace is read before the require, so the comparison cannot
 			//: happen while parsing.
 			"a version-qualified replace declared before the require",
-			"module x\n\nreplace github.com/kitsunium/sdk/pkg v0.1.9 => ../sdk/pkg\n" +
-				"require github.com/kitsunium/sdk/pkg v0.1.9\n",
+			"module x\n\nreplace github.com/kitsunium/sdk v0.1.9 => ../sdk\n" +
+				"require github.com/kitsunium/sdk v0.1.9\n",
 			"v0.1.9", true, true,
 		},
 		{
 			"an indirect marker",
-			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg v0.1.9 // indirect\n)\n",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk v0.1.9 // indirect\n)\n",
 			"v0.1.9", false, true,
 		},
 		{
 			"a commented-out directive is not a directive",
-			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.1.24\n" +
-				"// replace github.com/kitsunium/sdk/pkg => ../x\n",
+			"module x\n\nrequire github.com/kitsunium/sdk v0.1.24\n" +
+				"// replace github.com/kitsunium/sdk => ../x\n",
 			"v0.1.24", false, true,
 		},
 		{
 			"a non-version second field is not a version",
-			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/pkg => ../x\n)\n",
+			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk => ../x\n)\n",
 			"", false, false,
 		},
 		{"no SDK requirement", "module x\n\nrequire example.com/other v1.0.0\n", "", false, false},
@@ -1846,10 +1866,23 @@ func Test_parseGoMod(t *testing.T) {
 			"module x\n\nrequire (\n\tgithub.com/kitsunium/sdk/internal/core v0.1.24 // indirect\n)\n",
 			"", false, false,
 		},
+		{
+			//: the public module before ADR 0162 is another module path; a
+			//: go.mod on it is read for legacyModule, never as the SDK's.
+			"the pkg module of before ADR 0162 is not the SDK module",
+			"module x\n\nrequire github.com/kitsunium/sdk/pkg v0.17.0\n",
+			"", false, false,
+		},
+		{
+			//: the vendor modules sit beneath the SDK's path and are not it.
+			"a vendor module is not the SDK module",
+			"module x\n\nrequire github.com/kitsunium/sdk/third-party/aws v0.18.0\n",
+			"", false, false,
+		},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		ref, ok := parseGoMod(c.gomod)
+		ref, ok := parseGoMod(c.gomod, sdkModule)
 		if ok != c.wantFound {
 			t.Fatalf("found = %v, want %v", ok, c.wantFound)
 		}
@@ -1918,8 +1951,8 @@ func Test_readGoModLine(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		var ref moduleRef
-		if got := readGoModLine(&ref, c.section, c.line); got != c.want {
+		ref := new(moduleRef{module: sdkModule})
+		if got := readGoModLine(ref, c.section, c.line); got != c.want {
 			t.Errorf("readGoModLine = %v, want %v", got, c.want)
 		}
 	}
@@ -1941,14 +1974,15 @@ func Test_readRequire(t *testing.T) {
 	}
 	tests := []tc{
 		{"the SDK", sdkModule + " v0.1.24", "v0.1.24"},
+		{"the pkg module of before ADR 0162", legacyModule + " v0.1.24", ""},
 		{"another module", "example.com/x v1.0.0", ""},
 		{"too few fields", sdkModule, ""},
 		{"a second field that is not a version", sdkModule + " => ../x", ""},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		var ref moduleRef
-		readRequire(&ref, c.entry)
+		ref := new(moduleRef{module: sdkModule})
+		readRequire(ref, c.entry)
 		if ref.Version != c.want {
 			t.Errorf("version = %q, want %q", ref.Version, c.want)
 		}
@@ -2034,16 +2068,16 @@ func Test_readReplace(t *testing.T) {
 		want    bool
 	}
 	tests := []tc{
-		{"the SDK on the left", "v0.1.24", sdkModule + " => ../sdk/pkg", true},
-		{"an unversioned directive with no requirement", "", sdkModule + " => ../sdk/pkg", true},
+		{"the SDK on the left", "v0.1.24", sdkModule + " => ../sdk", true},
+		{"an unversioned directive with no requirement", "", sdkModule + " => ../sdk", true},
 		{
 			"a directive for the required version",
-			"v0.1.9", sdkModule + " v0.1.9 => ../sdk/pkg", true,
+			"v0.1.9", sdkModule + " v0.1.9 => ../sdk", true,
 		},
 		{
 			//: only v0.1.9 is redirected; this build resolves v0.1.24 normally.
 			"a directive for another version",
-			"v0.1.24", sdkModule + " v0.1.9 => ../sdk/pkg", false,
+			"v0.1.24", sdkModule + " v0.1.9 => ../sdk", false,
 		},
 		{"the SDK on the right", "v0.1.9", "example.com/fork => " + sdkModule + " v0.1.24", false},
 		{"another module entirely", "v0.1.9", "example.com/x => ../x", false},
@@ -2051,8 +2085,8 @@ func Test_readReplace(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		ref := moduleRef{Version: c.version}
-		readReplace(&ref, c.entry)
+		ref := new(moduleRef{module: sdkModule, Version: c.version})
+		readReplace(ref, c.entry)
 		if ref.Replaced() != c.want {
 			t.Errorf("replaced = %v, want %v", ref.Replaced(), c.want)
 		}
@@ -2191,7 +2225,7 @@ func Test_sdkRequirement(t *testing.T) {
 		if err := os.MkdirAll(start, 0o750); err != nil {
 			t.Fatalf("mkdir: %v", err)
 		}
-		ref, ok := sdkRequirement(start)
+		ref, ok := sdkRequirement(start, sdkModule)
 		if c.want == "" {
 			if ok {
 				t.Errorf("unexpected requirement %+v", ref)
@@ -2236,7 +2270,7 @@ func Test_workspaceRequirement(t *testing.T) {
 			"a replace anywhere silences the whole workspace",
 			map[string]string{
 				"go.work":   "go 1.27\n\nuse ./m1\n",
-				"m1/go.mod": "module m1\n\nrequire " + sdkModule + " v0.1.9\nreplace " + sdkModule + " => ../sdk/pkg\n",
+				"m1/go.mod": "module m1\n\nrequire " + sdkModule + " v0.1.9\nreplace " + sdkModule + " => ../sdk\n",
 			},
 			"", false,
 		},
@@ -2261,7 +2295,7 @@ func Test_workspaceRequirement(t *testing.T) {
 				t.Fatalf("write %s: %v", rel, err)
 			}
 		}
-		ref, ok := workspaceRequirement(root)
+		ref, ok := workspaceRequirement(root, sdkModule)
 		if ok != c.wantAny {
 			t.Fatalf("found = %v, want %v (%+v)", ok, c.wantAny, ref)
 		}
@@ -2501,6 +2535,81 @@ func Test_checkVersion(t *testing.T) {
 		}
 		if c.wantText != "" && !strings.Contains(notice, c.wantText) {
 			t.Errorf("notice %q does not contain %q", notice, c.wantText)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// A go.mod on the public module of before ADR 0162 is behind by a module once
+// the SDK module has a release: the notice is the migration, and its command
+// drops every module the SDK module replaced, so no package is found twice.
+// Before that release the old probe still answers for the old module.
+func Test_checkVersionMigration(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name      string
+		gomod     string
+		lists     map[string][]string
+		wantStale bool
+		wantText  []string
+	}
+	onPkg := "module x\n\nrequire (\n\t" + legacyModule + " v0.17.0\n\t" + sdkModule + "/framework v0.17.0\n)\n"
+	tests := []tc{
+		{
+			"the SDK module released: migrate",
+			onPkg,
+			map[string][]string{sdkModule: {"v0.18.0", "v0.18.1"}, legacyModule: {"v0.17.0"}},
+			true,
+			[]string{
+				"requires " + legacyModule + " v0.17.0",
+				"latest is v0.18.1",
+				"go get " + sdkModule + "@v0.18.1 " + legacyModule + "@none " + sdkModule + "/framework@none",
+				sdkModule + "/internal/service@none",
+				"ambiguous import",
+			},
+		},
+		{
+			"no SDK module release yet: the old probe answers",
+			onPkg,
+			map[string][]string{legacyModule: {"v0.17.0", "v0.17.1"}},
+			true,
+			[]string{"1 patch releases behind", "go get " + legacyModule + "@v0.17.1"},
+		},
+		{
+			"no SDK module release and up to date: silent",
+			onPkg,
+			map[string][]string{legacyModule: {"v0.17.0"}},
+			false, nil,
+		},
+		{
+			"a local checkout of the old module: silent",
+			onPkg + "replace " + legacyModule + " => ../sdk/pkg\n",
+			map[string][]string{sdkModule: {"v0.18.0"}},
+			false, nil,
+		},
+		{
+			"a go.mod already on the SDK module is measured against it alone",
+			"module x\n\nrequire " + sdkModule + " v0.18.0\n",
+			map[string][]string{sdkModule: {"v0.18.0", "v0.19.0"}, legacyModule: {"v0.17.0"}},
+			true,
+			[]string{"crossing a minor version", "go get " + sdkModule + "@v0.19.0"},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		notice, stale := checkVersion(modDir(t, c.gomod), proxyStubFor(t, c.lists))
+		if stale != c.wantStale {
+			t.Fatalf("stale = %v, want %v (notice: %q)", stale, c.wantStale, notice)
+		}
+		for _, want := range c.wantText {
+			if !strings.Contains(notice, want) {
+				t.Errorf("notice lacks %q:\n%s", want, notice)
+			}
 		}
 	}
 	for _, c := range tests {

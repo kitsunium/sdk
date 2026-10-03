@@ -1608,7 +1608,7 @@ rules:
       # TEMPORARY — kodflow/ktn-linter#694: BIGSTRUCT fires on aliases of external
       # types in framework/internal/kit (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
-      # framework module only.
+      # framework directory only.
       - "framework/**"
       - "**/framework/**"
 
@@ -1739,7 +1739,7 @@ rules:
       # TEMPORARY — kodflow/ktn-linter#691: DEADCODE fires on methods of generic
       # receivers and on promoted methods (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
-      # framework module only.
+      # framework directory only.
       - "framework/**"
       - "**/framework/**"
 
@@ -1815,13 +1815,13 @@ rules:
       - "internal/service/data/codec/msgpack/**"
 
   # KTN-ITER-YIELD / KTN-STRUCT-ACCESSOR — false positives in the framework
-  # module (kodflow/ktn-linter#692, #693). TEMPORARY.
+  # (kodflow/ktn-linter#692, #693). TEMPORARY.
   KTN-ITER-YIELD:
     exclude:
       # TEMPORARY — kodflow/ktn-linter#692: ITER-YIELD fires on a one-bool yield
       # (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
-      # framework module only.
+      # framework directory only.
       - "framework/**"
       - "**/framework/**"
 
@@ -1830,7 +1830,7 @@ rules:
       # TEMPORARY — kodflow/ktn-linter#693: STRUCT-ACCESSOR fires on Unwrap and
       # promoted methods (false positive).
       # Temporaire, à retirer quand l'issue est corrigée. Scoped to the
-      # framework module only.
+      # framework directory only.
       - "framework/**"
       - "**/framework/**"
       # TEMPORARY — the same kodflow/ktn-linter#693, on service/data/sql.Withheld.

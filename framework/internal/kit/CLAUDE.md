@@ -4,7 +4,7 @@
 Declarations (`NewService`, the generic methods of `*Service`), the runtime
 (`App`), and the product's self-description (`App.Graph`, the read-only
 `/_kit/api` surface). Moved from `kitsunium/platform/kit` into the SDK's
-framework module (ADR 0147): the platform keeps a deprecated facade of aliases
+framework (ADR 0147), a part of the SDK module since ADR 0162: the platform keeps a deprecated facade of aliases
 over the SDK's, and the tools a product runs but does not link — the
 Studio's pages, the analyzer, the generator. The platform's root `CLAUDE.md`
 holds the invariants; this file maps them to files. Every one still holds

@@ -2,12 +2,17 @@ module github.com/kitsunium/sdk
 
 go 1.27.1
 
-// The root module is the workspace's anchor: nothing requires it, the release
-// chain leaves it out so it is never tagged, and it holds no package. Every
-// vendor integration under third-party/ is a module of its own, in that chain
-// (ADR 0157) — third-party/aws, third-party/codec/{hcl,protobuf,yaml},
-// third-party/db/writer/{clickhouse,mysql,redis}, third-party/transform and
-// third-party/x-crypto. Entitlement's ssh Identity, the last package it held,
-// is the framework's connector module framework/connectors/ssh (ADR 0158). The
-// Docker-backed integration suites live in the auxiliary e2e module
-// (e2e/integration), outside go.work.
+// The SDK is this one module (ADR 0162): the kernel, core and service layers
+// under internal/, the public packages under pkg/v1/ and the framework under
+// framework/. Import paths are github.com/kitsunium/sdk/pkg/v1/... and
+// github.com/kitsunium/sdk/framework/..., and Go's internal/ rule keeps
+// consumers out of internal/. It requires no module outside the standard
+// library (ADR 0156), and a release is one tag on it, vX.Y.Z.
+//
+// The modules that require a vendor stay modules of their own, so a consumer of
+// one integration takes that vendor's graph and no other: the nine under
+// third-party/ (ADR 0157) and the four framework connectors under
+// framework/connectors/ (ADR 0147, ADR 0158). Each requires this module and is
+// tagged <dir>/vX.Y.Z only by a release that changes it. The Docker-backed
+// integration suites live in the auxiliary e2e module, outside go.work with
+// tools/genindex and tools/sdkguard.

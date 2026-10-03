@@ -17,7 +17,7 @@ import (
 
 func TestStudioIsOffInProduction(t *testing.T) {
 	app := start(t, kit.Env(kit.EnvProduction))
-	for _, path := range []string{"/_kit/", "/_kit/api/graph", "/_kit/api/events", "/_kit/api/source?file=internal/kit/product_test.go&line=1"} {
+	for _, path := range []string{"/_kit/", "/_kit/api/graph", "/_kit/api/events", "/_kit/api/source?file=framework/internal/kit/product_test.go&line=1"} {
 		if r := call(t, app, "GET"+" "+path, noBody); r.status != http.StatusNotFound {
 			t.Errorf("production serves %s: %d", path, r.status)
 		}
@@ -75,7 +75,7 @@ func TestStudioChecksTheHost(t *testing.T) {
 
 func TestSourceServesOnlyTheGraphsFiles(t *testing.T) {
 	app := start(t)
-	r := call(t, app, "GET /_kit/api/source?file=internal/kit/product_test.go&line=30&end=32", noBody)
+	r := call(t, app, "GET /_kit/api/source?file=framework/internal/kit/product_test.go&line=30&end=32", noBody)
 	var sn model.Snippet
 	r.json(t, &sn)
 	if r.status != http.StatusOK || sn.Focus != 30 || sn.FocusEnd != 32 || sn.Language != "go" || sn.StartLine != 18 {
@@ -86,14 +86,14 @@ func TestSourceServesOnlyTheGraphsFiles(t *testing.T) {
 	}
 	for _, file := range []string{
 		"../../../../etc/passwd", "/etc/passwd", "go.mod", ".git/config", ".kit/data/shop/items.json",
-		"internal/kit/app.go", "internal/kit/product_test.go\x00", "internal/kit/../kit/product_test.go", `internal\kit\product_test.go`,
+		"framework/internal/kit/app.go", "framework/internal/kit/product_test.go\x00", "framework/internal/kit/../kit/product_test.go", `framework\internal\kit\product_test.go`,
 	} {
 		r := call(t, app, "GET /_kit/api/source?file="+urlEscape(file)+"&line=1", noBody)
 		if r.status != http.StatusNotFound {
 			t.Errorf("file %q answered %d", file, r.status)
 		}
 	}
-	r = call(t, app, "GET /_kit/api/source?file=internal/kit/product_test.go&line=-4&end=999999999", noBody)
+	r = call(t, app, "GET /_kit/api/source?file=framework/internal/kit/product_test.go&line=-4&end=999999999", noBody)
 	r.json(t, &sn)
 	if r.status != http.StatusOK || sn.Focus != 1 || len(sn.Lines) > 400+2*12 {
 		t.Errorf("the range is not clamped: focus %d, %d lines", sn.Focus, len(sn.Lines))
@@ -158,7 +158,7 @@ func TestDeclarationProblemsAreReportedTogether(t *testing.T) {
 		}
 	}
 	for _, d := range de.Diagnostics {
-		if d.Source == nil || d.Source.File != "internal/kit/studio_test.go" {
+		if d.Source == nil || d.Source.File != "framework/internal/kit/studio_test.go" {
 			t.Errorf("diagnostic without its position: %+v", d)
 		}
 	}

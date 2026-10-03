@@ -160,7 +160,7 @@ func expectProblem(t *testing.T, de *kit.DiagnosticsError, file, said, where str
 		t.Errorf("no problem says %q:\n%v", said, de)
 		return
 	}
-	if want := (model.Source{File: "internal/kit/" + file, Line: lineIn(t, file, where)}); d.Source == nil || *d.Source != want {
+	if want := (model.Source{File: "framework/internal/kit/" + file, Line: lineIn(t, file, where)}); d.Source == nil || *d.Source != want {
 		t.Errorf("%q is said at %+v, want %+v", said, d.Source, want)
 	}
 	if d.Texts["fr"] == "" || d.Texts["fr"] == d.Message {

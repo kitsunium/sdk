@@ -203,10 +203,10 @@ func viewOf(m *model.Module) moduleView {
 // the one another required is mounted at its defaults, by nobody.
 func TestTheGraphSaysTheModules(t *testing.T) {
 	g := startReviews(t).Graph()
-	const kitTest, platform = "github.com/kitsunium/sdk/framework/internal/kit_test", "github.com/kitsunium/sdk/framework"
+	const kitTest, sdk = "github.com/kitsunium/sdk/framework/internal/kit_test", "github.com/kitsunium/sdk"
 	for name, want := range map[string]moduleView{
-		"reviews": {services: "reviews,reviews.screening", requires: "ratings", prefix: "/reviews/", pkg: kitTest, goModule: platform, mounted: true, french: true},
-		"ratings": {services: "ratings", requiredBy: "reviews", prefix: "/ratings/", pkg: kitTest, goModule: platform},
+		"reviews": {services: "reviews,reviews.screening", requires: "ratings", prefix: "/reviews/", pkg: kitTest, goModule: sdk, mounted: true, french: true},
+		"ratings": {services: "ratings", requiredBy: "reviews", prefix: "/ratings/", pkg: kitTest, goModule: sdk},
 	} {
 		if got := viewOf(g.ModuleOf(name)); got != want {
 			t.Errorf("module %s: %+v, want %+v", name, got, want)

@@ -32,9 +32,10 @@ Rules:
   transaction of the write that needs it — it waited the busy timeout, then
   failed (kit's `placementOf`, the platform's ADR 0004 step 2 as built). A store the keys
   seal lives beside kit.Privacy on the file.
-- `go.mod` requires the framework at the last release and replaces it — and
-  the SDK modules below it — with this tree; the release commit pins them
-  (ADR 0147 §9). It is a module of the SDK's `go.work`.
+- `go.mod` requires the SDK module, `github.com/kitsunium/sdk` — kit and the
+  packages below it — and replaces it with this tree; a release that changes
+  this module tags it and pins the SDK at that release (ADR 0162). It is a
+  module of the SDK's `go.work`.
 
 ## Test
 

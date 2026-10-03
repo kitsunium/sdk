@@ -16,11 +16,11 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/proc/process"
 )
 
-// The modules a build is described by, besides the product's own.
-const (
-	frameworkModule = "github.com/kitsunium/sdk/framework"
-	sdkModule       = "github.com/kitsunium/sdk/pkg"
-)
+// sdkModule is the module a build's kit and SDK are read from, besides the
+// product's own. The framework and the SDK are one Go module (ADR 0162), so
+// the two always say the same version; the graph keeps both, as it always
+// had them.
+const sdkModule = "github.com/kitsunium/sdk"
 
 // Environment kit dev gives the process it launches, describing the build.
 const (
@@ -44,11 +44,11 @@ var (
 		if bi == nil {
 			return "(unknown)"
 		}
-		if bi.Main.Path == frameworkModule {
+		if bi.Main.Path == sdkModule {
 			return bi.Main.Version
 		}
 		for _, d := range bi.Deps {
-			if d.Path == frameworkModule {
+			if d.Path == sdkModule {
 				if d.Replace != nil {
 					return "(replaced)"
 				}
@@ -107,7 +107,8 @@ type gitAnswer struct {
 
 // buildOf describes what the running binary was built from, as the SDK reads
 // it (process.ParseBuild): the product's own module with the VCS stamp Go
-// records, and the versions of kit and of the SDK. A module built from a
+// records, and the version of the SDK module, which holds kit (ADR 0162) — so
+// Kit and SDK say the same module at the same version. A module built from a
 // local directory — a workspace, a replace — has no version; with git (dev
 // only) its commit is still told.
 func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
@@ -117,19 +118,17 @@ func buildOf(bi *debug.BuildInfo, head gitHead) *model.Build {
 	info := process.ParseBuild(bi)
 	b := &model.Build{
 		Product: versionOf(&info.Main, nil),
-		Kit:     model.ModuleVersion{Module: frameworkModule},
-		SDK:     model.ModuleVersion{Module: sdkModule},
+		Kit:     model.ModuleVersion{Module: sdkModule},
 	}
 	// A product is always built from its own tree: its commit says where.
 	b.Product.Local = false
-	if info.Main.Path == frameworkModule {
+	if info.Main.Path == sdkModule {
 		b.Kit = b.Product
-	} else if m, ok := info.Module(frameworkModule); ok {
+	} else if m, ok := info.Module(sdkModule); ok {
 		b.Kit = versionOf(&m, head)
 	}
-	if m, ok := info.Module(sdkModule); ok {
-		b.SDK = versionOf(&m, head)
-	}
+	// Its own copy: a caller that edits one of the two edits only that one.
+	b.SDK = cloneVersion(b.Kit)
 	return b
 }
 

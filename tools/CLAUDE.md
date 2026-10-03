@@ -40,7 +40,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 
 ### `genindex/`
 
-1. `docs/site/scripts/gen-symbols.mjs` (a Node prebuild step) reads `versions.json` + `build-info.json`, then spawns `go run github.com/kitsunium/sdk/tools/genindex` with `GOWORK=off` (keeping the workspace invariant from the root `CLAUDE.md` intact: `go.work` names the root and the modules the release chain tags, nothing else).
+1. `docs/site/scripts/gen-symbols.mjs` (a Node prebuild step) reads `versions.json` + `build-info.json`, then spawns `go run github.com/kitsunium/sdk/tools/genindex` with `GOWORK=off` (keeping the workspace invariant from the root `CLAUDE.md` intact: `go.work` names the SDK module at the root and the modules a release may tag beside it, nothing else).
 2. `genindex` walks every package under `-input` (e.g. `pkg/v1`), uses `go/parser` + `go/doc` to extract exported symbols, and emits one JSON row per func / type / method / const / var. `-source-url-prefix` (set to the current commit's GitHub blob URL) is concatenated with the repo-relative file path + line number to produce the per-symbol `sourceUrl`.
 3. The docs site's `Search.astro` component lazy-loads the JSON on first ⌘K and feeds MiniSearch.
 
@@ -48,7 +48,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 
 - Tools here MUST be self-contained. No third-party binaries beyond `bash`, `git` and `go`.
 - Shell scripts: keep them small enough to read end-to-end. If a tool exceeds ~80 lines, split it into a helper package elsewhere and keep the entry point thin.
-- Go programs (e.g. `genindex/`) live in their own subdirectory with `go.mod` OUTSIDE `go.work` (`GOWORK=off`) so the workspace invariant is preserved: every module `go.work` names but the root is tagged by the release chain (ADR 0147 §9), and a tool is not published.
+- Go programs (e.g. `genindex/`) live in their own subdirectory with `go.mod` OUTSIDE `go.work` (`GOWORK=off`) so the workspace invariant is preserved: every module `go.work` names beside the SDK may be tagged by a release (ADR 0162), and a tool is not published.
 - Stdlib-only for Go tools. Pulling extra deps would pollute the build dependency graph for what is essentially a one-shot script.
 - The `tools/**` tree is linted like everything else. It used to be excluded via `.ktn-linter.yaml` on the grounds that tools are not library code, but the rules turned out to apply perfectly well to a build script — and the exemption was mostly hiding missing tests. Fix the finding rather than re-adding the exclusion.
 
@@ -58,7 +58,7 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 - Add a tool that mutates the working tree from inside a Bazel action. Stamp scripts are pure read-only probes.
 - Rename `workspace_status.sh` — `.bazelrc` references it by exact path.
 - Echo unrelated content from `workspace_status.sh`. Bazel treats unexpected lines as build failures when `--stamp` is enabled.
-- Add `genindex/` to `go.work`. It must stay out of the umbrella so `GOWORK=off go run` works from a clean checkout — and because the release chain tags every module `go.work` names, so a tool there would be published with the SDK.
+- Add `genindex/` to `go.work`. It must stay out of the umbrella so `GOWORK=off go run` works from a clean checkout — and because a release tags the modules `go.work` names, so a tool there would be published with the SDK (and `vendor_modules` refuses a `go.work` that names it).
 - Inline the alloc-lane target list into the `Makefile` or `bazel-ci.yml`. All three call sites MUST read `alloc-lane-targets.txt`, or `check-alloc-lane-coverage.sh` starts verifying a list nobody runs.
 - Silence `check-alloc-lane-coverage.sh` by deleting the offending entry. If a `!race` test genuinely should not run, drop the `!race` constraint or the test — do not leave it compiling but ungated.
 

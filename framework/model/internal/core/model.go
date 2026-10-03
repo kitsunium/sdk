@@ -36,7 +36,7 @@ import "time"
 // dispatch, ask and handle span operations and the dispatch and ask
 // controls.
 //
-// Version 5 is the first the SDK's framework module publishes (ADR 0147). It
+// Version 5 is the first the SDK's framework publishes (ADR 0147). It
 // adds what a product is made of beyond its services: the binary
 // ([KindBinary]) and its process roles ([KindRole]), the short CLI command
 // ([KindCLI]), the listener that is not HTTP ([KindListener]), the library
@@ -118,9 +118,11 @@ type AppMessage struct {
 type BuildMessage struct {
 	// Product is the product's own module.
 	Product ModuleVersionMessage `json:"product"`
-	// Kit is the framework.
+	// Kit is the framework: since ADR 0162 the SDK module,
+	// github.com/kitsunium/sdk, which holds it.
 	Kit ModuleVersionMessage `json:"kit"`
-	// SDK is the SDK the framework depends on.
+	// SDK is the SDK the framework is built on — the same module as Kit
+	// since ADR 0162, so the two say the same version.
 	SDK ModuleVersionMessage `json:"sdk"`
 }
 

@@ -4,6 +4,6 @@
 # XChaCha20-Poly1305 and their one vendor, golang.org/x/crypto, which both
 # share. This directory holds no package; the file marks the module root as a
 # Bazel package so gazelle's go_deps extension can load
-# //third-party/x-crypto:go.mod, as pkg/BUILD.bazel does for the public module.
+# //third-party/x-crypto:go.mod, which go.work names.
 
 package(default_visibility = ["//visibility:public"])

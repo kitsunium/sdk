@@ -57,7 +57,7 @@ env:
   # own reader does from a second process. The defect was deferred twice (ADR
   # 0078, then ADR 0079) on the stated grounds that it was "not reachable from
   # this CI matrix". Listing one more package here is what made that false. It
-  # is a package of the framework module now (ADR 0158), so it is listed in
+  # is a package of the framework now (ADR 0158), so it is listed in
   # FRAMEWORK_PKGS and run from framework/ rather than from internal/service.
   #
   # `proc/childwait` joins them because the one wait4(-1) in the SDK lives
@@ -110,7 +110,8 @@ env:
   # security descriptor at creation — is named in their CLAUDE.md, not done.
   SERVICE_FILE_PKGS: "./observe/logger/sink/file ./observe/logger/writer/rotfile ./observe/logger/internal/logfile"
   # Framework packages whose runtime is a kernel question — see `entitlement`
-  # above. Relative to framework/, the module they belong to.
+  # above. Relative to framework/, a directory of the SDK module (ADR 0162),
+  # as the three lists above are relative to the layer directories.
   FRAMEWORK_PKGS: "./internal/service/entitlement"
 
 jobs:
@@ -137,7 +138,7 @@ jobs:
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version-file: pkg/go.mod
+          go-version-file: go.mod
 
       - name: Unit tests — platform-sensitive packages on ${{ matrix.name }}
         shell: bash
@@ -191,18 +192,10 @@ jobs:
           fail=0
           # Every module of the census (ADR 0137) — this loop named six, and
           # tools/genindex and tools/sdkguard never ran on macOS or Windows.
+          # The root is the SDK module (ADR 0162) and is tested like the rest.
           modules="$(bash scripts/ci/go-modules.sh)" || { echo "::error::the module census failed"; exit 1; }
           for mod in $modules; do
             echo "::group::$mod"
-            # The root module is the workspace's anchor and holds no package
-            # (ADR 0157 §5), and `go test ./...` exits 1 on a pattern that
-            # matches nothing. It is skipped by name, and only while `go list`
-            # says it is empty: a package added there is tested again.
-            if [ "$mod" = "." ] && pkgs="$(go list ./... 2>/dev/null)" && [ -z "$pkgs" ]; then
-              echo "skip: the root module holds no package"
-              echo "::endgroup::"
-              continue
-            fi
             (cd "$mod" && go test -count=1 -short ./...) || { fail=1; echo "::error::$mod has failing tests on ${{ matrix.name }}"; }
             echo "::endgroup::"
           done
@@ -314,7 +307,7 @@ jobs:
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version-file: pkg/go.mod
+          go-version-file: go.mod
 
       - name: Cross-compile test binaries + conformance for ${{ matrix.os }}
         shell: bash
@@ -326,7 +319,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p bins
-          compile() { # module  pkg-list
+          compile() { # dir  pkg-list
             local mod="$1"; shift
             for pkg in $@; do
               local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"
@@ -445,7 +438,7 @@ jobs:
 
       - uses: actions/setup-go@4a3601121dd01d1626a1e23e37211e3254c1c06c # v6.4.0
         with:
-          go-version-file: pkg/go.mod
+          go-version-file: go.mod
 
       - name: Cross-compile test binaries + conformance for ${{ matrix.goos }}
         shell: bash
@@ -457,7 +450,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p bins
-          compile() { # module  pkg-list
+          compile() { # dir  pkg-list
             local mod="$1"; shift
             for pkg in $@; do
               local out="bins/$(echo "${mod#internal/}_${pkg#./}" | tr '/ ' '__').test"

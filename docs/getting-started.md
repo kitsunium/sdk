@@ -4,20 +4,18 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 
 ## Requirements
 
-- Go **1.27.1 or newer — mandatory**. Every SDK module declares `go 1.27.1` and `MODULE.bazel` pins the toolchain to 1.27.1. An older `go` command (1.21 or later) with the default `GOTOOLCHAIN=auto` downloads and runs Go 1.27.1 itself; with `GOTOOLCHAIN=local`, or where it cannot download, it refuses the build — the `go` directive is the requirement, not any single language feature. (The features the SDK does use — `for b.Loop()`, `b.Context()`, range-over-int — landed in 1.22/1.24 and are not what sets the floor.)
+- Go **1.27.1 or newer — mandatory**. The SDK module declares `go 1.27.1` and `MODULE.bazel` pins the toolchain to 1.27.1. An older `go` command (1.21 or later) with the default `GOTOOLCHAIN=auto` downloads and runs Go 1.27.1 itself; with `GOTOOLCHAIN=local`, or where it cannot download, it refuses the build — the `go` directive is the requirement, not any single language feature. (The features the SDK does use — `for b.Loop()`, `b.Context()`, range-over-int — landed in 1.22/1.24 and are not what sets the floor.)
 - A Go module to import from: `go mod init github.com/<you>/<project>` if you don't have one yet
 
 ## Install
 
-The SDK is shipped as three importable subpackages under one module per major version. Install all three (they coexist; only the parts you import end up in your binary):
+The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework and the internals they are built on — and it links the standard library and nothing else. Require the module once; only the packages you import end up in your binary:
 
 ```bash
-go get github.com/kitsunium/sdk/pkg/v1/data/codec
-go get github.com/kitsunium/sdk/pkg/v1/errs
-go get github.com/kitsunium/sdk/pkg/v1/observe/logger
+go get github.com/kitsunium/sdk@latest
 ```
 
-A single `go get github.com/kitsunium/sdk/pkg/v1/...` works too if you want everything in one shot.
+Run it BEFORE `go mod tidy`. Up to v0.17.0 the public packages were the module `github.com/kitsunium/sdk/pkg`, and Go resolves an import nothing in your go.mod provides to the module with the LONGEST path that provides it at its latest version — so a bare `go mod tidy` would pick that retired module, at v0.17.0. Once `github.com/kitsunium/sdk` is in your go.mod, the imports below resolve to it. A go.mod that already requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162).
 
 ## Hello, codec
 
