@@ -443,7 +443,7 @@ is from a separate run with no memory profiler attached.
 
 ### 4.1 `http.Header.Get("traceparent")` — 1 allocation and 87 ns, per Get
 
-`core/observe/trace.Extract` asks the carrier for `TraceParentHeader`, which is
+`Extract` asks the carrier for `TraceParentHeader`, which is
 `"traceparent"` — lowercase, as W3C §3.2.1 requires of a name a vendor **sends**.
 `http.Header` is keyed canonically, so every `Get` canonicalises the constant,
 and that is not free:
