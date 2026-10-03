@@ -15,9 +15,10 @@ import (
 	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 )
 
-// This file carries the SAME build constraint as flock_unix.go, so it runs
-// everywhere the file locker exists and nowhere it does not. That is not a
-// rule-12 exclusion: there is no configuration in which the code under test
+// This file carries the SAME build constraint as nofollow_unix.go and as the
+// kernel lock's flock_unix.go (internal/kernel/fs/flock), so it runs
+// everywhere the Unix file locker exists and nowhere it does not. That is not
+// a rule-12 exclusion: there is no configuration in which the code under test
 // is built and this file is not.
 
 // holdForeignFlock takes an exclusive flock on a SEPARATE open file

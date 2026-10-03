@@ -7,12 +7,17 @@ The concrete lockers implementing `internal/core/app/lock` (**ADR 0052**):
 
 - **`NewMemory`** — excludes the goroutines of one process. Its leases **expire**.
 - **`NewFileLocker`** — excludes the processes sharing one directory on one
-  machine, through `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081).
-  Its leases **do not expire**.
+  machine, through `flock(2)` on Unix and `LockFileEx` on Windows (ADR 0081) —
+  the kernel's `internal/kernel/fs/flock`, which session's file store takes
+  too (ADR 0159). Its leases **do not expire**.
 - **`Keepalive`** — renews a lease in the background and **cancels a derived
   context** the instant the lease is lost.
 
 Stdlib-only. Code range: `0.3.51.*`, plus the core sentinels `0.2.21.*`.
+
+Composes `internal/kernel/clock`, `internal/kernel/fs/pathchain`,
+`internal/kernel/fs/flock` and, on Windows, `internal/kernel/fs/winacl` — the
+DACL reader this package wrote and the queue now shares from there.
 
 ## The two backends are not two speeds
 
@@ -87,15 +92,12 @@ process pass the gate and then block on a `flock` its own process holds.
 | `file_lease.go` | `fileLease`: no deadline, deliberately |
 | `gate.go` | `nameGate` — the in-process half, and the measurement that justifies it |
 | `fence.go` | the on-disk ledger: read, increment, `fsync`. Refuses a non-counter, and the one counter with no successor (ADR 0081 §D7) |
-| `flock_unix.go` / `flock_windows.go` / `flock_other.go` | ADR 0018 platform split — `flock(2)`, `LockFileEx`, and the typed refusal |
+| `backend.go` | `platformNative` = `flock.Native && hardenedOpen` — the kernel lock (`internal/kernel/fs/flock`: `flock(2)`, `LockFileEx`, or nothing) and the hardened open, together or neither — and what each kernel's lock means HERE: why the gate stays on Windows, why the ledger sits inside the locked range |
 | `nofollow.go` | the refusal the lock path's PREDICTABILITY makes necessary, and why it closes on both kernels (ADR 0082) |
 | `chain.go` | the components ABOVE the lock file, which `O_NOFOLLOW` cannot reach: the `pathchain` walk, and the rule that refuses an indirection only where anybody could have planted it (ADR 0083) |
 | `identity.go` | `sameEntry` — is the file this lease holds still the file its NAME leads to? The one exposure here that is DETECTED rather than prevented (ADR 0083) |
-| `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the same split again — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open |
-| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory |
-| `dacl_windows.go` | Windows' answer to that question: `GetNamedSecurityInfoW` + `GetAce` from `advapi32`, and the cost estimate that deferred it three times, re-checked (ADR 0084) |
-| `dacl_tokens_windows.go` | `tokenSet`: the three nested accounts a DACL is evaluated for — a deny reaches every account holding the SID it names, which a map keyed by the ACE's SID gets wrong (ADR 0084 §D3b; the third account, ADR 0086) |
-| `dacl_shared_windows.go` | the same reader EXPORTED — `GrantsAnyone` and the rights it takes (`ReplaceRights`, `ContentRights`, `RightAddFile`, …) — because `internal/service/data/queue` asks the same question of its own directories, and a second reader would be a second place to get eight ACE shapes wrong (ADR 0095) |
+| `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the platform split of the open — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open — each declaring `hardenedOpen`, on the kernel lock's exact tag sets (`TestTheLockAndItsHardeningShareAPlatform`) |
+| `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory. The Windows half asks the kernel's DACL reader, `internal/kernel/fs/winacl` (ADR 0084), the masks of its two questions, and decides what "could not look" means here: accept, and log |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
 | `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/app/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner` |
 | `codes.go` / `errors.go` | the `0.3.51.*` codes and their five sentinels — see §Sentinels |
@@ -108,12 +110,20 @@ process pass the gate and then block on a `flock` its own process holds.
 | windows | native | native (`LockFileEx` — ADR 0081) |
 | js, wasip1, plan9, aix, solaris, illumos | native | **refused at construction** with `proc.UnsupportedPlatform` |
 
+The `NewFileLocker` column is `platformNative` = `flock.Native && hardenedOpen`:
+the kernel lock's matrix (`internal/kernel/fs/flock`, whose own suite asserts it
+on every GOOS) and this package's hardened open, which share their tag sets by
+test rather than by convention.
+
 ## `LockFileEx` is a different primitive, and the differences are measured
 
 Windows was refused until ADR 0081, on the argument that an emulation behaving
 *almost* like `flock` is worth less than none. The differences it named are
 real; what was missing was a measurement of each one on a real kernel. Taken on
-`windows-latest` through the `e2e-cross` lane, before the backend was written:
+`windows-latest` through the `e2e-cross` lane, before the backend was written —
+the backend that is now the kernel's `internal/kernel/fs/flock`, whose
+`flock_windows.go` carries the same table; the two consequences below are this
+domain's, and live in `backend.go`:
 
 | Case | `flock(2)` | `LockFileEx` |
 |---|---|---|
@@ -162,11 +172,11 @@ right to Everyone (`S-1-1-0`), Authenticated Users (`S-1-5-11`) or
 BUILTIN\Users (`S-1-5-32-545`) — and WHICH right depends on which of the two
 rules is asking (ADR 0086 §D1):
 
-| mask | rights | asked by |
+| mask (`internal/kernel/fs/winacl`) | rights | asked by |
 |---|---|---|
-| `replaceRights` | `FILE_DELETE_CHILD`, `WRITE_DAC`, `WRITE_OWNER` | `checkDir`, of the lock directory |
-| `createRights` | `FILE_ADD_SUBDIRECTORY`, `WRITE_DAC`, `WRITE_OWNER` | `plantable`, of an indirection's container |
-| `contentRights` | `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER` | `checkDir`, of the entries carrying `OBJECT_INHERIT_ACE` |
+| `ReplaceRights` | `FILE_DELETE_CHILD`, `WRITE_DAC`, `WRITE_OWNER` | `checkDir`, of the lock directory |
+| `CreateRights` | `FILE_ADD_SUBDIRECTORY`, `WRITE_DAC`, `WRITE_OWNER` | `plantable`, of an indirection's container |
+| `ContentRights` | `FILE_WRITE_DATA`, `FILE_APPEND_DATA`, `DELETE`, `WRITE_DAC`, `WRITE_OWNER` | `checkDir`, of the entries carrying `OBJECT_INHERIT_ACE` |
 
 The third mask has no Unix counterpart: there a lock file is created `0600`
 whatever the directory's mode says, here it INHERITS the directory's list — so
@@ -177,7 +187,11 @@ It was deferred three times on a cost estimate of ~250 lines of ABI that
 neither carrying record re-checked. It is two `advapi32` exports:
 `GetNamedSecurityInfoW` and `GetAce`. `syscall` already ships `StringToSid`,
 `(*SID).String` and `LocalFree`, so `EqualSid` is not bound at all — the
-comparison is byte equality on the rendered SID.
+comparison is byte equality on the rendered SID. The reader this package wrote
+is the kernel's now, `internal/kernel/fs/winacl` (ADR 0159), because the queue
+asked it the same question through this package's exported surface — a
+service-to-service edge for one Windows function; the masks it is asked and
+what an unanswered question means stay here.
 
 There **is** a sticky equivalent here, spelled in two bits instead of one:
 `FILE_ADD_FILE` without `FILE_DELETE_CHILD`. `%ProgramData%` grants
@@ -196,15 +210,16 @@ allow is read as granting, a conditional deny as denying nothing.
 
 The check **fails open**: any failure on the way to a verdict accepts. Failing
 open *silently* would be a different thing and is not what happens —
-`dirGrantsAnyone` returns an empty `observed` when a verdict was reached
+`winacl.GrantsAnyone` returns an empty `observed` when a verdict was reached
 and names what stopped it when it was not — the Win32 status
 (`GetNamedSecurityInfoW=5`), a path that is not one (`UTF16PtrFromString=…`),
 the entry the walk could not fetch (`GetAce#3`) — and both `checkDir` and
 `checkChain` **log** the second case before accepting. The last two used to
 come back empty, indistinguishable from a verdict; ADR 0095 named them so the
 queue, which asks the same reader, can refuse where the lock accepts.
-`TestEveryAnswerWithoutAVerdictIsNamed` drives the two a test can cause (a NUL
-in the path, a directory that is not there) against a list read to the end. Same channel
+`TestEveryAnswerWithoutAVerdictIsNamed`, which moved with the reader to
+`internal/kernel/fs/winacl`, drives the two a test can cause (a NUL in the
+path, a directory that is not there) against a list read to the end. The log is the same channel
 `framework/internal/service/entitlement` uses for the same shape of degradation, and it
 fires only when the platform API refused to answer.
 
@@ -276,7 +291,7 @@ unlinking one. That is ADR 0082's own argument, one level up.
 On **Windows the same rule runs**, over a different answer to the same
 question. `os.Stat` synthesises `0777` for every writable directory there, so
 the mode says nothing — the verdict comes from the directory's DACL instead
-(`dacl_windows.go`, ADR 0084). A junction in a directory only its owner can
+(`internal/kernel/fs/winacl`, ADR 0084). A junction in a directory only its owner can
 write is ACCEPTED, because `C:\Users\All Users -> C:\ProgramData` is one
 Windows installs itself; a junction in a directory Everyone can write is
 refused. Both rows are tested on `windows-latest` with real ACLs applied
@@ -355,7 +370,10 @@ Superseded by ADR 0154 (the charter); ADR 0082 stays as the incident's record, a
   `FILE_FLAG_OPEN_REPARSE_POINT` and refuses a handle carrying
   `FILE_ATTRIBUTE_REPARSE_POINT` — the flag alone opens the link, the pair
   refuses it. A platform gains the lock and its hardening together or neither:
-  `nofollow_*` and `flock_*` share their build tags.
+  `nofollow_*.go` and the kernel lock's `flock_*.go`
+  (`internal/kernel/fs/flock`) share their build tags, and since they sit in
+  two packages `TestTheLockAndItsHardeningShareAPlatform` is what keeps them
+  equal; `platformNative` needs both.
 - **A planted indirection is `LOCK_PATH_REDIRECTED`** (`0.3.51.4`, exit 78),
   never `LOCK_BACKEND_FAILED`, which invites the one wrong response — a retry.
 - **The errno is never branched on** (`ELOOP`, `EMLINK`, `EFTYPE` across six
@@ -374,7 +392,8 @@ Superseded by ADR 0154 (the charter); ADR 0083 stays as the incident's record, a
   through `pathchain`. An indirection at a parent is refused
   (`LOCK_PATH_REDIRECTED`) only when the directory holding it is open to
   anybody — world-writable on Unix, the sticky bit exempting nothing because
-  planting creates an entry; on Windows, `createRights` in its DACL (ADR 0086).
+  planting creates an entry; on Windows, `winacl.CreateRights` in its DACL
+  (ADR 0086).
   The operating system's own links (`/var` → `/private/var`, `/var/run`) pass.
 - **A held lock can lose its file, and the holder is told.** In a
   `0777|sticky` directory the entry's owner may unlink a held lock file and
@@ -394,11 +413,12 @@ Superseded by ADR 0154 (the charter); ADR 0084 stays as the incident's record, a
 - **On Windows the directory question is asked of the DACL, never of a mode**
   (`os.Stat` synthesises `0777` for every writable directory):
   `GetNamedSecurityInfoW` and `GetAce` from `advapi32` through
-  `syscall.NewLazyDLL`, no `x/sys`.
-- **The MASK is read** — world-readable is not world-writable; denials
-  accumulate per account, the ACE type is checked before its identifier, a
-  directory this process created is checked like any other, and a NULL DACL is
-  the most permissive list, not the emptiest.
+  `syscall.NewLazyDLL`, no `x/sys` — the reader is `internal/kernel/fs/winacl`
+  now, and its own rules (the mask is read, denials per account, the ACE type
+  before its identifier, a NULL DACL as the most permissive list) live in its
+  `CLAUDE.md`.
+- **A directory this process created is checked like any other** — on Windows
+  it inherits its parent's list and `lockDirMode` means nothing.
 - **An API that will not answer fails OPEN**, its Win32 status in a field; an
   answer in hand is never fail-open.
 - *Lesson*: `checkDir` accepted every Windows directory and `checkChain`
@@ -409,15 +429,17 @@ Superseded by ADR 0154 (the charter); ADR 0084 stays as the incident's record, a
 Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, and its rules live here.
 
 - **Creating an entry is not replacing one, and three masks say which**:
-  `replaceRights` (`FILE_DELETE_CHILD`, `WRITE_DAC`, `WRITE_OWNER`) for
-  `checkDir`; `createRights` (`FILE_ADD_SUBDIRECTORY`, `WRITE_DAC`,
-  `WRITE_OWNER`) for a planted component; `contentRights` for what the
+  `winacl.ReplaceRights` (`FILE_DELETE_CHILD`, `WRITE_DAC`, `WRITE_OWNER`) for
+  `checkDir`; `winacl.CreateRights` (`FILE_ADD_SUBDIRECTORY`, `WRITE_DAC`,
+  `WRITE_OWNER`) for a planted component; `winacl.ContentRights` for what the
   directory's new files INHERIT — so an `INHERIT_ONLY_ACE` counts.
 - **"Anybody" is Everyone, Authenticated Users and `BUILTIN\Users`**:
   `%ProgramData%` (create, not replace) is accepted, a junction planted beside
   it refused.
 - **Every discretionary ACE shape is decoded**, bounded by `AceSize`; the
-  directory and its files keep separate denial states; the SACL is never read.
+  directory and its files keep separate denial states; the SACL is never read —
+  the reader's half of ADR 0086, kept with the reader in
+  `internal/kernel/fs/winacl/CLAUDE.md`.
 - *Lesson*: one mask for two questions accepted a directory whose new lock files
   every account could rewrite — and the fencing ledger with them.
 
@@ -428,15 +450,20 @@ Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, a
   exclusion on Unix, and it makes every second acquisition fail outright on
   Windows — wrong twice, visible once.
 - **Give `nameGate` a TTL.** It would desynchronise from the `flock` it guards.
-- **Replace the `LOCK_NB` poll with a blocking `flock`** — or drop
-  `LOCKFILE_FAIL_IMMEDIATELY` on Windows, which is the same mistake spelled
-  differently. `Acquire`'s context would stop meaning anything.
+- **Replace the poll with a blocking lock** — a blocking `flock`, or
+  `LockFileEx` without `LOCKFILE_FAIL_IMMEDIATELY`, which is the same mistake
+  spelled differently. The kernel primitive (`internal/kernel/fs/flock`)
+  deliberately has no blocking call; do not wrap one around it here.
+  `Acquire`'s context would stop meaning anything.
 - **Run the POSIX directory rule on Windows.** It refuses every directory, and
   `prepareDir` only checks directories it did not create — so the symptom is a
   program that starts once on a fresh machine and never again.
-- **Fork the DACL reader for another package.** `GrantsAnyone` exists so
-  there is one: `internal/service/data/queue` calls it with masks of its own. A new
-  question is a new pair of masks, not a new walk.
+- **Fork the DACL reader, here or for another package.** It is
+  `internal/kernel/fs/winacl` so that there is one: this package and
+  `internal/service/data/queue` ask it masks of their own. A new question is a
+  new pair of masks, not a new walk — and the reader's own Do NOT list (a NULL
+  DACL is not "no grants", the mask is read and not just the SID, one denial
+  state per object, no ACE shape skipped, no SACL) lives in its `CLAUDE.md`.
 - **Make the DACL check refuse on an API failure.** It fails OPEN on purpose:
   this code cannot be iterated locally, a wrong refusal costs a locker that
   never builds on a safe directory, and a wrong acceptance leaves the platform
@@ -445,31 +472,14 @@ Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, a
   runs the other way (ADR 0095) — which is the caller's call, not the
   reader's. So the reader decides nothing and must keep naming every
   no-verdict answer: an empty `observed` means "read to the end", only that.
-- **Read a NULL DACL as "no entries, so no grants".** Windows reads it as
-  everyone, full control. That inversion is what makes a security check worse
-  than none.
-- **Match on the SID alone.** A world-READABLE lock directory is not a
-  world-writable one, exactly as `0755` is not `0777`. The mask is read.
 - **Return a non-empty `observed` from `plantable` when the verdict is
   "safe".** An empty `observed` is what tells `checkChain` a verdict was
   REACHED; filling it in on the safe path would make every component look
   uninspected and log on the ordinary one.
-- **Accumulate both of `checkDir`'s questions against one denial state.** The
-  directory and the files it will create are two objects, not two names for
-  one. A directory-only deny of `WRITE_DAC` followed by an inherit-only allow
-  of it hands every lock file the right to rewrite its own list, and a shared
-  state reports the directory safe (ADR 0086 §D3b).
 - **Give `checkDir` and `plantable` the same mask.** They ask different
   questions, on both kernels. Merging them is what kept `BUILTIN\Users` out of
   `anyoneSids` for a whole ADR, because one mask cannot accept `%ProgramData%`
   and refuse `%SystemRoot%\Temp` (ADR 0086 §D1).
-- **Skip an ACE type because its layout is unfamiliar.** That failed open
-  through six of the eight discretionary shapes. The layouts are in `winnt.h`;
-  what is checked before the pointer is formed is the entry's SIZE.
-- **Read the SACL.** Nothing it can carry GRANTS anything — audit and alarm
-  entries describe logging, the mandatory label and the access filter only
-  restrict, and a central access policy intersects with the DACL. Reading it
-  could only move the verdict towards accepting (ADR 0086 §D5).
 - **"Repair" a corrupt fence ledger.** Refusing is the decision.
 - **Open the lock file with a bare `os.OpenFile`.** That is the defect ADR 0082
   closed, and it is invisible: the acquisition succeeds. Go through
@@ -488,8 +498,10 @@ Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, a
   `/var/run` on most Linux distributions — ADR 0018 §(a)'s failure mode with an
   error that blames the operator for the operating system's own layout.
 - **Give the Unix `nofollow` file to Solaris** because it has `O_NOFOLLOW`.
-  The tag sets of `flock_*.go` and `nofollow_*.go` are identical on purpose —
-  a platform gains a lock and its hardening together or gains neither.
+  The tag sets of the kernel lock's `flock_*.go` (`internal/kernel/fs/flock`)
+  and this package's `nofollow_*.go` are identical on purpose — a platform
+  gains a lock and its hardening together or gains neither — and
+  `TestTheLockAndItsHardeningShareAPlatform` fails on the GOOS where they part.
 - **Make `Keepalive` release the lease on stop.** The lifetime of a lock must
   not depend on the lifetime of a convenience.
 - **Add a distributed backend here.** Redis / etcd / Consul are connectors to
@@ -505,15 +517,20 @@ bazel test --config=race //internal/service/app/lock:lock_test
 `file_contention_unix_test.go`, `file_contention_windows_test.go`,
 `dirsafety_posix_test.go`, `dirsafety_windows_test.go`,
 `nofollow_unix_test.go` and `nofollow_windows_test.go` each carry the same
-build constraint as the file they cover, so each runs everywhere its subject is
-compiled and nowhere it is not. That is **not** a rule-12 exclusion of the kind
-that hides a test: there is no configuration in which the code under test is
-built and its test file is not.
+build constraint as the file they cover — for the two contention suites, the
+kernel lock's `flock_*.go` in `internal/kernel/fs/flock` — so each runs
+everywhere its subject is compiled and nowhere it is not. That is **not** a
+rule-12 exclusion of the kind that hides a test: there is no configuration in
+which the code under test is built and its test file is not.
+`backend_internal_test.go` carries no constraint and asserts on every GOOS that
+the kernel lock and the hardened open share a platform.
 
 The lane that executes the Windows half is the `windows` job of
-`.github/workflows/e2e-cross.yml` (`./app/lock` is in `SERVICE_PKGS`). The Linux
-Bazel gate compiles neither `flock_windows.go` nor its suite, so that lane is
-the only gate either has — and the same lane now proves the file locker's
-runtime behaviour on macOS and the three BSDs, where it had never run — and,
-since ADR 0144, on illumos and Solaris, where what it proves is the refusal at
-construction.
+`.github/workflows/e2e-cross.yml` (`./app/lock` is in `SERVICE_PKGS`;
+`./fs/flock` and `./fs/winacl`, the two kernel primitives under it, are in
+`KERNEL_PKGS`). The Linux Bazel gate compiles neither the kernel's
+`flock_windows.go` and DACL reader nor this package's Windows suite, so that
+lane is the only gate any of them has — and the same lane now proves the file
+locker's runtime behaviour on macOS and the three BSDs, where it had never run
+— and, since ADR 0144, on illumos and Solaris, where what it proves is the
+refusal at construction.

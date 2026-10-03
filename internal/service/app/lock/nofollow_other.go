@@ -3,20 +3,27 @@
 // Package lock — the plain open on the platforms that have no file lock at all
 // (ADR 0018 §(a)).
 //
-// js/wasm, plan9, aix, solaris and ios reach this file. [NewFileLocker]
+// js, wasip1, plan9, aix, solaris and illumos reach this file. [NewFileLocker]
 // refuses them at CONSTRUCTION through platformNative, so nothing here is
 // reachable; it exists because the package must COMPILE on every GOOS, which
-// is ADR 0018's build bar, and because the build-tag set is the one
-// flock_other.go already uses rather than a fourth shape invented here.
+// is ADR 0018's build bar, and because the build-tag set is the one the
+// kernel's file lock uses for its own refusal (internal/kernel/fs/flock's
+// flock_other.go) rather than a fourth shape invented here.
 //
 // Solaris does have O_NOFOLLOW and is nevertheless served by this file. That
-// is deliberate: giving it the Unix open would mean the tag sets of
-// flock_*.go and nofollow_*.go disagree, which is how a platform ends up with
-// one half of a pair. A platform gains both files or neither, and it gains
-// them by acquiring a working flock backend first.
+// is deliberate: giving it the Unix open would mean the kernel lock's tag sets
+// and nofollow_*.go's disagree, which is how a platform ends up with one half
+// of a pair. A platform gains both or neither, and it gains them by acquiring
+// a working file lock first — TestTheLockAndItsHardeningShareAPlatform fails
+// the day the two sets part.
 package lock
 
 import "os"
+
+// hardenedOpen reports that this GOOS has no open the file locker trusts to
+// refuse an indirection — and, as TestTheLockAndItsHardeningShareAPlatform
+// pins, no file lock either, so platformNative is false here twice over.
+const hardenedOpen bool = false
 
 // openLockFile opens the lock file with no protection against an indirection
 // planted at path, because no such protection is portable here and the

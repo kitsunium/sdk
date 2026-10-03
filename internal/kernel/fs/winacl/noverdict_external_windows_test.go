@@ -1,15 +1,18 @@
 //go:build windows
 
-// Package lock — every answer the DACL reader gives WITHOUT a verdict names
+// Package winacl_test — every answer the reader gives WITHOUT a verdict names
 // what stopped it, so a caller can tell "could not look" from "looked, and
 // nobody may write". The lock accepts the first (ADR 0084 §D5); the queue,
-// asking the same reader, refuses it (ADR 0095).
-package lock
+// asking the same reader, refuses it (ADR 0095). Neither could choose if the
+// two answers looked alike.
+package winacl_test
 
 import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/kitsunium/sdk/internal/kernel/fs/winacl"
 )
 
 // TestEveryAnswerWithoutAVerdictIsNamed pins the reader's two answers a test
@@ -18,8 +21,8 @@ import (
 // verdict: a list read to the end, which alone comes back with nothing to name.
 //
 // The third no-verdict answer, an entry GetAce cannot fetch, is named the same
-// way ("GetAce#N") but has no fixture: the lists this file's siblings assemble
-// are well formed, and one that lies about its size would be read past its end.
+// way ("GetAce#N") but has no fixture: the lists the walk tests assemble are
+// well formed, and one that lies about its size would be read past its end.
 func TestEveryAnswerWithoutAVerdictIsNamed(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -36,7 +39,7 @@ func TestEveryAnswerWithoutAVerdictIsNamed(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		granted, observed := dirGrantsAnyone(c.path(t), replaceRights, contentRights)
+		granted, observed := winacl.GrantsAnyone(c.path(t), winacl.ReplaceRights, winacl.ContentRights)
 		//: none of these grants anything to anybody.
 		if granted {
 			t.Fatalf("%s: granted, observed=%q", c.name, observed)

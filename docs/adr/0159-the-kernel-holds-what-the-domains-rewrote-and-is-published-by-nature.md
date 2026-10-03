@@ -133,8 +133,18 @@ published, which is why §2 comes first.
     like `heap` and `ring`, and `pathchain` heads a third family, `fs`, of
     filesystem measurements. Publication is unchanged: those three stay
     unpublished on their own.
-  - Not yet: `ring`'s multi-producer mode, `flock`, and the `pkg/v1` aliases
-    of §4 other than `semver`.
+  - `flock` landed in the `fs` family, as `kernel/fs/flock`: `TryLock`,
+    `Unlock` and `Native` over `flock(2)` and `LockFileEx`, never blocking,
+    the kernel's errno unwrapped and `errors.ErrUnsupported` where neither
+    exists — so no error code of its own. The copies in `lock` and `session`
+    are gone; each keeps its gate, its waits, its codes and a platform gate of
+    its own (`lock` pairs the lock with its hardened open, by a test; `session`
+    stays narrower and refuses Windows). A primitive this record did not list
+    joined it: `kernel/fs/winacl`, the Windows DACL reader `lock` wrote
+    (ADR 0084, 0086) and exported for `queue` (ADR 0095), which took the
+    queue's Windows-only edge onto the lock service with it.
+  - Not yet: `ring`'s multi-producer mode and the `pkg/v1` aliases of §4
+    other than `semver`.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
 - Five service-to-service edges disappear from the dependency graph; the

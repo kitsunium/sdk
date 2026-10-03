@@ -18,7 +18,7 @@ internal/kernel/
 ├── errs/  clock/  backoff/  semver/  plugin/     the root: no family describes them
 ├── concur/        batcher, buffer, group, recycler, singleflight, snapshot, worker
 ├── collections/   cache, heap, ring
-└── fs/            pathchain
+└── fs/            flock, pathchain, winacl
 ```
 
 ### The root — what no family describes
@@ -51,11 +51,13 @@ internal/kernel/
 | `collections/heap/` | generic `Heap[T]` binary heap ordered by a caller-supplied comparison | (none — `Pop`/`Peek` return `(T, bool)`; a nil comparison panics) |
 | `collections/ring/` | SPSC lock-free bounded queue (ADR 0006) | `0.1.3.*` (RING_FULL / RING_EMPTY / RING_CAP_ZERO emit today) |
 
-### `fs/` — what the filesystem says about a path, measured rather than decided (see `fs/CLAUDE.md`)
+### `fs/` — what the filesystem says, measured or called one primitive at a time, never decided (see `fs/CLAUDE.md`)
 
 | Package | Purpose | Code range |
 |---|---|---|
+| `fs/flock/` | `TryLock(file)` / `Unlock(file)` / `Native` — an exclusive lock on a whole file that never blocks: `flock(LOCK_EX\|LOCK_NB)` on Linux and the BSDs, `LockFileEx` over every byte with `LOCKFILE_FAIL_IMMEDIATELY` on Windows (ADR 0081), `errors.ErrUnsupported` where neither exists; a caller polls on its own clock. The copy `service/app/lock` and `service/security/session` each carried (ADR 0159 §3) | (none — contention is `(false, nil)`, any other failure the kernel's errno, unwrapped) |
 | `fs/pathchain/` | `Resolve(path)` — a path resolved one COMPONENT at a time over `os.Root` directory handles, reporting every indirection together with the mode of the directory that holds it. It is the measurement `O_NOFOLLOW` cannot give, since that flag governs the final component only (ADR 0083); it refuses nothing, because the two callers in view want opposite verdicts on the same shape | (none — returns the filesystem's own `*os.PathError`) |
+| `fs/winacl/` | `GrantsAnyone(dir, onDirectory, onFilesWithin)` — reads a Windows directory's DACL and reports whether Everyone, Authenticated Users or BUILTIN\Users holds a right on the directory or on what the files created in it inherit, naming every answer that is not a verdict; plus the rights and the three masks (`ReplaceRights`, `CreateRights`, `ContentRights`) the SDK's directory rules ask (ADR 0084, ADR 0086, ADR 0095). Moved from `service/app/lock`, which exported it for `service/data/queue`. The reader is Windows-only; the vocabulary compiles everywhere | (none — a failed Win32 call travels as its status inside `observed`) |
 
 Each package owns a sibling `CLAUDE.md` documenting its surface and contract.
 
@@ -89,6 +91,26 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   package for this one type, which made a reliability-policy package the hub
   of the service graph. They import the kernel now, and the two aliases that
   keep the published names point at it (ADR 0074).
+- `flock` admitted on rule 1, and as a CONSOLIDATION (ADR 0159 §3): its
+  signatures name a file and nothing else, and the non-blocking `flock(2)` it
+  holds existed twice, line for line — in `service/app/lock`, with the
+  `LockFileEx` half ADR 0081 added, and in `service/security/session` (ADR
+  0073). Both call it now and keep what is theirs: lock its gate, its fencing
+  ledger and the pairing of the lock with its hardened open (a test fails if
+  `flock.Native` and lock's `nofollow_*.go` tag sets part); session its gate,
+  its abandonable waits and a platform gate NARROWER than `Native` (Windows has
+  the lock and not the owner-only modes). It never blocks, because a blocking
+  call parks a thread no cancellation reaches; it promises nothing about
+  goroutines sharing one descriptor, because the two kernels answer that
+  oppositely.
+- `winacl` admitted on rule 1: stdlib-only — two `advapi32` exports through
+  `syscall.NewLazyDLL`, no `x/sys` — and its signatures name a directory and a
+  rights mask. It is the DACL reader `service/app/lock` wrote (ADR 0084, 0086)
+  and EXPORTED for `service/data/queue` (ADR 0095), which made the queue import
+  the lock service for one Windows function — a service-to-service edge the
+  kernel removes. Like `pathchain` it produces no verdict: the lock accepts a
+  list it could not read and the queue refuses one, each for a reason the other
+  does not have, and the reader names "could not look" so both can choose.
 - `pathchain` admitted on rule 1: stdlib-only, and its signatures name a path
   and its components — no lock, no directory role, no policy. It shipped with
   one in-tree consumer, `internal/service/app/lock`, and that was stated rather than
@@ -184,6 +206,8 @@ The root:
 - `collections/heap/` — see `internal/kernel/collections/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
 - `collections/ring/` — see `internal/kernel/collections/ring/CLAUDE.md`
 
-`fs/` — see `internal/kernel/fs/CLAUDE.md` (the family: measurements of the filesystem, never a verdict on them):
+`fs/` — see `internal/kernel/fs/CLAUDE.md` (the family: measurements of the filesystem and single primitives over it, never a verdict on them):
 
+- `fs/flock/` — see `internal/kernel/fs/flock/CLAUDE.md` (a file lock that never blocks, over `flock(2)` and `LockFileEx` — the measured row where the two kernels are opposites, ADR 0081)
 - `fs/pathchain/` — see `internal/kernel/fs/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)
+- `fs/winacl/` — see `internal/kernel/fs/winacl/CLAUDE.md` (a Windows directory's DACL read for "can anybody?" — the reader's rules from ADR 0084/0086/0095, and its two callers' opposite answers to "could not look")

@@ -1,6 +1,6 @@
 //go:build windows
 
-package lock
+package winacl
 
 import (
 	"encoding/binary"
@@ -9,25 +9,30 @@ import (
 	"unsafe"
 )
 
-// This file is INTERNAL (package lock) because what it measures is the walk
-// itself rather than the locker's public verdict, and because the shapes it
-// drives cannot all be reached through the filesystem: a conditional entry
-// needs an expression blob the kernel validates, and a malformed one is not
-// something an ACL editor will write. It carries the same build constraint as
+// This file is INTERNAL (package winacl) because what it measures is the walk
+// itself rather than a caller's verdict, and because the shapes it drives
+// cannot all be reached through the filesystem: a conditional entry needs an
+// expression blob the kernel validates, and a malformed one is not something
+// an ACL editor will write. It carries the same build constraint as
 // dacl_windows.go, and the lane that executes it is the `windows` job of
-// .github/workflows/e2e-cross.yml.
+// .github/workflows/e2e-cross.yml (`./fs/winacl` in KERNEL_PKGS).
 //
 // The lists are assembled byte by byte and walked with the SHIPPED GetAce, so
 // what runs here is the production reader over real Win32 structures — only
 // the memory is this test's rather than the security descriptor's. The
 // end-to-end proof that an object entry survives a round trip through NTFS
-// lives in dacl_objectace_windows_test.go.
+// lives with the lock domain, which drives it through its own rule
+// (internal/service/app/lock/dacl_objectace_windows_test.go).
+//
+// The masks every row asks are ReplaceRights of the directory and
+// ContentRights of what its files inherit — the lock directory's question,
+// and the one with both halves in it.
 
 // aclRevisionDS is ACL_REVISION_DS, the highest revision GetAce accepts and
 // the only one that may carry an object-type entry.
 const aclRevisionDS byte = 4
 
-// sidOfEveryone and the two others are the identifiers the rule reads as
+// sidEveryone and the two others are the identifiers the reader reads as
 // "anybody"; sidOfNobodyInParticular is a local account, which it does not.
 const sidOfNobodyInParticular string = "S-1-5-21-1-2-3-1000"
 
@@ -132,10 +137,10 @@ func TestTheWalkReadsEveryDiscretionaryAceShape(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		list := buildAcl(buildAce(t, c.aceType, 0, sidEveryone, fileDeleteChild, c.guids))
-		granted, observed := walk(list, replaceRights, contentRights)
+		list := buildAcl(buildAce(t, c.aceType, 0, sidEveryone, RightDeleteChild, c.guids))
+		granted, observed := walk(list, ReplaceRights, ContentRights)
 		//: the grant is FILE_DELETE_CHILD to Everyone, which is the one right
-		//: that hands a stranger a holder's inode.
+		//: that lets a stranger replace an entry somebody else created.
 		if !granted {
 			t.Fatalf("a %s granting Everyone FILE_DELETE_CHILD was not seen (observed=%q)", c.name, observed)
 		}
@@ -161,7 +166,8 @@ func TestTheWalkReadsEveryDiscretionaryAceShape(t *testing.T) {
 // Authenticated Users, and every local interactive one holds BUILTIN\Users on
 // top. A list that denies the outer identifier and then allows an inner one
 // grants that right to nobody, and a walk keying denials on the literal SID
-// reports it as granted and refuses a directory that is perfectly safe.
+// reports it as granted, and a caller refuses a directory that is perfectly
+// safe.
 func TestADenialReachesEveryAccountHoldingTheIdentifierItNames(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -183,9 +189,9 @@ func TestADenialReachesEveryAccountHoldingTheIdentifierItNames(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		list := buildAcl(
-			buildAce(t, accessDeniedAceType, 0, c.deniedTo, fileDeleteChild, 0),
-			buildAce(t, accessAllowedAceType, 0, c.allowedTo, fileDeleteChild, 0))
-		granted, observed := walk(list, replaceRights, contentRights)
+			buildAce(t, accessDeniedAceType, 0, c.deniedTo, RightDeleteChild, 0),
+			buildAce(t, accessAllowedAceType, 0, c.allowedTo, RightDeleteChild, 0))
+		granted, observed := walk(list, ReplaceRights, ContentRights)
 		//: the third row is the one that must stay granted: an account outside
 		//: BUILTIN\Users still holds Everyone, and the anonymous caller is
 		//: exactly that account.
@@ -206,10 +212,10 @@ func TestADenialReachesEveryAccountHoldingTheIdentifierItNames(t *testing.T) {
 // place the callback shapes need a policy rather than a layout.
 //
 // A callback entry carries an expression this package does not evaluate. Both
-// dispositions are read in the direction that cannot turn a refusal into an
-// acceptance: a conditional allow is read as granting, and a conditional deny
-// is read as taking nothing away. Skipping both instead would make "add a
-// condition" a way to put a grant where this rule cannot see it.
+// dispositions are read in the direction that cannot hide a grant: a
+// conditional allow is read as granting, and a conditional deny is read as
+// taking nothing away. Skipping both instead would make "add a condition" a
+// way to put a grant where this reader cannot see it.
 func TestAConditionalEntryIsResolvedTowardsTheVerdictItCannotWeaken(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -220,13 +226,13 @@ func TestAConditionalEntryIsResolvedTowardsTheVerdictItCannotWeaken(t *testing.T
 		granted bool
 	}
 	conditionalAllow := func(t *testing.T) []byte {
-		return buildAce(t, accessAllowedCallbackAceType, 0, sidEveryone, fileDeleteChild, 0)
+		return buildAce(t, accessAllowedCallbackAceType, 0, sidEveryone, RightDeleteChild, 0)
 	}
 	conditionalDeny := func(t *testing.T) []byte {
-		return buildAce(t, accessDeniedCallbackAceType, 0, sidEveryone, fileDeleteChild, 0)
+		return buildAce(t, accessDeniedCallbackAceType, 0, sidEveryone, RightDeleteChild, 0)
 	}
 	plainAllow := func(t *testing.T) []byte {
-		return buildAce(t, accessAllowedAceType, 0, sidEveryone, fileDeleteChild, 0)
+		return buildAce(t, accessAllowedAceType, 0, sidEveryone, RightDeleteChild, 0)
 	}
 	tests := []tc{
 		{"a conditional allow grants", [][]byte{conditionalAllow(t)}, true},
@@ -235,7 +241,7 @@ func TestAConditionalEntryIsResolvedTowardsTheVerdictItCannotWeaken(t *testing.T
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		granted, observed := walk(buildAcl(c.entries...), replaceRights, contentRights)
+		granted, observed := walk(buildAcl(c.entries...), ReplaceRights, ContentRights)
 		//: the verdict, and the diagnosis when it is the wrong one.
 		if granted != c.granted {
 			t.Fatalf("%s = %v (observed=%q), want %v", c.name, granted, observed, c.granted)
@@ -256,9 +262,9 @@ func TestAConditionalEntryIsResolvedTowardsTheVerdictItCannotWeaken(t *testing.T
 // An entry applies to the directory itself unless it is INHERIT_ONLY, and it
 // reaches the FILES created in the directory when it carries
 // OBJECT_INHERIT_ACE. Those are two different questions with two different
-// masks, and ADR 0084 asked only the first — so a directory whose files all
-// inherit a write nobody holds on the directory was accepted, which hands
-// every account the fencing ledger.
+// masks, and ADR 0084 asked only the first — so a lock directory whose files
+// all inherit a write nobody holds on the directory was accepted, which handed
+// every account the lock domain's fencing ledger.
 func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -267,12 +273,13 @@ func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 		flags byte
 		// mask is what the entry grants.
 		mask uint32
-		// granted is checkDir's verdict for that entry.
+		// granted is the verdict on that entry, asked as the lock directory's
+		// rule asks it.
 		granted bool
 	}
 	tests := []tc{
-		{"applies here, and may unlink somebody else's entry", 0, fileDeleteChild, true},
-		{"applies here, and may only create one", 0, fileAddFile | fileAddSubdirectory, false},
+		{"applies here, and may unlink somebody else's entry", 0, RightDeleteChild, true},
+		{"applies here, and may only create one", 0, RightAddFile | RightAddSubdirectory, false},
 		{"inherit-only, and reaches no file", inheritOnlyAce, fileGenericWrite, false},
 		{"inherit-only, and every file created here inherits a write", inheritOnlyAce | objectInheritAce, fileGenericWrite, true},
 		{"applies here and to every file, read-only", objectInheritAce, standardRightsWrite, false},
@@ -280,8 +287,8 @@ func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		list := buildAcl(buildAce(t, accessAllowedAceType, c.flags, sidEveryone, c.mask, 0))
-		granted, observed := walk(list, replaceRights, contentRights)
-		//: the verdict checkDir would reach on that one entry.
+		granted, observed := walk(list, ReplaceRights, ContentRights)
+		//: the verdict on that one entry.
 		if granted != c.granted {
 			t.Fatalf("an entry with flags 0x%02x and mask 0x%08x = %v (observed=%q), want %v", c.flags, c.mask, granted, observed, c.granted)
 		}
@@ -298,13 +305,13 @@ func TestInheritanceDecidesWhichQuestionAnEntryAnswers(t *testing.T) {
 // TestADenialOnOneObjectDoesNotExcuseAGrantOnTheOther pins the two questions
 // apart at the DENIAL as well as at the grant.
 //
-// checkDir asks two things of one list: what an entry grants on the DIRECTORY,
-// and what the FILES created there will inherit. Accumulating both against one
-// denial state lets a deny that reached only one object cancel an allow that
-// reaches only the other — and the direction that matters is a directory-only
-// deny of WRITE_DAC followed by an inherit-only allow of it, where every lock
-// file created there inherits the right to rewrite its own list and then its
-// fencing ledger, and the walk reports the directory as safe.
+// One walk asks two things of one list: what an entry grants on the
+// DIRECTORY, and what the FILES created there will inherit. Accumulating both
+// against one denial state lets a deny that reached only one object cancel an
+// allow that reaches only the other — and the direction that matters is a
+// directory-only deny of WRITE_DAC followed by an inherit-only allow of it,
+// where every file created there inherits the right to rewrite its own list
+// and then its contents, and the walk reports no grant.
 //
 // WRITE_DAC is the probe because it is the one right in BOTH masks, so the two
 // entries differ in nothing but which object they reach.
@@ -332,9 +339,9 @@ func TestADenialOnOneObjectDoesNotExcuseAGrantOnTheOther(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		list := buildAcl(
-			buildAce(t, accessDeniedAceType, c.denyFlags, sidEveryone, writeDAC, 0),
-			buildAce(t, accessAllowedAceType, c.allowFlags, sidEveryone, writeDAC, 0))
-		granted, observed := walk(list, replaceRights, contentRights)
+			buildAce(t, accessDeniedAceType, c.denyFlags, sidEveryone, RightWriteDAC, 0),
+			buildAce(t, accessAllowedAceType, c.allowFlags, sidEveryone, RightWriteDAC, 0))
+		granted, observed := walk(list, ReplaceRights, ContentRights)
 		//: a deny reaches only the object its own flags describe, so only the
 		//: last two rows may cancel anything.
 		if granted != c.granted {
@@ -357,7 +364,7 @@ func TestADenialOnOneObjectDoesNotExcuseAGrantOnTheOther(t *testing.T) {
 // how LONG it is comes from a byte inside the identifier. Both are data, so a
 // malformed entry can put either past the end of the entry — and reading there
 // would hand ConvertSidToStringSidW the bytes of whatever follows in the list,
-// which could render as an identifier this rule reads as "anybody". The size
+// which could render as an identifier this reader reads as "anybody". The size
 // is checked twice, before the pointer is formed and after the length is read.
 func TestAnEntryWithNoRoomForItsIdentifierIsNotRead(t *testing.T) {
 	t.Parallel()
@@ -378,9 +385,9 @@ func TestAnEntryWithNoRoomForItsIdentifierIsNotRead(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		entry := buildAce(t, accessAllowedObjectAceType, 0, sidEveryone, fileDeleteChild, 0)
+		entry := buildAce(t, accessAllowedObjectAceType, 0, sidEveryone, RightDeleteChild, 0)
 		c.corrupt(entry)
-		granted, observed := walk(buildAcl(entry), replaceRights, contentRights)
+		granted, observed := walk(buildAcl(entry), ReplaceRights, ContentRights)
 		//: not granted, whichever way it is refused — a bound check declines
 		//: to read, or GetAce declines to hand the entry over at all.
 		if granted {

@@ -13,6 +13,12 @@ import (
 // kindSymlink names this platform's indirection in the refusal's fields.
 const kindSymlink string = "symlink"
 
+// hardenedOpen reports that this GOOS's [openLockFile] refuses an indirection
+// planted at the lock path — O_NOFOLLOW, here. It is true exactly where
+// internal/kernel/fs/flock.Native is: a platform gains the lock and its
+// hardening together, or neither (backend.go).
+const hardenedOpen bool = true
+
 // openLockFile opens the lock file, refusing to traverse a symbolic link
 // planted at the final component of path.
 //

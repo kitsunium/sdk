@@ -1,43 +1,9 @@
 //go:build windows
 
-// Package lock — "who could interfere with the lock file in this directory?",
-// asked of Windows in the only vocabulary Windows has for it.
+// Package winacl — the reader: a directory's discretionary list, fetched with
+// GetNamedSecurityInfoW and walked entry by entry with GetAce.
 //
-// # Why the POSIX question has no answer here, and this one does
-//
-// checkDir and checkChain both rest on a question about a directory. On Unix
-// each is a single mode bit. On Windows os.Stat has no permission bits to read
-// — it SYNTHESISES a mode from FILE_ATTRIBUTE_READONLY, so every writable
-// directory reports 0777 and every read-only one reports 0555 — so the POSIX
-// rule would refuse every directory a caller could name, which is ADR 0018
-// §(a)'s failure mode wearing an error that blames the deployment (ADR 0081
-// §D5).
-//
-// The questions themselves are perfectly answerable on this platform; they are
-// just not a mode. They are the directory's discretionary access control list.
-//
-// # They are two questions, and Windows answers them with different bits
-//
-// ADR 0084 asked ONE question here — "is there an entry granting a planting
-// right to an identifier meaning anybody?" — and gave both rules the same
-// mask. The Unix side has never done that: checkDir accepts 0777|sticky and
-// checkChain's plantable refuses it, because sticky governs UNLINKING an entry
-// that exists while planting a component CREATES one at a free name.
-//
-// Windows draws that same line, and draws it finer, because create and delete
-// are separate bits rather than one sticky flag (ADR 0086):
-//
-//   - [replaceRights] — what lets a stranger take away the entry a holder
-//     created. That is checkDir's question.
-//   - [createRights] — what lets a stranger put a directory at a name nobody
-//     has taken. That is plantable's question.
-//   - [contentRights] — what the FILES created in the directory inherit. It
-//     has no Unix counterpart at all, because a lock file there is created
-//     0600 whatever the directory's mode says, while on Windows it inherits
-//     the directory's list. A directory nobody can unlink from, whose files
-//     every account may write, hands a stranger the fencing ledger.
-//
-// # The cost estimate that deferred this twice, re-checked
+// # The cost estimate that deferred it three times, re-checked
 //
 // ADR 0081 §Alternatives priced a DACL check at roughly 250 lines of ABI and
 // deferred it; ADR 0082 §Deferred carried that forward unchanged. Reading
@@ -52,20 +18,20 @@
 //
 // What is left is GetNamedSecurityInfoW and GetAce, bound from advapi32.dll
 // with syscall.NewLazyDLL — the same discipline ADR 0081 used to bind
-// LockFileEx from kernel32, and for the same reason: golang.org/x/sys is
-// banned SDK-wide (ADR 0018) and binding two stable exports adds no module, no
-// go.sum entry and no MODULE.bazel change.
+// LockFileEx from kernel32 (internal/kernel/fs/flock), and for the same
+// reason: golang.org/x/sys is banned SDK-wide (ADR 0018), and binding two
+// stable exports adds no module, no go.sum entry and no MODULE.bazel change.
 //
-// # It fails OPEN, and that is deliberate
+// # Every way to the end of the list is named
 //
-// Every failure on the way to a verdict — a path that cannot be converted, an
-// object whose security information cannot be read, an ACE that cannot be
-// fetched — answers "no, nobody outside the holder can interfere". A wrong
-// REFUSAL here costs a caller a locker that will never build on a directory
-// that is perfectly safe; a wrong acceptance costs the hardening this file
-// adds and leaves the platform exactly where it was before. Those are not
-// symmetric, and the asymmetry decides.
-package lock
+// The walk reaches a verdict only by reading the whole list. Every failure on
+// the way — a path that cannot be converted, an object whose security
+// information cannot be read, an ACE that cannot be fetched — answers "no
+// grant found" AND names what stopped it, so a caller can tell it from the
+// verdict. Neither answer is a refusal: the reader decides nothing (see the
+// package comment), and the SDK's two callers resolve "could not look" in
+// opposite directions, each for a reason of its own.
+package winacl
 
 import (
 	"strconv"
@@ -117,11 +83,10 @@ const (
 	accessDeniedCallbackObject   byte = 0x0C
 )
 
-// ACE header flags (winnt.h) this rule reads.
+// ACE header flags (winnt.h) this reader reads.
 const (
 	// objectInheritAce is OBJECT_INHERIT_ACE: the entry is inherited by the
-	// FILES created in this directory, which is what [contentRights] is asked
-	// about.
+	// FILES created in this directory, which is what onFilesWithin asks about.
 	objectInheritAce byte = 0x01
 	// inheritOnlyAce is INHERIT_ONLY_ACE: the entry describes what children
 	// inherit and grants nothing on the object itself.
@@ -137,39 +102,20 @@ const (
 	aceInheritedObjectTypePresent uint32 = 0x00000002
 )
 
-// Specific rights (winnt.h). The first two carry two names apiece, and the
-// duality is the point: bit 0x0002 is FILE_ADD_FILE on a DIRECTORY and
-// FILE_WRITE_DATA on a FILE, and this rule asks about it in both senses — once
-// of the lock directory, once of the lock files that inherit the same entry.
+// The specific rights (winnt.h) that GENERIC_WRITE and GENERIC_ALL stand for
+// beyond the exported ones, named so [expandGeneric] can spell the mapping.
+// None of them is a right any question here asks about.
 const (
-	// fileAddFile is FILE_ADD_FILE on a directory, FILE_WRITE_DATA on a file.
-	fileAddFile uint32 = 0x0002
-	// fileAddSubdirectory is FILE_ADD_SUBDIRECTORY on a directory,
-	// FILE_APPEND_DATA on a file.
-	fileAddSubdirectory uint32 = 0x0004
 	// fileWriteEA is FILE_WRITE_EA, part of FILE_GENERIC_WRITE and neither a
 	// planting right nor a way to alter a file's contents.
 	fileWriteEA uint32 = 0x0010
-	// fileDeleteChild is FILE_DELETE_CHILD: unlink an entry of this directory
-	// WITHOUT owning it. It is the one right that turns a lock file into
-	// somebody else's inode.
-	fileDeleteChild uint32 = 0x0040
 	// fileWriteAttributes is FILE_WRITE_ATTRIBUTES, likewise part of
 	// FILE_GENERIC_WRITE and likewise harmless here.
 	fileWriteAttributes uint32 = 0x0100
-	// deleteObject is DELETE, the standard right that removes the object it is
-	// held on — a file, here, rather than an entry of a directory.
-	deleteObject uint32 = 0x00010000
 	// standardRightsWrite is STANDARD_RIGHTS_WRITE, which is READ_CONTROL
 	// alone and grants nothing here; it is named because FILE_GENERIC_WRITE
 	// includes it.
 	standardRightsWrite uint32 = 0x00020000
-	// writeDAC is WRITE_DAC and writeOwner is WRITE_OWNER. Both count, in
-	// every mask: an account that can rewrite the list, or take ownership and
-	// then rewrite it, can grant itself the rest — a right to become writable
-	// is a right to write.
-	writeDAC   uint32 = 0x00040000
-	writeOwner uint32 = 0x00080000
 	// synchronize is SYNCHRONIZE, likewise part of FILE_GENERIC_WRITE.
 	synchronize uint32 = 0x00100000
 )
@@ -184,44 +130,12 @@ const (
 
 // fileGenericWrite is the file object's GENERIC_MAPPING entry for
 // GENERIC_WRITE (winnt.h, FILE_GENERIC_WRITE).
-const fileGenericWrite uint32 = standardRightsWrite | fileAddFile | fileAddSubdirectory |
+const fileGenericWrite uint32 = standardRightsWrite | RightAddFile | RightAddSubdirectory |
 	fileWriteEA | fileWriteAttributes | synchronize
 
 // fileAllAccess is what GENERIC_ALL maps to for a file object: every specific
-// right this file names, plus the standard ones.
-const fileAllAccess uint32 = fileGenericWrite | fileDeleteChild | deleteObject | writeDAC | writeOwner
-
-// replaceRights is what lets its holder take away an entry it did not create —
-// [checkDir]'s question, and the exact Windows spelling of the Unix rule that
-// refuses 0777 and accepts 0777|sticky.
-//
-// FILE_ADD_FILE is deliberately NOT in it. Creating an entry at a free name is
-// what the sticky bit permits and what ADR 0052's table has accepted since it
-// was written; what it costs is a lock file planted before any holder exists,
-// which is a denial of service and is recorded as such rather than smuggled in
-// here (ADR 0081 §Deferred, ADR 0086 §D6).
-const replaceRights uint32 = fileDeleteChild | writeDAC | writeOwner
-
-// createRights is what lets its holder put a directory at a name nobody has
-// taken — [plantable]'s question, and the reason it and [checkDir] disagree
-// about the same identifier on %ProgramData%.
-//
-// A path component is always a directory: a junction and a Windows directory
-// symbolic link are both created with FILE_ADD_SUBDIRECTORY, and a file cannot
-// be a component of a longer path.
-const createRights uint32 = fileAddSubdirectory | writeDAC | writeOwner
-
-// contentRights is what lets its holder alter or remove the lock FILE itself,
-// read off the entries that the files created in the directory inherit.
-//
-// This half has no Unix counterpart. There a lock file is created 0600 no
-// matter what the directory's mode says, so a world-writable directory never
-// makes the lock file world-writable. On Windows the mode passed to os.OpenFile
-// is meaningless and the new file takes the directory's inheritable entries
-// instead — so a directory granting Everyone an inherited write hands every
-// account the fencing ledger, which LockFileEx protects only while somebody is
-// holding it.
-const contentRights uint32 = fileAddFile | fileAddSubdirectory | deleteObject | writeDAC | writeOwner
+// right this package names, plus the standard ones.
+const fileAllAccess uint32 = fileGenericWrite | RightDeleteChild | RightDelete | RightWriteDAC | RightWriteOwner
 
 // Offsets, from the start of an ACE, at which the variable-length identifier
 // begins (winnt.h). They are the two shapes a discretionary entry comes in.
@@ -244,18 +158,18 @@ const (
 	subAuthorityWidth uintptr = 4
 )
 
-// anyoneSids are the string-form security identifiers this rule reads as
+// anyoneSids are the string-form security identifiers this reader reads as
 // "anybody at all", which is what the Unix other-write bit means.
 //
 // S-1-1-0 is Everyone and S-1-5-11 is Authenticated Users — the two ADR 0081
 // §D5 named. S-1-5-32-545 (BUILTIN\Users) is the third, and it was excluded
 // until ADR 0086: every local interactive account is in that group and on a
 // domain-joined machine so is Domain Users, so a directory granting it a right
-// IS one this rule's own sentence describes. What kept it out was that
-// including it refused %ProgramData%, which was true only while both rules
-// shared one mask — %ProgramData% grants the group FILE_ADD_FILE and
-// FILE_ADD_SUBDIRECTORY and not FILE_DELETE_CHILD, which is create-but-not-
-// replace, which is what 0777|sticky means.
+// IS one the question "can anybody?" describes. What kept it out was that
+// including it refused %ProgramData%, which was true only while the lock
+// directory's two rules shared one mask — %ProgramData% grants the group
+// FILE_ADD_FILE and FILE_ADD_SUBDIRECTORY and not FILE_DELETE_CHILD, which is
+// create-but-not-replace, which is what 0777|sticky means.
 var anyoneSids = []string{sidEveryone, sidAuthenticatedUsers, sidBuiltinUsers}
 
 // sidEveryone is S-1-1-0, the identifier every account holds, authenticated or
@@ -299,19 +213,19 @@ type aceEntry struct {
 	Body     uint32
 }
 
-// aceShape is what this file knows about one ACE type.
+// aceShape is what this package knows about one ACE type.
 type aceShape struct {
 	// allow says the entry grants rather than denies.
 	allow bool
 	// object says the identifier sits behind a flags word and up to two GUIDs.
 	object bool
-	// conditional says the entry carries an expression this file does not
+	// conditional says the entry carries an expression this package does not
 	// evaluate — see [tokenSet.apply] for which way that is resolved.
 	conditional bool
 }
 
 // shapeOf reports the layout and disposition of an ACE type, and whether this
-// file knows it at all.
+// package knows it at all.
 func shapeOf(aceType byte) (shape aceShape, known bool) {
 	switch aceType {
 	//: the pair every ordinary ACL is made of.
@@ -341,8 +255,8 @@ func shapeOf(aceType byte) (shape aceShape, known bool) {
 	//: and its denying twin.
 	case accessDeniedCallbackObject:
 		return aceShape{object: true, conditional: true}, true
-	//: an entry this file does not know the layout of. It is skipped before
-	//: anything reads through it, which fails open.
+	//: an entry this package does not know the layout of. It is skipped before
+	//: anything reads through it, which can only lose a grant, never invent one.
 	default:
 		return aceShape{}, false
 	}
@@ -364,7 +278,7 @@ func expandGeneric(mask uint32) uint32 {
 		expanded |= fileGenericWrite
 	}
 	//: GENERIC_ALL stands for everything, which here means every specific
-	//: right this file knows how to name.
+	//: right this package knows how to name.
 	if mask&genericAll != 0 {
 		expanded |= fileAllAccess
 	}
@@ -373,21 +287,24 @@ func expandGeneric(mask uint32) uint32 {
 	return expanded
 }
 
-// dirGrantsAnyone reports whether any account can interfere with the lock file
-// in dir, and renders what it found for the refusal's fields.
+// GrantsAnyone reports whether dir's DACL grants a right in onDirectory to an
+// identifier meaning anybody — Everyone, Authenticated Users, BUILTIN\Users —
+// or a right in onFilesWithin through the entries the files created in dir
+// inherit. A zero mask asks nothing of its half.
 //
-// onDirectory is the rights that matter when an entry applies to dir itself;
-// onFilesWithin is the rights that matter when an entry is inherited by the
-// files created in it, and is zero for a caller that is not asking about them.
-//
-// A NULL DACL is the most permissive answer Windows has — it grants everyone
-// full control — so it is reported as writable rather than as an absence.
-// An EMPTY DACL is the opposite, granting nobody anything, and falls out of
-// the loop as not writable.
-func dirGrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted bool, observed string) {
+// Every discretionary ACE shape is decoded, denials are subtracted in list
+// order and per modelled account, and a NULL DACL is read as the full grant it
+// is; an EMPTY one, the opposite, grants nobody anything and falls out of the
+// walk as no grant. observed names the grant found ("S-1-1-0=0x40"), or — with
+// granted false — what kept a verdict from being reached: the Win32 status
+// ("GetNamedSecurityInfoW=5"), a path that is not one
+// ("UTF16PtrFromString=…"), or the entry the walk could not fetch
+// ("GetAce#3"). It is EMPTY only when the list was read to the end and grants
+// nothing asked about. What a caller does with "no verdict" is the caller's
+// decision — the reader takes none.
+func GrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted bool, observed string) {
 	namep, convErr := syscall.UTF16PtrFromString(dir)
-	//: a path with a NUL in it is not a path. Fail open: see the package
-	//: comment on why a wrong refusal costs more than a wrong acceptance.
+	//: a path with a NUL in it is not a path.
 	if convErr != nil {
 		//: no verdict — NAMED, as every no-verdict answer is, so a caller can
 		//: tell it from "read, and nobody may write" (ADR 0084 §D5).
@@ -405,7 +322,7 @@ func dirGrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted boo
 		uintptr(unsafe.Pointer(&descriptor)))
 	//: the security information could not be read — the object may be on a
 	//: filesystem with no ACL support at all, which is a fact about the
-	//: medium and not about the directory. Fail open.
+	//: medium and not about the directory.
 	if status != errorSuccess {
 		//: no verdict, and the Win32 code travels so an operator can look it
 		//: up rather than wonder whether the check ran.
@@ -418,7 +335,7 @@ func dirGrantsAnyone(dir string, onDirectory, onFilesWithin uint32) (granted boo
 	//: state a Windows object can be in, and reading it as "no entries, so no
 	//: grants" is the exact inversion that makes a security check useless.
 	if dacl == nil {
-		//: refused, and named so the reason is not mistaken for an ACE.
+		//: granted, and named so the reason is not mistaken for an ACE.
 		return true, "null_dacl"
 	}
 	return walkDacl(dacl, onDirectory, onFilesWithin)
@@ -437,22 +354,21 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 	//: independent: EVERY authenticated account holds Everyone AND
 	//: Authenticated Users, so a deny addressed to Everyone constrains a later
 	//: allow addressed to Authenticated Users. Keying denials by the ACE's
-	//: literal SID misses that and refuses a directory nobody can write.
+	//: literal SID misses that and reports a grant nobody holds.
 	//: TWO sets, because this walk asks two questions of one list and a deny
 	//: reaches only the object its own flags describe — see [reachOf].
 	directoryTokens, fileTokens := newTokens(), newTokens()
 	//: one pass per entry, in list order.
 	for index := range uint32(dacl.AceCount) {
 		ace, ok := aceAt(dacl, index)
-		//: an entry that cannot be fetched ends the walk. Fail open rather
-		//: than judge a list half-read.
+		//: an entry that cannot be fetched ends the walk: a list read in part
+		//: is not a list read and found safe.
 		if !ok {
-			//: no verdict, naming the entry the walk stopped at: a list read
-			//: in part is not a list read and found safe.
+			//: no verdict, naming the entry the walk stopped at.
 			return false, "GetAce#" + strconv.FormatUint(uint64(index), 10)
 		}
 		shape, known := shapeOf(ace.AceType)
-		//: an entry this file does not know the LAYOUT of is skipped before
+		//: an entry this package does not know the LAYOUT of is skipped before
 		//: anything reads through it. The type check comes first for that
 		//: reason and not for tidiness.
 		if !known {
@@ -463,7 +379,7 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 		//: an entry reaching neither object decides nothing. INHERIT_ONLY with
 		//: CONTAINER_INHERIT and no OBJECT_INHERIT is that entry: it describes
 		//: the SUBDIRECTORIES of this directory, which is neither the
-		//: directory this rule judges nor a lock file it will create.
+		//: directory asked about nor a file created in it.
 		if !onDir && !onFiles {
 			//: next entry.
 			continue
@@ -477,7 +393,7 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 		}
 		mask := expandGeneric(ace.Mask)
 		left := uint32(0)
-		//: the lock directory's own accounts, if this entry applies to it.
+		//: the directory's own accounts, if this entry applies to it.
 		if onDir {
 			left |= directoryTokens.apply(sid, shape, mask, onDirectory)
 		}
@@ -490,11 +406,11 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 		//: a grant that survives every preceding denial for at least one
 		//: account on at least one object is the verdict.
 		if left != 0 {
-			//: refused, naming who and what.
+			//: granted, naming who and what.
 			return true, sid + "=0x" + strconv.FormatUint(uint64(left), 16)
 		}
 	}
-	//: nobody meaning "anybody" can interfere here.
+	//: nobody meaning "anybody" holds a right asked about.
 	return false, ""
 }
 
@@ -508,13 +424,14 @@ func walkDacl(dacl *aclHeader, onDirectory, onFilesWithin uint32) (granted bool,
 // other.
 //
 // CONTAINER_INHERIT_ACE is deliberately not a third answer. It describes the
-// SUBDIRECTORIES of the lock directory, and this domain creates no
-// subdirectory there — only lock files.
+// SUBDIRECTORIES the directory will hold, and a caller that creates one asks
+// this question of it once it exists — it is a directory with a list of its
+// own, inherited or not — rather than of its parent in advance.
 func reachOf(flags byte) (directory, files bool) {
 	//: an inherit-only entry describes children and grants nothing here.
 	directory = flags&inheritOnlyAce == 0
-	//: OBJECT_INHERIT_ACE is what the lock files created in this directory
-	//: will carry — a different question with a different mask.
+	//: OBJECT_INHERIT_ACE is what the files created in this directory will
+	//: carry — a different question with a different mask.
 	files = flags&objectInheritAce != 0
 	//: the objects this entry decides anything about.
 	return directory, files
@@ -563,7 +480,7 @@ func sidOf(ace *aceEntry, shape aceShape) string {
 	//: the identifier's own LENGTH is data as well — one byte of it says how
 	//: many sub-authorities follow — so the whole SID has to fit too, or
 	//: ConvertSidToStringSidW would render bytes belonging to the next entry
-	//: and could name an identifier this rule reads as "anybody".
+	//: and could name an identifier this reader reads as "anybody".
 	subAuthorities := uintptr(*(*byte)(unsafe.Add(unsafe.Pointer(ace), offset+1)))
 	if offset+smallestSid+subAuthorityWidth*subAuthorities > uintptr(ace.AceSize) {
 		//: no identifier.

@@ -5,12 +5,10 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "lock",
     srcs = [
+        "backend.go",
         "chain.go",
         "codes.go",
         "config.go",
-        "dacl_shared_windows.go",
-        "dacl_tokens_windows.go",
-        "dacl_windows.go",
         "dirsafety_posix.go",
         "dirsafety_windows.go",
         "errors.go",
@@ -18,9 +16,6 @@ go_library(
         "file.go",
         "file_config.go",
         "file_lease.go",
-        "flock_other.go",
-        "flock_unix.go",
-        "flock_windows.go",
         "gate.go",
         "holding.go",
         "identity.go",
@@ -43,8 +38,14 @@ go_library(
         "//internal/core/proc",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/fs/flock",
         "//internal/kernel/fs/pathchain",
-    ],
+    ] + select({
+        "@rules_go//go/platform:windows": [
+            "//internal/kernel/fs/winacl",
+        ],
+        "//conditions:default": [],
+    }),
 )
 
 alias(
@@ -60,10 +61,9 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "backend_internal_test.go",
         "chain_posix_test.go",
         "chain_windows_test.go",
-        "dacl_internal_windows_test.go",
-        "dacl_noverdict_internal_windows_test.go",
         "dacl_objectace_windows_test.go",
         "dacl_windows_test.go",
         "dirsafety_posix_test.go",
@@ -91,6 +91,7 @@ go_test(
         "//internal/core/proc",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/fs/flock",
     ],
 )
 

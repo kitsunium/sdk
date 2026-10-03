@@ -2,7 +2,9 @@
 
 // Package queue — who else can write a queue directory, asked of Windows in the
 // only vocabulary it has for it: the directory's DACL, read by the one reader
-// this repository has (internal/service/app/lock, ADR 0084/0086).
+// this repository has (internal/kernel/fs/winacl — the lock domain's reader,
+// ADR 0084/0086, moved to the kernel so that the queue no longer reaches into
+// another service for it; ADR 0159).
 //
 // # Why the mode rule cannot run here
 //
@@ -15,7 +17,7 @@
 // # The same two questions, asked of the DACL
 //
 // The root is refused when an identifier meaning anybody may take away an
-// entry it did not create — lock's ReplaceRights, the Windows spelling of
+// entry it did not create — winacl.ReplaceRights, the Windows spelling of
 // "world-writable and not sticky". A state is refused when such an identifier
 // may put an entry there at all — a file (a planted message) or a directory
 // or junction — or take one away, or alter a file created there through what
@@ -37,19 +39,19 @@ import (
 	"path/filepath"
 	"syscall"
 
-	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
+	"github.com/kitsunium/sdk/internal/kernel/fs/winacl"
 )
 
 // stateRights is what an identifier meaning anybody must not hold on a state
 // directory: creating a file (a planted message), creating a directory or a
 // junction, or taking an entry away.
-const stateRights uint32 = svclock.RightAddFile | svclock.RightAddSubdirectory | svclock.ReplaceRights
+const stateRights uint32 = winacl.RightAddFile | winacl.RightAddSubdirectory | winacl.ReplaceRights
 
 // rootWritableByAnyone reports whether an identifier meaning anybody can
 // REPLACE an entry of the queue directory — what the sticky bit forbids on
 // Unix, spelled as the rights that do it here.
 func rootWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unusable bool) {
-	granted, observed := svclock.GrantsAnyone(filepath.Clean(dir), svclock.ReplaceRights, 0)
+	granted, observed := winacl.GrantsAnyone(filepath.Clean(dir), winacl.ReplaceRights, 0)
 	//: the verdict, or an inspection that could not run.
 	return dirVerdict(granted, observed)
 }
@@ -58,7 +60,7 @@ func rootWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unus
 // an entry into a state directory, take one away, or write the files created
 // in it.
 func stateWritableByAnyone(dir string, _ fs.FileInfo) (why, observed string, unusable bool) {
-	granted, observed := svclock.GrantsAnyone(filepath.Clean(dir), stateRights, svclock.ContentRights)
+	granted, observed := winacl.GrantsAnyone(filepath.Clean(dir), stateRights, winacl.ContentRights)
 	//: the verdict, or an inspection that could not run.
 	return dirVerdict(granted, observed)
 }

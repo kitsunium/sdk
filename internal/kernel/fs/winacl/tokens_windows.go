@@ -1,23 +1,22 @@
 //go:build windows
 
-// Package lock — the hypothetical accounts a DACL is evaluated against, and
+// Package winacl — the hypothetical accounts a DACL is evaluated against, and
 // why one map keyed by SID is the wrong shape.
-package lock
+package winacl
 
-// tokenSet is the accounts the "could anybody interfere here?" question is
-// asked on behalf of.
+// tokenSet is the accounts the "can anybody?" question is asked on behalf of.
 //
 // # Why accounts, and why not a map keyed by the ACE's SID
 //
 // The obvious implementation accumulates denied rights under each ACE's
 // literal identifier and subtracts them from a later allow carrying the SAME
-// identifier. It is wrong, because the identifiers this rule cares about are
+// identifier. It is wrong, because the identifiers this reader cares about are
 // not independent: EVERY authenticated account holds Everyone (S-1-1-0) AND
 // Authenticated Users (S-1-5-11), and every local interactive one holds
 // BUILTIN\Users (S-1-5-32-545) on top. So an ACL that denies Everyone
 // FILE_DELETE_CHILD and then allows Authenticated Users FILE_DELETE_CHILD
 // grants that right to nobody at all — and the SID-keyed version reports it as
-// granted and refuses a directory that is perfectly safe.
+// granted, and a caller refuses a directory that is perfectly safe.
 //
 // Modelling the accounts instead of the identifiers makes that fall out: a
 // deny reaches every account holding the SID it names, and an allow is
@@ -26,7 +25,7 @@ package lock
 // ADR 0084 §D3b said a third identifier would need a third account. ADR 0086
 // adds the identifier, and this is that third account.
 type tokenSet struct {
-	// accounts is one entry per caller this rule models, in no particular
+	// accounts is one entry per caller this reader models, in no particular
 	// order — the verdict is a union, so nothing depends on their sequence.
 	accounts []accountState
 }
@@ -68,17 +67,17 @@ func newTokens() *tokenSet {
 // because a denial is only subtracted from an allow that speaks the same
 // vocabulary. wanted is the subset of rights the caller's question is about.
 //
-// A CONDITIONAL entry carries an expression this file does not evaluate, and
-// the two dispositions are resolved in the one direction that cannot weaken
-// the verdict: a conditional allow is read as granting, and a conditional deny
-// is read as denying nothing. The alternative — evaluating neither and
-// skipping both — would make "add a condition" a way to put a grant where this
-// rule cannot see it.
+// A CONDITIONAL entry carries an expression this package does not evaluate,
+// and the two dispositions are resolved in the one direction that cannot hide
+// a grant: a conditional allow is read as granting, and a conditional deny is
+// read as denying nothing. The alternative — evaluating neither and skipping
+// both — would make "add a condition" a way to put a grant where this reader
+// cannot see it.
 //
 // A denial is recorded against this SET only, and [walkDacl] keeps one set per
-// OBJECT — the lock directory and the files created in it. A deny that reached
-// only one of them therefore constrains only that one, which is the whole
-// reason there are two sets rather than one.
+// OBJECT — the directory and the files created in it. A deny that reached only
+// one of them therefore constrains only that one, which is the whole reason
+// there are two sets rather than one.
 func (t *tokenSet) apply(sid string, shape aceShape, mask, wanted uint32) (granted uint32) {
 	//: one fold per modelled account; the verdict is the union, because one
 	//: account left holding the right is enough.
@@ -104,9 +103,8 @@ func (t *tokenSet) apply(sid string, shape aceShape, mask, wanted uint32) (grant
 
 // deny records what one entry takes away from this account.
 func (a *accountState) deny(shape aceShape, mask uint32) {
-	//: a deny whose condition this file cannot evaluate may never fire, so it
-	//: takes nothing away — the reading that cannot turn a refusal into an
-	//: acceptance.
+	//: a deny whose condition this package cannot evaluate may never fire, so
+	//: it takes nothing away — the reading that cannot hide a grant.
 	if shape.conditional {
 		//: nothing recorded.
 		return

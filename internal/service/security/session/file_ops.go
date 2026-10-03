@@ -9,6 +9,7 @@ import (
 	"time"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 
 	coresession "github.com/kitsunium/sdk/internal/core/security/session"
 )
@@ -54,7 +55,7 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 		//: a release that fails leaves the store wedged for every other
 		//: operation, so it is CHECKED rather than discarded — and reported
 		//: only when fn had nothing worse to say.
-		if unlockErr := unlockFile(f.lock); unlockErr != nil {
+		if unlockErr := flock.Unlock(f.lock); unlockErr != nil {
 			//: LockFailed, subordinate to fn's own verdict.
 			err = cmp.Or(err, wrapAs(LockFailed, unlockErr))
 		}
@@ -115,14 +116,28 @@ func (f *fileStore) leave() {
 
 // takeFlock polls for the cross-process lock until it has it or ctx ends.
 //
-// The poll interval is the caller's (FileConfig.Poll), armed on the injected
-// clock, so a test drives contention without sleeping and production waits on
-// the real one.
+// The lock is the kernel's (internal/kernel/fs/flock): an exclusive flock(2)
+// on the descriptor the store holds for its whole lifetime. flock(2) belongs
+// to the open file DESCRIPTION, so that descriptor is the lock and no other
+// process can hold it at the same time. It is ADVISORY: it binds every process
+// that takes it, which is every process using this store, and binds nothing
+// else — a mandatory lock would need a mount option no portable code can
+// require.
+//
+// It is polled rather than waited on, because the primitive never blocks: a
+// blocking LOCK_EX parks the thread inside a syscall no cancellation can
+// reach, so a caller whose request was abandoned would keep waiting for a lock
+// it no longer has any use for, and the goroutine would not come back until
+// some other process released it. internal/service/app/lock made the same
+// decision for the same syscall (ADR 0052), and this store made it again
+// (ADR 0073). The poll interval is the caller's (FileConfig.Poll), armed on
+// the injected clock, so a test drives contention without sleeping and
+// production waits on the real one.
 func (f *fileStore) takeFlock(ctx context.Context) error {
 	//: attempt, wait, attempt again — never a blocking flock(2), which parks
 	//: the thread inside a syscall no cancellation can reach.
 	for {
-		taken, flockErr := tryLockExclusive(f.lock)
+		taken, flockErr := flock.TryLock(f.lock)
 		//: the call itself failed.
 		if flockErr != nil {
 			//: LockFailed.

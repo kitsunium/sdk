@@ -43,6 +43,14 @@ env:
   # the lane that executes internal/service/app/lock's Windows suite; the Linux
   # Bazel gate compiles neither that suite nor the backend it covers.
   #
+  # The primitive itself is a kernel package since ADR 0159 — `fs/flock`, which
+  # session's file store takes too — and it joins for the same reason, with a
+  # suite that asserts on every GOOS: the lock where one exists, the refusal
+  # (errors.ErrUnsupported) on illumos and Solaris. `fs/winacl` joins with it:
+  # the Windows DACL reader lock's and queue's directory rules both stand on,
+  # whose walk tests ran here inside ./app/lock until it left that package.
+  # Everywhere but Windows it compiles to its constants and has no test to run.
+  #
   # `entitlement` joins for a narrower reason: its offline cache installs a
   # refreshed roster with write-then-rename, and Windows refuses to replace a
   # destination another handle holds open — which is exactly what that cache's
@@ -69,7 +77,7 @@ env:
   # `proc/ipc` joins them because its endpoint IS the platform: a Unix socket gated
   # by its directory, SO_PEERCRED on Linux, a named pipe with its own DACL on
   # Windows (ADR 0148).
-  KERNEL_PKGS: "./fs/pathchain"
+  KERNEL_PKGS: "./fs/flock ./fs/pathchain ./fs/winacl"
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
   # Unix file-security packages: their suites assert 0600 perms and inject
