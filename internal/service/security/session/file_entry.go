@@ -17,7 +17,7 @@
 // were never redirected — rename(2) replaces a link rather than following it —
 // which is why this file is about the two OPENS.
 //
-// # Why not O_NOFOLLOW, which is what internal/service/lock uses
+// # Why not O_NOFOLLOW, which is what internal/service/app/lock uses
 //
 // Because the store no longer opens anything by path. Every name resolves
 // against the os.Root held since construction (file_store.go), which is what

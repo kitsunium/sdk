@@ -80,7 +80,7 @@
 // visible, rather than hidden inside a tracer.
 //
 // It does not schedule an export.
-// [github.com/kitsunium/sdk/pkg/v1/scheduler] already owns "when", and Collect
+// [github.com/kitsunium/sdk/pkg/v1/app/scheduler] already owns "when", and Collect
 // plus Export is one call.
 //
 // It does not register the OTLP/HTTP exporter. Arming a network client from an
@@ -585,7 +585,7 @@ func NewOTLPJSONExporter(name ExporterName, dst io.Writer) SpanExporter {
 // collector. It is deliberately NOT in the registry: arming a network client from
 // an import is worse than arming a writer, and no endpoint could be a correct
 // default. It does not retry either — use OTLPRetryable with
-// [github.com/kitsunium/sdk/pkg/v1/resilience].
+// [github.com/kitsunium/sdk/pkg/v1/app/resilience].
 func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error) {
 	//: the exporter lives in the service layer; this facade only forwards.
 	return svctrace.NewOTLPHTTPExporter(name, cfg)

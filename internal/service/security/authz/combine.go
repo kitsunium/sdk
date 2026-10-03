@@ -46,7 +46,7 @@ import (
 //
 // DenyOverrides() with no members abstains — the identity of the combiner —
 // and [Check] then refuses. An authorizer with no policy grants nothing, which
-// is the exact opposite of internal/service/validation, where a validator with
+// is the exact opposite of internal/service/app/validation, where a validator with
 // no constraint passes. Both are the safe direction for their domain, and the
 // contrast is the reason ADR 0031 is about SAFE defaults rather than permissive
 // or restrictive ones.

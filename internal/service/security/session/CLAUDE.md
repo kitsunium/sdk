@@ -82,7 +82,7 @@ solaris, illumos, android and ios.
 
 This row used to say the right DACL needs `CreateFileW` with a security
 descriptor "which stdlib `syscall` does not expose". That stopped being true
-with ADR 0081 and ADR 0084: `internal/service/lock` binds `LockFileEx` from
+with ADR 0081 and ADR 0084: `internal/service/app/lock` binds `LockFileEx` from
 `kernel32` and `GetNamedSecurityInfoW` + `GetAce` from `advapi32` through
 `syscall.NewLazyDLL`, no new dependency. Reusing that code does not get this
 store there, because three things are still missing:
@@ -349,7 +349,7 @@ Superseded by ADR 0154 (the charter); ADR 0073 stays as the incident's record, a
   runtime bar is not cleared by a green cross-compile.
 - **Make `Sweep` a background goroutine.** A store that chose its own cadence
   would own a goroutine the caller never asked for; driving it is
-  `pkg/v1/scheduler`'s job.
+  `pkg/v1/app/scheduler`'s job.
 - **Distinguish the causes of `RecordCorrupt` or `SealInvalid`.** One verdict for
   tampering, truncation, a wrong key and a wrong purpose is what keeps them from
   becoming oracles.

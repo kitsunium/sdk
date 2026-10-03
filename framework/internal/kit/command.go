@@ -411,7 +411,7 @@ func transactionMechanic() model.Mechanic {
 
 // keyMechanic is the key's step: the SDK's lock, in the process.
 func keyMechanic(label string) model.Mechanic {
-	return model.Mechanic{Kind: "key", Label: label, Package: "github.com/kitsunium/sdk/pkg/v1/lock", Config: map[string]string{"scope": "process"}}
+	return model.Mechanic{Kind: "key", Label: label, Package: "github.com/kitsunium/sdk/pkg/v1/app/lock", Config: map[string]string{"scope": "process"}}
 }
 
 // NewCommand is a command no service declares yet: [Service.Command] makes

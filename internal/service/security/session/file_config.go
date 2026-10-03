@@ -14,7 +14,7 @@ import (
 // DefaultPoll is the interval between store-wide lock attempts when
 // [FileConfig.Poll] is unset.
 //
-// 25 ms is internal/service/lock's own default, for the same syscall and the
+// 25 ms is internal/service/app/lock's own default, for the same syscall and the
 // same contention, and the two are deliberately the same number: a caller
 // reading both should not have to wonder which lock they are looking at. It is
 // short enough that an uncontended handler never notices it and long enough

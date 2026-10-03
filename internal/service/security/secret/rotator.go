@@ -10,7 +10,7 @@ import (
 	"sync"
 	"time"
 
-	corelock "github.com/kitsunium/sdk/internal/core/lock"
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"

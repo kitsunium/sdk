@@ -101,7 +101,7 @@ have — and only then renders it. Two entries make the point beyond doubt:
 
 `gohcl.getFieldTags` at 5.01 % is the other half: the struct tags are re-parsed
 by reflection **on every call**, with no per-type cache — the mechanism
-`internal/service/validation` uses to make its tag front end 48× cheaper, and
+`internal/service/app/validation` uses to make its tag front end 48× cheaper, and
 which this library does not have.
 
 None of that is a bug. It is `hclwrite` doing its actual job, which is to be the

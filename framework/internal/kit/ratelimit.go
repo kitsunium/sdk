@@ -8,8 +8,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/resilience"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/resilience"
 )
 
 // The per-client buckets' bounds.
@@ -40,7 +40,7 @@ func RateLimitPerClient(perSecond float64, burst int) OperationOption {
 			mech: model.Mechanic{
 				Kind:    "ratelimit",
 				Label:   fmt.Sprintf("%s/s burst %d per client", rate, burst),
-				Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+				Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 				Config:  map[string]string{"rate": rate, "burst": strconv.Itoa(burst), "per": "client"},
 			},
 			runner: newClientLimiter(perSecond, burst, maxClientBuckets, clientBucketIdle, nil),

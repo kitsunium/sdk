@@ -6,8 +6,8 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 

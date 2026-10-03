@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T06:00:00Z -->
+<!-- updated: 2026-10-03T06:30:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -60,25 +60,16 @@ internal/
 │                          snapshot, worker},
 │                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
-│                  cli, config, crypto, events, health, i18n, id, lifecycle,
-│                  lock, mail, net, proc, resilience, scheduler,
-│                  statemachine, validation, view,
+│                  crypto, net, proc,
+│                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
+│                       mail, resilience, scheduler, statemachine, validation,
+│                       view},
 │                  data/{cache, codec, codec/scratch, queue, sql, transform,
 │                        vfs},
 │                  observe/{logger, logger/{level, writer}, metrics, otel,
 │                           trace},
 │                  security/{authz, secret, session, token}
 └── service/       concrete implementations
-                   cli    (resolution loop + generated help + config seam)
-                   config (env, file and fs.FS sources + layered decode +
-                           schema + origins + poll watcher)
-                   events  (synchronous priority-ordered bus + On[E])
-                   health (check registry + per-check timeouts + drain latch
-                           + HTTP handler + the loopback Ask)
-                   lifecycle (ordered engine + per-component stop budget
-                              + opt-in signal/sd_notify Run + the supervisor)
-                   lock    (in-process leases + file locker over flock(2)
-                            or LockFileEx + keepalive)
                    observe (the family — ADR 0155; a directory, no Go code:
                            logger — + encoder, sink/{console,file,memory,
                              syslog}, middleware/{async,encwrite,failover,
@@ -150,22 +141,39 @@ internal/
                            gates, the path above it audited with pathchain
                            (PATH_UNSAFE), SO_PEERCRED on Linux, a named pipe
                            with its own DACL on Windows — ADR 0148)
-                   i18n   (CLDR plural table + catalogue + negotiator + printer)
-                   id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
-                           ksuid, typeid)
                    net    (the family — ADR 0155; a directory, no Go code:
                            client, server, sse, static, tlsid, websocket —
                            one engine each over the one contract core/net)
-                   mail   (MIME composition + SMTP + memory and capture
-                           doubles; spool/ — the durable outbox)
-                   resilience (retry, circuit breaker, rate limit + keyed,
-                           bulkhead, timeout, fallback, hedging; the backoff
-                           curve, an alias of kernel/backoff's)
-                   scheduler (cron parser + fixed interval + engine)
-                   statemachine (declarations + per-entity transitions +
-                           an agenda heap the loop sleeps on)
-                   validation (constraints + combinators + struct-tag plan)
-                   view   (html/template engine + trust scan + parse-once)
+                   app    (the family — ADR 0155; a directory, no Go code:
+                           config — env, file and fs.FS sources + layered
+                             decode + schema + origins + poll watcher;
+                           cli — resolution loop + generated help + config
+                             seam;
+                           i18n — CLDR plural table + catalogue + negotiator
+                             + printer;
+                           validation — constraints + combinators +
+                             struct-tag plan;
+                           view — html/template engine + trust scan +
+                             parse-once;
+                           events — synchronous priority-ordered bus +
+                             On[E];
+                           scheduler — cron parser + fixed interval + engine;
+                           statemachine — declarations + per-entity
+                             transitions + an agenda heap the loop sleeps on;
+                           resilience — retry, circuit breaker, rate limit +
+                             keyed, bulkhead, timeout, fallback, hedging; the
+                             backoff curve, an alias of kernel/backoff's;
+                           lifecycle — ordered engine + per-component stop
+                             budget + opt-in signal/sd_notify Run + the
+                             supervisor;
+                           health — check registry + per-check timeouts +
+                             drain latch + HTTP handler + the loopback Ask;
+                           lock — in-process leases + file locker over
+                             flock(2) or LockFileEx + keepalive;
+                           id — uuidv4, uuidv7, ulid, snowflake, nanoid,
+                             ksuid, typeid;
+                           mail — MIME composition + SMTP + memory and
+                             capture doubles; spool/ — the durable outbox)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
@@ -176,7 +184,6 @@ pkg/
     │                 profiling/ — the process's CPU, heap and goroutines, folded
     │                   onto your owners — ADR 0121)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
-    ├── events/    (in-process synchronous bus — ADR 0053; NOT a queue)
     ├── data/      (a family directory, no Go code — ADR 0155:
     │                 codec/ — blank-imports all 16 service codecs + transform;
     │                   + strictjson/ — one document read one way — ADR 0102;
@@ -215,14 +222,6 @@ pkg/
     │                   client — ADR 0029;
     │                 sse/ — ADR 0029/0043; websocket/ — ADR 0047;
     │                 static/ — a file tree served by name — ADR 0130)
-    ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
-    ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
-    │                 the supervisor — ADR 0112)
-    ├── config/    (env, file and fs.FS layering, schema, origins, poll watch — ADR 0028, ADR 0061, ADR 0097)
-    ├── health/    (startup, readiness and liveness — three questions, three types — ADR 0060;
-    │                 Ask, the loopback readiness probe — ADR 0131)
-    ├── resilience/ (retry, breaker, rate limit + keyed, bulkhead, timeout, fallback, hedging — ADR 0026, ADR 0103)
-    ├── lock/      (Locker/Lease/Deadliner + memory & file lockers — ADR 0052, ADR 0081, ADR 0082, ADR 0083)
     ├── proc/      (the capability preflight at the family's root — ADR 0016, ADR 0144;
     │                 its facades are its children — a child never links its parent,
     │                 ADR 0155: process/ — spawn, wait, stop, and the process itself,
@@ -230,14 +229,34 @@ pkg/
     │                 memlimit/ — the cap already bounding this process — ADR 0075;
     │                 systemd/{notify, listen}/ — sd_notify and socket activation;
     │                 ipc/ — a private socket, the peer the kernel names — ADR 0148)
-    └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
-    └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
-    └── validation/ (Constraint / Violation / Report + the struct-tag front end — ADR 0046)
-    └── i18n/       (CLDR plurals over a named 13-language subset — ADR 0063)
-    └── cli/        (flag + sub-commands + generated help + typed exit — ADR 0065)
-    └── mail/       (compose + Transport, injection refused — ADR 0064;
-                     the spool, the durable outbox — ADR 0111)
-    └── view/       (html/template, one trust type, parse once — ADR 0058)
+    └── app/       (a family directory, no Go code — ADR 0155:
+                      config/ — env, file and fs.FS layering, schema, origins,
+                        poll watch — ADR 0028, ADR 0061, ADR 0097;
+                      cli/ — flag + sub-commands + generated help + typed exit —
+                        ADR 0065;
+                      i18n/ — CLDR plurals over a named 13-language subset —
+                        ADR 0063;
+                      validation/ — Constraint / Violation / Report + the
+                        struct-tag front end — ADR 0046;
+                      view/ — html/template, one trust type, parse once — ADR 0058;
+                      events/ — in-process synchronous bus — ADR 0053; NOT a queue;
+                      scheduler/ — Parse/ParseInLocation/Every + the engine —
+                        ADR 0041;
+                      statemachine/ — entities moved by events, timers,
+                        deadlines, guards; an agenda, not a sweep — ADR 0120;
+                      resilience/ — retry, breaker, rate limit + keyed, bulkhead,
+                        timeout, fallback, hedging — ADR 0026, ADR 0103;
+                      lifecycle/ — ordered start, reverse stop, per-component
+                        budget — ADR 0050; the supervisor — ADR 0112;
+                      health/ — startup, readiness and liveness — three
+                        questions, three types — ADR 0060; Ask, the loopback
+                        readiness probe — ADR 0131;
+                      lock/ — Locker/Lease/Deadliner + memory & file lockers —
+                        ADR 0052, ADR 0081, ADR 0082, ADR 0083;
+                      id/ — UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID —
+                        ADR 0024, ADR 0038;
+                      mail/ — compose + Transport, injection refused — ADR 0064;
+                        the spool, the durable outbox — ADR 0111)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:
                    aws (writer/{cloudwatch,s3}), codec/hcl, codec/protobuf,

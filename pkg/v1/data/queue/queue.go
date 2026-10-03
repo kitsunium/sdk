@@ -27,7 +27,7 @@
 //
 // # This is not an event bus, and the difference is the whole design
 //
-// Read this before anything else in the package. pkg/v1/events and this
+// Read this before anything else in the package. pkg/v1/app/events and this
 // package are described with the same words — publish, handler, message — and
 // they guarantee opposite things:
 //

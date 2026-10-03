@@ -9,7 +9,7 @@ that component was found in. It is the measurement `O_NOFOLLOW` cannot give,
 because `O_NOFOLLOW` governs the FINAL component only and a link planted at a
 parent is traversed by every open whatever flags it carries (ADR 0083).
 
-`internal/service/lock` is its first consumer: ADR 0082 closed the final
+`internal/service/app/lock` is its first consumer: ADR 0082 closed the final
 component and named the parents as deferred, on the grounds that closing them
 "needs a directory-handle API the SDK does not have". This is that API.
 `internal/service/proc/ipc` is the second: the components above a private socket's
@@ -94,7 +94,7 @@ Superseded by ADR 0154 (the charter); ADR 0083 stays as the incident's record, a
 - **Use it as a guard on a hot path.** It is an audit taken once, at
   construction; a component replaced after it returns is not seen by it. A
   component an attacker can PREDICT must be guarded at the open instead —
-  `O_NOFOLLOW` and `FILE_FLAG_OPEN_REPARSE_POINT`, as `internal/service/lock`
+  `O_NOFOLLOW` and `FILE_FLAG_OPEN_REPARSE_POINT`, as `internal/service/app/lock`
   does for the lock file's own name.
 - **Add a refusal here.** See §Conventions; the first one would have to pick
   one of two incompatible policies and would be wrong for the other caller.

@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "health",
+    srcs = ["health.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/app/health",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/app/health",
+        "//internal/core/app/lifecycle",
+        "//internal/service/app/health",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":health",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "health_test",
+    srcs = [
+        "ask_external_test.go",
+        "health_bench_test.go",
+        "health_external_test.go",
+    ],
+    deps = [
+        ":health",
+        "//pkg/v1/app/lifecycle",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

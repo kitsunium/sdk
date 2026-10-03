@@ -30,7 +30,7 @@ import (
 //
 // A second description is what makes this a real contention rather than a
 // no-op: flock on the SAME description is a lock conversion that succeeds at
-// once — measured in internal/service/lock, eight goroutines inside one
+// once — measured in internal/service/app/lock, eight goroutines inside one
 // counted section on every run — which is exactly why the store also carries
 // an in-process gate.
 func holdTheLock(t *testing.T, dir string) (release func()) {

@@ -30,7 +30,7 @@ const (
 // time.Time carries the same asymmetry for the same reason.
 //
 // PROMOTION CANDIDATE: this type is domain-neutral and stdlib-only, so it
-// belongs in internal/kernel or internal/core/config the moment a second domain
+// belongs in internal/kernel or internal/core/app/config the moment a second domain
 // needs it. It is declared here because the repo's bar for a shared primitive is
 // two real consumers arising from an actual duplication, and today there is one.
 type DurationValue time.Duration

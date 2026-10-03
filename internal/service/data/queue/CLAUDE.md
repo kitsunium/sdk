@@ -24,7 +24,7 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
-| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through `internal/service/lock`'s reader |
+| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through `internal/service/app/lock`'s reader |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
@@ -330,7 +330,7 @@ its signal is closed after the COMMIT of the publication it announces.
 - **Still no timer and no goroutine in a broker.** The wait is the consumer's;
   the broker only answers.
 
-## Where this package departs from `service/events`, and why
+## Where this package departs from `service/app/events`, and why
 
 `events` joins its `ListenerFailed` verdict beside the listener's cause,
 because `Publish` RETURNS the aggregate and a caller has to be able to ask "did
@@ -387,7 +387,7 @@ the code.
 ## A handler that parks its own message
 
 A handler may extend its OWN lease through `LeaseExtender` and return nil — the
-mail spool (`internal/service/mail/spool`, ADR 0111) does exactly that to wait
+mail spool (`internal/service/app/mail/spool`, ADR 0111) does exactly that to wait
 a backoff that grows with the attempt instead of the fixed `RetryDelay`. The
 extension replaces the receipt, so `Consume`'s acknowledgement of the old one
 is refused `LEASE_EXPIRED` by EVERY broker and ignored by `settle` like every

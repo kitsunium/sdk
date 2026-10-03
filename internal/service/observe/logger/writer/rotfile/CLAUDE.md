@@ -86,7 +86,7 @@ are `js/wasm`, `plan9/{386,amd64,arm}`, `windows/{386,amd64,arm64}` and
 
 Closing the gap on Windows needs a different primitive, not a different flag:
 `FILE_FLAG_OPEN_REPARSE_POINT` **opens** the link and the handle must then be
-rejected (ADR 0082 §D2 measured both shapes for `internal/service/lock`). Not
+rejected (ADR 0082 §D2 measured both shapes for `internal/service/app/lock`). Not
 done here, and named rather than implied.
 
 ## Behaviour

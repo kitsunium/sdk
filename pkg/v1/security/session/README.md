@@ -82,7 +82,7 @@ Those guarantees rest on flock\(2\), on a filesystem that enforces Unix permissi
 
 ### Sweeping is yours to schedule
 
-Both stores implement [Sweeper](<#Sweeper>), reached by type assertion rather than through a wider [Store](<#Store>) \(ADR 0039\). Neither runs a background goroutine the caller never asked for; driving Sweep on a cadence is what pkg/v1/scheduler is for. The file store additionally implements io.Closer, which releases its lock descriptor and the directory it holds.
+Both stores implement [Sweeper](<#Sweeper>), reached by type assertion rather than through a wider [Store](<#Store>) \(ADR 0039\). Neither runs a background goroutine the caller never asked for; driving Sweep on a cadence is what pkg/v1/app/scheduler is for. The file store additionally implements io.Closer, which releases its lock descriptor and the directory it holds.
 
 ## Index
 

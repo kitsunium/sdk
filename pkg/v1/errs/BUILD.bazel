@@ -29,7 +29,7 @@ go_test(
     ],
     deps = [
         ":errs",
-        "//pkg/v1/mail",
+        "//pkg/v1/app/mail",
         "//pkg/v1/observe/logger",
     ],
 )

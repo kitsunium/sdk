@@ -18,7 +18,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
-	"github.com/kitsunium/sdk/pkg/v1/lock"
+	"github.com/kitsunium/sdk/pkg/v1/app/lock"
 )
 
 // maxArtefactBytes caps each roster artefact. The endpoint is untrusted by

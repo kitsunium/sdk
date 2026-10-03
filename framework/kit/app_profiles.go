@@ -33,7 +33,7 @@ func IdleStop(d time.Duration) AppOption {
 
 // Singleton keeps one process of the app alive per scope on this machine: the
 // start takes an exclusive file lock named after scope in the app's runtime
-// directory (pkg/v1/lock: flock, LockFileEx) and holds it until the process
+// directory (pkg/v1/app/lock: flock, LockFileEx) and holds it until the process
 // ends. A second process refuses to start with CodeSingletonHeld — for a
 // daemon's client, the sign to talk to the one that runs. The kernel drops
 // the lock with a dead process.

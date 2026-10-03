@@ -73,7 +73,7 @@ var (
 	// lapsed. NOTHING happened: the message is back in the queue or in the
 	// dead-letter store, and another consumer may already hold it.
 	//
-	// Reporting it beats returning nil, for the reason core/lock gives about
+	// Reporting it beats returning nil, for the reason core/app/lock gives about
 	// releasing a lock one no longer holds: a holder that lost its claim must
 	// not be able to end somebody else's turn, and must find out that it lost
 	// it. A consumer that gets this has produced a duplicate — which the

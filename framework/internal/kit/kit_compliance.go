@@ -2,7 +2,7 @@
 // the interfaces the app reaches its nodes and options through.
 package kit
 
-import "github.com/kitsunium/sdk/pkg/v1/statemachine"
+import "github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 
 // : Asserts at compile time every role a type is handed through an interface.
 var (

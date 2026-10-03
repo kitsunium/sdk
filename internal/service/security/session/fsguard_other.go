@@ -17,7 +17,7 @@
 //
 // It said the right DACL needs CreateFileW with a security descriptor "which
 // stdlib syscall does not expose". That stopped being the obstacle with ADR
-// 0081 and ADR 0084: internal/service/lock binds LockFileEx from kernel32 and
+// 0081 and ADR 0084: internal/service/app/lock binds LockFileEx from kernel32 and
 // GetNamedSecurityInfoW and GetAce from advapi32 through syscall.NewLazyDLL,
 // with no new dependency, and the same mechanism reaches every advapi32
 // export. What is still missing is three things, and none of them is a reuse

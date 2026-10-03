@@ -11,15 +11,15 @@ import (
 	"slices"
 	"strings"
 
+	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
 	corevfs "github.com/kitsunium/sdk/internal/core/data/vfs"
-	corelock "github.com/kitsunium/sdk/internal/core/lock"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
-	svclock "github.com/kitsunium/sdk/internal/service/lock"
 )
 
 // lockPrefix namespaces the lock names this store takes, one per secret, so a

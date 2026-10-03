@@ -217,7 +217,7 @@ func TestWorkflowTimerAndGuard(t *testing.T) {
 		l := loop()
 		return l.State == model.LoopWaiting && l.NextRun == nil
 	})
-	if l := loop(); l.Errors != 0 || l.Provenance != model.ProvenanceLibrary || l.Library != "sdk/v1/statemachine" {
+	if l := loop(); l.Errors != 0 || l.Provenance != model.ProvenanceLibrary || l.Library != "sdk/v1/app/statemachine" {
 		t.Errorf("the loop %+v", l)
 	}
 }

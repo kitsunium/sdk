@@ -33,7 +33,7 @@ type rootStack struct {
 	// back. Nothing is ever written through these descriptors, so a refused
 	// close cannot have lost data — but a filesystem that will not close one
 	// is saying something, and this package's consumer reports a refused close
-	// for exactly that reason (see internal/service/lock's release).
+	// for exactly that reason (see internal/service/app/lock's release).
 	abandoned error
 }
 

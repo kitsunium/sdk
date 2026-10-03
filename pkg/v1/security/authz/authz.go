@@ -69,7 +69,7 @@
 // slice, and a resource is a string compared by equality — no expression
 // grammar, no wildcards, no file format, no relationship tuples. What a DSL
 // would buy is a deployment property, and it is available by loading your own
-// rule data through pkg/v1/config and building the policy from it, in your
+// rule data through pkg/v1/app/config and building the policy from it, in your
 // vocabulary rather than the SDK's.
 //
 // It is not a framework. A firewall, voters wired onto routes, a role

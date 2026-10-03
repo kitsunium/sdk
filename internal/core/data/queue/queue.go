@@ -21,7 +21,7 @@
 //	flight               |                          | there
 //
 // A caller who wants "several things happen right now, on my goroutine,
-// inside my transaction" wants internal/core/events. This package will not
+// inside my transaction" wants internal/core/app/events. This package will not
 // give them a faster version of it: [Broker.Publish] costs a disk flush,
 // because that flush IS the guarantee.
 //
@@ -150,7 +150,7 @@ type Broker interface {
 	// A receipt whose lease has already lapsed is [LeaseExpired] and removes
 	// NOTHING: the message is back in the queue, or in the dead-letter
 	// store, and another consumer may already hold it. Reporting that is the
-	// same decision core/lock makes for a lapsed lease — a holder that lost
+	// same decision core/app/lock makes for a lapsed lease — a holder that lost
 	// its claim must not be able to end somebody else's turn, and must find
 	// out that it lost it.
 	//

@@ -17,9 +17,9 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
 	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 

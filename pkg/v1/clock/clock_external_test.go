@@ -14,14 +14,14 @@ import (
 	"testing"
 	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/app/health"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
+	"github.com/kitsunium/sdk/pkg/v1/app/lock"
+	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/cache"
 	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/data/sql"
-	"github.com/kitsunium/sdk/pkg/v1/health"
-	"github.com/kitsunium/sdk/pkg/v1/lifecycle"
-	"github.com/kitsunium/sdk/pkg/v1/lock"
-	"github.com/kitsunium/sdk/pkg/v1/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/security/session"
 )
 

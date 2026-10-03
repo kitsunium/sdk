@@ -188,7 +188,7 @@ name.
   forever — so a `select` that watches it needs no nil check and simply never
   fires that case.
 - **`DurationValue` is a PROMOTION CANDIDATE.** It is domain-neutral and
-  stdlib-only, so it belongs in `kernel` or `core/config` the moment a second
+  stdlib-only, so it belongs in `kernel` or `core/app/config` the moment a second
   domain needs it. It is declared here because the repo's bar for a shared
   primitive is two real consumers arising from an actual duplication, and today
   there is one. The doc comment on the type says so.

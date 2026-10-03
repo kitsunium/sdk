@@ -47,7 +47,7 @@ var (
 	// A durable queue whose directory any account may write is a queue any
 	// account may inject work into or silently drain, and the failure is
 	// invisible: messages simply stop arriving. It is the same refusal
-	// service/lock makes about its lock directory, and it is made at wiring
+	// service/app/lock makes about its lock directory, and it is made at wiring
 	// time for the same reason — at first use it would be a mystery, at
 	// construction it names the directory.
 	QueueDirectoryUnusable = errs.Define(CodeQueueDirectoryUnusable, "QUEUE_DIRECTORY_UNUSABLE",
@@ -84,7 +84,7 @@ var (
 	// FIELDS, never as the wrap origin, so a panic carrying an *errs.Error
 	// cannot hijack this code.
 	// A handler that merely RETURNS an error gets no sentinel of its own:
-	// Consume hands that error to Broker.Nack unmodified. service/events
+	// Consume hands that error to Broker.Nack unmodified. service/app/events
 	// joins its ListenerFailed verdict beside the listener's cause because
 	// Publish returns the aggregate to a caller who must be able to ask "did
 	// anything fail?"; here the aggregate's destination is a dead-letter

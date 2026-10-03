@@ -114,7 +114,7 @@ Go has no way to abandon a goroutine.
 
 ## Consumers
 
-- `internal/service/health` — `evaluateAll` runs a probe's checks through
+- `internal/service/app/health` — `evaluateAll` runs a probe's checks through
   `Collect`, so the results come back in REGISTRATION order and a fault in the
   evaluation path is re-raised in the probing goroutine, after every sibling
   check has returned, instead of crashing the process from a goroutine nobody
@@ -122,7 +122,7 @@ Go has no way to abandon a goroutine.
 - `internal/service/data/queue` — `Consume` runs its workers in a `NewJoined` group:
   each worker that hits the storage reports its OWN failure, the first one
   stops the others, and `Consume` returns them joined.
-- `internal/service/scheduler` was considered and does not use it: a job's
+- `internal/service/app/scheduler` was considered and does not use it: a job's
   error is published to the observer, never returned, and must not cancel the
   other entries — the two things a group exists to do. Its `sync.WaitGroup`
   says exactly what it needs, a join point.

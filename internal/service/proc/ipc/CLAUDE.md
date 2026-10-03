@@ -51,7 +51,7 @@ directory. Code range `0.3.91.*`.
   Linux the peer is not verified.
 - **The rule judges each component by the directory holding it, and only
   where ANYBODY can write that directory** (world-writable): an indirection is
-  refused (`kind=indirection` — `internal/service/lock`'s rule, ADR 0083,
+  refused (`kind=indirection` — `internal/service/app/lock`'s rule, ADR 0083,
   sticky exempts nothing because planting is a creation), a component owned by
   neither this account nor root is refused (`kind=foreign` — whoever created
   it decides everything below it), and without the sticky bit any component is

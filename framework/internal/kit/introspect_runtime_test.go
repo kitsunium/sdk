@@ -90,9 +90,9 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 
 	want := map[string][3]string{ // name → kind, provenance, library
 		"http":                               {model.LoopHTTP, model.ProvenanceLibrary, "sdk/v1/net/server"},
-		"scheduler":                          {model.LoopScheduler, model.ProvenanceLibrary, "sdk/v1/scheduler"},
-		"audit/job/tally":                    {model.LoopJob, model.ProvenanceLibrary, "sdk/v1/scheduler"},
-		"shop/workflow/lifecycle timers":     {model.LoopTimer, model.ProvenanceLibrary, "sdk/v1/statemachine"},
+		"scheduler":                          {model.LoopScheduler, model.ProvenanceLibrary, "sdk/v1/app/scheduler"},
+		"audit/job/tally":                    {model.LoopJob, model.ProvenanceLibrary, "sdk/v1/app/scheduler"},
+		"shop/workflow/lifecycle timers":     {model.LoopTimer, model.ProvenanceLibrary, "sdk/v1/app/statemachine"},
 		"audit/subscription/record consumer": {model.LoopConsumer, model.ProvenanceLibrary, "sdk/v1/queue"},
 	}
 	for _, l := range rt.Loops {

@@ -2,7 +2,7 @@
 
 // Package queue — who else can write a queue directory, asked of Windows in the
 // only vocabulary it has for it: the directory's DACL, read by the one reader
-// this repository has (internal/service/lock, ADR 0084/0086).
+// this repository has (internal/service/app/lock, ADR 0084/0086).
 //
 // # Why the mode rule cannot run here
 //
@@ -37,7 +37,7 @@ import (
 	"path/filepath"
 	"syscall"
 
-	svclock "github.com/kitsunium/sdk/internal/service/lock"
+	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 )
 
 // stateRights is what an identifier meaning anybody must not hold on a state

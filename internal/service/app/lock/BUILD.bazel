@@ -1,0 +1,102 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "lock",
+    srcs = [
+        "chain.go",
+        "codes.go",
+        "config.go",
+        "dacl_shared_windows.go",
+        "dacl_tokens_windows.go",
+        "dacl_windows.go",
+        "dirsafety_posix.go",
+        "dirsafety_windows.go",
+        "errors.go",
+        "fence.go",
+        "file.go",
+        "file_config.go",
+        "file_lease.go",
+        "flock_other.go",
+        "flock_unix.go",
+        "flock_windows.go",
+        "gate.go",
+        "holding.go",
+        "identity.go",
+        "keepalive.go",
+        "lock_compliance.go",
+        "memory.go",
+        "memory_lease.go",
+        "nofollow.go",
+        "nofollow_other.go",
+        "nofollow_unix.go",
+        "nofollow_windows.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/app/lock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/app/lock",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/kernel/fs/pathchain",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":lock",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "lock_test",
+    size = "small",
+    srcs = [
+        "chain_posix_test.go",
+        "chain_windows_test.go",
+        "dacl_internal_windows_test.go",
+        "dacl_noverdict_internal_windows_test.go",
+        "dacl_objectace_windows_test.go",
+        "dacl_windows_test.go",
+        "dirsafety_posix_test.go",
+        "dirsafety_windows_test.go",
+        "file_contention_unix_test.go",
+        "file_contention_windows_test.go",
+        "file_external_test.go",
+        "identity_posix_test.go",
+        "identity_windows_test.go",
+        "keepalive_external_test.go",
+        "memory_external_test.go",
+        "nofollow_test.go",
+        "nofollow_unix_test.go",
+        "nofollow_windows_test.go",
+        "nosleep_external_test.go",
+    ],
+    # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
+    # files at runtime. Bazel's sandbox strips the source-tree relationship, so
+    # the sources have to reach the test as runfiles — the same mechanism
+    # //internal/kernel/errs uses for its AST audits.
+    data = ["//:audit_sources"],
+    embed = [":lock"],
+    deps = [
+        "//internal/core/app/lock",
+        "//internal/core/proc",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -52,7 +52,7 @@ if err := authz.Check(ctx, policy, req); err != nil {
 
 It is not an authenticator. The subject comes from pkg/v1/security/session \(a revocable server\-side session\) or pkg/v1/security/token \(a self\-contained signed claim set\); this package takes it as given and reads no header, mints nothing, and verifies no credential.
 
-It is not a policy language. A condition is a Go func, a grant table is a Go slice, and a resource is a string compared by equality — no expression grammar, no wildcards, no file format, no relationship tuples. What a DSL would buy is a deployment property, and it is available by loading your own rule data through pkg/v1/config and building the policy from it, in your vocabulary rather than the SDK's.
+It is not a policy language. A condition is a Go func, a grant table is a Go slice, and a resource is a string compared by equality — no expression grammar, no wildcards, no file format, no relationship tuples. What a DSL would buy is a deployment property, and it is available by loading your own rule data through pkg/v1/app/config and building the policy from it, in your vocabulary rather than the SDK's.
 
 It is not a framework. A firewall, voters wired onto routes, a role catalogue, "what an admin is" and what a denied request looks like on the wire all belong one layer up. The SDK ships the evaluation.
 

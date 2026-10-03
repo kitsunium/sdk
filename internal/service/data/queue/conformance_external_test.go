@@ -89,7 +89,7 @@ func TestALapsedLeaseRedeliversTheMessageWithTheCountIncremented(t *testing.T) {
 }
 
 // TestAnAcknowledgementFromALapsedLeaseIsRefusedAndRemovesNothing is the rule
-// core/lock makes about releasing a lock one no longer holds, one domain
+// core/app/lock makes about releasing a lock one no longer holds, one domain
 // over: a consumer that lost the race must not be able to end the new
 // holder's turn, and must find out that it lost.
 func TestAnAcknowledgementFromALapsedLeaseIsRefusedAndRemovesNothing(t *testing.T) {

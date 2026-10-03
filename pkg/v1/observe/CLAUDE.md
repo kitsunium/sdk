@@ -22,7 +22,7 @@ ITSELF, kept for somebody other than the caller of the call being made: a line
 that says what happened (`logger`), a number that says how much (`metrics`), a
 span that says how long and on whose behalf (`trace`), and the profiles that
 say where the time and the memory went (`profiling`). Readiness and liveness
-are the app family's (`pkg/v1/health`): they answer a supervisor's question
+are the app family's (`pkg/v1/app/health`): they answer a supervisor's question
 rather than record what happened.
 
 ## Members

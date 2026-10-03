@@ -102,7 +102,7 @@ Code range: `0.2.24.*` (ADR 0055).
   existing application on migration.
 - **A nil `Down` is refused, `Irreversible` is the declaration.** "I forgot the
   reversal" and "there is no reversal" are the same nil and only one of them is
-  a defect — the rule `core/lifecycle` applies to a nil `Stop`.
+  a defect — the rule `core/app/lifecycle` applies to a nil `Stop`.
 - **A version above `math.MaxInt64` is refused at `Validate`.** It is stored in
   a `BIGINT` and bound as an `int64`; a value with no representation there
   would silently reorder the history.

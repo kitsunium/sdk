@@ -99,7 +99,7 @@ type otlpHTTPExporter struct {
 //
 // It does NOT retry, and that is a decision rather than an omission. The
 // specification asks a client to back off exponentially on a retryable status,
-// this SDK already ships that policy in internal/service/resilience, and a
+// this SDK already ships that policy in internal/service/app/resilience, and a
 // backoff hidden inside Export would be a second one a caller cannot see, tune
 // or cancel. What this exporter provides instead is the CLASSIFICATION a retry
 // policy needs:

@@ -217,7 +217,7 @@ func settle(
 // The stack is captured inside the deferred recover, while the panicking
 // frames are still unwinding. The recovered value travels as a FIELD and
 // never as the wrap origin, so a panic carrying an *errs.Error cannot hijack
-// HANDLER_PANICKED — the service/events and service/lifecycle rule.
+// HANDLER_PANICKED — the service/app/events and service/app/lifecycle rule.
 func guard(
 	ctx context.Context, handler corequeue.Handler, delivery corequeue.DeliveryValue,
 ) (failure error) {
@@ -233,7 +233,7 @@ func guard(
 			kerrs.String("panic", fmt.Sprint(value)), kerrs.String("stack", string(debug.Stack())))
 	}()
 	//: the handler's error travels to Nack UNMODIFIED, and that is a
-	//: deliberate departure from service/events.
+	//: deliberate departure from service/app/events.
 	//
 	//: events joins its own ListenerFailed verdict beside the listener's
 	//: cause because Publish RETURNS the aggregate, and a caller has to be

@@ -58,7 +58,7 @@ construction; a change to `events` that moves it right is wrong the same way.
    again after the messages published behind it. There is no per-key ordering.
 5. **Zero values, both branches of ADR 0031, in one struct.**
    `VisibilityTimeout` and `MaxDeliveries` are REFUSED at zero (two opposite
-   readings each, one of which silently destroys the guarantee — `core/lock`'s
+   readings each, one of which silently destroys the guarantee — `core/app/lock`'s
    TTL argument); `RetryDelay` and `MaxMessageBytes` are CLAMPED (one reading
    each, harmless). The two durations are also bounded from ABOVE, and that
    refusal is arithmetic, not a reading: above `MaxDeadlineOffset` (a century)

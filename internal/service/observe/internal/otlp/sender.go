@@ -66,7 +66,7 @@ const (
 //
 // It does NOT retry, and that is a decision rather than an omission. The
 // specification asks a client to honour Retry-After and otherwise back off
-// exponentially; internal/service/resilience already ships that policy, and a
+// exponentially; internal/service/app/resilience already ships that policy, and a
 // backoff hidden inside a send would be a second one a caller cannot see, tune
 // or cancel — an exporter's Export has no context to cancel it with. What it
 // supplies instead is the CLASSIFICATION a retry policy needs: a transient

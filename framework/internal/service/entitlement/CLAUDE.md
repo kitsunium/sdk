@@ -15,7 +15,7 @@ product (ADR 0078 §1).
 It was the SDK library's `internal/service/entitlement` until ADR 0158 made it
 the framework's. Its own range `0.3.67.*` kept its value (ADR 0160), and it now
 reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
-(framework/CLAUDE.md rule 1): the cache lock is `pkg/v1/lock`'s file locker.
+(framework/CLAUDE.md rule 1): the cache lock is `pkg/v1/app/lock`'s file locker.
 
 ## Contents
 
@@ -408,7 +408,7 @@ and lives in a module of its own because `golang.org/x/crypto/ssh` reaches
 
 ADR 0158 §2 sends this package's signatures, digests, JSON, HTTP, locks and
 waits through `pkg/v1`. Signatures (`pkg/v1/crypto/sign`), digests (`pkg/v1/crypto/hash`)
-and the cache lock (`pkg/v1/lock`) go through it — `crypto.go` and
+and the cache lock (`pkg/v1/app/lock`) go through it — `crypto.go` and
 `cache_lock.go`. Four things do not, each for a reason measured on this tree,
 and each is said again at its code site:
 

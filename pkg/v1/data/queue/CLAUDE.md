@@ -31,7 +31,7 @@ and the consumer engine.
   (rule 10, ADR 0008). Edit the doc comment and run `make docs-readme`; never
   hand-edit the README.
 - **The package doc leads with the frontier table**, not with an example. This
-  package and `pkg/v1/events` are described with the same words and guarantee
+  package and `pkg/v1/app/events` are described with the same words and guarantee
   opposite things, and a reader who picks the wrong one finds out in production.
   The table is the first thing after the synopsis for that reason.
 - **The at-least-once guarantee is stated three times** — `Delivery.Deliveries`,
@@ -64,7 +64,7 @@ and the consumer engine.
 - Re-export a `internal/service/data/queue` concrete type. `FileConfig`,
   `SQLConfig`, `MemoryConfig` and `ConsumerConfig` are aliases onto
   configuration STRUCTS,
-  which is the same pattern `pkg/v1/lock` and `pkg/v1/security/session` use; the brokers
+  which is the same pattern `pkg/v1/app/lock` and `pkg/v1/security/session` use; the brokers
   themselves stay unexported behind their constructors.
 - Hand-edit `README.md`.
 - Soften the frontier table, the ordering warning, or the idempotence

@@ -106,7 +106,7 @@ func RefuseSymlink(path string, refusal *errs.WrapParams) error {
 // the two calls changes which field this error carries and cannot change
 // whether the open was refused. It is the opposite situation from
 // RefuseSymlink, which runs BEFORE the open and is a check the flag exists to
-// back up — the same distinction internal/service/lock draws in
+// back up — the same distinction internal/service/app/lock draws in
 // classifyOpenFailure (ADR 0082 §D4).
 //
 // The errno is deliberately not consulted. O_NOFOLLOW reports a planted link as

@@ -15,7 +15,7 @@
 // Closing it here needs a different primitive, not a different flag — Windows
 // has FILE_FLAG_OPEN_REPARSE_POINT, which OPENS the link and requires the
 // handle to be rejected afterwards, the opposite shape from a failing open
-// (ADR 0082 §D2 measured both for internal/service/lock). That is a separate
+// (ADR 0082 §D2 measured both for internal/service/app/lock). That is a separate
 // piece of work and is named as one; this file does not pretend to be it.
 package logfile
 

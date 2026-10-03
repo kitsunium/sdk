@@ -13,11 +13,11 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/statemachine"
 	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
-	"github.com/kitsunium/sdk/pkg/v1/statemachine"
 )
 
 // The SDK's state-machine engine reads and writes a workflow's entities

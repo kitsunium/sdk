@@ -21,7 +21,7 @@
 //
 // # The rule is the lock domain's, and so is the reason for it
 //
-// internal/service/lock closed the same gap for its lock directory (ADR 0083),
+// internal/service/app/lock closed the same gap for its lock directory (ADR 0083),
 // on internal/kernel/fs/pathchain, and this is the same rule over the same walk:
 // an indirection is refused when the directory HOLDING it is world-writable —
 // when anybody could have planted it — and the sticky bit exempts nothing,

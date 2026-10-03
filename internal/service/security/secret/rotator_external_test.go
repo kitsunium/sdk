@@ -10,7 +10,7 @@ import (
 	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	svclock "github.com/kitsunium/sdk/internal/service/lock"
+	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 	svcsecret "github.com/kitsunium/sdk/internal/service/security/secret"
 )
 

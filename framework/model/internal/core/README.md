@@ -2407,8 +2407,8 @@ type LoopMessage struct {
     // Provenance is one of the Provenance constants.
     Provenance string `json:"provenance,omitempty"`
     // Library names the code that loops, for a library or kit loop:
-    // "net/http", "sdk/v1/scheduler", "sdk/v1/queue", "sdk/v1/mail",
-    // "sdk/v1/statemachine", "kit".
+    // "net/http", "sdk/v1/app/scheduler", "sdk/v1/queue", "sdk/v1/app/mail",
+    // "sdk/v1/app/statemachine", "kit".
     Library string `json:"library,omitempty"`
     // State is one of the Loop state constants.
     State string `json:"state,omitempty"`

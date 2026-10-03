@@ -99,7 +99,7 @@ type otlpHTTPExporter struct {
 // # It does not retry
 //
 // The specification asks a client to honour Retry-After and otherwise back off
-// exponentially. `internal/service/resilience` already ships that policy, and a
+// exponentially. `internal/service/app/resilience` already ships that policy, and a
 // backoff hidden inside Export would be a second one a caller cannot see, tune or
 // cancel — Export has no context to cancel it with. What this exporter supplies
 // instead is the CLASSIFICATION a retry policy needs, in the exact shape

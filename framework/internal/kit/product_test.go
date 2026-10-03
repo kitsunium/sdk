@@ -14,8 +14,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
 )
 
 // An item's states, in the order an item may pass through them; the zero

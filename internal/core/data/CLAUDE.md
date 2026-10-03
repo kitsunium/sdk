@@ -28,7 +28,7 @@ frame, a `traceparent`, a language tag — stays with that domain.
 `transform/` is not a codec: it transforms bytes and maps no value, so its
 registry is a sibling of the codec registry and never a `Format` (ADR 0014).
 A queue is not an event bus: `events`, one process and synchronous, is an
-application mechanism (`internal/core/events`), and the frontier between the
+application mechanism (`internal/core/app/events`), and the frontier between the
 two is ADR 0053's table.
 
 `docstore`, the family's seventh domain, has no core package yet — its codes

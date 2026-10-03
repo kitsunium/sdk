@@ -17,8 +17,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/health"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/health"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 

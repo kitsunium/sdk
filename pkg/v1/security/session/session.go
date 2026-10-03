@@ -146,7 +146,7 @@
 //
 // Both stores implement [Sweeper], reached by type assertion rather than
 // through a wider [Store] (ADR 0039). Neither runs a background goroutine the
-// caller never asked for; driving Sweep on a cadence is what pkg/v1/scheduler
+// caller never asked for; driving Sweep on a cadence is what pkg/v1/app/scheduler
 // is for. The file store additionally implements io.Closer, which releases its
 // lock descriptor and the directory it holds.
 package session

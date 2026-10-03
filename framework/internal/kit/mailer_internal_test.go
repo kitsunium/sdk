@@ -7,7 +7,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
 )
 
 func TestParseSMTPURL(t *testing.T) {

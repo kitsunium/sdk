@@ -22,16 +22,16 @@ import (
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
+	"github.com/kitsunium/sdk/pkg/v1/app/health"
+	"github.com/kitsunium/sdk/pkg/v1/app/lifecycle"
+	"github.com/kitsunium/sdk/pkg/v1/app/scheduler"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/health"
-	"github.com/kitsunium/sdk/pkg/v1/lifecycle"
 	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 	"github.com/kitsunium/sdk/pkg/v1/observe/metrics"
 	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 	"github.com/kitsunium/sdk/pkg/v1/proc/signal"
-	"github.com/kitsunium/sdk/pkg/v1/scheduler"
 )
 
 // kit's listener, on the SDK's server engine: its bounds on every phase of a

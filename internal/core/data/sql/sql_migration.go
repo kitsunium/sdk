@@ -53,7 +53,7 @@ type MigrationValue struct {
 	//
 	// A nil Down is refused rather than accepted as "irreversible", because
 	// "I forgot the reversal" and "there is no reversal" are the same nil and
-	// only one of them is a defect. The same rule core/lifecycle applies to a
+	// only one of them is a defect. The same rule core/app/lifecycle applies to a
 	// nil Stop, for the same reason.
 	Down Step
 }

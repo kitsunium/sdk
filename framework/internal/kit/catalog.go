@@ -7,7 +7,7 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/id"
+	"github.com/kitsunium/sdk/pkg/v1/app/id"
 )
 
 // Catalog lists the generic mechanics kit offers: the building blocks a node
@@ -28,22 +28,22 @@ func requestMechanics() []model.Mechanic {
 			Snippet: "kit.Auth() // or kit.AuthOptional(), with one Service.AuthHandler in the app",
 		},
 		{
-			Kind: "validate", Label: "validate", Package: "github.com/kitsunium/sdk/pkg/v1/validation",
+			Kind: "validate", Label: "validate", Package: "github.com/kitsunium/sdk/pkg/v1/app/validation",
 			Doc:     "Checks a request against the validate tags of its type before the handler runs; every violation is reported with its path, never with its value.",
 			Snippet: "Title string `json:\"title\" validate:\"required,maxlen=200\"`",
 		},
 		{
-			Kind: "ratelimit", Label: "rate limit", Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+			Kind: "ratelimit", Label: "rate limit", Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 			Doc:     "A token bucket in front of an endpoint's handler; an empty bucket answers 429 at once. RateLimitPerClient gives each user, or each address, a bucket of its own.",
 			Snippet: "kit.RateLimitPerClient(2, 5)",
 		},
 		{
-			Kind: "timeout", Label: "timeout", Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+			Kind: "timeout", Label: "timeout", Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 			Doc:     "Cancels the handler's context after a deadline and answers 504.",
 			Snippet: "kit.Timeout(2 * time.Second)",
 		},
 		{
-			Kind: "bulkhead", Label: "bulkhead", Package: "github.com/kitsunium/sdk/pkg/v1/resilience",
+			Kind: "bulkhead", Label: "bulkhead", Package: "github.com/kitsunium/sdk/pkg/v1/app/resilience",
 			Doc:     "Caps how many requests an endpoint serves at once; the overflow answers 503.",
 			Snippet: "kit.Bulkhead(8)",
 		},
@@ -59,7 +59,7 @@ func operationMechanics() []model.Mechanic {
 			Snippet: "Service.Command(\"place-order\", placeOrder).Allow(Policy, \"place\", \"order\").Authorize(ownsOrder)",
 		},
 		{
-			Kind: "key", Label: "key", Package: "github.com/kitsunium/sdk/pkg/v1/lock",
+			Kind: "key", Label: "key", Package: "github.com/kitsunium/sdk/pkg/v1/app/lock",
 			Doc:     "Names the entity a command is about: two runs with one key never overlap, and a queued command whose key waits or runs is not queued again. The SDK's lock, in the process.",
 			Snippet: "Service.Command(\"cancel-order\", cancelOrder).Key(func(in ByID) string { return in.ID })",
 		},
@@ -86,12 +86,12 @@ func backgroundMechanics() []model.Mechanic {
 			Snippet: "kit.MaxDeliveries(5)",
 		},
 		{
-			Kind: "schedule", Label: "schedule", Package: "github.com/kitsunium/sdk/pkg/v1/scheduler",
+			Kind: "schedule", Label: "schedule", Package: "github.com/kitsunium/sdk/pkg/v1/app/scheduler",
 			Doc:     "Runs a job at a fixed interval or on a cron expression; an overlapping or missed fire is skipped and counted.",
 			Snippet: "Service.Every(\"sample\", 10*time.Second, Sample)",
 		},
 		{
-			Kind: "id", Label: "typed id", Package: "github.com/kitsunium/sdk/pkg/v1/id",
+			Kind: "id", Label: "typed id", Package: "github.com/kitsunium/sdk/pkg/v1/app/id",
 			Doc:     "Time-ordered, prefixed identifiers (TypeID over UUIDv7).",
 			Snippet: "kit.NewID(\"todo\")",
 		},

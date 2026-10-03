@@ -30,7 +30,7 @@ const worldWritable fs.FileMode = 0o002
 // plantable reports whether any account could have created an entry in a
 // directory whose mode is container, and renders what it read.
 //
-// It is internal/service/lock's rule for the same question (ADR 0083), read
+// It is internal/service/app/lock's rule for the same question (ADR 0083), read
 // off the same pathchain.StepValue.Container. Other-write is the one bit that
 // answers it. Group-write is not enough: a directory shared with a group is a
 // deliberate arrangement, and its members are accounts the operator chose. The
@@ -60,7 +60,7 @@ func plantable(container fs.FileMode) (yes bool, observed string) {
 // thread inside a syscall no cancellation can reach: a caller whose request was
 // abandoned would keep waiting for a lock it no longer has any use for, and the
 // goroutine would not come back until some other process released it. The same
-// decision internal/service/lock made for the same syscall (ADR 0052), now the
+// decision internal/service/app/lock made for the same syscall (ADR 0052), now the
 // same here (ADR 0073).
 func tryLockExclusive(file *os.File) (taken bool, err error) {
 	flockErr := syscall.Flock(int(file.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)

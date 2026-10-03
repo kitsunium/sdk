@@ -14,7 +14,7 @@ import (
 	"time"
 
 	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
-	"github.com/kitsunium/sdk/pkg/v1/config"
+	"github.com/kitsunium/sdk/pkg/v1/app/config"
 	"github.com/kitsunium/sdk/pkg/v1/data/codec/bson"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )

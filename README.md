@@ -4,21 +4,23 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 18 at the top level, plus forty-six nested
-ones (the six scheme facades under `crypto/` — `agree`, `hash`, `kdf`, `mac`,
-`password`, `sign` — the five under `security/` — `authz`, `redact`, `secret`,
-`session`, `token` — the six under `net/` — `server`, `client`, `tlsid`,
-`sse`, `websocket`, `static` — the six under `observe/` — `logger`,
-`logger/writer`, `logger/slogbridge`, `metrics`, `trace`, `profiling` — the
-nine under `proc/` — `process`, `signal`, `reaper`, `rlimit`, `cgroup`,
-`memlimit`, `ipc`, `systemd/notify`, `systemd/listen` — and the fourteen under
-`data/` — `codec`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
-`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, `sql`, `docstore`,
-`queue`, `cache`, `vfs`, `semver`), and links the standard library and
-nothing else (ADR 0156). They are grouped below by the job they do, and each
-links to its own generated `README.md`. The distribution mechanisms that close
-the list are the framework's packages, imported from
-`github.com/kitsunium/sdk/framework/…` (ADR 0158).
+`pkg/v1` ships **64 packages**: 4 at the top level — `errs`, `clock`,
+`crypto` and `proc` — plus sixty nested ones (the six scheme facades under
+`crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — the five under
+`security/` — `authz`, `redact`, `secret`, `session`, `token` — the six under
+`net/` — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — the six
+under `observe/` — `logger`, `logger/writer`, `logger/slogbridge`, `metrics`,
+`trace`, `profiling` — the nine under `proc/` — `process`, `signal`, `reaper`,
+`rlimit`, `cgroup`, `memlimit`, `ipc`, `systemd/notify`, `systemd/listen` —
+the fourteen under `data/` — `codec`, `codec/strictjson`, `codec/jsonshape`,
+`codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`,
+`sql`, `docstore`, `queue`, `cache`, `vfs`, `semver` — and the fourteen under
+`app/` — `config`, `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`,
+`statemachine`, `resilience`, `lifecycle`, `health`, `lock`, `id`, `mail`),
+and links the standard library and nothing else (ADR 0156). They are grouped
+below by the job they do, and each links to its own generated `README.md`. The
+distribution mechanisms that close the list are the framework's packages,
+imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ### Observability
 
@@ -27,26 +29,26 @@ the list are the framework's packages, imported from
 | [`logger`](./pkg/v1/observe/logger) + [`writer`](./pkg/v1/observe/logger/writer), [`slogbridge`](./pkg/v1/observe/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. `LevelGate` gives one branch of a fan-out a floor of its own — a terminal at Info, a viewer at Debug. |
 | [`metrics`](./pkg/v1/observe/metrics) | The OpenTelemetry metrics **data model**, implemented from the specification with **zero** `go.opentelemetry.io` imports. Typed attributes whose kind is part of the series identity, explicit delta/cumulative temporality, OTLP/JSON on the wire. The Prometheus exporter is a deliberately lossy connector and says which losses it takes. |
 | [`trace`](./pkg/v1/observe/trace) | Distributed tracing on the OTel trace model + W3C Trace Context, both written from their documents. The sampling decision is taken once at the root and travels in the `sampled` bit, so a trace never has holes. A malformed `traceparent` starts a new trace and never fails a request. |
-| [`health`](./pkg/v1/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. `Ask` is the other end — the question a container's HEALTHCHECK asks, from a binary in an image with no shell and no curl: ready means 200 and nothing else, and every other outcome has its own code. |
+| [`health`](./pkg/v1/app/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. `Ask` is the other end — the question a container's HEALTHCHECK asks, from a binary in an image with no shell and no curl: ready means 200 and nothing else, and every other outcome has its own code. |
 | [`profiling`](./pkg/v1/observe/profiling) | The process's own CPU, heap and goroutines. A CPU window and the live heap captured through `runtime/pprof` — one CPU profiler per process, so a second capture is refused rather than queued — the pprof format decoded with the standard library, samples folded onto owners **you** name so the parts add up to the total exactly, and the runtime's goroutine dump read into goroutines and grouped. A heap profile is sampled, and the doc says so first. |
 
 ### Application plumbing
 
 | Package | What it does |
 |---|---|
-| [`config`](./pkg/v1/config) | env + file layering, typed decode, cross-OS poll-watch, and a **schema**: a missing required key fails at startup with every missing key named at once, an unknown key is refused by default, and a default is a layer *under* every source so `timeout = 0` stays 0. |
-| [`lifecycle`](./pkg/v1/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. A **supervisor** keeps a component's loop running: restarted after an error, an early return or a panic, on a growing backoff, and joined on stop. |
-| [`cli`](./pkg/v1/cli) | Sub-commands, generated help and a typed exit status on the stdlib `flag`, with zero dependencies. `flag.ExitOnError` is refused by name — nothing here can end your process. |
-| [`events`](./pkg/v1/events) | In-process **synchronous** bus keyed on the event's concrete Go type. Not a queue: no durability, no retry, no dead-letter path, and deliberately no async mode. |
+| [`config`](./pkg/v1/app/config) | env + file layering, typed decode, cross-OS poll-watch, and a **schema**: a missing required key fails at startup with every missing key named at once, an unknown key is refused by default, and a default is a layer *under* every source so `timeout = 0` stays 0. |
+| [`lifecycle`](./pkg/v1/app/lifecycle) | Ordered bring-up, reverse teardown. A partial start is unwound before `Start` returns, through the same path an ordinary `Stop` uses; the shutdown budget is **per component**, so the first thing that will not finish cannot spend everyone else's. A **supervisor** keeps a component's loop running: restarted after an error, an early return or a panic, on a growing backoff, and joined on stop. |
+| [`cli`](./pkg/v1/app/cli) | Sub-commands, generated help and a typed exit status on the stdlib `flag`, with zero dependencies. `flag.ExitOnError` is refused by name — nothing here can end your process. |
+| [`events`](./pkg/v1/app/events) | In-process **synchronous** bus keyed on the event's concrete Go type. Not a queue: no durability, no retry, no dead-letter path, and deliberately no async mode. |
 | [`queue`](./pkg/v1/data/queue) | The asynchronous, durable counterpart. At-least-once, and the consequence is in the type: `Deliveries` counts from 1 and `HandlerIsIdempotent` is refused at its zero value. The durable broker's whole state is a directory and every transition is one `rename(2)`. An idle consumer sleeps until a publication, a retry falling due or a lapsed lease wakes it, so the poll only bounds what another process publishes. |
-| [`scheduler`](./pkg/v1/scheduler) | Five-field POSIX cron + fixed intervals. DST, missed deadlines and overlap are decided and documented rather than emergent. |
-| [`statemachine`](./pkg/v1/statemachine) | Entities of **your** store moved along declared states: events you fire, timers after a duration in a state, deadlines the entity carries, guards on it. One transition per entity at a time, a hook that panics never leaves one locked, and a replace never resurrects a deleted entity. The loop keeps an agenda — one heap entry per entity — so it sleeps until the next transition due or a write and finds it in O(log N), not by re-reading the store. |
+| [`scheduler`](./pkg/v1/app/scheduler) | Five-field POSIX cron + fixed intervals. DST, missed deadlines and overlap are decided and documented rather than emergent. |
+| [`statemachine`](./pkg/v1/app/statemachine) | Entities of **your** store moved along declared states: events you fire, timers after a duration in a state, deadlines the entity carries, guards on it. One transition per entity at a time, a hook that panics never leaves one locked, and a replace never resurrects a deleted entity. The loop keeps an agenda — one heap entry per entity — so it sleeps until the next transition due or a write and finds it in O(log N), not by re-reading the store. |
 | [`cache`](./pkg/v1/data/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
 | [`clock`](./pkg/v1/clock) | The time port — `Clock` / `Waiter` / `Timed`, plus `System` and a `ManualClock` a test drives by hand. Every SDK `Clock` field takes one, so a timeout, a cron cadence or a lease expiry is asserted exactly, with no sleeping. |
 | [`semver`](./pkg/v1/data/semver) | Version precedence the way Go writes versions — SemVer 2.0.0 with a leading `v` — and Go pseudo-versions recognised and read, with `golang.org/x/mod`'s names and answers and nothing outside the standard library. An unreadable string sorts first, numbers of any size order exactly, nothing allocates. |
-| [`resilience`](./pkg/v1/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
-| [`lock`](./pkg/v1/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
-| [`id`](./pkg/v1/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
+| [`resilience`](./pkg/v1/app/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
+| [`lock`](./pkg/v1/app/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
+| [`id`](./pkg/v1/app/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
 
 ### Network and web
 
@@ -55,9 +57,9 @@ the list are the framework's packages, imported from
 | [`server`](./pkg/v1/net/server) + [`sse`](./pkg/v1/net/sse), [`websocket`](./pkg/v1/net/websocket), [`static`](./pkg/v1/net/static) | Inbound HTTP with TLS/mTLS identity, per-phase deadlines and policy; Server-Sent Events; and RFC 6455 WebSocket written in the stdlib, whose MUST-fails are enforced rather than tolerated. `static` serves a file tree — an embedded single-page application — the way `http.FileServerFS` does not: never a directory listing, never HTML for a missing script, and the security headers on every answer. Draining is **announced** to the handler, never imposed. |
 | [`client`](./pkg/v1/net/client) | The outbound half over the same substrate: policy, per-phase deadlines, call hooks. |
 | [`tlsid`](./pkg/v1/net/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
-| [`view`](./pkg/v1/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
-| [`i18n`](./pkg/v1/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
-| [`mail`](./pkg/v1/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |
+| [`view`](./pkg/v1/app/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
+| [`i18n`](./pkg/v1/app/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
+| [`mail`](./pkg/v1/app/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |
 
 ### Data and security
 
@@ -70,7 +72,7 @@ the list are the framework's packages, imported from
 | [`secret`](./pkg/v1/security/secret) | A secret is a value no rendering writes down: `secret.Value` prints `<redacted>` under every fmt verb, JSON, text and slog, reveals its bytes only through `Reveal`, and decodes from a configuration string like any field. Versioned stores — memory, the environment with the Docker/Kubernetes `NAME_FILE` convention, a 0700 directory of atomically published records sealed with AES-256-GCM — a `Keyring` whose boxes name the version that sealed them so a rotation never breaks what came before it, and a `Rotator` that keeps at least two. `SubjectKeys`: one data key per subject under that rotating root, so a rotation re-wraps one small key per subject and never a field, and destroying a subject's key erases every copy it sealed. |
 | [`session`](./pkg/v1/security/session) | Server-side sessions. `Regenerate` is the only call that binds a subject and always mints a new identifier, so session fixation is prevented by the **absence** of any other spelling rather than by remembering a step. |
 | [`authz`](./pkg/v1/security/authz) | RBAC + ABAC with no policy DSL — a condition is a Go func. **Abstention is a third verdict** and the zero value, because folding "no opinion" into a grant is a hole and into a refusal is an outage. |
-| [`validation`](./pkg/v1/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
+| [`validation`](./pkg/v1/app/validation) | Constraints, located violations (`user.addresses[2].zip`), collect-all by default. A message names the rule and the bound but **never the value** — a security property with its own test. |
 | [`sql`](./pkg/v1/data/sql) | Ports above `database/sql`, deliberately never an ORM, and **no driver**. A unit of work receives an `Executor` with no Commit and no Rollback, so a callee ending its caller's transaction is a sentence with no spelling. |
 | [`vfs`](./pkg/v1/data/vfs) | Reading is `io/fs` **unchanged** (`FS` is a type alias, so `fs.WalkDir` applies with no adapter); writing is four verbs; publication is `rename(2)`-atomic — measured at 0 torn reads out of 600. |
 | [`docstore`](./pkg/v1/data/docstore) | Typed, keyed JSON documents with unique and multi-valued indexes, in memory, on a filesystem or over SQL. A write is durable before it returns and costs the same at a hundred documents or a hundred thousand: it publishes one small file, and the store rests as ONE readable snapshot. Asked to, it keeps each document's last **versions** in the document's own write, so no crash ever separates them. |

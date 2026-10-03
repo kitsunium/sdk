@@ -7,8 +7,8 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/kitsunium/sdk/pkg/v1/app/i18n"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/i18n"
 )
 
 // kit's words. Every diagnostic kit gives — a declaration it refuses, a

@@ -16,7 +16,7 @@
 // This package refuses it. A condition is a Go func, a grant table is a Go
 // slice, a resource is a string compared by equality. What a DSL would buy —
 // changing a rule without recompiling — is a deployment property the caller
-// can have by loading their own rule data through internal/service/config and
+// can have by loading their own rule data through internal/service/app/config and
 // building the policy from it, which keeps the parsing in their vocabulary
 // rather than the SDK's. See ADR 0057 §D1.
 //
@@ -177,7 +177,7 @@ func causeCode(cause error) string {
 
 // Must unwraps a constructor pair for a package-level var, panicking on error.
 //
-// It is the same shape internal/service/validation ships, and for the same
+// It is the same shape internal/service/app/validation ships, and for the same
 // reason: a policy is built once at start-up, and a misconfiguration there is
 // a programming fault that must stop the process rather than be handled per
 // request. Never call it on data read at run time — that turns a bad

@@ -100,7 +100,7 @@ Code range: `0.3.54.*` (ADR 0055).
   a *dedicated* connection. `pg_advisory_lock` / `GET_LOCK` die with the
   session, which the OS does for a process that no longer exists — so there is
   no lease, no heartbeat, no expiry to tune and no stealing. See ADR 0055 §D7
-  for why this is not `pkg/v1/lock`.
+  for why this is not `pkg/v1/app/lock`.
 - **SQLite's lock is the database file's write lock** (ADR 0140). A run is
   ONE transaction of the runner's own transactor: `CREATE TABLE IF NOT EXISTS`
   on the version table, then `DELETE FROM <table> WHERE 1 = 0` — a write that
@@ -246,7 +246,7 @@ never because a finding was inconvenient:
 - **Interpolate anything a caller supplied into SQL** other than the
   version-table name, which is validated at construction.
 - **Make the savepoint counter per-scope, or reset it.** Reuse shadows.
-- **Replace the advisory lock with a lock table or `pkg/v1/lock`** without
+- **Replace the advisory lock with a lock table or `pkg/v1/app/lock`** without
   reading ADR 0055 §D7 — a lock that survives its holder's death is the
   failure mode this design exists to avoid. The same holds for SQLite's file
   lock (ADR 0140).

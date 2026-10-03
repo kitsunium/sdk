@@ -79,7 +79,7 @@ still hands it to the port, from the `_test` package alone.
    it.
 4. **`NewOTLPHTTPExporter` is not registered and does not retry.** Construct it
    explicitly with a full URL (`endpoint + trace.OTLPTracesPath`), and hand
-   `trace.OTLPRetryable` to `pkg/v1/resilience` if you want a backoff you can see.
+   `trace.OTLPRetryable` to `pkg/v1/app/resilience` if you want a backoff you can see.
 
 ## Do NOT
 

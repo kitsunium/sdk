@@ -22,6 +22,6 @@ go_test(
     deps = [
         ":yaml",
         "//internal/core/data/codec",
-        "//pkg/v1/config",
+        "//pkg/v1/app/config",
     ],
 )

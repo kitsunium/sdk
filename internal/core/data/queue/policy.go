@@ -58,7 +58,7 @@ const MaxDeadlineOffset time.Duration = 100 * 365 * 24 * time.Hour
 //     delivery storm, or "never redeliver", which is a lost message; zero
 //     deliveries is either "unlimited", which lets one poison message loop
 //     forever and the dead-letter store stay empty, or "none", which is a
-//     queue that delivers nothing. This is core/lock's argument for refusing
+//     queue that delivers nothing. This is core/app/lock's argument for refusing
 //     a zero TTL, and it is the same argument because it is the same class of
 //     value: a lifetime belongs to the work being protected, and only the
 //     caller knows what that is.

@@ -61,7 +61,7 @@ The client one lives at the transport for the same reason the network domain's p
 
 It does not batch. A [SpanSink](<#SpanSink>) receives one span at a time and a batching processor is a sink that buffers and forwards — which is where its cost is visible, rather than hidden inside a tracer.
 
-It does not schedule an export. [github.com/kitsunium/sdk/pkg/v1/scheduler](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/scheduler/>) already owns "when", and Collect plus Export is one call.
+It does not schedule an export. [github.com/kitsunium/sdk/pkg/v1/app/scheduler](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/scheduler/>) already owns "when", and Collect plus Export is one call.
 
 It does not register the OTLP/HTTP exporter. Arming a network client from an import is a step beyond the stdout hazard the SDK already refuses, and there is no endpoint that could be a correct default.
 
@@ -735,7 +735,7 @@ LookupExporter returns the SpanExporter registered under name.
 func NewOTLPHTTPExporter(name ExporterName, cfg OTLPHTTPConfig) (exporter SpanExporter, err error)
 ```
 
-NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP collector. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/resilience](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/resilience/>).
+NewOTLPHTTPExporter builds a SpanExporter that POSTs each batch to an OTLP collector. It is deliberately NOT in the registry: arming a network client from an import is worse than arming a writer, and no endpoint could be a correct default. It does not retry either — use OTLPRetryable with [github.com/kitsunium/sdk/pkg/v1/app/resilience](<https://pkg.go.dev/github.com/kitsunium/sdk/pkg/v1/app/resilience/>).
 
 <a name="NewOTLPJSONExporter"></a>
 ### func [NewOTLPJSONExporter](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/observe/trace/trace.go#L579>)

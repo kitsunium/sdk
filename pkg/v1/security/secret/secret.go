@@ -22,7 +22,7 @@
 // come out only through [Value].Reveal and [Value].RevealString.
 //
 // A Value decodes from a JSON string or from text, so config.Load
-// (pkg/v1/config) fills a Value field from a file or the environment exactly as it fills a string —
+// (pkg/v1/app/config) fills a Value field from a file or the environment exactly as it fills a string —
 // and it refuses two inputs, with ValueRefused: a JSON token that is not a
 // string, because a number has been re-spelled before a decoder sees it (1e3
 // arrives as 1000; twenty digits lose their tail to float64), and the

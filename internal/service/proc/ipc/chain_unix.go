@@ -32,7 +32,7 @@
 // A link at a parent is not evidence on its own — /tmp -> private/tmp and
 // /var -> private/var on macOS, /var/run -> /run on most Linux distributions —
 // and what separates those from an attack is the directory the component
-// lives in, exactly as internal/service/lock reasons (ADR 0083). So every
+// lives in, exactly as internal/service/app/lock reasons (ADR 0083). So every
 // component above the socket's directory is judged by the directory holding
 // it, and only when ANYBODY can write that directory:
 //

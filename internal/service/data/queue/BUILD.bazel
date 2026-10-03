@@ -49,7 +49,7 @@ go_library(
         "//internal/service/data/vfs",
     ] + select({
         "@rules_go//go/platform:windows": [
-            "//internal/service/lock",
+            "//internal/service/app/lock",
         ],
         "//conditions:default": [],
     }),

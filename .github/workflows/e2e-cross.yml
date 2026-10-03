@@ -40,7 +40,7 @@ env:
   # split over a kernel primitive — flock(2) on Unix, LockFileEx on Windows
   # (ADR 0081) — and the two kernels give OPPOSITE answers to what a second
   # lock inside one process does. A green cross-compile proves neither. This is
-  # the lane that executes internal/service/lock's Windows suite; the Linux
+  # the lane that executes internal/service/app/lock's Windows suite; the Linux
   # Bazel gate compiles neither that suite nor the backend it covers.
   #
   # `entitlement` joins for a narrower reason: its offline cache installs a
@@ -71,7 +71,7 @@ env:
   # Windows (ADR 0148).
   KERNEL_PKGS: "./fs/pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
+  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one

@@ -123,7 +123,7 @@ type fileStore struct {
 	// goroutines reached full occupancy of the counted section on every run.
 	// Cross-PROCESS exclusion was always intact; cross-goroutine never was,
 	// and no test that only spawns processes could see it. Taken BEFORE the
-	// flock, the same order internal/service/lock's nameGate uses.
+	// flock, the same order internal/service/app/lock's nameGate uses.
 	//
 	// It is a one-slot CHANNEL rather than a sync.Mutex because a Mutex has no
 	// abandonable Lock: a goroutine parked in it cannot be told its caller has

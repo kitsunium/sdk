@@ -37,7 +37,7 @@ import (
 // The macOS failure is also the best evidence this package has for the rule
 // its first consumer applies. A blanket "refuse any link above the lock file"
 // would refuse every lock directory on that kernel — and the accepting rows of
-// internal/service/lock's chain table passed on the very same run, because the
+// internal/service/app/lock's chain table passed on the very same run, because the
 // directory holding /var is / and nobody but root can write it.
 func namesSameEntry(t *testing.T, got, want string) bool {
 	t.Helper()

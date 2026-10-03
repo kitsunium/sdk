@@ -83,8 +83,8 @@ a complete `Timed`:
 | `internal/service/observe/logger` | `frozenClock` |
 | `internal/service/observe/logger/writer/dbsink` | `frozenClock` |
 | `internal/service/observe/logger/writer/rotfile` | `fakeClock` |
-| `internal/service/resilience` | `steppedClock` |
-| `internal/service/id` | `steppedClock` |
+| `internal/service/app/resilience` | `steppedClock` |
+| `internal/service/app/id` | `steppedClock` |
 | `internal/service/data/queue` | `steppingClock` |
 | `pkg/v1/clock` | `readOnlyClock`, `handClock` |
 

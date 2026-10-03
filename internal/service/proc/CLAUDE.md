@@ -54,7 +54,7 @@ when the package moved here from the root of `internal/service` (ADR 0160):
 
 Two members import a sibling, and say so: `exec` and `reaper` share
 `childwait`, because the kernel hands a zombie's status to exactly one wait.
-Outside the family, `internal/service/health` and `internal/service/lifecycle`
+Outside the family, `internal/service/app/health` and `internal/service/app/lifecycle`
 import `systemd/notify`, and `internal/service/net/server` imports
 `systemd/listen` to adopt a socket a supervisor passed.
 
