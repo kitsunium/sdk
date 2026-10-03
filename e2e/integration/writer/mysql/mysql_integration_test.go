@@ -34,9 +34,9 @@ import (
 	mysqlc "github.com/testcontainers/testcontainers-go/modules/mysql"
 	"github.com/testcontainers/testcontainers-go/wait"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/logger/level"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	_ "github.com/kitsunium/sdk/third-party/db/writer/mysql"
 )
 

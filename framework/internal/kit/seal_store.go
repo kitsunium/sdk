@@ -14,7 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/pkg/v1/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // A store that seals (ADR 0006 §4): the SDK's document store keeps each

@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

@@ -121,7 +121,7 @@ func BenchmarkPool_Parallel(b *testing.B) {
 //
 // Every consumer in this repository already does the right thing —
 // kernel/concur/buffer pools *[]byte, core/codec/scratch pools *bytes.Buffer and
-// *bytes.Reader, service/logger pools *chainBuilder, async pools *recordEntry,
+// *bytes.Reader, service/observe/logger pools *chainBuilder, async pools *recordEntry,
 // net/server pools *pooledConn — so this exists to keep the next one honest.
 func BenchmarkPool_GetPut_BufferPtr4K(b *testing.B) {
 	p := recycler.NewPool(func() *[]byte { return new(make([]byte, 0, 4096)) })

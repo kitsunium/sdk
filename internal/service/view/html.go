@@ -38,7 +38,7 @@ import (
 // HTML is the registered html/template [coreview.Factory].
 //
 // It registers through a package-level var initialiser rather than an init(),
-// mirroring core/codec and core/writer: importing this package is what wires
+// mirroring core/codec and core/observe/logger/writer: importing this package is what wires
 // the engine, and the binding is a value a caller can hold.
 //
 // Registration arms nothing. Unlike ADR 0048's OTLP/HTTP emitter — which is

@@ -14,9 +14,9 @@
 package redis
 
 import (
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
-	"github.com/kitsunium/sdk/internal/service/writer/dbsink"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink"
 )
 
 // writerName is the canonical registry key.

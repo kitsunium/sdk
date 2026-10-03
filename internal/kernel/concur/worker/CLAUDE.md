@@ -66,14 +66,14 @@ three real consumers each hand-rolled (ADR 0014 §D6).
 `worker.LoopDaemon` owns the background goroutine, in place of a hand-rolled
 `stop/stopOnce/done/doneOnce` lifecycle, in:
 
-- `internal/service/logger/middleware/async` — the drainer goroutine (retrofitted
+- `internal/service/observe/logger/middleware/async` — the drainer goroutine (retrofitted
   in the same commit that introduced this package, as the proving consumer).
 - `internal/service/net/server` — the goroutine running `http.Server.Serve`.
 - `internal/service/net/sse` and `internal/service/net/websocket` — each
   stream's or connection's drain watcher (`Start`) and its keep-alive /
   heartbeat (`Every`, on the stream's or connection's clock, ended early by
   `WithDone` on the stream's own end).
-- `internal/service/writer/rotfile` — interval rotation, through `Every`.
+- `internal/service/observe/logger/writer/rotfile` — interval rotation, through `Every`.
 
 The s3 / cloudwatch batching sinks under `third-party/aws/writer/*` do not use
 it: they are built on `kernel/concur/batcher`, which drives its own `time.Ticker`

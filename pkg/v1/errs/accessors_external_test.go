@@ -7,11 +7,11 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/mail"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
-// TestV1ErrsEndToEnd proves that a real failure surfaced by pkg/v1/logger
+// TestV1ErrsEndToEnd proves that a real failure surfaced by pkg/v1/observe/logger
 // flows through pkg/v1/errs accessors with the expected values (V-OI-1).
 func TestV1ErrsEndToEnd(t *testing.T) {
 	t.Parallel()
@@ -27,7 +27,7 @@ func TestV1ErrsEndToEnd(t *testing.T) {
 			if err == nil {
 				t.Fatal("expected NewText error, got nil")
 			}
-			//: 0x01_01_00_01 = 1.1.0.1 (pkg/v1/logger WriterRequired under ADR 0005).
+			//: 0x01_01_00_01 = 1.1.0.1 (pkg/v1/observe/logger WriterRequired under ADR 0005).
 			const writerRequired errs.Code = 0x01_01_00_01
 			if !errs.HasCode(err, writerRequired) {
 				t.Errorf("HasCode(err, 1.1.0.1) = false")

@@ -15,8 +15,8 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 	"github.com/kitsunium/sdk/pkg/v1/statemachine"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
 	"github.com/kitsunium/sdk/pkg/v1/vfs"
 )
 

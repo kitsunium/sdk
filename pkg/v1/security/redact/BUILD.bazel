@@ -25,6 +25,6 @@ go_test(
     deps = [
         ":redact",
         "//pkg/v1/errs",
-        "//pkg/v1/logger",
+        "//pkg/v1/observe/logger",
     ],
 )

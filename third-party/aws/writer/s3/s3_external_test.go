@@ -9,8 +9,8 @@ import (
 	"sync"
 	"testing"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	_ "github.com/kitsunium/sdk/third-party/aws/writer/s3"
 )
 

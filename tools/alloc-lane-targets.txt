@@ -13,7 +13,7 @@
 #
 # That is not hypothetical. Before this file existed the list held only the two
 # entries below marked (original), and four `!race` files ran in zero lanes —
-# including `pkg/v1/logger`'s regression test pinning the "Build().Send() is NOT
+# including `pkg/v1/observe/logger`'s regression test pinning the "Build().Send() is NOT
 # allocation-free" contract, i.e. the very guard against the doc claim it exists
 # to police.
 #
@@ -41,18 +41,18 @@
 # Mutation-checked in the file's doc comment.
 //internal/kernel/semver:semver_test
 # encwrite frame-overflow probe (AllocsPerRun-based).
-//internal/service/logger/middleware/encwrite:encwrite_test
+//internal/service/observe/logger/middleware/encwrite:encwrite_test
 # Labelled-series lookup allocation gate — the claim that resolving an existing
 # series (including one already folded into overflow) costs zero allocations.
-//internal/service/metrics:metrics_test
+//internal/service/observe/metrics:metrics_test
 # An unexercised failover branch must cost nothing: the healthy write returns
 # on the first sink and its error slate stays empty, so chain DEPTH must not
 # appear in the allocation profile.
-//internal/service/logger/middleware/failover:failover_test
+//internal/service/observe/logger/middleware/failover:failover_test
 # Build().Send() one-alloc-per-emit contract — the guard behind the
 # "zero-allocation logger" claim in README.md / CLAUDE.md. Also pins fan-out
 # WIDTH, which that per-emit claim never covered.
-//pkg/v1/logger:logger_test
+//pkg/v1/observe/logger:logger_test
 # The two steady-state allocation claims RFC 6455's frame reader is sold on:
 # the reassembly buffer is reused across messages and the write buffer across
 # frames, so neither Receive nor Send allocates once a connection is warm. Both
@@ -79,7 +79,7 @@
 # are gated at zero/one now, and each is mutation-checked in its doc comment.
 //internal/service/net/client:client_test
 # The two default writers (ADR 0015) and the severity floor in front of them,
-# against the SDK's flagship claim: "one alloc per emit". pkg/v1/logger's
+# against the SDK's flagship claim: "one alloc per emit". pkg/v1/observe/logger's
 # TestV116BuildSendAllocatesOnePerEmit ends at the handler, and nothing had ever
 # measured what a WRITER adds underneath it. The answer is nothing — the
 # allocation profile of a full emit puts 99.53 % (console) / 95.92 % (file) of
@@ -94,9 +94,9 @@
 # comment, and all three count a TOTAL malloc delta rather than calling
 # testing.AllocsPerRun — whose integer division reported 0.0 for a mutation that
 # really did allocate.
-//internal/service/writer/levelgate:levelgate_test
-//internal/service/writer/console:console_test
-//internal/service/writer/file:file_test
+//internal/service/observe/logger/writer/levelgate:levelgate_test
+//internal/service/observe/logger/writer/console:console_test
+//internal/service/observe/logger/writer/file:file_test
 # The two claims the CVE-2025-30204 defence rests on, both stated in three
 # places (splitCompact's doc comment, segmentsValue's, and the package
 # CLAUDE.md §Bounds) and both unguarded until 2026-09: splitting a well-formed
@@ -137,7 +137,7 @@
 #
 # Each is mutation-checked in its own doc comment, and the first records a
 # mutation that was DISCARDED for not modelling a defect.
-//internal/service/trace:trace_test
+//internal/service/observe/trace:trace_test
 # The decompression-bomb guard of ADR 0014 D1's frame layer, measured by the
 # bytes it allocates rather than by the verdict it returns (#215). The verdict
 # was never wrong — a bomb was rejected before this PR and after — so no

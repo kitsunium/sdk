@@ -223,7 +223,7 @@ func BenchmarkVerify_PasetoV4(b *testing.B) {
 }
 
 // BenchmarkVerify_HS256_Tampered is the REFUSAL path, and it matters for the
-// same reason it did in core/trace: a verifier is exposed to input the caller
+// same reason it did in core/observe/trace: a verifier is exposed to input the caller
 // does not choose, so a refusal that costs far more than an acceptance is an
 // amplification. A tampered signature must be rejected without costing more
 // than accepting a good one.

@@ -3,7 +3,7 @@
 // Package telemetry is the port a running product reports what it does on,
 // and the exporter that hands it to a tool attached to the product (ADR 0149).
 //
-// It is not the trace domain. pkg/v1/trace builds spans a backend stores and
+// It is not the trace domain. pkg/v1/observe/trace builds spans a backend stores and
 // carries its context through context.WithValue; this port carries nothing
 // through a context, builds nothing a caller keeps, and costs a producer one
 // fixed-size copy into a bounded ring — zero allocations, pinned by a test

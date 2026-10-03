@@ -78,7 +78,7 @@ const (
 // lazily-initialised state (including the runtime's interface-switch caches)
 // is not attributed to the loop, and read the counter either side.
 //
-// It is a verbatim sibling of the helper in internal/service/writer/levelgate;
+// It is a verbatim sibling of the helper in internal/service/observe/logger/writer/levelgate;
 // the two are deliberately not shared, because a package's allocation gate
 // must not be able to fail for a reason that lives in another package.
 func mallocsOver(runs int, f func()) uint64 {

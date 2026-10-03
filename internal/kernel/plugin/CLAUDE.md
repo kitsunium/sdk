@@ -17,7 +17,7 @@ is the read-mostly, name-keyed, copy-on-write table a registrar publishes into
 error, for the reason `Unusable` returns a string: the registrar refuses with
 its own code. Its first two users are the metrics and trace exporter registries,
 which were one mechanism written twice (`publishExporter` + a map clone, in
-`core/metrics` and `core/trace`); the core registries that still carry their own
+`core/observe/metrics` and `core/observe/trace`); the core registries that still carry their own
 copy of it — codec, writer, crypto's `schemeRegistry`, transform, id, view — are
 the next candidates.
 

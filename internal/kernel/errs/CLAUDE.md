@@ -86,13 +86,13 @@ Package-level Of-accessors walk the Unwrap chain: `CodeOf / ReasonOf / PublicOf 
 ## How to declare a sentinel (emitter packages)
 
 ```go
-// service/logger/codes.go
+// service/observe/logger/codes.go
 const CodeWriterNil errs.Code = 0x00_03_01_01 // 0.3.1.1
 
-// service/logger/errors.go
+// service/observe/logger/errors.go
 var WriterNil = errs.Define(CodeWriterNil, "WRITER_NIL",
     "Log handler requires a non-nil writer",                       // public, literal, ≤120 runes
-    "service/logger.NewTextHandler called with nil io.Writer")     // private (log-only)
+    "service/observe/logger.NewTextHandler called with nil io.Writer")     // private (log-only)
 ```
 
 The variable name dictates the Reason — change one, change the other; the AST audit refuses divergence.

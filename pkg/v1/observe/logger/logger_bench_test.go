@@ -1,0 +1,156 @@
+// Benchmarks for the logger package — two scenarios matching the
+// convention adopted by zap/zerolog: a static string and a record
+// carrying a structured set of attrs (the size of benchAttrs10).
+//
+// Methodology disclosed in pkg/v1/observe/logger/BENCH.md alongside the
+// numbers. The zero-alloc claim in /workspace/CLAUDE.md is auditable
+// here: if the `BenchmarkLogger10Fields` row shows `0 allocs/op`,
+// the claim holds; otherwise the claim must be retracted.
+//
+// Run: `cd pkg/v1/observe/logger && go test -bench=. -benchmem -run='^$'`
+package logger_test
+
+import (
+	"context"
+	"testing"
+
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
+)
+
+// discardSink implements logger.Sink (= corelogger.Sink) by dropping
+// every record. Using a custom sink lets the bench focus on the
+// serialisation + dispatch path without the I/O of a real transport.
+// Flush + Close are no-ops — required by the Sink interface contract.
+type discardSink struct{}
+
+func (discardSink) Write(_ context.Context, _ corelogger.RecordEvent, p []byte) (int, error) {
+	return len(p), nil
+}
+
+func (discardSink) Flush(_ context.Context) error { return nil }
+func (discardSink) Close() error                  { return nil }
+
+// Attribute set reused across the structured-record benches so a
+// future comparison would be apples-to-apples on payload shape.
+var benchAttrs10 = []logger.Attr{
+	logger.String("k1", "v1"),
+	logger.String("k2", "v2"),
+	logger.String("k3", "v3"),
+	logger.String("k4", "v4"),
+	logger.String("k5", "v5"),
+	logger.Int("n1", 1),
+	logger.Int("n2", 2),
+	logger.Int("n3", 3),
+	logger.Int("n4", 4),
+	logger.Int("n5", 5),
+}
+
+func newKitsuniumLogger(b *testing.B) logger.Logger {
+	lg, err := logger.NewWithSink(logger.SinkConfig{
+		Sink:    discardSink{},
+		Encoder: logger.TextEncoder(),
+	})
+	if err != nil {
+		b.Fatalf("logger init: %v", err)
+	}
+	return lg
+}
+
+// BenchmarkLoggerStaticString — cheapest path. No fields, just the
+// message. Mirrors zap's "static string" scenario.
+func BenchmarkLoggerStaticString(b *testing.B) {
+	ctx := b.Context()
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "static")
+	}
+}
+
+// BenchmarkLogger10Fields — record + 10 attrs every call. This is the
+// zero-alloc claim's load-bearing scenario.
+func BenchmarkLogger10Fields(b *testing.B) {
+	ctx := b.Context()
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "event", benchAttrs10...)
+	}
+}
+
+// benchTraceID and benchSpanID are a syntactically valid W3C identifier pair
+// (the traceparent example from the specification) so the "with span"
+// benchmarks measure the emitting path an instrumented service actually runs.
+var (
+	benchTraceID = trace.TraceID{
+		0x4b, 0xf9, 0x2f, 0x35, 0x77, 0xb3, 0x4d, 0xa6,
+		0xa3, 0xce, 0x92, 0x9d, 0x0e, 0x0e, 0x47, 0x36,
+	}
+	benchSpanID = trace.SpanID{0x00, 0xf0, 0x67, 0xaa, 0x0b, 0xa9, 0x02, 0xb7}
+)
+
+// benchTraceContext defeats dead-code elimination in the extraction benches.
+var benchTraceContext logger.TraceContext
+
+// benchSpanContext returns a context carrying a valid span, i.e. what an
+// inbound HTTP request looks like once the trace middleware has extracted the
+// traceparent header.
+func benchSpanContext(ctx context.Context) context.Context {
+	return trace.ContextWithSpanContext(ctx, trace.SpanContext{
+		TraceID: benchTraceID,
+		SpanID:  benchSpanID,
+		Flags:   trace.FlagSampled,
+	})
+}
+
+// BenchmarkLoggerStaticStringWithSpan — the cheapest path, emitted from inside
+// a span. The delta against BenchmarkLoggerStaticString is the whole cost of
+// trace correlation: one context walk plus 32 + 16 hex digits appended into
+// the encoder's borrowed buffer. It MUST NOT change the allocation count.
+func BenchmarkLoggerStaticStringWithSpan(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "static")
+	}
+}
+
+// BenchmarkLogger10FieldsWithSpan — the structured scenario, emitted from
+// inside a span.
+func BenchmarkLogger10FieldsWithSpan(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	lg := newKitsuniumLogger(b)
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		logger.Info(ctx, lg, "event", benchAttrs10...)
+	}
+}
+
+// BenchmarkTraceContextFromContextHit isolates the extraction: the context
+// walk plus the two array copies, with no logging around it.
+func BenchmarkTraceContextFromContextHit(b *testing.B) {
+	ctx := benchSpanContext(b.Context())
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		benchTraceContext = logger.TraceContextFromContext(ctx)
+	}
+}
+
+// BenchmarkTraceContextFromContextMiss isolates the extraction when no span is
+// in scope — the path most log lines in a service take.
+func BenchmarkTraceContextFromContextMiss(b *testing.B) {
+	ctx := b.Context()
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		benchTraceContext = logger.TraceContextFromContext(ctx)
+	}
+}

@@ -9,7 +9,7 @@
 // goroutine calls TryRead at a time. Concurrent producers or concurrent
 // consumers are NOT safe — those callers should serialise upstream or wrap
 // this primitive with a mutex. The logger async sink takes the mutex-
-// serialisation route (see internal/service/logger/middleware/async); other
+// serialisation route (see internal/service/observe/logger/middleware/async); other
 // domains pick whichever coordination fits their topology.
 package ring
 

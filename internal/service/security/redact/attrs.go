@@ -7,7 +7,7 @@ import (
 	"strconv"
 	"time"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // Unencodable is the text an attribute holding a value encoding/json refuses

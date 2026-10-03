@@ -15,7 +15,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/profiling"
+	"github.com/kitsunium/sdk/pkg/v1/observe/profiling"
 )
 
 // parkedLabels waits until a goroutine is parked in parkedIn and returns

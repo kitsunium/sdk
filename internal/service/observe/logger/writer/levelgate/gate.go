@@ -1,0 +1,87 @@
+// Package levelgate provides a Sink decorator that forwards records at or above
+// a minimum severity and silently drops the rest. It implements the per-writer
+// MinLevel floor for the writer factories (console, file, s3, cloudwatch)
+// without the route middleware's NoMatch error — a below-threshold record is a
+// successful no-op, not a failure, so it never pollutes a multi fan-out.
+//
+// Two constructors share the one gate. New is the writer configuration's: its
+// Info is the zero value of MinLevel and means "inherit the handler's level",
+// so New returns the sink unwrapped there. Floor is everyone else's: the floor
+// it is given is the floor it applies, Info included (ADR 0132).
+package levelgate
+
+import (
+	"context"
+
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+)
+
+// gateSink forwards Write to inner only when the record meets the floor.
+type gateSink struct {
+	// inner is the wrapped terminal/middleware sink.
+	inner corelogger.Sink
+	// min is the inclusive severity floor; records below it are dropped.
+	min level.Level
+}
+
+// New wraps inner so only records with Level >= min reach it. When min equals
+// level.Info — the zero value of a writer config's MinLevel — New returns inner
+// unwrapped: the writer then inherits the handler-global level with no extra
+// gate and no per-record overhead.
+//
+// IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
+// gateSink type stays unexported.
+func New(inner corelogger.Sink, min level.Level) corelogger.Sink {
+	//: Info is the config zero value — treat it as "inherit", skip the wrapper.
+	if min == level.Info {
+		//: hand back the sink untouched so the hot path stays flat.
+		return inner
+	}
+	//: a real floor was requested — install the gate.
+	return &gateSink{inner: inner, min: min}
+}
+
+// Floor wraps inner so only records with Level >= min reach it, for every min —
+// Info included. It is the gate without New's reading of Info as "inherit":
+// that reading belongs to a writer configuration, whose zero MinLevel must not
+// narrow anything, and a caller who names a floor outside one means the floor
+// it named. A nil inner yields nil, which a fan-out skips and NewWithSink
+// refuses, rather than a gate that fails on its first record.
+//
+// IFACE-PLUGIN: the gate is returned behind the Sink interface; the concrete
+// gateSink type stays unexported.
+func Floor(inner corelogger.Sink, min level.Level) corelogger.Sink {
+	//: a gate over nothing is nothing, not a panic deferred to the first write.
+	if inner == nil {
+		//: nil: skipped by a fan-out, refused by NewWithSink.
+		return nil
+	}
+	//: the gate, whatever the floor.
+	return &gateSink{inner: inner, min: min}
+}
+
+// Write forwards records at or above the floor and silently drops the rest,
+// reporting a successful (len(p), nil) for drops so fan-out callers never see a
+// spurious failure.
+func (s *gateSink) Write(ctx context.Context, r corelogger.RecordEvent, p []byte) (n int, err error) {
+	//: below-floor records are dropped as a successful no-op.
+	if r.Level < s.min {
+		//: report the payload as accepted so multi never aggregates a failure.
+		return len(p), nil
+	}
+	//: at or above the floor — delegate to the wrapped sink.
+	return s.inner.Write(ctx, r, p)
+}
+
+// Flush delegates to the wrapped sink.
+func (s *gateSink) Flush(ctx context.Context) error {
+	//: the gate buffers nothing; forward the flush verbatim.
+	return s.inner.Flush(ctx)
+}
+
+// Close delegates to the wrapped sink.
+func (s *gateSink) Close() error {
+	//: the gate owns no resources; forward the close verbatim.
+	return s.inner.Close()
+}

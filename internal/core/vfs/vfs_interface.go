@@ -74,7 +74,7 @@ type AtomicWriter interface {
 // FullFS is the union of [WritableFS] and [AtomicWriter], and it is what the
 // SDK's own constructors return.
 //
-// It is the shape core/metrics already uses for FullMeter, and it exists for
+// It is the shape core/observe/metrics already uses for FullMeter, and it exists for
 // the same reason: the port stays frozen and the capability stays assertable
 // for a THIRD-PARTY filesystem that cannot publish atomically, while a caller
 // wiring one of the SDK's own does not have to type-assert for the headline

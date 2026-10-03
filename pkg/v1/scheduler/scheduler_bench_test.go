@@ -52,7 +52,7 @@ func BenchmarkParse_Dense(b *testing.B) {
 }
 
 // BenchmarkParse_Refused is the failure path, and it is here for the same
-// reason the refusals are benchmarked in core/trace and token: an expression
+// reason the refusals are benchmarked in core/observe/trace and token: an expression
 // can come from configuration a stranger wrote, and a refusal that costs far
 // more than an acceptance is an amplification.
 func BenchmarkParse_Refused(b *testing.B) {

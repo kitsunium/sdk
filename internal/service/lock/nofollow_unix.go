@@ -54,7 +54,7 @@ func openLockFile(path string) (file *os.File, err error) {
 // between the two calls changes which sentinel is reported and cannot change
 // whether the open was refused. That is the difference from an Lstat-then-open
 // check, which is a genuine TOCTOU — and it is why the order here is the
-// reverse of internal/service/writer/rotfile's, which checks first.
+// reverse of internal/service/observe/logger/writer/rotfile's, which checks first.
 func classifyOpenFailure(path string, openErr error) error {
 	info, statErr := os.Lstat(path)
 	//: a deliberate act, and the errno it arrived as travels as a field

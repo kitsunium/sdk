@@ -70,11 +70,11 @@ Octets are reached on the typed [Code](<#Code>) itself: code.Major\(\), code.Lay
 ```
 import (
     "github.com/kitsunium/sdk/pkg/v1/errs"
-    "github.com/kitsunium/sdk/pkg/v1/logger"
+    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 _, err := logger.NewText(logger.Config{})  // nil Writer → fails
-// 0x01_01_00_01 = 1.1.0.1 (pkg/v1/logger WriterRequired under ADR 0005).
+// 0x01_01_00_01 = 1.1.0.1 (pkg/v1/observe/logger WriterRequired under ADR 0005).
 if errs.HasCode(err, 0x01_01_00_01) {
     // configuration problem on our side
 }
@@ -114,7 +114,7 @@ Safe to read is not safe to publish: fields are diagnostics, like [PrivateOf](<#
 
 ### Semantics reminders
 
-- Origin wins on wrap. An error born in service/logger \(code 31xx\) and observed through pkg/v1/logger keeps its 31xx code — the Code describes the origin, never the observation surface.
+- Origin wins on wrap. An error born in service/observe/logger \(code 31xx\) and observed through pkg/v1/observe/logger keeps its 31xx code — the Code describes the origin, never the observation surface.
 - errors.Is keeps stdlib semantics. For code / reason matching use the explicit [HasCode](<#CodeOf>) / [HasReason](<#CodeOf>) helpers; errors.Is\(err, context.Canceled\) still walks the chain through errs.Wrap.
 - Default HTTP / exit codes are global \(500 / 70\). Per\-error overrides come from errs.WithHTTPStatus / WithExitCode inside the emitter package.
 

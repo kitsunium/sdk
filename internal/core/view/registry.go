@@ -1,6 +1,6 @@
 // Package view — holds the process-wide [Factory] registry. Engine packages
 // register themselves through package-level var initialisers when imported (no
-// init()), mirroring core/codec and core/writer.
+// init()), mirroring core/codec and core/observe/logger/writer.
 package view
 
 import (
@@ -15,7 +15,7 @@ import (
 // registry maps each [Engine] to its [Factory].
 //
 // snapshot.Value is the deliberate choice over sync.Map, for the same reason
-// core/writer gives: an engine package registers exactly ONCE at import time
+// core/observe/logger/writer gives: an engine package registers exactly ONCE at import time
 // and every other access is a lock-free Load (ADR 0011). Update serialises
 // writers on a mutex so Register's read-modify-write publish is race-free;
 // Lookup stays lock-free.

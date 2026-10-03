@@ -4,7 +4,7 @@ import (
 	"context"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	_ "github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch"
 )
 

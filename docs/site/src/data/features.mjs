@@ -72,7 +72,7 @@ export default [
     title: "Structured zero-alloc logger",
     blurb:
       "NewText / Default plus typed attribute constructors and Debug/Info/Warn/Error helpers — structured records on a zero-alloc hot path.",
-    anchor: "pkg/v1/logger/logger.go",
+    anchor: "pkg/v1/observe/logger/logger.go",
   },
   {
     id: "logger-builder",
@@ -80,7 +80,7 @@ export default [
     title: "Chainable zero-alloc builder",
     blurb:
       "Build(lg, lvl).Str(k, v).Send(ctx, msg) — a pooled, allocation-free fluent builder for the hottest log paths.",
-    anchor: "pkg/v1/logger/builder.go",
+    anchor: "pkg/v1/observe/logger/builder.go",
   },
   {
     id: "logger-multisink",
@@ -88,7 +88,7 @@ export default [
     title: "Named multi-writer fan-out",
     blurb:
       "DefaultMulti / NewMulti fan a record out to named writers (console, file, rotfile) from a config-driven registry.",
-    anchor: "pkg/v1/logger/writer.go",
+    anchor: "pkg/v1/observe/logger/writer.go",
     links: { adr: "0012" },
   },
   {
@@ -97,7 +97,7 @@ export default [
     title: "Custom sink topology",
     blurb:
       "NewWithSink + Multi / ConsoleStderr / ConsoleStdout / NewWriterSink compose an arbitrary sink tree behind the Logger.",
-    anchor: "pkg/v1/logger/sink.go",
+    anchor: "pkg/v1/observe/logger/sink.go",
   },
   {
     id: "logger-fromconfig",
@@ -105,7 +105,7 @@ export default [
     title: "Config-driven construction",
     blurb:
       "FromConfig builds a fully wired Logger from a config blob (any codec format) with zero Go glue.",
-    anchor: "pkg/v1/logger/fromconfig.go",
+    anchor: "pkg/v1/observe/logger/fromconfig.go",
     links: { adr: "0014" },
   },
   {
@@ -113,8 +113,8 @@ export default [
     domain: "logger",
     title: "Pluggable writer registry",
     blurb:
-      "Blank-import pkg/v1/logger/writer to register the console / file / rotfile sink factories used by the config-driven path.",
-    anchor: "pkg/v1/logger/writer/writer.go",
+      "Blank-import pkg/v1/observe/logger/writer to register the console / file / rotfile sink factories used by the config-driven path.",
+    anchor: "pkg/v1/observe/logger/writer/writer.go",
     links: { adr: "0015" },
   },
   {
@@ -123,7 +123,7 @@ export default [
     title: "Build-time version stamping",
     blurb:
       'Version (ldflags injection point) + FrameworkVersion() stamp every record with the framework version, defaulting to "dev".',
-    anchor: "pkg/v1/logger/version.go",
+    anchor: "pkg/v1/observe/logger/version.go",
     links: { adr: "0007" },
   },
 

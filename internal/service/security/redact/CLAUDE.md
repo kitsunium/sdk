@@ -9,7 +9,7 @@ by `[redacted]`, within an exact byte bound, never mutating the input. Public
 facade: `pkg/v1/security/redact`.
 
 Stdlib (`encoding/json` for the wire form of a value, `encoding/json/jsontext`
-to stream a document, `reflect`, `regexp`) plus `internal/core/logger` for the
+to stream a document, `reflect`, `regexp`) plus `internal/core/observe/logger` for the
 attribute shape and `internal/kernel/errs`. Code range `0.3.73.*`.
 
 ## Contents

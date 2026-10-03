@@ -41,7 +41,7 @@ the field untouched.
 
 **No `LogValue`.** `slog.LogValuer` would put `log/slog` in core, which ADR 0032
 forbids. slog's handlers reach for `TextMarshaler`/`json.Marshaler`/fmt, all of
-which redact — asserted in `pkg/v1/logger/slogbridge`.
+which redact — asserted in `pkg/v1/observe/logger/slogbridge`.
 
 **Versions, never reused.** A version number is how a sealed box names its key
 (the keyring), so a reused number would hand an old box to a new key.

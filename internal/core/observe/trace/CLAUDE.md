@@ -1,0 +1,183 @@
+<!-- updated: 2026-10-03T00:00:00Z -->
+# internal/core/observe/trace/
+
+## Purpose
+
+Declares the SDK's **distributed-tracing port**: the `Tracer`/`Span` pair an
+application instruments against, the immutable `SpanContextValue` that travels
+between processes, the OpenTelemetry trace data model, and the W3C Trace Context
+propagation format. The 18th core sibling, admitted by **ADR 0051**.
+
+Like `metrics` since ADR 0044, it speaks the OpenTelemetry model and imports
+**none** of OpenTelemetry's code. OTel is a published specification; this SDK
+implements it from the document. Interoperability is a property of the WIRE, not
+of the import graph.
+
+Concrete implementations — the tracer, the samplers, the recorder, the OTLP/JSON
+encoder, the HTTP middlewares — live in `internal/service/observe/trace`.
+
+Code range: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
+attribute model moved to `internal/core/observe/otel`).
+
+## Contents
+
+| File | Surface |
+|---|---|
+| `trace.go` | package doc + `Tracer` (1 method, FROZEN) + `Span` (5 methods, FROZEN) |
+| `identifier.go` | `TraceID` / `SpanID` / `TraceFlags` + `ParseTraceID` / `ParseSpanID` + `FlagSampled` + `Sanitized` |
+| `span_context.go` | `SpanContextValue` — TraceID, SpanID, Flags, State, Remote; `IsValid` / `IsSampled` / `WithState` |
+| `traceparent.go` | `ParseTraceParent` / `FormatTraceParent` + `TraceParentHeader` / `TraceStateHeader` / `TraceParentLen` / `VersionSupported` |
+| `state_value.go` | `StateValue` — the `tracestate` list, ordered and immutable; `ParseTraceState` + `Get` / `Insert` / `Delete` / `Len` / `String` + the three grammar limits (`MaxTraceStateMembers` / `MaxTraceStateKeyLen` / `MaxTraceStateValueLen`) |
+| `trace_state_entry.go` | `traceStateEntry` — one list member, unexported |
+| `carrier.go` | `Carrier` (2 methods, FROZEN) + `Inject` / `Extract` |
+| `context.go` | `ContextWithSpanContext` / `SpanContextFromContext` |
+| `span_kind.go` | `SpanKind` + the five values + `Resolved` |
+| `status_value.go` | `StatusValue` + `StatusCode` (`Unset`/`OK`/`Error`) + `Resolved` / `IsUnset` |
+| `event_value.go` | `EventValue` + the `exception.*` convention constants |
+| `link_value.go` | `LinkValue` — a whole `SpanContextValue` plus attributes — and `SpanParams`, the facts a span is born with (the zero value is an INTERNAL span starting now) |
+| `span_value.go` | `SpanValue` — one FINISHED span; `Duration` / `IsRoot` |
+| `spans_value.go` | `SpansValue` — Resource + Scope + spans, the exportable payload |
+| `sampler.go` | `Sampler` and `SpanSink` — FUNC ports (ADR 0041) |
+| `sampling_params.go` | `SamplingParams` — what a Sampler sees |
+| `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
+| `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/observe/otel` and refusing with this package's `InvalidAttribute` |
+| `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/observe/metrics`' exporter registry runs on too |
+| `codes.go` | `Code*` constants — range 0.2.20.* |
+| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute` |
+
+## The one rule everything else follows from
+
+**The sampling decision is taken ONCE, at the root, and travels in the `sampled`
+bit of the traceparent.**
+
+Everything odd-looking in this package is downstream of it:
+
+- `Sampler` is documented as consulted for root spans only — that is a property
+  of the `Tracer`, stated here because this is where a reader looks for it.
+- An unsampled span is a no-op that still carries a valid `SpanContextValue`,
+  so `Inject` still writes a header, with the bit CLEAR.
+- `SpanContextValue.IsSampled` is the ONLY sampling question anything downstream
+  asks.
+
+Deciding per span produces a trace with holes in the middle. A span whose parent
+was dropped becomes an orphan the backend renders as its own root, so one request
+appears as several unrelated ones and the latency of the whole is unrecoverable —
+and nothing looks wrong at the process that caused it.
+
+## Why the attribute model is `core/observe/otel`'s — Do NOT twin it
+
+This package declares **no** attribute, Resource or Scope type: every model
+value holds `internal/core/observe/otel`'s `AttrValue`, `ResourceValue` and `ScopeValue`
+directly, and `pkg/v1/observe/trace` aliases those same types — as does `pkg/v1/observe/metrics`
+— so `pkg/v1/observe/trace.Attr` and `pkg/v1/observe/metrics.Attr` are one type.
+
+They are not metrics concepts and never were. `AttrValue` is
+`common/v1.KeyValue`/`AnyValue`, `ResourceValue` is `resource/v1.Resource`,
+`ScopeValue` is `common/v1.InstrumentationScope` — all three live in the SHARED
+protos precisely because every signal uses them. They sat in `core/observe/metrics`
+until the extraction ADR 0051 §Decision 2 named and deferred; both signals now
+sit above `core/observe/otel`, and this package no longer imports `core/observe/metrics` at all.
+That also took the metrics port out of `pkg/v1/observe/logger`'s import graph, which
+reaches this package for trace correlation (ADR 0062).
+
+A twin costs three things, and none of them is hypothetical:
+
+1. `metrics.String("k","v")` and `trace.String("k","v")` become incompatible
+   values spelling one fact, so every dual-signal consumer writes a converter.
+2. A process carries **two Resources that can disagree**, and `service.name` is
+   the key a backend correlates a trace with a metric on.
+3. **Exemplars** — ADR 0044 deferred them waiting on exactly this domain — attach
+   a trace id to a metric data point. One model makes that a field; two make it a
+   conversion at the boundary the feature exists to cross.
+
+What is NOT shared, and has a test each:
+
+- **`DefaultScopeName`.** A scope names the library that produced THIS signal,
+  so a span batch stamped `…/pkg/v1/observe/metrics` would be a lie. `core/observe/otel`'s
+  `NormalizeScope` takes the default as a parameter; this package's passes its
+  own (`TestScopeDefaultNamesTheTracePackage`).
+- **The refusal.** An unusable attribute set panics with THIS package's
+  `InvalidAttribute`, `0.2.20.7` (`TestAnUnusableAttributeIsRefusedUnderTheTraceCode`).
+  It used to panic with the metrics code, `0.2.9.4`, because the refusal
+  travelled with the type; `core/observe/otel` owns no code, so each signal names the
+  defect itself. Every panic site is a programmer error at the call site — an
+  empty or repeated key, a value no constructor set — so only the code in the
+  message changed, and no constant changed value.
+
+## W3C Trace Context — the refusals that look arbitrary
+
+Each is normative, and each is the one a future reader would delete.
+
+| Refused | Section |
+|---|---|
+| all-zero `trace-id` | §3.2.2.3 "MUST ignore the `traceparent`" |
+| all-zero `parent-id` | §3.2.2.4, same |
+| version `ff` | §3.2.2.1 "Version `ff` is invalid" |
+| uppercase hex | the grammar is `32HEXDIGLC` / `16HEXDIGLC` |
+| a header under 55 characters | §3.2.4 "should not parse … should restart the trace" |
+| trailing content on version `00` | version 00 has no extension point |
+| a higher version whose tail is not dash-delimited | §3.2.4 — without it, a 56th hex byte reads as a TRUNCATED flag field, so the sampled bit is wrong rather than the header rejected |
+
+**Flags are masked on OUTPUT, never on input.** §3.2.2.5.2 says a vendor MUST
+zero the undefined bits; §3.2.4 says a receiver must not assume anything about
+unknown fields. Clearing on receipt satisfies the first and violates the second.
+`TraceFlags.Sanitized` runs in `FormatTraceParent` and nowhere else.
+
+**`Extract` returns no error.** §4.3 prescribes exactly one response to a
+malformed parent — start a new trace, delete the tracestate — so there is nothing
+to decide. An error would invite the response the specification forbids: failing
+a request because a stranger wrote a bad header. `ParseTraceParent` is the
+typed-error form, for diagnosis.
+
+Three §4.3 consequences, each tested:
+
+- a malformed **traceparent** drops the tracestate with it;
+- a malformed **tracestate** does NOT drop the traceparent;
+- **two** traceparent headers merge to `"v1,v2"`, fail the grammar, and restart —
+  which is correct, because neither claim may be believed.
+
+`StateValue` is an ordered slice and not a map, because §3.5 makes the order
+meaning: leftmost is the system that touched the trace most recently. The
+grammar's own numbers are the limits (32 members, 256-char keys and values,
+241/14 for `tenant@system`) — there is no SDK-invented ceiling.
+
+**One leniency, and it is the only one**: OWS is stripped at the list's edges,
+where the `list` rule grants no OWS slot, because RFC 7230 §3.2.4 already
+normalises a field value's surrounding whitespace. The `nblk-chr` rule is
+enforced in `Insert` instead. Documented in place and in
+`TestTraceStateAbsorbsEdgeWhitespaceButInsertRefusesIt`.
+
+## Do NOT
+
+- **Do NOT add a method to `Tracer`, `Span` or `Carrier`.** All three are
+  published through `pkg/v1/observe/trace` aliases and Go interfaces are structural, so
+  widening breaks every downstream double at compile time with no deprecation
+  window (ADR 0039). `Carrier` is two methods on purpose: it is exactly
+  `http.Header`'s `Get`/`Set` pair, which is what lets `Inject(ctx, req.Header)`
+  compile with no adapter. A test holds that assignment.
+- **Do NOT import `net/http` here.** `Carrier` exists so this package does not
+  have to. An HTTP opinion in the contract would exclude a message queue and a
+  gRPC metadata map.
+- **Do NOT add `RecordError` to `Span`.** What an error's TYPE is, is a judgement
+  about the caller's error model. It is a helper in `internal/service/observe/trace`, and
+  that is the shape that does not freeze a decision into a port.
+- **Do NOT emit an all-zero identifier.** It is the specification's own invalid
+  value; `Inject` writes nothing for an invalid context, and the OTLP encoder
+  refuses one outright.
+- **Do NOT re-derive the sampling decision anywhere below the root.**
+- **Do NOT clear undefined trace-flags bits on receipt.** See above.
+
+## Verification
+
+| Command | Expected |
+|---|---|
+| `GOWORK=off go test ./observe/trace/...` (from `internal/core`) | green |
+| `bazel test //internal/core/observe/trace:trace_test` | green |
+| `TestParseTraceParentRefusals` | every W3C refusal, each naming its section |
+| `TestParseTraceParentIsForwardCompatible` | §3.2.4, including the undashed-tail case |
+| `TestFormatTraceParentMasksUndefinedFlagBits` | mask on output, keep on input |
+| `TestExtractRestartsTheTraceOnAMalformedParent` / `…KeepsAValidParentDespiteAnUnreadableTraceState` | both halves of §4.3 |
+| `TestAttributesAreTheSameTypeAsMetrics` | one attribute type across every model value of BOTH signals, as a compile and value fact |
+| `TestAnUnusableAttributeIsRefusedUnderTheTraceCode` | every attribute refusal here carries `0.2.20.7`, never the metrics code |
+| `TestScopeDefaultNamesTheTracePackage` | the one thing that is NOT shared |
+| `TestHTTPHeaderIsACarrierWithNoAdapter` | the ADR 0039 freeze on `Carrier` |

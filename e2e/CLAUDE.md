@@ -71,7 +71,7 @@ e2e/
 - Imports may reach `internal/*` for the sentinel **codes only** (the e2e binary
   is internal tooling, not a consumer) — this is why it sits outside the Bazel
   graph the layer firewall queries (`.bazelignore`; ADR 0068). The one exception
-  is `integration/writer/*`, whose suites drive `internal/core/writer`'s registry
+  is `integration/writer/*`, whose suites drive `internal/core/observe/logger/writer`'s registry
   exactly as they did beside the writer packages they test.
 
 ## Build system

@@ -3,7 +3,7 @@ package s3
 import (
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 

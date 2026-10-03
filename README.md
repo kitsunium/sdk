@@ -4,15 +4,16 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 29 at the top level, plus thirty-five nested
-ones (`logger/writer`, `logger/slogbridge`, `codec/strictjson`,
-`codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`,
-`codec/bson`, the six scheme facades under `crypto/` — `agree`, `hash`, `kdf`,
-`mac`, `password`, `sign` — the five under `security/` — `authz`, `redact`,
-`secret`, `session`, `token` — the six under `net/` — `server`, `client`,
-`tlsid`, `sse`, `websocket`, `static` — and the nine under `proc/` —
-`process`, `signal`, `reaper`, `rlimit`, `cgroup`, `memlimit`, `ipc`,
-`systemd/notify`, `systemd/listen`), and links the standard library and
+`pkg/v1` ships **64 packages**: 25 at the top level, plus thirty-nine nested
+ones (`codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`,
+`codec/yaml`, `codec/toml`, `codec/bson`, the six scheme facades under
+`crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — the five under
+`security/` — `authz`, `redact`, `secret`, `session`, `token` — the six under
+`net/` — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — the six
+under `observe/` — `logger`, `logger/writer`, `logger/slogbridge`, `metrics`,
+`trace`, `profiling` — and the nine under `proc/` — `process`, `signal`,
+`reaper`, `rlimit`, `cgroup`, `memlimit`, `ipc`, `systemd/notify`,
+`systemd/listen`), and links the standard library and
 nothing else (ADR 0156). They are grouped below by the job they do, and each
 links to its own generated `README.md`. The distribution mechanisms that close
 the list are the framework's packages, imported from
@@ -22,11 +23,11 @@ the list are the framework's packages, imported from
 
 | Package | What it does |
 |---|---|
-| [`logger`](./pkg/v1/logger) + [`writer`](./pkg/v1/logger/writer), [`slogbridge`](./pkg/v1/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. `LevelGate` gives one branch of a fan-out a floor of its own — a terminal at Info, a viewer at Debug. |
-| [`metrics`](./pkg/v1/metrics) | The OpenTelemetry metrics **data model**, implemented from the specification with **zero** `go.opentelemetry.io` imports. Typed attributes whose kind is part of the series identity, explicit delta/cumulative temporality, OTLP/JSON on the wire. The Prometheus exporter is a deliberately lossy connector and says which losses it takes. |
-| [`trace`](./pkg/v1/trace) | Distributed tracing on the OTel trace model + W3C Trace Context, both written from their documents. The sampling decision is taken once at the root and travels in the `sampled` bit, so a trace never has holes. A malformed `traceparent` starts a new trace and never fails a request. |
+| [`logger`](./pkg/v1/observe/logger) + [`writer`](./pkg/v1/observe/logger/writer), [`slogbridge`](./pkg/v1/observe/logger/slogbridge) | Structured logger, one allocation per emit (see its BENCH.md). Multi-sink (console / file / syslog / memory), middleware chain, build-time version stamping; `writer` is the named, config-driven sink registry and `slogbridge` is the one package allowed to import `log/slog`, so a consumer facing a concrete `*slog.Logger` stops building a second pipeline. **Trace-correlated by default**: a record emitted inside a span carries `trace_id` / `span_id` as top-level fields; one emitted outside carries neither key rather than an invalid all-zero id. `LevelGate` gives one branch of a fan-out a floor of its own — a terminal at Info, a viewer at Debug. |
+| [`metrics`](./pkg/v1/observe/metrics) | The OpenTelemetry metrics **data model**, implemented from the specification with **zero** `go.opentelemetry.io` imports. Typed attributes whose kind is part of the series identity, explicit delta/cumulative temporality, OTLP/JSON on the wire. The Prometheus exporter is a deliberately lossy connector and says which losses it takes. |
+| [`trace`](./pkg/v1/observe/trace) | Distributed tracing on the OTel trace model + W3C Trace Context, both written from their documents. The sampling decision is taken once at the root and travels in the `sampled` bit, so a trace never has holes. A malformed `traceparent` starts a new trace and never fails a request. |
 | [`health`](./pkg/v1/health) | Liveness, readiness and startup are three questions, so they take three **types**: a readiness `Check` gets a context and may reach a dependency; a liveness `SelfCheck` has none to reach one with. The classic mis-wiring does not compile by accident. `Ask` is the other end — the question a container's HEALTHCHECK asks, from a binary in an image with no shell and no curl: ready means 200 and nothing else, and every other outcome has its own code. |
-| [`profiling`](./pkg/v1/profiling) | The process's own CPU, heap and goroutines. A CPU window and the live heap captured through `runtime/pprof` — one CPU profiler per process, so a second capture is refused rather than queued — the pprof format decoded with the standard library, samples folded onto owners **you** name so the parts add up to the total exactly, and the runtime's goroutine dump read into goroutines and grouped. A heap profile is sampled, and the doc says so first. |
+| [`profiling`](./pkg/v1/observe/profiling) | The process's own CPU, heap and goroutines. A CPU window and the live heap captured through `runtime/pprof` — one CPU profiler per process, so a second capture is refused rather than queued — the pprof format decoded with the standard library, samples folded onto owners **you** name so the parts add up to the total exactly, and the runtime's goroutine dump read into goroutines and grouped. A heap profile is sampled, and the doc says so first. |
 
 ### Application plumbing
 
@@ -91,7 +92,7 @@ the list are the framework's packages, imported from
 ```bash
 go get github.com/kitsunium/sdk/pkg/v1/codec
 go get github.com/kitsunium/sdk/pkg/v1/errs
-go get github.com/kitsunium/sdk/pkg/v1/logger
+go get github.com/kitsunium/sdk/pkg/v1/observe/logger
 ```
 
 ## Quick example

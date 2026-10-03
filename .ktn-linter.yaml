@@ -100,22 +100,22 @@ vocabulary:
     # capability a type assertion is asking for.
     - github.com/kitsunium/sdk/internal/core/sql.Transactor
     - github.com/kitsunium/sdk/internal/core/sql.Preparer
-    # UpDownMeter is the ADR 0039 sibling of the frozen core/metrics.Meter port,
+    # UpDownMeter is the ADR 0039 sibling of the frozen core/observe/metrics.Meter port,
     # and "Meter" is the OpenTelemetry vocabulary for an instrument factory —
     # the word the whole domain is discussed in. The -er form the rule would
     # impose, "UpDownCounterrer", is not a word; and naming the sibling after
     # its method rather than its role would break the Meter / UpDownMeter /
     # AsyncMeter / FullMeter family that says, at a glance, which capabilities a
     # parameter requires. Same argument as ConnHandler above.
-    - github.com/kitsunium/sdk/internal/core/metrics.UpDownMeter
-    # core/trace.Tracer is OpenTelemetry's own vocabulary for the type that
+    - github.com/kitsunium/sdk/internal/core/observe/metrics.UpDownMeter
+    # core/observe/trace.Tracer is OpenTelemetry's own vocabulary for the type that
     # starts spans — the word the entire domain, the specification and every
     # backend are discussed in — exactly as Meter is for the type that mints
     # instruments. The -er form the rule would impose, "Starter", names the
     # METHOD rather than the role, and it collides with the ordinary English
     # meaning of the word in a domain full of things that start. Same argument
     # as UpDownMeter above and ConnHandler further up.
-    - github.com/kitsunium/sdk/internal/core/trace.Tracer
+    - github.com/kitsunium/sdk/internal/core/observe/trace.Tracer
     # AtomicWriter is the ADR 0039 capability sibling of the frozen core/vfs
     # WritableFS port, and the -er form the rule would impose —
     # "WriteAtomiccer" — is not a word. The name already ENDS in -er: it names
@@ -283,7 +283,7 @@ rules:
   # scheduler.go, lifecycle.go, vfs.go, events.go, clock.go — holding the
   # package doc comment plus every type alias the domain publishes. The
   # declarations are "unrelated" to each other by construction: they are a
-  # domain's whole vocabulary re-exported side by side, and pkg/v1/trace.go is
+  # domain's whole vocabulary re-exported side by side, and pkg/v1/observe/trace.go is
   # reported as 62 unrelated groups precisely because tracing has 62 public
   # names.
   #
@@ -308,8 +308,8 @@ rules:
       - "pkg/v1/net/server/server.go"
       - "**/pkg/v1/net/websocket/websocket.go"
       - "pkg/v1/net/websocket/websocket.go"
-      - "**/pkg/v1/trace/trace.go"
-      - "pkg/v1/trace/trace.go"
+      - "**/pkg/v1/observe/trace/trace.go"
+      - "pkg/v1/observe/trace/trace.go"
 
   # KTN-VAR-MINLEN (phase 4) — "a one or two letter name only reads while its
   # declaration is still on screen".
@@ -379,12 +379,24 @@ rules:
       - "third-party/codec/yaml/**"
       - "**/pkg/v1/codec/**"
       - "pkg/v1/codec/**"
-      - "**/internal/core/logger/**"
-      - "internal/core/logger/**"
-      - "**/internal/service/logger/**"
-      - "internal/service/logger/**"
-      - "**/pkg/v1/logger/**"
-      - "pkg/v1/logger/**"
+      # The logger's subtree is listed part by part, in core and in service:
+      # since ADR 0155 the writers (logger/writer) and the logfile helper
+      # (logger/internal/logfile) sit beneath it, and this exclusion has never
+      # covered them — a logger-wide "**" would have widened it in a rename.
+      - "**/internal/core/observe/logger/*.go"
+      - "internal/core/observe/logger/*.go"
+      - "**/internal/core/observe/logger/level/**"
+      - "internal/core/observe/logger/level/**"
+      - "**/internal/service/observe/logger/*.go"
+      - "internal/service/observe/logger/*.go"
+      - "**/internal/service/observe/logger/encoder/**"
+      - "internal/service/observe/logger/encoder/**"
+      - "**/internal/service/observe/logger/middleware/**"
+      - "internal/service/observe/logger/middleware/**"
+      - "**/internal/service/observe/logger/sink/**"
+      - "internal/service/observe/logger/sink/**"
+      - "**/pkg/v1/observe/logger/**"
+      - "pkg/v1/observe/logger/**"
       # kernel/concur/singleflight carries a recovered PANIC value across a goroutine
       # boundary. recover() is defined by the language to return `any`, and the
       # payload really can be anything a panic() call was given — so `any` is not
@@ -592,8 +604,8 @@ rules:
       # actively wrong here: the function's whole job is to switch on Kind() and
       # preserve the payload's type across the bridge, so narrowing to Any()
       # would erase exactly what the package exists to keep (ADR 0032).
-      - "**/pkg/v1/logger/slogbridge/**"
-      - "pkg/v1/logger/slogbridge/**"
+      - "**/pkg/v1/observe/logger/slogbridge/**"
+      - "pkg/v1/observe/logger/slogbridge/**"
       # The vfs domain is the same contract-required class, and its two cases
       # are the clearest examples in this file of a suggestion that does not
       # compile. ValidatePerm takes an fs.FileMode and the rule suggests
@@ -647,17 +659,17 @@ rules:
       - "**/pkg/v1/security/session/**"
       - "pkg/v1/security/session/**"
       # The trace domain is the same class as the token one above. The OTLP
-      # encoder's helpers take core/trace.StatusValue, SpanValue, LinkValue and
+      # encoder's helpers take core/observe/trace.StatusValue, SpanValue, LinkValue and
       # SpanContextValue — the domain's own immutable value types, each fixed by
       # the OTLP payload it renders. The suggestion for StatusValue is the
       # clearest tell: `interface{ Resolved() trace.StatusValue }` mentions the
       # very type it proposes to remove, so it cannot be written at all.
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
-      - "**/pkg/v1/trace/**"
-      - "pkg/v1/trace/**"
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
+      - "**/pkg/v1/observe/trace/**"
+      - "pkg/v1/observe/trace/**"
       # The health domain is the token/Algorithm case above, four times over —
       # and here the suggestion does not even compile. shortCircuit and unknown
       # take a core/health.Probe and STORE it in ReportValue.Probe, a field
@@ -764,7 +776,7 @@ rules:
       - "**/internal/service/security/session/**"
       - "internal/service/security/session/**"
       #
-      # service/trace/recorder.go — the rule's advice here is CORRECT about the
+      # service/observe/trace/recorder.go — the rule's advice here is CORRECT about the
       # code and WRONG about the workload, and the difference was measured
       # rather than argued. Recorder.Len and Recorder.Dropped really are
       # read-only, so the heuristic fires accurately; what it cannot see is that
@@ -774,7 +786,7 @@ rules:
       # too, so the shared side was serving nothing else.
       #
       # This field DID hold a sync.RWMutex, on exactly the reasoning the rule
-      # states. internal/service/trace/BENCH.md §2 prices it: 1.27x-1.65x slower
+      # states. internal/service/observe/trace/BENCH.md §2 prices it: 1.27x-1.65x slower
       # on record with no reader at all, and 2.7x-9.0x slower in the mixed shape
       # the RWMutex's own field comment named — spans arriving while an operator
       # polls Len — because a writer's Lock must drain the in-flight reader and
@@ -791,8 +803,8 @@ rules:
       # TestRecorderTakesAnExclusiveLockOnEveryPath pins the choice through
       # reflect, so this exclusion cannot quietly become permission to drift
       # back. Scoped to the one file that holds the lock.
-      - "**/internal/service/trace/recorder.go"
-      - "internal/service/trace/recorder.go"
+      - "**/internal/service/observe/trace/recorder.go"
+      - "internal/service/observe/trace/recorder.go"
 
   # KTN-GOROUTINE-DOUBLECLOSE (error) — the guard the rule asks for would
   # SILENCE the defect it exists to catch.
@@ -985,7 +997,7 @@ rules:
       # NewNewKeyValue()", which is not a name anything could satisfy.)
       - "**/internal/service/crypto/key/jwk/**"
       - "internal/service/crypto/key/jwk/**"
-      # core/otel.AttrValue is built by FOUR kind-specific constructors —
+      # core/observe/otel.AttrValue is built by FOUR kind-specific constructors —
       # String / Bool / Int64 / Float64 — and by nothing else: the value payload
       # is unexported precisely so a struct literal cannot produce an attribute
       # whose kind and payload disagree. A NewAttrValue(key, kind, num, str)
@@ -993,10 +1005,10 @@ rules:
       # prevent, reachable in one call. (The rule's own message here reads
       # "constructor NewNewAttrValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk entry above records.) It
-      # was declared in core/metrics until the shared OTel model moved to
-      # core/otel (ADR 0051 §Decision 2); the exclusion moved with the type.
-      - "**/internal/core/otel/**"
-      - "internal/core/otel/**"
+      # was declared in core/observe/metrics until the shared OTel model moved to
+      # core/observe/otel (ADR 0051 §Decision 2); the exclusion moved with the type.
+      - "**/internal/core/observe/otel/**"
+      - "internal/core/observe/otel/**"
       # The i18n values (ADR 0063) are the jwk and metrics case again: every
       # one comes out of a constructor that VALIDATES, and each is named for
       # what it does rather than for the type it returns. TagValue comes from
@@ -1042,7 +1054,7 @@ rules:
       - "internal/kernel/concur/group/**"
       - "**/internal/kernel/collections/heap/**"
       - "internal/kernel/collections/heap/**"
-      # core/trace.StateValue is the parsed W3C `tracestate` list, and it has no
+      # core/observe/trace.StateValue is the parsed W3C `tracestate` list, and it has no
       # from-parts constructor ON PURPOSE: every instance comes out of
       # ParseTraceState or Insert, each of which validates the key against
       # `simple-key`/`multi-tenant-key` and the value against `value = 0*255(chr)
@@ -1052,8 +1064,8 @@ rules:
       # struct" the rule exists to prevent. (The rule's own message here reads
       # "constructor NewNewStateValue()", which is not a name anything could
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
       # core/security/authz.AttrValue has FOUR constructors on purpose — AttrString,
       # AttrInt64, AttrBool and AttrStrings — one per kind, each taking only
       # the payload its kind can hold. That is what makes the kind part of the
@@ -1138,8 +1150,8 @@ rules:
   # implementation, which is the only place a concrete struct carries the name.
   KTN-STRUCT-ROLE-STUTTER:
     exclude:
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
 
   # KTN-STRUCT-ROLE (info) — "every exported struct declares its role by a
   # suffix". The suffixes the rule accepts (Value, State, Config, Spec, Event)
@@ -1405,15 +1417,15 @@ rules:
       # SpanContextValue on purpose, so that a link's own sampled bit and
       # tracestate travel with it; SpanParams is the caller's literal at a Start
       # call site, copied once per span immediately before work that dwarfs it.
-      # The exporter port's Export(SpansValue) mirrors core/metrics.Exporter's
+      # The exporter port's Export(SpansValue) mirrors core/observe/metrics.Exporter's
       # Export(SnapshotValue) exactly, and diverging the two signals' ports
       # would be a worse cost than one copy per export.
-      - "**/internal/core/trace/**"
-      - "internal/core/trace/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
-      - "**/pkg/v1/trace/**"
-      - "pkg/v1/trace/**"
+      - "**/internal/core/observe/trace/**"
+      - "internal/core/observe/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
+      - "**/pkg/v1/observe/trace/**"
+      - "pkg/v1/observe/trace/**"
       # StateValue (96 B) is returned by value so a caller can hold, log or
       # compare a snapshot without racing the server that produced it. A
       # pointer would hand out a view that mutates underneath the reader.
@@ -1540,7 +1552,7 @@ rules:
       # The metrics domain, for the two reasons already established above.
       # SnapshotValue (128 B) is the payload an Exporter receives, and
       # `Exporter.Export(snap SnapshotValue) error` is a PUBLISHED port —
-      # pkg/v1/metrics.Exporter is a type alias to it, so changing the parameter
+      # pkg/v1/observe/metrics.Exporter is a type alias to it, so changing the parameter
       # to a pointer breaks every downstream implementer at compile time with no
       # deprecation window (ADR 0039). By value is also the safer half: the
       # Attrs slices inside a snapshot ALIAS the meter's own copies, so handing
@@ -1554,12 +1566,12 @@ rules:
       # so filling in the defaults cannot mutate the config its caller still
       # holds, and newMemMeter copies it exactly once, at construction. Same
       # argument as net/client.Config above.
-      - "**/internal/core/metrics/**"
-      - "internal/core/metrics/**"
-      - "**/internal/service/metrics/**"
-      - "internal/service/metrics/**"
-      - "**/pkg/v1/metrics/**"
-      - "pkg/v1/metrics/**"
+      - "**/internal/core/observe/metrics/**"
+      - "internal/core/observe/metrics/**"
+      - "**/internal/service/observe/metrics/**"
+      - "internal/service/observe/metrics/**"
+      - "**/pkg/v1/observe/metrics/**"
+      - "pkg/v1/observe/metrics/**"
       # core/health.ResultValue (72 B) is one check's ANSWER, and value
       # semantics are the contract for the same two reasons core/net and
       # core/security/session give above. It is PUBLISHED — pkg/v1/health.Result is a
@@ -1674,8 +1686,8 @@ rules:
   # call. RETIRE this block once #388 ships (mirror the 2026-05-28 retirements).
   KTN-TEST-PARALLEL:
     exclude:
-      - "**/internal/service/writer/console/console_external_test.go"
-      - "internal/service/writer/console/console_external_test.go"
+      - "**/internal/service/observe/logger/writer/console/console_external_test.go"
+      - "internal/service/observe/logger/writer/console/console_external_test.go"
 
   # KTN-FUNC-DEADCODE / KTN-CONST-UNUSED (error) — build-tag blind spot.
   #
@@ -1745,7 +1757,7 @@ rules:
   # not read.
   # The third entry is the same class on a FUNC port rather than an interface.
   # AlwaysSample, NeverSample and discardSpan have their signatures fixed by
-  # core/trace.Sampler and core/trace.SpanSink, both of which are func types
+  # core/observe/trace.Sampler and core/observe/trace.SpanSink, both of which are func types
   # (ADR 0041) precisely so a published port cannot grow a method at all. The
   # rule looks for an INTERFACE that requires the parameter and finds none,
   # because there is no interface to find — the signature is no less required
@@ -1758,8 +1770,8 @@ rules:
       - "internal/service/proc/cgroup/cgroup_other.go"
       - "**/internal/service/cache/**"
       - "internal/service/cache/**"
-      - "**/internal/service/trace/**"
-      - "internal/service/trace/**"
+      - "**/internal/service/observe/trace/**"
+      - "internal/service/observe/trace/**"
       # savepointSQL(_ coresql.Dialect, name string) discards its dialect BY
       # DESIGN, and the discard is the documentation. All three supported
       # engines spell SAVEPOINT / ROLLBACK TO SAVEPOINT / RELEASE SAVEPOINT

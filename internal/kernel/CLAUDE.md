@@ -65,7 +65,7 @@ Single module `github.com/kitsunium/sdk/internal/kernel` — one `go.mod`, one `
 
 ## Why NO `level/` here?
 
-`level` used to live at `internal/kernel/level/` but was moved to `internal/core/logger/level/` on 2026-04-19. `Debug / Info / Warn / Error` is logger-domain vocabulary — no non-logger domain will ever import it, so it fails the "generic" half of the kernel rule even though it's stdlib-only. See `.claude/contexts/sdk-layer-placement-audit.md`.
+`level` used to live at `internal/kernel/level/` but was moved to `internal/core/observe/logger/level/` on 2026-04-19. `Debug / Info / Warn / Error` is logger-domain vocabulary — no non-logger domain will ever import it, so it fails the "generic" half of the kernel rule even though it's stdlib-only. See `.claude/contexts/sdk-layer-placement-audit.md`.
 
 Lesson: stdlib-only is necessary but NOT sufficient. When considering a new kernel package, ask "would a future HTTP middleware, metrics writer, or cache reach for this?". If no, it belongs in `core/<domain>/`.
 
@@ -76,7 +76,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
 - `errs` stays — every layer of the SDK uses typed errors, including kernel itself. Meta-infrastructure.
 - `clock` stays — textbook generic time abstraction. Extended in place (2026-09) with the waiting half (`Waiter`/`Timer`/`Ticker`) plus `ManualClock`, which is still stdlib-only and still domain-free: no `Job`, no `Task`, no `Schedule` appears in a signature. `Clock` itself was deliberately NOT widened — it is reachable downstream through the `pkg/v1/cache.Config` alias, so a new method would break every consumer's hand-written double. See `clock/CLAUDE.md` §"Why `Clock` was NOT extended".
 - `recycler` admitted by ADR 0010 — `Pool[T]` + `CappedPool[T]` are textbook generic object pools (reuse + reset + cap-discard). Any byte buffer, codec stream, HTTP body encoder, or metrics line writer can reuse the mechanism; the thresholds stay with the consumers.
-- `buffer` stays — the `[]byte` pool is generic even though `service/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
+- `buffer` stays — the `[]byte` pool is generic even though `service/observe/logger` is the heaviest consumer today. Since ADR 0010 it is a thin specialisation over `recycler.CappedPool[*[]byte]` (the generic `Pool[T]` moved to `recycler`).
 - `ring` admitted by ADR 0006 — SPSC bounded queue is a textbook generic primitive. Logger's async middleware is the only consumer today; metrics batchers and codec stream pipelines are obvious future users.
 - `snapshot` admitted by ADR 0011 — `Value[T]` is a textbook generic copy-on-write container (lock-free `Load` + mutex-serialised writers). The codec registry consolidated its three hand-rolled `atomic.Pointer[map]` + CAS loops onto it; routing tables, feature-flag maps, and hot-reloaded config are obvious future consumers.
 - `singleflight` admitted by ADR 0049 — `Group[K,V]` is textbook generic call deduplication (`Do`/`Forget`/`InFlight`; no domain word in any signature). It ships with **one** in-tree consumer, `internal/service/cache`, and that is recorded rather than dressed up: the second consumer claimed during planning (`config`) was checked and does not exist — `config.Load` is stateless and `pollWatcher.Watch` delegates the reload to a caller callback, so there is nothing to deduplicate. Two real candidates exist and were left alone (`service/validation.planFor`, `service/codec/tlv.cachedStructTypeInfo`, both `LoadOrStore` on a compile-once cache that accepts the duplicate in writing). The admission rests on the rule that governs — stdlib-only AND generic — and on the precedent in the row above it: **ADR 0025 admitted `cache` with ZERO domain consumers**; today `internal/service/cache` and `internal/service/security/secret` build on it. A consumer count was never the bar; ADR 0010's "three copies already existed" was a *consolidation* argument, not a gate.
@@ -95,7 +95,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   dressed up; `internal/service/proc/ipc` is the second (its socket directory's
   parents); three neighbours ask a related question with hand-rolled checks
   today (`internal/service/queue`'s symlinked state directory,
-  `internal/core/vfs`'s `PathEscaped`, `internal/service/writer/rotfile`'s
+  `internal/core/vfs`'s `PathEscaped`, `internal/service/observe/logger/writer/rotfile`'s
   `refuseSymlink`) and none of them can ask THIS one. It deliberately produces
   no verdict: `/var/run` being a symbolic link is a distribution's decision and
   `/tmp/myapp` being one may be an attack, so the primitive measures and the

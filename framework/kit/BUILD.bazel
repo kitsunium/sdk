@@ -66,7 +66,7 @@ go_library(
         "//framework/model",
         "//pkg/v1/clock",
         "//pkg/v1/errs",
-        "//pkg/v1/logger",
+        "//pkg/v1/observe/logger",
         "//pkg/v1/security/secret",
         "//pkg/v1/sql",
     ],

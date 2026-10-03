@@ -61,10 +61,11 @@ internal/
 │                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  cache, cli, codec, codec/scratch, config, crypto,
-│                  events, health, i18n, id, lifecycle, lock, logger,
-│                  logger/level, mail, metrics, net, otel, proc, queue,
-│                  resilience, scheduler, sql, statemachine, trace,
-│                  transform, validation, vfs, view, writer,
+│                  events, health, i18n, id, lifecycle, lock, mail, net,
+│                  proc, queue, resilience, scheduler, sql, statemachine,
+│                  transform, validation, vfs, view,
+│                  observe/{logger, logger/{level, writer}, metrics, otel,
+│                           trace},
 │                  security/{authz, secret, session, token}
 └── service/       concrete implementations
                    cache   (tagged memory store + L1/L2 chain)
@@ -83,11 +84,24 @@ internal/
                              versions, in its own write — ADR 0143)
                    lock    (in-process leases + file locker over flock(2)
                             or LockFileEx + keepalive)
-                   logger (+ encoder, sink/{console,file,memory,syslog},
-                             middleware/{async,encwrite,failover,multi,
-                                         recover,route,sample,tee})
-                   writer (console, dbsink, file, journald, levelgate,
-                           nettransport, rotfile)
+                   observe (the family — ADR 0155; a directory, no Go code:
+                           logger — + encoder, sink/{console,file,memory,
+                             syslog}, middleware/{async,encwrite,failover,
+                             multi,recover,route,sample,tee};
+                           logger/writer — console, dbsink, file, journald,
+                             levelgate, nettransport, rotfile;
+                           logger/internal/logfile — the hardened open both
+                             file sinks share;
+                           metrics — in-memory meter + text/prometheus/
+                             otlpjson exporters + the OTLP/HTTP emitter;
+                           trace — tracer + samplers + recorder + otlpjson
+                             exporter + the OTLP/HTTP emitter + the
+                             server/client HTTP middlewares;
+                           profiling — CPU/heap capture + a stdlib pprof
+                             decoder + fold onto owners + goroutine dumps,
+                             grouped;
+                           internal/otlp — the OTLP/HTTP + JSON transport
+                             metrics and trace share)
                    crypto (the schemes by role — ADR 0155:
                            aead/{aesgcm, streamaead}, agree/{x25519},
                            hash/{stdhash}, kdf/{hkdfsha256, keytree},
@@ -124,8 +138,6 @@ internal/
                            (PATH_UNSAFE), SO_PEERCRED on Linux, a named pipe
                            with its own DACL on Windows — ADR 0148)
                    i18n   (CLDR plural table + catalogue + negotiator + printer)
-                   profiling (CPU/heap capture + a stdlib pprof decoder +
-                           fold onto owners + goroutine dumps, grouped)
                    id     (uuidv4, uuidv7, ulid, snowflake, nanoid,
                            ksuid, typeid)
                    net    (the family — ADR 0155; a directory, no Go code:
@@ -133,8 +145,6 @@ internal/
                            one engine each over the one contract core/net)
                    mail   (MIME composition + SMTP + memory and capture
                            doubles; spool/ — the durable outbox)
-                   metrics (in-memory meter + text/prometheus/otlpjson
-                             exporters + the OTLP/HTTP emitter)
                    resilience (retry, circuit breaker, rate limit + keyed,
                            bulkhead, timeout, fallback, hedging; the backoff
                            curve, an alias of kernel/backoff's)
@@ -144,22 +154,21 @@ internal/
                    sql    (transaction manager + savepoints + pool policy
                            + Join/Defer siblings + migration runner, SQLite's
                            on the database file's write lock — ADR 0140)
-                   trace  (tracer + samplers + recorder + otlpjson
-                             exporter + the OTLP/HTTP emitter + the
-                             server/client HTTP middlewares)
                    transform
                    validation (constraints + combinators + struct-tag plan)
                    view   (html/template engine + trust scan + parse-once)
                    vfs    (os.Root-confined FS + memory FS + atomic publish)
-                   internal (otlp — the OTLP/HTTP + JSON transport metrics
-                           and trace share; logfile — the hardened open both
-                           file sinks share)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── cache/     (the ADR 0025 primitive AND the ADR 0049 domain, side by side)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
     ├── semver/    (SemVer precedence + Go pseudo-versions on the standard library — ADR 0156 §4, ADR 0159 §4)
-    ├── logger/    (+ ldflags-injected Version, + writer/, + slogbridge/)
+    ├── observe/   (a family directory, no Go code — ADR 0155:
+    │                 logger/ — + ldflags-injected Version, + writer/, + slogbridge/;
+    │                 metrics/ — the OTel data model, zero OTel imports — ADR 0044;
+    │                 trace/ — W3C Trace Context + the OTel span model — ADR 0051;
+    │                 profiling/ — the process's CPU, heap and goroutines, folded
+    │                   onto your owners — ADR 0121)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── events/    (in-process synchronous bus — ADR 0053; NOT a queue)
     ├── codec/     (blank-imports all 16 service codecs + transform;
@@ -206,11 +215,8 @@ pkg/
     │                 memlimit/ — the cap already bounding this process — ADR 0075;
     │                 systemd/{notify, listen}/ — sd_notify and socket activation;
     │                 ipc/ — a private socket, the peer the kernel names — ADR 0148)
-    ├── metrics/   (the OTel data model, zero OTel imports — ADR 0044)
     └── scheduler/ (Parse/ParseInLocation/Every + the engine — ADR 0041)
     └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
-    └── profiling/ (the process's CPU, heap and goroutines, folded onto your owners — ADR 0121)
-    └── trace/     (W3C Trace Context + the OTel span model — ADR 0051)
     └── validation/ (Constraint / Violation / Report + the struct-tag front end — ADR 0046)
     └── i18n/       (CLDR plurals over a named 13-language subset — ADR 0063)
     └── cli/        (flag + sub-commands + generated help + typed exit — ADR 0065)
@@ -282,12 +288,12 @@ Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refact
 4. **Public/Private split.** Every SDK error carries a wire-safe `Public` (string literal ≤120 runes, no newline) and a log-only `Private`. `err.Error()` renders `"[<code> <REASON>] <public>"` on the no-trail fast path; when the wrap trail is non-empty, ADR 0005 §Semantics extends the bracket header with `" <- "`-separated trail codes and an optional `" (truncated)"` marker — never Private, never Fields. Log-parser regex: `\[[\d.]+(?: <- [\d.]+)*(?: \(truncated\))? \w+\]`.
 5. **No empty stub files / dirs.** If a file or directory only carries a placeholder, inline its content into an existing file or delete it.
 6. **Origin wins on wrap.** When `errs.Wrap` receives an `*errs.Error` cause, it inherits the cause's Code/Reason/Public/Private. Wrappers can only add `Fields` (and extend the intrinsic wrap trail). To relabel, define a fresh sentinel.
-7. **`Version` via build-time injection.** `pkg/v1/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
+7. **`Version` via build-time injection.** `pkg/v1/observe/logger.Version` is stamped at link time — under Bazel via `x_defs` + `--stamp` + `tools/workspace_status.sh` (`STABLE_VERSION`); under raw `go build` via `-ldflags "-X github.com/kitsunium/sdk/pkg/v1/observe/logger.Version=…"`. `FrameworkVersion()` returns `"dev"` when unset; every emitted log record carries `framework_version` automatically.
 8. **Every package is documented.** The guard `scripts/pre-commit/check-pkg-docs.sh` — run by `make lint` and CI — fails when any `internal/*` or `pkg/v*/**` directory containing Go production code is missing `CLAUDE.md` AND `README.md`. Public packages (`pkg/v*/**`) require BOTH: `README.md` (consumer-facing — pkg.go.dev renders it; the model is `pkg/v1/errs/README.md`) and `CLAUDE.md` (agent-facing), because the two roles do not collapse. The `scripts/release/*.{sh,mjs}` and `docs/site/scripts/*.mjs` trees are tooling, not library code, and are exempt from this gate.
 9. **Every benchmark package ships its numbers.** The guard `scripts/pre-commit/check-bench-md.sh` — run by `make lint` and CI — fails when a directory contains `*_bench_test.go` but no sibling `BENCH.md`. The report is regenerated with `make bench`; it stamps machine, RAM, CPU, OS, Go toolchain, git SHA, and timestamp so cross-machine deltas can be evaluated honestly.
 10. **`pkg/v*/**/README.md` are generated, not hand-authored.** The `gomarkdoc` binary (`go install github.com/princjef/gomarkdoc/cmd/gomarkdoc@v1.1.0`) reads each package's Go doc comments and emits `README.md` per package (ADR 0008). Edit the package comment in the existing `.go` file (`codec.go` / `accessors.go` / `logger.go`); run `make docs-readme` to regenerate; `scripts/pre-commit/check-readme-drift.sh` — run by CI's `bazel` job — blocks any change where the file on disk doesn't match what gomarkdoc would produce now. Maintainer rationale (Why-this-shape, layering, do-not lists) stays in `CLAUDE.md` — consumer-facing prose belongs in the package doc comment.
 11. **Docs travel with the code — always update them in the same change.** Documentation is part of the change, never a follow-up. Whenever you add/rename/remove an exported symbol, package, format, code range, capability, or convention, update every doc that describes it **in the same commit**: the package's `CLAUDE.md` (Purpose/Surface/Contents/Sentinels), the parent/layer `CLAUDE.md` tables (e.g. `internal/service/codec/CLAUDE.md` Streaming/Appender columns, `internal/core/CLAUDE.md` registry counts), the root `CLAUDE.md` domain list, and — for public packages — the Go doc comment that `gomarkdoc` renders into `README.md` (rule 10). A doc that names a symbol, count, file, or code that no longer matches the code is a defect: fix the doc or the code, never leave them divergent. When in doubt, grep the docs for the old name/number before committing. Two of this rule's failure modes are now mechanical rather than remembered: `scripts/pre-commit/check-domain-docs.sh` fails the build when this file's architecture tree stops naming exactly the Go packages under `internal/core`, at any depth (a family's packages may be written `family/{a, b}`), when a domain is described twice in the Purpose paragraph, or when one of the three ADR indexes (`docs/adr/CLAUDE.md`, `docs/CLAUDE.md`, this file's Reference list) drifts from the files in `docs/adr/` — both of which parallel union merges had actually produced here, along with two whole Purpose paragraphs coexisting while `events` was documented only in the stale one and `health` in neither.
-12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` tagged suites declare their run procedure in `e2e/integration/CLAUDE.md` (they live in the auxiliary `e2e` module — ADR 0157) and `localstack` ones in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module of the census — the framework and its four connectors, `connectors/ssh` included — a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
+12. **Every test excluded from normal discovery needs a named, executable, currently-green gate — or an explicit declaration that it must not run.** Exclusion mechanisms compound silently: `//go:build !race` hides a file from the race suite (race is on by default, see `.bazelrc`), `gazelle:excluded` + `manual` + `-test.run=^$` hides a target from `bazel test //...`, and a `.ktn-linter.yaml` entry hides it from the linter. Each exclusion is individually justified and documented; *together* they have already produced tests that nothing ever ran — including `pkg/v1/observe/logger`'s `TestV116BuildSendAllocatesOnePerEmit`, the regression guard for the allocation claim in this very file. Gates in force today: the race-off alloc lane (`tools/alloc-lane-targets.txt`, mechanically enforced by `scripts/pre-commit/check-alloc-lane-coverage.sh`, wired into `make lint` and CI) covers every `//go:build !race` test, and CI's `test-386` job compiles and runs those same files a second time on linux/386, where `-race` does not exist; `TestGenerateBenchMD` is opt-in by exact `-test.run` name under BOTH build systems; `integration` tagged suites declare their run procedure in `e2e/integration/CLAUDE.md` (they live in the auxiliary `e2e` module — ADR 0157) and `localstack` ones in their package `CLAUDE.md`. `//framework/internal/kit:kit_test` is `manual` under Bazel — the suite reads its own sources and positions relative to its module root — and `make test-framework` (`go test -race` in every framework module of the census — the framework and its four connectors, `connectors/ssh` included — a step of CI's `bazel` job and a gate of `scripts/ci-gates-check.sh`) is its lane (ADR 0147). When you add an exclusion, name its compensating lane in the same commit — and remember that a lane which exists but has been failing for weeks verifies nothing.
 
 ## Layout
 

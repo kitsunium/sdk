@@ -23,7 +23,7 @@ graph of every consumer of a database writer.
 | `writer/redis/` | the `"redis"` writer over the bind-mounted Unix socket: XADD, MaxLen trimming, the `AddFailed` path | `redis:7-alpine` |
 
 The writer suites are external test packages: they import the writer module
-for its registration side effect and drive `internal/core/writer`'s registry,
+for its registration side effect and drive `internal/core/observe/logger/writer`'s registry,
 exactly as they did beside the package (`e2e/go.mod` replaces each writer
 module with this tree). That is the one place `e2e` imports more of `internal/`
 than sentinel codes — see `e2e/CLAUDE.md` §Rules.

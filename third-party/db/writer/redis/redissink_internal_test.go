@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // : compile-time proof the wrapper satisfies the Sink port (kept in the test

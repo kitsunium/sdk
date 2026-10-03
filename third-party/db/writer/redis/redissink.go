@@ -8,7 +8,7 @@ import (
 	"cmp"
 	"context"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // redisSink decorates the composed dbsink chain with ownership of the client's

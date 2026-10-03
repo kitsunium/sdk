@@ -80,9 +80,9 @@ a complete `Timed`:
 | Package | Type |
 |---|---|
 | `internal/kernel/collections/cache` | `fakeClock`, `fixedClock` |
-| `internal/service/logger` | `frozenClock` |
-| `internal/service/writer/dbsink` | `frozenClock` |
-| `internal/service/writer/rotfile` | `fakeClock` |
+| `internal/service/observe/logger` | `frozenClock` |
+| `internal/service/observe/logger/writer/dbsink` | `frozenClock` |
+| `internal/service/observe/logger/writer/rotfile` | `fakeClock` |
 | `internal/service/resilience` | `steppedClock` |
 | `internal/service/id` | `steppedClock` |
 | `internal/service/queue` | `steppingClock` |

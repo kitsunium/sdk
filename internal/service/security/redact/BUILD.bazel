@@ -20,7 +20,7 @@ go_library(
         "//internal/service:service_consumers",
     ],
     deps = [
-        "//internal/core/logger",
+        "//internal/core/observe/logger",
         "//internal/kernel/errs",
     ],
 )
@@ -43,7 +43,7 @@ go_test(
     ],
     embed = [":redact"],
     deps = [
-        "//internal/core/logger",
+        "//internal/core/observe/logger",
         "//internal/kernel/errs",
     ],
 )

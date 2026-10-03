@@ -29,8 +29,8 @@ go_test(
     ],
     deps = [
         ":errs",
-        "//pkg/v1/logger",
         "//pkg/v1/mail",
+        "//pkg/v1/observe/logger",
     ],
 )
 

@@ -82,7 +82,7 @@ env:
   # chmod injections, naming why (ADR 0095). Listing them for Windows here too
   # would only run them twice. ACL hardening of the Windows file sinks — a
   # security descriptor at creation — is named in their CLAUDE.md, not done.
-  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile ./internal/logfile"
+  SERVICE_FILE_PKGS: "./observe/logger/sink/file ./observe/logger/writer/rotfile ./observe/logger/internal/logfile"
   # Framework packages whose runtime is a kernel question — see `entitlement`
   # above. Relative to framework/, the module they belong to.
   FRAMEWORK_PKGS: "./internal/service/entitlement"

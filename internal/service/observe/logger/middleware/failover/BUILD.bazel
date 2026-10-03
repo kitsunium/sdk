@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "failover",
+    srcs = [
+        "codes.go",
+        "errors.go",
+        "failover_sink.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":failover",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "failover_test",
+    srcs = [
+        "alloc_external_test.go",
+        "failover_sink_external_test.go",
+        "failover_sink_internal_test.go",
+    ],
+    embed = [":failover"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/sink/file",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

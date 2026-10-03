@@ -43,7 +43,7 @@ is identical either way: diagnostics and a non-zero exit.
 | SDK001 | invariant | no second logging pipeline beside the SDK logger | ADR 0032 |
 | SDK002 | convention | errors carry a typed code, not a formatted string | SDK rule 2 / ADR 0019 |
 | SDK003 | invariant | stdout is a protocol channel, never a log destination | ADR 0030 |
-| SDK004 | invariant | `logger.Version` is stamped at link time, not assigned | `pkg/v1/logger/CLAUDE.md` |
+| SDK004 | invariant | `logger.Version` is stamped at link time, not assigned | `pkg/v1/observe/logger/CLAUDE.md` |
 | SDK005 | convention | no second logging pipeline via the legacy `log` package | ADR 0032 |
 
 **Invariant vs convention** is what makes incremental adoption possible. An

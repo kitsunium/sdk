@@ -37,7 +37,7 @@ forwarding constructors — and, since **ADR 0142**, the subject keys in
   the engine's and alias service.
 - The subject keys live in their own file, `subjectkeys.go`, because
   ktn-linter's cohesion rule reads the facade as one file per seam.
-- The slog proof lives in `pkg/v1/logger/slogbridge`, the one package allowed to
+- The slog proof lives in `pkg/v1/observe/logger/slogbridge`, the one package allowed to
   import `log/slog` (ADR 0032).
 
 ## Do NOT

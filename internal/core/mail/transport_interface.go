@@ -92,7 +92,7 @@ type Outbox interface {
 // FullTransport is the union the SDK's in-memory transport returns: a
 // [Transport] that also batches and records.
 //
-// It exists for the same reason core/vfs.FullFS and core/metrics.FullMeter do —
+// It exists for the same reason core/vfs.FullFS and core/observe/metrics.FullMeter do —
 // the port stays frozen and the capabilities stay assertable for a THIRD-PARTY
 // transport that has neither, while a caller wiring one of the SDK's own does
 // not have to type-assert for a feature it just constructed. A parameter should
