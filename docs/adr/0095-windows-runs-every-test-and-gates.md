@@ -1,6 +1,6 @@
 # ADR 0095 — Windows runs every test and gates, and each of its nineteen failures was answered on its own terms
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `.github/workflows/CLAUDE.md` §Rules from ADR 0095. Before that: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) — Decision 5's Windows inventory and §Deferred "Windows at runtime" are superseded: the Windows lane gates; [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) §1 — the canonical root is cleaned into the OS's form, and its single `EvalSymlinks` becomes two

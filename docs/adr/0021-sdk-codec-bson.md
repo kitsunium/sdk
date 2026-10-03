@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-06-21
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) — BSON is written natively, and `mongo-driver` leaves `pkg`'s module graph
 - **Related**: ADR 0003 (universal codec package, M5 deferred set), ADR 0005/0006 (error-code registry)
 
 ## Context

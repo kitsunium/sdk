@@ -61,6 +61,21 @@ indirection: it detects one with `Lstat`, reads it with `Readlink`, and
 restarts the walk itself. `os.Root` descends into components already known to
 be real directories, and nothing else.
 
+## Rules from ADR 0083
+
+Superseded by ADR 0154 (the charter); ADR 0083 stays as the incident's record, and its rules for this primitive live here.
+
+- **It measures and never decides**: each component, what it is, where it
+  points, and the mode of the directory HOLDING it; the verdict is the caller's
+  (`lock` refuses only where the holder is open to anybody).
+- **A path is made absolute without being cleaned**: `filepath.Abs` and
+  `filepath.Join` `Clean`, and `Clean` drops `link/..` lexically where the
+  kernel follows the link first — `TestResolveAppliesParentAfterTheLinkAndNotBefore`.
+- **It walks `os.Root` handles, never `syscall.Openat`**, which go1.27 declares
+  for linux, aix and wasip1 only.
+- *Lesson*: `O_NOFOLLOW` governs the final component, so a link planted at a
+  parent moved a lock directory past a check that only ever saw the last name.
+
 ## Do NOT
 
 - **Read a verdict into `Indirect` alone.** It is true for `/tmp` on macOS.

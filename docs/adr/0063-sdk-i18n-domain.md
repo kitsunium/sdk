@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — language-tag parsing and pattern compilation move from `internal/core/i18n` to the service
 - **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is a safe default or an explicit refusal), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (a published port grows by SIBLING, never by widening), [ADR 0041](0041-sdk-scheduler-domain.md) (the "refused by name" discipline, applied to a cron subset), [ADR 0042](0042-sdk-token-domain.md) (`v4.local` refused by name), [ADR 0046](0046-sdk-validation-domain.md) (a message names the rule and the bound, never the VALUE), [ADR 0051](0051-sdk-trace-domain.md) (a malformed header a stranger wrote is never an error), [ADR 0056](0056-sdk-vfs-domain.md) (`io/fs` unchanged), [ADR 0058](0058-sdk-view-domain.md) (contextual escaping belongs to `view`), [ADR 0034](0034-hcl-quarantine-rationale-corrected.md) (the `x/sys` filter, and the discipline of correcting a stated mechanism)
 - **Corrects**: the reason previously given in review for building this domain rather than adopting `golang.org/x/text`. See §Context.2 — the doctrinal argument stands and the dependency argument, as it was stated, does not.
 

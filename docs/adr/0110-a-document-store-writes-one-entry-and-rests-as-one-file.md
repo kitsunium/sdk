@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D1: `docstore` gains a core
 - **Related**: [ADR 0056](0056-sdk-vfs-domain.md) (the atomic publication every write is), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (no port, so the values are the engine's), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (the clamps), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md)
 
 ## Context

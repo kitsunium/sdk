@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — the quarantined codec becomes a module of its own; the reason stands
 - **Related**: [ADR 0022](0022-sdk-codec-hcl.md) (HCL codec quarantine), [ADR 0012](0012-logger-writer-registry.md) (third-party quarantine for vendor-heavy integrations), [ADR 0016](0016-sdk-process-supervision-domain.md) §Dependency discipline (the `x/sys` ban), [ADR 0018](0018-sdk-cross-platform-portability.md) §133 (the ban restated), [ADR 0029](0029-sdk-net-domain.md) §"The `x/sys` collision"
 - **Amends**: [ADR 0022](0022-sdk-codec-hcl.md) §Context.1 and §Why not (the *mechanism*, not the decision)
 

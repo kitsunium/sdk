@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-29T03:41:17Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/lock/
 
 ## Purpose
@@ -345,6 +345,81 @@ re-`Define`d here.
 - **Nothing here waits on the wall clock**, production or tests, enforced by
   `TestPackageNeverWaitsOnTheWallClock` (the ADR 0041 audit) with
   `TestWallClockAuditDetectsAViolation` proving it fires.
+
+## Rules from ADR 0082
+
+Superseded by ADR 0154 (the charter); ADR 0082 stays as the incident's record, and its rules live here.
+
+- **The lock path is a file, never a link to one.** Unix opens it with
+  `O_NOFOLLOW` and the kernel refuses; Windows opens it with
+  `FILE_FLAG_OPEN_REPARSE_POINT` and refuses a handle carrying
+  `FILE_ATTRIBUTE_REPARSE_POINT` — the flag alone opens the link, the pair
+  refuses it. A platform gains the lock and its hardening together or neither:
+  `nofollow_*` and `flock_*` share their build tags.
+- **A planted indirection is `LOCK_PATH_REDIRECTED`** (`0.3.51.4`, exit 78),
+  never `LOCK_BACKEND_FAILED`, which invites the one wrong response — a retry.
+- **The errno is never branched on** (`ELOOP`, `EMLINK`, `EFTYPE` across six
+  kernels); the `Lstat` after a failed open is diagnosis, the kernel having
+  already decided.
+- *Lesson*: the lock filename is predictable and the directory rule governs
+  unlinking, while the attack creates; over a planted link the shipped locker
+  returned `held=true` with no error, its `flock` and fencing ledger outside the
+  checked directory.
+
+## Rules from ADR 0083
+
+Superseded by ADR 0154 (the charter); ADR 0083 stays as the incident's record, and its rules live here.
+
+- **Every component of the lock directory is audited before `MkdirAll`**,
+  through `pathchain`. An indirection at a parent is refused
+  (`LOCK_PATH_REDIRECTED`) only when the directory holding it is open to
+  anybody — world-writable on Unix, the sticky bit exempting nothing because
+  planting creates an entry; on Windows, `createRights` in its DACL (ADR 0086).
+  The operating system's own links (`/var` → `/private/var`, `/var/run`) pass.
+- **A held lock can lose its file, and the holder is told.** In a
+  `0777|sticky` directory the entry's owner may unlink a held lock file and
+  nothing prevents it. `Acquire` and `Extend` compare the descriptor with the
+  name (`os.SameFile` over `Lstat`, failing open) and answer
+  `LOCK_FILE_REPLACED` (`0.3.51.5`); a `Keepalive` cancels. A test asserts the
+  second holder still acquires: detection, never prevention — the prevention is
+  a directory no other account can write, which `NewFileLocker` creates `0700`.
+- *Lesson*: `O_NOFOLLOW` governs the final component only, so a link at a parent
+  moved the whole lock directory; and an unlinked lock file left two holders on
+  two inodes, the fence reset to 1 and the victim's `Extend` returning nil.
+
+## Rules from ADR 0084
+
+Superseded by ADR 0154 (the charter); ADR 0084 stays as the incident's record, and its rules live here.
+
+- **On Windows the directory question is asked of the DACL, never of a mode**
+  (`os.Stat` synthesises `0777` for every writable directory):
+  `GetNamedSecurityInfoW` and `GetAce` from `advapi32` through
+  `syscall.NewLazyDLL`, no `x/sys`.
+- **The MASK is read** — world-readable is not world-writable; denials
+  accumulate per account, the ACE type is checked before its identifier, a
+  directory this process created is checked like any other, and a NULL DACL is
+  the most permissive list, not the emptiest.
+- **An API that will not answer fails OPEN**, its Win32 status in a field; an
+  answer in hand is never fail-open.
+- *Lesson*: `checkDir` accepted every Windows directory and `checkChain`
+  refused nothing there — a gap estimated at 250 lines that cost two exports.
+
+## Rules from ADR 0086
+
+Superseded by ADR 0154 (the charter); ADR 0086 stays as the incident's record, and its rules live here.
+
+- **Creating an entry is not replacing one, and three masks say which**:
+  `replaceRights` (`FILE_DELETE_CHILD`, `WRITE_DAC`, `WRITE_OWNER`) for
+  `checkDir`; `createRights` (`FILE_ADD_SUBDIRECTORY`, `WRITE_DAC`,
+  `WRITE_OWNER`) for a planted component; `contentRights` for what the
+  directory's new files INHERIT — so an `INHERIT_ONLY_ACE` counts.
+- **"Anybody" is Everyone, Authenticated Users and `BUILTIN\Users`**:
+  `%ProgramData%` (create, not replace) is accepted, a junction planted beside
+  it refused.
+- **Every discretionary ACE shape is decoded**, bounded by `AceSize`; the
+  directory and its files keep separate denial states; the SACL is never read.
+- *Lesson*: one mask for two questions accepted a directory whose new lock files
+  every account could rewrite — and the fencing ledger with them.
 
 ## Do NOT
 

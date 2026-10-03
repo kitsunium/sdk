@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/session/
 
 ## Purpose
@@ -209,6 +209,24 @@ Two more rules sit on the same call:
   flush: withdrawing the new record there used to leave neither identifier
   resolving, the state the order of the steps exists to prevent
   (`TestAFlushFailureAfterTheRetirementIsNotUndone`).
+
+## Rules from ADR 0073
+
+Superseded by ADR 0154 (the charter); ADR 0073 stays as the incident's record, and its rules live here.
+
+- **Both waits observe the caller's context.** The cross-process lock is
+  `flock(LOCK_NB)` polled on the injected clock (`FileConfig.Poll`,
+  `DefaultPoll` 25 ms — the `lock` domain's number; negative refused); the
+  in-process gate is a one-slot channel selected against the context, taken
+  FIRST, because `flock` on one open file description excludes no goroutine.
+- **The context is checked once more after both waits**, before the section: a
+  select whose cancellation and acquisition become ready together picks either.
+- **A caller who left gets `STORE_UNAVAILABLE`**, its own context error in the
+  fields — no new code.
+- *Lesson*: a blocking `flock(LOCK_EX)` parks its thread in a syscall no
+  cancellation reaches, so a request whose client had hung up kept waiting for a
+  lock nobody would read the result of — the opposite answer to the one `lock`
+  had already given the same syscall.
 
 ## Do NOT
 

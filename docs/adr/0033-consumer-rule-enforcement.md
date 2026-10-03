@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-04
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0161](0161-an-untyped-error-fails-the-build.md) — SDK002 stays a convention for consumers; the SDK's own tree is held to the ban as an invariant
 - **Related**: [ADR 0032](../adr/0032-logger-slog-bridge.md) (the slog bridge — the rule that prompted this), [ADR 0030](../adr/0030-stdout-is-a-protocol-channel.md), [ADR 0019](../adr/0019-pkg-errs-public-construction.md) (the error model offered to downstreams), [ADR 0004](../adr/0004-sdk-bazel-build-system.md) (why `tools/*` must stay dependency-free)
 
 ## Context

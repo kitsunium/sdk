@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/kernel/plugin/
 
 ## Purpose
@@ -56,6 +56,20 @@ registrars answer them with a panic rather than an error.
   `"nil plugin_test.funcPlug"` is the more useful of the two answers.
 - **`reflect` is used and that is fine here.** It runs once per registration,
   at import, and nothing on any hot path calls it.
+
+## Rules from ADR 0071
+
+Superseded by ADR 0154 (the charter); ADR 0071 stays as the incident's record, and its rule lives here.
+
+- **A registry asks `Unusable` before it stores, at the call that publishes** —
+  the importing package's initialiser, the earliest point the offender is still
+  visible — and panics with its OWN code and reason, borrowing only the sentence.
+- **Two refusals, nil first**: a typed nil, and a value whose dynamic type is not
+  comparable.
+- *Lesson*: fifteen registrars guarded with `if x == nil` and were wrong the same
+  way fifteen times — a typed nil was stored and failed at its first dispatch,
+  and a non-comparable plug-in panicked inside the duplicate check with Go's
+  message instead of the domain's.
 
 ## Do NOT
 

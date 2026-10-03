@@ -1,6 +1,6 @@
 # ADR 0132 — a floor a caller names is the floor applied
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/writer/levelgate/CLAUDE.md` §Rules from ADR 0132. Before that: Accepted
 - **Date**: 2026-09-26
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0012](0012-logger-writer-registry.md) (the writer configuration and its `MinLevel`), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the frozen `Sink` port)

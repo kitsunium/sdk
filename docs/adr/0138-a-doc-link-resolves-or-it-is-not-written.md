@@ -1,6 +1,6 @@
 # ADR 0138 — A doc link resolves or it is not written, and a facade links the alias
 
-- **Status**: Accepted; implemented in `tools/genindex` (`-check-doclinks`) and run by `make doclinks`, which `make lint-check` — a CI gate — invokes.
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `pkg/v1/CLAUDE.md` §Rules from ADR 0138. Before that: Accepted; implemented in `tools/genindex` (`-check-doclinks`) and run by `make doclinks`, which `make lint-check` — a CI gate — invokes.
 - **Date**: 2026-09-26
 - **Deciders**: kitsunium maintainers
 - **Related**: [ADR 0008](0008-readme-from-code-generation.md) (READMEs are generated from the doc comments this checks), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (the facade aliases its types, which is the cause), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md) (a gate is a name CI says out loud)

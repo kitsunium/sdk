@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) — `golang.org/x/mod/semver` is replaced by `kernel/semver`; [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework
 - **Related**: [ADR 0013](0013-sdk-crypto-domain.md) (the crypto domain the verification leans on), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a refusal is not a degradation), [ADR 0065](0065-sdk-cli-domain.md) (the `cli` domain whose binaries this updates), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (why `Source` and `Service` alias the service layer)
 
 ## Context

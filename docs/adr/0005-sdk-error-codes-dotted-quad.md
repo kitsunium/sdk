@@ -4,7 +4,7 @@
 **Date**: 2026-04-23
 **Deciders**: @kodflow
 **Supersedes**: ADR 0002 (Registry table only; all other sections of 0002 remain authoritative)
-**Amended by**: ADR 0020 (§Enforcement / §Semantics — the AST audit's reason invariant now accepts a second derivation, `screamingSnake(CodeConst − "Code")`, alongside `screamingSnake(varName)`; this ADR's body is preserved verbatim as the original record per the ADR-immutability rule)
+**Amended by**: ADR 0020 (§Enforcement / §Semantics — the AST audit's reason invariant now accepts a second derivation, `screamingSnake(CodeConst − "Code")`, alongside `screamingSnake(varName)`; this ADR's body is preserved verbatim as the original record per the ADR-immutability rule); [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §Layout: `LL` records the layer that allocated a range, and a range keeps its value when its declaration moves
 **Related**: ADR 0001 (multi-module layout)
 
 ## Context

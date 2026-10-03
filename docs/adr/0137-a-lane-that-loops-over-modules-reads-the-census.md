@@ -1,6 +1,6 @@
 # ADR 0137 — A lane that loops over modules reads the census, and names what it skips
 
-- **Status**: Accepted; implemented in `scripts/ci/go-modules.sh` and read by the `cross-build` and `test-386` jobs of `.github/workflows/bazel-ci.yml`, the per-package job of `.github/workflows/e2e-cross.yml`, `scripts/cross-platform-audit.sh` and `scripts/ci/vuln-check.sh`.
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `scripts/CLAUDE.md` §Rules from ADR 0137. Before that: Accepted; implemented in `scripts/ci/go-modules.sh` and read by the `cross-build` and `test-386` jobs of `.github/workflows/bazel-ci.yml`, the per-package job of `.github/workflows/e2e-cross.yml`, `scripts/cross-platform-audit.sh` and `scripts/ci/vuln-check.sh`.
 - **Date**: 2026-09-26
 - **Deciders**: kitsunium maintainers
 - **Amends**: [ADR 0094](0094-a-test-compiles-where-its-package-does.md) (the build bar's loop covers every module, not the six it named)

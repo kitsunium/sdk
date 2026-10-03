@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-06-21
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md) — each schema codec becomes a module of its own
 - **Related**: ADR 0003 (codec package, M6 deferred set), ADR 0021 (BSON — document-bound, in-tree), ADR 0022 (HCL — first third-party codec), ADR 0005/0006 (error-code registry)
 
 ## Context

@@ -1,6 +1,6 @@
 # ADR 0083 — a path is a chain, and a held lock can lose its file
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/lock/CLAUDE.md` and `internal/kernel/pathchain/CLAUDE.md` §Rules from ADR 0083. Before that: Accepted
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0082](0082-the-lock-path-is-a-file-never-a-link-to-one.md) §Deferred — both of its first two items are closed here, one by prevention and one by detection, and the ADR says which is which

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) — `golang.org/x/mod/module` is replaced by `kernel/semver`; [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — `git.Head` moves to the framework; `process.Build` and `process.Self` stay
 - **Amends**: [ADR 0076](0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md) (the git engine gains a query the port does not model)
 - **Related**: [ADR 0016](0016-sdk-process-supervision-domain.md) (the `proc` domain), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (whose type a value is), [ADR 0018](0018-sdk-cross-platform-portability.md) (every GOOS builds)
 

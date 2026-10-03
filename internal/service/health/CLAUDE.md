@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # internal/service/health/
 
 ## Purpose
@@ -73,6 +73,23 @@ A departed caller's result is `CHECK_TIMEOUT` with the caller's context error
 as its cause, and an unexplained failing startup report is `STARTUP_PENDING`;
 both are built from the sentinel's own identity with a Private of their own, so
 `errors.Is` matches the sentinel — no new code.
+
+## Rules from ADR 0072
+
+Superseded by ADR 0154 (the charter); ADR 0072 stays as the incident's record, and its rules live here.
+
+- **Every wait this package owns has a budget no departing caller takes with
+  it.** The sd_notify announcement is bounded by the probe's own context, else
+  by the budget a check gets (`Config.DefaultTimeout`, then
+  `DefaultCheckTimeout`), armed on the injected clock — never
+  `context.WithTimeout`. A check run's budget is armed in `perform` and belongs
+  to the run, so a run every caller has left is still cancelled at its deadline.
+- **A run cancelled by its budget is a timeout** (`inflight.expire`), whatever
+  the body returns for it; a body that succeeds late keeps its success.
+- *Lesson*: one supervisor that stopped reading its socket, while the
+  announcement lock was held, stopped every later probe from answering; and a
+  run behind a proxy with a shorter timeout was cancelled by nobody. A bound held
+  by a party that can leave is no bound.
 
 ## Do NOT
 

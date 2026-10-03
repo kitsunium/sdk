@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-25
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — §D5: `redact` gains a core
 - **Related**: [ADR 0074](0074-what-a-public-alias-may-point-at.md) (whose type a value is), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (zero values), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) (the code range)
 
 ## Context

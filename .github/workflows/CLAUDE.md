@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:52:43Z -->
+<!-- updated: 2026-10-02T23:06:22Z -->
 # .github/workflows/
 
 ## Purpose
@@ -143,6 +143,22 @@ Concurrency: `sdk-release-${{ github.ref }}` with `cancel-in-progress: false` (N
 - `permissions: contents: read` only — nothing in the SDK lane writes back.
 - `bazel-ci.yml` is the only source-of-truth gate. CI does NOT run `golangci-lint` directly (ADR 0004), and runs `go test` directly only where Bazel cannot — other GOOS/GOARCH (see Do NOT). It DOES run `govulncheck` directly, per module (`make vuln-check`, ADR 0136): the vulnerability database is the one input Bazel does not carry, which is why ADR 0004's retirement of the old scans left nothing scanning the SDK (#210).
 - A job that loops over modules reads `scripts/ci/go-modules.sh` (ADR 0137). Writing a module list into a workflow is how `tools/` fell out of every 32-bit lane.
+
+## Rules from ADR 0095
+
+Superseded by ADR 0154 (the charter); ADR 0095 stays as the incident's record, and its rules live here.
+
+- **The Windows whole-suite step of `e2e-cross.yml` gates**: no
+  `continue-on-error`; a Windows regression fails the job as a macOS one does.
+- **A failure is answered on the platform's own terms**: a production bug is
+  fixed in the code; a Unix premise in a test — clock resolution, file modes,
+  open handles, kernel buffering — is replaced by what the platform promises.
+- **A skip is allowed only where the fixture cannot exist**, its message says
+  why, and it follows an assertion of the platform's documented contract
+  wherever one exists.
+- *Lesson*: nineteen packages failed on Windows behind `continue-on-error`, nine
+  of them production bugs — a multipart filename decoded per host, a git root
+  never matched, a queue that refused every directory among them.
 
 ## Do NOT
 

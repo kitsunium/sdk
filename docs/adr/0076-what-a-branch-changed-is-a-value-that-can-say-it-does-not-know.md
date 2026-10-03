@@ -3,7 +3,8 @@
 - **Status**: Accepted
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
-- **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0052](0052-lock-domain.md) (why a two-backend domain has no registry), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer a public alias points at), [ADR 0075](0075-reading-the-cgroup-cap-that-already-bounds-us.md) (the first versement from the same source)
+- **Amended by**: [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) — the domain moves to the framework
+- **Related**: [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0052](0052-sdk-lock-domain.md) (why a two-backend domain has no registry), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer a public alias points at), [ADR 0075](0075-reading-the-cgroup-cap-that-already-bounds-us.md) (the first versement from the same source)
 
 ## Context
 
@@ -214,7 +215,7 @@ remains open is marked as such and its reason is unchanged.
 ## References
 
 - [ADR 0031](0031-policy-zero-values-are-never-inert.md) — why the zero `ResolutionValue` is neither readable shape
-- [ADR 0052](0052-lock-domain.md) — the no-registry argument this reuses
+- [ADR 0052](0052-sdk-lock-domain.md) — the no-registry argument this reuses
 - [ADR 0074](0074-what-a-public-alias-may-point-at.md) — why `Config` aliases the service and `ChangedSet` aliases core
 - [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md) — closes six of the seven entries above
 - `gitrepository-layout(5)` — https://git-scm.com/docs/gitrepository-layout

@@ -3,6 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-09
 - **Deciders**: SDK maintainers
+- **Amended by**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) — the v0 licence covers import paths, with no alias left at the old path
 - **Related**: [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (the interface half of this problem), [ADR 0007](0007-sdk-release-and-versioning.md) (bump semantics), [ADR 0017](0017-pkg-bare-module-path.md) (the published module), [ADR 0027](0027-sdk-metrics-domain.md) (the change that triggered this)
 
 ## Context

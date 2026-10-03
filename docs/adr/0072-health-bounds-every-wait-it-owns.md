@@ -1,6 +1,6 @@
 # ADR 0072 — health bounds every wait it owns, including the two that belonged to somebody else
 
-- **Status**: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/health/CLAUDE.md` §Rules from ADR 0072. Before that: Accepted
 - **Date**: 2026-09-12
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0060](0060-sdk-health-domain.md) — the bounds, not the three-probe shape
