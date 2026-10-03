@@ -11,7 +11,7 @@ configuration; snowflake, NanoID and TypeID also offer explicit constructors.
 
 | File | Scheme | Notes |
 |---|---|---|
-| `common.go` | — | shared consts + `readRandom`/`formatUUID`/`parseUUID`/`setUUIDBits`/`putUint48BE` + the Crockford base32 codec (`crockford32Encode`/`crockford32Decode`) shared by ULID and TypeID |
+| `common.go` | — | package doc (why `crypto/rand.Read` is called directly) + shared consts + `formatUUID`/`parseUUID`/`setUUIDBits`/`putUint48BE` + the Crockford base32 codec (`crockford32Encode`/`crockford32Decode`) shared by ULID and TypeID |
 | `uuidv4.go` | `uuidv4` | RFC 9562 §5.4, fully random |
 | `uuidv7.go` | `uuidv7` | RFC 9562 §5.7, 48-bit ms prefix (k-sortable) |
 | `ulid.go` | `ulid` | 48-bit ms + 80-bit random, UPPERCASE Crockford base32 (26 chars) |
