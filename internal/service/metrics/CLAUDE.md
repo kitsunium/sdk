@@ -35,11 +35,11 @@ the excess into a single aggregated overflow series.
 | `gauge.go` | `memGauge` (atomic float64 bits, CAS) |
 | `histogram.go` | `memHistogram` (sorted bounds + atomic counts/sum, delta-consuming snapshot) |
 | `exporter_text.go` / `metric_header.go` | `textExporter` + default **stderr** `Text` + `NewTextExporter`; `metricHeader`, what one `# metric` line says about a name |
-| `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the proto3-JSON scalar types (`otlpInt64`/`otlpUint64`/`otlpDouble`) + the two refusals + `otlpJSONExporter` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter` |
-| `otlp_request.go` | the OTLP payload TREE — a Go mirror of the four `.proto` files, in schema field-number order, restricted to the fields this SDK produces |
-| `exporter_otlphttp.go` | the EMITTER, and the only `net/http` in this package: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + endpoint refusal + response classification + the default client's own connection pool (`newOTLPTransport`) |
-| `otlphttp_config.go` | `OTLPHTTPConfig` (endpoint, client, headers, timeout, response cap) |
-| `otlp_export_response.go` | `ExportMetricsServiceResponse` + `ExportMetricsPartialSuccess` + `otlpLenientInt64`, the number-OR-string 64-bit decoder the specification requires |
+| `exporter_otlpjson.go` | `EncodeOTLPJSON` (the ENCODER — snapshot to bytes, no I/O) + the two refusals + `otlpJSONExporter` over the shared `otlp.Stream` + default **stderr** `OTLPJSON` + `NewOTLPJSONExporter`; the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
+| `otlp_request.go` | the OTLP payload TREE — a Go mirror of `collector/metrics` and `metrics/v1`, in schema field-number order, restricted to the fields this SDK produces; the `common`/`resource` messages and the proto3-JSON scalars it embeds are the shared package's |
+| `exporter_otlphttp.go` | the EMITTER: `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPMetricsPath` + `DefaultOTLPTimeout`/`DefaultOTLPMaxResponseBytes` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
+| `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` (endpoint, client, headers, timeout, response cap — documented there once) |
+| `otlp_export_response.go` | `ExportMetricsPartialSuccess` reduced to `rejectedDataPoints` + `decodeRejected`, the one member of the answer that is this signal's own |
 | `exporter_prometheus.go` | `prometheusExporter` + default **stderr** `Prometheus` + `NewPrometheusExporter` + the two name grammars |
 | `codes.go` / `errors.go` | `0.3.45.*` (INVALID_METRIC_NAME, INVALID_LABEL_NAME, RESERVED_LABEL_NAME, UNSUPPORTED_TEMPORALITY, OTLP_UNRESOLVED_TEMPORALITY, OTLP_INVALID_BUCKET_LAYOUT, OTLP_ENDPOINT_INVALID, OTLP_EXPORT_REJECTED, OTLP_EXPORT_UNAVAILABLE, OTLP_PARTIAL_SUCCESS) |
 
@@ -355,6 +355,21 @@ Each row below has an executable test.
 The description is the one part of the OTel Metric this connector carries
 (`# HELP`).
 
+## The transport is shared, the vocabulary is not
+
+Everything OTLP that is not this signal's payload lives in
+`internal/service/internal/otlp`, shared with `internal/service/trace`: the
+proto3-JSON scalars, the `KeyValue`/`AnyValue`/`ResourceMessage`/`ScopeMessage`
+messages, the single-document marshal, the NDJSON stream, the lenient
+`rejected` decode and the whole OTLP/HTTP sender. The two signals carried
+near-copies of all of it; they differed only in their codes, their wording and
+the name a partial success is counted under, and those three are handed to the
+shared code as `otlpSignal` (an `otlp.SignalSpec`) and the two `EXPORT_FAILED`
+wraps. Every error therefore still reads `0.3.45.*` and this package's words,
+byte for byte — the tests below that assert both ran unchanged across the move.
+The rules this section and the next describe are enforced THERE; they are
+restated here because this is where a metrics reader looks.
+
 ## The OTLP/JSON encoder
 
 Reference: the OTLP specification (<https://opentelemetry.io/docs/specs/otlp/>),
@@ -456,8 +471,8 @@ valid JSON number — including the exponent notation `1e+21`.
 **HTML escaping is OFF.** `encoding/json` escapes `<`, `>` and `&` by default (a
 defence for JSON inside `<script>`); an OTLP body never is, and URL attributes
 (`url.full`, `http.route`) carry `&`. Only `json.Encoder` can turn it off, and it
-appends a newline a single-document body must not carry — hence
-`marshalOTLPJSON`.
+appends a newline a single-document body must not carry — hence the shared
+`otlp.Marshal`.
 
 **An unset `time.Time` encodes as 0.** `UnixNano` is *undefined* out of range:
 the zero `Time` returns `-6795364578871345152`, which as a `uint64` timestamp
@@ -469,8 +484,9 @@ exports is NDJSON); `EncodeOTLPJSON` does not — an HTTP body is one document.
 
 ## The OTLP/HTTP emitter
 
-`exporter_otlphttp.go` is the only file in this package that imports `net/http`.
-It calls `EncodeOTLPJSON` and adds transport, nothing else.
+`exporter_otlphttp.go` calls `EncodeOTLPJSON` and hands the bytes to the shared
+`otlp.Sender`, which is the only code behind this package that opens an
+outbound socket; nothing in this package imports `net/http` for one.
 
 It is **never registered**. The registry is reached by importing a package, and
 arming a *network client* from an import is a step past the hazard ADR 0030
@@ -562,7 +578,7 @@ request will fail the same way. Both halves have a test.
   accepted; turning a malformed or proxied response into a lost-data verdict
   would invent a failure forever. It is also the posture the specification asks
   a receiver to take in the other direction.
-- **`rejectedDataPoints` decodes from a number OR a string** (`otlpLenientInt64`),
+- **`rejectedDataPoints` decodes from a number OR a string** (`otlp.LenientInt64`),
   because the specification says either is accepted on decode and collectors
   differ. A decoder that read one form would silently read every partial success
   as a full one against the other kind.

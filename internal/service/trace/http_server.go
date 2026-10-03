@@ -47,6 +47,13 @@ const (
 // every scanner probing for /wp-admin light up a service's error rate.
 const httpServerErrorFloor int = 500
 
+// The two values url.scheme takes on a server span: the scheme the socket
+// actually spoke, decided by TLS presence alone (see requestScheme).
+const (
+	schemeHTTP  string = "http"
+	schemeHTTPS string = "https"
+)
+
 // ServerMiddleware returns a middleware that traces every inbound request.
 //
 // It is a corenet.Middleware[http.Handler] — the SDK's OWN middleware type,

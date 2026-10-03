@@ -3,18 +3,13 @@
 package metrics
 
 import (
-	"bytes"
-	"encoding/json"
 	"io"
 	"math"
 	"os"
-	"strconv"
-	"sync"
-	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/internal/otlp"
 )
 
 // otlpJSONExporterName is the registered name of the default OTLP/JSON
@@ -38,44 +33,39 @@ const (
 	otlpTemporalityCumulative
 )
 
-// The three spellings proto3 JSON gives a non-finite double. A double is
-// "a number or one of the special string values 'NaN', 'Infinity', and
-// '-Infinity'", so a NaN gauge reading is expressible rather than fatal —
-// unlike encoding/json's own float path, which refuses it outright.
-const (
-	otlpNaN         string = `"NaN"`
-	otlpPosInfinity string = `"Infinity"`
-	otlpNegInfinity string = `"-Infinity"`
+var (
+	// otlpEncodeFailure is the wrap a rendering fault in the shared marshal leaves
+	// under: this signal's EXPORT_FAILED, in its own words. Near-impossible — every
+	// field of the tree is a Go primitive or one of the shared Marshalers — and
+	// still typed rather than swallowed.
+	otlpEncodeFailure = errs.WrapParams{
+		Code:    coremetrics.CodeExportFailed,
+		Reason:  "EXPORT_FAILED",
+		Public:  "The metrics exporter failed to ship the snapshot",
+		Private: "service/metrics: the OTLP/JSON encoder could not render the payload",
+	}
+
+	// otlpWriteFailure is the wrap a writer fault leaves under when the
+	// writer-bound exporter emits a document: this signal's EXPORT_FAILED.
+	otlpWriteFailure = errs.WrapParams{
+		Code:    coremetrics.CodeExportFailed,
+		Reason:  "EXPORT_FAILED",
+		Public:  "The metrics exporter failed to ship the snapshot",
+		Private: "service/metrics: OTLP/JSON exporter writer returned an error",
+	}
+
+	// OTLPJSON is the default OTLP/JSON exporter, registered to write each snapshot
+	// to stderr as one newline-terminated document. Use NewOTLPJSONExporter for a
+	// custom writer/name, EncodeOTLPJSON for the bytes alone, or
+	// NewOTLPHTTPExporter to actually ship them to a collector.
+	//
+	// stderr, not stdout, for the reason ADR 0030 gives in full on Text: importing
+	// a package must never arm a writer on a stream the process may be using as a
+	// protocol channel. This instance is a diagnostic — the production path is
+	// NewOTLPHTTPExporter, which is never registered because arming a network
+	// client on import would be strictly worse than arming a writer.
+	OTLPJSON = coremetrics.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
 )
-
-// otlpDocumentTerminator ends each document a WRITER-bound OTLP exporter emits,
-// so a stream of exports is newline-delimited JSON. It is deliberately NOT part
-// of what EncodeOTLPJSON returns: that is the HTTP body, and a body is one
-// document.
-const otlpDocumentTerminator byte = '\n'
-
-// otlpIntBufferSize pre-sizes a quoted 64-bit decimal: 20 digits, a sign, two
-// quotes, rounded up.
-const otlpIntBufferSize int = 24
-
-// floatFmt / floatPrec are the strconv parameters for a shortest-round-trip
-// double, the same pair the Prometheus connector formats its values with.
-const (
-	floatFmt  byte = 'g'
-	floatPrec int  = -1
-)
-
-// OTLPJSON is the default OTLP/JSON exporter, registered to write each snapshot
-// to stderr as one newline-terminated document. Use NewOTLPJSONExporter for a
-// custom writer/name, EncodeOTLPJSON for the bytes alone, or
-// NewOTLPHTTPExporter to actually ship them to a collector.
-//
-// stderr, not stdout, for the reason ADR 0030 gives in full on Text: importing
-// a package must never arm a writer on a stream the process may be using as a
-// protocol channel. This instance is a diagnostic — the production path is
-// NewOTLPHTTPExporter, which is never registered because arming a network
-// client on import would be strictly worse than arming a writer.
-var OTLPJSON = coremetrics.RegisterExporter(newOTLPJSONExporter(otlpJSONExporterName, os.Stderr))
 
 // otlpJSONExporter writes each snapshot to dst as one OTLP/JSON document.
 //
@@ -85,37 +75,16 @@ var OTLPJSON = coremetrics.RegisterExporter(newOTLPJSONExporter(otlpJSONExporter
 // and a caller who wants them at a collector binds NewOTLPHTTPExporter. Each
 // surface fails in exactly one way.
 //
-// mu serialises the single dst.Write for the reason textExporter's does —
-// core/metrics.Exporter requires concurrency safety and dst is caller-supplied.
-// Encoding happens outside the lock, so a slow writer serialises callers
-// without also serialising the work.
+// The shared stream serialises the single write for the reason textExporter's
+// mutex does — core/metrics.Exporter requires concurrency safety and the
+// writer is caller-supplied. Encoding happens before it, outside the lock, so
+// a slow writer serialises callers without also serialising the work.
 type otlpJSONExporter struct {
-	mu   sync.Mutex
+	// name is the exporter's registry key.
 	name coremetrics.ExporterName
-	dst  io.Writer
+	// stream is the newline-delimited document stream bound to the writer.
+	stream *otlp.Stream
 }
-
-// otlpInt64 is a signed 64-bit integer rendered as a DECIMAL STRING.
-//
-// That is the proto3 JSON mapping OTLP inherits — "64-bit integer numbers in
-// JSON-encoded payloads are encoded as decimal strings" — and the reason is
-// range, not taste: a JSON number is a double in most parsers, so an int64 past
-// 2^53 loses its low bits on the way through. Every 64-bit field of this
-// payload uses it, including the two timestamps, which are always past 2^53.
-type otlpInt64 int64
-
-// otlpUint64 is an unsigned 64-bit integer rendered as a decimal string, for
-// the same reason otlpInt64 is: fixed64 and uint64 both map to a string.
-type otlpUint64 uint64
-
-// otlpDouble is an IEEE-754 double rendered as a JSON number, or as one of the
-// three quoted spellings proto3 JSON gives a non-finite value.
-//
-// encoding/json refuses NaN and ±Inf outright ("json: unsupported value"), so
-// without this type a single NaN gauge reading would fail the whole export.
-// The model allows the value — a gauge is whatever was sampled — and the
-// specification says how to spell it, so the encoder spells it.
-type otlpDouble float64
 
 // EncodeOTLPJSON renders snap as ONE OTLP/JSON ExportMetricsServiceRequest —
 // exactly the bytes that go in the body of a POST to /v1/metrics under
@@ -163,47 +132,15 @@ func EncodeOTLPJSON(snap coremetrics.SnapshotValue) (doc []byte, err error) {
 	//: is one Resource and one Scope, so there is nothing to group. Each level
 	//: is a named local, so no composite literal nests deeper than it reads.
 	scope := otlpScopeMetrics{
-		Scope:   otlpScope{Name: snap.Scope.Name, Version: snap.Scope.Version},
+		Scope:   otlp.ScopeOf(snap.Scope),
 		Metrics: list,
 	}
 	resource := otlpResourceMetrics{
-		Resource:     otlpResource{Attributes: otlpAttrs(snap.Resource.Attrs)},
+		Resource:     otlp.ResourceOf(snap.Resource),
 		ScopeMetrics: []otlpScopeMetrics{scope},
 	}
-	//: marshal the tree with HTML escaping off — see marshalOTLPJSON.
-	return marshalOTLPJSON(otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}})
-}
-
-// marshalOTLPJSON renders request with HTML escaping DISABLED and no trailing
-// newline.
-//
-// encoding/json escapes '<', '>' and '&' into their \u00xx forms by default, a
-// defence for JSON embedded in a <script> element. An OTLP body is never
-// embedded in HTML, and OTel-conventional attributes carry URLs (url.full,
-// http.route) whose query separators are exactly '&' — so the default turns a
-// readable payload into an unreadable one for no gain, and makes this SDK's
-// bytes differ from every other OTLP producer's for the same input.
-// json.Encoder is the only way to turn it off, and it appends a newline that a
-// single-document body must not carry.
-func marshalOTLPJSON(request otlpRequest) (doc []byte, err error) {
-	//: encode into a local buffer so the escaping switch is available.
-	var buf bytes.Buffer
-	encoder := json.NewEncoder(&buf)
-	//: '&' in a URL attribute stays '&'.
-	encoder.SetEscapeHTML(false)
-	//: the only failure mode left is a type encoding/json cannot render, and
-	//: every field of this tree is a Go primitive or a Marshaler defined here.
-	if encodeErr := encoder.Encode(request); encodeErr != nil {
-		//: report it typed rather than swallowing an impossible case.
-		return nil, errs.Wrap(encodeErr, errs.WrapParams{
-			Code:    coremetrics.CodeExportFailed,
-			Reason:  "EXPORT_FAILED",
-			Public:  "The metrics exporter failed to ship the snapshot",
-			Private: "service/metrics: the OTLP/JSON encoder could not render the payload",
-		})
-	}
-	//: Encode appends a newline; the HTTP body is one document, so drop it.
-	return bytes.TrimSuffix(buf.Bytes(), []byte{otlpDocumentTerminator}), nil
+	//: marshal the tree with HTML escaping off — see otlp.Marshal.
+	return otlp.Marshal(otlpRequest{ResourceMetrics: []otlpResourceMetrics{resource}}, &otlpEncodeFailure)
 }
 
 // otlpMetricList flattens the snapshot's three name-keyed maps into the single
@@ -215,7 +152,7 @@ func marshalOTLPJSON(request otlpRequest) (doc []byte, err error) {
 // determinism is what makes the output diffable and its tests writable.
 func otlpMetricList(snap coremetrics.SnapshotValue) (list []otlpMetric, err error) {
 	//: the window is one pair per snapshot and is copied down onto each point.
-	start, end := otlpUnixNano(snap.StartTime), otlpUnixNano(snap.Time)
+	start, end := otlp.UnixNano(snap.StartTime), otlp.UnixNano(snap.Time)
 	//: sums first — Counters and UpDownCounters share this map.
 	list, err = appendOTLPSums(list, snap.Sums, start, end)
 	//: abort the whole document on a refusal.
@@ -241,7 +178,7 @@ func otlpMetricList(snap coremetrics.SnapshotValue) (list []otlpMetric, err erro
 // A Counter and an UpDownCounter both land here, told apart by isMonotonic —
 // the OTel model's own economy, and the reason there is one point shape for two
 // instruments.
-func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlpUint64) (metrics []otlpMetric, err error) {
+func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValue, start, end otlp.Uint64) (metrics []otlpMetric, err error) {
 	//: names first, so the document is stable across runs.
 	for _, name := range sortedKeys(sums) {
 		metric := sums[name]
@@ -266,7 +203,7 @@ func appendOTLPSums(list []otlpMetric, sums map[string]coremetrics.SumMetricValu
 
 // otlpSumPoints renders one sum name's series as NumberDataPoints carrying
 // asInt, because a sum in this SDK is an int64 accumulator.
-func otlpSumPoints(series []coremetrics.SumValue, start, end otlpUint64) []otlpNumberDataPoint {
+func otlpSumPoints(series []coremetrics.SumValue, start, end otlp.Uint64) []otlpNumberDataPoint {
 	//: exactly-sized: one data point per series.
 	points := make([]otlpNumberDataPoint, 0, len(series))
 	//: the series are already sorted by attribute set by Collect.
@@ -275,8 +212,8 @@ func otlpSumPoints(series []coremetrics.SumValue, start, end otlpUint64) []otlpN
 		points = append(points, otlpNumberDataPoint{
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
-			AsInt:             new(otlpInt64(point.Value)),
-			Attributes:        otlpAttrs(point.Attrs),
+			AsInt:             new(otlp.Int64(point.Value)),
+			Attributes:        otlp.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.
@@ -286,7 +223,7 @@ func otlpSumPoints(series []coremetrics.SumValue, start, end otlpUint64) []otlpN
 // appendOTLPGauges renders each gauge name as one Metric carrying a Gauge
 // message. A Gauge has no aggregationTemporality field — a sampled reading
 // covers no window — so there is nothing here to refuse.
-func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlpUint64) []otlpMetric {
+func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetricValue, start, end otlp.Uint64) []otlpMetric {
 	//: same name-ordered walk as sums.
 	for _, name := range sortedKeys(gauges) {
 		//: one Metric per name; the Gauge envelope has a single field.
@@ -300,7 +237,7 @@ func appendOTLPGauges(list []otlpMetric, gauges map[string]coremetrics.GaugeMetr
 
 // otlpGaugePoints renders one gauge name's series as NumberDataPoints carrying
 // asDouble, because a gauge reading is a float64.
-func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlpUint64) []otlpNumberDataPoint {
+func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlp.Uint64) []otlpNumberDataPoint {
 	//: exactly-sized: one data point per series.
 	points := make([]otlpNumberDataPoint, 0, len(series))
 	//: one point per series, in the snapshot's canonical order.
@@ -309,8 +246,8 @@ func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlpUint64) []o
 		points = append(points, otlpNumberDataPoint{
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
-			AsDouble:          new(otlpDouble(point.Value)),
-			Attributes:        otlpAttrs(point.Attrs),
+			AsDouble:          new(otlp.Double(point.Value)),
+			Attributes:        otlp.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.
@@ -319,7 +256,7 @@ func otlpGaugePoints(series []coremetrics.GaugeValue, start, end otlpUint64) []o
 
 // appendOTLPHistograms renders each histogram name as one Metric carrying a
 // Histogram message of explicit-bucket data points.
-func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlpUint64) (metrics []otlpMetric, err error) {
+func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.HistogramMetricValue, start, end otlp.Uint64) (metrics []otlpMetric, err error) {
 	//: same name-ordered walk as sums.
 	for _, name := range sortedKeys(histograms) {
 		metric := histograms[name]
@@ -354,7 +291,7 @@ func appendOTLPHistograms(list []otlpMetric, histograms map[string]coremetrics.H
 // Counts ride through unchanged: the snapshot stores them PER BUCKET and OTLP's
 // bucketCounts is per bucket too, so unlike the Prometheus connector — which
 // has to build a cumulative ladder as it walks — there is nothing to convert.
-func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start, end otlpUint64) (points []otlpHistogramDataPoint, err error) {
+func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start, end otlp.Uint64) (points []otlpHistogramDataPoint, err error) {
 	//: exactly-sized: one data point per series.
 	rendered := make([]otlpHistogramDataPoint, 0, len(series))
 	//: one point per series, each with its own bucket ladder to check.
@@ -369,11 +306,11 @@ func otlpHistogramPoints(name string, series []coremetrics.HistogramValue, start
 		rendered = append(rendered, otlpHistogramDataPoint{
 			StartTimeUnixNano: start,
 			TimeUnixNano:      end,
-			Count:             otlpUint64(point.Count),
-			Sum:               new(otlpDouble(point.Sum)),
+			Count:             otlp.Uint64(point.Count),
+			Sum:               new(otlp.Double(point.Sum)),
 			BucketCounts:      otlpBucketCounts(point.Counts),
 			ExplicitBounds:    otlpExplicitBounds(point.Bounds),
-			Attributes:        otlpAttrs(point.Attrs),
+			Attributes:        otlp.Attrs(point.Attrs),
 		})
 	}
 	//: hand back the rendered points.
@@ -447,64 +384,10 @@ func checkOTLPBucketLayout(name string, point coremetrics.HistogramValue) error 
 	return nil
 }
 
-// otlpAttrs renders an attribute set as the repeated KeyValue every OTLP
-// message spells its dimensions with. An empty set stays nil, which
-// encoding/json omits — the proto3 rule for an empty repeated field.
-func otlpAttrs(attrs []coreotel.AttrValue) []otlpKeyValue {
-	//: the dimensionless series has no attributes array at all.
-	if len(attrs) == 0 {
-		//: omitted by the omitempty tag.
-		return nil
-	}
-	//: exactly-sized; the set is already sorted by Key.
-	pairs := make([]otlpKeyValue, len(attrs))
-	//: one KeyValue per dimension, in the snapshot's canonical order.
-	for i, attr := range attrs {
-		//: the AnyValue oneof carries the TYPE OTLP has and Prometheus lacks.
-		pairs[i] = otlpKeyValueOf(attr)
-	}
-	//: hand back the rendered set.
-	return pairs
-}
-
-// otlpKeyValueOf maps one typed attribute onto a KeyValue whose AnyValue names
-// the attribute's kind.
-//
-// Exactly one AnyValue field is non-nil, and it is emitted even when it holds
-// the type's zero: a oneof member has explicit presence, so an absent field
-// means "no case selected", not "the default". Bool("cache.hit", false) must
-// therefore encode as {"boolValue":false} and not as {}.
-func otlpKeyValueOf(attr coreotel.AttrValue) otlpKeyValue {
-	//: one oneof case per attribute kind.
-	switch attr.Kind() {
-	//: the common dimension.
-	case coreotel.AttrKindString:
-		//: stringValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{StringValue: new(attr.Str())}}
-	//: a flag.
-	case coreotel.AttrKindBool:
-		//: boolValue — false is a value, not an absence.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{BoolValue: new(attr.Bool())}}
-	//: a signed 64-bit integer, which rides as a decimal string.
-	case coreotel.AttrKindInt64:
-		//: intValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{IntValue: new(otlpInt64(attr.Int64()))}}
-	//: an IEEE-754 double, non-finite values included.
-	case coreotel.AttrKindFloat64:
-		//: doubleValue.
-		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{DoubleValue: new(otlpDouble(attr.Float64()))}}
-	//: AttrKindInvalid never reaches a snapshot — the meter panics on it at
-	//: the call site that wrote it.
-	default:
-		//: an empty AnyValue selects no case, which is what "no value" is.
-		return otlpKeyValue{Key: attr.Key}
-	}
-}
-
 // otlpBucketCounts widens the snapshot's per-bucket counts into the 64-bit
 // decimal strings the wire wants. The values are unchanged: the snapshot is
 // already per bucket, which is what OTLP asks for.
-func otlpBucketCounts(counts []uint64) []otlpUint64 {
+func otlpBucketCounts(counts []uint64) []otlp.Uint64 {
 	//: a histogram always has at least the overflow slot, but a hand-built
 	//: point could be empty and an empty repeated field is omitted.
 	if len(counts) == 0 {
@@ -512,11 +395,11 @@ func otlpBucketCounts(counts []uint64) []otlpUint64 {
 		return nil
 	}
 	//: exactly-sized copy in wire order.
-	ladder := make([]otlpUint64, len(counts))
+	ladder := make([]otlp.Uint64, len(counts))
 	//: one bucket count per slot, verbatim.
 	for i, count := range counts {
 		//: only the JSON rendering differs.
-		ladder[i] = otlpUint64(count)
+		ladder[i] = otlp.Uint64(count)
 	}
 	//: hand back the rendered ladder.
 	return ladder
@@ -525,7 +408,7 @@ func otlpBucketCounts(counts []uint64) []otlpUint64 {
 // otlpExplicitBounds renders the declared upper bounds. The field is
 // explicit_bounds in the schema, which is why the snapshot calls it Bounds
 // rather than Buckets.
-func otlpExplicitBounds(bounds []float64) []otlpDouble {
+func otlpExplicitBounds(bounds []float64) []otlp.Double {
 	//: a histogram with no declared bound is one +Inf bucket, and an empty
 	//: repeated field is omitted.
 	if len(bounds) == 0 {
@@ -533,40 +416,20 @@ func otlpExplicitBounds(bounds []float64) []otlpDouble {
 		return nil
 	}
 	//: exactly-sized copy in ascending order.
-	ladder := make([]otlpDouble, len(bounds))
+	ladder := make([]otlp.Double, len(bounds))
 	//: every bound is finite here — checkOTLPBucketLayout ran first.
 	for i, bound := range bounds {
 		//: only the JSON rendering differs.
-		ladder[i] = otlpDouble(bound)
+		ladder[i] = otlp.Double(bound)
 	}
 	//: hand back the rendered ladder.
 	return ladder
 }
 
-// otlpUnixNano converts a wall-clock instant to the fixed64 nanosecond
-// timestamp OTLP carries, mapping an unset instant onto 0.
-//
-// The guard is not defensive noise. time.Time's own documentation says
-// UnixNano's "result is undefined if the Unix time in nanoseconds cannot be
-// represented by an int64", and the zero Time is exactly that case: it returns
-// a large negative number which, cast to uint64, becomes a timestamp several
-// centuries in the future. A snapshot built by hand rather than by a Meter is
-// the reachable path, and it would ship silently wrong rather than visibly
-// empty. Zero is what the schema already means by an unknown timestamp.
-func otlpUnixNano(instant time.Time) otlpUint64 {
-	//: the unset instant, and a pre-1970 one, have no unsigned spelling.
-	if instant.IsZero() || instant.UnixNano() < 0 {
-		//: the schema's own "unknown" value, rather than a wrapped one.
-		return 0
-	}
-	//: in range and positive.
-	return otlpUint64(instant.UnixNano())
-}
-
 // newOTLPJSONExporter is the shared constructor.
 func newOTLPJSONExporter(name coremetrics.ExporterName, dst io.Writer) *otlpJSONExporter {
-	//: a stateless writer-bound exporter.
-	return &otlpJSONExporter{name: name, dst: dst}
+	//: a writer-bound exporter whose only state is the shared stream's lock.
+	return &otlpJSONExporter{name: name, stream: otlp.NewStream(dst, &otlpWriteFailure)}
 }
 
 // NewOTLPJSONExporter returns an Exporter writing each snapshot to dst as one
@@ -597,68 +460,6 @@ func (e *otlpJSONExporter) Export(snap coremetrics.SnapshotValue) error {
 		//: the sentinel already carries the code, reason and public message.
 		return err
 	}
-	//: terminate the document so consecutive exports do not run together.
-	doc = append(doc, otlpDocumentTerminator)
-	//: single write — serialised so concurrent Exports cannot interleave
-	//: partial documents into a non-atomic dst.
-	e.mu.Lock()
-	_, writeErr := e.dst.Write(doc)
-	e.mu.Unlock()
-	//: success fast-path.
-	if writeErr == nil {
-		//: snapshot written.
-		return nil
-	}
-	//: wrap the writer fault with the dotted-quad code.
-	return errs.Wrap(writeErr, errs.WrapParams{
-		Code:    coremetrics.CodeExportFailed,
-		Reason:  "EXPORT_FAILED",
-		Public:  "The metrics exporter failed to ship the snapshot",
-		Private: "service/metrics: OTLP/JSON exporter writer returned an error",
-	})
-}
-
-// MarshalJSON renders the integer as a quoted decimal string.
-func (v otlpInt64) MarshalJSON() (encoded []byte, err error) {
-	//: quote, digits, quote — no escaping is possible inside a decimal.
-	out := make([]byte, 0, otlpIntBufferSize)
-	out = append(out, '"')
-	out = strconv.AppendInt(out, int64(v), decimalBase)
-	//: json.Marshal never sees an error from a decimal rendering.
-	return append(out, '"'), nil
-}
-
-// MarshalJSON renders the integer as a quoted decimal string.
-func (v otlpUint64) MarshalJSON() (encoded []byte, err error) {
-	//: quote, digits, quote.
-	out := make([]byte, 0, otlpIntBufferSize)
-	out = append(out, '"')
-	out = strconv.AppendUint(out, uint64(v), decimalBase)
-	//: json.Marshal never sees an error from a decimal rendering.
-	return append(out, '"'), nil
-}
-
-// MarshalJSON renders the double shortest-round-trip, or names it when it is
-// not finite.
-func (v otlpDouble) MarshalJSON() (encoded []byte, err error) {
-	//: a value that is not a number has a name rather than a rendering.
-	value := float64(v)
-	//: NaN first — it fails every ordered comparison below.
-	if math.IsNaN(value) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpNaN), nil
-	}
-	//: +Inf.
-	if math.IsInf(value, 1) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpPosInfinity), nil
-	}
-	//: -Inf.
-	if math.IsInf(value, -1) {
-		//: the schema's spelling, quoted.
-		return []byte(otlpNegInfinity), nil
-	}
-	//: finite: shortest representation that round-trips, which is a JSON
-	//: number in every form strconv produces (123, 1.5, 1e+21, -1.5e-08).
-	return strconv.AppendFloat(nil, value, floatFmt, floatPrec, floatBitSize), nil
+	//: one terminated document, one write, under this signal's EXPORT_FAILED.
+	return e.stream.Emit(doc)
 }

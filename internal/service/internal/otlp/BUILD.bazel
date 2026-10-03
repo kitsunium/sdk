@@ -1,0 +1,52 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "otlp",
+    srcs = [
+        "any_value.go",
+        "http_config.go",
+        "key_value.go",
+        "marshal.go",
+        "otlp.go",
+        "resource_message.go",
+        "response.go",
+        "scalar.go",
+        "scope_message.go",
+        "sender.go",
+        "signal_spec.go",
+        "stream.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/internal/otlp",
+    visibility = [
+        "//internal/service:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/otel",
+        "//internal/kernel/errs",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":otlp",
+    visibility = [
+        "//internal/service:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "otlp_test",
+    srcs = [
+        "sender_external_test.go",
+        "wire_external_test.go",
+    ],
+    deps = [
+        ":otlp",
+        "//internal/core/otel",
+        "//internal/kernel/errs",
+    ],
+)

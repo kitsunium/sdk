@@ -506,8 +506,8 @@ func TestOTLPHTTPReturnsFromACollectorThatNeverStopsSending(t *testing.T) {
 // reason. What the drain decides is whether reuse happens at all; without it,
 // every export opens a connection of its own.
 //
-// Seen failing: with closeOTLPResponse reduced to the Close alone, the padded
-// case printed, in 10 runs out of 10,
+// Seen failing: with the shared sender's closeResponse reduced to the Close
+// alone, the padded case printed, in 10 runs out of 10,
 //
 //	3 exports opened 3 connections; not one found its predecessor's idle, so the drain never reached the end of the response
 //
@@ -606,10 +606,10 @@ func TestOTLPHTTPDefaultClientOwnsItsConnectionPool(t *testing.T) {
 // and it reads the environment once per process. So the export runs in a child
 // process started with HTTP_PROXY pointing at this test's server and an
 // endpoint that cannot resolve: the proxy seeing the request is the only way the
-// child can succeed. Both branches of newOTLPTransport are driven — the clone,
-// and the fallback taken when http.DefaultTransport is no *http.Transport.
+// child can succeed. Both branches of the shared newTransport are driven — the
+// clone, and the fallback taken when http.DefaultTransport is no *http.Transport.
 //
-// Seen failing: with newOTLPTransport returning a bare &http.Transport{}, both
+// Seen failing: with newTransport returning a bare &http.Transport{}, both
 // cases printed
 //
 //	the child's export did not reach the collector through HTTP_PROXY: exit status 1

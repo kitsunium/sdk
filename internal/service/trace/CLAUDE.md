@@ -26,14 +26,14 @@ Code range: `0.3.50.*` (ADR 0051).
 | `idgen.go` | `NewTraceID` / `NewSpanID` + `readRandom` |
 | `recorder.go` / `recorder_config.go` | `Recorder` + `Sink` / `Collect` / `Len` / `Dropped`; `RecorderConfig` |
 | `record_error.go` | `RecordError` — the conventional `exception` event |
-| `otlp_request.go` | the Go mirror of `trace.proto` / `common.proto` / `resource.proto`, in FIELD-NUMBER order |
-| `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter + `OTLPJSON` (registered, stderr) |
-| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` + the default client's own connection pool (`newOTLPTransport`) — the only file with an outbound socket |
-| `otlphttp_config.go` | `OTLPHTTPConfig` |
-| `otlp_export_response.go` | the partial-success body + the lenient 64-bit decoder |
+| `otlp_request.go` | the Go mirror of `collector/trace` and `trace.proto`, in FIELD-NUMBER order; the `common.proto` / `resource.proto` messages and the proto3-JSON scalars are the shared package's |
+| `exporter_otlpjson.go` | `EncodeOTLPJSON` + the writer-bound exporter over the shared `otlp.Stream` + `OTLPJSON` (registered, stderr) + the two `EXPORT_FAILED` wraps the shared marshal and stream leave under |
+| `exporter_otlphttp.go` | `NewOTLPHTTPExporter` + `OTLPRetryable` + `OTLPTracesPath` + `otlpSignal`, this signal's `otlp.SignalSpec` — its codes and wording for every verdict the shared sender reaches |
+| `otlphttp_config.go` | `OTLPHTTPConfig`, a DEFINED type over the shared `otlp.HTTPConfig` |
+| `otlp_export_response.go` | `ExportTracePartialSuccess` reduced to `rejectedSpans` + `decodeRejected` — the one member of the answer that is this signal's own |
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
 | `http_client.go` | `ClientMiddleware` + `tracedRoundTripper` |
-| `numeric.go` | the strconv parameters shared by the encoder and the samplers |
+| `numeric.go` | the shortest-round-trip rendering a refused sampling ratio is reported with |
 | `codes.go` | `Code*` constants — range 0.3.50.* |
 | `errors.go` | `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
 
@@ -117,6 +117,13 @@ matter of degree: **there is no endpoint that could be a correct default**, so a
 registered emitter would POST at whatever answers on an address the caller never
 named — inside a cluster, a real host belonging to somebody else.
 `TestOTLPHTTPExporterIsNeverRegistered` pins the absence.
+
+Its transport is `internal/service/internal/otlp`'s `Sender`, shared with
+`internal/service/metrics`: the two emitters were near-copies, and they differed
+only in their codes, their wording and the name a partial success counts under,
+which this package hands over as `otlpSignal`. Every verdict still carries
+`0.3.50.*` and this package's words, byte for byte, and every test below ran
+unchanged across the move. What follows is enforced there and restated here.
 
 It is a connector, written like `writer/nettransport`: bounded response read, no
 redirects (CWE-918 — an unfollowed `30x` classifies as the permanent rejection a
