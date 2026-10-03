@@ -3,7 +3,6 @@ module github.com/kitsunium/sdk/internal/service
 go 1.27.1
 
 require (
-	github.com/fxamacker/cbor/v2 v2.9.3
 	github.com/kitsunium/sdk/internal/core v0.1.16
 	github.com/kitsunium/sdk/internal/kernel v0.1.16
 	github.com/pelletier/go-toml/v2 v2.4.3
@@ -20,7 +19,6 @@ require (
 	github.com/rogpeppe/go-internal v1.14.1 // indirect
 	github.com/stretchr/testify v1.11.1 // indirect
 	github.com/vmihailenco/tagparser/v2 v2.0.0 // indirect
-	github.com/x448/float16 v0.8.4 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )
 
