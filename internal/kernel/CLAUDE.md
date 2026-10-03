@@ -76,7 +76,7 @@ As of the 2026-04-19 audit (extended by ADR 0006 to admit `ring`):
   answer about it — no release, no update, no product — and its vocabulary is
   SemVer's and the Go toolchain's, which every Go program shares. It ships with
   one in-tree consumer, `internal/service/proc/self` (pseudo-versions); the two
-  callers of `x/mod/semver`, `selfupdate` and `entitlement`, move to the
+  callers of `x/mod/semver`, `selfupdate` and `entitlement`, moved to the
   framework (ADR 0158) and reach it through `pkg/v1/semver`, the alias that
   exists for exactly that reason (ADR 0159 §4). Written from the
   specifications, not from x/mod's source; x/mod's test vectors are what the

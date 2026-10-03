@@ -50,10 +50,11 @@ the analyzer, the generator, `kit check`.
 5. **Release.** Lockstep with the rest of the chain: `framework/vX` at the
    same `X` as `pkg/vX` (ADR 0147 §9). `go.mod` requires `pkg` and
    `internal/kernel` at the last release and replaces them with the tree;
-   the release commit pins and drops the replaces. Its one vendor requirement
-   is `golang.org/x/mod`, for the `semver` the entitlement and self-update
-   engines compare versions with, until the SDK publishes its own (ADR 0158
-   §2); a connector carries its own vendor in its own module.
+   the release commit pins and drops the replaces. It requires no vendor: the
+   entitlement and self-update engines compare versions with `pkg/v1/semver`,
+   the SDK's standard-library semver (ADR 0156 §4, ADR 0158 §2), which
+   replaced `golang.org/x/mod`; a connector carries its own vendor in its own
+   module.
 
 ## Verification
 

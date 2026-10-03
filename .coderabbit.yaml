@@ -36,10 +36,12 @@ reviews:
         Service layer: concrete implementations. May import stdlib,
         internal/kernel, internal/core, other internal/service packages (a
         lateral import is permitted, not tolerated: internal/CLAUDE.md
-        §Dependency direction, ADR 0054 §D7) and the vetted modules
-        internal/service/go.mod requires (the codec libraries,
-        golang.org/x/mod). Must NOT import pkg/* or the repository's
-        third-party/ tree (ADR 0068).
+        §Dependency direction, ADR 0054 §D7). internal/service/go.mod requires
+        no module outside the SDK: every codec is written on the standard
+        library and the semver is internal/kernel/semver (ADR 0156), so a new
+        vendor import here is a finding — a vendor library is a third-party/
+        module of its own (ADR 0157). Must NOT import pkg/* or the
+        repository's third-party/ tree (ADR 0068).
     - path: "pkg/v1/**"
       instructions: |
         Public stable v1 API. Frozen post-v1.0.0. Type aliases onto

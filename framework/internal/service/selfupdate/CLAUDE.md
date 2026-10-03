@@ -11,10 +11,10 @@ framework's; its range `0.3.66.*` kept its value (ADR 0160). It reaches the SDK
 through `pkg/v1/*` and `internal/kernel/errs` alone (framework/CLAUDE.md rule
 1): the Windows refusal is `pkg/v1/proc`'s `UnsupportedPlatform`.
 
-Its only non-stdlib dependency is `golang.org/x/mod/semver`, which is itself
-stdlib-pure — three functions (`Compare`, `IsValid`, `Prerelease`), no transitive
-module. It is a requirement of the framework module until the SDK publishes a
-semver of its own, which ADR 0158 §2 routes every version through.
+It depends on no module outside the SDK. Versions are compared through
+`pkg/v1/semver` — `Compare`, `IsValid`, `Prerelease`, with the names and answers
+of `golang.org/x/mod/semver`, which it replaced (ADR 0156 §4) — the SDK's own
+semver that ADR 0158 §2 routes every version through.
 
 ## Contents
 

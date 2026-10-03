@@ -8,10 +8,11 @@ Six forwarding functions — no type, no behaviour of its own. Stdlib-only →
 dep-light; cross-OS portable.
 
 It exists for the framework. The distribution mechanisms that compare versions
-— `selfupdate`, `entitlement` — move out of the SDK into `framework/`
+— `selfupdate`, `entitlement` — moved out of the SDK into `framework/`
 (ADR 0158), which reaches the SDK through `pkg/v1` and `kernel/errs` only
-(ADR 0147). Without this package they would have to keep `golang.org/x/mod` in
-the framework's graph, or re-implement precedence a third time. It sits at the
+(ADR 0147), and call this package. Without it they would have kept
+`golang.org/x/mod` in the framework's graph, or re-implemented precedence a
+third time. It sits at the
 root of `pkg/v1`, beside `errs` and `clock`: a value every family may compare
 and none owns (ADR 0159 §4).
 

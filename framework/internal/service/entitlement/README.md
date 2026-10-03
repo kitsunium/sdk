@@ -286,7 +286,7 @@ RequestActionsToken exchanges the runner's credentials for an OIDC token.
 The audience is ours and is set here rather than taken from anywhere: a workflow must not be able to ask for a token this verifier will then accept for a purpose it never agreed to.
 
 <a name="RequiresUpdate"></a>
-## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L51>)
+## func [RequiresUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L50>)
 
 ```go
 func RequiresUpdate(current, floor string) bool
@@ -309,7 +309,7 @@ Two cases deliberately do NOT require an update:
 The asymmetry is the point. A binary cannot demonstrate it is at or above a bar it cannot name, and the action that resolves it — install a published build — is precisely what coreent.ErrUpdateRequired already asks for. The cost is stated where it is paid: an anchored build whose version stamp failed is refused, and the ordinary unanchored developer loop never reaches this function at all because enforceLicense returns before Verify is called.
 
 <a name="UpdateRefusal"></a>
-## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L125>)
+## func [UpdateRefusal](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L124>)
 
 ```go
 func UpdateRefusal(current, floor string) error
@@ -730,7 +730,7 @@ WithVersion records the binary's own version so Verify can apply the roster's ma
 It is a separate call rather than a constructor parameter because pkg/license must not import the command package that owns the version string, and because a caller with nothing to declare — a test, a tool embedding the check — should not have to invent one.
 
 <a name="UpdateRequiredError"></a>
-## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L103-L108>)
+## type [UpdateRequiredError](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L102-L107>)
 
 UpdateRequiredError is the refusal raised when a binary sits below the roster's floor. It carries both versions as FIELDS, not just in its message, because the caller has to act on the floor and not merely print it: after upgrading it must check that the newly installed build actually clears the bar.
 
@@ -746,7 +746,7 @@ type UpdateRequiredError struct {
 ```
 
 <a name="UpdateRequiredError.Error"></a>
-### func \(\*UpdateRequiredError\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L112>)
+### func \(\*UpdateRequiredError\) [Error](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L111>)
 
 ```go
 func (e *UpdateRequiredError) Error() string
@@ -755,7 +755,7 @@ func (e *UpdateRequiredError) Error() string
 Error renders both versions: "from what, to what" is the only question anyone asks at that point.
 
 <a name="UpdateRequiredError.Unwrap"></a>
-### func \(\*UpdateRequiredError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L119>)
+### func \(\*UpdateRequiredError\) [Unwrap](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/version.go#L118>)
 
 ```go
 func (e *UpdateRequiredError) Unwrap() error

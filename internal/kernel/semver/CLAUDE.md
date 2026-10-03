@@ -10,9 +10,9 @@ signature — so it passes SDK rule 1 like `heap` and `pathchain` did.
 
 Its consumers are `internal/service/proc/self` (pseudo-versions, in place of
 `x/mod/module`) and, through the public alias `pkg/v1/semver`, the distribution
-mechanisms (`selfupdate`, `entitlement`) once they live in the framework, which
-reaches the SDK only through `pkg/v1` (ADR 0147). Until they move they still
-import `x/mod/semver`, and `internal/service/go.mod` still requires it.
+mechanisms (`selfupdate`, `entitlement`), which live in the framework (ADR 0158)
+and reach the SDK only through `pkg/v1` (ADR 0147). With them switched, no
+`go.mod` of the SDK or the framework requires `golang.org/x/mod` any more.
 
 Emits **no error codes**: every function answers with a value or a `bool`, as
 x/mod's do, so the package needs no `PP` range, no `codeRangeOwners` row and no

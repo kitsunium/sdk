@@ -21,11 +21,10 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/mod/semver"
-
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
+	"github.com/kitsunium/sdk/pkg/v1/semver"
 )
 
 // Service constants for GitHub API, versioning, and file operations.

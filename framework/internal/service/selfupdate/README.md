@@ -342,7 +342,7 @@ type Getter = coreupd.Getter
 ```
 
 <a name="Service"></a>
-## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L68-L104>)
+## type [Service](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L67-L103>)
 
 Service replaces the running binary with a newer signed release of the product its SourceValue names. It manages version checking via GitHub API and binary replacement. goos/goarch are captured at construction time so the per\-platform asset resolution \(\`getBinaryName\`, \`getArchiveSuffix\`, \`innerBinaryName\`\) is stable per\-instance — tests can construct a literal with explicit values instead of mutating package\-level \`runtimeGOOS\`/\`runtimeGOARCH\` \(which would race under t.Parallel\).
 
@@ -353,7 +353,7 @@ type Service struct {
 ```
 
 <a name="NewService"></a>
-### func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L111>)
+### func [NewService](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L110>)
 
 ```go
 func NewService(version string, src SourceValue) *Service
@@ -364,7 +364,7 @@ NewService creates a new updater instance.
 The returned Service carries NO vendor key and therefore installs nothing: callers chain \`.WithVendorKey\(...\)\` with the build's linked\-in anchor. That is deliberate — see WithVendorKey in signature.go.
 
 <a name="NewUpdaterWithDeps"></a>
-### func [NewUpdaterWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L140>)
+### func [NewUpdaterWithDeps](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L139>)
 
 ```go
 func NewUpdaterWithDeps(version string, src SourceValue, client Getter, fs FileSystem, copier Copier) *Service
@@ -386,7 +386,7 @@ func (u *Service) AuthoriseUnattendedUpgrade(out io.Writer, in io.Reader, intera
 AuthoriseUnattendedUpgrade decides whether an upgrade nobody asked for may proceed for this Service: an explicit environment answer first, then the product's own consent \(WithAutomaticConsent\), then the source's prompt rule.
 
 <a name="Service.CheckForUpdate"></a>
-### func \(\*Service\) [CheckForUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L155>)
+### func \(\*Service\) [CheckForUpdate](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L154>)
 
 ```go
 func (u *Service) CheckForUpdate() (info UpdateValue, checkErr error)
@@ -413,7 +413,7 @@ func (u *Service) ListCandidates() (candidates []CandidateValue, listErr error)
 ListCandidates returns all available release candidates.
 
 <a name="Service.Upgrade"></a>
-### func \(\*Service\) [Upgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L182>)
+### func \(\*Service\) [Upgrade](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/selfupdate/updater.go#L181>)
 
 ```go
 func (u *Service) Upgrade() (info UpdateValue, upgradeErr error)
