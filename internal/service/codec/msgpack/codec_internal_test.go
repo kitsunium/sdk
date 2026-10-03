@@ -116,11 +116,11 @@ func Test_msgpackCodec_Unmarshal(t *testing.T) {
 		wantErr string
 	}
 	tests := []tc{
-		//: malformed byte 0xc1 (reserved/never-used) drives the library
-		//: decode error → UNMARSHAL_FAILED wrap.
+		//: malformed byte 0xc1 (reserved/never-used) is refused by the header
+		//: table → UNMARSHAL_FAILED.
 		{"malformed-byte-fails", []byte{0xc1}, "UNMARSHAL_FAILED"},
-		//: input one byte past maxMsgPackBytes trips the size-cap guard
-		//: (lines 116-124) before any decode — the DoS defence branch.
+		//: input one byte past maxMsgPackBytes trips the size-cap guard in
+		//: Unmarshal before any decode — the DoS defence branch.
 		{"over-cap-rejected", make([]byte, maxMsgPackBytes+1), "UNMARSHAL_FAILED"},
 	}
 	runCase := func(t *testing.T, tc tc) {
@@ -205,12 +205,11 @@ func (c *countingReader) Read(p []byte) (int, error) {
 
 // oversizedBinStream returns a MessagePack bin32 value (header 0xc6) whose
 // declared payload length is body bytes, followed by exactly that many filler
-// bytes. The vendor reads the bin body incrementally up to the declared
-// length; sizing body past maxMsgPackBytes lets the test assert the streaming
-// cap. The bin (not map32) header is used deliberately: the vendor clamps bin
-// growth to bytesAllocLimit, so the unhardened path reads the whole oversized
-// body without the catastrophic map pre-alloc — keeping the regression test
-// memory-safe while still proving the byte cap is (un)enforced.
+// bytes. Sizing body past maxMsgPackBytes makes the declared length longer
+// than the stream may deliver: the framer refuses it at the header, before
+// reading or reserving the body. The test was written against the vendor
+// decoder, which read the body until the stream's limit cut it; it pins the
+// bound, so it holds for both.
 func oversizedBinStream(body int) []byte {
 	//: 0xc6 = bin32, then a 32-bit big-endian payload length.
 	out := []byte{
@@ -227,8 +226,8 @@ func oversizedBinStream(body int) []byte {
 // streaming NewDecoder must inherit the maxMsgPackBytes cap Unmarshal enforces
 // so an oversized value cannot drive unbounded reads/allocation (CWE-400 /
 // CWE-1284). Before the io.LimitReader fix the decoder pulled the entire
-// oversized body from the reader; after it, the read is bounded to
-// maxMsgPackBytes+1 and the truncated decode surfaces as UNMARSHAL_FAILED.
+// oversized body from the reader; now the stream is limited to one byte past
+// maxMsgPackBytes and a declared length beyond it surfaces as UNMARSHAL_FAILED.
 func Test_msgpackCodec_NewDecoder_StreamingDoS(t *testing.T) {
 	t.Parallel()
 	type tc struct {
