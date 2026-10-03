@@ -121,7 +121,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_2F_00: "internal/service/app/validation",
 	0x00_03_30_00: "internal/service/data/cache",
 	0x00_03_31_00: "internal/service/app/lifecycle",
-	0x00_03_32_00: "internal/service/observe/trace",
+	0x00_03_32_00: "internal/core/observe/trace",
 	0x00_03_33_00: "internal/service/app/lock",
 	0x00_03_34_00: "internal/service/app/events",
 	0x00_03_35_00: "internal/service/data/queue",

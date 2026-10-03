@@ -243,22 +243,22 @@ var (
 	// DuplicateRegistration is the boot-time registry panic sentinel.
 	DuplicateRegistration = coretrace.DuplicateRegistration
 	// EntropyFailed reports a crypto/rand failure while minting an identifier.
-	EntropyFailed = svctrace.EntropyFailed
+	EntropyFailed = coretrace.EntropyFailed
 	// InvalidSampleRatio reports a fraction Ratio will not accept — including
 	// exactly 0, which also spells "unconfigured".
-	InvalidSampleRatio = svctrace.InvalidSampleRatio
+	InvalidSampleRatio = coretrace.InvalidSampleRatio
 	// OTLPInvalidSpanContext reports a span with an all-zero identifier.
-	OTLPInvalidSpanContext = svctrace.OTLPInvalidSpanContext
+	OTLPInvalidSpanContext = coretrace.OTLPInvalidSpanContext
 	// OTLPSpanNotEnded reports a span that reached the encoder unended.
-	OTLPSpanNotEnded = svctrace.OTLPSpanNotEnded
+	OTLPSpanNotEnded = coretrace.OTLPSpanNotEnded
 	// OTLPEndpointInvalid reports an endpoint that cannot address a collector.
-	OTLPEndpointInvalid = svctrace.OTLPEndpointInvalid
+	OTLPEndpointInvalid = coretrace.OTLPEndpointInvalid
 	// OTLPExportRejected reports a permanent refusal by the collector.
-	OTLPExportRejected = svctrace.OTLPExportRejected
+	OTLPExportRejected = coretrace.OTLPExportRejected
 	// OTLPExportUnavailable reports a transient failure worth retrying.
-	OTLPExportUnavailable = svctrace.OTLPExportUnavailable
+	OTLPExportUnavailable = coretrace.OTLPExportUnavailable
 	// OTLPPartialSuccess reports an accepted request with rejected spans.
-	OTLPPartialSuccess = svctrace.OTLPPartialSuccess
+	OTLPPartialSuccess = coretrace.OTLPPartialSuccess
 
 	// The four attribute constructors below are the shared model's own, the
 	// ones [github.com/kitsunium/sdk/pkg/v1/observe/metrics] delegates to, so a value

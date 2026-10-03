@@ -22,7 +22,7 @@ import (
 // none, and it cannot be produced by forgetting anything.
 func TestRatioRefusesZeroBecauseZeroIsAmbiguous(t *testing.T) {
 	sampler, err := svctrace.Ratio(0)
-	if !errors.Is(err, svctrace.InvalidSampleRatio) {
+	if !errors.Is(err, coretrace.InvalidSampleRatio) {
 		t.Fatalf("Ratio(0) must be refused, got %v", err)
 	}
 	if sampler != nil {
@@ -45,7 +45,7 @@ func TestRatioRefusalsAndAcceptances(t *testing.T) {
 	}
 	for _, tc := range refused {
 		t.Run("refused/"+tc.name, func(t *testing.T) {
-			if _, err := svctrace.Ratio(tc.fraction); !errors.Is(err, svctrace.InvalidSampleRatio) {
+			if _, err := svctrace.Ratio(tc.fraction); !errors.Is(err, coretrace.InvalidSampleRatio) {
 				t.Fatalf("Ratio(%v) must be refused, got %v", tc.fraction, err)
 			}
 		})

@@ -342,7 +342,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 	recorder := svctrace.NewRecorder(svctrace.RecorderConfig{})
 	tracer := svctrace.NewTracer(svctrace.TracerConfig{Sink: recorder.Sink()})
 	_, span := tracer.Start(t.Context(), "op", coretrace.SpanParams{})
-	svctrace.RecordError(span, svctrace.OTLPPartialSuccess)
+	svctrace.RecordError(span, coretrace.OTLPPartialSuccess)
 	span.End()
 
 	recorded := recorder.Collect().Spans[0]
@@ -350,7 +350,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 		t.Fatalf("events = %+v, want one %q event", recorded.Events, coretrace.ExceptionEventName)
 	}
 	attrs := recorded.Events[0].Attrs
-	code, ok := errs.CodeOf(svctrace.OTLPPartialSuccess)
+	code, ok := errs.CodeOf(coretrace.OTLPPartialSuccess)
 	if !ok {
 		t.Fatal("the sentinel must carry a dotted-quad code")
 	}
@@ -361,7 +361,7 @@ func TestRecordErrorWritesTheConventionalExceptionEvent(t *testing.T) {
 		t.Error("RecordError must also mark the span ERROR")
 	}
 	//: a nil span and a nil error are no-ops rather than panics.
-	svctrace.RecordError(nil, svctrace.OTLPPartialSuccess)
+	svctrace.RecordError(nil, coretrace.OTLPPartialSuccess)
 	svctrace.RecordError(span, nil)
 }
 

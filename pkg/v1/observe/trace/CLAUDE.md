@@ -30,7 +30,7 @@ alphabetical order.
 | Export | `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`, `RegisterExporter`, `LookupExporter`, `AvailableExporters`, `Export` |
 | Attributes | `String`, `Bool`, `Int64`, `Float64` |
 | Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported`, `MaxTraceStateMembers`; the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
-| Sentinels | core: `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `InvalidAttribute`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`; service: `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess` |
+| Sentinels | all aliased from `internal/core/observe/trace` (ADR 0074): its own `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `InvalidAttribute`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`, and the engine's `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess`, declared there since ADR 0160 |
 
 ## `trace.Attr` IS `metrics.Attr`
 

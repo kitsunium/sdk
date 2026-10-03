@@ -161,13 +161,13 @@ func checkOTLPSpan(span coretrace.SpanValue) error {
 	if !span.Context.IsValid() {
 		//: the span NAME is structure and safe to echo; the ids are not
 		//: secret, but they are noise in a log line about a shape defect.
-		return errs.Wrap(OTLPInvalidSpanContext, errs.WrapParams{}, errs.String("span", span.Name))
+		return errs.Wrap(coretrace.OTLPInvalidSpanContext, errs.WrapParams{}, errs.String("span", span.Name))
 	}
 	//: endTimeUnixNano is required. A zero would claim the span ended at the
 	//: Unix epoch, which renders as a span 56 years long.
 	if span.EndTime.IsZero() {
 		//: name the span, which is structure and safe to echo.
-		return errs.Wrap(OTLPSpanNotEnded, errs.WrapParams{}, errs.String("span", span.Name))
+		return errs.Wrap(coretrace.OTLPSpanNotEnded, errs.WrapParams{}, errs.String("span", span.Name))
 	}
 	//: expressible.
 	return nil

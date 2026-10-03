@@ -219,7 +219,7 @@ func TestEncodeOTLPJSONRefusesAnInvalidSpanContext(t *testing.T) {
 		EndTime:   time.Unix(0, fixtureRootEnd),
 	}}}
 	doc, err := svctrace.EncodeOTLPJSON(batch)
-	if !errors.Is(err, svctrace.OTLPInvalidSpanContext) {
+	if !errors.Is(err, coretrace.OTLPInvalidSpanContext) {
 		t.Fatalf("want OTLPInvalidSpanContext, got %v", err)
 	}
 	if doc != nil {
@@ -234,7 +234,7 @@ func TestEncodeOTLPJSONRefusesAnUnendedSpan(t *testing.T) {
 	batch := fixtureSpans(t)
 	batch.Spans[1].EndTime = time.Time{}
 	doc, err := svctrace.EncodeOTLPJSON(batch)
-	if !errors.Is(err, svctrace.OTLPSpanNotEnded) {
+	if !errors.Is(err, coretrace.OTLPSpanNotEnded) {
 		t.Fatalf("want OTLPSpanNotEnded, got %v", err)
 	}
 	if doc != nil {

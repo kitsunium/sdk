@@ -16,8 +16,12 @@ of the import graph.
 Concrete implementations — the tracer, the samplers, the recorder, the OTLP/JSON
 encoder, the HTTP middlewares — live in `internal/service/observe/trace`.
 
-Code range: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
-attribute model moved to `internal/core/observe/otel`).
+Code ranges: `0.2.20.*` (ADR 0051; `0.2.20.7` `INVALID_ATTRIBUTE` since the
+attribute model moved to `internal/core/observe/otel`), and `0.3.50.*` — the range
+ADR 0051 allocated to the engine, `internal/service/observe/trace`, declared here
+since ADR 0160 §2 with its values unchanged (`ENTROPY_FAILED`,
+`INVALID_SAMPLE_RATIO` and the six `OTLP_*`). The engine returns those sentinels
+and declares none; `codeRangeOwners` maps both keys to this directory.
 
 ## Contents
 
@@ -42,8 +46,8 @@ attribute model moved to `internal/core/observe/otel`).
 | `scope.go` | `DefaultScopeName` + `NormalizeScope` (the shared rule, with this signal's default) |
 | `attrs.go` | this signal's half of the shared attribute model: `ValidateAttrs` / `SortAttrs` / `NormalizeResource`, delegating the RULES to `internal/core/observe/otel` and refusing with this package's `InvalidAttribute` |
 | `exporter.go` | `SpanExporter` + `ExporterName` + registry (`RegisterExporter` / `LookupExporter` / `AvailableExporters` / `Export`) over `internal/kernel/plugin.Registry`, the table `core/observe/metrics`' exporter registry runs on too |
-| `codes.go` | `Code*` constants — range 0.2.20.* |
-| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute` |
+| `codes.go` | `Code*` constants — range 0.2.20.*, and the engine's 0.3.50.* |
+| `errors.go` | `InvalidTraceParent` / `InvalidTraceState` / `UnknownExporter` / `ExportFailed` / `DuplicateRegistration` / `InvalidSpanName` / `InvalidAttribute`; and the engine's `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
 
 ## The one rule everything else follows from
 

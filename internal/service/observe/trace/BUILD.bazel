@@ -5,9 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "trace",
     srcs = [
-        "codes.go",
         "config.go",
-        "errors.go",
         "exporter_otlphttp.go",
         "exporter_otlpjson.go",
         "http_client.go",
@@ -47,13 +45,6 @@ alias(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )
 
 go_test(

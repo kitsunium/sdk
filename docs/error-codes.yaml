@@ -1881,35 +1881,35 @@ codes:
   - code: "0.3.50.1"
     const: CodeEntropyFailed
     hex: "0x00_03_32_01"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.2"
     const: CodeInvalidSampleRatio
     hex: "0x00_03_32_02"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.3"
     const: CodeOTLPInvalidSpanContext
     hex: "0x00_03_32_03"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.4"
     const: CodeOTLPSpanNotEnded
     hex: "0x00_03_32_04"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.5"
     const: CodeOTLPEndpointInvalid
     hex: "0x00_03_32_05"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.6"
     const: CodeOTLPExportRejected
     hex: "0x00_03_32_06"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.7"
     const: CodeOTLPExportUnavailable
     hex: "0x00_03_32_07"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.50.8"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_32_08"
-    package: internal/service/observe/trace
+    package: internal/core/observe/trace
   - code: "0.3.51.1"
     const: CodeLockFenceCorrupt
     hex: "0x00_03_33_01"

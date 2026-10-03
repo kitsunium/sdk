@@ -42,28 +42,28 @@ const rejectedFieldKey string = "rejected_spans"
 // own codes (0.3.50.5-8) and its own wording, byte for byte what this exporter
 // returned before the transport was shared.
 var otlpSignal = otlp.SignalSpec{
-	EndpointInvalid: OTLPEndpointInvalid,
+	EndpointInvalid: coretrace.OTLPEndpointInvalid,
 	EndpointUnparsable: errs.WrapParams{
-		Code:    CodeOTLPEndpointInvalid,
+		Code:    coretrace.CodeOTLPEndpointInvalid,
 		Reason:  "OTLP_ENDPOINT_INVALID",
 		Public:  "The OTLP endpoint must be an absolute http(s) URL with a path",
 		Private: "service/observe/trace: the configured OTLP endpoint could not be parsed as a URL",
 	},
 	RequestUnbuildable: errs.WrapParams{
-		Code:    CodeOTLPExportRejected,
+		Code:    coretrace.CodeOTLPExportRejected,
 		Reason:  "OTLP_EXPORT_REJECTED",
 		Public:  "The trace collector rejected the export",
 		Private: "service/observe/trace: the OTLP/HTTP request could not be built",
 	},
 	TransportFault: errs.WrapParams{
-		Code:    CodeOTLPExportUnavailable,
+		Code:    coretrace.CodeOTLPExportUnavailable,
 		Reason:  "OTLP_EXPORT_UNAVAILABLE",
 		Public:  "The trace collector is unavailable",
 		Private: "service/observe/trace: the OTLP/HTTP request failed before a response was read",
 	},
-	Rejected:       OTLPExportRejected,
-	Unavailable:    OTLPExportUnavailable,
-	PartialSuccess: OTLPPartialSuccess,
+	Rejected:       coretrace.OTLPExportRejected,
+	Unavailable:    coretrace.OTLPExportUnavailable,
+	PartialSuccess: coretrace.OTLPPartialSuccess,
 	RejectedField:  rejectedFieldKey,
 	DecodeRejected: decodeRejected,
 }
@@ -138,7 +138,7 @@ func NewOTLPHTTPExporter(name coretrace.ExporterName, cfg OTLPHTTPConfig) (expor
 // exporter classifies instead of looping.
 func OTLPRetryable(err error) bool {
 	//: one code carries the transient verdict; HasCode walks the wrap trail.
-	return errs.HasCode(err, CodeOTLPExportUnavailable)
+	return errs.HasCode(err, coretrace.CodeOTLPExportUnavailable)
 }
 
 // Name implements core/observe/trace.SpanExporter.

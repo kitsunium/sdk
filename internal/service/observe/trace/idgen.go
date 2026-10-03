@@ -71,7 +71,7 @@ func readRandom(b []byte) error {
 	}
 	//: wrap the CSPRNG fault with the dotted-quad entropy code.
 	return errs.Wrap(err, errs.WrapParams{
-		Code:    CodeEntropyFailed,
+		Code:    coretrace.CodeEntropyFailed,
 		Reason:  "ENTROPY_FAILED",
 		Public:  "Trace identifier generation failed to read secure random bytes",
 		Private: "service/observe/trace: crypto/rand.Read returned an error",

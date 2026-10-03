@@ -12,7 +12,9 @@ Everything here is written from the OpenTelemetry and W3C specifications with th
 standard library. Nothing imports `go.opentelemetry.io`; nothing imports a
 protobuf runtime.
 
-Code range: `0.3.50.*` (ADR 0051).
+Code range: `0.3.50.*` (ADR 0051), declared in `internal/core/observe/trace` since
+ADR 0160 §2 beside the core's own `0.2.20.*`: this package returns those
+sentinels as `coretrace.X` and declares none.
 
 ## Contents
 
@@ -34,8 +36,7 @@ Code range: `0.3.50.*` (ADR 0051).
 | `http_server.go` | `ServerMiddleware` + the semantic-convention keys + `statusRecorder` |
 | `http_client.go` | `ClientMiddleware` + `tracedRoundTripper` |
 | `numeric.go` | the shortest-round-trip rendering a refused sampling ratio is reported with |
-| `codes.go` | `Code*` constants — range 0.3.50.* |
-| `errors.go` | `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` |
+| `internal/core/observe/trace` | the codes (range 0.3.50.*) and sentinels — `EntropyFailed` / `InvalidSampleRatio` / `OTLPInvalidSpanContext` / `OTLPSpanNotEnded` / `OTLPEndpointInvalid` / `OTLPExportRejected` / `OTLPExportUnavailable` / `OTLPPartialSuccess` — declared in the core since ADR 0160; this package declares none |
 
 ## `Ratio(0)` is refused — the ADR 0031 answer
 
