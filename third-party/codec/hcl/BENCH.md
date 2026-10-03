@@ -10,7 +10,7 @@ It costs a great deal, and the number is not close. This page exists so that
 "opt-in" is understood as a real decision rather than a formality.
 
 Every row encodes the **same Go value**: the fixtures carry `hcl` and `json`
-struct tags side by side, and `fxamacker/cbor` falls back to the `json` tag, so
+struct tags side by side, and the `cbor` codec falls back to the `json` tag, so
 JSON and CBOR — the two codecs a consumer gets without opting into anything —
 encode exactly what HCL encodes. The documents are configuration files, because
 that is what HCL is for.

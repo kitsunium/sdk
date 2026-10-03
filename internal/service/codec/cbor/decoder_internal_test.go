@@ -3,8 +3,6 @@ package cbor
 import (
 	"bytes"
 	"testing"
-
-	gocbor "github.com/fxamacker/cbor/v2"
 )
 
 // Test_cborDecoder_Decode covers both a success path and a malformed-input
@@ -22,7 +20,7 @@ func Test_cborDecoder_Decode(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &cborDecoder{inner: gocbor.NewDecoder(bytes.NewReader(tc.data))}
+		dec := &cborDecoder{r: bytes.NewReader(tc.data), walk: validator{limit: maxCBORNestedLevels}}
 		var out map[string]any
 		err := dec.Decode(&out)
 		//: treat EOF on the empty case as non-error.
@@ -48,7 +46,7 @@ func Test_cborDecoder_More(t *testing.T) {
 	tests := []tc{{"idempotent before any Decode"}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &cborDecoder{inner: gocbor.NewDecoder(bytes.NewReader(nil))}
+		dec := &cborDecoder{r: bytes.NewReader(nil), walk: validator{limit: maxCBORNestedLevels}}
 		first := dec.More()
 		second := dec.More()
 		if first != second {
