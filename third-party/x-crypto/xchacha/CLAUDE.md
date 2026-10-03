@@ -12,10 +12,11 @@ box, _ := crypto.SealAs(crypto.XChaCha20Poly1305, k, plaintext, aad)
 ```
 
 This is the **only** place `golang.org/x/crypto` enters a build for this scheme —
-declared in the **root umbrella `go.mod`** under `third-party/x-crypto`, which no
-other module requires. So `pkg/v1/crypto` consumers stay **dep-light** (zero
-`x/crypto`) unless they opt in with this blank import — the same pattern as the
-AWS writers under `third-party/aws/*` (ADR 0012).
+declared in the `go.mod` of the **`third-party/x-crypto` module** it shares with
+argon2id (ADR 0157), which nothing in the SDK requires. So `pkg/v1/crypto`
+consumers stay **dep-light** (zero `x/crypto`) unless they opt in with this blank
+import — the same pattern as the AWS writers under `third-party/aws/*`
+(ADR 0012) — and the opt-in brings no other vendor.
 
 ## Why XChaCha20-Poly1305
 
@@ -89,6 +90,6 @@ ships no amd64 assembly for it.
 ## Verification
 
 ```sh
-# from the repo root (root umbrella module)
-GOWORK=off go test -race -cover ./third-party/x-crypto/xchacha/...
+# from the module root, as a consumer builds it (ADR 0157)
+cd third-party/x-crypto && GOWORK=off go test -race -cover ./xchacha/...
 ```

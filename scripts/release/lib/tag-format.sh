@@ -53,22 +53,37 @@ is_valid_framework_tag() {
   [[ "$1" =~ $FRAMEWORK_TAG_REGEX ]]
 }
 
-# is_valid_chain_tag <tag> — one of the three shapes a release chain carries.
+# Vendor-module tags (ADR 0157): `third-party/<path>/vX.Y.Z`, one per vendor
+# module — `third-party/aws/v0.17.0`, `third-party/db/writer/mysql/v0.17.0`,
+# `third-party/x-crypto/v0.17.0`. Each module requires internal/* exactly, so
+# it is cut in the same lockstep, at the same X.Y.Z. A path component is
+# lowercase and may carry a hyphen (`x-crypto`), as the directory does; at least
+# one component is required, so a bare `third-party/vX.Y.Z` is no module's tag.
+THIRD_PARTY_TAG_REGEX='^third-party(/[a-z][a-z0-9-]*)+/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# Test a vendor-module tag against the canonical shape. Exits 0 on match.
+is_valid_third_party_tag() {
+  [[ "$1" =~ $THIRD_PARTY_TAG_REGEX ]]
+}
+
+# is_valid_chain_tag <tag> — one of the four shapes a release chain carries.
 is_valid_chain_tag() {
   case "$1" in
     pkg/*) is_valid_tag "$1" ;;
     internal/*) is_valid_internal_tag "$1" ;;
     framework/*) is_valid_framework_tag "$1" ;;
+    third-party/*) is_valid_third_party_tag "$1" ;;
     *) return 1 ;;
   esac
 }
 
 # chain_modules [go.work] — the modules a release tags, one directory per line,
 # read from the workspace's `use` directives with the root module (`.`) left
-# out: it is the umbrella that hosts third-party/ and nothing requires it
-# (ADR 0012). Deriving the chain from go.work is what makes a module added to
-# the workspace released without anyone editing this file — ADR 0137's census
-# argument, applied to tags (ADR 0147 §9).
+# out: nothing requires it and it is never tagged (ADR 0012) — every vendor
+# integration it used to host is a workspace module of its own now (ADR 0157).
+# Deriving the chain from go.work is what makes a module added to the workspace
+# released without anyone editing this file — ADR 0137's census argument,
+# applied to tags (ADR 0147 §9).
 #
 # It REFUSES rather than guesses: a missing go.work, one it cannot read, or one
 # whose chain lacks `pkg` is an exit 1 with the reason on stderr, because a
@@ -78,8 +93,10 @@ is_valid_chain_tag() {
 # Output order: internal/* first (by name — the tags are pushed atomically, so
 # no order among them matters), then pkg, then framework, then connectors —
 # the order each requires the one before, which is the order a reader of the
-# dry-run expects. Both `use ./x` and a parenthesised `use ( ... )` block are
-# read; a `//` comment and blank lines are skipped.
+# dry-run expects — and every other module last, by name: the vendor modules
+# under third-party/ (ADR 0157), which require internal/* and nothing above.
+# Both `use ./x` and a parenthesised `use ( ... )` block are read; a `//`
+# comment and blank lines are skipped.
 chain_modules() {
   local work="${1:-go.work}" dirs="" rc=0
   if [ ! -r "$work" ]; then

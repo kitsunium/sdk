@@ -371,7 +371,7 @@ the code.
   transactions, PostgreSQL's aborted state, a statement log, and failures at a
   named statement. It verifies neither the SQL an engine accepts nor SKIP
   LOCKED; `sql_statements_external_test.go` pins the text, and
-  `third-party/db/sql` runs the broker on the three real engines under the
+  `e2e/integration/sql` runs the broker on the three real engines under the
   `integration` tag — see its CLAUDE.md.
 - **`TestSQLAPublicationExistsIfAndOnlyIfItsTransactionCommits`** is the SQL
   broker's reason to exist, and **`TestSQLStatementsPerCall`** what each call
@@ -443,5 +443,5 @@ delivery count incremented. That is a contract now: a broker that answered
 - ADR 0139 — docstore over SQL, whose transaction rules the SQL broker follows
 - ADR 0151 — the SQL broker, the growing retry delay, `Rejecter`, `DeadLetterManager`
 - `internal/core/queue/CLAUDE.md` — the port and the five decisions
-- `third-party/db/sql/CLAUDE.md` — the SQL broker on the three real engines
+- `e2e/integration/sql/CLAUDE.md` — the SQL broker on the three real engines
 - `BENCH.md` — the cost of durability, and the two defects the numbers found

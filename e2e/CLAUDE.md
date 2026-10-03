@@ -11,29 +11,41 @@ kernels by `.github/workflows/e2e-cross.yml` (GitHub's Linux, macOS and Windows
 runners, the three BSDs, OmniOS and Oracle Solaris in VMs) and, on demand, on the lab's VMs by
 `.github/workflows/e2e-vm.yml`.
 
+The module also hosts the **Docker-backed integration suites** under
+`integration/` (ADR 0157): the SQL mechanisms and the database writers against
+real servers started by testcontainers-go. They are tests behind the
+`integration` tag, not part of the binary, and they live here because this
+module is the one no consumer requires — see `integration/CLAUDE.md`.
+
 ## Shape
 
 ```
 e2e/
 ├── go.mod              own module (github.com/kitsunium/sdk/e2e); replace → ../pkg + ../internal/*
+│                       + ../third-party/db/writer/* (the writer suites)
 ├── main.go            orchestrator: conformanceGroups() lists every domain, exit 1 when any check fails
 ├── harness/           the runner
 │   ├── harness.go      Status, Result, Run, watchedRun (CheckTimeout), safeRun, report (table + summary)
 │   └── checkgroup.go   Check, CheckGroup — a domain's named group of checks
-└── checks/            one file per domain group; each exports func <Domain>() harness.CheckGroup
-    ├── codec.go        Marshal/Unmarshal round-trip per Format
-    ├── crypto.go       AEAD seal/open, hash, sign, kdf, password, mac, agree
-    ├── logger.go        logger (buffer capture + level filter)
-    ├── errs.go          errs (code/reason introspection, Public/Private, degradation)
-    ├── proc_spawn.go   process (exit/stdio/group-stop) + rlimit (trampoline readback) + signal
-    ├── cgroup.go        cgroup (limit readback from /sys/fs/cgroup, freeze/thaw/kill)
-    ├── reaper.go        reaper (subreaper acquisition + orphan adoption)
-    └── proc_systemd.go  sdnotify (readiness round-trip) + sdlisten (activation env)
+├── checks/            one file per domain group; each exports func <Domain>() harness.CheckGroup
+│   ├── codec.go        Marshal/Unmarshal round-trip per Format
+│   ├── crypto.go       AEAD seal/open, hash, sign, kdf, password, mac, agree
+│   ├── logger.go        logger (buffer capture + level filter)
+│   ├── errs.go          errs (code/reason introspection, Public/Private, degradation)
+│   ├── proc_spawn.go   process (exit/stdio/group-stop) + rlimit (trampoline readback) + signal
+│   ├── cgroup.go        cgroup (limit readback from /sys/fs/cgroup, freeze/thaw/kill)
+│   ├── reaper.go        reaper (subreaper acquisition + orphan adoption)
+│   └── proc_systemd.go  sdnotify (readiness round-trip) + sdlisten (activation env)
+└── integration/       Docker-backed suites, //go:build integration only — see integration/CLAUDE.md
+    ├── sql/            pkg/v1/{sql,docstore,queue} on SQLite, PostgreSQL 17, MySQL 8.4
+    └── writer/         third-party/db/writer/{clickhouse,mysql,redis} against real servers
 ```
 
 ## Rules
 
-- **Platform-neutral Go, no build tags.** The public API compiles on every GOOS
+- **Platform-neutral Go, no build tags** — in the binary (`main.go`, `harness/`,
+  `checks/`); `integration/` is the one subtree behind a tag, so the default
+  build of every census lane compiles none of it. The public API compiles on every GOOS
   and returns a typed `UnsupportedPlatform` off its native platform, so each
   check calls it on any OS and branches: `perrs.HasCode(err,
   coreproc.CodeUnsupportedPlatform)` → `harness.NotSupported` (a *success*, the
@@ -58,7 +70,9 @@ e2e/
   the conformance lane, so a laptop without cgroup delegation stays green.
 - Imports may reach `internal/*` for the sentinel **codes only** (the e2e binary
   is internal tooling, not a consumer) — this is why it sits outside the Bazel
-  graph the layer firewall queries (`.bazelignore`; ADR 0068).
+  graph the layer firewall queries (`.bazelignore`; ADR 0068). The one exception
+  is `integration/writer/*`, whose suites drive `internal/core/writer`'s registry
+  exactly as they did beside the writer packages they test.
 
 ## Build system
 
@@ -72,5 +86,6 @@ e2e/
 ## Do NOT
 
 - Add build tags to a check — branch on the runtime `UnsupportedPlatform` result.
+- Import `integration/` from the binary, or drop a suite's `integration` tag.
 - Assert on a nil error alone — read the observable effect back.
 - Add it to `go.work` or a Bazel target (it breaks `go_deps`; keep it go-build-only).

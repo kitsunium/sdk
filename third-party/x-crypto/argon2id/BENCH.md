@@ -204,8 +204,8 @@ theirs are faster.
 
 (That same file is also why this package is quarantined: `blamka_amd64.go`
 imports `golang.org/x/sys/cpu`, the dependency the four inner modules ban. The
-root `go.mod` carries it as an indirect. ADR 0012's placement is load-bearing,
-not stylistic.)
+`third-party/x-crypto` module's `go.mod` carries it as an indirect (ADR 0157).
+ADR 0012's placement is load-bearing, not stylistic.)
 
 ## The constant-time comparison — corroborated, and left alone
 

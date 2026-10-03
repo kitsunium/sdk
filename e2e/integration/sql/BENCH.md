@@ -1,4 +1,4 @@
-<!-- generated from third-party/db/sql/docstore_bench_test.go — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./third-party/db/sql/` to refresh (Docker for PostgreSQL and MySQL); the pattern matches BenchmarkSQLStoreVersions too -->
+<!-- generated from e2e/integration/sql/docstore_bench_test.go (third-party/db/sql/ until ADR 0157) — run `GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./integration/sql/` in e2e/ to refresh (Docker for PostgreSQL and MySQL); the pattern matches BenchmarkSQLStoreVersions too -->
 # Benchmarks — the document store over SQL, on real engines
 
 These numbers answer the question ADR 0139's cost table leaves open:
@@ -111,7 +111,7 @@ rows it is read against.
 | Git branch | `feat/docstore-versions` |
 | Git commit | `cdcbe78f` (pre-commit: the tree these rows ship with) |
 | Generated (UTC) | 2026-09-28, load average 2.1 / 2.3 / 3.6 |
-| Command | `GOWORK=off go test -tags integration -run '^$' -bench 'BenchmarkSQLStoreVersions\|BenchmarkSQLStore$' -benchmem -benchtime=2s ./third-party/db/sql/` |
+| Command | `GOWORK=off go test -tags integration -run '^$' -bench 'BenchmarkSQLStoreVersions\|BenchmarkSQLStore$' -benchmem -benchtime=2s ./third-party/db/sql/` — the suite's path before ADR 0157 moved it to `e2e/integration/sql/` |
 
 ```
 BenchmarkSQLStore/sqlite/Get-10                     227197       10496 ns/op      1379 B/op       37 allocs/op

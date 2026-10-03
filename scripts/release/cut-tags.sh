@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
-# scripts/release/cut-tags.sh — read the bump token `pkg` on stdin (from
-# compute-bumps.sh), compute the next tag, then publish a `go get`-able tag
-# chain (ADR 0009): rewrite every chain module's go.mod to drop `replace` and pin
-# its intra-repo deps to the release version, commit that on a detached release
-# commit, and tag internal/{kernel,core,service} + pkg at the same version so a
-# consumer resolves the whole graph from the proxy with no local context.
+# scripts/release/cut-tags.sh — read the bump tokens on stdin (from
+# compute-bumps.sh: `pkg`, `framework`, `third-party`), compute the next tag,
+# then publish a `go get`-able tag chain (ADR 0009): rewrite every chain module's
+# go.mod to drop `replace` and pin its intra-repo deps to the release version,
+# commit that on a detached release commit, and tag every chain module —
+# internal/{kernel,core,service}, pkg, the framework and its connectors, the
+# vendor modules under third-party/ — at the same version so a consumer resolves
+# the whole graph from the proxy with no local context.
 #
 # The public module is the bare `github.com/kitsunium/sdk/pkg` (no /vN suffix —
 # Go forbids it; the consumer packages live under the pkg/v1/ directory). Its
@@ -43,8 +45,9 @@ here="$(cd "$(dirname "$0")" && pwd)"
 # The release chain is every workspace module but the root, read from go.work
 # by chain_modules (lib/tag-format.sh — ADR 0147 §9): internal/* (tagged only
 # so pkg resolves without `replace`; Go's internal/ rule still blocks a direct
-# consumer import), pkg, the framework and its connectors. All are tagged at
-# one version and cross-pinned, so the published graph resolves from the proxy.
+# consumer import), pkg, the framework and its connectors, and the vendor
+# modules under third-party/ (ADR 0157). All are tagged at one version and
+# cross-pinned, so the published graph resolves from the proxy.
 
 DRY_RUN=0
 ALLOW_BOOTSTRAP=0
@@ -58,7 +61,8 @@ for arg in "$@"; do
     --bump=*) BUMP="${arg#--bump=}" ;;
     --help | -h)
       cat <<EOF
-cut-tags.sh — read the bump token 'pkg' on stdin, publish the next tag chain.
+cut-tags.sh — read the bump tokens ('pkg', 'framework', 'third-party') on stdin,
+publish the next tag chain.
 
 Usage: $0 [--dry-run] [--allow-bootstrap] [--range=<rev>..HEAD]
           [--bump=patch|minor|major] < bump.txt
@@ -295,8 +299,9 @@ bump_for_pkg() {
 }
 
 # SDK_PREFIX is every module of the chain: `…/internal/*`, `…/pkg`,
-# `…/framework`, `…/framework/connectors/*`. The root module is the bare
-# `github.com/kitsunium/sdk` — without the slash — and nothing requires it.
+# `…/framework`, `…/framework/connectors/*`, `…/third-party/*`. The root module
+# is the bare `github.com/kitsunium/sdk` — without the slash — and nothing
+# requires it.
 SDK_PREFIX="github.com/kitsunium/sdk/"
 
 # sdk_deps_of <go.mod> — echo the intra-repo module paths this go.mod
@@ -376,7 +381,8 @@ publish_chain() {
   for d in "${chain_dirs[@]}"; do tags+=("$d/$sem"); done
 
   # Validate every tag before touching the repo, each against the shape of its
-  # family: pkg, internal/*, framework(/connectors/*) — lib/tag-format.sh.
+  # family: pkg, internal/*, framework(/connectors/*), third-party/* —
+  # lib/tag-format.sh.
   for t in "${tags[@]}"; do
     is_valid_chain_tag "$t" || {
       echo "cut-tags: refusing to push malformed chain tag '$t'" >&2
@@ -415,7 +421,7 @@ publish_chain() {
       # clone pointed `core.hooksPath` at the in-repo hooks, which every clone
       # was told to do until ADR 0153 removed them; a clone may still carry a
       # hooks path of its own. What the gates would have checked is already
-      # checked: this commit changes nothing but four go.mod files, and
+      # checked: this commit changes nothing but the chain's go.mod files, and
       # `assert_publishable` verifies each of them above.
       local before
       before="$(git rev-parse HEAD)"
@@ -439,20 +445,20 @@ publish_chain() {
   return "$rc"
 }
 
-# The tokens are read in full first. `pkg` and `framework` both mean "the chain
-# changed" and the chain is released in lockstep (ADR 0147 §9), so any number
-# of valid tokens publishes it ONCE — a second pass would find the tag it just
-# pushed and cut the next patch on top of it.
+# The tokens are read in full first. `pkg`, `framework` and `third-party` all
+# mean "the chain changed" and the chain is released in lockstep (ADR 0147 §9,
+# ADR 0157), so any number of valid tokens publishes it ONCE — a second pass
+# would find the tag it just pushed and cut the next patch on top of it.
 tokens=()
 while IFS= read -r token; do
   [ -z "$token" ] && continue
   case "$token" in
-    pkg | framework) ;;
+    pkg | framework | third-party) ;;
     # Backward-compat: a legacy "vN" major token (pre bare-`pkg` migration)
     # now maps to the single public module.
     v[0-9]*) token="pkg" ;;
     *)
-      echo "cut-tags: unexpected bump token '$token' (expected 'pkg' or 'framework')" >&2
+      echo "cut-tags: unexpected bump token '$token' (expected 'pkg', 'framework' or 'third-party')" >&2
       exit 1
       ;;
   esac
@@ -501,12 +507,13 @@ if [ "${#tokens[@]}" -gt 0 ]; then
 
   # stdout is the list of consumer-facing tags the workflow turns into GitHub
   # releases: pkg's first — the one its verification step counts —, then the
-  # framework's and its connectors'. The internal/* tags are resolution-only
-  # and get no GitHub Release.
+  # framework's and its connectors', then the vendor modules' (ADR 0157), each
+  # a module a consumer requires by name. The internal/* tags are
+  # resolution-only and get no GitHub Release.
   if [ "$DRY_RUN" -eq 0 ]; then
     echo "$next"
     while IFS= read -r d; do
-      case "$d" in framework | framework/*) echo "$d/$sem" ;; esac
+      case "$d" in framework | framework/* | third-party/*) echo "$d/$sem" ;; esac
     done < <(chain_modules go.work)
   fi
 fi

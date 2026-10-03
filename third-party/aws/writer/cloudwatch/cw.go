@@ -1,6 +1,8 @@
 // Package cloudwatch registers the "cloudwatch" writer factory. It lives under
-// third-party/* in the root umbrella module — NOT in pkg/v1 — so the AWS SDK it
-// pulls never enters the module graph of pkg/v1 consumers (ADR 0012).
+// third-party/ — NOT in pkg/v1 — in the third-party/aws module it shares with
+// the s3 writer, so the AWS SDK it pulls never enters the module graph of
+// pkg/v1 consumers (ADR 0012), and a consumer of this writer inherits no other
+// vendor (ADR 0157).
 // Blank-importing the package self-registers the factory (and pulls the AWS
 // SDK), so writer.Open("cloudwatch",
 // logger.CloudWatchConfig{…}) resolves only in builds that opt in. The factory

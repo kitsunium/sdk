@@ -1,5 +1,11 @@
 load("@rules_go//go:def.bzl", "go_library", "go_test")
 
+# gazelle:prefix github.com/kitsunium/sdk/third-party/db/writer/redis
+
+# third-party/db/writer/redis is a Go module of its own (ADR 0157): the "redis"
+# logger writer and its one vendor, go-redis/v9. One vendor per module, so a
+# consumer's graph carries the vendor it imports and no other.
+
 package(default_visibility = ["//visibility:public"])
 
 go_library(

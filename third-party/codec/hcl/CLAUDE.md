@@ -3,13 +3,14 @@
 ## Purpose
 
 HCL codec — wraps HashiCorp HCL v2 behind the universal `core/codec.Codec`
-dispatch. **Lives under `third-party/` (root module), NOT
-`internal/service/codec`**, because `hashicorp/hcl/v2` pulls `go-cty` and a
+dispatch. **Lives under `third-party/` — the `third-party/codec/hcl` module
+(ADR 0157) — NOT `internal/service/codec`**, because `hashicorp/hcl/v2` pulls `go-cty` and a
 heavier dep graph that, added to `internal/service`, would **introduce**
 `golang.org/x/sys` there (measured: `v0.20.0`, pulled by `x/tools`) — a module
 that is **banned SDK-wide**, which is exactly why `proc`'s syscall code is
-written against raw stdlib `syscall`. Quarantining it in the root module keeps
-the dep-light service module untouched (ADR 0022, with its mechanism corrected
+written against raw stdlib `syscall`. Quarantining it in a module of its own keeps
+the dep-light service module untouched, and a consumer of HCL inherits no other
+vendor (ADR 0022, with its mechanism corrected
 by ADR 0034 — nothing is *downgraded*; mirrors the ADR 0012 writer-quarantine
 policy). **Opt-in**: blank-import this package to
 register the `"hcl"` Format — `pkg/v1/codec` does NOT pull it, so the public

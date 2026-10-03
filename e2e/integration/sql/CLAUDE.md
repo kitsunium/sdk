@@ -1,4 +1,4 @@
-# third-party/db/sql/
+# e2e/integration/sql/
 
 ## Purpose
 
@@ -9,11 +9,13 @@ transactor's and migration runner's contracts (`pkg/v1/sql`), SQLite's file
 lock among them (ADR 0140). It is a suite, not a package: every file is an
 `//go:build integration` test, and there is no production code.
 
-It lives in the ROOT module because that is where drivers may be imported
-(ADR 0055 §D2 — a driver is a connector, and connectors live under
-`third-party/`). The workspace modules import none, so their default suites
-run the same contracts over scripted drivers; this is where the SQL meets an
-engine that parses it.
+It lives in the auxiliary `e2e` module, outside `go.work`, because a driver is
+a connector (ADR 0055 §D2) and testcontainers starts the servers: neither may
+reach a module a consumer requires. It was `third-party/db/sql/` in the root
+module until ADR 0157 made every vendor a module of its own and moved the
+Docker-backed suites here. The workspace modules import no driver, so their
+default suites run the same contracts over scripted drivers; this is where the
+SQL meets an engine that parses it.
 
 | Engine | Driver | Needs |
 |---|---|---|
@@ -37,20 +39,23 @@ Docker, the PostgreSQL and MySQL cases skip and SQLite's still run.
 
 ## Run procedure (rule 12)
 
-These tests are excluded from `bazel test //...` and from a plain
-`go test ./...` by their build tag — gazelle reads no `integration` file, so
-this directory has no BUILD file — and they run here:
+These tests are excluded from `bazel test //...` twice over — `e2e/` is in
+`.bazelignore`, and no `integration` file is read by gazelle — and from a plain
+`go test ./...` by their build tag, so the census lanes that loop over `e2e`
+(ADR 0137) compile none of it. They run here, from the `e2e` module:
 
 ```sh
-GOWORK=off go test -tags integration -race ./third-party/db/sql/...
+cd e2e
+GOWORK=off go test -tags integration -race ./integration/sql/...
 # the benchmarks, without -race, to refresh BENCH.md
-GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./third-party/db/sql/
+GOWORK=off go test -tags integration -run '^$' -bench BenchmarkSQLStore -benchmem -benchtime=2s ./integration/sql/
 ```
 
-They are a named, manual lane, as `third-party/db/writer/mysql`'s are: CI's
-runners do not start the containers. Run them on any change to
-`internal/service/sql`, `internal/core/sql`, the SQL engine of
-`internal/service/docstore`, or the SQL broker of `internal/service/queue`.
+They are a named, manual lane, as the database writers' suites beside them
+are (`e2e/integration/CLAUDE.md`): CI's runners do not start the containers.
+Run them on any change to `internal/service/sql`, `internal/core/sql`, the SQL
+engine of `internal/service/docstore`, or the SQL broker of
+`internal/service/queue`.
 
 ## Do NOT
 

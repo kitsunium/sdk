@@ -8,9 +8,10 @@ records to a **Redis Stream** via pipelined `XADD` over a Redis **Unix-domain
 socket** (local-protocol). Importing the package self-registers the factory (no
 `init()`), so `writer.Open("redis", writer.RedisStreamConfig{…})` resolves.
 
-Dep-light: the `github.com/redis/go-redis/v9` import is confined to `client.go`
-and lives in the **root** module only, so `pkg/v1` consumers never pull the
-driver into their graph. The driver's `*redis.Client` never leaves `client.go`:
+Dep-light: the `github.com/redis/go-redis/v9` import is confined to `client.go`,
+in the **`third-party/db/writer/redis` module** (ADR 0157), so `pkg/v1` consumers
+never pull the driver into their graph and a consumer of this writer pulls no
+other vendor. The driver's `*redis.Client` never leaves `client.go`:
 `newClient` returns a `closeFn` closure instead, so `redissink.go` holds no
 driver type.
 
@@ -64,14 +65,16 @@ go test -race ./third-party/db/writer/redis/...
 
 ### Opt-in integration test (no CI lane — run it by hand)
 
-`redis_integration_test.go` carries `//go:build integration`, so **no CI lane
-runs it**: `Test_Integration_RedisWriter` needs a Docker-compatible runtime to
-spin up a real Redis via testcontainers-go. Per rule 12 this is a *declared*
+`e2e/integration/writer/redis/redis_integration_test.go` carries
+`//go:build integration`, so **no CI lane runs it**: `Test_Integration_RedisWriter`
+needs a Docker-compatible runtime to spin up a real Redis via testcontainers-go.
+It lives in the auxiliary `e2e` module, not here, so testcontainers stays out of
+this module's `go.mod` and out of every consumer's graph (ADR 0157). Per rule 12 this is a *declared*
 exemption, not an oversight — run it before shipping a change to the factory or
 the batching chain:
 
 ```sh
-GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/redis/...
+cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/redis/
 ```
 
 ## Accepted audit findings

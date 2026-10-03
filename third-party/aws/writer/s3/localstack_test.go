@@ -5,7 +5,7 @@
 // LocalStack container emulating S3:
 //
 //	docker run --rm -p 4566:4566 localstack/localstack
-//	GOWORK=off go test -tags localstack ./third-party/aws/writer/s3/...
+//	cd third-party/aws && GOWORK=off go test -tags localstack ./writer/s3/...
 //
 // LOCALSTACK_ENDPOINT overrides the endpoint (default http://localhost:4566).
 // It exercises the REAL PutObject against the emulator and reads the object

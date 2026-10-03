@@ -108,7 +108,8 @@ none does today.
 
 `test-386` RUNS every module's tests on linux/386 — the four workspace modules
 it always ran, plus the root module's `third-party/` tests, `e2e` and both tools,
-all measured passing on linux/386 before they were added. Compiling and
+all measured passing on linux/386 before they were added; those `third-party/`
+tests now live in one module per vendor (ADR 0157), each in the census. Compiling and
 behaving are different questions, and the gap between them is where a 64-bit
 assumption survives: `int(0xffffffff)` is `-1` where `int` is 32 bits and passes
 every `> cap` check, which is exactly the bound `internal/service/session`'s
@@ -127,8 +128,8 @@ Single job `release` on `ubuntu-latest`, gated by `workflow_run` on `SDK CI (Baz
 
 1. `actions/checkout@93cb6efe…  # v5` with `fetch-depth: 0` — full history, so both scripts can walk the range since the last release.
 2. `actions/setup-go@…` + `bazel-contrib/setup-bazel@…` (with its caches) — Bazel answers the `rdeps` query inside `compute-bumps.sh`; a step reports whether it can start.
-3. **Compute majors to bump** — `compute-bumps.sh --explain --require-bazel` (tokens `pkg` and/or `framework` — ADR 0147), or `inputs.force_bumps` on manual dispatch. The verdict and its reason go to the log and to the step output `reason`.
-4. **Cut and push tags** — `cut-tags.sh` sizes the release from the `release:*` labels of the range's merged pull requests (ADR 0135), or from `inputs.bump` when dispatched with one (`--bump`, no lookup); rewrites the chain's go.mods — the chain is every module `go.work` uses but the root, tagged in lockstep and cut ONCE whatever the tokens (ADR 0147 §9) —, race-protected re-read, atomic push; stdout lists the `pkg/` tag then the `framework/` ones. Exit 65 is a refused size: its stderr names the pull request and both ways out. Exit 3 is a held bootstrap.
+3. **Compute majors to bump** — `compute-bumps.sh --explain --require-bazel` (tokens `pkg`, `framework` and/or `third-party` — ADR 0147, ADR 0157), or `inputs.force_bumps` on manual dispatch. The verdict and its reason go to the log and to the step output `reason`.
+4. **Cut and push tags** — `cut-tags.sh` sizes the release from the `release:*` labels of the range's merged pull requests (ADR 0135), or from `inputs.bump` when dispatched with one (`--bump`, no lookup); rewrites the chain's go.mods — the chain is every module `go.work` uses but the root, tagged in lockstep and cut ONCE whatever the tokens (ADR 0147 §9) —, race-protected re-read, atomic push; stdout lists the `pkg/` tag, then the `framework/` ones, then the `third-party/` ones (one module per vendor — ADR 0157). Exit 65 is a refused size: its stderr names the pull request and both ways out. Exit 3 is a held bootstrap.
 5. **Verify the computed release was actually published** — once a bump was computed, a run that pushed no `pkg/` tag fails (#227 defect 2).
 6. `gh release create --generate-notes --verify-tag` per pushed tag.
 7. **Release summary** — on EVERY run (`if: always()`), to the job summary and a `release-summary-${{ github.run_number }}` artifact: the verdict, the size and where it came from, and one of four renderings — refused (quoting `cut-tags.sh`), nothing to publish, held bootstrap, or the tags pushed.

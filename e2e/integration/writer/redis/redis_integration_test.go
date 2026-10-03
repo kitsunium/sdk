@@ -1,6 +1,9 @@
 //go:build integration
 
-// Requires: go get github.com/testcontainers/testcontainers-go github.com/testcontainers/testcontainers-go/modules/redis
+// Run (Docker required; the e2e module requires testcontainers-go and its redis
+// module, so nothing needs fetching by hand):
+//
+//	cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/redis/
 
 package redis_test
 

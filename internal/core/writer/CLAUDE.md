@@ -65,8 +65,8 @@ the very vendor tiers the tier exists to quarantine — ADR 0015 §"Why not enco
 | `depTier` | The writer's package imports… | Where it lives | Activation |
 |---|---|---|---|
 | `stdlib` | only the Go stdlib (+ kernel/core/service) | `internal/service/writer/*` (in-tree) | blank-import of the in-tree package, wired by `pkg/v1/logger` |
-| `vendor-root` | a vendor dep already in the **root** `go.mod` (nothing requires root) | `third-party/*` (root module) | opt-in blank import of the `third-party/*` package |
-| `third-party` | a vendor SDK quarantined so it never reaches `pkg/v1` | `third-party/*` (root module or own module) | opt-in blank import of the `third-party/*` package |
+| `vendor-root` | a vendor dep already in the **root** `go.mod` (nothing requires root) | **none since ADR 0157** — the root module hosts no writer, and a vendor writer is a module of its own | — |
+| `third-party` | a vendor SDK quarantined so it never reaches `pkg/v1` | `third-party/*`, one Go module per vendor (ADR 0157) | opt-in blank import of the `third-party/*` package |
 
 **The never-in-tree rule (mechanical placement):** a writer whose `depTier` is
 anything other than `stdlib` MUST NOT have its factory package under

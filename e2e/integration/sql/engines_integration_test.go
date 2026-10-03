@@ -8,10 +8,11 @@
 // The SDK ships no driver and its workspace modules import none (ADR 0055
 // §D2), so the default suite runs the same contracts over a fake engine. This
 // package is where the SQL meets an engine that parses it. It lives in the
-// root module, which already hosts the driver-backed writers under
-// third-party/, and runs only under the integration tag:
+// auxiliary e2e module, outside go.work, so the drivers and testcontainers it
+// needs reach no module a consumer requires (ADR 0157), and runs only under
+// the integration tag:
 //
-//	GOWORK=off go test -tags integration -race ./third-party/db/sql/...
+//	cd e2e && GOWORK=off go test -tags integration -race ./integration/sql/...
 //
 // SQLite needs nothing (modernc.org/sqlite, no cgo). PostgreSQL 17 and MySQL
 // 8.4 are started with testcontainers on free ports and removed at the end;

@@ -505,3 +505,55 @@ STUB
   [ "$status" -eq 0 ]
   [ "$output" = $'pkg\nframework' ]
 }
+
+# ── The vendor modules (ADR 0157) ───────────────────────────────────────────
+# Every vendor integration under third-party/ is a module of the chain, so a
+# change to one emits the token `third-party`; the chain is cut once whatever
+# the tokens.
+
+@test "a change under third-party/ emits third-party" {
+  mkdir -p third-party/aws/writer/s3
+  echo "package s3" > third-party/aws/writer/s3/s3.go
+  g add -A
+  g commit -q --no-verify -m "feat(s3): a declaration"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "third-party" ]
+}
+
+@test "a change to a vendor module's go.mod emits third-party" {
+  mkdir -p third-party/db/writer/mysql
+  printf 'module github.com/kitsunium/sdk/third-party/db/writer/mysql\n\ngo 1.27\n' > third-party/db/writer/mysql/go.mod
+  g add -A
+  g commit -q --no-verify -m "chore(mysql): the module"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "third-party" ]
+}
+
+@test "a vendor CLAUDE.md or BUILD.bazel alone releases nothing" {
+  mkdir -p third-party/x-crypto
+  echo "# notes" > third-party/x-crypto/CLAUDE.md
+  echo "# gazelle:prefix github.com/kitsunium/sdk/third-party/x-crypto" > third-party/x-crypto/BUILD.bazel
+  g add -A
+  g commit -q --no-verify -m "docs(x-crypto): notes"
+  run "$SCRIPT" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"third-party"$'\n'* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+}
+
+@test "pkg, framework and third-party in one range emit the three tokens, in order" {
+  mkdir -p framework/model third-party/transform
+  echo "package model" > framework/model/model.go
+  echo "package transform" > third-party/transform/zstd.go
+  echo "// patch" >> pkg/v1/codec.go
+  g add -A
+  g commit -q --no-verify -m "feat: three modules"
+  run "$SCRIPT" --explain
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verdict: RELEASE (tokens 'pkg', 'framework' and 'third-party')"* ]]
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = $'pkg\nframework\nthird-party' ]
+}

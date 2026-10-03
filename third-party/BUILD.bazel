@@ -1,9 +1,12 @@
 # gazelle:default_visibility //visibility:public
 
-# third-party/ hosts opt-in, vendor-dependent integrations (ADR 0012) as
-# packages of the root umbrella module. Everything here is publicly visible —
-# consumers blank-import these packages to activate the matching writer; the
-# heavy vendor deps (e.g. the AWS SDK) are declared in the root go.mod, which
-# no other module requires.
+# third-party/ hosts the opt-in, vendor-dependent integrations (ADR 0012), one
+# Go module per vendor (ADR 0157): third-party/aws, third-party/codec/{hcl,
+# protobuf}, third-party/db/writer/{clickhouse,mysql,redis}, third-party/transform
+# and third-party/x-crypto, each with its own go.mod and released in the
+# lockstep chain. Everything here is publicly visible — consumers blank-import
+# these packages to activate the matching writer, codec or scheme. The ssh
+# Identity of entitlement (third-party/entitlement) is still a package of the
+# root module, which nothing requires.
 
 package(default_visibility = ["//visibility:public"])

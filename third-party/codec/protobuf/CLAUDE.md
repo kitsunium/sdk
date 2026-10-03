@@ -3,8 +3,9 @@
 ## Purpose
 
 Protobuf codec — wraps `google.golang.org/protobuf` behind the universal
-`core/codec.Codec` dispatch. **Lives under `third-party/codec/` (root module),
-NOT `internal/service/codec`**, and is **opt-in** (not blank-imported by
+`core/codec.Codec` dispatch. **Lives under `third-party/codec/` — the
+`third-party/codec/protobuf` module (ADR 0157) — NOT `internal/service/codec`**,
+and is **opt-in** (not blank-imported by
 `pkg/v1/codec`). The reason is not dep weight (protobuf is light) but the
 **schema-bound contract**: Protobuf can only encode `proto.Message` values, so
 it cannot honour the universal "every registered codec round-trips any Go

@@ -1,4 +1,4 @@
-<!-- generated from third-party/transform/transform_bench_test.go — run `GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s ./third-party/transform/` to refresh; ratios come from `GOWORK=off go test -run TestReportRatios -v ./third-party/transform/` -->
+<!-- generated from third-party/transform/transform_bench_test.go — run `GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s .` in third-party/transform, the module's root, to refresh; ratios come from `GOWORK=off go test -run TestReportRatios -v .` there -->
 # Benchmarks — `third-party/transform`
 
 A compressor is chosen on numbers or it is chosen on folklore. This report

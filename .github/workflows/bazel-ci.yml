@@ -473,7 +473,8 @@ jobs:
       # other four had never run a test on 386: tools/genindex and
       # tools/sdkguard (477 passing tests, #242), the root module's
       # third-party/ tests and e2e's. All four were run on linux/386 before
-      # being added, and pass.
+      # being added, and pass. Those third-party/ tests now live in one module
+      # per vendor (ADR 0157), which the census reaches like any other.
       - name: test every module on linux/386
         env:
           GOARCH: "386"

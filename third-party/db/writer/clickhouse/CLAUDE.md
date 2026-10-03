@@ -8,8 +8,9 @@ protocol**. Importing the package self-registers the factory (no `init()`), so
 `writer.Open("clickhouse", writer.ClickHouseConfig{…})` resolves.
 
 Dep-light: the `github.com/ClickHouse/clickhouse-go/v2` import is confined to
-`client.go` and lives in the **root** module only, so `pkg/v1` consumers never
-pull the driver into their graph. The package uses the driver's `database/sql`
+`client.go`, in the **`third-party/db/writer/clickhouse` module** (ADR 0157), so
+`pkg/v1` consumers never pull the driver into their graph and a consumer of this
+writer pulls no other vendor. The package uses the driver's `database/sql`
 surface (`clickhouse.OpenDB`, lazy) so the code mirrors the mysql writer exactly.
 
 ## Contents
@@ -71,9 +72,11 @@ go test -race ./third-party/db/writer/clickhouse/...
 
 ### Opt-in integration test (no CI lane — run it by hand)
 
-`clickhouse_integration_test.go` carries `//go:build integration`, so **no CI
-lane runs it**: it needs a Docker-compatible runtime to spin up
-`clickhouse/clickhouse-server:24-alpine` via testcontainers-go.
+`e2e/integration/writer/clickhouse/clickhouse_integration_test.go` carries
+`//go:build integration`, so **no CI lane runs it**: it needs a Docker-compatible
+runtime to spin up `clickhouse/clickhouse-server:24-alpine` via testcontainers-go.
+It lives in the auxiliary `e2e` module, not here, so testcontainers stays out of
+this module's `go.mod` and out of every consumer's graph (ADR 0157).
 `TestIntegration_clickhouseFactory_roundtrip` drives the real registered factory
 (`writer.Open("clickhouse", …)`) through Open → Write N → Flush → Close and reads
 the rows back. It self-skips when no runtime is reachable, so the default lane
@@ -81,5 +84,5 @@ stays green either way. Per rule 12 this is a *declared* exemption, not an
 oversight — run it before shipping a change to the factory or the batching chain:
 
 ```sh
-GOWORK=off go test -tags integration -timeout 180s ./third-party/db/writer/clickhouse/...
+cd e2e && GOWORK=off go test -tags integration -timeout 180s ./integration/writer/clickhouse/
 ```

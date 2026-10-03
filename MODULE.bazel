@@ -2,8 +2,10 @@
 
 Bazel 9 dropped WORKSPACE; this file is the single source of truth for
 external dependencies. rules_go + gazelle read Go deps directly from the
-workspace's go.work file so the 4 module-local go.mod files stay the
-authoritative list for gopls / IDE tooling.
+workspace's go.work file so the module-local go.mod files it names — the
+internal/* layers, pkg, the framework and its connectors, one module per
+vendor under third-party/ — stay the authoritative list for gopls / IDE
+tooling.
 """
 
 module(
@@ -24,7 +26,7 @@ go_sdk.download(version = "1.27.1")
 
 # ── Go dependencies ────────────────────────────────────────────────────
 # `go_deps.from_file(go_work=...)` imports every direct + indirect
-# dependency across all 4 go.mod files referenced by the workspace.
+# dependency across every go.mod file the workspace references.
 go_deps = use_extension("@gazelle//:extensions.bzl", "go_deps")
 go_deps.from_file(go_work = "//:go.work")
 
@@ -48,13 +50,7 @@ use_repo(
     "com_github_kitsunium_sdk_internal_service",
     "com_github_kitsunium_sdk_pkg",
     "com_github_klauspost_compress",
-    "com_github_moby_moby_api",
     "com_github_redis_go_redis_v9",
-    "com_github_testcontainers_testcontainers_go",
-    "com_github_testcontainers_testcontainers_go_modules_clickhouse",
-    "com_github_testcontainers_testcontainers_go_modules_mysql",
-    "com_github_testcontainers_testcontainers_go_modules_postgres",
-    "com_github_testcontainers_testcontainers_go_modules_redis",
     "in_gopkg_yaml_v3",
     "org_golang_google_protobuf",
     "org_golang_x_crypto",

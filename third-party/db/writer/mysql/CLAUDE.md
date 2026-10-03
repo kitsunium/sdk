@@ -8,9 +8,10 @@ batches records into multi-row INSERTs over a MySQL **Unix-domain socket**
 (local-protocol). Importing the package self-registers the factory (no `init()`),
 so `writer.Open("mysql", writer.MySQLConfig{…})` resolves.
 
-Dep-light: the `github.com/go-sql-driver/mysql` import is confined to `client.go`
-and lives in the **root** module only, so `pkg/v1` consumers never pull a DB
-driver into their graph (`GOWORK=off go list -deps ./v1/...` in `pkg/` names no
+Dep-light: the `github.com/go-sql-driver/mysql` import is confined to `client.go`,
+in the **`third-party/db/writer/mysql` module** (ADR 0157), so `pkg/v1` consumers
+never pull a DB driver into their graph and a consumer of this writer pulls no
+other vendor (`GOWORK=off go list -deps ./v1/...` in `pkg/` names no
 driver; no CI lane asserts it).
 
 ## Contents
@@ -70,7 +71,9 @@ Unit tests (`client_internal_test.go`): an offline lazy handle + a fake
 path (asserting the bound `ts, level, message` column order), and the `wrapInsert`
 error path — all without a running MySQL server.
 
-Integration test (`mysql_integration_test.go`, `//go:build integration`): spins up
+Integration test (`e2e/integration/writer/mysql/mysql_integration_test.go`,
+`//go:build integration`, in the auxiliary `e2e` module so testcontainers stays
+out of this module's `go.mod` and out of every consumer's graph — ADR 0157): spins up
 a real `mysql:8` container via testcontainers-go (bind-mounting its socket dir to
 the host so the local-protocol `SocketPath` resolves), exercises the full
 registered-factory path through `writer.Open("mysql", …)`, writes 3 records,
@@ -79,7 +82,7 @@ round-trip. It self-skips when Docker is unavailable, so the default lane stays
 green.
 
 ```sh
-GOWORK=off go test -tags integration ./third-party/db/writer/mysql/...
+cd e2e && GOWORK=off go test -tags integration ./integration/writer/mysql/
 ```
 
 ## Do NOT

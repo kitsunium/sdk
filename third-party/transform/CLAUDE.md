@@ -34,8 +34,9 @@ placement rests on ADR 0034 §Decision.3's *other* criterion: it imposes a
 dependency on consumers who never use the integration. `internal/service` and
 `pkg` are dep-light on purpose, and a consumer who wants a logger should not
 resolve, download, verify and link a compression library to get one.
-`third-party/` lives in the root module, which nothing requires, so the cost is
-paid by the blank-import and by nobody else.
+`third-party/transform` is a module of its own (ADR 0157), which nothing in the
+SDK requires, so the cost is paid by the blank-import and by nobody else — and
+a consumer of these two compressors inherits no other vendor.
 
 **Do not cite the downgrade narrative.** ADR 0022's "hcl downgrades `x/sys`"
 sentence was retired as a placement rule by ADR 0034: under minimal version
@@ -253,9 +254,12 @@ because its 2.75 MiB must not be linked by a consumer who came for zstd.
 ## Verification
 
 ```sh
-GOWORK=off go test -race -cover ./third-party/transform/     # 95.4% of statements
-GOWORK=off go test -run TestReportRatios -v ./third-party/transform/
-GOWORK=off go test -run '^$' -bench=. -benchmem ./third-party/transform/
+# from the module root, as a consumer builds it (ADR 0157)
+cd third-party/transform
+GOWORK=off go test -race -cover .                  # 95.4% of statements
+GOWORK=off go test -run TestReportRatios -v .
+GOWORK=off go test -run '^$' -bench=. -benchmem .
+cd ../..
 ktn-linter lint --skip-phases=tests ./third-party/transform/...
 # Under Bazel
 bazel test --config=race //third-party/transform:transform_test
