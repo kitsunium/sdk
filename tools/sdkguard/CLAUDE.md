@@ -53,6 +53,18 @@ something the SDK *offers* — ADR 0019 makes the error model available to
 downstreams, it does not oblige them. A team runs `-level=invariant` first and
 turns conventions on when ready, instead of switching the whole tool off.
 
+**The SDK holds itself to SDK002.** SDK rule 2 (root `CLAUDE.md`: no
+`fmt.Errorf`, no `errors.New` in production code) used to cite an AST audit
+that did not exist, and 22 calls had passed CI. `make guard` — run by
+`make lint` and by CI's lint gate — now runs a second pass, `-rules=SDK002`,
+over `internal/`, `pkg/`, `third-party/` and `framework/`. Selecting a rule by
+ID runs it whatever its level, so the level a consumer gets by default does not
+move. `tools/` and `e2e/` are outside that pass: stdlib-only modules, they
+cannot import the errs package the rule sends a caller to (`errors.go` here is
+the example). The SDK grants itself no exemption — `make guard` fails on a
+`//sdkguard:allow SDK002` directive in that tree, and fails closed when it
+cannot scan for one.
+
 ## Freshness probe
 
 Beside the rules, sdkguard warns when the consumer's `go.mod` pins an SDK older

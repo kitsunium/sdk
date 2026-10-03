@@ -107,7 +107,7 @@ func main() {
 ## What makes this SDK different
 
 - **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced by Bazel `visibility` rules.
-- **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. AST audit gates the build.
+- **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. `make guard` gates it: the SDK runs its own `sdkguard` rule SDK002 over its production tree in `make lint` and CI.
 - **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
 - **The rules are checkable from outside** — the conventions this SDK states in its ADRs are enforced on *your* codebase too, by a tool the SDK ships:
   ```sh
@@ -148,7 +148,7 @@ make build       # bazel mod tidy + gazelle + gofumpt + bazel build //...
 make test        # every *_test target green incl. AST audits
 make test-alloc  # race-off allocation gates (the only lane running //go:build !race tests)
 make lint        # drift check (read-only): mod tidy + gazelle + gofumpt + ktn-linter + alloc-lane coverage + guard
-make guard       # sdkguard over the SDK's own tree at invariant level (ADR 0033)
+make guard       # sdkguard over the SDK's own tree: the invariants (ADR 0033), and SDK002 over production code (rule 2)
 make bench       # regenerate codec BENCH.md from real Go benchmarks
 ```
 
