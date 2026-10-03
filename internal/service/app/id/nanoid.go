@@ -2,6 +2,8 @@
 package id
 
 import (
+	"crypto/rand"
+
 	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -60,11 +62,8 @@ func (nanoIDGen) Scheme() coreid.Scheme {
 func (g nanoIDGen) New() (newID string, err error) {
 	//: one output byte per character, resolved through the zero-value rule.
 	out := make([]byte, g.length())
-	//: fill it with unbiased draws; the only failure is a CSPRNG fault.
-	if rerr := randomFromAlphabet(out, nanoIDAlphabet); rerr != nil {
-		//: propagate the wrapped entropy failure.
-		return "", rerr
-	}
+	//: fill it with unbiased draws.
+	randomFromAlphabet(out, nanoIDAlphabet)
 	//: the assembled identifier.
 	return string(out), nil
 }
@@ -106,7 +105,7 @@ func (g nanoIDGen) length() int {
 // weight for that: it is what keeps the function correct if the alphabet ever
 // changes, and Test_randomFromAlphabet drives it with non-power-of-two
 // alphabets precisely so the branch is exercised rather than assumed.
-func randomFromAlphabet(dst []byte, alphabet string) error {
+func randomFromAlphabet(dst []byte, alphabet string) {
 	//: the smallest 2^k-1 that can address every symbol.
 	mask := pow2MaskFor(len(alphabet))
 	//: draw in batches the width of the request; rejections cost another round.
@@ -115,11 +114,9 @@ func randomFromAlphabet(dst []byte, alphabet string) error {
 	filled := 0
 	//: keep drawing until every position holds an accepted symbol.
 	for filled < len(dst) {
-		//: a fresh batch of secure random bytes.
-		if rerr := readRandom(buf); rerr != nil {
-			//: propagate the wrapped entropy failure.
-			return rerr
-		}
+		//: a fresh batch of secure random bytes; crypto/rand.Read cannot fail
+		//: (see the package doc).
+		_, _ = rand.Read(buf)
 		//: consume the batch, skipping the values that fall outside the set.
 		for _, b := range buf {
 			//: keep only the low bits the mask spans.
@@ -140,8 +137,6 @@ func randomFromAlphabet(dst []byte, alphabet string) error {
 			}
 		}
 	}
-	//: dst is fully populated with uniform draws.
-	return nil
 }
 
 // pow2MaskFor returns the smallest 2^k-1 able to address n symbols, i.e. the

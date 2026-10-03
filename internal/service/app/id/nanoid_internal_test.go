@@ -197,9 +197,7 @@ func Test_randomFromAlphabet(t *testing.T) {
 		t.Helper()
 		total := len(c.alphabet) * c.perSymbol
 		out := make([]byte, total)
-		if err := randomFromAlphabet(out, c.alphabet); err != nil {
-			t.Fatalf("randomFromAlphabet = %v, want nil", err)
-		}
+		randomFromAlphabet(out, c.alphabet)
 
 		counts := make(map[byte]int, len(c.alphabet))
 		for _, b := range out {
@@ -233,10 +231,9 @@ func Test_randomFromAlphabet(t *testing.T) {
 		})
 	}
 	//: a zero-width request must terminate rather than spin looking for a
-	//: character it will never be asked to place.
-	if err := randomFromAlphabet(nil, nanoIDAlphabet); err != nil {
-		t.Errorf("randomFromAlphabet(nil) = %v, want nil", err)
-	}
+	//: character it will never be asked to place — the test returning at all
+	//: is the assertion.
+	randomFromAlphabet(nil, nanoIDAlphabet)
 }
 
 // Test_NewNanoID_refuses pins the ADR 0031 refusal. A generator built from a

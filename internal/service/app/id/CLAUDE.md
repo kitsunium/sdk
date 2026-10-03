@@ -27,7 +27,11 @@ configuration; snowflake, NanoID and TypeID also offer explicit constructors.
 - **Registration via `var X = id.Register(...)`, never `init()`.**
 - Stateless singletons (uuidv4/v7/ulid/nanoid/ksuid) ; snowflake is per-instance
   stateful (mutex + sequence), with a default-node singleton + `NewSnowflake(node)`.
-- Entropy failures wrap `crypto/rand` via `errs.Wrap` (ID_ENTROPY_FAILED).
+- Random bytes come from `crypto/rand.Read`, called directly. Since Go 1.24 it
+  never returns an error and always fills its buffer — a failing source crashes
+  the program instead — so no generator fails for want of entropy and there is
+  no wrapping helper. `ID_ENTROPY_FAILED` (`EntropyFailed`) stays declared and
+  published by `pkg/v1/app/id`, but nothing returns it.
 - Parse refusals carry a `rule` field naming the clause that fired
   (`length` / `alphabet` / `overflow` / `charset` / …) and **never echo the
   input** — these errors are logged, and the input is unbounded caller data.

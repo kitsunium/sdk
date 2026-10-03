@@ -2,6 +2,8 @@
 package id
 
 import (
+	"crypto/rand"
+
 	coreid "github.com/kitsunium/sdk/internal/core/app/id"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
@@ -26,11 +28,9 @@ func (uuidv7Gen) New() (newID string, err error) {
 	var b [uuidRawLen]byte
 	//: the leading 6 bytes carry the Unix-millisecond timestamp (big-endian).
 	putUint48BE(b[:], clock.System.Now().UnixMilli())
-	//: the remaining bytes (after the timestamp) are secure random.
-	if rerr := readRandom(b[tsBytes:]); rerr != nil {
-		//: propagate the wrapped entropy failure.
-		return "", rerr
-	}
+	//: the remaining bytes (after the timestamp) are secure random;
+	//: crypto/rand.Read cannot fail (see the package doc).
+	_, _ = rand.Read(b[tsBytes:])
 	//: stamp version 7 (time-ordered) + the RFC variant bits.
 	setUUIDBits(b[:], uuidVersion7)
 	//: render the canonical dashed-hex form.

@@ -68,11 +68,9 @@ func (t *Tracer) Scope() coreotel.ScopeValue {
 // An empty name panics with InvalidSpanName: it is a literal at the call site,
 // so it is wrong on the first call or never.
 //
-// An entropy failure — crypto/rand refusing — cannot be reported through this
-// signature, and the alternative would be a Start that returns an error every
-// call site has to handle for a case that has never happened on a working
-// kernel. It degrades to a NO-OP span with an invalid context, which propagates
-// nothing and records nothing: the trace is lost, the request is not.
+// Minting cannot fail, so Start has no error to report or degrade from: the
+// ids come from crypto/rand.Read, which since Go 1.24 never returns an error —
+// a failing source crashes the program instead.
 func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanParams) (child context.Context, span coretrace.Span) {
 	//: an unnamed span is a trace nobody can group; fail at the call site.
 	if name == "" {
@@ -82,10 +80,10 @@ func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanPa
 	//: the parent is whatever this scope carries — extracted from a header
 	//: upstream, or started by an outer call.
 	parent := coretrace.SpanContextFromContext(ctx)
-	//: mint the identity; an entropy fault degrades to the invalid context.
-	spanContext, ok := t.mint(parent, name, params)
-	//: an unsampled or unmintable span records nothing and costs nothing.
-	if !ok || !spanContext.IsSampled() {
+	//: mint the identity.
+	spanContext := t.mint(parent, name, params)
+	//: an unsampled span records nothing and costs nothing.
+	if !spanContext.IsSampled() {
 		//: the context still travels, so the decision propagates downstream.
 		return coretrace.ContextWithSpanContext(ctx, spanContext), noopSpan{context: spanContext}
 	}
@@ -96,16 +94,10 @@ func (t *Tracer) Start(ctx context.Context, name string, params coretrace.SpanPa
 }
 
 // mint builds the new span's context: the trace id, a fresh span id, the
-// sampled bit and the inherited tracestate. It reports false when the CSPRNG
-// refused, which is the only failure this path has.
-func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) (context coretrace.SpanContextValue, ok bool) {
+// sampled bit and the inherited tracestate. It cannot fail: the draws cannot.
+func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params coretrace.SpanParams) (context coretrace.SpanContextValue) {
 	//: every span has its own id, root or not.
-	spanID, spanErr := NewSpanID()
-	//: a CSPRNG fault produces the invalid context, which records nothing.
-	if spanErr != nil {
-		//: degrade rather than fail the caller's request.
-		return coretrace.SpanContextValue{}, false
-	}
+	spanID := drawSpanID()
 	//: a valid parent hands down the trace id, the flags and the vendor list
 	//: unchanged — that inheritance IS the trace.
 	if parent.IsValid() {
@@ -115,15 +107,10 @@ func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params cor
 			SpanID:  spanID,
 			Flags:   parent.Flags,
 			State:   parent.State,
-		}, true
+		}
 	}
 	//: no parent: this is a root, so a trace id is minted for it.
-	traceID, traceErr := NewTraceID()
-	//: a CSPRNG fault produces the invalid context, which records nothing.
-	if traceErr != nil {
-		//: degrade rather than fail the caller's request.
-		return coretrace.SpanContextValue{}, false
-	}
+	traceID := drawTraceID()
 	//: THE decision, taken exactly here and nowhere else in the trace.
 	sampled := t.cfg.Sampler(coretrace.SamplingParams{
 		Parent:  parent,
@@ -138,5 +125,5 @@ func (t *Tracer) mint(parent coretrace.SpanContextValue, name string, params cor
 		TraceID: traceID,
 		SpanID:  spanID,
 		Flags:   coretrace.TraceFlags(0).WithSampled(sampled),
-	}, true
+	}
 }

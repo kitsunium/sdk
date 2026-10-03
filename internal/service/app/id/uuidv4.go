@@ -1,7 +1,11 @@
 // Package id — UUIDv4 (random) generator (RFC 9562 §5.4).
 package id
 
-import coreid "github.com/kitsunium/sdk/internal/core/app/id"
+import (
+	"crypto/rand"
+
+	coreid "github.com/kitsunium/sdk/internal/core/app/id"
+)
 
 // UUIDv4 is the registered random UUIDv4 generator (RFC 9562 §5.4).
 var UUIDv4 = coreid.Register(uuidv4Gen{})
@@ -19,11 +23,9 @@ func (uuidv4Gen) Scheme() coreid.Scheme {
 func (uuidv4Gen) New() (newID string, err error) {
 	//: 16 raw bytes back the 128-bit identifier.
 	var b [uuidRawLen]byte
-	//: fill the whole identifier with secure randomness.
-	if rerr := readRandom(b[:]); rerr != nil {
-		//: propagate the wrapped entropy failure.
-		return "", rerr
-	}
+	//: fill the whole identifier with secure randomness; crypto/rand.Read
+	//: cannot fail (see the package doc).
+	_, _ = rand.Read(b[:])
 	//: stamp version 4 (random) + the RFC variant bits.
 	setUUIDBits(b[:], uuidVersion4)
 	//: render the canonical dashed-hex form.
