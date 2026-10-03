@@ -4,12 +4,14 @@
 ## Purpose
 
 The public facade for the mail domain (ADR 0064): type aliases over
-`internal/core/app/mail`, the sentinels from both layers, and the constructors —
+`internal/core/app/mail`, its sentinels (every one declared in the core,
+ADR 0160), and the constructors —
 `NewSMTP`, `NewMemory`, `NewCapture`, `NewComposer` — plus `Compose`,
 `Validate` and `EnvelopeOf` for a caller that wants the bytes, the verdict or
-the envelope without a transport. And the durable outbox (ADR 0111): `NewSpool` over
-`internal/service/app/mail/spool`, whose `Spool.SendWithID` queues a mail under an
-identifier its caller minted (ADR 0141).
+the envelope without a transport. The durable outbox (ADR 0111, ADR 0141) is NOT here: it is
+`pkg/v1/app/mail/spool`, so a program that only composes and sends links no
+queue, no filesystem engine and no SQL port — `go list -deps` of this package
+names none of `data/queue`, `data/vfs`, `data/sql` or `app/id`.
 
 Consumer-facing prose lives in the package doc comment in `mail.go` and is
 rendered into `README.md` by `gomarkdoc` (rule 10 / ADR 0008). This file is the
@@ -25,15 +27,9 @@ maintainer's half.
 | `FullTransport` | alias | the union `NewMemory` returns |
 | `SMTPConfig`, `TLSMode`, `ComposerConfig`, `Composer` | aliases | service-layer types |
 | `TLSUnset`/`TLSStartTLS`/`TLSImplicit`/`TLSDisabled` | constants | the zero is refused |
-| 19 sentinels | vars | all aliases of `core/app/mail`'s (ADR 0160): the 9 message refusals and the 10 outcomes of composition and the SMTP session — `InvalidURL` is `ParseURL`'s — plus the spool's six below |
+| 19 sentinels | vars | all aliases of `core/app/mail`'s (ADR 0160): the 9 message refusals and the 10 outcomes of composition and the SMTP session — `InvalidURL` is `ParseURL`'s |
 | `NewSMTP`, `NewMemory`, `NewComposer`, `Compose`, `Validate`, `EnvelopeOf`, `ParseURL` | funcs | `ParseURL` reads `smtp://…?tls=…` / `smtps://…` into a config `NewSMTP` accepts, and never quotes the URL in a refusal |
 | `NewCapture(keep)` / `DefaultCaptureKeep` | func / const | `NewMemory`'s double keeping the last `keep` deliveries (200 when not positive) — the development server's transport |
-| `NewSpool`, `SpoolAttemptFrom` | funcs | the durable outbox and the attempt a delivery context carries (ADR 0111) |
-| `Spool`, `SpoolConfig`, `SpoolEvent`, `SpoolEventKind`, `SpoolAttempt`, `SpoolDeadLetter` | aliases | onto `service/app/mail/spool` — `Spool`, `Config`, `EventValue`, `EventKind`, `AttemptValue`, `DeadLetterValue`; `Spool.SendWithID` reaches consumers through the alias, so the facade adds no function for it (ADR 0141) |
-| `SpoolQueued` … `SpoolDuplicate` | constants | the five event kinds |
-| `DefaultSpoolSendTimeout`, `DefaultSpoolRetryBase`, `DefaultSpoolRetryMax`, `DefaultSpoolMaxMessageBytes`, `SpoolDeliveredMemory` | constants | the spool's clamps |
-| `SpoolMaxIDBytes` | constant | the bound on a spooled mail's identifier, whoever minted it (ADR 0141) |
-| `SpoolMisconfigured`, `SpoolClosed`, `SpooledMailUndecodable`, `SpooledMailUnencodable`, `TransportPanicked`, `InvalidMailID` | vars | the spool's sentinels (`0.3.81.*`); `InvalidMailID` is `SendWithID`'s refusal of an identifier no mail can keep |
 
 Error CODE constants are deliberately not re-exported. `errors.Is(err,
 mail.HeaderInjection)` is the consumer-facing way to match one refusal —
@@ -57,6 +53,13 @@ and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/data/vfs`.
   a method of the core value could not reach them. It replaced
   `Message.Envelope()` while the module is v0 (ADR 0040), so a caller who used
   the method fails to compile rather than receiving an unvalidated envelope.
+- **The spool is a package of its own.** It stands on the queue domain, and
+  a durable spool on the filesystem and SQL ports beneath it. With it, this
+  facade linked 23 SDK packages; without it, 7 (`go list -deps`, measured
+  when it moved out) — the queue, `vfs` and `sql` engines, `id` and five
+  kernel primitives are linked only by a program that imports
+  `pkg/v1/app/mail/spool`. A child package is not linked by its parent's
+  importers, so the split costs a caller nothing (ADR 0155).
 - **No `Send(ctx, transport, msg)` helper.** It would only hide which transport
   carried the message, for no line saved.
 
@@ -67,11 +70,12 @@ and `errs.CodeOf` covers the rest. This mirrors `pkg/v1/data/vfs`.
   one step further: a package-level transport armed from an import would dial a
   network from an `init`.
 - **Do NOT hand-edit `README.md`.** Edit the package doc comment in `mail.go`
-  and run `go generate ./v1/mail/` (rule 10).
+  and run `go generate ./v1/app/mail/` (rule 10).
 
 ## Verification
 
 ```bash
-cd pkg && GOWORK=off go test -race ./v1/mail/...
-cd pkg && go generate ./v1/mail/   # regenerates README.md from the doc comment
+cd pkg && GOWORK=off go test -race ./v1/app/mail/...
+cd pkg && go generate ./v1/app/mail/   # regenerates README.md from the doc comment
+cd pkg && go list -deps ./v1/app/mail | grep -E 'data/(queue|vfs|sql)'   # prints nothing
 ```

@@ -112,7 +112,7 @@ const (
 
 	// Deprecated: kit no longer returns it. The outbox is the SDK's mail
 	// spool, which dead-letters a record that does not decode itself
-	// (mail.SpooledMailUndecodable).
+	// (MessageUndecodable, in pkg/v1/app/mail/spool).
 	CodeMailUndecodable errs.Code = ikit.CodeMailUndecodable
 
 	// CodeMailPanic is CodeMailPanic.

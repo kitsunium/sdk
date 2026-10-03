@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "spool",
+    srcs = ["spool.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/app/mail/spool",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/app/mail/spool",
+        "//internal/service/app/mail/spool",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":spool",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "spool_test",
+    size = "small",
+    srcs = ["spool_external_test.go"],
+    deps = [
+        ":spool",
+        "//pkg/v1/app/id",
+        "//pkg/v1/app/mail",
+    ],
+)

@@ -9,7 +9,7 @@ identifier its caller minted (ADR 0141); `Run` hands each mail to a
 mail after its last attempt with that failure, and drops a redelivery of a
 mail it delivered — the one resend left is a crash between the relay's
 acceptance and the acknowledgement, under the same Message-ID. The queue is `internal/service/data/queue` — `NewFile` with a
-`Dir`, `NewMemory` without. Public facade: `pkg/v1/app/mail` (`NewSpool`).
+`Dir`, `NewMemory` without. Public facade: `pkg/v1/app/mail/spool` (`New`).
 
 Code range `0.3.81.*`, declared with its sentinels in
 `internal/core/app/mail/spool` (ADR 0160). This package declares no code and

@@ -8,6 +8,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/app/mail"
+	mailspool "github.com/kitsunium/sdk/pkg/v1/app/mail/spool"
 )
 
 func TestParseSMTPURL(t *testing.T) {
@@ -83,7 +84,7 @@ func TestMailboxRing(t *testing.T) {
 	}
 
 	// Without the capture transport, the ring keeps summaries only.
-	env := &mail.SpoolEvent{ID: "mail_1", QueuedAt: time.Now(), Message: mail.Message{
+	env := &mailspool.Event{ID: "mail_1", QueuedAt: time.Now(), Message: mail.Message{
 		From: mail.Address{Name: "A", Addr: "a@example.com"}, To: []mail.Address{{Addr: "b@example.com"}},
 		Bcc: []mail.Address{{Addr: "hidden@example.com"}}, Subject: "S", Text: "secret body", HTML: "<p>secret</p>",
 	}}

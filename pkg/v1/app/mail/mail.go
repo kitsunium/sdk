@@ -121,68 +121,13 @@
 // guarantees is that the structure is the one the RFCs prescribe for the
 // content supplied.
 //
-// # A durable outbox: the Spool
+// # A durable outbox
 //
 // A transport sends once, synchronously, and a relay that is down makes that
-// the caller's problem. [NewSpool] is the outbox between them: [Spool].Send
-// validates a mail — refusing at the call site everything the transport would
-// refuse later — stamps what a retry must not change (the sender from
-// [SpoolConfig].From when the mail names none, the Date, and a Message-ID made
-// of the spool's identifier at the sender's domain), and returns once the mail
-// is queued: durable, in a directory that outlives the process, when
-// [SpoolConfig].Dir is set. [Spool].Run hands each mail to the transport, one
-// at a time, and a failure waits a backoff that grows with the attempt — one
-// second, doubling, to five minutes by default — before the next; after
-// [SpoolConfig].MaxAttempts the mail is dead-lettered with its last failure,
-// readable through [Spool].DeadLetters.
-//
-//	outbox, err := mail.NewSpool(mail.SpoolConfig{
-//		Transport:   transport,
-//		Dir:         "/var/lib/app/outbox", // empty: in memory
-//		MaxAttempts: 6,
-//		From:        mail.Address{Name: "App", Addr: "app@example.com"},
-//	})
-//	go outbox.Run(ctx) // or under lifecycle.NewSupervisor
-//	id, err := outbox.Send(ctx, mail.Message{To: to, Subject: "Welcome", Text: body})
-//
-// A redelivery of a mail the spool delivered — its lease lapsed while a slow
-// relay was still accepting it — is recognised by its identifier and dropped.
-// The one duplicate no outbox can prevent is a process
-// that dies between the relay's acceptance and the acknowledgement; the next
-// process sends the mail again under the SAME Message-ID, which is how a
-// receiver recognises it. Every attempt carries its [SpoolAttempt] in its
-// context — the identifier, the count, and what [SpoolConfig].Annotate kept
-// from the Send's context — so a transport can continue the Send's trace, and
-// every mail's fate reaches [SpoolConfig].Observe. The spool writes nothing
-// anywhere itself.
-//
-// # An identifier minted before the mail is spooled
-//
-// [Spool].Send mints the mail's identifier. A caller that must know it before
-// the spool has the mail — a framework that holds a mail until a transaction
-// commits, and returns the identifier at the call — mints it itself and
-// queues the mail later with [Spool].SendWithID, which stamps what Send
-// stamps and makes the Message-ID of that identifier:
-//
-//	mailIDs, err := id.NewTypeID("mail") // github.com/kitsunium/sdk/pkg/v1/app/id
-//	outboxID, err := mailIDs.New()       // at the call, inside the transaction
-//	// … once the transaction has committed:
-//	err = outbox.SendWithID(ctx, outboxID, msg)
-//
-// The identifier becomes the left half of the mail's Message-ID, so it must be
-// an RFC 5322 dot-atom — printable ASCII, no space, no special, no empty label
-// — of at most [SpoolMaxIDBytes] bytes, even for a mail that brings its own
-// Message-ID. Anything else is [InvalidMailID], which never quotes the
-// identifier, and nothing is queued. A [SpoolConfig].NewID that mints such an
-// identifier is [SpoolMisconfigured] at Send.
-//
-// A repeated identifier is not refused. A mail under one the spool delivered
-// is dropped at delivery as a [SpoolDuplicate], after its own [SpoolQueued],
-// so a SendWithID retried after an ambiguous failure sends the mail once while
-// the process remembers it. A mail dead-lettered under an identifier was
-// never delivered, and can be queued again under it. After a restart the
-// spool remembers nothing, and a repeat is sent again — under the same
-// Message-ID, when that was made of the identifier.
+// the caller's problem. The outbox that retries on a backoff, dead-letters
+// with the last failure and keeps a Message-ID stable across retries is
+// package [github.com/kitsunium/sdk/pkg/v1/app/mail/spool]: it stands on the
+// queue domain, so a program that only composes and sends links none of it.
 //
 // # Testing
 //
@@ -201,13 +146,8 @@
 package mail
 
 import (
-	"context"
-	"time"
-
 	coremail "github.com/kitsunium/sdk/internal/core/app/mail"
-	corespool "github.com/kitsunium/sdk/internal/core/app/mail/spool"
 	svcmail "github.com/kitsunium/sdk/internal/service/app/mail"
-	svcspool "github.com/kitsunium/sdk/internal/service/app/mail/spool"
 )
 
 // TLSUnset is the zero value and is refused at construction — neither
@@ -230,43 +170,9 @@ const TLSImplicit TLSMode = svcmail.TLSImplicit
 // refused with it, at construction.
 const TLSDisabled TLSMode = svcmail.TLSDisabled
 
-// The spool's defaults, and the capture transport's.
-const (
-	// DefaultCaptureKeep is how many deliveries NewCapture keeps when given a
-	// non-positive number.
-	DefaultCaptureKeep int = svcmail.DefaultCaptureKeep
-	// DefaultSpoolSendTimeout bounds one delivery attempt when
-	// SpoolConfig.SendTimeout is not positive.
-	DefaultSpoolSendTimeout time.Duration = svcspool.DefaultSendTimeout
-	// DefaultSpoolRetryBase and DefaultSpoolRetryMax bound the wait between
-	// attempts when SpoolConfig.Backoff is zero; DefaultSpoolRetryBase is
-	// also the first wait of a curve that sets no BaseDelay.
-	DefaultSpoolRetryBase time.Duration = svcspool.DefaultRetryBase
-	DefaultSpoolRetryMax  time.Duration = svcspool.DefaultRetryMax
-	// DefaultSpoolMaxMessageBytes bounds one spooled mail when
-	// SpoolConfig.MaxMessageBytes is zero.
-	DefaultSpoolMaxMessageBytes int = svcspool.DefaultMaxMessageBytes
-	// SpoolDeliveredMemory is how many delivered mails a spool remembers to
-	// drop a redelivery.
-	SpoolDeliveredMemory int = svcspool.DeliveredMemory
-	// SpoolMaxIDBytes bounds a spooled mail's identifier, whoever minted it:
-	// Spool.SendWithID refuses a longer one with InvalidMailID.
-	SpoolMaxIDBytes int = svcspool.MaxIDBytes
-)
-
-// What can happen to a spooled mail.
-const (
-	// SpoolQueued: Send put the mail in the spool.
-	SpoolQueued SpoolEventKind = svcspool.EventQueued
-	// SpoolSent: the transport accepted the mail.
-	SpoolSent SpoolEventKind = svcspool.EventSent
-	// SpoolRetrying: an attempt failed and the next is due at Next.
-	SpoolRetrying SpoolEventKind = svcspool.EventRetrying
-	// SpoolDeadLettered: the last attempt failed; the mail is kept with it.
-	SpoolDeadLettered SpoolEventKind = svcspool.EventDeadLettered
-	// SpoolDuplicate: a redelivery of a mail already delivered was dropped.
-	SpoolDuplicate SpoolEventKind = svcspool.EventDuplicate
-)
+// DefaultCaptureKeep is how many deliveries NewCapture keeps when given a
+// non-positive number.
+const DefaultCaptureKeep int = svcmail.DefaultCaptureKeep
 
 // Message is the public alias for one mail, as a value.
 type Message = coremail.MessageValue
@@ -321,28 +227,6 @@ type ComposerConfig = svcmail.ComposerConfig
 // Composer is the public alias for the type that turns a [Message] into
 // the RFC 5322 wire form without sending anything.
 type Composer = svcmail.Composer
-
-// Spool is the public alias for the durable outbox: Send, SendWithID, Run,
-// DeadLetters, Close.
-type Spool = svcspool.Spool
-
-// SpoolConfig is the public alias for a spool's configuration: Transport and
-// MaxAttempts required; Dir, Clock, From, Backoff, SendTimeout,
-// MaxMessageBytes, PollInterval, Observe, Annotate and NewID optional.
-type SpoolConfig = svcspool.Config
-
-// SpoolEvent is the public alias for one thing that happened to one mail.
-type SpoolEvent = svcspool.EventValue
-
-// SpoolEventKind is the public alias for what a SpoolEvent reports.
-type SpoolEventKind = svcspool.EventKind
-
-// SpoolAttempt is the public alias for what one delivery attempt knows about
-// itself, carried in the context the spool hands its transport.
-type SpoolAttempt = svcspool.AttemptValue
-
-// SpoolDeadLetter is the public alias for a mail the spool gave up on.
-type SpoolDeadLetter = svcspool.DeadLetterValue
 
 var (
 	// HeaderInjection is returned when a header name or value carries CR, LF or
@@ -404,40 +288,7 @@ var (
 	// InvalidURL is returned by [ParseURL] for a URL it cannot read. It names
 	// the clause and never the URL, which carries the password.
 	InvalidURL = coremail.InvalidURL
-
-	// The spool's own sentinels (0.3.81.*). As for every sentinel of this
-	// package, errors.Is matches one and errs.CodeOf reads its code.
-
-	// SpoolMisconfigured refuses a spool that could never deliver, and a Send
-	// whose SpoolConfig.NewID minted an identifier no mail can keep.
-	SpoolMisconfigured = corespool.SpoolMisconfigured
-	// SpoolClosed refuses a Send or a SendWithID after Close.
-	SpoolClosed = corespool.SpoolClosed
-	// SpooledMailUndecodable reports a spooled record that is not a mail.
-	SpooledMailUndecodable = corespool.MessageUndecodable
-	// SpooledMailUnencodable refuses a mail Send could not write.
-	SpooledMailUnencodable = corespool.MessageUnencodable
-	// TransportPanicked is the failure of an attempt whose transport panicked.
-	TransportPanicked = corespool.TransportPanicked
-	// InvalidMailID refuses an identifier Spool.SendWithID was given that is
-	// empty, longer than SpoolMaxIDBytes or not an RFC 5322 dot-atom. It names
-	// the rule broken and never the identifier.
-	InvalidMailID = corespool.InvalidMailID
 )
-
-// NewSpool builds a durable outbox over cfg.Transport: a queue in cfg.Dir, or
-// in memory without one. It starts nothing: Run delivers.
-func NewSpool(cfg SpoolConfig) (*Spool, error) {
-	//: delegate to the service constructor.
-	return svcspool.New(cfg)
-}
-
-// SpoolAttemptFrom returns the attempt a delivery context carries — only a
-// context a Spool handed its transport carries one.
-func SpoolAttemptFrom(ctx context.Context) (attempt SpoolAttempt, ok bool) {
-	//: delegate to the service accessor.
-	return svcspool.AttemptFrom(ctx)
-}
 
 // NewCapture returns NewMemory's double keeping only the last keep deliveries
 // — DefaultCaptureKeep when keep is not positive: the transport a development

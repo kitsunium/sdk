@@ -8,8 +8,9 @@ under `internal/core/app`, at the same paths. This directory holds no Go
 code: it is a prefix, not a package, and nothing imports
 `internal/service/app` itself. Each member is a package of the
 `internal/service` module with its own `CLAUDE.md`, and each is published by
-the facade at the same path under `pkg/v1/app` — except `mail/spool`, the
-mail outbox, which `pkg/v1/app/mail` publishes beside the composer.
+the facade at the same path under `pkg/v1/app` — `mail/spool`, the mail
+outbox, included: `pkg/v1/app/mail/spool`, apart from the composer so that
+sending a mail links no queue.
 
 ## The rule that put them together
 
@@ -49,7 +50,7 @@ retry on the `kernel/backoff` curve.
 | `lifecycle/` | the ordering engine, the per-component stop budget, the opt-in `Run` over `proc/{signal,systemd/notify}`, and the supervisor that restarts a loop (ADR 0050, ADR 0112) | `core/app/lifecycle` | `0.3.49.*` and `0.2.19.*`, both declared in `core/app/lifecycle` | `pkg/v1/app/lifecycle` |
 | `lock/` | the in-process locker, whose leases expire, and the file locker over `flock(2)` or `LockFileEx`, whose leases do not; the keepalive; the lock path refused when redirected or replaced (ADR 0052, ADR 0081–ADR 0084, ADR 0086) | `core/app/lock` | `0.3.51.*` and `0.2.21.*`, both declared in `core/app/lock` | `pkg/v1/app/lock` |
 | `mail/` | the guards every writer runs (the injection gate, the addr-spec subset, `Validate`, `Envelope` — ADR 0160), MIME composition and the SMTP transport over `net/smtp`, with memory and capture doubles that compose as production does (ADR 0064) | `core/app/mail` | `0.3.61.*` and `0.2.31.*`, both declared in `core/app/mail` | `pkg/v1/app/mail` |
-| `mail/spool/` | the durable outbox: validated and stamped at `Send`, delivered from a `data/queue` consumer, a failure parked on the backoff curve and the last one dead-lettered with its cause (ADR 0111, ADR 0141) | none — it composes `core/app/mail` and `core/data/queue` | `0.3.81.*`, declared in `core/app/mail/spool` | published by `pkg/v1/app/mail` |
+| `mail/spool/` | the durable outbox: validated and stamped at `Send`, delivered from a `data/queue` consumer, a failure parked on the backoff curve and the last one dead-lettered with its cause (ADR 0111, ADR 0141) | none — it composes `core/app/mail` and `core/data/queue` | `0.3.81.*`, declared in `core/app/mail/spool` | `pkg/v1/app/mail/spool` |
 | `resilience/` | retry, circuit breaker, rate limit (one bucket, or one per caller), bulkhead, timeout, fallback and hedging, and `BackoffValue`, an alias of `kernel/backoff`'s curve (ADR 0026, ADR 0031, ADR 0103) | `core/app/resilience` | none of its own — core's `0.2.8.*` | `pkg/v1/app/resilience` |
 | `scheduler/` | the five-field cron parser, the fixed interval and the firing engine, waiting on `kernel/clock` (ADR 0041) | `core/app/scheduler` | `0.3.43.*` and `0.2.12.*`, both declared in `core/app/scheduler` | `pkg/v1/app/scheduler` |
 | `statemachine/` | declarations frozen per machine, per-entity transitions, and the agenda heap the loop sleeps on (ADR 0120) | `core/app/statemachine` | `0.3.88.*` and `0.2.56.*`, both declared in `core/app/statemachine` | `pkg/v1/app/statemachine` |
