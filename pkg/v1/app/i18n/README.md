@@ -346,7 +346,7 @@ NewMessage compiles an uncounted message, or returns [InvalidPattern](<#InvalidT
 func NewPluralMessage(forms map[Form]string) (message Message, err error)
 ```
 
-NewPluralMessage compiles a counted message from one pattern per category, or returns [InvalidPattern](<#InvalidTag>) or [PluralFormMissing](<#InvalidTag>). The map MUST contain [FormOther](<#FormOther>).
+NewPluralMessage compiles a counted message from one pattern per category, or returns [InvalidPattern](<#InvalidTag>), [InvalidForm](<#InvalidTag>) or [PluralFormMissing](<#InvalidTag>). The map MUST contain [FormOther](<#FormOther>).
 
 It does not check the map against any language's rules — it does not know the language. [NewStore](<#NewStore>) does, and refuses there.
 

@@ -39,7 +39,7 @@ const expectedCatalogueKeys int = 64
 // # The tag comes from the file NAME
 //
 // "en.json" is English, "pt-PT.yaml" is European Portuguese. The base name
-// minus its extension is parsed by [corei18n.ParseTag], so the whole refusal
+// minus its extension is parsed by [ParseTag], so the whole refusal
 // list of that function applies to filenames: "fr_FR.json" is refused, because
 // accepting it would mint a second Tag for French and split the catalogue.
 // Subdirectories are ignored rather than walked — a nested layout is a
@@ -124,7 +124,7 @@ func tagFromFilename(name string) (tag corei18n.TagValue, err error) {
 	//: strip the extension; "en.json" names English.
 	base := name[:len(name)-len(path.Ext(name))]
 	//: the whole ParseTag refusal list applies to filenames.
-	tag, err = corei18n.ParseTag(base)
+	tag, err = ParseTag(base)
 	//: a filename that is not a tag in the subset.
 	if err != nil {
 		//: add the file so the maintainer knows which one to rename.

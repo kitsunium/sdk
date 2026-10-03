@@ -249,8 +249,8 @@ var (
 // refused by name rather than parsed and dropped — a dropped subtag changes
 // which language answers without changing anything a reader can see.
 func ParseTag(text string) (tag Tag, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.ParseTag(text)
+	//: delegate to the service parser, which assembles the core value.
+	return svci18n.ParseTag(text)
 }
 
 // ParseForm returns the [Form] named by a CLDR category spelling — "zero",
@@ -288,19 +288,19 @@ func ValidateKey(key Key) error {
 
 // NewMessage compiles an uncounted message, or returns [InvalidPattern].
 func NewMessage(text string) (message Message, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.NewMessage(text)
+	//: delegate to the service compiler, which assembles the core value.
+	return svci18n.NewMessage(text)
 }
 
 // NewPluralMessage compiles a counted message from one pattern per category,
-// or returns [InvalidPattern] or [PluralFormMissing]. The map MUST contain
-// [FormOther].
+// or returns [InvalidPattern], [InvalidForm] or [PluralFormMissing]. The map
+// MUST contain [FormOther].
 //
 // It does not check the map against any language's rules — it does not know
 // the language. [NewStore] does, and refuses there.
 func NewPluralMessage(forms map[Form]string) (message Message, err error) {
-	//: delegate to the core value constructor.
-	return corei18n.NewPluralMessage(forms)
+	//: delegate to the service compiler, which assembles the core value.
+	return svci18n.NewPluralMessage(forms)
 }
 
 // Plain returns an uncounted [Entry].

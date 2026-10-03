@@ -1012,15 +1012,17 @@ rules:
       # The i18n values (ADR 0063) are the jwk and metrics case again: every
       # one comes out of a constructor that VALIDATES, and each is named for
       # what it does rather than for the type it returns. TagValue comes from
-      # ParseTag, which refuses everything outside the BCP 47 subset BY NAME;
-      # CountValue comes from Int or Decimal, which are the two ways CLDR's
-      # operands can be derived and which say at the call site which one the
-      # caller means; MessageValue comes from NewMessage or NewPluralMessage,
-      # which parse the placeholders once so no render ever parses. A
-      # NewTagValue / NewCountValue / NewMessageValue would each be a second
-      # way in that skips the validation — exactly the "poorly initialized
-      # struct" the rule exists to prevent. (Same broken "NewNewTagValue()"
-      # suggestion the entries above record.)
+      # NewTag, which holds each subtag to the BCP 47 subset's shape (the
+      # service's ParseTag reads a written tag into it, ADR 0160); CountValue
+      # comes from Int or Decimal, which are the two ways CLDR's operands can
+      # be derived and which say at the call site which one the caller means;
+      # PatternValue comes from NewPattern and MessageValue from
+      # NewCompiledMessage, which hold compiled spans to their invariants (the
+      # service's NewMessage / NewPluralMessage parse the placeholders once, so
+      # no render ever parses). A NewTagValue / NewCountValue / NewMessageValue
+      # would each be a second way in that skips the validation — exactly the
+      # "poorly initialized struct" the rule exists to prevent. (Same broken
+      # "NewNewTagValue()" suggestion the entries above record.)
       #
       # service/app/i18n.PluralValue is stronger still: a caller never constructs
       # one. Its only instances are the thirteen entries of the hand-written

@@ -28,8 +28,10 @@ const exitConfig int = 78
 // and asserts the secret appears in neither Error(), Public(), Private(), nor
 // any field.
 var (
-	// InvalidTag is returned by [ParseTag] for a tag outside the subset this
-	// domain resolves.
+	// InvalidTag is returned for a tag outside the subset this domain
+	// resolves: by [NewTag] for a subtag of the wrong shape, and by the parser
+	// of a written tag, internal/service/app/i18n's ParseTag, for everything
+	// BCP 47 can spell outside `language[-Script][-REGION]`.
 	//
 	// It is deliberately NOT what an unparsable Accept-Language element
 	// produces. That header is written by a stranger, and RFC 4647 §3.4
@@ -49,8 +51,9 @@ var (
 		"core/app/i18n: a message key must be non-empty and free of control characters — it is compared by byte equality and is shown on screen when a translation is missing",
 		errs.WithExitCode(exitConfig))
 
-	// InvalidPattern is returned by [NewMessage] and [NewPluralMessage] for a
-	// pattern the placeholder parser refuses.
+	// InvalidPattern is returned for a pattern the placeholder parser refuses
+	// — by the compiler behind internal/service/app/i18n's NewMessage and
+	// NewPluralMessage — and by [NewPattern] for spans that are not a pattern.
 	InvalidPattern = errs.Define(CodeInvalidPattern, "INVALID_PATTERN",
 		"The message pattern is malformed and was refused",
 		"core/app/i18n: the pattern carries an unclosed brace, an unmatched closing brace, an empty placeholder or a placeholder name outside [A-Za-z_][A-Za-z0-9_]*",

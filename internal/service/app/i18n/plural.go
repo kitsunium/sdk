@@ -136,7 +136,7 @@ func SupportedTags() []corei18n.TagValue {
 	//: table typo is caught by TestEverySupportedTagParses.
 	for key := range rulesByTag {
 		//: canonicalise the key into a Tag.
-		tag, err := corei18n.ParseTag(key)
+		tag, err := ParseTag(key)
 		//: a malformed key is a table defect the test catches.
 		if err != nil {
 			//: skip it rather than panic on a package variable.

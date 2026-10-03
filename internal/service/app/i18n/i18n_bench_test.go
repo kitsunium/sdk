@@ -65,7 +65,7 @@ func benchCatalogues() map[corei18n.TagValue]svci18n.Catalogue {
 
 // benchTag parses a canonical tag, panicking on a typo in this file.
 func benchTag(text string) corei18n.TagValue {
-	tag, err := corei18n.ParseTag(text)
+	tag, err := svci18n.ParseTag(text)
 	if err != nil {
 		panic("benchmark tag is not canonical: " + text)
 	}
@@ -306,7 +306,7 @@ func BenchmarkParseTag(b *testing.B) {
 	b.ResetTimer()
 
 	for range b.N {
-		sinkTag, sinkErr = corei18n.ParseTag("zh-Hant-TW")
+		sinkTag, sinkErr = svci18n.ParseTag("zh-Hant-TW")
 	}
 }
 

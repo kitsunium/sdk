@@ -153,7 +153,7 @@ func compileEntry(tag corei18n.TagValue, key corei18n.Key, entry EntryValue, rul
 // compilePlain compiles an uncounted entry.
 func compilePlain(tag corei18n.TagValue, key corei18n.Key, text string) (message corei18n.MessageValue, err error) {
 	//: parse the placeholders once, here.
-	message, err = corei18n.NewMessage(text)
+	message, err = NewMessage(text)
 	//: a malformed pattern is a catalogue defect.
 	if err != nil {
 		//: add the coordinates a maintainer needs to find the line.
@@ -175,7 +175,7 @@ func compileCounted(tag corei18n.TagValue, key corei18n.Key, forms map[string]st
 		return corei18n.MessageValue{}, err
 	}
 	//: compile every declared category.
-	message, err = corei18n.NewPluralMessage(byForm)
+	message, err = NewPluralMessage(byForm)
 	//: a missing `other`, or a malformed pattern.
 	if err != nil {
 		//: add the coordinates.

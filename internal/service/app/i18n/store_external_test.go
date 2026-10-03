@@ -13,7 +13,7 @@ import (
 func mustTag(t *testing.T, text string) corei18n.TagValue {
 	t.Helper()
 
-	tag, err := corei18n.ParseTag(text)
+	tag, err := svci18n.ParseTag(text)
 	if err != nil {
 		t.Fatalf("ParseTag(%q) = %v", text, err)
 	}

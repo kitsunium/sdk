@@ -4,17 +4,25 @@
 ## Purpose
 
 The concrete half of the message-translation domain (**ADR 0063**): the
-hand-written CLDR plural rule table, the immutable `Store` that compiles a
-catalogue, the `Negotiator` that resolves an `Accept-Language` header, and the
-`Printer` that renders. The port, the values and the typed refusals live in
-`internal/core/app/i18n`.
+parser of a written language tag (`ParseTag`), the compiler of a message
+pattern (`NewMessage`, `NewPluralMessage`), the hand-written CLDR plural rule
+table, the immutable `Store` that compiles a catalogue, the `Negotiator` that
+resolves an `Accept-Language` header, and the `Printer` that renders. The
+port, the values — the tag, the compiled message — and every typed refusal
+live in `internal/core/app/i18n`; reading text into those values is a
+mechanism, and lives here (ADR 0160).
 
-Code range: `0.3.60.*` (ADR 0063).
+Code range: `0.3.60.*` (ADR 0063), declared with the port's `0.2.30.*` in
+`internal/core/app/i18n` (ADR 0160). This package declares no code.
 
 ## Contents
 
 | File | Surface |
 |---|---|
+| `tag.go` | `ParseTag` — splits a written tag, places each subtag by length and order, and refuses BY NAME everything outside `language[-Script][-REGION]`; `corei18n.NewTag` then checks each subtag's shape and canonicalises its case |
+| `pattern.go` | `compilePattern` / `compileBraced` — the placeholder syntax, and every construct it refuses by name |
+| `pattern_compiler.go` | `patternCompiler` — the one-pass parser run at catalogue load; it hands its spans to `corei18n.NewPattern` |
+| `message.go` | `NewMessage` / `NewPluralMessage` — a message compiled from a translator's text, assembled by `corei18n.NewCompiledMessage` |
 | `plural.go` | the CLDR rule table (13 entries) + `Rules` / `SupportedTags` + the nine transcribed rule functions (`ja` and `zh` carry none; `de`, `en` and `nl` share one) |
 | `plural_value.go` | `PluralValue` — one language's categories and its rule |
 | `entry_value.go` | `EntryValue` + `Catalogue` + `Plain` / `PluralForms` |
@@ -26,8 +34,7 @@ Code range: `0.3.60.*` (ADR 0063).
 | `negotiator.go` | `Negotiator` + `NewNegotiator` + `Supported` + `Negotiate` |
 | `negotiate.go` | RFC 4647 §3.4 `lookup` / §3.3.1 refusal (`refused`) + `subtagPrefixFold` + the stable `sortByQuality` |
 | `accept.go` | the RFC 9110 `Accept-Language` parser (bounded, allocation-free) |
-| `codes.go` | `Code*` constants — range 0.3.60.* |
-| `errors.go` | `UnsupportedLanguage` / `CatalogInvalid` / `CatalogLoadFailed` / `TranslationIncomplete` / `NegotiationEmpty` + `failLoad` |
+| `errors.go` | `failLoad` — `CATALOG_LOAD_FAILED` over the filesystem's or the codec's own error, kept in the chain (the sentinels are `corei18n`'s) |
 
 ## Supported languages
 

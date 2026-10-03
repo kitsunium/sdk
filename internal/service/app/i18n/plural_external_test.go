@@ -170,7 +170,7 @@ func TestCLDRRulesAtTheirBoundaries(t *testing.T) {
 		t.Run(language, func(t *testing.T) {
 			t.Parallel()
 
-			tag, err := corei18n.ParseTag(language)
+			tag, err := svci18n.ParseTag(language)
 			if err != nil {
 				t.Fatalf("ParseTag(%q) = %v", language, err)
 			}
@@ -276,7 +276,7 @@ func TestRulesResolveTheExactTagBeforeTheLanguage(t *testing.T) {
 
 	// A region narrowing CLDR does not distinguish inherits its language …
 	for _, spelling := range []string{"fr-CA", "de-AT", "zh-Hant", "en-GB", "pt-BR"} {
-		tag, err := corei18n.ParseTag(spelling)
+		tag, err := svci18n.ParseTag(spelling)
 		if err != nil {
 			t.Fatalf("ParseTag(%q) = %v", spelling, err)
 		}
@@ -287,11 +287,11 @@ func TestRulesResolveTheExactTagBeforeTheLanguage(t *testing.T) {
 
 	// … and one it DOES distinguish gets its own. "0 ficheiros" is other in
 	// Portugal and "0 arquivos" is one in Brazil.
-	european, err := corei18n.ParseTag("pt-PT")
+	european, err := svci18n.ParseTag("pt-PT")
 	if err != nil {
 		t.Fatalf("ParseTag = %v", err)
 	}
-	brazilian, err := corei18n.ParseTag("pt-BR")
+	brazilian, err := svci18n.ParseTag("pt-BR")
 	if err != nil {
 		t.Fatalf("ParseTag = %v", err)
 	}
@@ -313,7 +313,7 @@ func TestAnUnsupportedLanguageIsRefusedRatherThanApproximated(t *testing.T) {
 	// Every one of these has plural rules English does not have, and every
 	// one of them would render a wrong sentence under an English fallback.
 	for _, spelling := range []string{"cs", "lt", "lv", "ga", "cy", "sl", "ro", "hr", "sk", "uk"} {
-		tag, err := corei18n.ParseTag(spelling)
+		tag, err := svci18n.ParseTag(spelling)
 		if err != nil {
 			t.Fatalf("ParseTag(%q) = %v", spelling, err)
 		}

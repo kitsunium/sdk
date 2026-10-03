@@ -252,7 +252,7 @@ func (oneLanguageCatalog) Lookup(tag corei18n.TagValue, key corei18n.Key) (corei
 	if tag.String() != "en" || key != "greeting" {
 		return corei18n.MessageValue{}, false
 	}
-	message, err := corei18n.NewMessage("Hello")
+	message, err := svci18n.NewMessage("Hello")
 	return message, err == nil
 }
 
