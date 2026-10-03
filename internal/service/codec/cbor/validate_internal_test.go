@@ -143,8 +143,22 @@ func Test_validateItem_depth(t *testing.T) {
 
 // Test_validateItem_indefiniteBounds pins the element and chunk bounds of the
 // indefinite forms, which no count announces up front.
+//
+// It walks a million items per case, in every build but a coverage one. There
+// each basic block bumps a counter, and under the race detector, which
+// `bazel coverage` keeps on, every bump is an instrumented atomic: the four
+// walks took 26 to 29 s each and 104 s of CPU together (0.2 to 0.5 s each under
+// the race detector alone), against the 60 s .bazelrc gives the target. The
+// race suite, the alloc lane and `go test` walk them; the coverage run reaches
+// the same bounds, at the constants themselves, through
+// Test_validator_countChild.
 func Test_validateItem_indefiniteBounds(t *testing.T) {
 	t.Parallel()
+	//: a coverage build cannot afford the walks; countChild is pinned instead.
+	if testing.CoverMode() != "" {
+		t.Log("coverage build: the bounds are pinned by Test_validator_countChild")
+		return
+	}
 	type tc struct {
 		name    string
 		opener  byte
@@ -171,6 +185,58 @@ func Test_validateItem_indefiniteBounds(t *testing.T) {
 			}
 			return
 		}
+		if err == nil || !strings.Contains(errs.PrivateOf(err), tc.wantErr) {
+			t.Errorf("%s: err = %v (%s), want %q", tc.name, err, errs.PrivateOf(err), tc.wantErr)
+		}
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, tc)
+		})
+	}
+}
+
+// Test_validator_countChild pins the three indefinite-length bounds on the one
+// function every item of an open indefinite frame is counted through, at the
+// constants themselves: the frame starts one item short of its bound, or at
+// it, so the item counted is the last one admitted or the first one refused.
+// A map counts its keys and values, so its bound falls on the key that would
+// open a pair past it. It costs one call per case, which is what keeps these
+// bounds inside a coverage run (see Test_validateItem_indefiniteBounds).
+func Test_validator_countChild(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		wantErr string
+		count   uint64
+		kind    frameKind
+	}
+	tests := []tc{
+		{"the last element an array admits", "", uint64(maxCBORArrayElements) - 1, frameArray},
+		{"one element past the bound", "more than 1048576 elements", uint64(maxCBORArrayElements), frameArray},
+		{"the value that completes the last pair", "", 2*uint64(maxCBORMapPairs) - 1, frameMap},
+		{"the key of one pair past the bound", "more than 1048576 pairs", 2 * uint64(maxCBORMapPairs), frameMap},
+		{"the last chunk a string admits", "", uint64(maxCBORStringChunks) - 1, frameChunks},
+		{"one chunk past the bound", "more than 1048576 chunks", uint64(maxCBORStringChunks), frameChunks},
+	}
+	runCase := func(t *testing.T, tc tc) {
+		t.Helper()
+		v := &validator{}
+		top := validFrame{count: tc.count, kind: tc.kind, indefinite: true}
+		err := v.countChild(&top)
+		//: the item is counted either way.
+		if top.count != tc.count+1 {
+			t.Errorf("%s: count = %d after the item, want %d", tc.name, top.count, tc.count+1)
+		}
+		//: admitted.
+		if tc.wantErr == "" {
+			if err != nil {
+				t.Errorf("%s: refused at the bound: %v", tc.name, err)
+			}
+			return
+		}
+		//: refused, naming the bound.
 		if err == nil || !strings.Contains(errs.PrivateOf(err), tc.wantErr) {
 			t.Errorf("%s: err = %v (%s), want %q", tc.name, err, errs.PrivateOf(err), tc.wantErr)
 		}

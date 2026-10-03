@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-03T05:55:00Z -->
 # internal/service/codec/cbor/
 
 ## Purpose
@@ -153,3 +153,10 @@ cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem ./codec/c
 `FuzzUnmarshal` asserts that nothing panics, that what decodes untyped
 re-encodes to a fixed point after one round, that the stream decoder agrees
 with `Unmarshal`, and that a typed target fails only with `UNMARSHAL_FAILED`.
+
+A coverage build does not walk the million-item documents of
+`Test_validateItem_indefiniteBounds`: under the race detector, which
+`bazel coverage` keeps on, every coverage counter is an instrumented atomic,
+and the walks took 26 to 29 s each against the target's 60 s.
+`Test_validator_countChild` pins the same three bounds there, at the constants
+themselves; every other build walks them.
