@@ -142,7 +142,9 @@ published, which is why §2 comes first.
     stays narrower and refuses Windows). A primitive this record did not list
     joined it: `kernel/fs/winacl`, the Windows DACL reader `lock` wrote
     (ADR 0084, 0086) and exported for `queue` (ADR 0095), which took the
-    queue's Windows-only edge onto the lock service with it.
+    queue's Windows-only edge onto the lock service with it. The five
+    "private directory" rules built on these primitives were compared and
+    kept five: each difference is a decision (`internal/kernel/fs/CLAUDE.md`).
   - Not yet: `ring`'s multi-producer mode and the `pkg/v1` aliases of §4
     other than `semver`.
 - The framework replaces its copy-on-write values, its fan-out and its ring

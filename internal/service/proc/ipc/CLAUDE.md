@@ -88,6 +88,36 @@ directory. Code range `0.3.91.*`.
   not is a leftover and is removed — only when it is a socket this account
   owns. A regular file there is never touched.
 
+## The socket directory's rule, beside the other four
+
+`app/lock`, `security/secret`, `security/session` and `data/queue` each refuse
+a directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+`pathchain` walk and no rule; this one's, and why it is not a neighbour's:
+
+- **The directory is the whole access control**, so it must be this account's
+  and writable by nobody else: a link, another account's directory, or a
+  group- or other-WRITABLE one (`0o022`) is `DIRECTORY_UNSAFE`. `lock` and
+  `queue` accept a group-writable directory because they are shared on
+  purpose; a private socket is not.
+- **Group SEARCH is allowed** (`0750`), where `secret` and `session` refuse any
+  group bit: an on-call group reaching this directory reaches a socket whose
+  listener admits only the accounts it names (and, on Linux, checks the peer),
+  while reading theirs reaches the secrets themselves.
+- **The path above is judged three ways** wherever anybody can write the
+  holder — an indirection, a component neither this account's nor root's, or
+  any component without sticky (`PATH_UNSAFE`) — where `lock` and `session`
+  refuse only the first. The OWNER rule is this package's alone: a component
+  another account owns decides everything below it, and a lock that is shared
+  between accounts on purpose cannot ask it.
+- **It runs on both sides**: at `Listen`, before and after the `Mkdir`, and at
+  every `Dial` — the only rule of the five a client applies too.
+- **`Mkdir`, never `MkdirAll`**: the parent must already exist and is audited
+  first, so nothing is ever created inside a steered tree.
+- **No DACL is READ on Windows**: there is no directory there. The named pipe
+  carries a DACL this package BUILDS (`D:P(A;;GA;;;<SID>)`, ADR 0148 §3), so the
+  kernel's reader, `internal/kernel/fs/winacl`, is not this package's.
+
 ## Do NOT
 
 - Branch on the errno of a failed dial: the cause travels as a field, the

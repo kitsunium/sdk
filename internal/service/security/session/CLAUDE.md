@@ -249,6 +249,40 @@ a change to `vfs` itself — the mode assertion in `WriteAtomic`, a durable
 remove or flush sibling (ADR 0039), and `fs.ReadLinkFS` — which changes `vfs`
 for every caller and is not this change.
 
+## The store directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/secret` and `data/queue` each refuse a
+directory by a rule of their own, and the five are compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`pathchain`, `winacl`) and lock (`flock`), and no rule. This
+store's, and why it is not a neighbour's:
+
+- **Owner-only, judged on the directory it HOLDS.** Any bit beyond `0700` is
+  `DirectoryUnsafe`, read through the `os.Root` every later operation uses,
+  and the path must still name that directory (`PathRedirected`). Stricter than
+  `lock` and `queue`, which accept a GROUP share because a lock or a queue
+  shared between two service accounts is their point; a session record is one
+  subject's secret. As strict as `secret` on a group READ bit — and, unlike
+  `ipc`, which admits group search, there is no peer check behind this
+  directory to make reading it harmless.
+- **The one rule that narrows.** A directory this call CREATED is `fchmod`ed
+  to `0700`, because `MkdirAll`'s mode is a request a default POSIX ACL can
+  widen; an operator's existing directory is refused, never narrowed — the line
+  every other domain draws at "never narrow".
+- **The path above is `lock`'s rule, verbatim** (ADR 0083): an indirection
+  whose holder is world-writable is refused, the sticky bit exempting nothing,
+  through `pathchain`, BEFORE anything is created. `plantable` on Unix is
+  byte-for-byte `lock`'s, and stays a copy: it is one bit test whose meaning —
+  who counts as "anybody" — is a policy this store adopted, and `lock`'s
+  Windows half (a DACL question) is one this store refuses the platform before
+  it could ask. `ipc` judges the same walk more strictly (a foreign owner, a
+  replaceable component); `queue` does not walk the path at all.
+- **Ownership is not checked** (§What is NOT closed), where `ipc` checks the
+  owner of the directory and of every component an outsider could write.
+- **Windows is refused** where `lock` and `queue` read the DACL:
+  `winacl.GrantsAnyone` answers "can ANYBODY write?", which is weaker than
+  owner-only (§Why Windows is still refused).
+
 ## Conventions
 
 - **Nothing waits on the wall clock, and nothing sleeps.** The memory store

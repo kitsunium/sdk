@@ -206,7 +206,7 @@ The root:
 - `collections/heap/` — see `internal/kernel/collections/heap/CLAUDE.md` (generic priority queue — and the measured cost of `container/heap`'s interface)
 - `collections/ring/` — see `internal/kernel/collections/ring/CLAUDE.md`
 
-`fs/` — see `internal/kernel/fs/CLAUDE.md` (the family: measurements of the filesystem and single primitives over it, never a verdict on them):
+`fs/` — see `internal/kernel/fs/CLAUDE.md` (the family: measurements of the filesystem and single primitives over it, never a verdict on them — and the five directory rules that share them and nothing else):
 
 - `fs/flock/` — see `internal/kernel/fs/flock/CLAUDE.md` (a file lock that never blocks, over `flock(2)` and `LockFileEx` — the measured row where the two kernels are opposites, ADR 0081)
 - `fs/pathchain/` — see `internal/kernel/fs/pathchain/CLAUDE.md` (a path resolved one component at a time — the measurement `O_NOFOLLOW` cannot give, ADR 0083)

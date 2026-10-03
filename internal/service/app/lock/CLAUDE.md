@@ -223,6 +223,35 @@ path, a directory that is not there) against a list read to the end. The log is 
 `framework/internal/service/entitlement` uses for the same shape of degradation, and it
 fires only when the platform API refused to answer.
 
+## The lock directory's rule, beside the other four
+
+`proc/ipc`, `security/secret`, `security/session` and `data/queue` each refuse
+a directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`pathchain`, `winacl`) and lock (`flock`), and no rule — a
+consolidation into one parameterised check was proposed and refused, because
+each difference below is a decision this domain made for a reason the others
+do not have:
+
+- **Group-writable is accepted, and so is `0777|sticky`.** A lock exists to be
+  SHARED — between two service accounts through a group, or every account
+  through `/tmp` — so the rule refuses only what lets a stranger REPLACE a lock
+  file and split one lock into two inodes. `ipc`, `secret` and `session`
+  refuse a group bit because their directory is one account's; their rule
+  here would refuse the deployments this domain exists for. `queue` makes the
+  same decision for the same reason, at its root.
+- **Ownership is never checked**, of the directory or of a component above it,
+  where `ipc` checks both: the entry may belong to the OTHER account by design
+  (ADR 0082 §Deferred, and §Unlink-and-replace below).
+- **An unreadable Windows list is ACCEPTED and logged**; `queue` refuses the
+  same answer from the same reader (ADR 0084 §D5, ADR 0095).
+- **The path above is audited on both kernels, before `MkdirAll`.** `session`
+  adopts the Unix half verbatim; `secret` inherits it by taking this package's
+  file locker over its own directory — after its own `MkdirAll`, so a refused
+  path may already hold the new, empty directory.
+- **Nothing is narrowed**: an existing directory is checked, never changed —
+  `session` alone narrows, and only a directory it created.
+
 ## The directory rule never reached the lock file's NAME
 
 `checkDir` refuses a directory whose entries any account can UNLINK. The attack

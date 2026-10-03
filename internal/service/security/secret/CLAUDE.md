@@ -134,6 +134,37 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
   the root would never prune again — checks the context at every key, and
   fails closed.
 
+## The store directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/session` and `data/queue` each refuse a
+directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules; they share the kernel's
+measurements and lock, and no rule. This store's, and why it is not a
+neighbour's:
+
+- **Any group or other bit is refused** (`0o077`), READ included: a directory
+  another account can list hands it the secret NAMES, which are the file
+  names — so a group share `lock` and `queue` accept, and the group search
+  `ipc` admits, are refused here. `session` is the one neighbour as strict, for
+  the same reason.
+- **Refused, never narrowed** — `session` narrows a directory it created; this
+  store refuses even its own, so an umask or a default ACL that widened
+  `MkdirAll`'s request is a refusal the operator sees, not a repair.
+- **Judged twice, the second time on the HELD root** (`checkHeldRoot`), where
+  `os.SameFile` must still match the path — as `session` does; `lock` and
+  `queue` judge the path once.
+- **The path above is not walked here.** It is audited by the lock domain's
+  `checkChain` when `NewFile` opens its file locker over the same directory —
+  AFTER `prepareDir`'s `MkdirAll`, so a path the audit refuses may already
+  hold the new, empty `0700` directory inside the planter's tree, where `lock`
+  and `session` audit BEFORE anything is created. Nothing is written there and
+  `NewFile` fails, but the order is the one ADR 0083 warns against; moving the
+  audit ahead of `prepareDir` is a behaviour change left to its own decision,
+  named here rather than implied closed.
+- **No Windows rule**: the store is refused there (`vfs` refuses the platform:
+  no directory flush, a mode that is not an ACL), so neither `winacl` nor a
+  mode is asked.
+
 ## Surface
 
 | Symbol | Notes |

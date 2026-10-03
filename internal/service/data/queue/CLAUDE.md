@@ -147,6 +147,37 @@ Two consequences, stated rather than discovered:
   `TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt` pin both rules through
   real ACLs (`icacls`) and a real junction (`mklink /J`).
 
+## The queue directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/secret` and `security/session` each refuse a
+directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`winacl` here; `pathchain` elsewhere) and no rule. This one's,
+and why it is not a neighbour's:
+
+- **Two levels, one notch apart.** The root takes `lock`'s decision —
+  other-write without sticky refused, group-writable accepted — because
+  nothing lives there but the three states; a STATE is refused as soon as an
+  outsider can write it at all, sticky or not, because there an entry IS a
+  message. No other domain has a directory whose entries are acted upon.
+- **Group-writable is accepted at both levels**, as `lock` accepts it: a queue
+  shared between two service accounts through a group is a deployment, and a
+  state another member of that group made is trusted as the share itself is.
+  `ipc`, `secret` and `session` refuse a group bit; their rule would refuse
+  the shared queue.
+- **An unreadable Windows list is REFUSED** (`why=unverifiable`) where `lock`
+  accepts and logs the same answer from the same reader — the asymmetry runs
+  the other way here (ADR 0095).
+- **The root's path is not walked**, and a link configured as `Dir` is
+  followed (`os.Stat`), where `lock`, `ipc` and `session` audit every
+  component through `pathchain`. The states are `Lstat`ed, so a link or a
+  junction planted AT a state is refused; one planted at a PARENT of `Dir`, in
+  a directory anybody can write, is not looked for. That is the gap
+  `pathchain` closed for the other three (ADR 0083), named here rather than
+  implied closed.
+- **Nothing is narrowed**: a state this broker made is checked like one it
+  found, and an existing directory is refused rather than chmod'ed.
+
 ## Where `internal/service/data/vfs` is used, and where it stops
 
 `vfs.AtomicWriter.WriteAtomic` does the two writes that must be atomic AND
