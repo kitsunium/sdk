@@ -116,6 +116,20 @@ func TestParseBuildReadsAReleaseAndABuildOutsideVersionControl(t *testing.T) {
 	}
 }
 
+// TestParseBuildKeepsTheRevisionOfAStampThatIsNoInstant covers the one reading
+// of a pseudo-version that can fail: the shape is a pseudo-version's, so it is
+// a commit and not a release, and its revision reads — but a thirteenth month
+// is no time, so Time stays zero rather than being guessed.
+func TestParseBuildKeepsTheRevisionOfAStampThatIsNoInstant(t *testing.T) {
+	t.Parallel()
+	build := self.ParseBuild(&debug.BuildInfo{Main: debug.Module{
+		Path: appPath, Version: "v0.0.0-20261399000000-abcdefabcdef",
+	}})
+	if want := (self.ModuleValue{Path: appPath, Revision: "abcdefabcdef"}); build.Main != want {
+		t.Errorf("a pseudo-version whose stamp is no instant reads\n  %+v\nwant\n  %+v", build.Main, want)
+	}
+}
+
 // TestReadBuildAgreesWithTheToolchain pins that ReadBuild is ParseBuild over
 // the running binary's own information, whatever built this test binary.
 func TestReadBuildAgreesWithTheToolchain(t *testing.T) {

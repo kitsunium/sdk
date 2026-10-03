@@ -9,8 +9,10 @@ child; this one only reads, and only the process it runs in. Public facade:
 `pkg/v1/process` (`Self`, `Build`, `ParseBuild`, and the `Stats` /
 `Distribution` / `BuildInfo` / `Module` aliases).
 
-Stdlib plus `golang.org/x/mod/module`, which the service module already
-required (for `semver`) — no new module.
+Stdlib plus `internal/kernel/semver`, which recognises a pseudo-version and
+reads its revision and time — the kernel primitive that replaced
+`golang.org/x/mod/module` here (ADR 0156 §4), so this package reaches no module
+outside the SDK.
 
 ## Contents
 
@@ -39,7 +41,9 @@ required (for `semver`) — no new module.
   versioned nor local; both are now told. The main module's stamp beats its
   pseudo-version (a full revision against a twelve-character prefix, exact time
   against a second-granular copy), and `+dirty` — which Go 1.24 appends —
-  becomes `Modified` instead of staying in the version string.
+  becomes `Modified` instead of staying in the version string. A pseudo-version
+  whose stamp is no instant (a thirteenth month) is still a commit: its
+  revision is kept and its time left zero, never guessed.
 - **Measured, not assumed: what the toolchain records.** In workspace mode a
   directory replacement is recorded relative to the WORKSPACE root, not to the
   main module (`../lib` in `go.mod` read back as `./lib`), and a workspace
@@ -65,8 +69,10 @@ required (for `semver`) — no new module.
 - Add an error return. A caller has nothing to do with "this platform has no
   getrusage" except read the flag.
 - Reset or window the runtime's counters here. Subtract two snapshots.
-- Parse pseudo-versions by hand. `golang.org/x/mod/module` is the toolchain's
-  own grammar, three forms and build metadata included.
+- Parse pseudo-versions here. `kernel/semver` owns the grammar — the three
+  shapes and their build metadata — and its suite holds it to the toolchain's
+  own pattern on every near miss; a second reading in this package would be
+  the hand-written pattern ADR 0100 refused.
 
 ## Verification
 

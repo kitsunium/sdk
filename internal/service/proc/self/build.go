@@ -15,7 +15,7 @@ import (
 	"strings"
 	"time"
 
-	"golang.org/x/mod/module"
+	"github.com/kitsunium/sdk/internal/kernel/semver"
 )
 
 // Values the Go toolchain writes into debug.BuildInfo.
@@ -228,16 +228,17 @@ func dependency(dep *debug.Module) ModuleValue {
 }
 
 // pseudoCommit returns the commit a pseudo-version names and its time.
-// IsPseudoVersion has already validated both halves, so neither read fails in
-// practice; one that did would leave its half empty, which is the honest
-// reading of a version that does not parse.
+// IsPseudoVersion has already recognised the shape, so the revision always
+// reads; the time does not when the stamp's fourteen digits are no instant —
+// a thirteenth month — and is then left zero, which is the honest reading of
+// a time that does not parse.
 func pseudoCommit(version string) (revision string, at time.Time) {
 	//: the twelve-character commit prefix.
-	if rev, revErr := module.PseudoVersionRev(version); revErr == nil {
+	if rev, ok := semver.PseudoVersionRev(version); ok {
 		revision = rev
 	}
 	//: the commit's time, to the second, in UTC.
-	if stamp, timeErr := module.PseudoVersionTime(version); timeErr == nil {
+	if stamp, ok := semver.PseudoVersionTime(version); ok {
 		at = stamp
 	}
 	//: whatever read.
@@ -258,7 +259,7 @@ func fromVersion(path, version string) ModuleValue {
 	case version == develVersion || version == "":
 		//: left empty.
 	//: a pseudo-version names a commit, not a release.
-	case module.IsPseudoVersion(version):
+	case semver.IsPseudoVersion(version):
 		described.Revision, described.Time = pseudoCommit(version)
 	//: a release.
 	default:
