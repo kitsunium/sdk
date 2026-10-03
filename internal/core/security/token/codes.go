@@ -1,4 +1,6 @@
-// Package token — range 0.2.13.* (ADR 0042 core/security/token block).
+// Package token — ranges 0.2.13.* (the domain's verdicts) and 0.3.44.* (what
+// is specific to the two concrete formats) — ADR 0042, declared here since
+// ADR 0160.
 package token
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -75,3 +77,48 @@ const CodeClaimNameInvalid errs.Code = 0x00_02_0D_0F // 0.2.13.15
 // CodeLifetimeTooLong identifies an authenticated token whose exp-iat span
 // exceeds the maximum lifetime the verifier accepts.
 const CodeLifetimeTooLong errs.Code = 0x00_02_0D_10 // 0.2.13.16
+
+// range: 0.3.44.0 - 0.3.44.255
+//
+// What is specific to the two concrete formats the engine in
+// internal/service/security/token implements — header parameters, key-set
+// selection, PASETO framing. The verdicts a caller matches on are the 0.2.13.*
+// block above. The range was allocated in the service layer (LL = 3) and is
+// declared here since ADR 0160: LL records the layer that allocated a range,
+// not the directory its declaration lives in, so the values never change.
+
+// CodeHeaderUnsupported identifies a JOSE header the engine will not act on:
+// a non-empty "crit" (RFC 7515 §4.1.11 makes an unrecognised critical
+// parameter a mandatory rejection), or a "typ" that does not match the one the
+// verifier requires.
+const CodeHeaderUnsupported errs.Code = 0x00_03_2C_01 // 0.3.44.1
+
+// CodeKeyNotFound identifies a token whose "kid" names no key in the JWK Set
+// the verifier was built from.
+const CodeKeyNotFound errs.Code = 0x00_03_2C_02 // 0.3.44.2
+
+// CodeKeyIDMissing identifies a token presented to a key-set verifier with no
+// "kid" header. A set verifier selects by id; it does not try every key it
+// holds.
+const CodeKeyIDMissing errs.Code = 0x00_03_2C_03 // 0.3.44.3
+
+// CodeKeyIDAmbiguous identifies a "kid" carried by more candidates than the
+// verifier will try. Trying a bounded number of candidates is the rotation
+// path; trying an unbounded number is a CPU amplifier a publisher controls.
+const CodeKeyIDAmbiguous errs.Code = 0x00_03_2C_04 // 0.3.44.4
+
+// CodeFooterMismatch identifies a PASETO token whose footer is not the one the
+// verifier expects — including a footer present where none was configured.
+const CodeFooterMismatch errs.Code = 0x00_03_2C_05 // 0.3.44.5
+
+// CodeSchemeUnsupported identifies a PASETO version+purpose the engine does
+// not implement: any local (encrypted) purpose, and every version other than
+// v4. See internal/service/security/token/CLAUDE.md for why v4.local is
+// absent.
+const CodeSchemeUnsupported errs.Code = 0x00_03_2C_06 // 0.3.44.6
+
+// CodeDuplicateMember identifies a JOSE header or claims object carrying the
+// same member name twice. Go's encoding/json silently keeps the last one, so
+// two readers of the same bytes could disagree about what the token says
+// (RFC 8725 §2.6).
+const CodeDuplicateMember errs.Code = 0x00_03_2C_07 // 0.3.44.7

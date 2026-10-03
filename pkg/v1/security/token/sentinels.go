@@ -12,7 +12,6 @@ package token
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
-	svctoken "github.com/kitsunium/sdk/internal/service/security/token"
 )
 
 var (
@@ -66,24 +65,24 @@ var (
 
 	// HeaderUnsupported is returned for a header carrying a non-empty "crit",
 	// or a "typ" other than VerifierConfig.RequireType.
-	HeaderUnsupported = svctoken.HeaderUnsupported
+	HeaderUnsupported = coretoken.HeaderUnsupported
 	// KeyNotFound is returned when a token's kid names no key in the set.
-	KeyNotFound = svctoken.KeyNotFound
+	KeyNotFound = coretoken.KeyNotFound
 	// KeyIDMissing is returned when a set verifier is handed a token with no
 	// kid header.
-	KeyIDMissing = svctoken.KeyIDMissing
+	KeyIDMissing = coretoken.KeyIDMissing
 	// KeyIDAmbiguous is returned when more keys share a kid than
 	// VerifierConfig.MaxKeyCandidates allows the verifier to try.
-	KeyIDAmbiguous = svctoken.KeyIDAmbiguous
+	KeyIDAmbiguous = coretoken.KeyIDAmbiguous
 	// FooterMismatch is returned for a PASETO footer that is not the expected
 	// one, including a footer present where none was configured.
-	FooterMismatch = svctoken.FooterMismatch
+	FooterMismatch = coretoken.FooterMismatch
 	// SchemeUnsupported is returned for a PASETO version+purpose this package
 	// does not implement — every local purpose, and every version but v4.
-	SchemeUnsupported = svctoken.SchemeUnsupported
+	SchemeUnsupported = coretoken.SchemeUnsupported
 	// DuplicateMember is returned when a header or claims object repeats a
 	// member name (RFC 8725 §2.6).
-	DuplicateMember = svctoken.DuplicateMember
+	DuplicateMember = coretoken.DuplicateMember
 
 	// JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is
 	// not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an

@@ -78,10 +78,10 @@ func TestKeyringOpensWhatWasSealedBeforeARotation(t *testing.T) {
 	if pruneErr := store.Prune(ctx, "session-key", 2); pruneErr != nil {
 		t.Fatalf("Prune: %v", pruneErr)
 	}
-	if _, openErr := keyring.Open(ctx, before, []byte("aad")); !errs.HasCode(openErr, svcsecret.CodeSealInvalid) {
+	if _, openErr := keyring.Open(ctx, before, []byte("aad")); !errs.HasCode(openErr, coresecret.CodeSealInvalid) {
 		t.Errorf("Open of a box sealed under a pruned version = %v, want SealInvalid", openErr)
 	}
-	if verifyErr := keyring.Verify(ctx, []byte("signed under v1"), signedBefore); !errs.HasCode(verifyErr, svcsecret.CodeSignatureInvalid) {
+	if verifyErr := keyring.Verify(ctx, []byte("signed under v1"), signedBefore); !errs.HasCode(verifyErr, coresecret.CodeSignatureInvalid) {
 		t.Errorf("Verify under a pruned version = %v, want SignatureInvalid", verifyErr)
 	}
 	if opened, openErr := keyring.Open(ctx, after, nil); openErr != nil || string(opened) != "sealed under v3" {
@@ -120,7 +120,7 @@ func TestKeyringOpenIsNotAnOracle(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		if _, openErr := keyring.Open(t.Context(), c.box, []byte(c.aad)); !errs.HasCode(openErr, svcsecret.CodeSealInvalid) {
+		if _, openErr := keyring.Open(t.Context(), c.box, []byte(c.aad)); !errs.HasCode(openErr, coresecret.CodeSealInvalid) {
 			t.Errorf("%s: Open = %v, want SealInvalid", c.name, openErr)
 		}
 	}
@@ -153,17 +153,17 @@ func TestKeyringBindsItsName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Seal: %v", err)
 	}
-	if _, openErr := second.Open(t.Context(), box, nil); !errs.HasCode(openErr, svcsecret.CodeSealInvalid) {
+	if _, openErr := second.Open(t.Context(), box, nil); !errs.HasCode(openErr, coresecret.CodeSealInvalid) {
 		t.Errorf("another keyring opened the box: %v", openErr)
 	}
 	signature, err := first.Sign(t.Context(), []byte("message"))
 	if err != nil {
 		t.Fatalf("Sign: %v", err)
 	}
-	if verifyErr := second.Verify(t.Context(), []byte("message"), signature); !errs.HasCode(verifyErr, svcsecret.CodeSignatureInvalid) {
+	if verifyErr := second.Verify(t.Context(), []byte("message"), signature); !errs.HasCode(verifyErr, coresecret.CodeSignatureInvalid) {
 		t.Errorf("another keyring verified the signature: %v", verifyErr)
 	}
-	if verifyErr := first.Verify(t.Context(), []byte("massage"), signature); !errs.HasCode(verifyErr, svcsecret.CodeSignatureInvalid) {
+	if verifyErr := first.Verify(t.Context(), []byte("massage"), signature); !errs.HasCode(verifyErr, coresecret.CodeSignatureInvalid) {
 		t.Errorf("a signature verified another message: %v", verifyErr)
 	}
 }
@@ -173,7 +173,7 @@ func TestKeyringBindsItsName(t *testing.T) {
 func TestKeyringRefusals(t *testing.T) {
 	t.Parallel()
 	store := svcsecret.NewMemory(svcsecret.MemoryConfig{})
-	if _, err := svcsecret.NewKeyring(nil, "k"); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+	if _, err := svcsecret.NewKeyring(nil, "k"); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 		t.Errorf("NewKeyring(nil store) = %v, want InvalidConfig", err)
 	}
 	if _, err := svcsecret.NewKeyring(store, "Not A Name"); !errs.HasCode(err, coresecret.CodeInvalidName) {
@@ -189,10 +189,10 @@ func TestKeyringRefusals(t *testing.T) {
 	if _, putErr := store.Put(t.Context(), "password-not-key", coresecret.FromString("correct horse")); putErr != nil {
 		t.Fatalf("Put: %v", putErr)
 	}
-	if _, sealErr := keyring.Seal(t.Context(), []byte("x"), nil); !errs.HasCode(sealErr, svcsecret.CodeKeyMaterialInvalid) {
+	if _, sealErr := keyring.Seal(t.Context(), []byte("x"), nil); !errs.HasCode(sealErr, coresecret.CodeKeyMaterialInvalid) {
 		t.Errorf("Seal under a password = %v, want KeyMaterialInvalid", sealErr)
 	}
-	if _, signErr := keyring.Sign(t.Context(), []byte("x")); !errs.HasCode(signErr, svcsecret.CodeKeyMaterialInvalid) {
+	if _, signErr := keyring.Sign(t.Context(), []byte("x")); !errs.HasCode(signErr, coresecret.CodeKeyMaterialInvalid) {
 		t.Errorf("Sign under a password = %v, want KeyMaterialInvalid", signErr)
 	}
 }
@@ -257,7 +257,7 @@ func TestKeyringReportsAStoreOutageAsItself(t *testing.T) {
 	}
 	//: a malformed box is still the non-oracle verdict, outage or not: it is
 	//: judged before the store is asked.
-	if _, openErr := down.Open(t.Context(), []byte{0x01}, nil); !errs.HasCode(openErr, svcsecret.CodeSealInvalid) {
+	if _, openErr := down.Open(t.Context(), []byte{0x01}, nil); !errs.HasCode(openErr, coresecret.CodeSealInvalid) {
 		t.Errorf("Open of a malformed box during an outage = %v, want SEAL_INVALID", openErr)
 	}
 }

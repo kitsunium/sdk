@@ -62,7 +62,7 @@ func assertPrivateFile(file tempRecord) error {
 	if info.Mode().Perm()&^fileMode != 0 {
 		//: DirectoryUnsafe covers the whole "this location cannot hold a
 		//: session record safely" family; the field says which half failed.
-		return wrapAs(DirectoryUnsafe, nil,
+		return wrapAs(coresession.DirectoryUnsafe, nil,
 			kerrs.String("subject", "record"), kerrs.String("want", fileMode.String()))
 	}
 	//: owner-only.

@@ -55,7 +55,7 @@ func NewSealer(key corecrypto.Key, purpose string) (seal coresession.Sealer, err
 	//: no default purpose exists that would mean anything.
 	if purpose == "" {
 		//: InvalidPurpose.
-		return nil, wrapAs(InvalidPurpose, nil)
+		return nil, wrapAs(coresession.InvalidPurpose, nil)
 	}
 	//: the AAD is fixed for the sealer's lifetime; nothing reads it back.
 	return sealer{key: key, aad: []byte(cookieAAD + purpose)}, nil

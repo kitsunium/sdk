@@ -157,7 +157,7 @@ func TestSubjectKeysBindingIsWhereTheValueLies(t *testing.T) {
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
-		openFails(t, keys, c.box, svcsecret.CodeSealInvalid, c.bind...)
+		openFails(t, keys, c.box, coresecret.CodeSealInvalid, c.bind...)
 	}
 	for _, c := range tests {
 		t.Run(c.name, func(t *testing.T) {
@@ -189,22 +189,22 @@ func TestSubjectKeysOpenIsNotAnOracle(t *testing.T) {
 		code errs.Code
 	}
 	tests := []tc{
-		{"empty", nil, svcsecret.CodeSealInvalid},
-		{"the header alone", box[:idStart+8], svcsecret.CodeSealInvalid},
-		{"an unknown format", edit(0, 0x7f), svcsecret.CodeSealInvalid},
-		{"a zero subject length", edit(1, 0), svcsecret.CodeSealInvalid},
-		{"a subject length past the box", edit(1, 0xff), svcsecret.CodeSealInvalid},
-		{"a subject outside the grammar", edit(2, 'U'), svcsecret.CodeSealInvalid},
-		{"a flipped bit in the ciphertext", edit(len(box)-1, box[len(box)-1]^0x01), svcsecret.CodeSealInvalid},
-		{"a flipped bit in the nonce", edit(idStart+8+2, box[idStart+8+2]^0x01), svcsecret.CodeSealInvalid},
-		{"an edited key identifier", edit(idStart, box[idStart]^0x01), svcsecret.CodeKeyDestroyed},
-		{"the subject edited to one with a key", edit(idStart-1, '2'), svcsecret.CodeKeyDestroyed},
-		{"the subject edited to one without", edit(idStart-1, '9'), svcsecret.CodeKeyDestroyed},
+		{"empty", nil, coresecret.CodeSealInvalid},
+		{"the header alone", box[:idStart+8], coresecret.CodeSealInvalid},
+		{"an unknown format", edit(0, 0x7f), coresecret.CodeSealInvalid},
+		{"a zero subject length", edit(1, 0), coresecret.CodeSealInvalid},
+		{"a subject length past the box", edit(1, 0xff), coresecret.CodeSealInvalid},
+		{"a subject outside the grammar", edit(2, 'U'), coresecret.CodeSealInvalid},
+		{"a flipped bit in the ciphertext", edit(len(box)-1, box[len(box)-1]^0x01), coresecret.CodeSealInvalid},
+		{"a flipped bit in the nonce", edit(idStart+8+2, box[idStart+8+2]^0x01), coresecret.CodeSealInvalid},
+		{"an edited key identifier", edit(idStart, box[idStart]^0x01), coresecret.CodeKeyDestroyed},
+		{"the subject edited to one with a key", edit(idStart-1, '2'), coresecret.CodeKeyDestroyed},
+		{"the subject edited to one without", edit(idStart-1, '9'), coresecret.CodeKeyDestroyed},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		openFails(t, keys, c.box, c.code)
-		if c.code == svcsecret.CodeSealInvalid {
+		if c.code == coresecret.CodeSealInvalid {
 			if _, err := svcsecret.SubjectOf(c.box); err == nil && len(c.box) < idStart+9 {
 				t.Errorf("%s: SubjectOf accepted a box with no AEAD part", c.name)
 			}
@@ -233,9 +233,9 @@ func TestSubjectKeysDestroyIsACryptographicErase(t *testing.T) {
 	if err != nil || !destroyed {
 		t.Fatalf("Destroy = (%v, %v), want (true, nil)", destroyed, err)
 	}
-	openFails(t, keys, record, svcsecret.CodeKeyDestroyed, "reports", "r-1", "/name")
-	openFails(t, keys, formerVersion, svcsecret.CodeKeyDestroyed, "reports", "r-1", "/name")
-	openFails(t, keys, deadLetter, svcsecret.CodeKeyDestroyed, "queue")
+	openFails(t, keys, record, coresecret.CodeKeyDestroyed, "reports", "r-1", "/name")
+	openFails(t, keys, formerVersion, coresecret.CodeKeyDestroyed, "reports", "r-1", "/name")
+	openFails(t, keys, deadLetter, coresecret.CodeKeyDestroyed, "queue")
 	mustOpen(t, keys, other, "john", "reports", "r-2", "/name")
 	//: destroying again finds nothing, and says so without failing.
 	if again, againErr := keys.Destroy(t.Context(), "user:1"); again || againErr != nil {
@@ -244,7 +244,7 @@ func TestSubjectKeysDestroyIsACryptographicErase(t *testing.T) {
 	//: the subject comes back: a NEW key, which opens nothing the old one sealed.
 	fresh := seal(t, keys, "user:1", "jane, again", "reports", "r-3", "/name")
 	mustOpen(t, keys, fresh, "jane, again", "reports", "r-3", "/name")
-	openFails(t, keys, record, svcsecret.CodeKeyDestroyed, "reports", "r-1", "/name")
+	openFails(t, keys, record, coresecret.CodeKeyDestroyed, "reports", "r-1", "/name")
 }
 
 // TestSubjectKeysDestroyReachesThisProcessAtOnce pins that a destruction
@@ -258,7 +258,7 @@ func TestSubjectKeysDestroyReachesThisProcessAtOnce(t *testing.T) {
 	if _, err := keys.Destroy(t.Context(), "user:1"); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	openFails(t, keys, box, svcsecret.CodeKeyDestroyed)
+	openFails(t, keys, box, coresecret.CodeKeyDestroyed)
 }
 
 // TestSubjectKeysCacheTTLBoundsAnotherProcessesErasure pins the bound the
@@ -273,12 +273,12 @@ func TestSubjectKeysCacheTTLBoundsAnotherProcessesErasure(t *testing.T) {
 	if _, err := eraser.Destroy(t.Context(), "user:1"); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	openFails(t, eraser, box, svcsecret.CodeKeyDestroyed)
+	openFails(t, eraser, box, coresecret.CodeKeyDestroyed)
 	//: within the TTL the reader still holds the key — the documented bound.
 	f.clk.Advance(cacheTTL - time.Second)
 	mustOpen(t, reader, box, "value")
 	f.clk.Advance(time.Second)
-	openFails(t, reader, box, svcsecret.CodeKeyDestroyed)
+	openFails(t, reader, box, coresecret.CodeKeyDestroyed)
 }
 
 // TestSubjectKeysACachedKeyReplacedElsewhereIsReread pins that a key
@@ -296,7 +296,7 @@ func TestSubjectKeysACachedKeyReplacedElsewhereIsReread(t *testing.T) {
 	}
 	fresh := seal(t, writer, "user:1", "fresh")
 	mustOpen(t, reader, fresh, "fresh")
-	openFails(t, reader, old, svcsecret.CodeKeyDestroyed)
+	openFails(t, reader, old, coresecret.CodeKeyDestroyed)
 }
 
 // TestSubjectKeysConcurrentFirstSealsAgreeOnOneKey pins the Insert contract
@@ -348,8 +348,8 @@ func TestSubjectKeysAReplacedRootIsNotAnErasure(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSubjectKeys: %v", err)
 	}
-	openFails(t, misconfigured, box, svcsecret.CodeSubjectKeyUnreadable)
-	if _, sealErr := misconfigured.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, svcsecret.CodeSubjectKeyUnreadable) {
+	openFails(t, misconfigured, box, coresecret.CodeSubjectKeyUnreadable)
+	if _, sealErr := misconfigured.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Seal over an unreadable key = %v, want SubjectKeyUnreadable", sealErr)
 	}
 	if after := filed(t, f.store); len(after) != 1 || !bytes.Equal(after[0].Wrapped, before[0].Wrapped) {
@@ -433,7 +433,7 @@ func TestNewSubjectKeysRefusesAnUnusableConfig(t *testing.T) {
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
 		keys, err := svcsecret.NewSubjectKeys(c.cfg)
-		if keys != nil || !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+		if keys != nil || !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 			t.Fatalf("%s: NewSubjectKeys = (%v, %v), want InvalidConfig", c.name, keys, err)
 		}
 		if !strings.Contains(fieldText(err), "setting="+c.setting) {
@@ -513,7 +513,7 @@ func TestSubjectKeysReportAStoreFailureAsItself(t *testing.T) {
 			err  error
 		}{{"Seal", sealErr}, {"Open", openErr}, {"Destroy", destroyErr}, {"Rewrap", rewrapErr}, {"OldestRoot", oldestErr}}
 		for _, verdict := range verdicts {
-			if !errs.HasCode(verdict.err, coresecret.CodeStoreUnavailable) || errs.HasCode(verdict.err, svcsecret.CodeKeyDestroyed) {
+			if !errs.HasCode(verdict.err, coresecret.CodeStoreUnavailable) || errs.HasCode(verdict.err, coresecret.CodeKeyDestroyed) {
 				t.Errorf("%s over a failing store = %v, want StoreUnavailable and never KeyDestroyed", verdict.call, verdict.err)
 			}
 			if cause == errBackendDown && !errors.Is(verdict.err, errBackendDown) {

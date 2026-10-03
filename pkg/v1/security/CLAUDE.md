@@ -28,7 +28,7 @@ and the identity a TLS connection presents is the network domain's (`tlsid`).
 | Package | What it publishes | Aliases onto | README |
 |---|---|---|---|
 | `authz/` | RBAC and ABAC with no policy language: `NewRBAC` / `NewABAC` / `DenyOverrides` / `Check`, three decisions with `Abstain` the zero (ADR 0057) | `internal/core/security/authz`, `internal/service/security/authz` | `authz/README.md` |
-| `redact/` | `New(Config)` → a `Redactor` whose `Value` / `JSON` / `Text` / `Attrs` replace every secret it recognises within an exact byte bound (ADR 0101) | `internal/service/security/redact` | `redact/README.md` |
+| `redact/` | `New(Config)` → a `Redactor` — the port, since ADR 0160 — whose `Value` / `JSON` / `Text` / `Attrs` replace every secret it recognises within an exact byte bound (ADR 0101) | `internal/core/security/redact`, `internal/service/security/redact` | `redact/README.md` |
 | `secret/` | the `Value` no rendering writes down, the versioned stores, `NewKeyring`, `NewRotator` (ADR 0096) and `NewSubjectKeys` (ADR 0142) | `internal/core/security/secret`, `internal/service/security/secret` | `secret/README.md` |
 | `session/` | `NewMemoryStore` / `NewFileStore` → a `Store` where `Regenerate` is the only call that binds a subject, and `NewSealer` for the cookie's value (ADR 0045) | `internal/core/security/session`, `internal/service/security/session` | `session/README.md` |
 | `token/` | JWT over JWS Compact and PASETO v4.public, one constructor per algorithm, `ParseJWK` / `ParseJWKSet` / `NewJWKSet` (ADR 0042) | `internal/core/security/token`, `internal/service/security/token`, `internal/service/crypto/key/jwk` | `token/README.md` |

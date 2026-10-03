@@ -8,6 +8,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/security/redact",
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/core/security/redact",
         "//internal/kernel/errs",
         "//internal/service/security/redact",
     ],

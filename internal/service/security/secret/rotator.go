@@ -45,13 +45,13 @@ type PolicySpec struct {
 	Keep int
 	// Generate makes a new version. [Random] is the generator for keys and
 	// tokens. An error or an empty value aborts the rotation with
-	// [GenerateFailed]; nothing is stored and nothing is pruned.
+	// [coresecret.GenerateFailed]; nothing is stored and nothing is pruned.
 	Generate func() (coresecret.Value, error)
 }
 
 // Random returns a generator of n bytes from crypto/rand — the one a Keyring's
 // versions need with n = 32. An n below 16 bytes yields a generator that
-// refuses every call with [InvalidConfig], so the mistake surfaces at the
+// refuses every call with [coresecret.InvalidConfig], so the mistake surfaces at the
 // first Ensure rather than as a guessable secret.
 func Random(n int) func() (coresecret.Value, error) {
 	//: the generator a Policy calls on every rotation.
@@ -59,7 +59,7 @@ func Random(n int) func() (coresecret.Value, error) {
 		//: a secret shorter than 128 bits is refused, never padded.
 		if n < minRandomBytes {
 			//: InvalidConfig, naming the setting and the bound.
-			return coresecret.Value{}, wrapAs(InvalidConfig, nil,
+			return coresecret.Value{}, wrapAs(coresecret.InvalidConfig, nil,
 				errs.String("setting", "Random"), errs.Int("bytes", n), errs.Int("minimum", minRandomBytes))
 		}
 		raw := make([]byte, n)
@@ -67,7 +67,7 @@ func Random(n int) func() (coresecret.Value, error) {
 		//: crypto/rand never returns a short read; its error is reported.
 		if _, readErr := rand.Read(raw); readErr != nil {
 			//: GenerateFailed, with the entropy source's message.
-			return coresecret.Value{}, wrapAs(GenerateFailed, readErr)
+			return coresecret.Value{}, wrapAs(coresecret.GenerateFailed, readErr)
 		}
 		//: NewValue copies, so the buffer can be cleared.
 		return coresecret.NewValue(raw), nil
@@ -146,7 +146,7 @@ type Rotator struct {
 
 // NewRotator validates cfg and returns a rotator. It refuses a nil store, a
 // malformed name, a non-positive interval, fewer than two kept versions and a
-// nil generator — each with [InvalidConfig] naming the setting — and touches
+// nil generator — each with [coresecret.InvalidConfig] naming the setting — and touches
 // nothing: the secret is created by Ensure, not here.
 func NewRotator(cfg RotatorConfig) (rotator *Rotator, err error) {
 	//: every refusal is decided before anything is built.
@@ -206,7 +206,7 @@ func (c RotatorConfig) validate() error {
 // refuseSetting is the InvalidConfig verdict for one setting.
 func refuseSetting(setting, problem string) error {
 	//: the setting and the clause; never a value.
-	return wrapAs(InvalidConfig, nil, errs.String("setting", setting), errs.String("problem", problem))
+	return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", setting), errs.String("problem", problem))
 }
 
 // Ensure returns the current version, creating version 1 with the policy's
@@ -431,12 +431,12 @@ func (r *Rotator) generate() (value coresecret.Value, err error) {
 			return coresecret.Value{}, genErr
 		}
 		//: GenerateFailed, with the caller's message as a field.
-		return coresecret.Value{}, wrapAs(GenerateFailed, genErr, errs.String("secret", r.name))
+		return coresecret.Value{}, wrapAs(coresecret.GenerateFailed, genErr, errs.String("secret", r.name))
 	}
 	//: an empty secret would be refused by Put; say why here instead.
 	if value.IsZero() {
 		//: GenerateFailed.
-		return coresecret.Value{}, wrapAs(GenerateFailed, nil, errs.String("secret", r.name), errs.String("problem", "empty"))
+		return coresecret.Value{}, wrapAs(coresecret.GenerateFailed, nil, errs.String("secret", r.name), errs.String("problem", "empty"))
 	}
 	//: a new secret.
 	return value, nil

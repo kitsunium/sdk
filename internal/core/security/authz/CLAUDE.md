@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/core/security/authz/
 
 ## Purpose
@@ -10,7 +10,10 @@ that), the three-valued `Decision` it answers with, the immutable
 **ADR 0057**. The RBAC and ABAC evaluators, the deny-overrides combiner, the
 closure and the built-in conditions live in `internal/service/security/authz`.
 
-Code range: `0.2.26.*` (ADR 0057).
+Code ranges: `0.2.26.*` — the port's four verdicts (ADR 0057) — and
+`0.3.56.*` — the engine's three construction refusals, allocated in the
+service layer and declared here since ADR 0160, with their values unchanged.
+Every code of the domain is in this package; the engine declares none.
 
 ## Contents
 
@@ -20,8 +23,8 @@ Code range: `0.2.26.*` (ADR 0057).
 | `decision.go` | `Decision` + `Abstain` / `Allow` / `Deny` + `Granted` / `Valid` / `String` |
 | `request_value.go` | `RequestValue` + `NewRequestValue` + `Subject` / `Action` / `Resource` / `Attr` / `AttrCount` |
 | `attr_value.go` | `AttrKind` (`KindInvalid` / `KindString` / `KindInt64` / `KindBool` / `KindStrings`) + `AttrValue` + `AttrString` / `AttrInt64` / `AttrBool` / `AttrStrings` + `Key` / `Kind`, the `(value, ok)` accessors and `Contains` |
-| `codes.go` | `Code*` constants — range 0.2.26.* |
-| `errors.go` | `PermissionDenied` / `AttributeMissing` / `AttributeKindMismatch` / `PolicyMisconfigured` (`errs.Define`) |
+| `codes.go` | `Code*` constants — ranges 0.2.26.* (verdicts) and 0.3.56.* (the engine's construction refusals) |
+| `errors.go` | `PermissionDenied` / `AttributeMissing` / `AttributeKindMismatch` / `PolicyMisconfigured` — the verdicts — and `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` — the engine's construction refusals (`errs.Define`) |
 
 ## The frontier
 
@@ -75,7 +78,7 @@ express what it could not name — see ADR 0057 §D1.
 - **A set attribute is cloned in and cloned out.** One `RequestValue` is handed
   to every policy in a composition, on any goroutine; `Contains` scans in place
   so the hot path never pays for the clone.
-- **Every sentinel carries the same `Public`.** "Access to the requested
+- **Every verdict carries the same `Public`.** "Access to the requested
   resource is denied", four times, with four distinct `Private` messages.
   `TestEveryRefusalShowsTheSameSentence` and
   `TestPublicNamesNoAttributeRoleOrRule` are the executable guards.
@@ -83,6 +86,13 @@ express what it could not name — see ADR 0057 §D1.
   faults: a 500 would tell a client to retry a request that will be refused
   identically forever, and tell an attacker which input the policy could not
   parse. A framework that prefers 404 overrides it at the edge.
+- **The engine's three construction refusals are specific on purpose.**
+  `GrantInvalid`, `RuleInvalid` and `ConditionInvalid` describe themselves in
+  `Public`, carry no HTTP status and carry `EX_CONFIG` (78): they are raised by
+  `internal/service/security/authz` while a policy is being ASSEMBLED, on a
+  path where no request exists and no client is listening, so they never
+  become a response. Their `Private` names the engine that raises them; they
+  are declared here only so the domain's codes are in one place (ADR 0160).
 
 ## Relationship to `session` and `token`
 

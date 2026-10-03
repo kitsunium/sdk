@@ -191,7 +191,7 @@ func TestSetVerifierBoundsTheCandidateCount(t *testing.T) {
 	}
 	forged := forge(`{"alg":"ES256","kid":"crowded","typ":"JWT"}`, `{"sub":"u"}`,
 		func(string) []byte { return make([]byte, 64) })
-	if _, verr := verifier.Verify(forged); !errs.HasCode(verr, svctoken.CodeKeyIDAmbiguous) {
+	if _, verr := verifier.Verify(forged); !errs.HasCode(verr, coretoken.CodeKeyIDAmbiguous) {
 		t.Fatalf("six candidates at a bound of two: got %v, want KEY_ID_AMBIGUOUS", verr)
 	}
 }
@@ -215,7 +215,7 @@ func TestSetVerifierRequiresAKid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, svctoken.CodeKeyIDMissing) {
+	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, coretoken.CodeKeyIDMissing) {
 		t.Fatalf("no kid: got %v, want KEY_ID_MISSING", verr)
 	}
 	strayIssuer, err := svctoken.NewES256Issuer(ec, svctoken.IssuerConfig{
@@ -229,7 +229,7 @@ func TestSetVerifierRequiresAKid(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, verr := verifier.Verify(stray); !errs.HasCode(verr, svctoken.CodeKeyNotFound) {
+	if _, verr := verifier.Verify(stray); !errs.HasCode(verr, coretoken.CodeKeyNotFound) {
 		t.Fatalf("unknown kid: got %v, want KEY_NOT_FOUND", verr)
 	}
 }
@@ -321,7 +321,7 @@ func TestUnverifiableCandidatesStillCountAgainstTheBound(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Issue: %v", err)
 	}
-	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, svctoken.CodeKeyIDAmbiguous) {
+	if _, verr := verifier.Verify(minted); !errs.HasCode(verr, coretoken.CodeKeyIDAmbiguous) {
 		t.Fatalf("four published candidates at a bound of three: got %v, want KEY_ID_AMBIGUOUS", verr)
 	}
 }

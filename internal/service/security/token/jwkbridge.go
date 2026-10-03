@@ -261,18 +261,18 @@ func (v *setVerifier) candidates(kid string) (keys []boundKeyValue, err error) {
 		//: refuse, and name the missing header. This check stays FIRST: the
 		//: index deliberately holds no entry for the empty kid, but a lookup
 		//: that reached it must never be the thing that decides.
-		return nil, KeyIDMissing
+		return nil, coretoken.KeyIDMissing
 	}
 	matches := v.byKid[kid]
 	//: no key under that id.
 	if len(matches) == 0 {
 		//: refuse without saying which ids the set does hold.
-		return nil, KeyNotFound
+		return nil, coretoken.KeyNotFound
 	}
 	//: more candidates than the bound: refuse rather than verify slowly.
 	if len(matches) > v.policy.maxKeyCandidates {
 		//: name the limit, never the kid.
-		return nil, errs.Wrap(KeyIDAmbiguous, errs.WrapParams{},
+		return nil, errs.Wrap(coretoken.KeyIDAmbiguous, errs.WrapParams{},
 			errs.Int("limit", v.policy.maxKeyCandidates))
 	}
 	//: one, or a bounded rotation window.

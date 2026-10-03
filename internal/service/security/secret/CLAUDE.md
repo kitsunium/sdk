@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/secret/
 
 ## Purpose
@@ -13,7 +13,11 @@ SDK's own mechanisms: `crypto` (AES-256-GCM, HKDF-SHA256, HMAC-SHA256), `vfs`
 (atomic publication), `lock` (the file locker), `clock` (every stamp and every
 wait), `kernel/collections/cache` (the opened subject keys).
 
-Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
+Codes: none declared here. The engines' refusals — `0.3.68.*`, allocated here
+(ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142) — and the port's
+verdicts (`0.2.37.*`) are both declared in `internal/core/security/secret`
+(ADR 0160) and only raised here; the `0.3.68.*` values were kept when their
+declarations moved.
 
 ## Files
 
@@ -32,7 +36,7 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
 | `subjectmemory.go` | `NewMemorySubjectKeyStore` — the reference `core/security/secret.SubjectKeyStore` |
 | `rotator.go` | `Rotator` / `NewRotator` / `RotatorConfig` / `PolicySpec` / `Random` |
 | `keyfile.go` | `KeyFile` — the machine-local key for a sealed file store |
-| `codes.go` / `errors.go` | `0.3.68.*`, `wrapAs`, and `storeFailure` (a `SubjectKeyStore` error as `StoreUnavailable`, the store's own error kept) |
+| `wrap.go` | `wrapAs` (a core sentinel as the origin, a cause as a field), and `storeFailure` (a `SubjectKeyStore` error as `StoreUnavailable`, the store's own error kept) |
 
 ## Decisions worth not relitigating
 
@@ -144,14 +148,7 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
 | `NewKeyring(Store, name) (*Keyring, error)` | `Seal` / `Open` / `Sign` / `Verify` |
 | `NewRotator(RotatorConfig) (*Rotator, error)` | `Ensure` / `Due` / `RotateIfDue` / `Rotate` / `Run` |
 | `PolicySpec`, `Random(n)` | the policy and its generator |
-| `InvalidConfig` `0.3.68.1` | a constructor's refusal, naming the setting |
-| `RecordUnreadable` `0.3.68.2` | a file record that exists and does not read back |
-| `EnvRefused` `0.3.68.3` | the environment named a secret without a usable value |
-| `SealInvalid` `0.3.68.4` | `Keyring.Open`, every box-shaped failure |
-| `SignatureInvalid` `0.3.68.5` | `Keyring.Verify`, every signature-shaped failure |
-| `KeyMaterialInvalid` `0.3.68.6` | a keyring version is not one `crypto.Key` long |
-| `GenerateFailed` `0.3.68.7` | the policy's generator failed or returned nothing |
-| `KeyFileInvalid` `0.3.68.8` | a key file that is not a regular file of exactly 32 raw bytes |
+| `InvalidConfig` … `KeyFileInvalid`, `KeyDestroyed`, `SubjectKeyUnreadable` (`0.3.68.1`–`0.3.68.10`) | the engines' refusals: declared in `core/security/secret` beside the port's verdicts (ADR 0160) — its Surface table says what each one means — and raised here, bare or through `wrapAs` with log-only fields |
 | `KeyFile(path) (crypto.Key, error)` | the machine-local key |
 | `NewSubjectKeys(SubjectKeysConfig) (*SubjectKeys, error)` | `Seal(ctx, subject, plaintext, bind...)` / `Open(ctx, box, bind...)` / `Destroy` / `Rewrap` / `OldestRoot` |
 | `SubjectKeysConfig` | `Root`, `Store`, `CacheSize`, `CacheTTL`, `Clock` |
@@ -159,8 +156,6 @@ Code range: `0.3.68.*` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by ADR 0142).
 | `SubjectOf(box) (string, error)` | the subject a box names, without opening it |
 | `NewMemorySubjectKeyStore() core/security/secret.SubjectKeyStore` | the reference store; cannot fail |
 | `RotatorConfig.InUse` | `func(ctx) (oldest int, err error)` — wire `SubjectKeys.OldestRoot` |
-| `KeyDestroyed` `0.3.68.9` | the box's data key is not held: the value was erased |
-| `SubjectKeyUnreadable` `0.3.68.10` | a data key held that does not unwrap under the root — a fault, never an erasure |
 
 ## Tests
 
@@ -187,6 +182,11 @@ version).
 - Read an absent subject key, or one under another identifier, as anything but
   `KEY_DESTROYED` — and never read `SUBJECT_KEY_UNREADABLE` as an erasure.
 - Replace a subject key the engine could not unwrap.
+- Declare an error code here — an `errs.Define` or a `Code*` constant. Every
+  code of the domain is declared in `internal/core/security/secret`, at this
+  package's path in the core (ADR 0160); a new refusal gets its code and
+  sentinel there, in the range this package already owns (`0.3.68.*`), and is
+  raised here.
 
 ## Verification
 

@@ -10,6 +10,12 @@
 // password in a member called "p", a key pasted into free text — is shown.
 // What IS recognised is stated in each rule's own comment, so nobody has to
 // guess.
+//
+// It implements the internal/core/security/redact port: the Redactor
+// interface, the values a caller compares results against — Placeholder,
+// Ellipsis, MinBytes, Unencodable, DocumentValue — and the domain's two codes
+// are declared there (ADR 0160). What is here is the engine and its
+// construction parameters (ADR 0074).
 package redact
 
 import (
@@ -17,21 +23,9 @@ import (
 	"slices"
 	"strings"
 	"sync"
+
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 )
-
-// Placeholder replaces every secret this package recognises.
-const Placeholder string = "[redacted]"
-
-// Ellipsis ends a string, a text or a document cut to fit its bound. It is
-// one character, three bytes of UTF-8, and it is counted inside the bound.
-const Ellipsis string = "…"
-
-// MinBytes is the smallest bound a call honours; a smaller or non-positive
-// one is raised to it. Below it a cut document could not hold its own
-// marker and the closers of the containers it cut — and a bound is the
-// display's size, so raising a nonsensical one is safer than refusing to
-// show anything (ADR 0031's clamp: the floor is obvious).
-const MinBytes int = 16
 
 // defaultTag is the struct tag key read when Config.Tag is empty.
 const defaultTag string = "redact"
@@ -133,5 +127,5 @@ func (r *Redactor) Name(name string) bool {
 // bound resolves a caller's byte bound to one the output can honour.
 func bound(maxBytes int) int {
 	//: the floor under which a cut output cannot hold its own markers.
-	return max(maxBytes, MinBytes)
+	return max(maxBytes, coreredact.MinBytes)
 }

@@ -141,7 +141,7 @@ func TestALinkAtARecordNameIsNeverReadThrough(t *testing.T) {
 			}
 
 			loaded, loadErr := fixture.store.Load(ctx, fresh.ID())
-			if !errs.HasCode(loadErr, svcsession.CodeRecordCorrupt) {
+			if !errs.HasCode(loadErr, coresession.CodeRecordCorrupt) {
 				where, _ := loaded.Get("where")
 				t.Fatalf("Load through a planted link = %v (where=%q), want CodeRecordCorrupt", loadErr, where)
 			}
@@ -217,7 +217,7 @@ func TestALinkAtTheLockFileIsRefused(t *testing.T) {
 				t.Fatalf("Symlink: %v", err)
 			}
 			store, err := svcsession.NewFileStore(pathConfig(t, dir))
-			if !errs.HasCode(err, svcsession.CodePathRedirected) {
+			if !errs.HasCode(err, coresession.CodePathRedirected) {
 				t.Fatalf("NewFileStore over a planted lock link = %v, want CodePathRedirected", err)
 			}
 			if store != nil {
@@ -311,7 +311,7 @@ func TestALinkInDirsPathIsRefusedWhereAnybodyCouldHavePlantedIt(t *testing.T) {
 				}
 				return
 			}
-			if !errs.HasCode(err, svcsession.CodePathRedirected) {
+			if !errs.HasCode(err, coresession.CodePathRedirected) {
 				t.Fatalf("NewFileStore = %v, want CodePathRedirected", err)
 			}
 			if store != nil {

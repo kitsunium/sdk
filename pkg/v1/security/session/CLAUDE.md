@@ -23,7 +23,7 @@ honestly where its mechanics do not exist.
 | `ParseID` / `NewID` | the inbound path from a cookie, and the raw-bytes path a third-party store needs |
 | `NewSession` | builds a `Session` from a `State` — for a framework implementing its own `Store` |
 | `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused` | core sentinels (`0.2.14.*`) |
-| `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` | store sentinels (`0.3.46.*`). `PathRedirected` (`0.3.46.6`) is the file store refusing to be led through a link — at its lock file, or at a component of `Dir` planted in a world-writable directory — see `internal/service/security/session/CLAUDE.md` §The location |
+| `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` | store sentinels (`0.3.46.*`), declared in the core beside the verdicts (ADR 0160) and aliased there. `PathRedirected` (`0.3.46.6`) is the file store refusing to be led through a link — at its lock file, or at a component of `Dir` planted in a world-writable directory — see `internal/service/security/session/CLAUDE.md` §The location |
 | `UnsupportedPlatform` | the SDK-wide sentinel, shared with `pkg/v1/proc` (ADR 0018) |
 
 ## Conventions

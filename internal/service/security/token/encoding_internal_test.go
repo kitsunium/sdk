@@ -116,7 +116,7 @@ func TestCheckNoDuplicateMembers(t *testing.T) {
 	if err := checkNoDuplicateMembers([]byte(`{"a":1,"b":2}`)); err != nil {
 		t.Fatalf("distinct members must pass: %v", err)
 	}
-	if err := checkNoDuplicateMembers([]byte(`{"a":1,"a":2}`)); !errs.HasCode(err, CodeDuplicateMember) {
+	if err := checkNoDuplicateMembers([]byte(`{"a":1,"a":2}`)); !errs.HasCode(err, coretoken.CodeDuplicateMember) {
 		t.Fatalf("duplicate members: got %v, want DUPLICATE_MEMBER", err)
 	}
 	if err := checkNoDuplicateMembers([]byte(`{"a":{"b":1,"b":2}}`)); err != nil {

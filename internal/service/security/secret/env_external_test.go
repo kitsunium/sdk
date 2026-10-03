@@ -118,13 +118,13 @@ func TestEnvStoreRefusals(t *testing.T) {
 		{"both forms are set", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN", "value-in-env")
 			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, "value-in-file"))
-		}, svcsecret.CodeEnvRefused},
+		}, coresecret.CodeEnvRefused},
 		{"the file is empty", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, "\n"))
-		}, svcsecret.CodeEnvRefused},
+		}, coresecret.CodeEnvRefused},
 		{"the file is too large to be a secret", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN_FILE", writeSecretFile(t, strings.Repeat("x", 64<<10+1)))
-		}, svcsecret.CodeEnvRefused},
+		}, coresecret.CodeEnvRefused},
 		{"the file does not exist", func(t *testing.T) {
 			t.Setenv(envPrefix+"_TOKEN_FILE", filepath.Join(t.TempDir(), "absent-path-marker"))
 		}, coresecret.CodeStoreUnavailable},
@@ -206,7 +206,7 @@ func TestEnvStoreNamesAndItsOwnGrammar(t *testing.T) {
 // the unprefixed mode.
 func TestEnvStoreRefusesAPrefixNoShellExports(t *testing.T) {
 	for _, prefix := range []string{"app", "_", "__", "1APP", "APP-X", "APP X"} {
-		if _, err := svcsecret.NewEnv(svcsecret.EnvConfig{Prefix: prefix}); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+		if _, err := svcsecret.NewEnv(svcsecret.EnvConfig{Prefix: prefix}); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 			t.Errorf("NewEnv(%q) = %v, want InvalidConfig", prefix, err)
 		}
 	}

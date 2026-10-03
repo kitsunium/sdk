@@ -2,25 +2,35 @@
 
 ## Purpose
 
-Public facade over `internal/service/security/redact` (ADR 0101): render a Go value, a
-JSON document, a text or log attributes for display with their secrets replaced,
-within an exact byte bound, never touching the input.
+Public facade over `internal/core/security/redact` — the port, its values and
+its codes — and `internal/service/security/redact` — the engine and its
+configuration (ADR 0101, ADR 0160): render a Go value, a JSON document, a text
+or log attributes for display with their secrets replaced, within an exact byte
+bound, never touching the input.
 
 ## Surface
 
 | Symbol | Kind | Notes |
 |---|---|---|
-| `New(cfg)` | func | a `*Redactor` applying `cfg` |
+| `New(cfg)` | func | a `Redactor` applying `cfg` — the SDK's engine, returned as the port |
 | `DefaultWords()` | func | the ten default name fragments, as a fresh slice |
 | `Config` | type alias | `Words`, `Tag` (default `redact`), `Field`, `Error` |
-| `Redactor` | type alias | `Name`, `Text`, `JSON`, `Value`, `Attrs` |
-| `Document` | type alias | `= svcredact.DocumentValue` — `JSON` (never over the bound, always well-formed) + `Truncated` |
+| `Redactor` | type alias | `= coreredact.Redactor`, the port — `Name`, `Text`, `JSON`, `Value`, `Attrs`, frozen at five (ADR 0039) |
+| `Document` | type alias | `= coreredact.DocumentValue` — `JSON` (never over the bound, always well-formed) + `Truncated` |
 | `Placeholder`, `Ellipsis`, `MinBytes`, `Unencodable` | const | |
 | `CodeDocumentInvalid`, `CodeValueUnencodable` | const | `0.3.73.*` |
 | `DocumentInvalid`, `ValueUnencodable` | var | sentinels |
 
-All types are aliases onto the service: there is no port, and the values are
-the engine's (ADR 0074).
+Every alias points at the layer that owns it (ADR 0074): `Redactor`,
+`Document`, the four constants, the two codes and the two sentinels at the
+core; `Config` and `DefaultWords` — one engine's construction parameters — at
+the service.
+
+**Shape change (v0, ADR 0040).** Until ADR 0160, `Redactor` aliased the
+engine's struct and `New` returned `*Redactor`. It now aliases the port and
+`New` returns `Redactor`: code that wrote the type as `*redact.Redactor`
+writes `redact.Redactor`; code that let the compiler infer it compiles
+unchanged, and every method call is the same call.
 
 ## Why-this-shape
 

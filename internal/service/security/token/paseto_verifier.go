@@ -31,7 +31,7 @@ func (v *pasetoVerifier) Verify(token string) (claims coretoken.ClaimsValue, err
 	//: length-then-bytes comparison on one leaks its prefix.
 	if subtle.ConstantTimeCompare(footer, v.cfg.Footer) != 1 {
 		//: refuse rather than authenticate data the port cannot return.
-		return coretoken.ClaimsValue{}, FooterMismatch
+		return coretoken.ClaimsValue{}, coretoken.FooterMismatch
 	}
 	//: a body shorter than the signature is not a token.
 	if len(payload) < pasetoSigLen {

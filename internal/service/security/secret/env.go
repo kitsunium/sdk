@@ -68,7 +68,7 @@ type envStore struct {
 // APP_SMTP_URL, or — the Docker and Kubernetes convention — from the file the
 // variable APP_SMTP_URL_FILE names, with ONE trailing line ending removed,
 // because a file written with `echo` ends with one and a password does not.
-// Setting both is refused with [EnvRefused] rather than resolved by a
+// Setting both is refused with [coresecret.EnvRefused] rather than resolved by a
 // precedence rule, exactly as the official container images refuse it. An
 // empty variable counts as unset, since shells and compose files export empty
 // variables to mean exactly that; an empty FILE is refused, since a file named
@@ -102,7 +102,7 @@ func normalisePrefix(prefix string) (normalised string, err error) {
 	//: a prefix of underscores alone would silently collapse to no namespace.
 	if name == "" || !isVariableName(name) {
 		//: refused, naming the setting and the clause, never guessing.
-		return "", wrapAs(InvalidConfig, nil, errs.String("setting", "Prefix"),
+		return "", wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Prefix"),
 			errs.String("problem", "must be uppercase letters, digits and '_', and not start with a digit"))
 	}
 	//: the namespace, with the one separator the store supplies.
@@ -174,7 +174,7 @@ func (e envStore) Get(_ context.Context, name string) (current coresecret.Versio
 	//: both forms set: the operator meant one of them, and picking is guessing.
 	case value != "" && path != "":
 		//: EnvRefused, naming both variables and neither value.
-		return coresecret.VersionValue{}, wrapAs(EnvRefused, nil, errs.String("secret", name),
+		return coresecret.VersionValue{}, wrapAs(coresecret.EnvRefused, nil, errs.String("secret", name),
 			errs.String("variable", variable), errs.String("file_variable", variable+fileSuffix))
 	//: the value itself is in the environment.
 	case value != "":
@@ -281,7 +281,7 @@ func readSecretFile(name, fileVariable, path string) (current coresecret.Version
 	//: an explicitly named file that is empty, or too large to be a secret.
 	if len(content) == 0 || int64(len(content)) > maxEnvFileBytes {
 		//: EnvRefused, naming the variable, never the content or the path.
-		return coresecret.VersionValue{}, wrapAs(EnvRefused, nil, errs.String("secret", name),
+		return coresecret.VersionValue{}, wrapAs(coresecret.EnvRefused, nil, errs.String("secret", name),
 			errs.String("file_variable", fileVariable), errs.String("problem", "the file is empty or larger than 64 KiB"))
 	}
 	//: version 1, stamped with the file's modification time.

@@ -12,7 +12,12 @@ concrete stores (memory, environment, file), the `Keyring`, the `Rotator`, the
 `SubjectKeys` engine and the memory `SubjectKeyStore` live in
 `internal/service/security/secret`.
 
-Code range: `0.2.37.*` (ADR 0096; `0.2.37.8` added by ADR 0142).
+Code ranges: `0.2.37.*` — the ports' verdicts (ADR 0096; `0.2.37.8` added by
+ADR 0142) — and `0.3.68.*` — the refusals of the engines in
+`internal/service/security/secret` (ADR 0096; `0.3.68.9`–`0.3.68.10` added by
+ADR 0142), allocated in the service layer and declared here since ADR 0160,
+with their values unchanged. Every code of the domain is in this package; the
+engines declare none.
 
 ## Why this shape
 
@@ -89,6 +94,16 @@ engine replaces keys while it ranges.
 | `EmptyValue` `0.2.37.6` | `Put` of an empty secret |
 | `InvalidKeep` `0.2.37.7` | `Prune` asked to keep fewer than one version |
 | `InvalidSubject` `0.2.37.8` | outside the subject grammar; the rejected string is never repeated (ADR 0142) |
+| `InvalidConfig` `0.3.68.1` | an engine constructor's refusal, naming the setting |
+| `RecordUnreadable` `0.3.68.2` | a file record that exists and does not read back |
+| `EnvRefused` `0.3.68.3` | the environment named a secret without a usable value |
+| `SealInvalid` `0.3.68.4` | `Keyring.Open`, every box-shaped failure |
+| `SignatureInvalid` `0.3.68.5` | `Keyring.Verify`, every signature-shaped failure |
+| `KeyMaterialInvalid` `0.3.68.6` | a keyring version is not one `crypto.Key` long |
+| `GenerateFailed` `0.3.68.7` | the policy's generator failed or returned nothing |
+| `KeyFileInvalid` `0.3.68.8` | a key file that is not a regular file of exactly 32 raw bytes |
+| `KeyDestroyed` `0.3.68.9` | the box's data key is not held: the value was erased (ADR 0142) |
+| `SubjectKeyUnreadable` `0.3.68.10` | a data key held that does not unwrap under the root — a fault, never an erasure (ADR 0142) |
 
 ## Conventions
 

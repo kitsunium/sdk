@@ -155,9 +155,9 @@ type fileStore struct {
 // It refuses, at construction rather than at first use: a configuration it
 // cannot honour ([coresession.InvalidConfig]), a platform without the two
 // mechanics the guarantees rest on ([coreproc.UnsupportedPlatform]), a
-// directory whose permissions expose its contents ([DirectoryUnsafe]), and a
+// directory whose permissions expose its contents ([coresession.DirectoryUnsafe]), and a
 // location reached through a link anybody could have planted
-// ([PathRedirected]).
+// ([coresession.PathRedirected]).
 func NewFileStore(cfg FileConfig) (store coresession.Store, err error) {
 	//: timeouts, directory and key are checked before anything touches disk.
 	if validationErr := cfg.validate(); validationErr != nil {
@@ -284,13 +284,13 @@ func assertHeldDir(root *os.Root, dir string) error {
 	//: notice, and would silently succeed on a filesystem that ignores the call.
 	if held.Mode().Perm()&^dirMode != 0 {
 		//: DirectoryUnsafe, without naming the path in the Public string.
-		return wrapAs(DirectoryUnsafe, nil, kerrs.String("want", dirMode.String()))
+		return wrapAs(coresession.DirectoryUnsafe, nil, kerrs.String("want", dirMode.String()))
 	}
 	named, namedErr := os.Stat(dir)
 	//: the path names another directory now, or nothing.
 	if namedErr != nil || !os.SameFile(held, named) {
 		//: PathRedirected: no retry helps, a human looks at the path.
-		return wrapAs(PathRedirected, namedErr,
+		return wrapAs(coresession.PathRedirected, namedErr,
 			kerrs.String("path", dir), kerrs.String("dir", dir), kerrs.String("kind", kindHeldReplaced))
 	}
 	//: owner-only, and the one dir names.
@@ -359,7 +359,7 @@ func openLockFile(root *os.Root, dir string) (lock *os.File, err error) {
 	//: a link, or a name swapped while it was being opened.
 	if found != "" {
 		//: PathRedirected: no retry helps.
-		return nil, wrapAs(PathRedirected, openErr,
+		return nil, wrapAs(coresession.PathRedirected, openErr,
 			kerrs.String("path", filepath.Join(dir, lockName)), kerrs.String("dir", dir), kerrs.String("kind", found))
 	}
 	//: the medium failed.
@@ -459,7 +459,7 @@ func (f *fileStore) readLocked(digest string) (rec record, err error) {
 	//: one verdict as tampering with the file.
 	if found != "" {
 		//: RecordCorrupt, undistinguished.
-		return record{}, wrapAs(RecordCorrupt, readErr)
+		return record{}, wrapAs(coresession.RecordCorrupt, readErr)
 	}
 	//: an absent file is an absent session, not a backend fault.
 	if errors.Is(readErr, fs.ErrNotExist) {
@@ -484,7 +484,7 @@ func (f *fileStore) decodeAt(raw []byte, digest string) (rec record, err error) 
 	//: already non-oracle and this keeps it that way.
 	if openErr != nil {
 		//: RecordCorrupt.
-		return record{}, wrapAs(RecordCorrupt, nil)
+		return record{}, wrapAs(coresession.RecordCorrupt, nil)
 	}
 	rec, decodeErr := decodeRecord(plain)
 	//: a frame that does not parse.
@@ -496,7 +496,7 @@ func (f *fileStore) decodeAt(raw []byte, digest string) (rec record, err error) 
 	//: thing, and this is where the two are compared in constant time.
 	if !digestsEqual(rec.digest, digest) {
 		//: RecordCorrupt.
-		return record{}, wrapAs(RecordCorrupt, nil)
+		return record{}, wrapAs(coresession.RecordCorrupt, nil)
 	}
 	//: a live, authenticated record.
 	return rec, nil

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	coresession "github.com/kitsunium/sdk/internal/core/security/session"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -139,7 +140,7 @@ func TestEveryMalformedFrameIsOneVerdict(t *testing.T) {
 				}
 			}()
 			decoded, err := decodeRecord(tc.frame)
-			if !errs.HasCode(err, CodeRecordCorrupt) {
+			if !errs.HasCode(err, coresession.CodeRecordCorrupt) {
 				t.Fatalf("decodeRecord = (%+v, %v), want CodeRecordCorrupt", decoded, err)
 			}
 			if decoded.digest != "" || decoded.data != nil {
@@ -170,7 +171,7 @@ func TestThePayloadBoundIsCheckedBeforeTheWorkItFunds(t *testing.T) {
 			t.Parallel()
 			err := boundPayload(tc.data)
 			if tc.refused {
-				if !errs.HasCode(err, CodePayloadTooLarge) {
+				if !errs.HasCode(err, coresession.CodePayloadTooLarge) {
 					t.Fatalf("boundPayload = %v, want CodePayloadTooLarge", err)
 				}
 				//: the offending key is caller data and is never named.

@@ -56,7 +56,7 @@ func (f *fileStore) withLock(ctx context.Context, fn func() error) (err error) {
 		//: only when fn had nothing worse to say.
 		if unlockErr := unlockFile(f.lock); unlockErr != nil {
 			//: LockFailed, subordinate to fn's own verdict.
-			err = cmp.Or(err, wrapAs(LockFailed, unlockErr))
+			err = cmp.Or(err, wrapAs(coresession.LockFailed, unlockErr))
 		}
 	}()
 	//: and one last look before the section runs. Every wait above is a select,
@@ -126,7 +126,7 @@ func (f *fileStore) takeFlock(ctx context.Context) error {
 		//: the call itself failed.
 		if flockErr != nil {
 			//: LockFailed.
-			return wrapAs(LockFailed, flockErr)
+			return wrapAs(coresession.LockFailed, flockErr)
 		}
 		//: ours.
 		if taken {

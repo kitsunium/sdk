@@ -3,9 +3,10 @@
 ## Purpose
 
 Public facade for the secret domain (**ADR 0096**): aliases onto
-`internal/core/security/secret` (`Value`, `Store`, `Versioned`, the port's sentinels)
-and `internal/service/security/secret` (the three store configurations, `Keyring`,
-`Policy`, `RotatorConfig`, `Rotator`, the engines' sentinels), plus thin
+`internal/core/security/secret` (`Value`, `Store`, `Versioned`, and every
+sentinel — the port's and the engines', all declared there since ADR 0160)
+and `internal/service/security/secret` (the three store configurations,
+`Keyring`, `Policy`, `RotatorConfig`, `Rotator`), plus thin
 forwarding constructors — and, since **ADR 0142**, the subject keys in
 `subjectkeys.go`: `SubjectKeys` over a `SubjectKeyStore`. No logic lives here.
 
@@ -25,7 +26,7 @@ forwarding constructors — and, since **ADR 0142**, the subject keys in
 | `SubjectKeys`, `SubjectKeysConfig`, `NewSubjectKeys` | one data key per subject under a rotating root: `Seal` / `Open` / `Destroy` / `Rewrap` / `OldestRoot` (ADR 0142) |
 | `SubjectKeyStore`, `WrappedKey`, `NewMemorySubjectKeyStore` | the frozen five-method port a caller implements (atomic `Insert` and `Replace`), what it yields, and the memory one |
 | `RewrapReport`, `SubjectOf`, `ValidateSubject`, `MaxSubjectLen` | a pass's report, a box's subject, the reference grammar (lowercase, 1–128 bytes) |
-| `NotFound` … `SubjectKeyUnreadable` | the eighteen sentinels of both layers (`InvalidSubject`, `KeyDestroyed`, `SubjectKeyUnreadable` added by ADR 0142) |
+| `NotFound` … `SubjectKeyUnreadable` | the eighteen sentinels — the port's eight and the engines' ten, all aliasing `internal/core/security/secret` (ADR 0160) (`InvalidSubject`, `KeyDestroyed`, `SubjectKeyUnreadable` added by ADR 0142) |
 
 ## Why-this-shape
 

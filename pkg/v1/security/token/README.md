@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/security/token"
 
 Package token — the dotted\-quad codes a consumer routes on.
 
-These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\*, 0.3.44.\* and 0.3.42.\* are owned by internal/core/security/token, internal/service/security/token and internal/service/crypto/key/jwk, and the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
+These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\* and 0.3.44.\* are owned by internal/core/security/token, where every code of the token domain is declared \(ADR 0160\), and 0.3.42.\* by internal/service/crypto/key/jwk; the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
 
 ```
 switch {
@@ -208,7 +208,7 @@ const CodeClaimNameInvalid errs.Code = coretoken.CodeClaimNameInvalid
 <a name="CodeDuplicateMember"></a>CodeDuplicateMember identifies a header or claims object repeating a member name \(0.3.44.7\).
 
 ```go
-const CodeDuplicateMember errs.Code = svctoken.CodeDuplicateMember
+const CodeDuplicateMember errs.Code = coretoken.CodeDuplicateMember
 ```
 
 <a name="CodeExpired"></a>CodeExpired identifies an authenticated token whose exp is past \(0.2.13.5\).
@@ -226,13 +226,13 @@ const CodeExpiryRequired errs.Code = coretoken.CodeExpiryRequired
 <a name="CodeFooterMismatch"></a>CodeFooterMismatch identifies a PASETO footer that is not the expected one \(0.3.44.5\).
 
 ```go
-const CodeFooterMismatch errs.Code = svctoken.CodeFooterMismatch
+const CodeFooterMismatch errs.Code = coretoken.CodeFooterMismatch
 ```
 
 <a name="CodeHeaderUnsupported"></a>CodeHeaderUnsupported identifies a non\-empty "crit", or a "typ" mismatch \(0.3.44.1\).
 
 ```go
-const CodeHeaderUnsupported errs.Code = svctoken.CodeHeaderUnsupported
+const CodeHeaderUnsupported errs.Code = coretoken.CodeHeaderUnsupported
 ```
 
 <a name="CodeIssueFailed"></a>CodeIssueFailed identifies claims that could not be rendered or signed \(0.2.13.14\).
@@ -286,19 +286,19 @@ const CodeJWKUnsupportedKeyType errs.Code = jwk.CodeJWKUnsupportedKeyType
 <a name="CodeKeyIDAmbiguous"></a>CodeKeyIDAmbiguous identifies more keys sharing a kid than the verifier will try \(0.3.44.4\).
 
 ```go
-const CodeKeyIDAmbiguous errs.Code = svctoken.CodeKeyIDAmbiguous
+const CodeKeyIDAmbiguous errs.Code = coretoken.CodeKeyIDAmbiguous
 ```
 
 <a name="CodeKeyIDMissing"></a>CodeKeyIDMissing identifies a token presented to a set verifier with no kid \(0.3.44.3\).
 
 ```go
-const CodeKeyIDMissing errs.Code = svctoken.CodeKeyIDMissing
+const CodeKeyIDMissing errs.Code = coretoken.CodeKeyIDMissing
 ```
 
 <a name="CodeKeyNotFound"></a>CodeKeyNotFound identifies a kid naming no key in the set \(0.3.44.2\).
 
 ```go
-const CodeKeyNotFound errs.Code = svctoken.CodeKeyNotFound
+const CodeKeyNotFound errs.Code = coretoken.CodeKeyNotFound
 ```
 
 <a name="CodeKeyUnsuitable"></a>CodeKeyUnsuitable identifies a key that cannot serve the algorithm it was handed to \(0.2.13.12\).
@@ -334,7 +334,7 @@ const CodePolicyMisconfigured errs.Code = coretoken.CodePolicyMisconfigured
 <a name="CodeSchemeUnsupported"></a>CodeSchemeUnsupported identifies a PASETO version\+purpose that is not v4.public \(0.3.44.6\).
 
 ```go
-const CodeSchemeUnsupported errs.Code = svctoken.CodeSchemeUnsupported
+const CodeSchemeUnsupported errs.Code = coretoken.CodeSchemeUnsupported
 ```
 
 <a name="CodeSignatureInvalid"></a>CodeSignatureInvalid identifies a signature or MAC tag that did not authenticate \(0.2.13.4\).
@@ -411,24 +411,24 @@ var (
 
     // HeaderUnsupported is returned for a header carrying a non-empty "crit",
     // or a "typ" other than VerifierConfig.RequireType.
-    HeaderUnsupported = svctoken.HeaderUnsupported
+    HeaderUnsupported = coretoken.HeaderUnsupported
     // KeyNotFound is returned when a token's kid names no key in the set.
-    KeyNotFound = svctoken.KeyNotFound
+    KeyNotFound = coretoken.KeyNotFound
     // KeyIDMissing is returned when a set verifier is handed a token with no
     // kid header.
-    KeyIDMissing = svctoken.KeyIDMissing
+    KeyIDMissing = coretoken.KeyIDMissing
     // KeyIDAmbiguous is returned when more keys share a kid than
     // VerifierConfig.MaxKeyCandidates allows the verifier to try.
-    KeyIDAmbiguous = svctoken.KeyIDAmbiguous
+    KeyIDAmbiguous = coretoken.KeyIDAmbiguous
     // FooterMismatch is returned for a PASETO footer that is not the expected
     // one, including a footer present where none was configured.
-    FooterMismatch = svctoken.FooterMismatch
+    FooterMismatch = coretoken.FooterMismatch
     // SchemeUnsupported is returned for a PASETO version+purpose this package
     // does not implement — every local purpose, and every version but v4.
-    SchemeUnsupported = svctoken.SchemeUnsupported
+    SchemeUnsupported = coretoken.SchemeUnsupported
     // DuplicateMember is returned when a header or claims object repeats a
     // member name (RFC 8725 §2.6).
-    DuplicateMember = svctoken.DuplicateMember
+    DuplicateMember = coretoken.DuplicateMember
 
     // JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is
     // not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an

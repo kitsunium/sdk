@@ -68,7 +68,7 @@ internal/
 │                        vfs},
 │                  observe/{logger, logger/{level, writer}, metrics, otel,
 │                           trace},
-│                  security/{authz, secret, session, token}
+│                  security/{authz, redact, secret, session, token}
 └── service/       concrete implementations
                    observe (the family — ADR 0155; a directory, no Go code:
                            logger — + encoder, sink/{console,file,memory,

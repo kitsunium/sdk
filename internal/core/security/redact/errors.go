@@ -1,8 +1,11 @@
 // Package redact — declares the sentinel *errs.Error outcomes. Each var's name
 // equals its errs.Define Reason in SCREAMING_SNAKE form.
 //
-// Neither refusal carries a byte of what it refused: this package exists to
-// keep secrets out of what is shown, and an error message is shown.
+// Neither refusal carries a byte of what it refused: this domain exists to
+// keep secrets out of what is shown, and an error message is shown. They are
+// raised by the engine in internal/service/security/redact — their Private
+// names that package, the one that raises them — and declared here since ADR
+// 0160, so every code of the domain is in one place.
 package redact
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

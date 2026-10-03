@@ -200,26 +200,26 @@ var (
 	InvalidKeep = coresecret.InvalidKeep
 	// InvalidConfig is returned by a constructor given a configuration it
 	// cannot honour.
-	InvalidConfig = svcsecret.InvalidConfig
+	InvalidConfig = coresecret.InvalidConfig
 	// RecordUnreadable is returned by the file store for a record it found
 	// and could not read back — most often, one written under another key.
-	RecordUnreadable = svcsecret.RecordUnreadable
+	RecordUnreadable = coresecret.RecordUnreadable
 	// EnvRefused is returned when the environment names a secret without a
 	// usable value: both forms set, or an empty or oversized file.
-	EnvRefused = svcsecret.EnvRefused
+	EnvRefused = coresecret.EnvRefused
 	// SealInvalid is returned by Keyring.Open for every box it cannot open.
-	SealInvalid = svcsecret.SealInvalid
+	SealInvalid = coresecret.SealInvalid
 	// SignatureInvalid is returned by Keyring.Verify for every signature it
 	// cannot verify.
-	SignatureInvalid = svcsecret.SignatureInvalid
+	SignatureInvalid = coresecret.SignatureInvalid
 	// KeyMaterialInvalid is returned when a keyring version is not exactly 32
 	// bytes.
-	KeyMaterialInvalid = svcsecret.KeyMaterialInvalid
+	KeyMaterialInvalid = coresecret.KeyMaterialInvalid
 	// GenerateFailed is returned when a rotation's generator failed.
-	GenerateFailed = svcsecret.GenerateFailed
+	GenerateFailed = coresecret.GenerateFailed
 	// KeyFileInvalid is returned by KeyFile for a file that exists and does not
 	// hold exactly one key of raw bytes.
-	KeyFileInvalid = svcsecret.KeyFileInvalid
+	KeyFileInvalid = coresecret.KeyFileInvalid
 )
 
 // New returns a Value holding a copy of raw.

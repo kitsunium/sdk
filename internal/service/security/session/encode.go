@@ -7,6 +7,7 @@ import (
 	"slices"
 	"time"
 
+	coresession "github.com/kitsunium/sdk/internal/core/security/session"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -118,19 +119,19 @@ func decodeRecord(raw []byte) (rec record, err error) {
 	//: the version byte gates everything after it.
 	if len(raw) < versionLen || raw[0] != recordVersion {
 		//: an unknown layout is never guessed at.
-		return record{}, wrapAs(RecordCorrupt, nil)
+		return record{}, wrapAs(coresession.RecordCorrupt, nil)
 	}
 	head, off, ok := decodeHeader(raw, versionLen)
 	//: a truncated header cannot be repaired.
 	if !ok {
 		//: same single verdict.
-		return record{}, wrapAs(RecordCorrupt, nil)
+		return record{}, wrapAs(coresession.RecordCorrupt, nil)
 	}
 	payload, ok := decodeData(raw, off)
 	//: a truncated or over-large payload.
 	if !ok {
 		//: same single verdict.
-		return record{}, wrapAs(RecordCorrupt, nil)
+		return record{}, wrapAs(coresession.RecordCorrupt, nil)
 	}
 	head.data = payload
 	//: a complete record.
@@ -288,7 +289,7 @@ func boundSubject(subject string) error {
 	//: the same cap as a payload string, since it is the same frame field shape.
 	if len(subject) > maxStringLen {
 		//: the subject is personal data and is never named, only its role.
-		return wrapAs(PayloadTooLarge, nil, kerrs.String("field", "subject"))
+		return wrapAs(coresession.PayloadTooLarge, nil, kerrs.String("field", "subject"))
 	}
 	//: within bounds.
 	return nil
@@ -299,7 +300,7 @@ func boundPayload(data map[string]string) error {
 	//: refuse at the door, so no store ever holds a record it cannot re-read.
 	if len(data) > maxDataEntries {
 		//: the cap is a documented number, not an implementation accident.
-		return wrapAs(PayloadTooLarge, nil)
+		return wrapAs(coresession.PayloadTooLarge, nil)
 	}
 	//: and every entry is checked, not just the count: one huge value is the
 	//: same memory-exhaustion vector as many small ones.
@@ -308,7 +309,7 @@ func boundPayload(data map[string]string) error {
 		if len(key) > maxStringLen || len(value) > maxStringLen {
 			//: the key is NOT named in the error: it is caller data, and a
 			//: Public string is read by third parties.
-			return wrapAs(PayloadTooLarge, nil)
+			return wrapAs(coresession.PayloadTooLarge, nil)
 		}
 	}
 	//: within bounds.

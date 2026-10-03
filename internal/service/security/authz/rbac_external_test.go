@@ -201,7 +201,7 @@ func TestGrantTableRefusalsRunAtConstruction(t *testing.T) {
 			if policy != nil {
 				t.Fatal("a refused table still produced a policy")
 			}
-			if !errs.HasCode(err, svcauthz.CodeGrantInvalid) {
+			if !errs.HasCode(err, coreauthz.CodeGrantInvalid) {
 				t.Fatalf("err = %v, want GRANT_INVALID", err)
 			}
 		})

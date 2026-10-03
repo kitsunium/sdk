@@ -8,6 +8,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 	"github.com/kitsunium/sdk/internal/service/security/redact"
 )
 
@@ -61,12 +62,12 @@ func TestAttrsRendersARecordForDisplay(t *testing.T) {
 		attr("stream", corelogger.AnyValue(make(chan int))),
 	}
 	want := map[string]string{
-		"user": "ann", "db.host": "db.local", "db.password": redact.Placeholder,
-		"db.dsn": "postgres://[redacted]@db/x", "session": redact.Placeholder,
+		"user": "ann", "db.host": "db.local", "db.password": coreredact.Placeholder,
+		"db.dsn": "postgres://[redacted]@db/x", "session": coreredact.Placeholder,
 		"count": "-3", "size": "7", "ratio": "0.25", "ok": "true", "took": "1.5s",
 		"at": "2026-09-24T08:00:00.000000005Z", "err": "dial https://[redacted]@h failed",
 		"thing": "rendered by String", "model": `{"visible":"v","hidden":"[redacted]"}`,
-		"nothing": "null", "stream": redact.Unencodable,
+		"nothing": "null", "stream": coreredact.Unencodable,
 	}
 	got := collect(redact.NewRedactor(redact.Config{}), attrs, 1024)
 	for key, text := range want {
@@ -130,7 +131,7 @@ func TestAttrsBoundsEachText(t *testing.T) {
 			t.Errorf("%s is %d bytes over a bound of 64", key, len(text))
 		}
 	}
-	if !strings.HasSuffix(got["text"], redact.Ellipsis) {
+	if !strings.HasSuffix(got["text"], coreredact.Ellipsis) {
 		t.Errorf("a cut text does not say so: %q", got["text"])
 	}
 }
@@ -143,11 +144,11 @@ func TestAttrsBoundEveryKind(t *testing.T) {
 		attr("at", corelogger.TimeValue(time.Date(2026, 9, 25, 21, 0, 0, 123456789, time.UTC))),
 		attr("took", corelogger.DurationValue(1234567*time.Hour+time.Nanosecond)),
 		attr("n", corelogger.Int64Value(-1234567890123456789)),
-	}, redact.MinBytes)
+	}, coreredact.MinBytes)
 	for key, text := range got {
 		//: every text, whatever its kind.
-		if len(text) > redact.MinBytes {
-			t.Errorf("%s = %q is %d bytes over a bound of %d", key, text, len(text), redact.MinBytes)
+		if len(text) > coreredact.MinBytes {
+			t.Errorf("%s = %q is %d bytes over a bound of %d", key, text, len(text), coreredact.MinBytes)
 		}
 	}
 }

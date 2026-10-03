@@ -31,7 +31,7 @@ const keyTempPattern string = ".keyfile-*.tmp"
 //
 // The file holds exactly one key as RAW bytes: exactly crypto.KeyLen of them,
 // no encoding, no line ending. `openssl rand 32 > key` writes one. Anything
-// else is refused with [KeyFileInvalid] — never truncated, never padded, never
+// else is refused with [coresecret.KeyFileInvalid] — never truncated, never padded, never
 // decoded, because a key reshaped to fit is a different key and a store sealed
 // under the original would then read as corrupt.
 //
@@ -44,7 +44,7 @@ const keyTempPattern string = ".keyfile-*.tmp"
 // link, so the name survives a crash alongside the bytes.
 //
 // An existing file with ANY group or world permission bit is refused with
-// [InvalidConfig] — the rule the file store's directory follows, and never
+// [coresecret.InvalidConfig] — the rule the file store's directory follows, and never
 // narrowed behind the operator's back. The error never contains the key, and
 // never the content of a file that was refused.
 //
@@ -120,7 +120,7 @@ func keyFromOpenFile(file statter) (key corecrypto.Key, err error) {
 	//: a directory, a device or a socket where a file belongs.
 	if !info.Mode().IsRegular() {
 		//: KeyFileInvalid, naming the clause.
-		return corecrypto.Key{}, wrapAs(KeyFileInvalid, nil, errs.String("problem", "not a regular file"))
+		return corecrypto.Key{}, wrapAs(coresecret.KeyFileInvalid, nil, errs.String("problem", "not a regular file"))
 	}
 	//: another account can read — or replace — the key.
 	if info.Mode().Perm()&otherAccountBits != 0 {
@@ -138,7 +138,7 @@ func keyFromOpenFile(file statter) (key corecrypto.Key, err error) {
 	//: so a longer file is refused rather than truncated.
 	if len(content) != corecrypto.KeyLen {
 		//: KeyFileInvalid, with the length and never the content.
-		return corecrypto.Key{}, wrapAs(KeyFileInvalid, nil,
+		return corecrypto.Key{}, wrapAs(coresecret.KeyFileInvalid, nil,
 			errs.String("problem", "not exactly one key of raw bytes"), errs.Int("length", len(content)))
 	}
 	//: NewKey copies, so the buffer is cleared on the way out.
@@ -159,7 +159,7 @@ func createKeyFile(path string) (key corecrypto.Key, err error) {
 	//: crypto/rand never returns a short read; its error is reported.
 	if _, randErr := rand.Read(raw); randErr != nil {
 		//: GenerateFailed, with the entropy source's message.
-		return corecrypto.Key{}, wrapAs(GenerateFailed, randErr)
+		return corecrypto.Key{}, wrapAs(coresecret.GenerateFailed, randErr)
 	}
 	published, publishErr := publishKey(dir, path, raw)
 	//: the name could not be written at all.

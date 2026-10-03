@@ -1,4 +1,5 @@
-// Package session — range 0.2.14.* (ADR 0045 core/security/session block).
+// Package session — ranges 0.2.14.* (the port's verdicts) and 0.3.46.* (the
+// engines' own refusals) — ADR 0045, declared here since ADR 0160.
 package session
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -47,3 +48,42 @@ const CodeSealInvalid errs.Code = 0x00_02_0E_08 // 0.2.14.8
 // identifier is session fixation, so the write is refused rather than applied
 // or silently reduced to a data-only write.
 const CodeFixationRefused errs.Code = 0x00_02_0E_09 // 0.2.14.9
+
+// range: 0.3.46.0 - 0.3.46.255
+//
+// The refusals specific to the engines in internal/service/security/session —
+// the file store's location and lock, the payload caps, the sealer's purpose.
+// The range was allocated in the service layer (LL = 3) and is declared here,
+// beside the domain's verdicts, since ADR 0160: LL records the layer that
+// allocated a range, not the directory its declaration lives in, so the values
+// never change.
+
+// CodeRecordCorrupt identifies a stored record that could not be turned back
+// into a session: the seal did not open, the frame did not parse, or the
+// record named a digest other than the one it was filed under.
+const CodeRecordCorrupt errs.Code = 0x00_03_2E_01 // 0.3.46.1
+
+// CodeDirectoryUnsafe identifies a location that cannot hold a session record
+// safely — a directory readable beyond its owner, or a filesystem that accepts
+// a 0600 request and does not enforce it.
+const CodeDirectoryUnsafe errs.Code = 0x00_03_2E_02 // 0.3.46.2
+
+// CodeLockFailed identifies a failure to take the store-wide exclusive lock.
+// The operation is refused rather than attempted unserialised.
+const CodeLockFailed errs.Code = 0x00_03_2E_03 // 0.3.46.3
+
+// CodePayloadTooLarge identifies a session payload above the store's key-count
+// or per-string caps, or a subject above the per-string cap. The bound is
+// checked before the write it would fund.
+const CodePayloadTooLarge errs.Code = 0x00_03_2E_04 // 0.3.46.4
+
+// CodeInvalidPurpose identifies a sealer built without a purpose string, which
+// would silently drop the domain separation between two things sealed under one
+// key.
+const CodeInvalidPurpose errs.Code = 0x00_03_2E_05 // 0.3.46.5
+
+// CodePathRedirected identifies a store location reached through an
+// indirection the file store refuses to follow: a link at the lock file's
+// name, a link at a component of Dir planted where any account could have
+// planted it, or a Dir that stopped naming the directory the store opened.
+const CodePathRedirected errs.Code = 0x00_03_2E_06 // 0.3.46.6

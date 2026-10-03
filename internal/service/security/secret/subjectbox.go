@@ -38,7 +38,7 @@ const (
 
 // SubjectOf returns the subject a box sealed by [SubjectKeys.Seal] names,
 // without opening it — what an erasure reads to find which keys the records it
-// erases were sealed under. It answers [SealInvalid] for anything that is not
+// erases were sealed under. It answers [coresecret.SealInvalid] for anything that is not
 // a subject box. The subject is not secret: it is a reference, and it travels
 // in clear in every box.
 func SubjectOf(box []byte) (subject string, err error) {
@@ -46,7 +46,7 @@ func SubjectOf(box []byte) (subject string, err error) {
 	//: not a box this build makes.
 	if !ok {
 		//: SealInvalid.
-		return "", SealInvalid
+		return "", coresecret.SealInvalid
 	}
 	//: the reference the header carries.
 	return parsed.subject, nil

@@ -140,12 +140,12 @@ const (
 	// that returned a decision outside allow/deny/abstain.
 	CodePolicyMisconfigured errs.Code = coreauthz.CodePolicyMisconfigured
 	// CodeGrantInvalid identifies an RBAC grant table refused at construction.
-	CodeGrantInvalid errs.Code = svcauthz.CodeGrantInvalid
+	CodeGrantInvalid errs.Code = coreauthz.CodeGrantInvalid
 	// CodeRuleInvalid identifies an ABAC rule set refused at construction.
-	CodeRuleInvalid errs.Code = svcauthz.CodeRuleInvalid
+	CodeRuleInvalid errs.Code = coreauthz.CodeRuleInvalid
 	// CodeConditionInvalid identifies a condition constructor refused at
 	// construction.
-	CodeConditionInvalid errs.Code = svcauthz.CodeConditionInvalid
+	CodeConditionInvalid errs.Code = coreauthz.CodeConditionInvalid
 )
 
 // Decision is the public alias for the three-valued verdict: [Allow], [Deny]
@@ -199,12 +199,12 @@ var (
 	// decision outside allow/deny/abstain.
 	PolicyMisconfigured = coreauthz.PolicyMisconfigured
 	// GrantInvalid is returned by [NewRBAC] for a grant table it cannot honour.
-	GrantInvalid = svcauthz.GrantInvalid
+	GrantInvalid = coreauthz.GrantInvalid
 	// RuleInvalid is returned by [NewABAC] for a rule set it cannot honour.
-	RuleInvalid = svcauthz.RuleInvalid
+	RuleInvalid = coreauthz.RuleInvalid
 	// ConditionInvalid is returned by a condition constructor for arguments it
 	// cannot honour.
-	ConditionInvalid = svcauthz.ConditionInvalid
+	ConditionInvalid = coreauthz.ConditionInvalid
 )
 
 // NewRequest builds the immutable question. Attributes are indexed by key,

@@ -172,7 +172,7 @@ func historyOf(name string, record fileRecord) (versions []coresecret.VersionVal
 // unreadable is the RecordUnreadable verdict for name, with the clause.
 func unreadable(name, problem string) error {
 	//: the name and the clause; never a byte of the record.
-	return wrapAs(RecordUnreadable, nil, errs.String("secret", name), errs.String("problem", problem))
+	return wrapAs(coresecret.RecordUnreadable, nil, errs.String("secret", name), errs.String("problem", problem))
 }
 
 // clearRecord overwrites every secret the decoded or encoded document holds.

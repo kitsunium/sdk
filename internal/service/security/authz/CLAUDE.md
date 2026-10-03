@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/authz/
 
 ## Purpose
@@ -8,8 +8,10 @@ ABAC evaluator over conditions, the deny-overrides combiner, the closure that
 turns a three-valued decision into one refusal, and the built-in conditions and
 combinators rules are written with. **ADR 0057**.
 
-Code range: `0.3.56.*` (construction refusals only — every evaluation outcome
-emits a core sentinel from `0.2.26.*`).
+Codes: none declared here. The engine's construction refusals (`0.3.56.*`) and
+every evaluation verdict (`0.2.26.*`) are declared in
+`internal/core/security/authz` (ADR 0160); this package only raises them. The
+`0.3.56.*` values were allocated here and kept when their declarations moved.
 
 ## Contents
 
@@ -23,9 +25,7 @@ emits a core sentinel from `0.2.26.*`).
 | `abac.go` | `RuleValue` / `NewABAC` + the rule fold |
 | `conditions.go` | `AttrEquals` / `AttrIsTrue` / `AttrAtLeast` / `AttrContains` / `AttrMatchesSubject` |
 | `combinators.go` | `Not` / `AllOf` / `AnyOf` |
-| `validate.go` | every construction-time refusal, plus `kindName` |
-| `codes.go` | `Code*` constants — range 0.3.56.* |
-| `errors.go` | `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` (`errs.Define`) |
+| `validate.go` | every construction-time refusal — raised as the core's `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` — plus `kindName` |
 | `BENCH.md` | the evaluation path is zero-allocation; the numbers and how to read them |
 
 ## The four rules this package exists to enforce
@@ -77,11 +77,12 @@ emits a core sentinel from `0.2.26.*`).
   let an `AttributeMissing` become the code a framework routes on AND the
   message a client sees — the moment a refusal starts explaining which
   attribute to forge.
-- **The three sentinels here are specific on purpose.** Unlike the core ones,
-  `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` describe themselves in
-  `Public`: they are raised while a policy is being ASSEMBLED, on a path where
-  no request exists and no client is listening, so they never become a
-  response. All three carry `EX_CONFIG` (78).
+- **The three construction refusals are specific on purpose.** Unlike the
+  verdicts, `GrantInvalid` / `RuleInvalid` / `ConditionInvalid` describe
+  themselves in `Public`: they are raised while a policy is being ASSEMBLED, on
+  a path where no request exists and no client is listening, so they never
+  become a response. All three carry `EX_CONFIG` (78). They are declared in
+  the core beside the verdicts (ADR 0160) and raised only here.
 - **There is no `Always` condition.** An unconditional rule is a grant with no
   reason; the caller who wants one writes the predicate at the call site, where
   it appears in the diff and in review.
@@ -111,6 +112,10 @@ emits a core sentinel from `0.2.26.*`).
 - **Give a refusal a `Public` that says why.** The uniform sentence is the
   security property; fields carry the diagnosis.
 - **Add a DSL, a rule file format, a wildcard matcher or a tuple store.**
+- **Declare an error code here** — an `errs.Define` or a `Code*` constant.
+  Every code of the domain is declared in `internal/core/security/authz`, at
+  this package's path in the core (ADR 0160); a new refusal gets its code and
+  its sentinel there, in the range this package already owns (`0.3.56.*`).
 
 ## Verification
 

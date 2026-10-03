@@ -6,6 +6,7 @@ import (
 	"context"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 )
 
 // rootView is ONE reading of a keyring's versions, with every usable
@@ -32,7 +33,7 @@ type rootView struct {
 // view reads the keyring's versions once and derives their keys for label —
 // wrapLabel, for a re-wrap. It returns core/security/secret.NotFound while the root has
 // no version, the store's verdict when it cannot be read, and
-// [KeyMaterialInvalid] when the newest version cannot seal.
+// [coresecret.KeyMaterialInvalid] when the newest version cannot seal.
 func (k *Keyring) view(ctx context.Context, label string) (view *rootView, err error) {
 	versions, readErr := k.store.Versions(ctx, k.name)
 	//: no root yet, or no store to ask.
@@ -69,26 +70,26 @@ func (v *rootView) seal(plaintext, aad []byte) (box []byte, err error) {
 }
 
 // open opens a box any usable kept version sealed, exactly as openAs would
-// have for the view's purpose. Every failure is the one [SealInvalid]: the
+// have for the view's purpose. Every failure is the one [coresecret.SealInvalid]: the
 // view has read the store already, so there is no "retry" to tell apart.
 func (v *rootView) open(box, aad []byte) (plaintext []byte, err error) {
 	version, sealed, parsed := parseHeader(box)
 	//: not a keyring box.
 	if !parsed {
 		//: SealInvalid.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	key, kept := v.keys[version]
 	//: a version pruned, never made, or not usable as a key.
 	if !kept {
 		//: SealInvalid.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	plaintext, openErr := corecrypto.Open(key, sealed, v.keyring.binding(version, aad))
 	//: tampered, or bound to other data.
 	if openErr != nil {
 		//: the one verdict.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	//: the plaintext, authenticated.
 	return plaintext, nil

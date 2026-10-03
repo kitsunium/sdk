@@ -9,6 +9,10 @@
 //	line := r.Text(message, 2<<10)          // URL credentials replaced, cut
 //	for key, text := range r.Attrs(record.Attrs, 2<<10) { … }
 //
+// [Redactor] is a port frozen at five methods — Name, Text, JSON, Value and
+// Attrs: [New] returns the SDK's implementation, and code that accepts a
+// Redactor can be handed a test double in its place.
+//
 // # What counts as a secret
 //
 // Three rules, each stated so nobody has to guess:
@@ -54,33 +58,34 @@
 package redact
 
 import (
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcredact "github.com/kitsunium/sdk/internal/service/security/redact"
 )
 
 // Placeholder replaces every secret.
-const Placeholder string = svcredact.Placeholder
+const Placeholder string = coreredact.Placeholder
 
 // Ellipsis ends whatever was cut to fit a bound, and is counted in it.
-const Ellipsis string = svcredact.Ellipsis
+const Ellipsis string = coreredact.Ellipsis
 
 // MinBytes is the smallest bound honoured; a smaller one is raised to it.
-const MinBytes int = svcredact.MinBytes
+const MinBytes int = coreredact.MinBytes
 
 // Unencodable is the text a log attribute encoding/json refuses is shown as.
-const Unencodable string = svcredact.Unencodable
+const Unencodable string = coreredact.Unencodable
 
 // CodeDocumentInvalid identifies a document that is not one JSON value.
-const CodeDocumentInvalid errs.Code = svcredact.CodeDocumentInvalid
+const CodeDocumentInvalid errs.Code = coreredact.CodeDocumentInvalid
 
 // CodeValueUnencodable identifies a value encoding/json refuses to encode.
-const CodeValueUnencodable errs.Code = svcredact.CodeValueUnencodable
+const CodeValueUnencodable errs.Code = coreredact.CodeValueUnencodable
 
 var (
 	// DocumentInvalid refuses a document that is not one JSON value.
-	DocumentInvalid = svcredact.DocumentInvalid
+	DocumentInvalid = coreredact.DocumentInvalid
 	// ValueUnencodable refuses a value encoding/json will not encode.
-	ValueUnencodable = svcredact.ValueUnencodable
+	ValueUnencodable = coreredact.ValueUnencodable
 )
 
 // Config says what a Redactor treats as secret: the name Words, the struct
@@ -88,17 +93,19 @@ var (
 // zero value is usable.
 type Config = svcredact.Config
 
-// Redactor applies one Config: Name, Text, JSON, Value and Attrs. It caches
-// what it learns about each Go type, so build one per configuration and keep
-// it. It is safe for concurrent use.
-type Redactor = svcredact.Redactor
+// Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New]
+// returns the SDK's implementation, which caches what it learns about each Go
+// type, so build one per configuration and keep it; it is safe for concurrent
+// use. The port is frozen at those five methods (ADR 0039), so a consumer can
+// accept a Redactor and hand a test double in its place.
+type Redactor = coreredact.Redactor
 
 // Document is a JSON document with its secrets replaced — never longer than
 // its bound, always well-formed — and whether it had to be cut.
-type Document = svcredact.DocumentValue
+type Document = coreredact.DocumentValue
 
 // New returns a Redactor applying cfg.
-func New(cfg Config) *Redactor {
+func New(cfg Config) Redactor {
 	//: delegate verbatim to the service constructor.
 	return svcredact.NewRedactor(cfg)
 }

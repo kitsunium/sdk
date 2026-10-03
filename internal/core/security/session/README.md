@@ -5,7 +5,10 @@ owns a session's lifetime, the `Sealer` that renders its identifier as a cookie
 value, the opaque redacting `ID`, and the immutable `SessionValue` a store hands
 back — plus the typed sentinels (NotFound / Expired / InvalidID / InvalidConfig /
 IdentifierCollision / EntropyFailed / StoreUnavailable / SealInvalid /
-FixationRefused).
+FixationRefused), and those of the concrete stores and sealer (RecordCorrupt /
+DirectoryUnsafe / LockFailed / PayloadTooLarge / InvalidPurpose /
+PathRedirected), declared here so every code of the domain is in one place
+(ADR 0160).
 
 A session is not a token. A token carries its claims and cannot be revoked; a
 session is an opaque handle whose facts live on the server, so `Destroy` takes

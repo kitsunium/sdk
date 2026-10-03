@@ -186,7 +186,7 @@ func TestRuleSetRefusalsRunAtConstruction(t *testing.T) {
 			if policy != nil {
 				t.Fatal("a refused rule set still produced a policy")
 			}
-			if !errs.HasCode(err, svcauthz.CodeRuleInvalid) {
+			if !errs.HasCode(err, coreauthz.CodeRuleInvalid) {
 				t.Fatalf("err = %v, want RULE_INVALID", err)
 			}
 		})
@@ -203,7 +203,7 @@ func TestMustPanicsOnARefusedConstructor(t *testing.T) {
 			t.Fatal("Must accepted a refused constructor")
 		}
 		failure, ok := recovered.(error)
-		if !ok || !errs.HasCode(failure, svcauthz.CodeRuleInvalid) {
+		if !ok || !errs.HasCode(failure, coreauthz.CodeRuleInvalid) {
 			t.Fatalf("panic value = %v, want the RULE_INVALID error", recovered)
 		}
 	}()

@@ -300,7 +300,7 @@ func TestRequireTypeSeparatesTokenKinds(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewHS256Verifier: %v", err)
 	}
-	if _, verr := refreshVerifier.Verify(minted); !errs.HasCode(verr, svctoken.CodeHeaderUnsupported) {
+	if _, verr := refreshVerifier.Verify(minted); !errs.HasCode(verr, coretoken.CodeHeaderUnsupported) {
 		t.Fatalf("access token at the refresh endpoint: got %v, want HEADER_UNSUPPORTED", verr)
 	}
 	accessVerifier, err := svctoken.NewHS256Verifier(secret,

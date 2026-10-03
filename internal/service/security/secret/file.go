@@ -61,7 +61,7 @@ type fileStore struct {
 // temporary the publication writes first holds the same sealed bytes.
 //
 // It refuses at CONSTRUCTION: a configuration it cannot honour
-// ([InvalidConfig]), a directory another account can read ([InvalidConfig],
+// ([coresecret.InvalidConfig]), a directory another account can read ([coresecret.InvalidConfig],
 // never narrowed silently), and — with core/proc.UnsupportedPlatform — a
 // platform where vfs cannot publish atomically or the lock cannot exclude,
 // which today is every platform but the Unix family. The directory is not
@@ -90,14 +90,14 @@ func NewFile(cfg FileConfig) (store coresecret.Store, err error) {
 	//: the directory was just checked, so this is a race or a mount going away.
 	if rootErr != nil {
 		//: InvalidConfig, with vfs's verdict as a field: it names no path.
-		return nil, wrapAs(InvalidConfig, rootErr, errs.String("setting", "Dir"), errs.String("problem", "cannot be opened"))
+		return nil, wrapAs(coresecret.InvalidConfig, rootErr, errs.String("setting", "Dir"), errs.String("problem", "cannot be opened"))
 	}
 	clk := cfg.clockOrSystem()
 	locker, lockErr := svclock.NewFileLocker(svclock.FileConfig{Dir: cfg.Dir, Clock: clk})
 	//: the lock domain refused the directory the store was about to use.
 	if lockErr != nil {
 		//: close what was opened; its own failure joins the verdict.
-		return nil, errors.Join(wrapAs(InvalidConfig, lockErr, errs.String("setting", "Dir"),
+		return nil, errors.Join(wrapAs(coresecret.InvalidConfig, lockErr, errs.String("setting", "Dir"),
 			errs.String("problem", "the lock domain refused it")), closeRoot(root))
 	}
 	//: the directory checked by path, the directory held, and the directory

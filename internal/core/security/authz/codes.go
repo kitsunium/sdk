@@ -1,4 +1,5 @@
-// Package authz — range 0.2.26.* (ADR 0057 core/security/authz block).
+// Package authz — ranges 0.2.26.* (the domain's verdicts) and 0.3.56.* (the
+// engine's construction refusals) — ADR 0057, declared here since ADR 0160.
 package authz
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -26,3 +27,26 @@ const CodeAttributeKindMismatch errs.Code = 0x00_02_1A_03 // 0.2.26.3
 // of how it was assembled: a nil [Policy] in a composition, or a [Policy] that
 // returned a [Decision] outside the three named states.
 const CodePolicyMisconfigured errs.Code = 0x00_02_1A_04 // 0.2.26.4
+
+// range: 0.3.56.0 - 0.3.56.255
+//
+// The construction refusals of the engine in internal/service/security/authz.
+// The range was allocated in the service layer (LL = 3) and is declared here,
+// beside the domain's verdicts, since ADR 0160: LL records the layer that
+// allocated a range, not the directory its declaration lives in, so the values
+// never change.
+
+// CodeGrantInvalid identifies an RBAC grant table refused at construction: no
+// roles attribute named, no grants, an unnamed role, a role that confers
+// nothing, or a permission with an empty half.
+const CodeGrantInvalid errs.Code = 0x00_03_38_01 // 0.3.56.1
+
+// CodeRuleInvalid identifies an ABAC rule set refused at construction: no
+// rules, an unnamed rule, an empty action or resource, a nil condition, or an
+// effect that is neither Allow nor Deny.
+const CodeRuleInvalid errs.Code = 0x00_03_38_02 // 0.3.56.2
+
+// CodeConditionInvalid identifies a condition constructor refused at
+// construction: an empty attribute name, an empty set member, a nil inner
+// condition, or a combinator over no conditions at all.
+const CodeConditionInvalid errs.Code = 0x00_03_38_03 // 0.3.56.3

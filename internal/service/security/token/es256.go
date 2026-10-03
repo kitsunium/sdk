@@ -11,6 +11,13 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
+// exitConfigFault matches sysexits EX_CONFIG (78), the exit code core/security/token's
+// KeyUnsuitable / PolicyMisconfigured / IssueFailed sentinels carry. It is
+// restated here so a stdlib cause wrapped through WrapParams — the one path
+// that cannot inherit an exit override — lands on the same number its sibling
+// sentinel would have produced.
+const exitConfigFault int = 78
+
 // es256Signing is ECDSA P-256 signing with the RFC 7518 §3.4 R||S encoding.
 type es256Signing struct {
 	// key is the private key; its curve and point are checked at construction.

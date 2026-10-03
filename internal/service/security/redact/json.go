@@ -11,6 +11,7 @@ import (
 	"reflect"
 	"unicode/utf8"
 
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -18,7 +19,7 @@ import (
 const (
 	// minValueBytes is the smallest value a cut can still write where a value
 	// is owed: the Ellipsis as a JSON string, `"…"`.
-	minValueBytes int = len(`"` + Ellipsis + `"`)
+	minValueBytes int = len(`"` + coreredact.Ellipsis + `"`)
 	// quoteBytes is the two quotation marks around a string.
 	quoteBytes int = 2
 	// separatorBytes is a comma between members or elements, or the colon
@@ -27,10 +28,10 @@ const (
 )
 
 // quotedPlaceholder is the Placeholder as a JSON string.
-const quotedPlaceholder string = `"` + Placeholder + `"`
+const quotedPlaceholder string = `"` + coreredact.Placeholder + `"`
 
 // truncatedValue is what a value that cannot fit becomes.
-const truncatedValue string = `"` + Ellipsis + `"`
+const truncatedValue string = `"` + coreredact.Ellipsis + `"`
 
 // fieldOffset carries where the reader refused a document.
 const fieldOffset string = "offset"
@@ -51,17 +52,6 @@ var shortEscapes = map[rune]byte{
 	'"': '"', '\\': '\\', '\b': 'b', '\f': 'f', '\n': 'n', '\r': 'r', '\t': 't',
 }
 
-// DocumentValue is a JSON document with its secrets replaced, and whether it
-// had to be cut to fit its bound.
-type DocumentValue struct {
-	// JSON is always one well-formed JSON value, never longer than the bound.
-	JSON json.RawMessage
-	// Truncated reports that members, elements or the tail of a string were
-	// left out to fit the bound. The containers that were cut are still
-	// closed, so JSON stays well-formed.
-	Truncated bool
-}
-
 // JSON returns document with its secrets replaced, at most maxBytes long
 // (raised to MinBytes): every member whose name the Redactor recognises has
 // its value, whatever it is, replaced by Placeholder, and every string has
@@ -73,7 +63,7 @@ type DocumentValue struct {
 // recognised. Duplicate member names and invalid UTF-8 are tolerated — this
 // is for showing a document, not for accepting one — and invalid UTF-8 is
 // shown as U+FFFD.
-func (r *Redactor) JSON(document []byte, maxBytes int) (redacted DocumentValue, err error) {
+func (r *Redactor) JSON(document []byte, maxBytes int) (redacted coreredact.DocumentValue, err error) {
 	//: a document has no Go type, so only names and URLs are judged.
 	return r.redact(document, nil, maxBytes)
 }
@@ -88,12 +78,12 @@ func (r *Redactor) JSON(document []byte, maxBytes int) (redacted DocumentValue, 
 //
 // v is encoded, never modified. A value encoding/json refuses — a channel, a
 // function, a cycle — is refused with ValueUnencodable.
-func (r *Redactor) Value(v any, maxBytes int) (redacted DocumentValue, err error) {
+func (r *Redactor) Value(v any, maxBytes int) (redacted coreredact.DocumentValue, err error) {
 	encoded, encodeErr := json.Marshal(v)
 	//: nothing on the wire, nothing to redact.
 	if encodeErr != nil {
 		//: the type, never the value: the value is what may be secret.
-		return DocumentValue{}, errs.Wrap(ValueUnencodable, errs.WrapParams{},
+		return coreredact.DocumentValue{}, errs.Wrap(coreredact.ValueUnencodable, errs.WrapParams{},
 			errs.String("type", reflect.TypeOf(v).String()))
 	}
 	//: nil encodes as null and declares nothing.
@@ -106,7 +96,7 @@ func (r *Redactor) Value(v any, maxBytes int) (redacted DocumentValue, err error
 }
 
 // redact copies one document with its secrets replaced, within the bound.
-func (r *Redactor) redact(document []byte, declared *plan, maxBytes int) (DocumentValue, error) {
+func (r *Redactor) redact(document []byte, declared *plan, maxBytes int) (coreredact.DocumentValue, error) {
 	limit := bound(maxBytes)
 	c := copier{
 		redactor: r,
@@ -118,15 +108,15 @@ func (r *Redactor) redact(document []byte, declared *plan, maxBytes int) (Docume
 	//: the document, or the reason it is not one.
 	if copyErr := c.value(declared, false); copyErr != nil {
 		//: nothing returned for a document that does not parse.
-		return DocumentValue{}, c.invalid()
+		return coreredact.DocumentValue{}, c.invalid()
 	}
 	//: exactly one value: anything after it is not part of a document.
 	if _, trailingErr := c.decoder.ReadToken(); !errors.Is(trailingErr, io.EOF) {
 		//: a second value, or garbage.
-		return DocumentValue{}, c.invalid()
+		return coreredact.DocumentValue{}, c.invalid()
 	}
 	//: never longer than the bound, always well-formed.
-	return DocumentValue{JSON: c.out, Truncated: c.cut}, nil
+	return coreredact.DocumentValue{JSON: c.out, Truncated: c.cut}, nil
 }
 
 // copier streams one JSON value from decoder into out, writing nothing that
@@ -153,7 +143,7 @@ func (c *copier) room() int {
 // invalid is the refusal of a document the reader could not read.
 func (c *copier) invalid() error {
 	//: where the reader stopped, never what it read.
-	return errs.Wrap(DocumentInvalid, errs.WrapParams{}, errs.Int64(fieldOffset, c.decoder.InputOffset()))
+	return errs.Wrap(coreredact.DocumentInvalid, errs.WrapParams{}, errs.Int64(fieldOffset, c.decoder.InputOffset()))
 }
 
 // value copies the next value. A secret one — by its member's name, or by
@@ -337,7 +327,7 @@ func (c *copier) text(value string) {
 		return
 	}
 	//: the prefix budget: the room less the quotes and the Ellipsis.
-	budget := room - quoteBytes - len(Ellipsis)
+	budget := room - quoteBytes - len(coreredact.Ellipsis)
 	c.out = append(c.out, '"')
 	//: rune by rune, so an escape is never split.
 	for _, character := range value {
@@ -349,7 +339,7 @@ func (c *copier) text(value string) {
 		c.out = appendEscaped(c.out, character)
 		budget -= escaped
 	}
-	c.out = append(c.out, Ellipsis...)
+	c.out = append(c.out, coreredact.Ellipsis...)
 	c.out = append(c.out, '"')
 	c.cut = true
 }

@@ -135,7 +135,7 @@ func checkPasetoScheme(version, purpose string) error {
 	//: an operator looking for a corrupt token instead of a missing feature.
 	if slices.Contains(pasetoVersions, version) && (purpose == "public" || purpose == "local") {
 		//: name the scheme; it is public information, already on the wire.
-		return errs.Wrap(SchemeUnsupported, errs.WrapParams{},
+		return errs.Wrap(coretoken.SchemeUnsupported, errs.WrapParams{},
 			errs.String("scheme", version+"."+purpose))
 	}
 	//: not a PASETO at all.
