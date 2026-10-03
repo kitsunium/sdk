@@ -1,7 +1,7 @@
 //go:build !(linux || darwin || freebsd || openbsd || netbsd || dragonfly)
 
-// Package session — the honest refusal on platforms without the two mechanics
-// the file store requires (ADR 0018 §(a): a uniform typed sentinel where a
+// Package session — the honest refusal on platforms without the mechanics the
+// file store requires (ADR 0018 §(a): a uniform typed sentinel where a
 // platform has no native mechanic, never a silent drop and never a build
 // break).
 //
@@ -63,7 +63,7 @@ import (
 // read anything.
 const unsupportedPlatform string = "unsupported-platform"
 
-// platformNative reports that this GOOS lacks at least one of the two mechanics
+// platformNative reports that this GOOS lacks at least one of the mechanics
 // the file store requires. NewFileStore reads it and refuses at CONSTRUCTION,
 // so the refusal arrives where the program is wired rather than at the first
 // login.

@@ -275,7 +275,7 @@ for every caller and is not this change.
   `int` only once it is proven small, because where `int` is 32 bits
   `int(0xffffffff)` is `-1` and passed every "> cap" check.
 - **A record file is recognised by one test, `isDigest`** — 64 lowercase hex
-  characters, exactly what `ID.Digest` writes — and `recordPath` and
+  characters, exactly what `ID.Digest` writes — and `recordName` and
   `recordDigest` both apply it. What a sweep recognises is what it deletes, and a
   length-only test swept any foreign file that merely had a 64-character stem.
 - **A sealed value has one spelling.** `Open` decodes with the STRICT base64url
