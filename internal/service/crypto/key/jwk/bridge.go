@@ -19,6 +19,7 @@ import (
 	"math/big"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -31,7 +32,7 @@ func FromECDSAPublic(der []byte) (key KeyValue, err error) {
 	if perr != nil {
 		//: keep the x509 cause; it describes structure, not key material.
 		return KeyValue{}, errs.Wrap(perr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk.FromECDSAPublic: x509.ParsePKIXPublicKey rejected the DER blob",
@@ -42,7 +43,7 @@ func FromECDSAPublic(der []byte) (key KeyValue, err error) {
 	//: an Ed25519 or RSA SPKI is a different constructor's job.
 	if !ok {
 		//: refuse rather than reinterpret the blob as another family.
-		return KeyValue{}, TypeMismatch
+		return KeyValue{}, corejwk.TypeMismatch
 	}
 	//: curve naming and point validation live in one place.
 	return fromECDSAPublicKey(pub)
@@ -57,7 +58,7 @@ func FromECDSAPrivate(der []byte) (key KeyValue, err error) {
 	if perr != nil {
 		//: keep the x509 cause; it describes structure, not key material.
 		return KeyValue{}, errs.Wrap(perr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk.FromECDSAPrivate: x509.ParseECPrivateKey rejected the DER blob",
@@ -81,7 +82,7 @@ func attachScalar(base KeyValue, scalar *big.Int) (key KeyValue, err error) {
 	//: FillBytes panics on an over-wide integer, so bound it first.
 	if scalar == nil || scalar.BitLen() > size*bitsPerOctet {
 		//: a scalar that does not fit the field is not a key on this curve.
-		return KeyValue{}, KeyMismatch
+		return KeyValue{}, corejwk.KeyMismatch
 	}
 	fixed := scalar.FillBytes(make([]byte, size))
 	//: range-check AND require it to derive the declared point.
@@ -101,14 +102,14 @@ func fromECDSAPublicKey(pub *ecdsa.PublicKey) (key KeyValue, err error) {
 	//: P-224 and custom curves have no "crv" name.
 	if !ok {
 		//: no JOSE curve name means no JWK spelling.
-		return KeyValue{}, UnsupportedCurve
+		return KeyValue{}, corejwk.UnsupportedCurve
 	}
 	size := coordLen(crv)
 	//: FillBytes panics on an over-wide integer, so bound both first.
 	if pub.X == nil || pub.Y == nil ||
 		pub.X.BitLen() > size*bitsPerOctet || pub.Y.BitLen() > size*bitsPerOctet {
 		//: coordinates that do not fit the field are not a point on it.
-		return KeyValue{}, KeyMismatch
+		return KeyValue{}, corejwk.KeyMismatch
 	}
 	//: fixed-width big-endian, leading zeros preserved (RFC 7518 §6.2.1.2).
 	xcoord := pub.X.FillBytes(make([]byte, size))
@@ -137,7 +138,7 @@ func (k KeyValue) ECDSAPublic() (der []byte, err error) {
 	//: defensive — Parse already validated the point, so this cannot fail.
 	if merr != nil {
 		//: surface typed rather than dropping an impossible error.
-		return nil, KeyMismatch
+		return nil, corejwk.KeyMismatch
 	}
 	//: the DER blob.
 	return out, nil
@@ -158,7 +159,7 @@ func (k KeyValue) ECDSAPrivate() (der []byte, err error) {
 	//: refuse a public-only key instead of emitting a keyless SEC1 blob.
 	if !k.IsPrivate() {
 		//: the caller asked for material this key does not hold.
-		return nil, NoPrivateMaterial
+		return nil, corejwk.NoPrivateMaterial
 	}
 	//: D is validated against x/y at construction, so the pair is coherent.
 	priv := &ecdsa.PrivateKey{PublicKey: *pub, D: new(big.Int).SetBytes(k.priv)}
@@ -166,7 +167,7 @@ func (k KeyValue) ECDSAPrivate() (der []byte, err error) {
 	//: defensive — a validated keypair always marshals.
 	if merr != nil {
 		//: surface typed rather than dropping an impossible error.
-		return nil, KeyMismatch
+		return nil, corejwk.KeyMismatch
 	}
 	//: the DER blob.
 	return out, nil
@@ -177,13 +178,13 @@ func (k KeyValue) ecdsaPublicKey() (pub *ecdsa.PublicKey, err error) {
 	//: a non-EC key has no ECDSA rendering.
 	if k.kty != TypeEC {
 		//: wrong family for this accessor.
-		return nil, TypeMismatch
+		return nil, corejwk.TypeMismatch
 	}
 	//: the curve was validated at construction; re-resolve it for x509.
 	curve, ok := ellipticCurve(k.crv)
 	if !ok {
 		//: unreachable for a constructed key; defensive.
-		return nil, UnsupportedCurve
+		return nil, corejwk.UnsupportedCurve
 	}
 	//: coordinates are stored fixed-width big-endian.
 	return &ecdsa.PublicKey{
@@ -199,7 +200,7 @@ func FromEd25519Public(pub []byte) (key KeyValue, err error) {
 	//: crypto/ed25519 fixes the public key at 32 octets.
 	if len(pub) != ed25519.PublicKeySize {
 		//: a wrong-length blob is a data error, not a key.
-		return KeyValue{}, errs.Wrap(InvalidEncoding, errs.WrapParams{},
+		return KeyValue{}, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
 			errs.Int("want", ed25519.PublicKeySize), errs.Int("got", len(pub)))
 	}
 	//: clone so a later mutation of the caller's slice cannot reach the key.
@@ -214,7 +215,7 @@ func FromEd25519Private(priv []byte) (key KeyValue, err error) {
 	//: crypto/ed25519 fixes the private key at 64 octets.
 	if len(priv) != ed25519.PrivateKeySize {
 		//: a wrong-length blob is a data error, not a key.
-		return KeyValue{}, errs.Wrap(InvalidEncoding, errs.WrapParams{},
+		return KeyValue{}, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
 			errs.Int("want", ed25519.PrivateKeySize), errs.Int("got", len(priv)))
 	}
 	seed := priv[:ed25519KeyLen]
@@ -222,7 +223,7 @@ func FromEd25519Private(priv []byte) (key KeyValue, err error) {
 	//: halves of the blob describe different keys.
 	if !bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519KeyLen:], priv[ed25519KeyLen:]) {
 		//: seed and public half disagree.
-		return KeyValue{}, KeyMismatch
+		return KeyValue{}, corejwk.KeyMismatch
 	}
 	//: a coherent Edwards keypair.
 	return KeyValue{
@@ -237,7 +238,7 @@ func (k KeyValue) Ed25519Public() (pub []byte, err error) {
 	//: only an OKP key has an Ed25519 rendering.
 	if k.kty != TypeOKP {
 		//: wrong family for this accessor.
-		return nil, TypeMismatch
+		return nil, corejwk.TypeMismatch
 	}
 	//: clone so the caller cannot reach into the key.
 	return bytes.Clone(k.x), nil
@@ -250,12 +251,12 @@ func (k KeyValue) Ed25519Private() (priv []byte, err error) {
 	//: only an OKP key has an Ed25519 rendering.
 	if k.kty != TypeOKP {
 		//: wrong family for this accessor.
-		return nil, TypeMismatch
+		return nil, corejwk.TypeMismatch
 	}
 	//: refuse a public-only key instead of returning a zero-seeded blob.
 	if !k.IsPrivate() {
 		//: the caller asked for material this key does not hold.
-		return nil, NoPrivateMaterial
+		return nil, corejwk.NoPrivateMaterial
 	}
 	//: the seed was checked against x at construction, so this re-derives the
 	//: same public half the JWK declares.
@@ -290,12 +291,12 @@ func (k KeyValue) Secret() (secret corecrypto.Key, err error) {
 	//: only an oct key is a symmetric secret.
 	if k.kty != TypeOct {
 		//: wrong family for this accessor.
-		return corecrypto.Key{}, TypeMismatch
+		return corecrypto.Key{}, corejwk.TypeMismatch
 	}
 	//: an oct key always carries "k"; a zero key does not reach here.
 	if !k.IsPrivate() {
 		//: nothing to hand back.
-		return corecrypto.Key{}, NoPrivateMaterial
+		return corecrypto.Key{}, corejwk.NoPrivateMaterial
 	}
 	//: NewKey enforces the 32-octet rule and copies defensively.
 	return corecrypto.NewKey(k.priv)

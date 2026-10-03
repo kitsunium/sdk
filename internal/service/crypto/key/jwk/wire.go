@@ -9,6 +9,7 @@ import (
 	"encoding/base64"
 	"encoding/json"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -58,7 +59,7 @@ func b64Decode(member string) (raw []byte, err error) {
 	if derr != nil {
 		//: wrap so errors.Is(err, InvalidEncoding) still matches on Code+Reason.
 		return nil, errs.Wrap(derr, errs.WrapParams{
-			Code:    CodeJWKInvalidEncoding,
+			Code:    corejwk.CodeJWKInvalidEncoding,
 			Reason:  "INVALID_ENCODING",
 			Public:  "JWK member is not valid unpadded base64url",
 			Private: "service/crypto/key/jwk: base64.RawURLEncoding rejected a member (padded or wrong alphabet)",
@@ -84,7 +85,7 @@ func b64DecodeFixed(member string, want int) (raw []byte, err error) {
 	//: exact length, never a truncation or a left-pad on our side.
 	if len(decoded) != want {
 		//: report the sizes, which are public facts about the curve.
-		return nil, errs.Wrap(InvalidEncoding, errs.WrapParams{},
+		return nil, errs.Wrap(corejwk.InvalidEncoding, errs.WrapParams{},
 			errs.Int("want", want), errs.Int("got", len(decoded)))
 	}
 	//: a correctly sized field element.

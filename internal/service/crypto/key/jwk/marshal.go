@@ -14,6 +14,7 @@ import (
 	"crypto/sha256"
 	"encoding/json"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -69,17 +70,17 @@ func (k KeyValue) publicWire() (raw keyJSON, err error) {
 	//: a zero KeyValue has no kty and therefore no serialisation.
 	if k.IsZero() {
 		//: nothing to render.
-		return keyJSON{}, MissingMember
+		return keyJSON{}, corejwk.MissingMember
 	}
 	//: the refusal this package exists to make explicit.
 	if k.kty == TypeOct {
 		//: "k" is the secret; there is no public half to emit.
-		return keyJSON{}, NoPublicForm
+		return keyJSON{}, corejwk.NoPublicForm
 	}
 	//: every asymmetric family carries at least "x".
 	if len(k.x) == 0 {
 		//: a key with no public member cannot be published.
-		return keyJSON{}, MissingMember
+		return keyJSON{}, corejwk.MissingMember
 	}
 	raw = keyJSON{
 		Kty: string(k.kty), Crv: string(k.crv), Kid: k.kid,
@@ -100,12 +101,12 @@ func (k KeyValue) privateWire() (raw keyJSON, err error) {
 	//: a zero KeyValue has no kty and therefore no serialisation.
 	if k.IsZero() {
 		//: nothing to render.
-		return keyJSON{}, MissingMember
+		return keyJSON{}, corejwk.MissingMember
 	}
 	//: refuse rather than quietly emit a public JWK from a private call.
 	if !k.IsPrivate() {
 		//: the caller asked for material this key does not hold.
-		return keyJSON{}, NoPrivateMaterial
+		return keyJSON{}, corejwk.NoPrivateMaterial
 	}
 	//: a symmetric key has no public members to build on.
 	if k.kty == TypeOct {
@@ -138,7 +139,7 @@ func encodeWire(raw keyJSON) (document []byte, err error) {
 	if merr != nil {
 		//: keep the cause; there is no material in a JSON encoder error.
 		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk: json.Marshal failed on the JWK wire struct",
@@ -198,7 +199,7 @@ func (k KeyValue) thumbprintInput() (canonical []byte, err error) {
 	//: the zero KeyValue is rejected the same way every marshaller rejects it.
 	if k.IsZero() {
 		//: no kty, no required-member list, no thumbprint.
-		return nil, MissingMember
+		return nil, corejwk.MissingMember
 	}
 	//: each family has its own required-member list (RFC 7638 §3.2).
 	switch k.kty {
@@ -217,7 +218,7 @@ func (k KeyValue) thumbprintInput() (canonical []byte, err error) {
 	//: any unmodelled family.
 	default:
 		//: no required-member list is defined for this family.
-		return nil, UnsupportedKeyType
+		return nil, corejwk.UnsupportedKeyType
 	}
 }
 
@@ -226,7 +227,7 @@ func (k KeyValue) thumbprintEC() (canonical []byte, err error) {
 	//: an incomplete key has no thumbprint to be identified by.
 	if len(k.x) == 0 || len(k.y) == 0 {
 		//: nothing to hash.
-		return nil, MissingMember
+		return nil, corejwk.MissingMember
 	}
 	//: members in lexicographic order, no whitespace.
 	return []byte(`{"crv":"` + string(k.crv) + `","kty":"EC","x":"` +
@@ -238,7 +239,7 @@ func (k KeyValue) thumbprintOKP() (canonical []byte, err error) {
 	//: an incomplete key has no thumbprint to be identified by.
 	if len(k.x) == 0 {
 		//: nothing to hash.
-		return nil, MissingMember
+		return nil, corejwk.MissingMember
 	}
 	//: members in lexicographic order, no whitespace.
 	return []byte(`{"crv":"` + string(k.crv) + `","kty":"OKP","x":"` +
@@ -250,7 +251,7 @@ func (k KeyValue) thumbprintOct() (canonical []byte, err error) {
 	//: an oct key without "k" holds nothing to hash.
 	if !k.IsPrivate() {
 		//: nothing to hash.
-		return nil, NoPrivateMaterial
+		return nil, corejwk.NoPrivateMaterial
 	}
 	//: members in lexicographic order, no whitespace.
 	return []byte(`{"k":"` + b64Encode(k.priv) + `","kty":"oct"}`), nil

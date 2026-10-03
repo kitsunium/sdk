@@ -19,6 +19,7 @@ import (
 	"slices"
 	"strconv"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -53,7 +54,7 @@ func ParseSet(document []byte) (set Set, err error) {
 	//: member of "keys" reaches Parse, and is refused there.
 	if isJSONNull(document) {
 		//: the sentinel itself, so its HTTP status and exit code survive.
-		return Set{}, errs.Wrap(Malformed, errs.WrapParams{},
+		return Set{}, errs.Wrap(corejwk.Malformed, errs.WrapParams{},
 			errs.String("why", "the document is JSON null, not a JWK Set object"))
 	}
 	var raw setJSON
@@ -61,7 +62,7 @@ func ParseSet(document []byte) (set Set, err error) {
 	if uerr := json.Unmarshal(document, &raw); uerr != nil {
 		//: keep the decoder's cause — it names an offset, never the material.
 		return Set{}, errs.Wrap(uerr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk.ParseSet: json.Unmarshal rejected the JWK Set envelope",
@@ -70,7 +71,7 @@ func ParseSet(document []byte) (set Set, err error) {
 	//: nil covers both an absent and a null "keys"; an empty array does not.
 	if raw.Keys == nil {
 		//: a set document without its one required member.
-		return Set{}, MissingMember
+		return Set{}, corejwk.MissingMember
 	}
 	//: then every member, through the single validating entry point.
 	return parseMembers(raw.Keys)
@@ -142,7 +143,7 @@ func (s Set) ByKid(kid string) (key KeyValue, err error) {
 	//: empty kid resolves nothing (see AllByKid).
 	if kid == "" {
 		//: nothing to look up.
-		return KeyValue{}, KeyNotFound
+		return KeyValue{}, corejwk.KeyNotFound
 	}
 	matches := s.AllByKid(kid)
 	//: exactly one match is the only unambiguous answer.
@@ -150,7 +151,7 @@ func (s Set) ByKid(kid string) (key KeyValue, err error) {
 	//: the set does not hold that key.
 	case 0:
 		//: no candidate carries that id.
-		return KeyValue{}, KeyNotFound
+		return KeyValue{}, corejwk.KeyNotFound
 	//: the single, unambiguous answer.
 	case 1:
 		//: exactly one candidate, so no choice to make.
@@ -158,7 +159,7 @@ func (s Set) ByKid(kid string) (key KeyValue, err error) {
 	//: rotation window, or a publisher reusing an id — the caller decides.
 	default:
 		//: refuse, and say how many candidates there were.
-		return KeyValue{}, errs.Wrap(AmbiguousKid, errs.WrapParams{},
+		return KeyValue{}, errs.Wrap(corejwk.AmbiguousKid, errs.WrapParams{},
 			errs.Int("candidates", len(matches)))
 	}
 }
@@ -213,7 +214,7 @@ func (s Set) marshalWith(render func(KeyValue) ([]byte, error)) (document []byte
 	if jerr != nil {
 		//: surface typed rather than dropping an impossible error.
 		return nil, errs.Wrap(jerr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk: json.Marshal failed on the JWK Set envelope",

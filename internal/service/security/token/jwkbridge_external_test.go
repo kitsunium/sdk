@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -132,7 +133,7 @@ func TestSetVerifierResolvesAmbiguousKidBySignature(t *testing.T) {
 		ecJWK(t, &current.PublicKey, "rotating"),
 	)
 	//: jwk.Set itself refuses to choose — that refusal is the premise here.
-	if _, err := set.ByKid("rotating"); !errs.HasCode(err, jwk.CodeJWKAmbiguousKid) {
+	if _, err := set.ByKid("rotating"); !errs.HasCode(err, corejwk.CodeJWKAmbiguousKid) {
 		t.Fatalf("jwk.Set.ByKid should refuse a duplicate kid, got %v", err)
 	}
 	verifier, err := svctoken.NewSetVerifier(set, svctoken.VerifierConfig{Clock: manual})

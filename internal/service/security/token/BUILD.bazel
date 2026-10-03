@@ -84,6 +84,7 @@ go_test(
     embed = [":token"],
     deps = [
         "//internal/core/crypto",
+        "//internal/core/crypto/key/jwk",
         "//internal/core/security/token",
         "//internal/kernel/clock",
         "//internal/kernel/errs",

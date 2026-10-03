@@ -18,7 +18,9 @@ with `logger/level` and `logger/writer` beneath it, `metrics`, `otel`,
 `health`, `i18n`, `id`, `lifecycle`, `lock`, `mail`, `resilience`,
 `scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
 one package, that package sits at the family's path (`crypto/`, `net/`,
-`proc/`). No domain sits at the root of this layer any more, and the root
+`proc/`), and a service package beneath it with codes, values or ports of its
+own is mirrored beneath it at the same path (`crypto/key/jwk` — ADR 0160). No
+domain sits at the root of this layer any more, and the root
 `CLAUDE.md` architecture tree names every package by its path
 (`check-domain-docs.sh`).
 
@@ -27,6 +29,7 @@ one package, that package sits at the family's path (`crypto/`, `net/`,
 | `data/codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
 | `observe/logger/writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012); beneath `observe/logger/` because what it produces is the logger's `Sink` | `0.2.3.*` |
 | `crypto/` | eight registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`), the detached `MAC` (`MACTag`/`MACVerify`), the `Agreement` DH port, and the chunked `StreamSealer` (ADR 0013 + ADR 0014) | `0.2.4.*` |
+| `crypto/key/jwk/` | the JSON Web Key format's codes and sentinels and nothing else — the format itself is `internal/service/crypto/key/jwk`, at the mirrored path (ADR 0160); `crypto/key/` holds no Go code | `0.3.42.*` (allocated to the service, value unchanged) |
 | `data/transform/` | `Compressor` port + process-wide registry mapping an `Algorithm` to a `Compressor` (`Compress`/`Decompress`); a parallel registry, never a codec `Format` (ADR 0014) | `0.2.5.*` |
 | `observe/logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent` (incl. `TraceContext`), `AttrValue`, `Value`, `Kind`, `TraceContextValue` + the `TraceContextSource` FUNC port (ADR 0062 — stdlib-only: the trace domain is NOT imported here) | `0.2.1.*` (reserved) |
 | `app/mail/` | electronic-mail port: `Transport` frozen at one method, `BatchSender`/`Outbox` siblings, the message as a value (`MessageValue`/`AddressValue`/`AttachmentValue`/`HeaderFieldValue`), `EnvelopeValue` where Bcc becomes RCPT TO and no header, and the injection gate every writer runs — CR/LF/NUL in a header is a typed refusal, never a repair; **no registry** (ADR 0064) | `0.2.31.*` |
@@ -100,6 +103,7 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `data/codec/` — see `internal/core/data/codec/CLAUDE.md`
 - `observe/logger/writer/` — see `internal/core/observe/logger/writer/CLAUDE.md`
 - `crypto/` — see `internal/core/crypto/CLAUDE.md`
+- `crypto/key/jwk/` — see `internal/core/crypto/key/jwk/CLAUDE.md` (the JWK format's codes, declared at the path that mirrors the service — ADR 0160)
 - `data/transform/` — see `internal/core/data/transform/CLAUDE.md`
 - `proc/` — see `internal/core/proc/CLAUDE.md` (OS process-supervision foundation, ADR 0016)
 - `data/queue/` — see `internal/core/data/queue/CLAUDE.md` (the frozen Broker, at-least-once in the type, and why the routing key is a name — ADR 0054; the siblings and the mark ADR 0151 added)

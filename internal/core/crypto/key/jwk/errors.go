@@ -1,6 +1,8 @@
 // Package jwk — declares the sentinel *errs.Error values for JWK / JWK Set
-// parsing, serialisation and selection. Each var's name equals its errs.Define
-// Reason in SCREAMING_SNAKE form.
+// parsing, serialisation and selection, which internal/service/crypto/key/jwk
+// returns. Each var's name equals its errs.Define Reason in SCREAMING_SNAKE
+// form. The Private strings name that service package, where each condition
+// is detected.
 //
 // None of these Public strings names a member VALUE: a JWK carries key
 // material, and an error message is the one place it must never surface. The

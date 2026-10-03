@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T19:54:12Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/crypto/
 
 ## Purpose
@@ -111,6 +111,15 @@ known from the alg-id, so the reader strips it without a length prefix. Each
   `service/crypto/*` and `third-party/x-crypto/*`.
 - Log `Key.Bytes()` or place key material in an `errs` `Public` / `Private` /
   `Fields`.
+
+## Beneath this package
+
+`key/jwk/` — the JSON Web Key format's codes and sentinels (`0.3.42.*`), at the
+core path that mirrors `internal/service/crypto/key/jwk` (ADR 0160). It is a
+separate package with a range of its own, not a ninth registry: a key format's
+refusals (an off-curve point, an ambiguous `kid`) are not this package's
+`0.2.4.*` scheme failures. `key/` holds no Go code; its `CLAUDE.md` lists the
+members.
 
 ## Verification
 

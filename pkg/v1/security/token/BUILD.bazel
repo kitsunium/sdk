@@ -15,6 +15,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/crypto",
+        "//internal/core/crypto/key/jwk",
         "//internal/core/security/token",
         "//internal/service/crypto/key/jwk",
         "//internal/service/security/token",

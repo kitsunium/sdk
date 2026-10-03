@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
@@ -100,7 +101,7 @@ func TestPublicSerialisationRefusesSymmetricKeys(t *testing.T) {
 		out, err := c.invoke()
 		//: the refusal is typed, so a caller can distinguish it from an
 		//: encoding fault and act on it.
-		if !errs.HasCode(err, jwk.CodeJWKNoPublicForm) {
+		if !errs.HasCode(err, corejwk.CodeJWKNoPublicForm) {
 			t.Fatalf("err=%v want NoPublicForm", err)
 		}
 		//: and nothing resembling the secret comes back alongside it.
@@ -174,7 +175,7 @@ func TestMarshalPrivateRefusesAPublicOnlyKey(t *testing.T) {
 		out, err := parseFixture(t, c.doc).MarshalPrivate()
 		//: refusing beats silently downgrading to the public document, which
 		//: would ship a key store that fails at first signature.
-		if out != nil || !errs.HasCode(err, jwk.CodeJWKNoPrivateMaterial) {
+		if out != nil || !errs.HasCode(err, corejwk.CodeJWKNoPrivateMaterial) {
 			t.Errorf("MarshalPrivate=(%s,%v) want NoPrivateMaterial", out, err)
 		}
 	}
@@ -204,7 +205,7 @@ func TestZeroKeyIsNotSerialisable(t *testing.T) {
 		t.Helper()
 		out, err := c.invoke()
 		//: the zero value carries no kty, hence nothing to render.
-		if out != nil || !errs.HasCode(err, jwk.CodeJWKMissingMember) {
+		if out != nil || !errs.HasCode(err, corejwk.CodeJWKMissingMember) {
 			t.Errorf("%s=(%s,%v) want MissingMember", c.name, out, err)
 		}
 	}

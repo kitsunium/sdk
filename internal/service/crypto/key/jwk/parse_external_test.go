@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"testing"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
@@ -102,33 +103,33 @@ func TestParseRejects(t *testing.T) {
 		doc      string
 		wantCode errs.Code
 	}{
-		{"not JSON at all", `{`, jwk.CodeJWKMalformed},
-		{"JSON but not an object", `["EC"]`, jwk.CodeJWKMalformed},
+		{"not JSON at all", `{`, corejwk.CodeJWKMalformed},
+		{"JSON but not an object", `["EC"]`, corejwk.CodeJWKMalformed},
 		//: json.Unmarshal accepts null into a struct and leaves it zero, which
 		//: then read as a JWK missing its kty — MISSING_MEMBER, for a document
 		//: that is not an object at all.
-		{"the document is null", `null`, jwk.CodeJWKMalformed},
-		{"null with whitespace around it", " null\n", jwk.CodeJWKMalformed},
-		{"kty absent", `{"crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKMissingMember},
-		{"kty empty", `{"kty":"","crv":"P-256"}`, jwk.CodeJWKMissingMember},
-		{"RSA is not modelled", `{"kty":"RSA","n":"AQAB","e":"AQAB"}`, jwk.CodeJWKUnsupportedKeyType},
-		{"unknown kty", `{"kty":"nonsense"}`, jwk.CodeJWKUnsupportedKeyType},
-		{"unknown EC curve", `{"kty":"EC","crv":"P-192","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKUnsupportedCurve},
-		{"EC crv absent", `{"kty":"EC","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKUnsupportedCurve},
-		{"Ed25519 mislabelled as EC", `{"kty":"EC","crv":"Ed25519","x":"` + ecXCoord + `"}`, jwk.CodeJWKUnsupportedCurve},
-		{"P-256 mislabelled as OKP", `{"kty":"OKP","crv":"P-256","x":"` + ecXCoord + `"}`, jwk.CodeJWKUnsupportedCurve},
-		{"oct carrying a curve", `{"kty":"oct","crv":"P-256","k":"` + b64Of32Ones + `"}`, jwk.CodeJWKUnsupportedCurve},
-		{"EC y absent", `{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `"}`, jwk.CodeJWKMissingMember},
-		{"OKP x absent", `{"kty":"OKP","crv":"Ed25519"}`, jwk.CodeJWKMissingMember},
-		{"oct k absent", `{"kty":"oct","kid":"1"}`, jwk.CodeJWKMissingMember},
-		{"padded base64url is refused", `{"kty":"oct","k":"AQEB="}`, jwk.CodeJWKInvalidEncoding},
-		{"standard-alphabet base64 is refused", `{"kty":"oct","k":"a+b/c"}`, jwk.CodeJWKInvalidEncoding},
-		{"coordinate one octet short", `{"kty":"EC","crv":"P-256","x":"` + b64Of31Ones + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKInvalidEncoding},
-		{"OKP key of the wrong length", `{"kty":"OKP","crv":"Ed25519","x":"` + b64Of31Ones + `"}`, jwk.CodeJWKInvalidEncoding},
-		{"point not on the declared curve", `{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, jwk.CodeJWKKeyMismatch},
-		{"EC scalar out of range", `{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","d":"` + b64Of32Zeros + `"}`, jwk.CodeJWKKeyMismatch},
-		{"EC d does not derive x,y", `{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","d":"` + b64Of32Ones + `"}`, jwk.CodeJWKKeyMismatch},
-		{"OKP d does not derive x", `{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","d":"` + b64Of32Ones + `"}`, jwk.CodeJWKKeyMismatch},
+		{"the document is null", `null`, corejwk.CodeJWKMalformed},
+		{"null with whitespace around it", " null\n", corejwk.CodeJWKMalformed},
+		{"kty absent", `{"crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, corejwk.CodeJWKMissingMember},
+		{"kty empty", `{"kty":"","crv":"P-256"}`, corejwk.CodeJWKMissingMember},
+		{"RSA is not modelled", `{"kty":"RSA","n":"AQAB","e":"AQAB"}`, corejwk.CodeJWKUnsupportedKeyType},
+		{"unknown kty", `{"kty":"nonsense"}`, corejwk.CodeJWKUnsupportedKeyType},
+		{"unknown EC curve", `{"kty":"EC","crv":"P-192","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, corejwk.CodeJWKUnsupportedCurve},
+		{"EC crv absent", `{"kty":"EC","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, corejwk.CodeJWKUnsupportedCurve},
+		{"Ed25519 mislabelled as EC", `{"kty":"EC","crv":"Ed25519","x":"` + ecXCoord + `"}`, corejwk.CodeJWKUnsupportedCurve},
+		{"P-256 mislabelled as OKP", `{"kty":"OKP","crv":"P-256","x":"` + ecXCoord + `"}`, corejwk.CodeJWKUnsupportedCurve},
+		{"oct carrying a curve", `{"kty":"oct","crv":"P-256","k":"` + b64Of32Ones + `"}`, corejwk.CodeJWKUnsupportedCurve},
+		{"EC y absent", `{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `"}`, corejwk.CodeJWKMissingMember},
+		{"OKP x absent", `{"kty":"OKP","crv":"Ed25519"}`, corejwk.CodeJWKMissingMember},
+		{"oct k absent", `{"kty":"oct","kid":"1"}`, corejwk.CodeJWKMissingMember},
+		{"padded base64url is refused", `{"kty":"oct","k":"AQEB="}`, corejwk.CodeJWKInvalidEncoding},
+		{"standard-alphabet base64 is refused", `{"kty":"oct","k":"a+b/c"}`, corejwk.CodeJWKInvalidEncoding},
+		{"coordinate one octet short", `{"kty":"EC","crv":"P-256","x":"` + b64Of31Ones + `","y":"` + ecXCoord + `"}`, corejwk.CodeJWKInvalidEncoding},
+		{"OKP key of the wrong length", `{"kty":"OKP","crv":"Ed25519","x":"` + b64Of31Ones + `"}`, corejwk.CodeJWKInvalidEncoding},
+		{"point not on the declared curve", `{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`, corejwk.CodeJWKKeyMismatch},
+		{"EC scalar out of range", `{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","d":"` + b64Of32Zeros + `"}`, corejwk.CodeJWKKeyMismatch},
+		{"EC d does not derive x,y", `{"kty":"EC","crv":"P-256","x":"f83OJ3D2xF1Bg8vub9tLe1gHMzV76e8Tus9uPHvRVEU","y":"x_FEzRu9m36HLN_tue659LNpXW6pCyStikYjKIWI5a0","d":"` + b64Of32Ones + `"}`, corejwk.CodeJWKKeyMismatch},
+		{"OKP d does not derive x", `{"kty":"OKP","crv":"Ed25519","x":"11qYAYKxCrfVS_7TyWQHOg7hcvPapiMlrwIaaPcHURo","d":"` + b64Of32Ones + `"}`, corejwk.CodeJWKKeyMismatch},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -228,7 +229,7 @@ func TestParseIsTheOnlyDecodeEntryPoint(t *testing.T) {
 			t.Fatalf("reflective decode populated a KeyValue: %v", envelope.Key)
 		}
 		//: and refuses it typed, so the mistake surfaces at first use.
-		if _, err := envelope.Key.MarshalPublic(); !errs.HasCode(err, jwk.CodeJWKMissingMember) {
+		if _, err := envelope.Key.MarshalPublic(); !errs.HasCode(err, corejwk.CodeJWKMissingMember) {
 			t.Errorf("MarshalPublic err=%v want MissingMember", err)
 		}
 		//: Parse is the path that actually produces a key.

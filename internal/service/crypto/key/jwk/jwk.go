@@ -29,6 +29,8 @@ import (
 	"bytes"
 	"slices"
 	"strconv"
+
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 )
 
 // ed25519KeyLen is the octet length of an Ed25519 public key and of the seed
@@ -196,13 +198,13 @@ func (k KeyValue) Public() (pub KeyValue, err error) {
 	//: the zero KeyValue has nothing to reduce.
 	if k.IsZero() {
 		//: nothing to publish.
-		return KeyValue{}, MissingMember
+		return KeyValue{}, corejwk.MissingMember
 	}
 	//: a symmetric key has no public half; refusing beats returning an empty
 	//: shell the caller might publish believing it is a real public key.
 	if k.kty == TypeOct {
 		//: the same refusal MarshalPublic raises, at the value level.
-		return KeyValue{}, NoPublicForm
+		return KeyValue{}, corejwk.NoPublicForm
 	}
 	//: drop the secret member; every other member is public metadata.
 	k.priv = nil

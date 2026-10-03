@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 
@@ -193,7 +194,7 @@ func TestSecretBridgeStaysRedacting(t *testing.T) {
 			t.Fatalf("FromSecret: %v", ferr)
 		}
 		//: still refuses the public path.
-		if _, err := key.MarshalPublic(); !errs.HasCode(err, jwk.CodeJWKNoPublicForm) {
+		if _, err := key.MarshalPublic(); !errs.HasCode(err, corejwk.CodeJWKNoPublicForm) {
 			t.Errorf("MarshalPublic err=%v want NoPublicForm", err)
 		}
 		//: and hands the material back only as a redacting crypto.Key.
@@ -237,13 +238,13 @@ func TestBridgeRejects(t *testing.T) {
 		invoke   func() (jwk.KeyValue, error)
 		wantCode errs.Code
 	}{
-		{"not DER at all", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic([]byte("nope")) }, jwk.CodeJWKMalformed},
-		{"not a SEC1 private key", func() (jwk.KeyValue, error) { return jwk.FromECDSAPrivate([]byte("nope")) }, jwk.CodeJWKMalformed},
-		{"an Ed25519 SPKI is not an EC key", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic(edSPKI) }, jwk.CodeJWKTypeMismatch},
-		{"P-224 has no JOSE curve name", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic(p224Pub) }, jwk.CodeJWKUnsupportedCurve},
-		{"a short Ed25519 public key", func() (jwk.KeyValue, error) { return jwk.FromEd25519Public(edPub[:16]) }, jwk.CodeJWKInvalidEncoding},
-		{"a short Ed25519 private key", func() (jwk.KeyValue, error) { return jwk.FromEd25519Private(edPriv[:32]) }, jwk.CodeJWKInvalidEncoding},
-		{"an Ed25519 blob whose halves disagree", func() (jwk.KeyValue, error) { return jwk.FromEd25519Private(forged) }, jwk.CodeJWKKeyMismatch},
+		{"not DER at all", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic([]byte("nope")) }, corejwk.CodeJWKMalformed},
+		{"not a SEC1 private key", func() (jwk.KeyValue, error) { return jwk.FromECDSAPrivate([]byte("nope")) }, corejwk.CodeJWKMalformed},
+		{"an Ed25519 SPKI is not an EC key", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic(edSPKI) }, corejwk.CodeJWKTypeMismatch},
+		{"P-224 has no JOSE curve name", func() (jwk.KeyValue, error) { return jwk.FromECDSAPublic(p224Pub) }, corejwk.CodeJWKUnsupportedCurve},
+		{"a short Ed25519 public key", func() (jwk.KeyValue, error) { return jwk.FromEd25519Public(edPub[:16]) }, corejwk.CodeJWKInvalidEncoding},
+		{"a short Ed25519 private key", func() (jwk.KeyValue, error) { return jwk.FromEd25519Private(edPriv[:32]) }, corejwk.CodeJWKInvalidEncoding},
+		{"an Ed25519 blob whose halves disagree", func() (jwk.KeyValue, error) { return jwk.FromEd25519Private(forged) }, corejwk.CodeJWKKeyMismatch},
 		{"a short symmetric key", func() (jwk.KeyValue, error) { return jwk.FromSecret(corecrypto.Key{}) }, corecrypto.CodeInvalidKey},
 	}
 	runCase := func(t *testing.T, c struct {
@@ -279,12 +280,12 @@ func TestTypedAccessorsRefuseTheWrongFamily(t *testing.T) {
 		invoke   func() error
 		wantCode errs.Code
 	}{
-		{"ECDSAPublic on an OKP key", func() error { _, err := okpKey.ECDSAPublic(); return err }, jwk.CodeJWKTypeMismatch},
-		{"Ed25519Public on an EC key", func() error { _, err := ecKey.Ed25519Public(); return err }, jwk.CodeJWKTypeMismatch},
-		{"Secret on an EC key", func() error { _, err := ecKey.Secret(); return err }, jwk.CodeJWKTypeMismatch},
-		{"ECDSAPrivate on an oct key", func() error { _, err := octKey.ECDSAPrivate(); return err }, jwk.CodeJWKTypeMismatch},
-		{"ECDSAPrivate on a public EC key", func() error { _, err := publicEC.ECDSAPrivate(); return err }, jwk.CodeJWKNoPrivateMaterial},
-		{"Ed25519Private on a public OKP key", func() error { _, err := publicOKP.Ed25519Private(); return err }, jwk.CodeJWKNoPrivateMaterial},
+		{"ECDSAPublic on an OKP key", func() error { _, err := okpKey.ECDSAPublic(); return err }, corejwk.CodeJWKTypeMismatch},
+		{"Ed25519Public on an EC key", func() error { _, err := ecKey.Ed25519Public(); return err }, corejwk.CodeJWKTypeMismatch},
+		{"Secret on an EC key", func() error { _, err := ecKey.Secret(); return err }, corejwk.CodeJWKTypeMismatch},
+		{"ECDSAPrivate on an oct key", func() error { _, err := octKey.ECDSAPrivate(); return err }, corejwk.CodeJWKTypeMismatch},
+		{"ECDSAPrivate on a public EC key", func() error { _, err := publicEC.ECDSAPrivate(); return err }, corejwk.CodeJWKNoPrivateMaterial},
+		{"Ed25519Private on a public OKP key", func() error { _, err := publicOKP.Ed25519Private(); return err }, corejwk.CodeJWKNoPrivateMaterial},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string

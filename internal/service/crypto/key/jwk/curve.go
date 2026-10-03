@@ -12,6 +12,8 @@ import (
 	"bytes"
 	"crypto/ecdh"
 	"crypto/elliptic"
+
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 )
 
 // uncompressedPointTag is the SEC1 §2.3.3 prefix of an uncompressed point,
@@ -156,12 +158,12 @@ func checkECPoint(crv Curve, x, y []byte) error {
 	curve, ok := ecdhCurve(crv)
 	if !ok {
 		//: the caller declared a curve this package does not model.
-		return UnsupportedCurve
+		return corejwk.UnsupportedCurve
 	}
 	//: NewPublicKey rejects off-curve points and the point at infinity.
 	if _, err := curve.NewPublicKey(uncompressedPoint(x, y)); err != nil {
 		//: the material is well-encoded but is not a key on this curve.
-		return KeyMismatch
+		return corejwk.KeyMismatch
 	}
 	//: a genuine public point.
 	return nil
@@ -176,7 +178,7 @@ func checkECScalar(crv Curve, d, x, y []byte) error {
 	curve, ok := ecdhCurve(crv)
 	if !ok {
 		//: the caller declared a curve this package does not model.
-		return UnsupportedCurve
+		return corejwk.UnsupportedCurve
 	}
 	//: NewPrivateKey enforces the exact length and the [1, n-1] range; the
 	//: short-circuit keeps the derived-point comparison off the error path.
@@ -184,7 +186,7 @@ func checkECScalar(crv Curve, d, x, y []byte) error {
 	//: an out-of-range scalar, or one that derives a different point.
 	if err != nil || !bytes.Equal(priv.PublicKey().Bytes(), uncompressedPoint(x, y)) {
 		//: the two halves of the keypair do not agree.
-		return KeyMismatch
+		return corejwk.KeyMismatch
 	}
 	//: consistent keypair.
 	return nil
