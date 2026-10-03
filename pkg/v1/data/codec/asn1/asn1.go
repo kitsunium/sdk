@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/asn1 .
 
-// Package asn1 registers the ASN.1 DER codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package asn1 registers the ASN.1 DER codec with the SDK's codec registry —
+// and no other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/asn1"
 //
@@ -39,17 +39,17 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/asn1"
 )
 
-// Format is the name ASN.1 DER is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name ASN.1 DER is registered under. It is an untyped constant,
+// so it goes wherever a format name is taken — the codec package's Marshal,
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "asn1-der"
 
 // The error codes, range 0.3.9.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies encoding/asn1 could not encode the value (0.3.9.1).
+	// CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value.
 	CodeMarshalFailed errs.Code = coreasn1.CodeASN1MarshalFailed
-	// CodeUnmarshalFailed identifies the input is not DER or BER the target can hold (0.3.9.2).
+	// CodeUnmarshalFailed is 0.3.9.2: the input is not DER or BER the target
+	// can hold.
 	CodeUnmarshalFailed errs.Code = coreasn1.CodeASN1UnmarshalFailed
 )
 

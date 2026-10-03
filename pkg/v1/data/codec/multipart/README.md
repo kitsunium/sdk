@@ -23,7 +23,7 @@ Failures carry the range 0.3.41.\*; match them with errs.HasCode, or the sentine
 ```
 CodeMarshalFailed    0.3.41.1  a part could not be written
 CodeUnmarshalFailed  0.3.41.2  a malformed part, a part with no name, a missing closing delimiter
-CodeValueInvalid     0.3.41.3  an unusable value: no name, a CR, LF or NUL in a header field
+CodeValueInvalid     0.3.41.3  an unusable value — no name, or a CR, LF or NUL in a header field
 CodeBoundaryInvalid  0.3.41.4  no usable RFC 2046 boundary
 CodeLimitExceeded    0.3.41.5  a part, the part count or the body crossed its bound
 CodeLimitsInvalid    0.3.41.6  a negative bound
@@ -46,17 +46,20 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies a part could not be written (0.3.41.1).
+    // CodeMarshalFailed is 0.3.41.1: a part could not be written.
     CodeMarshalFailed errs.Code = coremultipart.CodeMultipartMarshalFailed
-    // CodeUnmarshalFailed identifies a malformed part, a part with no name, a missing closing delimiter (0.3.41.2).
+    // CodeUnmarshalFailed is 0.3.41.2: a malformed part, a part with no name,
+    // a missing closing delimiter.
     CodeUnmarshalFailed errs.Code = coremultipart.CodeMultipartUnmarshalFailed
-    // CodeValueInvalid identifies an unusable value: no name, a CR, LF or NUL in a header field (0.3.41.3).
+    // CodeValueInvalid is 0.3.41.3: an unusable value — no name, or a CR, LF
+    // or NUL in a header field.
     CodeValueInvalid errs.Code = coremultipart.CodeMultipartValueInvalid
-    // CodeBoundaryInvalid identifies no usable RFC 2046 boundary (0.3.41.4).
+    // CodeBoundaryInvalid is 0.3.41.4: no usable RFC 2046 boundary.
     CodeBoundaryInvalid errs.Code = coremultipart.CodeMultipartBoundaryInvalid
-    // CodeLimitExceeded identifies a part, the part count or the body crossed its bound (0.3.41.5).
+    // CodeLimitExceeded is 0.3.41.5: a part, the part count or the body
+    // crossed its bound.
     CodeLimitExceeded errs.Code = coremultipart.CodeMultipartLimitExceeded
-    // CodeLimitsInvalid identifies a negative bound (0.3.41.6).
+    // CodeLimitsInvalid is 0.3.41.6: a negative bound.
     CodeLimitsInvalid errs.Code = coremultipart.CodeMultipartLimitsInvalid
 )
 ```
@@ -89,7 +92,7 @@ var (
 ```
 
 <a name="ContentType"></a>
-## func [ContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L104>)
+## func [ContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L107>)
 
 ```go
 func ContentType(body []byte) (value string, err error)
@@ -98,7 +101,7 @@ func ContentType(body []byte) (value string, err error)
 ContentType returns the Content\-Type header value — "multipart/form\-data; boundary=…", quoted when the boundary needs it — for a body Marshal wrote, read off its first delimiter line. A body with no recoverable delimiter is refused with CodeBoundaryInvalid.
 
 <a name="Form"></a>
-## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L92>)
+## type [Form](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L95>)
 
 Form is the native value of the multipart/form\-data Format: a whole body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*Form to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered.
 
@@ -107,7 +110,7 @@ type Form = svcmultipart.FormValue
 ```
 
 <a name="Part"></a>
-## type [Part](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L98>)
+## type [Part](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart/multipart.go#L101>)
 
 Part is one section of a [Form](<#Form>): a named field, optionally a filename and a media type, and the bytes. Name is required, and a CR, an LF or a NUL in Name, FileName or ContentType is refused, never escaped. Decoding keeps a filename's last path element only.
 

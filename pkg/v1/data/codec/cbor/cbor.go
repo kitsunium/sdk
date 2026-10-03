@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/cbor .
 
-// Package cbor registers the CBOR codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package cbor registers the CBOR codec with the SDK's codec registry — and no
+// other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/cbor"
 //
@@ -43,15 +43,16 @@ import (
 
 // Format is the name CBOR is registered under. It is an untyped constant, so
 // it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "cbor"
 
 // The error codes, range 0.3.6.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies a value CBOR cannot carry, invalid UTF-8, nesting past the bound (0.3.6.1).
+	// CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8,
+	// nesting past the bound.
 	CodeMarshalFailed errs.Code = corecbor.CodeCBORMarshalFailed
-	// CodeUnmarshalFailed identifies input that is not one well-formed item, or an item the target cannot hold (0.3.6.2).
+	// CodeUnmarshalFailed is 0.3.6.2: input that is not one well-formed item,
+	// or an item the target cannot hold.
 	CodeUnmarshalFailed errs.Code = corecbor.CodeCBORUnmarshalFailed
 )
 

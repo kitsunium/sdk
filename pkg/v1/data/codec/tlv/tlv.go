@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/tlv .
 
-// Package tlv registers the TLV codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package tlv registers the TLV codec with the SDK's codec registry — and no
+// other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/tlv"
 //
@@ -43,25 +43,27 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/tlv"
 )
 
-// Format is the name TLV is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name TLV is registered under. It is an untyped constant, so it
+// goes wherever a format name is taken — the codec package's Marshal,
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "tlv"
 
 // The error codes, range 0.3.22.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies the value could not be encoded, or the writer failed (0.3.22.1).
+	// CodeMarshalFailed is 0.3.22.1: the value could not be encoded, or the
+	// writer failed.
 	CodeMarshalFailed errs.Code = coretlv.CodeTLVMarshalFailed
-	// CodeUnmarshalFailed identifies a malformed record, a type mismatch, or the reader failed (0.3.22.2).
+	// CodeUnmarshalFailed is 0.3.22.2: a malformed record, a type mismatch, or
+	// the reader failed.
 	CodeUnmarshalFailed errs.Code = coretlv.CodeTLVUnmarshalFailed
-	// CodeUnsupportedType identifies a channel, a function, a complex number, an unsafe pointer (0.3.22.3).
+	// CodeUnsupportedType is 0.3.22.3: a channel, a function, a complex
+	// number, an unsafe pointer.
 	CodeUnsupportedType errs.Code = coretlv.CodeTLVUnsupportedType
-	// CodeDepthExceeded identifies nesting past 32 levels (0.3.22.4).
+	// CodeDepthExceeded is 0.3.22.4: nesting past 32 levels.
 	CodeDepthExceeded errs.Code = coretlv.CodeTLVDepthExceeded
-	// CodeSizeExceeded identifies an input past 10 MiB (0.3.22.5).
+	// CodeSizeExceeded is 0.3.22.5: an input past 10 MiB.
 	CodeSizeExceeded errs.Code = coretlv.CodeTLVSizeExceeded
-	// CodeTruncated identifies the input ends inside a record (0.3.22.6).
+	// CodeTruncated is 0.3.22.6: the input ends inside a record.
 	CodeTruncated errs.Code = coretlv.CodeTLVTruncated
 )
 

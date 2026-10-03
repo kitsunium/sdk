@@ -43,17 +43,20 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies the value could not be encoded, or the writer failed (0.3.22.1).
+    // CodeMarshalFailed is 0.3.22.1: the value could not be encoded, or the
+    // writer failed.
     CodeMarshalFailed errs.Code = coretlv.CodeTLVMarshalFailed
-    // CodeUnmarshalFailed identifies a malformed record, a type mismatch, or the reader failed (0.3.22.2).
+    // CodeUnmarshalFailed is 0.3.22.2: a malformed record, a type mismatch, or
+    // the reader failed.
     CodeUnmarshalFailed errs.Code = coretlv.CodeTLVUnmarshalFailed
-    // CodeUnsupportedType identifies a channel, a function, a complex number, an unsafe pointer (0.3.22.3).
+    // CodeUnsupportedType is 0.3.22.3: a channel, a function, a complex
+    // number, an unsafe pointer.
     CodeUnsupportedType errs.Code = coretlv.CodeTLVUnsupportedType
-    // CodeDepthExceeded identifies nesting past 32 levels (0.3.22.4).
+    // CodeDepthExceeded is 0.3.22.4: nesting past 32 levels.
     CodeDepthExceeded errs.Code = coretlv.CodeTLVDepthExceeded
-    // CodeSizeExceeded identifies an input past 10 MiB (0.3.22.5).
+    // CodeSizeExceeded is 0.3.22.5: an input past 10 MiB.
     CodeSizeExceeded errs.Code = coretlv.CodeTLVSizeExceeded
-    // CodeTruncated identifies the input ends inside a record (0.3.22.6).
+    // CodeTruncated is 0.3.22.6: the input ends inside a record.
     CodeTruncated errs.Code = coretlv.CodeTLVTruncated
 )
 ```

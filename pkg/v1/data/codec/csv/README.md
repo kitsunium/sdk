@@ -40,11 +40,12 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies encoding/csv refused to write the records (0.3.8.1).
+    // CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records.
     CodeMarshalFailed errs.Code = corecsv.CodeCSVMarshalFailed
-    // CodeUnmarshalFailed identifies the input is not CSV encoding/csv reads (0.3.8.2).
+    // CodeUnmarshalFailed is 0.3.8.2: the input is not CSV encoding/csv reads.
     CodeUnmarshalFailed errs.Code = corecsv.CodeCSVUnmarshalFailed
-    // CodeValueInvalid identifies the value or the target is not a [][]string (0.3.8.3).
+    // CodeValueInvalid is 0.3.8.3: the value or the target is not a
+    // [][]string.
     CodeValueInvalid errs.Code = corecsv.CodeCSVValueInvalid
 )
 ```

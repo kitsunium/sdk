@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/baseenc .
 
-// Package baseenc registers the base-N codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package baseenc registers the base-N codec with the SDK's codec registry —
+// and no other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/baseenc"
 //
@@ -28,7 +28,7 @@
 //	CodeMarshalFailed    0.3.24.1  the value has no JSON encoding
 //	CodeUnmarshalFailed  0.3.24.2  the decoded text is not JSON the target can hold
 //	CodeDecodeFailed     0.3.24.3  the input is not text of the Format's alphabet
-//	CodeSizeExceeded     0.3.24.4  an input past its bound: 10 MiB, 4 KiB for base58 and base62
+//	CodeSizeExceeded     0.3.24.4  an input past its bound — 10 MiB, 4 KiB for base58 and base62
 //
 // No error message quotes the input.
 package baseenc
@@ -68,13 +68,16 @@ const (
 
 // The error codes, range 0.3.24.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies the value has no JSON encoding (0.3.24.1).
+	// CodeMarshalFailed is 0.3.24.1: the value has no JSON encoding.
 	CodeMarshalFailed errs.Code = corebaseenc.CodeBaseEncMarshalFailed
-	// CodeUnmarshalFailed identifies the decoded text is not JSON the target can hold (0.3.24.2).
+	// CodeUnmarshalFailed is 0.3.24.2: the decoded text is not JSON the target
+	// can hold.
 	CodeUnmarshalFailed errs.Code = corebaseenc.CodeBaseEncUnmarshalFailed
-	// CodeDecodeFailed identifies the input is not text of the Format's alphabet (0.3.24.3).
+	// CodeDecodeFailed is 0.3.24.3: the input is not text of the Format's
+	// alphabet.
 	CodeDecodeFailed errs.Code = corebaseenc.CodeBaseEncDecodeFailed
-	// CodeSizeExceeded identifies an input past its bound: 10 MiB, 4 KiB for base58 and base62 (0.3.24.4).
+	// CodeSizeExceeded is 0.3.24.4: an input past its bound — 10 MiB, 4 KiB
+	// for base58 and base62.
 	CodeSizeExceeded errs.Code = corebaseenc.CodeBaseEncSizeExceeded
 )
 

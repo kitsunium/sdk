@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/xml .
 
-// Package xml registers the XML codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package xml registers the XML codec with the SDK's codec registry — and no
+// other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/xml"
 //
@@ -38,17 +38,17 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/xml"
 )
 
-// Format is the name XML is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name XML is registered under. It is an untyped constant, so it
+// goes wherever a format name is taken — the codec package's Marshal,
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "xml"
 
 // The error codes, range 0.3.3.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies encoding/xml could not encode the value (0.3.3.1).
+	// CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value.
 	CodeMarshalFailed errs.Code = corexml.CodeXMLMarshalFailed
-	// CodeUnmarshalFailed identifies the input is not XML the target can hold (0.3.3.2).
+	// CodeUnmarshalFailed is 0.3.3.2: the input is not XML the target can
+	// hold.
 	CodeUnmarshalFailed errs.Code = corexml.CodeXMLUnmarshalFailed
 )
 

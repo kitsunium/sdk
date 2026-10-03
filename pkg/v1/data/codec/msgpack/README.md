@@ -39,9 +39,11 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies a value MessagePack cannot represent, nesting past the bound, a writer's failure (0.3.7.1).
+    // CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent,
+    // nesting past the bound, a writer's failure.
     CodeMarshalFailed errs.Code = coremsgpack.CodeMsgPackMarshalFailed
-    // CodeUnmarshalFailed identifies malformed or truncated input, past a bound, or a value the target cannot hold (0.3.7.2).
+    // CodeUnmarshalFailed is 0.3.7.2: malformed or truncated input, past a
+    // bound, or a value the target cannot hold.
     CodeUnmarshalFailed errs.Code = coremsgpack.CodeMsgPackUnmarshalFailed
 )
 ```

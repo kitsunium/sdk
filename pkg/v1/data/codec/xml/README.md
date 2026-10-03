@@ -39,9 +39,10 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies encoding/xml could not encode the value (0.3.3.1).
+    // CodeMarshalFailed is 0.3.3.1: encoding/xml could not encode the value.
     CodeMarshalFailed errs.Code = corexml.CodeXMLMarshalFailed
-    // CodeUnmarshalFailed identifies the input is not XML the target can hold (0.3.3.2).
+    // CodeUnmarshalFailed is 0.3.3.2: the input is not XML the target can
+    // hold.
     CodeUnmarshalFailed errs.Code = corexml.CodeXMLUnmarshalFailed
 )
 ```

@@ -42,11 +42,14 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeValueInvalid identifies the value or the target is not url.Values-shaped (0.3.40.1).
+    // CodeValueInvalid is 0.3.40.1: the value or the target is not
+    // url.Values-shaped.
     CodeValueInvalid errs.Code = coreform.CodeFormValueInvalid
-    // CodeUnmarshalFailed identifies a malformed escape, a ';' separator, or a decode bound exceeded (0.3.40.2).
+    // CodeUnmarshalFailed is 0.3.40.2: a malformed escape, a ';' separator, or
+    // a decode bound exceeded.
     CodeUnmarshalFailed errs.Code = coreform.CodeFormUnmarshalFailed
-    // CodeMultiValue identifies a repeated key decoded into a map[string]string (0.3.40.3).
+    // CodeMultiValue is 0.3.40.3: a repeated key decoded into a
+    // map[string]string.
     CodeMultiValue errs.Code = coreform.CodeFormMultiValue
 )
 ```

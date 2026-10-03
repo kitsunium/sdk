@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/ndjson .
 
-// Package ndjson registers the NDJSON codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package ndjson registers the NDJSON codec with the SDK's codec registry —
+// and no other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/ndjson"
 //
@@ -39,19 +39,20 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/ndjson"
 )
 
-// Format is the name newline-delimited JSON is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name newline-delimited JSON is registered under. It is an
+// untyped constant, so it goes wherever a format name is taken — the codec
+// package's Marshal, config.FSSource's string, i18n.LoadFS's codec.Format —
+// without a conversion.
 const Format = "ndjson"
 
 // The error codes, range 0.3.11.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies a record has no JSON encoding (0.3.11.1).
+	// CodeMarshalFailed is 0.3.11.1: a record has no JSON encoding.
 	CodeMarshalFailed errs.Code = corendjson.CodeNDJSONMarshalFailed
-	// CodeUnmarshalFailed identifies a line is not JSON its element can hold (0.3.11.2).
+	// CodeUnmarshalFailed is 0.3.11.2: a line is not JSON its element can
+	// hold.
 	CodeUnmarshalFailed errs.Code = corendjson.CodeNDJSONUnmarshalFailed
-	// CodeValueInvalid identifies the value or the target is not a slice (0.3.11.3).
+	// CodeValueInvalid is 0.3.11.3: the value or the target is not a slice.
 	CodeValueInvalid errs.Code = corendjson.CodeNDJSONValueInvalid
 )
 

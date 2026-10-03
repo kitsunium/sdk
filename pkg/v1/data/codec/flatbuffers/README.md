@@ -42,11 +42,14 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeBadType identifies Marshal was given neither a []byte nor a BytesProvider (0.3.23.1).
+    // CodeBadType is 0.3.23.1: Marshal was given neither a []byte nor a
+    // BytesProvider.
     CodeBadType errs.Code = coreflatbuffers.CodeFlatbuffersBadType
-    // CodeBadTarget identifies Unmarshal was given neither a *[]byte nor a BytesAcceptor (0.3.23.2).
+    // CodeBadTarget is 0.3.23.2: Unmarshal was given neither a *[]byte nor a
+    // BytesAcceptor.
     CodeBadTarget errs.Code = coreflatbuffers.CodeFlatbuffersBadTarget
-    // CodeTruncated identifies the buffer is shorter than its root offset, or past 64 MiB (0.3.23.3).
+    // CodeTruncated is 0.3.23.3: the buffer is shorter than its root offset,
+    // or past 64 MiB.
     CodeTruncated errs.Code = coreflatbuffers.CodeFlatbuffersTruncated
 )
 ```
@@ -73,7 +76,7 @@ var (
 ```
 
 <a name="BytesAcceptor"></a>
-## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L78>)
+## type [BytesAcceptor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L81>)
 
 BytesAcceptor is what an Unmarshal target may implement to receive the buffer. The slice is the caller's input, passed by reference: an implementation that keeps it copies it.
 
@@ -82,7 +85,7 @@ type BytesAcceptor = svcflatbuffers.BytesAcceptor
 ```
 
 <a name="BytesProvider"></a>
-## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L73>)
+## type [BytesProvider](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/flatbuffers/flatbuffers.go#L76>)
 
 BytesProvider is what a Marshal argument may implement to hand the codec its already\-encoded FlatBuffer: the bytes are read, never copied, for the length of the call.
 

@@ -41,19 +41,22 @@ import (
 	svcflatbuffers "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers"
 )
 
-// Format is the name FlatBuffers is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
+// Format is the name FlatBuffers is registered under. It is an untyped
+// constant, so it goes wherever a format name is taken — the codec package's
+// Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "flatbuffers"
 
 // The error codes, range 0.3.23.*, declared in the core (ADR 0160).
 const (
-	// CodeBadType identifies Marshal was given neither a []byte nor a BytesProvider (0.3.23.1).
+	// CodeBadType is 0.3.23.1: Marshal was given neither a []byte nor a
+	// BytesProvider.
 	CodeBadType errs.Code = coreflatbuffers.CodeFlatbuffersBadType
-	// CodeBadTarget identifies Unmarshal was given neither a *[]byte nor a BytesAcceptor (0.3.23.2).
+	// CodeBadTarget is 0.3.23.2: Unmarshal was given neither a *[]byte nor a
+	// BytesAcceptor.
 	CodeBadTarget errs.Code = coreflatbuffers.CodeFlatbuffersBadTarget
-	// CodeTruncated identifies the buffer is shorter than its root offset, or past 64 MiB (0.3.23.3).
+	// CodeTruncated is 0.3.23.3: the buffer is shorter than its root offset,
+	// or past 64 MiB.
 	CodeTruncated errs.Code = coreflatbuffers.CodeFlatbuffersTruncated
 )
 

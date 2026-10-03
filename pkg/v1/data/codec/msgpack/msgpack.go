@@ -40,17 +40,19 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
 )
 
-// Format is the name MessagePack is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
+// Format is the name MessagePack is registered under. It is an untyped
+// constant, so it goes wherever a format name is taken — the codec package's
+// Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "msgpack"
 
 // The error codes, range 0.3.7.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies a value MessagePack cannot represent, nesting past the bound, a writer's failure (0.3.7.1).
+	// CodeMarshalFailed is 0.3.7.1: a value MessagePack cannot represent,
+	// nesting past the bound, a writer's failure.
 	CodeMarshalFailed errs.Code = coremsgpack.CodeMsgPackMarshalFailed
-	// CodeUnmarshalFailed identifies malformed or truncated input, past a bound, or a value the target cannot hold (0.3.7.2).
+	// CodeUnmarshalFailed is 0.3.7.2: malformed or truncated input, past a
+	// bound, or a value the target cannot hold.
 	CodeUnmarshalFailed errs.Code = coremsgpack.CodeMsgPackUnmarshalFailed
 )
 

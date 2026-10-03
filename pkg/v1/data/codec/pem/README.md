@@ -40,11 +40,12 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies encoding/pem refused to write the block (0.3.10.1).
+    // CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block.
     CodeMarshalFailed errs.Code = corepem.CodePEMMarshalFailed
-    // CodeUnmarshalFailed identifies no PEM block in the input (0.3.10.2).
+    // CodeUnmarshalFailed is 0.3.10.2: no PEM block in the input.
     CodeUnmarshalFailed errs.Code = corepem.CodePEMUnmarshalFailed
-    // CodeValueInvalid identifies the value is not a *pem.Block, or the target a **pem.Block (0.3.10.3).
+    // CodeValueInvalid is 0.3.10.3: the value is not a *pem.Block, or the
+    // target a **pem.Block.
     CodeValueInvalid errs.Code = corepem.CodePEMValueInvalid
 )
 ```

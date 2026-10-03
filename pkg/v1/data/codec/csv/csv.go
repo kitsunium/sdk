@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/csv .
 
-// Package csv registers the CSV codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package csv registers the CSV codec with the SDK's codec registry — and no
+// other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/csv"
 //
@@ -39,19 +39,19 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/csv"
 )
 
-// Format is the name CSV is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name CSV is registered under. It is an untyped constant, so it
+// goes wherever a format name is taken — the codec package's Marshal,
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "csv"
 
 // The error codes, range 0.3.8.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies encoding/csv refused to write the records (0.3.8.1).
+	// CodeMarshalFailed is 0.3.8.1: encoding/csv refused to write the records.
 	CodeMarshalFailed errs.Code = corecsv.CodeCSVMarshalFailed
-	// CodeUnmarshalFailed identifies the input is not CSV encoding/csv reads (0.3.8.2).
+	// CodeUnmarshalFailed is 0.3.8.2: the input is not CSV encoding/csv reads.
 	CodeUnmarshalFailed errs.Code = corecsv.CodeCSVUnmarshalFailed
-	// CodeValueInvalid identifies the value or the target is not a [][]string (0.3.8.3).
+	// CodeValueInvalid is 0.3.8.3: the value or the target is not a
+	// [][]string.
 	CodeValueInvalid errs.Code = corecsv.CodeCSVValueInvalid
 )
 

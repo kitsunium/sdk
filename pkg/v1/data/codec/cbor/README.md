@@ -39,9 +39,11 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies a value CBOR cannot carry, invalid UTF-8, nesting past the bound (0.3.6.1).
+    // CodeMarshalFailed is 0.3.6.1: a value CBOR cannot carry, invalid UTF-8,
+    // nesting past the bound.
     CodeMarshalFailed errs.Code = corecbor.CodeCBORMarshalFailed
-    // CodeUnmarshalFailed identifies input that is not one well-formed item, or an item the target cannot hold (0.3.6.2).
+    // CodeUnmarshalFailed is 0.3.6.2: input that is not one well-formed item,
+    // or an item the target cannot hold.
     CodeUnmarshalFailed errs.Code = corecbor.CodeCBORUnmarshalFailed
 )
 ```

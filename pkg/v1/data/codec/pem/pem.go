@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/pem .
 
-// Package pem registers the PEM codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package pem registers the PEM codec with the SDK's codec registry — and no
+// other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/pem"
 //
@@ -39,19 +39,19 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/pem"
 )
 
-// Format is the name PEM is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
-// conversion.
+// Format is the name PEM is registered under. It is an untyped constant, so it
+// goes wherever a format name is taken — the codec package's Marshal,
+// config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 const Format = "pem"
 
 // The error codes, range 0.3.10.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies encoding/pem refused to write the block (0.3.10.1).
+	// CodeMarshalFailed is 0.3.10.1: encoding/pem refused to write the block.
 	CodeMarshalFailed errs.Code = corepem.CodePEMMarshalFailed
-	// CodeUnmarshalFailed identifies no PEM block in the input (0.3.10.2).
+	// CodeUnmarshalFailed is 0.3.10.2: no PEM block in the input.
 	CodeUnmarshalFailed errs.Code = corepem.CodePEMUnmarshalFailed
-	// CodeValueInvalid identifies the value is not a *pem.Block, or the target a **pem.Block (0.3.10.3).
+	// CodeValueInvalid is 0.3.10.3: the value is not a *pem.Block, or the
+	// target a **pem.Block.
 	CodeValueInvalid errs.Code = corepem.CodePEMValueInvalid
 )
 

@@ -39,9 +39,10 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies encoding/asn1 could not encode the value (0.3.9.1).
+    // CodeMarshalFailed is 0.3.9.1: encoding/asn1 could not encode the value.
     CodeMarshalFailed errs.Code = coreasn1.CodeASN1MarshalFailed
-    // CodeUnmarshalFailed identifies the input is not DER or BER the target can hold (0.3.9.2).
+    // CodeUnmarshalFailed is 0.3.9.2: the input is not DER or BER the target
+    // can hold.
     CodeUnmarshalFailed errs.Code = coreasn1.CodeASN1UnmarshalFailed
 )
 ```

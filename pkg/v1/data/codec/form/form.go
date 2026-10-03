@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/form .
 
-// Package form registers the application/x-www-form-urlencoded codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package form registers the application/x-www-form-urlencoded codec with the
+// SDK's codec registry — and no other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/form"
 //
@@ -44,19 +44,22 @@ import (
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/form"
 )
 
-// Format is the name the urlencoded form is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
+// Format is the name the urlencoded form is registered under. It is an untyped
+// constant, so it goes wherever a format name is taken — the codec package's
+// Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "form"
 
 // The error codes, range 0.3.40.*, declared in the core (ADR 0160).
 const (
-	// CodeValueInvalid identifies the value or the target is not url.Values-shaped (0.3.40.1).
+	// CodeValueInvalid is 0.3.40.1: the value or the target is not
+	// url.Values-shaped.
 	CodeValueInvalid errs.Code = coreform.CodeFormValueInvalid
-	// CodeUnmarshalFailed identifies a malformed escape, a ';' separator, or a decode bound exceeded (0.3.40.2).
+	// CodeUnmarshalFailed is 0.3.40.2: a malformed escape, a ';' separator, or
+	// a decode bound exceeded.
 	CodeUnmarshalFailed errs.Code = coreform.CodeFormUnmarshalFailed
-	// CodeMultiValue identifies a repeated key decoded into a map[string]string (0.3.40.3).
+	// CodeMultiValue is 0.3.40.3: a repeated key decoded into a
+	// map[string]string.
 	CodeMultiValue errs.Code = coreform.CodeFormMultiValue
 )
 

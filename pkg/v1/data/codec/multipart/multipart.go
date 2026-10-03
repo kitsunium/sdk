@@ -1,7 +1,7 @@
 //go:generate gomarkdoc --output README.md --repository.url https://github.com/kitsunium/sdk --repository.default-branch main --repository.path /pkg/v1/data/codec/multipart .
 
-// Package multipart registers the multipart/form-data codec with the SDK's codec
-// registry — and no other codec — when it is imported (ADR 0134):
+// Package multipart registers the multipart/form-data codec with the SDK's
+// codec registry — and no other codec — when it is imported (ADR 0134):
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
 //
@@ -29,7 +29,7 @@
 //
 //	CodeMarshalFailed    0.3.41.1  a part could not be written
 //	CodeUnmarshalFailed  0.3.41.2  a malformed part, a part with no name, a missing closing delimiter
-//	CodeValueInvalid     0.3.41.3  an unusable value: no name, a CR, LF or NUL in a header field
+//	CodeValueInvalid     0.3.41.3  an unusable value — no name, or a CR, LF or NUL in a header field
 //	CodeBoundaryInvalid  0.3.41.4  no usable RFC 2046 boundary
 //	CodeLimitExceeded    0.3.41.5  a part, the part count or the body crossed its bound
 //	CodeLimitsInvalid    0.3.41.6  a negative bound
@@ -46,25 +46,28 @@ import (
 	svcmultipart "github.com/kitsunium/sdk/internal/service/data/codec/multipart"
 )
 
-// Format is the name multipart/form-data is registered under. It is an untyped constant, so
-// it goes wherever a format name is taken — the codec package's Marshal,
-// config.FSSource's string, i18n.LoadFS's codec.Format — without a
+// Format is the name multipart/form-data is registered under. It is an untyped
+// constant, so it goes wherever a format name is taken — the codec package's
+// Marshal, config.FSSource's string, i18n.LoadFS's codec.Format — without a
 // conversion.
 const Format = "multipart"
 
 // The error codes, range 0.3.41.*, declared in the core (ADR 0160).
 const (
-	// CodeMarshalFailed identifies a part could not be written (0.3.41.1).
+	// CodeMarshalFailed is 0.3.41.1: a part could not be written.
 	CodeMarshalFailed errs.Code = coremultipart.CodeMultipartMarshalFailed
-	// CodeUnmarshalFailed identifies a malformed part, a part with no name, a missing closing delimiter (0.3.41.2).
+	// CodeUnmarshalFailed is 0.3.41.2: a malformed part, a part with no name,
+	// a missing closing delimiter.
 	CodeUnmarshalFailed errs.Code = coremultipart.CodeMultipartUnmarshalFailed
-	// CodeValueInvalid identifies an unusable value: no name, a CR, LF or NUL in a header field (0.3.41.3).
+	// CodeValueInvalid is 0.3.41.3: an unusable value — no name, or a CR, LF
+	// or NUL in a header field.
 	CodeValueInvalid errs.Code = coremultipart.CodeMultipartValueInvalid
-	// CodeBoundaryInvalid identifies no usable RFC 2046 boundary (0.3.41.4).
+	// CodeBoundaryInvalid is 0.3.41.4: no usable RFC 2046 boundary.
 	CodeBoundaryInvalid errs.Code = coremultipart.CodeMultipartBoundaryInvalid
-	// CodeLimitExceeded identifies a part, the part count or the body crossed its bound (0.3.41.5).
+	// CodeLimitExceeded is 0.3.41.5: a part, the part count or the body
+	// crossed its bound.
 	CodeLimitExceeded errs.Code = coremultipart.CodeMultipartLimitExceeded
-	// CodeLimitsInvalid identifies a negative bound (0.3.41.6).
+	// CodeLimitsInvalid is 0.3.41.6: a negative bound.
 	CodeLimitsInvalid errs.Code = coremultipart.CodeMultipartLimitsInvalid
 )
 

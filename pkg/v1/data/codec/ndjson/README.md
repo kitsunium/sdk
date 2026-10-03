@@ -40,11 +40,12 @@ No error message quotes the input.
 
 ```go
 const (
-    // CodeMarshalFailed identifies a record has no JSON encoding (0.3.11.1).
+    // CodeMarshalFailed is 0.3.11.1: a record has no JSON encoding.
     CodeMarshalFailed errs.Code = corendjson.CodeNDJSONMarshalFailed
-    // CodeUnmarshalFailed identifies a line is not JSON its element can hold (0.3.11.2).
+    // CodeUnmarshalFailed is 0.3.11.2: a line is not JSON its element can
+    // hold.
     CodeUnmarshalFailed errs.Code = corendjson.CodeNDJSONUnmarshalFailed
-    // CodeValueInvalid identifies the value or the target is not a slice (0.3.11.3).
+    // CodeValueInvalid is 0.3.11.3: the value or the target is not a slice.
     CodeValueInvalid errs.Code = corendjson.CodeNDJSONValueInvalid
 )
 ```
