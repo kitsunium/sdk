@@ -79,7 +79,10 @@ func goroutineProfile(debug int) ([]byte, error) {
 	if err := pprof.Lookup("goroutine").WriteTo(&buf, debug); err != nil {
 		//: the runtime's error goes to the chain.
 		return nil, errs.Wrap(err, errs.WrapParams{
-			Code: coreprofiling.CodeCaptureFailed, Reason: "CAPTURE_FAILED", Public: coreprofiling.CaptureFailed.Public(), Private: coreprofiling.CaptureFailed.Private(),
+			Code:    coreprofiling.CodeCaptureFailed,
+			Reason:  "CAPTURE_FAILED",
+			Public:  coreprofiling.CaptureFailed.Public(),
+			Private: coreprofiling.CaptureFailed.Private(),
 		}, errs.String("profile", "goroutine"))
 	}
 	//: the text.

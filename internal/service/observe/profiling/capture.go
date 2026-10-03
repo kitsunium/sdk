@@ -82,7 +82,10 @@ func CaptureHeap() (*coreprofiling.ProfileValue, error) {
 	if err := pprof.Lookup("heap").WriteTo(&buf, 0); err != nil {
 		//: the runtime's error goes to the chain.
 		return nil, errs.Wrap(err, errs.WrapParams{
-			Code: coreprofiling.CodeCaptureFailed, Reason: "CAPTURE_FAILED", Public: coreprofiling.CaptureFailed.Public(), Private: coreprofiling.CaptureFailed.Private(),
+			Code:    coreprofiling.CodeCaptureFailed,
+			Reason:  "CAPTURE_FAILED",
+			Public:  coreprofiling.CaptureFailed.Public(),
+			Private: coreprofiling.CaptureFailed.Private(),
 		}, errs.String("profile", "heap"))
 	}
 	//: the runtime's bytes, decoded.
