@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -114,7 +115,7 @@ func Test_bufferingWriter_Close_writerError(t *testing.T) {
 			t.Fatalf("%s: expected error on flush failure", tc.name)
 		}
 		//: the wrap must carry the typed dotted-quad code.
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 		//: the synthetic sink error must survive the wrap so errors.Is keeps

@@ -4,15 +4,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "form",
-    srcs = [
-        "codec.go",
-        "codes.go",
-        "errors.go",
-    ],
+    srcs = ["codec.go"],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/form",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/form",
         "//internal/kernel/errs",
     ],
 )
@@ -36,10 +33,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

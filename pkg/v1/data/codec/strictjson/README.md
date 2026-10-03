@@ -59,49 +59,49 @@ DecodeRequest adds what only an HTTP body has. The body is read through http.Max
 <a name="CodeDecodeMisconfigured"></a>CodeDecodeMisconfigured identifies a call no input can satisfy: a non\-positive bound, or a target that is not a non\-nil pointer.
 
 ```go
-const CodeDecodeMisconfigured errs.Code = svcstrict.CodeDecodeMisconfigured
+const CodeDecodeMisconfigured errs.Code = corestrictjson.CodeDecodeMisconfigured
 ```
 
 <a name="CodeDocumentEmpty"></a>CodeDocumentEmpty identifies a document of zero bytes \(400\).
 
 ```go
-const CodeDocumentEmpty errs.Code = svcstrict.CodeDocumentEmpty
+const CodeDocumentEmpty errs.Code = corestrictjson.CodeDocumentEmpty
 ```
 
 <a name="CodeDocumentMalformed"></a>CodeDocumentMalformed identifies a document that is not exactly one well\-formed JSON value \(400\).
 
 ```go
-const CodeDocumentMalformed errs.Code = svcstrict.CodeDocumentMalformed
+const CodeDocumentMalformed errs.Code = corestrictjson.CodeDocumentMalformed
 ```
 
 <a name="CodeDocumentTooLarge"></a>CodeDocumentTooLarge identifies a document longer than the bound \(413\).
 
 ```go
-const CodeDocumentTooLarge errs.Code = svcstrict.CodeDocumentTooLarge
+const CodeDocumentTooLarge errs.Code = corestrictjson.CodeDocumentTooLarge
 ```
 
 <a name="CodeDocumentUnreadable"></a>CodeDocumentUnreadable identifies a reader that failed before the document ended \(400\).
 
 ```go
-const CodeDocumentUnreadable errs.Code = svcstrict.CodeDocumentUnreadable
+const CodeDocumentUnreadable errs.Code = corestrictjson.CodeDocumentUnreadable
 ```
 
 <a name="CodeMediaTypeUnsupported"></a>CodeMediaTypeUnsupported identifies a request body that does not declare JSON \(415\).
 
 ```go
-const CodeMediaTypeUnsupported errs.Code = svcstrict.CodeMediaTypeUnsupported
+const CodeMediaTypeUnsupported errs.Code = corestrictjson.CodeMediaTypeUnsupported
 ```
 
 <a name="CodeMemberUnknown"></a>CodeMemberUnknown identifies a member the target does not declare \(400\).
 
 ```go
-const CodeMemberUnknown errs.Code = svcstrict.CodeMemberUnknown
+const CodeMemberUnknown errs.Code = corestrictjson.CodeMemberUnknown
 ```
 
 <a name="CodeValueMismatched"></a>CodeValueMismatched identifies a value the target cannot hold \(400\).
 
 ```go
-const CodeValueMismatched errs.Code = svcstrict.CodeValueMismatched
+const CodeValueMismatched errs.Code = corestrictjson.CodeValueMismatched
 ```
 
 <a name="MaxPointerBytes"></a>MaxPointerBytes bounds the JSON Pointer PointerOf returns; a longer one is cut back to the deepest ancestor that fits.
@@ -117,26 +117,26 @@ const MaxPointerBytes int = svcstrict.MaxPointerBytes
 ```go
 var (
     // DocumentTooLarge refuses a document longer than the bound.
-    DocumentTooLarge = svcstrict.DocumentTooLarge
+    DocumentTooLarge = corestrictjson.DocumentTooLarge
     // DocumentEmpty reports a document of zero bytes.
-    DocumentEmpty = svcstrict.DocumentEmpty
+    DocumentEmpty = corestrictjson.DocumentEmpty
     // DocumentMalformed refuses a document that is not one well-formed value.
-    DocumentMalformed = svcstrict.DocumentMalformed
+    DocumentMalformed = corestrictjson.DocumentMalformed
     // MemberUnknown refuses a member the target does not declare.
-    MemberUnknown = svcstrict.MemberUnknown
+    MemberUnknown = corestrictjson.MemberUnknown
     // ValueMismatched refuses a value the target cannot hold.
-    ValueMismatched = svcstrict.ValueMismatched
+    ValueMismatched = corestrictjson.ValueMismatched
     // MediaTypeUnsupported refuses a request body that does not declare JSON.
-    MediaTypeUnsupported = svcstrict.MediaTypeUnsupported
+    MediaTypeUnsupported = corestrictjson.MediaTypeUnsupported
     // DocumentUnreadable wraps a reader that failed before the document ended.
-    DocumentUnreadable = svcstrict.DocumentUnreadable
+    DocumentUnreadable = corestrictjson.DocumentUnreadable
     // DecodeMisconfigured refuses a call no input can satisfy.
-    DecodeMisconfigured = svcstrict.DecodeMisconfigured
+    DecodeMisconfigured = corestrictjson.DecodeMisconfigured
 )
 ```
 
 <a name="Decode"></a>
-## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L124>)
+## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L125>)
 
 ```go
 func Decode(r io.Reader, v any, maxBytes int64) error
@@ -145,7 +145,7 @@ func Decode(r io.Reader, v any, maxBytes int64) error
 Decode reads exactly one JSON value from r into v, a non\-nil pointer, reading at most maxBytes bytes of it — the bound plus the one byte that proves it was exceeded, never more. On a refusal v may be partly written.
 
 <a name="DecodeRequest"></a>
-## func [DecodeRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L134>)
+## func [DecodeRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L135>)
 
 ```go
 func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error
@@ -154,7 +154,7 @@ func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int
 DecodeRequest decodes the JSON body of req into v as Decode does, through http.MaxBytesReader, after refusing an empty body \(CodeDocumentEmpty\) and a body that does not declare JSON \(CodeMediaTypeUnsupported\). w is used only to have net/http close the connection after an oversized body; nil is accepted.
 
 <a name="PointerOf"></a>
-## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L143>)
+## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L144>)
 
 ```go
 func PointerOf(err error) (pointer string, ok bool)

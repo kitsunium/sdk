@@ -14,6 +14,7 @@ import (
 	"unsafe"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corendjson "github.com/kitsunium/sdk/internal/core/data/codec/ndjson"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -80,7 +81,7 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 	if !ok {
 		//: loud failure — caller passed a non-slice.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeNDJSONValueInvalid,
+			Code:    corendjson.CodeNDJSONValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "NDJSON codec requires a slice value",
 			Private: "service/data/codec/ndjson.Marshal: argument is not a slice",
@@ -98,7 +99,7 @@ func (*ndjsonCodec) Marshal(v any) (encoded []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error for reason-based matching.
 		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeNDJSONMarshalFailed,
+			Code:    corendjson.CodeNDJSONMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "NDJSON encoding failed",
 			Private: "service/data/codec/ndjson.Marshal: encoding/json returned an error",
@@ -238,7 +239,7 @@ func (*ndjsonCodec) Unmarshal(data []byte, v any) error {
 	if !ok {
 		//: loud failure — caller passed a non-slice pointer.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeNDJSONValueInvalid,
+			Code:    corendjson.CodeNDJSONValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "NDJSON codec requires a slice pointer target",
 			Private: "service/data/codec/ndjson.Unmarshal: target is not a pointer to a slice",
@@ -298,7 +299,7 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 		if len(line) > scannerMaxCapacity {
 			//: surface the documented sentinel for oversized records.
 			return reflect.Value{}, errs.Wrap(nil, errs.WrapParams{
-				Code:    CodeNDJSONUnmarshalFailed,
+				Code:    corendjson.CodeNDJSONUnmarshalFailed,
 				Reason:  "UNMARSHAL_FAILED",
 				Public:  "NDJSON record exceeds size limit",
 				Private: "service/data/codec/ndjson.Unmarshal: line length exceeds scannerMaxCapacity",
@@ -317,7 +318,7 @@ func decodeLines(data []byte, sliceType reflect.Type) (result reflect.Value, err
 		if uerr := stdjson.Unmarshal(line, out.Index(decoded).Addr().Interface()); uerr != nil {
 			//: wrap the stdlib error for reason-based matching.
 			return reflect.Value{}, errs.Wrap(uerr, errs.WrapParams{
-				Code:    CodeNDJSONUnmarshalFailed,
+				Code:    corendjson.CodeNDJSONUnmarshalFailed,
 				Reason:  "UNMARSHAL_FAILED",
 				Public:  "NDJSON decoding failed",
 				Private: "service/data/codec/ndjson.Unmarshal: encoding/json returned an error",
@@ -368,7 +369,7 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	if !ok {
 		//: leave dst untouched and surface the documented sentinel.
 		return dst, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeNDJSONValueInvalid,
+			Code:    corendjson.CodeNDJSONValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "NDJSON codec requires a slice value",
 			Private: "service/data/codec/ndjson.Append: argument is not a slice",
@@ -386,7 +387,7 @@ func (*ndjsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 			//: wrap the stdlib error for reason-based matching; slice off any
 			//: partially-written records so callers never see a torn buffer.
 			return dst[:origLen], errs.Wrap(merr, errs.WrapParams{
-				Code:    CodeNDJSONMarshalFailed,
+				Code:    corendjson.CodeNDJSONMarshalFailed,
 				Reason:  "MARSHAL_FAILED",
 				Public:  "NDJSON encoding failed",
 				Private: "service/data/codec/ndjson.Append: encoding/json returned an error",

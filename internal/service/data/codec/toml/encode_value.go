@@ -10,6 +10,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -185,9 +186,9 @@ func marshalText(v reflect.Value, info *typeInfo) ([]byte, error) {
 	if err != nil {
 		//: refused.
 		return nil, errs.Wrap(err, errs.WrapParams{
-			Code:    CodeTOMLMarshalFailed,
-			Reason:  MarshalFailed.Reason(),
-			Public:  MarshalFailed.Public(),
+			Code:    coretoml.CodeTOMLMarshalFailed,
+			Reason:  coretoml.MarshalFailed.Reason(),
+			Public:  coretoml.MarshalFailed.Public(),
 			Private: privateTextMarshalFailed,
 		}, errs.String(fieldProblem, problemMarshalText), errs.String(fieldType, v.Type().String()))
 	}

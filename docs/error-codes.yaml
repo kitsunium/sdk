@@ -1161,131 +1161,131 @@ codes:
   - code: "0.3.2.1"
     const: CodeJSONMarshalFailed
     hex: "0x00_03_02_01"
-    package: internal/service/data/codec/json
+    package: internal/core/data/codec/json
   - code: "0.3.2.2"
     const: CodeJSONUnmarshalFailed
     hex: "0x00_03_02_02"
-    package: internal/service/data/codec/json
+    package: internal/core/data/codec/json
   - code: "0.3.3.1"
     const: CodeXMLMarshalFailed
     hex: "0x00_03_03_01"
-    package: internal/service/data/codec/xml
+    package: internal/core/data/codec/xml
   - code: "0.3.3.2"
     const: CodeXMLUnmarshalFailed
     hex: "0x00_03_03_02"
-    package: internal/service/data/codec/xml
+    package: internal/core/data/codec/xml
   - code: "0.3.4.1"
     const: CodeYAMLMarshalFailed
     hex: "0x00_03_04_01"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.2"
     const: CodeYAMLUnmarshalFailed
     hex: "0x00_03_04_02"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.3"
     const: CodeYAMLAnchorRefused
     hex: "0x00_03_04_03"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.4"
     const: CodeYAMLAliasRefused
     hex: "0x00_03_04_04"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.5"
     const: CodeYAMLTagRefused
     hex: "0x00_03_04_05"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.6"
     const: CodeYAMLMergeKeyRefused
     hex: "0x00_03_04_06"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.7"
     const: CodeYAMLMultiDocRefused
     hex: "0x00_03_04_07"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.8"
     const: CodeYAMLComplexKeyRefused
     hex: "0x00_03_04_08"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.9"
     const: CodeYAMLDirectiveRefused
     hex: "0x00_03_04_09"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.10"
     const: CodeYAMLDuplicateKey
     hex: "0x00_03_04_0A"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.4.11"
     const: CodeYAMLLeadingZeroRefused
     hex: "0x00_03_04_0B"
-    package: internal/service/data/codec/yaml
+    package: internal/core/data/codec/yaml
   - code: "0.3.5.1"
     const: CodeTOMLMarshalFailed
     hex: "0x00_03_05_01"
-    package: internal/service/data/codec/toml
+    package: internal/core/data/codec/toml
   - code: "0.3.5.2"
     const: CodeTOMLUnmarshalFailed
     hex: "0x00_03_05_02"
-    package: internal/service/data/codec/toml
+    package: internal/core/data/codec/toml
   - code: "0.3.6.1"
     const: CodeCBORMarshalFailed
     hex: "0x00_03_06_01"
-    package: internal/service/data/codec/cbor
+    package: internal/core/data/codec/cbor
   - code: "0.3.6.2"
     const: CodeCBORUnmarshalFailed
     hex: "0x00_03_06_02"
-    package: internal/service/data/codec/cbor
+    package: internal/core/data/codec/cbor
   - code: "0.3.7.1"
     const: CodeMsgPackMarshalFailed
     hex: "0x00_03_07_01"
-    package: internal/service/data/codec/msgpack
+    package: internal/core/data/codec/msgpack
   - code: "0.3.7.2"
     const: CodeMsgPackUnmarshalFailed
     hex: "0x00_03_07_02"
-    package: internal/service/data/codec/msgpack
+    package: internal/core/data/codec/msgpack
   - code: "0.3.8.1"
     const: CodeCSVMarshalFailed
     hex: "0x00_03_08_01"
-    package: internal/service/data/codec/csv
+    package: internal/core/data/codec/csv
   - code: "0.3.8.2"
     const: CodeCSVUnmarshalFailed
     hex: "0x00_03_08_02"
-    package: internal/service/data/codec/csv
+    package: internal/core/data/codec/csv
   - code: "0.3.8.3"
     const: CodeCSVValueInvalid
     hex: "0x00_03_08_03"
-    package: internal/service/data/codec/csv
+    package: internal/core/data/codec/csv
   - code: "0.3.9.1"
     const: CodeASN1MarshalFailed
     hex: "0x00_03_09_01"
-    package: internal/service/data/codec/asn1
+    package: internal/core/data/codec/asn1
   - code: "0.3.9.2"
     const: CodeASN1UnmarshalFailed
     hex: "0x00_03_09_02"
-    package: internal/service/data/codec/asn1
+    package: internal/core/data/codec/asn1
   - code: "0.3.10.1"
     const: CodePEMMarshalFailed
     hex: "0x00_03_0A_01"
-    package: internal/service/data/codec/pem
+    package: internal/core/data/codec/pem
   - code: "0.3.10.2"
     const: CodePEMUnmarshalFailed
     hex: "0x00_03_0A_02"
-    package: internal/service/data/codec/pem
+    package: internal/core/data/codec/pem
   - code: "0.3.10.3"
     const: CodePEMValueInvalid
     hex: "0x00_03_0A_03"
-    package: internal/service/data/codec/pem
+    package: internal/core/data/codec/pem
   - code: "0.3.11.1"
     const: CodeNDJSONMarshalFailed
     hex: "0x00_03_0B_01"
-    package: internal/service/data/codec/ndjson
+    package: internal/core/data/codec/ndjson
   - code: "0.3.11.2"
     const: CodeNDJSONUnmarshalFailed
     hex: "0x00_03_0B_02"
-    package: internal/service/data/codec/ndjson
+    package: internal/core/data/codec/ndjson
   - code: "0.3.11.3"
     const: CodeNDJSONValueInvalid
     hex: "0x00_03_0B_03"
-    package: internal/service/data/codec/ndjson
+    package: internal/core/data/codec/ndjson
   - code: "0.3.13.1"
     const: CodeWriterNil
     hex: "0x00_03_0D_01"
@@ -1393,55 +1393,55 @@ codes:
   - code: "0.3.22.1"
     const: CodeTLVMarshalFailed
     hex: "0x00_03_16_01"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.22.2"
     const: CodeTLVUnmarshalFailed
     hex: "0x00_03_16_02"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.22.3"
     const: CodeTLVUnsupportedType
     hex: "0x00_03_16_03"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.22.4"
     const: CodeTLVDepthExceeded
     hex: "0x00_03_16_04"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.22.5"
     const: CodeTLVSizeExceeded
     hex: "0x00_03_16_05"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.22.6"
     const: CodeTLVTruncated
     hex: "0x00_03_16_06"
-    package: internal/service/data/codec/tlv
+    package: internal/core/data/codec/tlv
   - code: "0.3.23.1"
     const: CodeFlatbuffersBadType
     hex: "0x00_03_17_01"
-    package: internal/service/data/codec/flatbuffers
+    package: internal/core/data/codec/flatbuffers
   - code: "0.3.23.2"
     const: CodeFlatbuffersBadTarget
     hex: "0x00_03_17_02"
-    package: internal/service/data/codec/flatbuffers
+    package: internal/core/data/codec/flatbuffers
   - code: "0.3.23.3"
     const: CodeFlatbuffersTruncated
     hex: "0x00_03_17_03"
-    package: internal/service/data/codec/flatbuffers
+    package: internal/core/data/codec/flatbuffers
   - code: "0.3.24.1"
     const: CodeBaseEncMarshalFailed
     hex: "0x00_03_18_01"
-    package: internal/service/data/codec/baseenc
+    package: internal/core/data/codec/baseenc
   - code: "0.3.24.2"
     const: CodeBaseEncUnmarshalFailed
     hex: "0x00_03_18_02"
-    package: internal/service/data/codec/baseenc
+    package: internal/core/data/codec/baseenc
   - code: "0.3.24.3"
     const: CodeBaseEncDecodeFailed
     hex: "0x00_03_18_03"
-    package: internal/service/data/codec/baseenc
+    package: internal/core/data/codec/baseenc
   - code: "0.3.24.4"
     const: CodeBaseEncSizeExceeded
     hex: "0x00_03_18_04"
-    package: internal/service/data/codec/baseenc
+    package: internal/core/data/codec/baseenc
   - code: "0.3.25.2"
     const: CodeCWClientInitFailed
     hex: "0x00_03_19_02"
@@ -1549,23 +1549,23 @@ codes:
   - code: "0.3.36.1"
     const: CodeBSONMarshalFailed
     hex: "0x00_03_24_01"
-    package: internal/service/data/codec/bson
+    package: internal/core/data/codec/bson
   - code: "0.3.36.2"
     const: CodeBSONUnmarshalFailed
     hex: "0x00_03_24_02"
-    package: internal/service/data/codec/bson
+    package: internal/core/data/codec/bson
   - code: "0.3.36.3"
     const: CodeBSONSizeExceeded
     hex: "0x00_03_24_03"
-    package: internal/service/data/codec/bson
+    package: internal/core/data/codec/bson
   - code: "0.3.36.4"
     const: CodeBSONDepthExceeded
     hex: "0x00_03_24_04"
-    package: internal/service/data/codec/bson
+    package: internal/core/data/codec/bson
   - code: "0.3.36.5"
     const: CodeBSONValueInvalid
     hex: "0x00_03_24_05"
-    package: internal/service/data/codec/bson
+    package: internal/core/data/codec/bson
   - code: "0.3.37.1"
     const: CodeHCLMarshalFailed
     hex: "0x00_03_25_01"
@@ -1621,39 +1621,39 @@ codes:
   - code: "0.3.40.1"
     const: CodeFormValueInvalid
     hex: "0x00_03_28_01"
-    package: internal/service/data/codec/form
+    package: internal/core/data/codec/form
   - code: "0.3.40.2"
     const: CodeFormUnmarshalFailed
     hex: "0x00_03_28_02"
-    package: internal/service/data/codec/form
+    package: internal/core/data/codec/form
   - code: "0.3.40.3"
     const: CodeFormMultiValue
     hex: "0x00_03_28_03"
-    package: internal/service/data/codec/form
+    package: internal/core/data/codec/form
   - code: "0.3.41.1"
     const: CodeMultipartMarshalFailed
     hex: "0x00_03_29_01"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.41.2"
     const: CodeMultipartUnmarshalFailed
     hex: "0x00_03_29_02"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.41.3"
     const: CodeMultipartValueInvalid
     hex: "0x00_03_29_03"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.41.4"
     const: CodeMultipartBoundaryInvalid
     hex: "0x00_03_29_04"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.41.5"
     const: CodeMultipartLimitExceeded
     hex: "0x00_03_29_05"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.41.6"
     const: CodeMultipartLimitsInvalid
     hex: "0x00_03_29_06"
-    package: internal/service/data/codec/multipart
+    package: internal/core/data/codec/multipart
   - code: "0.3.42.1"
     const: CodeJWKMalformed
     hex: "0x00_03_2A_01"
@@ -2273,35 +2273,35 @@ codes:
   - code: "0.3.72.1"
     const: CodeDocumentTooLarge
     hex: "0x00_03_48_01"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.2"
     const: CodeDocumentEmpty
     hex: "0x00_03_48_02"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.3"
     const: CodeDocumentMalformed
     hex: "0x00_03_48_03"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.4"
     const: CodeMemberUnknown
     hex: "0x00_03_48_04"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.5"
     const: CodeValueMismatched
     hex: "0x00_03_48_05"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.6"
     const: CodeMediaTypeUnsupported
     hex: "0x00_03_48_06"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.7"
     const: CodeDocumentUnreadable
     hex: "0x00_03_48_07"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.72.8"
     const: CodeDecodeMisconfigured
     hex: "0x00_03_48_08"
-    package: internal/service/data/codec/strictjson
+    package: internal/core/data/codec/strictjson
   - code: "0.3.73.1"
     const: CodeDocumentInvalid
     hex: "0x00_03_49_01"
@@ -2537,7 +2537,7 @@ codes:
   - code: "0.3.90.1"
     const: CodeNotJSON
     hex: "0x00_03_5A_01"
-    package: internal/service/data/codec/jsonpatch
+    package: internal/core/data/codec/jsonpatch
   - code: "0.3.91.1"
     const: CodeMisconfigured
     hex: "0x00_03_5B_01"

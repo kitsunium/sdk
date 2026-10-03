@@ -15,6 +15,7 @@ import (
 	stdmp "mime/multipart"
 	"reflect"
 
+	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -372,7 +373,7 @@ func delimiterLineComplete(head []byte) bool {
 func unmarshalFailed(cause error, detail string) error {
 	//: typed sentinel so callers route on CodeMultipartUnmarshalFailed.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeMultipartUnmarshalFailed,
+		Code:    coremultipart.CodeMultipartUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "multipart decoding failed",
 		Private: "service/data/codec/multipart." + detail,

@@ -41,16 +41,18 @@ reorganisation series reaches it.
 | Package | What it declares | Code range | Engine |
 |---|---|---|---|
 | `cache/` | the `Store[V]` port frozen at three methods with `EntryFetcher[V]` / `Tagger` / `Loader[V]` as siblings, `EntryValue[V]`, the `Fill[V]` FUNC port and `NoExpiry`; no registry, because Go has no `map[Name]Store[V]` for an open `V` (ADR 0049) | `0.2.18.*` | `internal/service/data/cache` |
-| `codec/` | the `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` ports, the process-wide registry and the `Format` value (ADR 0003); `codec/scratch/` beneath it holds the codec-payload recycling threshold every engine shares | `0.2.2.*` | `internal/service/data/codec/*` |
+| `codec/` | the `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` ports, the process-wide registry and the `Format` value (ADR 0003); `codec/scratch/` beneath it holds the codec-payload recycling threshold every engine shares, and `codec/<format>/` the codes and sentinels of each service package at the same path — eighteen of them, codes only (ADR 0160 §2) | `0.2.2.*`; each `codec/<format>/` its service range, `0.3.<PP>.*` | `internal/service/data/codec/*` |
 | `queue/` | the `Broker` port frozen at four methods, the `Handler` FUNC port, the message, delivery, lease, receipt and dead-letter values, `PolicyValue`, and five ADR 0039 siblings; at-least-once in the type (ADR 0054, ADR 0104, ADR 0151) | `0.2.23.*` | `internal/service/data/queue` |
 | `sql/` | the `Executor` / `Transactor` / `Checker` / `Migrator` ports over the stdlib's own `*sql.Rows` and `sql.Result`, the `Preparer`, `Joiner` and `Deferrer` siblings, and the closed `Dialect` set (ADR 0055, ADR 0139) | `0.2.24.*` | `internal/service/data/sql` |
 | `transform/` | the `Compressor` port and the registry mapping an `Algorithm` to it (ADR 0014) | `0.2.5.*` | `internal/service/data/transform` |
 | `vfs/` | `FS`, an alias of `io/fs.FS`, `WritableFS` frozen at four write verbs, the `AtomicWriter` sibling, and the lexical path and permission guards (ADR 0056) | `0.2.25.*` | `internal/service/data/vfs` |
 
-A code keeps its value when its package moves (ADR 0160): the six ranges
-above are the ones these packages declared before the family existed, and
-`codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
-names the new directories under the same keys.
+A code keeps its value when its package moves (ADR 0160): the six `0.2.*`
+ranges above are the ones these packages declared before the family existed,
+the eighteen `0.3.*` ranges under `codec/<format>/` are the ones the service
+codecs declared before their declarations moved here, and `codeRangeOwners`
+(`internal/kernel/errs/registry_ownership_external_test.go`) names the new
+directories under the same keys.
 
 ## Do NOT
 

@@ -6,11 +6,9 @@ go_library(
     name = "tlv",
     srcs = [
         "codec.go",
-        "codes.go",
         "decoder.go",
         "decoder_typed.go",
         "encoder.go",
-        "errors.go",
         "helpers.go",
         "typeinfo.go",
         "types.go",
@@ -23,6 +21,7 @@ go_library(
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/scratch",
+        "//internal/core/data/codec/tlv",
         "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
     ],
@@ -59,10 +58,4 @@ go_test(
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

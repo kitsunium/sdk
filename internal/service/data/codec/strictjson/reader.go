@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -56,7 +57,7 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 	//: body was too large, which it does on the byte past the bound.
 	if b.delivered > maxBytes || (b.failure != nil && oversize != nil && oversize(b.failure)) {
 		//: the bound, never the bytes.
-		return errs.Wrap(DocumentTooLarge, errs.WrapParams{}, errs.Int64(fieldLimit, maxBytes))
+		return errs.Wrap(corestrictjson.DocumentTooLarge, errs.WrapParams{}, errs.Int64(fieldLimit, maxBytes))
 	}
 	//: the source failed before the document ended.
 	if b.failure != nil {
@@ -64,12 +65,12 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 		//: 400. The source's message is NOT carried: an arbitrary reader's
 		//: error may quote what it read, and fields are public — the failure's
 		//: type says which kind of reader failed, and nothing it held.
-		return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(b.failure)))
+		return errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(b.failure)))
 	}
 	//: not one byte.
 	if b.delivered == 0 {
 		//: an empty document, which a caller may read as "no body".
-		return DocumentEmpty
+		return corestrictjson.DocumentEmpty
 	}
 	//: the reading was fine; the decoder decides.
 	return nil

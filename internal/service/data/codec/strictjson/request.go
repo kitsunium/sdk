@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"strings"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -58,7 +59,7 @@ func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int
 	//: a body that does not say it is JSON is not parsed as JSON.
 	if !isJSONMediaType(req.Header.Get("Content-Type")) {
 		//: 415, before a byte is decoded.
-		return MediaTypeUnsupported
+		return corestrictjson.MediaTypeUnsupported
 	}
 	//: the bound is net/http's too, so its refusal reads as the size it is.
 	return decode(body, v, maxBytes, isMaxBytesError)
@@ -69,10 +70,10 @@ func emptyOrUnreadable(peekErr error) error {
 	//: no first byte: an empty body.
 	if errors.Is(peekErr, io.EOF) {
 		//: DocumentEmpty.
-		return DocumentEmpty
+		return corestrictjson.DocumentEmpty
 	}
 	//: the transport failed before the body began: its type, never its text.
-	return errs.Wrap(DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(peekErr)))
+	return errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(peekErr)))
 }
 
 // isJSONMediaType reports whether a Content-Type header declares JSON.

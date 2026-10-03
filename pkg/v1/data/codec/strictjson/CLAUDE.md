@@ -15,8 +15,8 @@ never quote the input.
 | `DecodeRequest(w, req, v, maxBytes)` | func | an HTTP body: `http.MaxBytesReader`, empty body first, media type second |
 | `PointerOf(err)` | func | where a refused document failed, as a JSON Pointer, bounded to `MaxPointerBytes` (256) |
 | `MaxPointerBytes` | const | the pointer's bound |
-| `Code*` | const | re-exported `0.3.72.*` codes |
-| `DocumentTooLarge` … `DecodeMisconfigured` | var | re-exported sentinels, each with its HTTP status (413 / 400 / 415 / 500) |
+| `Code*` | const | re-exported `0.3.72.*` codes, declared in `internal/core/data/codec/strictjson` (ADR 0160) |
+| `DocumentTooLarge` … `DecodeMisconfigured` | var | re-exported sentinels, each with its HTTP status (413 / 400 / 415 / 500), aliased from the core |
 
 ## Why a package of its own
 

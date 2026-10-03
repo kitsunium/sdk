@@ -27,6 +27,11 @@ documents and on every struct-tag option).
 
 ## Error codes (range `0.3.5.*`)
 
+Declared in `internal/core/data/codec/toml` — `codes.go` and `errors.go` — and used
+here as `coretoml.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code | Var | Trigger |
 |---|---|---|
 | `0.3.5.1` | `MarshalFailed`   | a value TOML cannot represent: a non-table root, nil, chan/func/complex, an unsigned integer above `MaxInt64`, a string or key that is not UTF-8, two map keys written alike, a cycle; a writer or `MarshalText` failure (its error kept as the cause) |

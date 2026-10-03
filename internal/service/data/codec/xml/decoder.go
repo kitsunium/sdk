@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -43,7 +44,7 @@ func (d *xmlDecoder) Decode(v any) error {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeXMLUnmarshalFailed,
+		Code:    corexml.CodeXMLUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "XML decoding failed",
 		Private: "service/data/codec/xml.Decoder.Decode: encoding/xml returned an error",

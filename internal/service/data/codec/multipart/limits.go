@@ -7,7 +7,10 @@
 // identical set so the codec never emits a body it would refuse to read back.
 package multipart
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
 
 // DefaultMaxPartBytes caps one part body at 32 MiB. Generous for a form field
 // or a document upload, and small enough that a single part cannot exhaust a
@@ -62,7 +65,7 @@ func (l LimitsConfig) resolve() (resolved LimitsConfig, err error) {
 	if bad {
 		//: typed refusal — matchable with errs.HasCode(err, CodeMultipartLimitsInvalid).
 		return LimitsConfig{}, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeMultipartLimitsInvalid,
+			Code:    coremultipart.CodeMultipartLimitsInvalid,
 			Reason:  "LIMITS_INVALID",
 			Public:  "multipart limits are not usable",
 			Private: "service/data/codec/multipart.NewWithLimits: a negative bound is not a limit",
@@ -125,7 +128,7 @@ func clampInt(v, fallback int) int {
 func limitExceeded(knob string, bound, got int64) error {
 	//: typed sentinel so callers route on CodeMultipartLimitExceeded.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeMultipartLimitExceeded,
+		Code:    coremultipart.CodeMultipartLimitExceeded,
 		Reason:  "LIMIT_EXCEEDED",
 		Public:  "multipart payload exceeds a configured limit",
 		Private: "service/data/codec/multipart: bound crossed while walking the parts",

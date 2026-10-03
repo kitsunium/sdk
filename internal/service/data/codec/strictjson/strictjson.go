@@ -34,6 +34,7 @@ import (
 
 	jsonv2 "encoding/json/v2"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -156,10 +157,10 @@ func PointerOf(err error) (pointer string, ok bool) {
 func classify(decodeErr error) error {
 	//: a semantic refusal: well-formed, but not what the target holds.
 	if semantic, isSemantic := errors.AsType[*jsonv2.SemanticError](decodeErr); isSemantic {
-		sentinel := ValueMismatched
+		sentinel := corestrictjson.ValueMismatched
 		//: the one semantic refusal with a code of its own.
 		if errors.Is(decodeErr, jsonv2.ErrUnknownName) {
-			sentinel = MemberUnknown
+			sentinel = corestrictjson.MemberUnknown
 		}
 		//: located, and nothing more.
 		return located(sentinel, semantic.JSONPointer, semantic.ByteOffset)
@@ -167,10 +168,10 @@ func classify(decodeErr error) error {
 	//: a syntactic refusal: not one well-formed value.
 	if syntactic, isSyntactic := errors.AsType[*jsontext.SyntacticError](decodeErr); isSyntactic {
 		//: located, and nothing more.
-		return located(DocumentMalformed, syntactic.JSONPointer, syntactic.ByteOffset)
+		return located(corestrictjson.DocumentMalformed, syntactic.JSONPointer, syntactic.ByteOffset)
 	}
 	//: an input that ended inside the value, reported without a location.
-	return errs.Wrap(DocumentMalformed, errs.WrapParams{})
+	return errs.Wrap(corestrictjson.DocumentMalformed, errs.WrapParams{})
 }
 
 // located builds a refusal carrying where the document failed.
@@ -204,5 +205,5 @@ func boundPointer(pointer string) string {
 // misconfigured refuses a call before anything is read.
 func misconfigured(argument string) error {
 	//: the argument's name, never its value.
-	return errs.Wrap(DecodeMisconfigured, errs.WrapParams{}, errs.String(fieldArgument, argument))
+	return errs.Wrap(corestrictjson.DecodeMisconfigured, errs.WrapParams{}, errs.String(fieldArgument, argument))
 }

@@ -5,6 +5,7 @@ import (
 	"errors"
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -89,7 +90,7 @@ func Test_baseencEncoder_Close_writerError(t *testing.T) {
 			t.Fatalf("%s: Encode err=%v (expected buffered success)", tc.name, err)
 		}
 		err := enc.Close()
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 		//: the synthetic sink error must survive the wrap.
@@ -123,7 +124,7 @@ func Test_baseencEncoder_Encode_jsonRejected(t *testing.T) {
 		//: chan int is the canonical non-encodable value; json.Encode trips
 		//: before any base-N byte reaches the sink.
 		err := enc.Encode(make(chan int))
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 	}
@@ -148,7 +149,7 @@ func Test_baseencEncoder_Encode_writerError(t *testing.T) {
 		c := &baseencCodec{variant: tc.v}
 		enc := c.NewEncoder(errEncSink{})
 		err := enc.Encode(1)
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 		//: the synthetic sink error must survive the wrap so errors.Is keeps

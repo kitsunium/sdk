@@ -26,6 +26,11 @@ the native codec — that would make it prove nothing.
 
 ## Error codes (range `0.3.7.*`)
 
+Declared in `internal/core/data/codec/msgpack` — `codes.go` and `errors.go` — and used
+here as `coremsgpack.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.7.1`    | `MarshalFailed`   | any encode failure: unsupported kind (chan, func, complex, unsafe.Pointer), a length over 2³²−1, nesting past `maxDepth`, a marshal method's error, `MarshalMsgpack` bytes that are not exactly one value, a struct with two fields on one key, a writer error |
@@ -151,7 +156,7 @@ returns one exact-size copy; `Append` encodes straight onto `dst`.
 | `decode_plan.go`, `decode_list.go`, `decode_map.go`, `decode_struct.go`, `decode_hook.go` | per-type decoders, slices/arrays, maps, structs, pointers/interfaces/unmarshal methods and the entry |
 | `struct.go` | struct layout and tag parsing, shared by both directions |
 | `encoder.go`, `decoder.go` | streaming encoder; streaming decoder — in place from the read-ahead, or framed |
-| `fault.go`, `failed.go` | failure constructors; the two codes and sentinels |
+| `fault.go` | failure constructors; the two codes and sentinels are `internal/core/data/codec/msgpack`'s (ADR 0160) |
 | `codec_compliance.go` | compile-time interface conformance |
 
 ## Verification

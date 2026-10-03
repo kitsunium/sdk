@@ -6,15 +6,14 @@ go_library(
     name = "json",
     srcs = [
         "codec.go",
-        "codes.go",
         "decoder.go",
         "encoder.go",
-        "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/json",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/json",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
@@ -41,10 +40,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

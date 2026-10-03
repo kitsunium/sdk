@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
@@ -37,29 +38,29 @@ func TestEveryRefusedConstructIsRefusedByName(t *testing.T) {
 		code   errs.Code
 	}
 	tests := []tc{
-		{name: "anchor", doc: "a: &base 1\n", code: yaml.CodeYAMLAnchorRefused, line: "1", column: "4"},
-		{name: "anchor on a key", doc: "x: 1\n&k y: 2\n", code: yaml.CodeYAMLAnchorRefused, line: "2", column: "1"},
-		{name: "alias", doc: "a: 1\nb: *base\n", code: yaml.CodeYAMLAliasRefused, line: "2", column: "4"},
-		{name: "alias in flow", doc: "[a, *b]", code: yaml.CodeYAMLAliasRefused, line: "1", column: "5"},
-		{name: "local tag", doc: "a: !thing 1\n", code: yaml.CodeYAMLTagRefused, line: "1", column: "4"},
-		{name: "core tag", doc: "- !!str 1\n", code: yaml.CodeYAMLTagRefused, line: "1", column: "3"},
-		{name: "verbatim tag", doc: "!<tag:x> a", code: yaml.CodeYAMLTagRefused, line: "1", column: "1"},
-		{name: "merge key", doc: "base: {a: 1}\nderived:\n  <<: {b: 2}\n", code: yaml.CodeYAMLMergeKeyRefused, line: "3", column: "3"},
-		{name: "merge key in flow", doc: "{<<: {a: 1}}", code: yaml.CodeYAMLMergeKeyRefused, line: "1", column: "2"},
-		{name: "second document after ---", doc: "a: 1\n---\nb: 2\n", code: yaml.CodeYAMLMultiDocRefused, line: "2", column: "1"},
-		{name: "second document after ...", doc: "a: 1\n...\nb: 2\n", code: yaml.CodeYAMLMultiDocRefused, line: "3", column: "1"},
-		{name: "two explicit documents", doc: "---\n---\n", code: yaml.CodeYAMLMultiDocRefused, line: "2", column: "1"},
-		{name: "complex key", doc: "? a\n: b\n", code: yaml.CodeYAMLComplexKeyRefused, line: "1", column: "1"},
-		{name: "flow collection as a key", doc: "[a, b]: c\n", code: yaml.CodeYAMLComplexKeyRefused, line: "1", column: "1"},
-		{name: "flow mapping key that is a collection", doc: "{[a]: b}", code: yaml.CodeYAMLComplexKeyRefused, line: "1", column: "2"},
-		{name: "explicit key in flow", doc: "[? a]", code: yaml.CodeYAMLComplexKeyRefused, line: "1", column: "2"},
-		{name: "YAML directive", doc: "%YAML 1.2\n---\na: 1\n", code: yaml.CodeYAMLDirectiveRefused, line: "1", column: "1"},
-		{name: "TAG directive", doc: "%TAG ! tag:x,2000:\n---\na: 1\n", code: yaml.CodeYAMLDirectiveRefused, line: "1", column: "1"},
-		{name: "duplicate key", doc: "port: 80\nhost: x\nport: 81\n", code: yaml.CodeYAMLDuplicateKey, line: "3", column: "1"},
-		{name: "duplicate key across styles", doc: "a: 1\n\"a\": 2\n", code: yaml.CodeYAMLDuplicateKey, line: "2", column: "1"},
-		{name: "duplicate key in flow", doc: "{a: 1, a: 2}", code: yaml.CodeYAMLDuplicateKey, line: "1", column: "8"},
-		{name: "duplicate key in a large mapping", doc: largeMappingWithDuplicate(), code: yaml.CodeYAMLDuplicateKey, line: "41", column: "1"},
-		{name: "leading zero", doc: "mode: 0644\n", code: yaml.CodeYAMLLeadingZeroRefused, line: "1", column: "7"},
+		{name: "anchor", doc: "a: &base 1\n", code: coreyaml.CodeYAMLAnchorRefused, line: "1", column: "4"},
+		{name: "anchor on a key", doc: "x: 1\n&k y: 2\n", code: coreyaml.CodeYAMLAnchorRefused, line: "2", column: "1"},
+		{name: "alias", doc: "a: 1\nb: *base\n", code: coreyaml.CodeYAMLAliasRefused, line: "2", column: "4"},
+		{name: "alias in flow", doc: "[a, *b]", code: coreyaml.CodeYAMLAliasRefused, line: "1", column: "5"},
+		{name: "local tag", doc: "a: !thing 1\n", code: coreyaml.CodeYAMLTagRefused, line: "1", column: "4"},
+		{name: "core tag", doc: "- !!str 1\n", code: coreyaml.CodeYAMLTagRefused, line: "1", column: "3"},
+		{name: "verbatim tag", doc: "!<tag:x> a", code: coreyaml.CodeYAMLTagRefused, line: "1", column: "1"},
+		{name: "merge key", doc: "base: {a: 1}\nderived:\n  <<: {b: 2}\n", code: coreyaml.CodeYAMLMergeKeyRefused, line: "3", column: "3"},
+		{name: "merge key in flow", doc: "{<<: {a: 1}}", code: coreyaml.CodeYAMLMergeKeyRefused, line: "1", column: "2"},
+		{name: "second document after ---", doc: "a: 1\n---\nb: 2\n", code: coreyaml.CodeYAMLMultiDocRefused, line: "2", column: "1"},
+		{name: "second document after ...", doc: "a: 1\n...\nb: 2\n", code: coreyaml.CodeYAMLMultiDocRefused, line: "3", column: "1"},
+		{name: "two explicit documents", doc: "---\n---\n", code: coreyaml.CodeYAMLMultiDocRefused, line: "2", column: "1"},
+		{name: "complex key", doc: "? a\n: b\n", code: coreyaml.CodeYAMLComplexKeyRefused, line: "1", column: "1"},
+		{name: "flow collection as a key", doc: "[a, b]: c\n", code: coreyaml.CodeYAMLComplexKeyRefused, line: "1", column: "1"},
+		{name: "flow mapping key that is a collection", doc: "{[a]: b}", code: coreyaml.CodeYAMLComplexKeyRefused, line: "1", column: "2"},
+		{name: "explicit key in flow", doc: "[? a]", code: coreyaml.CodeYAMLComplexKeyRefused, line: "1", column: "2"},
+		{name: "YAML directive", doc: "%YAML 1.2\n---\na: 1\n", code: coreyaml.CodeYAMLDirectiveRefused, line: "1", column: "1"},
+		{name: "TAG directive", doc: "%TAG ! tag:x,2000:\n---\na: 1\n", code: coreyaml.CodeYAMLDirectiveRefused, line: "1", column: "1"},
+		{name: "duplicate key", doc: "port: 80\nhost: x\nport: 81\n", code: coreyaml.CodeYAMLDuplicateKey, line: "3", column: "1"},
+		{name: "duplicate key across styles", doc: "a: 1\n\"a\": 2\n", code: coreyaml.CodeYAMLDuplicateKey, line: "2", column: "1"},
+		{name: "duplicate key in flow", doc: "{a: 1, a: 2}", code: coreyaml.CodeYAMLDuplicateKey, line: "1", column: "8"},
+		{name: "duplicate key in a large mapping", doc: largeMappingWithDuplicate(), code: coreyaml.CodeYAMLDuplicateKey, line: "41", column: "1"},
+		{name: "leading zero", doc: "mode: 0644\n", code: coreyaml.CodeYAMLLeadingZeroRefused, line: "1", column: "7"},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -70,8 +71,8 @@ func TestEveryRefusedConstructIsRefusedByName(t *testing.T) {
 			t.Fatalf("%s: Unmarshal(%q) error = %v, want code %s", tc.name, tc.doc, err, tc.code)
 		}
 		//: every refusal is also a decoding failure by code.
-		if !errs.HasCode(err, yaml.CodeYAMLUnmarshalFailed) {
-			t.Errorf("%s: error %v does not carry %s", tc.name, err, yaml.CodeYAMLUnmarshalFailed)
+		if !errs.HasCode(err, coreyaml.CodeYAMLUnmarshalFailed) {
+			t.Errorf("%s: error %v does not carry %s", tc.name, err, coreyaml.CodeYAMLUnmarshalFailed)
 		}
 		//: where the construct starts.
 		if line, column := position(err); line != tc.line || column != tc.column {

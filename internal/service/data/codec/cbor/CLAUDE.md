@@ -24,6 +24,11 @@ byte, except that map pairs are now sorted.
 
 ## Error codes (range `0.3.6.*`)
 
+Declared in `internal/core/data/codec/cbor` — `codes.go` and `errors.go` — and used
+here as `corecbor.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code      | Var               | Trigger |
 |---|---|---|
 | `0.3.6.1` | `MarshalFailed`   | a type CBOR cannot carry, a string that is not UTF-8, two map keys that encode alike, nesting past 32, a cycle, a failing writer / `MarshalBinary` / `MarshalCBOR` (a cause that is an SDK error keeps its own code: origin wins) |
@@ -38,7 +43,7 @@ input. No new code was needed: every failure is one of the two.
 | File | What it holds |
 |---|---|
 | `codec.go` | the `Codec` singleton, `Marshal` (pooled `scratch` buffer, one exact-size copy), `Unmarshal`, `Append`, the stream constructors, the package doc |
-| `codes.go`, `errors.go` | the two codes, the two sentinels, the four failure constructors |
+| `errors.go` | the four failure constructors; the two codes and the two sentinels are `internal/core/data/codec/cbor`'s (ADR 0160) |
 | `wire.go` | major types, additional information, simple values, tags 0–3, `appendHead`/`readHead`, the binary16 decoder |
 | `validate.go` | the validator: one resumable, explicit-stack pass accepting exactly one well-formed and valid item within the bounds |
 | `fields.go` | struct field resolution: `cbor` tag, `json` fallback, encoding/json embedding and dominance, options, `keyasint` canonicalisation, `toarray` |

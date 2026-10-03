@@ -10,6 +10,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
+	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -68,7 +69,7 @@ func (*xmlCodec) Marshal(v any) (encoded []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: wrap for reason-based matching.
 		return nil, errs.Wrap(xerr, errs.WrapParams{
-			Code:    CodeXMLMarshalFailed,
+			Code:    corexml.CodeXMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "XML encoding failed",
 			Private: "service/data/codec/xml.Marshal: encoding/xml returned an error",
@@ -82,7 +83,7 @@ func (*xmlCodec) Marshal(v any) (encoded []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: surface the close failure as a marshal error.
 		return nil, errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeXMLMarshalFailed,
+			Code:    corexml.CodeXMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "XML encoding failed",
 			Private: "service/data/codec/xml.Marshal: encoder.Close returned an error",
@@ -108,7 +109,7 @@ func (*xmlCodec) Unmarshal(data []byte, v any) error {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeXMLUnmarshalFailed,
+		Code:    corexml.CodeXMLUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "XML decoding failed",
 		Private: "service/data/codec/xml.Unmarshal: encoding/xml returned an error",
@@ -131,7 +132,7 @@ func (*xmlCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: wrap the library error for reason-based matching.
 		return dst, errs.Wrap(xerr, errs.WrapParams{
-			Code:    CodeXMLMarshalFailed,
+			Code:    corexml.CodeXMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "XML encoding failed",
 			Private: "service/data/codec/xml.Append: encoding/xml returned an error",
@@ -143,7 +144,7 @@ func (*xmlCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: surface the close failure as a marshal error.
 		return dst, errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeXMLMarshalFailed,
+			Code:    corexml.CodeXMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "XML encoding failed",
 			Private: "service/data/codec/xml.Append: encoder.Close returned an error",

@@ -9,6 +9,7 @@ import (
 	"strings"
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -235,10 +236,10 @@ func Test_baseencCodec_decodeBytes_malformed(t *testing.T) {
 			t.Errorf("%s: expected decode error, got nil", tc.name)
 			return
 		}
-		if !errs.HasCode(err, CodeBaseEncDecodeFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncDecodeFailed) {
 			got, _ := errs.CodeOf(err)
 			t.Errorf("%s: decode error code = %s, want %s",
-				tc.name, got, CodeBaseEncDecodeFailed)
+				tc.name, got, corebaseenc.CodeBaseEncDecodeFailed)
 		}
 	}
 	for _, tc := range tests {
@@ -307,7 +308,7 @@ func Test_bufferingWriter_ShortWrite_C2(t *testing.T) {
 		}
 		//: wrap chain must carry the typed dotted-quad code so an
 		//: incorrect sentinel with the same reason cannot pass silently.
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 		//: wrap chain must also carry the marshal-failed reason for log
@@ -374,7 +375,7 @@ func Test_baseencCodec_Marshal_jsonRejected(t *testing.T) {
 		t.Helper()
 		c := &baseencCodec{variant: tc.v}
 		_, err := c.Marshal(make(chan int))
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 	}
@@ -436,7 +437,7 @@ func Test_baseencCodec_Unmarshal_oversize(t *testing.T) {
 		c := &baseencCodec{variant: tc.v}
 		var out struct{ N int }
 		err := c.Unmarshal(make([]byte, maxBaseEncBytes+1), &out)
-		if !errs.HasCode(err, CodeBaseEncSizeExceeded) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncSizeExceeded) {
 			t.Errorf("%s: expected CodeBaseEncSizeExceeded, got %v", tc.name, err)
 		}
 	}
@@ -465,7 +466,7 @@ func Test_baseencCodec_Unmarshal_badJSON(t *testing.T) {
 		envelope := c.encodeBytes([]byte("{not-json"))
 		var out struct{ N int }
 		err := c.Unmarshal(envelope, &out)
-		if !errs.HasCode(err, CodeBaseEncUnmarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncUnmarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncUnmarshalFailed, got %v", tc.name, err)
 		}
 	}
@@ -533,7 +534,7 @@ func Test_baseencCodec_Append_rollback(t *testing.T) {
 		c := &baseencCodec{variant: tc.v}
 		prefix := []byte("HEAD:")
 		out, err := c.Append(slices.Clone(prefix), make(chan int))
-		if !errs.HasCode(err, CodeBaseEncMarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncMarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncMarshalFailed, got %v", tc.name, err)
 		}
 		if !bytes.Equal(out, prefix) {
@@ -849,7 +850,7 @@ func TestWrapDecode(t *testing.T) {
 		t.Helper()
 		got, err := wrapDecode(tc.in, tc.cause)
 		if tc.wantErr {
-			if !errs.HasCode(err, CodeBaseEncDecodeFailed) {
+			if !errs.HasCode(err, corebaseenc.CodeBaseEncDecodeFailed) {
 				t.Errorf("%s: expected CodeBaseEncDecodeFailed, got %v", tc.name, err)
 			}
 			if got != nil {
@@ -1137,7 +1138,7 @@ func Test_wrapMalformed(t *testing.T) {
 			}
 			return
 		}
-		if !errs.HasCode(err, CodeBaseEncDecodeFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncDecodeFailed) {
 			t.Fatalf("wrapMalformed(!ok) = %v, want BASE_ENC_DECODE_FAILED", err)
 		}
 		if got != nil {
@@ -1176,12 +1177,12 @@ func Test_convSizeExceeded(t *testing.T) {
 		err := convSizeExceeded(c.where)
 		if c.wantRefused {
 			//: whatever comes back, it must NOT masquerade as a size refusal.
-			if errs.HasCode(err, CodeBaseEncSizeExceeded) {
+			if errs.HasCode(err, corebaseenc.CodeBaseEncSizeExceeded) {
 				t.Fatalf("convSizeExceeded(\"\") = %v, want the wrap to be refused", err)
 			}
 			return
 		}
-		if !errs.HasCode(err, CodeBaseEncSizeExceeded) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncSizeExceeded) {
 			t.Fatalf("convSizeExceeded = %v, want BASE_ENC_SIZE_EXCEEDED", err)
 		}
 		reason, _ := errs.ReasonOf(err)

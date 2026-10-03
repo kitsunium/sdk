@@ -4,6 +4,7 @@ package json
 import (
 	stdjson "encoding/json"
 
+	corejson "github.com/kitsunium/sdk/internal/core/data/codec/json"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -23,7 +24,7 @@ func (e *jsonEncoder) Encode(v any) error {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeJSONMarshalFailed,
+		Code:    corejson.CodeJSONMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "JSON encoding failed",
 		Private: "service/data/codec/json.Encoder.Encode: encoding/json returned an error",

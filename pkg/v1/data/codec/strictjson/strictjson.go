@@ -63,6 +63,7 @@ import (
 	"io"
 	"net/http"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcstrict "github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
 )
@@ -72,50 +73,50 @@ import (
 const MaxPointerBytes int = svcstrict.MaxPointerBytes
 
 // CodeDocumentTooLarge identifies a document longer than the bound (413).
-const CodeDocumentTooLarge errs.Code = svcstrict.CodeDocumentTooLarge
+const CodeDocumentTooLarge errs.Code = corestrictjson.CodeDocumentTooLarge
 
 // CodeDocumentEmpty identifies a document of zero bytes (400).
-const CodeDocumentEmpty errs.Code = svcstrict.CodeDocumentEmpty
+const CodeDocumentEmpty errs.Code = corestrictjson.CodeDocumentEmpty
 
 // CodeDocumentMalformed identifies a document that is not exactly one
 // well-formed JSON value (400).
-const CodeDocumentMalformed errs.Code = svcstrict.CodeDocumentMalformed
+const CodeDocumentMalformed errs.Code = corestrictjson.CodeDocumentMalformed
 
 // CodeMemberUnknown identifies a member the target does not declare (400).
-const CodeMemberUnknown errs.Code = svcstrict.CodeMemberUnknown
+const CodeMemberUnknown errs.Code = corestrictjson.CodeMemberUnknown
 
 // CodeValueMismatched identifies a value the target cannot hold (400).
-const CodeValueMismatched errs.Code = svcstrict.CodeValueMismatched
+const CodeValueMismatched errs.Code = corestrictjson.CodeValueMismatched
 
 // CodeMediaTypeUnsupported identifies a request body that does not declare
 // JSON (415).
-const CodeMediaTypeUnsupported errs.Code = svcstrict.CodeMediaTypeUnsupported
+const CodeMediaTypeUnsupported errs.Code = corestrictjson.CodeMediaTypeUnsupported
 
 // CodeDocumentUnreadable identifies a reader that failed before the document
 // ended (400).
-const CodeDocumentUnreadable errs.Code = svcstrict.CodeDocumentUnreadable
+const CodeDocumentUnreadable errs.Code = corestrictjson.CodeDocumentUnreadable
 
 // CodeDecodeMisconfigured identifies a call no input can satisfy: a
 // non-positive bound, or a target that is not a non-nil pointer.
-const CodeDecodeMisconfigured errs.Code = svcstrict.CodeDecodeMisconfigured
+const CodeDecodeMisconfigured errs.Code = corestrictjson.CodeDecodeMisconfigured
 
 var (
 	// DocumentTooLarge refuses a document longer than the bound.
-	DocumentTooLarge = svcstrict.DocumentTooLarge
+	DocumentTooLarge = corestrictjson.DocumentTooLarge
 	// DocumentEmpty reports a document of zero bytes.
-	DocumentEmpty = svcstrict.DocumentEmpty
+	DocumentEmpty = corestrictjson.DocumentEmpty
 	// DocumentMalformed refuses a document that is not one well-formed value.
-	DocumentMalformed = svcstrict.DocumentMalformed
+	DocumentMalformed = corestrictjson.DocumentMalformed
 	// MemberUnknown refuses a member the target does not declare.
-	MemberUnknown = svcstrict.MemberUnknown
+	MemberUnknown = corestrictjson.MemberUnknown
 	// ValueMismatched refuses a value the target cannot hold.
-	ValueMismatched = svcstrict.ValueMismatched
+	ValueMismatched = corestrictjson.ValueMismatched
 	// MediaTypeUnsupported refuses a request body that does not declare JSON.
-	MediaTypeUnsupported = svcstrict.MediaTypeUnsupported
+	MediaTypeUnsupported = corestrictjson.MediaTypeUnsupported
 	// DocumentUnreadable wraps a reader that failed before the document ended.
-	DocumentUnreadable = svcstrict.DocumentUnreadable
+	DocumentUnreadable = corestrictjson.DocumentUnreadable
 	// DecodeMisconfigured refuses a call no input can satisfy.
-	DecodeMisconfigured = svcstrict.DecodeMisconfigured
+	DecodeMisconfigured = corestrictjson.DecodeMisconfigured
 )
 
 // Decode reads exactly one JSON value from r into v, a non-nil pointer,

@@ -7,6 +7,7 @@ import (
 	"errors"
 	"io"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -186,7 +187,7 @@ func (d *yamlDecoder) readLine(dst []byte) ([]byte, error) {
 		//: the bound, checked as the document grows.
 		if len(dst) > maxYAMLBytes {
 			//: refused, with the bound.
-			return dst, errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+			return dst, errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
 				errs.Int("cap", maxYAMLBytes), errs.String("detail", "a document of the stream is larger than the decoder accepts"))
 		}
 		//: more of the same line.
@@ -197,7 +198,7 @@ func (d *yamlDecoder) readLine(dst []byte) ([]byte, error) {
 		if err != nil && !errors.Is(err, io.EOF) {
 			//: the reader's own error stays the cause.
 			return dst, errs.Wrap(err, errs.WrapParams{
-				Code:    CodeYAMLUnmarshalFailed,
+				Code:    coreyaml.CodeYAMLUnmarshalFailed,
 				Reason:  "UNMARSHAL_FAILED",
 				Public:  "YAML decoding failed",
 				Private: "service/data/codec/yaml.Decoder: the reader failed",

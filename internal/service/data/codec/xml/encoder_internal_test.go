@@ -6,6 +6,7 @@ import (
 	"errors"
 	"testing"
 
+	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -106,7 +107,7 @@ func Test_xmlEncoder_Close_FlushError(t *testing.T) {
 		//: Close → Flush fails over the failing writer, hitting the wrap.
 		//: assert the typed code, not just non-nil, so a regression where
 		//: Close stops carrying the dotted-quad sentinel actually fails.
-		if err := enc.Close(); !errs.HasCode(err, CodeXMLMarshalFailed) {
+		if err := enc.Close(); !errs.HasCode(err, corexml.CodeXMLMarshalFailed) {
 			t.Errorf("%s: Close err=%v, want CodeXMLMarshalFailed (0.3.3.1)", tc.name, err)
 		}
 	}

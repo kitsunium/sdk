@@ -11,6 +11,7 @@ import (
 	"net/textproto"
 	"strings"
 
+	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -87,7 +88,7 @@ func (e *multipartEncoder) Close() error {
 	}
 	//: wrap the stdlib error for reason-based matching.
 	return errs.Wrap(cerr, errs.WrapParams{
-		Code:    CodeMultipartMarshalFailed,
+		Code:    coremultipart.CodeMultipartMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "multipart encoding failed",
 		Private: "service/data/codec/multipart.Encoder.Close: mime/multipart returned an error",
@@ -213,7 +214,7 @@ func asPart(v any) (part *PartValue, err error) {
 func marshalFailed(cause error, detail string) error {
 	//: typed sentinel so callers route on CodeMultipartMarshalFailed.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeMultipartMarshalFailed,
+		Code:    coremultipart.CodeMultipartMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "multipart encoding failed",
 		Private: "service/data/codec/multipart." + detail,
@@ -226,7 +227,7 @@ func marshalFailed(cause error, detail string) error {
 func valueInvalid(detail string, fields ...errs.FieldValue) error {
 	//: typed sentinel so callers route on CodeMultipartValueInvalid.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeMultipartValueInvalid,
+		Code:    coremultipart.CodeMultipartValueInvalid,
 		Reason:  "VALUE_INVALID",
 		Public:  "multipart codec rejected the value shape",
 		Private: "service/data/codec/multipart: " + detail,

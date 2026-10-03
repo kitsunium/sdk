@@ -19,7 +19,7 @@ Stdlib only; not a codec — it registers no Format. It reads documents with
 |---|---|
 | `jsonpatch.go` | package doc, `Op` (`Add`, `Remove`, `Replace`), `EditValue`, `Diff`; the `differ` — objects member by member in name order, arrays aligned (`align` → `lcsLengths`, bounded by `maxAlignCells`) then paired in runs (`changeRun`), anything else replaced; `escapeToken` |
 | `tree.go` | the `node` a document is read into (`parse` → `readValue` / `readObject` / `readArray` / `readMember`), its `digest` (FNV-1a over what `equal` compares, members summed so their order does not count), `equal` (the digests first, then RFC 6902 §4.6), `sameNumber` / `canonical` (exact decimal equality, linear in the text), `encode` (compact, members in the document's order, a number as written), `notJSON` |
-| `codes.go` / `errors.go` | `0.3.90.1` `NOT_JSON` |
+| — | `0.3.90.1` `NOT_JSON` is declared in `internal/core/data/codec/jsonpatch` (ADR 0160 §2) and used here as `corejsonpatch.NotJSON`; its 400 is a literal there, so neither package links `net/http` for a number |
 
 ## Why-this-shape
 

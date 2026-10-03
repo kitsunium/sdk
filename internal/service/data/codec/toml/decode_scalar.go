@@ -8,6 +8,7 @@ import (
 	"reflect"
 	"time"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -251,9 +252,9 @@ func (d *decoder) wrapFail(n int32, cause error, target reflect.Type) error {
 	line, _ := position(d.p.data, int(d.p.nodes[n].at))
 	//: the sentinel's code and messages over the cause.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeTOMLUnmarshalFailed,
-		Reason:  UnmarshalFailed.Reason(),
-		Public:  UnmarshalFailed.Public(),
+		Code:    coretoml.CodeTOMLUnmarshalFailed,
+		Reason:  coretoml.UnmarshalFailed.Reason(),
+		Public:  coretoml.UnmarshalFailed.Public(),
 		Private: privateTextRefused,
 	}, errs.String(fieldProblem, problemText), errs.String(fieldKey, d.keyPath(n)),
 		errs.Int(fieldLine, line), errs.String(fieldType, target.String()))

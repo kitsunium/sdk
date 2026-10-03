@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
@@ -93,7 +94,7 @@ func FuzzUnmarshal(f *testing.F) {
 		var typed fuzzTarget
 		//: a refusal is a value, never a panic — and always a decoding
 		//: failure by code, whichever construct it names.
-		if err := c.Unmarshal(data, &typed); err != nil && !errs.HasCode(err, yaml.CodeYAMLUnmarshalFailed) {
+		if err := c.Unmarshal(data, &typed); err != nil && !errs.HasCode(err, coreyaml.CodeYAMLUnmarshalFailed) {
 			t.Fatalf("decoding %q into a struct fails with %v, which is not an UnmarshalFailed", data, err)
 		}
 		var value any

@@ -4,14 +4,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "asn1",
-    srcs = [
-        "codec.go",
-        "failed.go",
-    ],
+    srcs = ["codec.go"],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/asn1",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/asn1",
         "//internal/kernel/errs",
     ],
 )
@@ -35,10 +33,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

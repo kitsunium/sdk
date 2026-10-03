@@ -10,6 +10,7 @@ import (
 	"reflect"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
+	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -85,7 +86,7 @@ func (e *tlvEncoder) Encode(v any) error {
 	}
 	//: wrap the writer error as a marshal failure.
 	return errs.Wrap(werr, errs.WrapParams{
-		Code:    CodeTLVMarshalFailed,
+		Code:    coretlv.CodeTLVMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "TLV encoding failed",
 		Private: "service/data/codec/tlv.Encoder.Encode: writer error or short write",
@@ -546,7 +547,7 @@ func encodeStructDirect(dst []byte, view reflectView, depth int) (encoded []byte
 func unsupportedKind(kind string) error {
 	//: kind names are short and stable across Go versions.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnsupportedType,
+		Code:    coretlv.CodeTLVUnsupportedType,
 		Reason:  "UNSUPPORTED_TYPE",
 		Public:  "TLV codec cannot encode this type",
 		Private: "service/data/codec/tlv: reflect.Kind not supported on the wire",
@@ -557,7 +558,7 @@ func unsupportedKind(kind string) error {
 func depthExceededError(depth int) error {
 	//: surface the documented depth sentinel.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVDepthExceeded,
+		Code:    coretlv.CodeTLVDepthExceeded,
 		Reason:  "DEPTH_EXCEEDED",
 		Public:  "TLV nesting depth exceeds limit",
 		Private: "service/data/codec/tlv: depth exceeded maxTLVDepth",
@@ -568,7 +569,7 @@ func depthExceededError(depth int) error {
 func fieldNameTooLong(length int) error {
 	//: include the offending length in Fields for diagnostics.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVMarshalFailed,
+		Code:    coretlv.CodeTLVMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "TLV struct field name too long",
 		Private: "service/data/codec/tlv.encodeStructField: name exceeds maxFieldNameBytes",

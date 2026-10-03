@@ -4,6 +4,7 @@ package xml
 import (
 	stdxml "encoding/xml"
 
+	corexml "github.com/kitsunium/sdk/internal/core/data/codec/xml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -23,7 +24,7 @@ func (e *xmlEncoder) Encode(v any) error {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeXMLMarshalFailed,
+		Code:    corexml.CodeXMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "XML encoding failed",
 		Private: "service/data/codec/xml.Encoder.Encode: encoding/xml returned an error",
@@ -41,7 +42,7 @@ func (e *xmlEncoder) Close() error {
 	}
 	//: wrap.
 	return errs.Wrap(xerr, errs.WrapParams{
-		Code:    CodeXMLMarshalFailed,
+		Code:    corexml.CodeXMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "XML encoding failed",
 		Private: "service/data/codec/xml.Encoder.Close: Flush returned an error",

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
@@ -92,10 +93,10 @@ func TestAStreamRefusalIsLocatedInTheStream(t *testing.T) {
 		code   errs.Code
 	}
 	tests := []tc{
-		{name: "anchor in the third document", stream: "a: 1\n---\nb: 2\n---\nc: &x 3\n", line: "5", code: yaml.CodeYAMLAnchorRefused},
-		{name: "syntax in the second document", stream: "a: 1\n---\n\nb: [\n", line: "4", code: yaml.CodeYAMLUnmarshalFailed},
-		{name: "a directive", stream: "a: 1\n...\n%YAML 1.2\n---\nb: 2\n", line: "3", code: yaml.CodeYAMLDirectiveRefused},
-		{name: "a ... closing nothing", stream: "a: 1\n...\n...\n", line: "3", code: yaml.CodeYAMLUnmarshalFailed},
+		{name: "anchor in the third document", stream: "a: 1\n---\nb: 2\n---\nc: &x 3\n", line: "5", code: coreyaml.CodeYAMLAnchorRefused},
+		{name: "syntax in the second document", stream: "a: 1\n---\n\nb: [\n", line: "4", code: coreyaml.CodeYAMLUnmarshalFailed},
+		{name: "a directive", stream: "a: 1\n...\n%YAML 1.2\n---\nb: 2\n", line: "3", code: coreyaml.CodeYAMLDirectiveRefused},
+		{name: "a ... closing nothing", stream: "a: 1\n...\n...\n", line: "3", code: coreyaml.CodeYAMLUnmarshalFailed},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

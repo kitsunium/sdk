@@ -13,6 +13,7 @@ import (
 	"mime"
 	"strings"
 
+	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -209,7 +210,7 @@ func validateBoundary(boundary string) error {
 func boundaryInvalid(detail string) error {
 	//: typed sentinel so callers route on CodeMultipartBoundaryInvalid.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeMultipartBoundaryInvalid,
+		Code:    coremultipart.CodeMultipartBoundaryInvalid,
 		Reason:  "BOUNDARY_INVALID",
 		Public:  "multipart boundary is missing or invalid",
 		Private: "service/data/codec/multipart: " + detail,

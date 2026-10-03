@@ -6,6 +6,7 @@ import (
 	"strings"
 	"testing"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
 )
@@ -26,14 +27,14 @@ func TestDecodeRequest(t *testing.T) {
 		{name: "with a charset", body: `{"name":"lamp","price":12}`, contentType: "application/json; charset=utf-8"},
 		{name: "a vendor +json type", body: `{"name":"lamp","price":12}`, contentType: "application/vnd.shop+json"},
 		{name: "upper-case", body: `{"name":"lamp","price":12}`, contentType: "Application/JSON"},
-		{name: "text/plain", body: `{"name":"lamp","price":12}`, contentType: "text/plain", wantCode: strictjson.CodeMediaTypeUnsupported},
-		{name: "a form", body: `name=lamp`, contentType: "application/x-www-form-urlencoded", wantCode: strictjson.CodeMediaTypeUnsupported},
-		{name: "no content type", body: `{"name":"lamp","price":12}`, wantCode: strictjson.CodeMediaTypeUnsupported},
-		{name: "an unparsable content type", body: `{}`, contentType: "application/json;;", wantCode: strictjson.CodeMediaTypeUnsupported},
-		{name: "an empty body with no content type", wantCode: strictjson.CodeDocumentEmpty},
-		{name: "an empty body claiming text", contentType: "text/plain", wantCode: strictjson.CodeDocumentEmpty},
-		{name: "an unknown member", body: `{"name":"lamp","admin":true}`, contentType: "application/json", wantCode: strictjson.CodeMemberUnknown},
-		{name: "past the bound", body: `{"name":"` + strings.Repeat("x", 200) + `"}`, contentType: "application/json", wantCode: strictjson.CodeDocumentTooLarge},
+		{name: "text/plain", body: `{"name":"lamp","price":12}`, contentType: "text/plain", wantCode: corestrictjson.CodeMediaTypeUnsupported},
+		{name: "a form", body: `name=lamp`, contentType: "application/x-www-form-urlencoded", wantCode: corestrictjson.CodeMediaTypeUnsupported},
+		{name: "no content type", body: `{"name":"lamp","price":12}`, wantCode: corestrictjson.CodeMediaTypeUnsupported},
+		{name: "an unparsable content type", body: `{}`, contentType: "application/json;;", wantCode: corestrictjson.CodeMediaTypeUnsupported},
+		{name: "an empty body with no content type", wantCode: corestrictjson.CodeDocumentEmpty},
+		{name: "an empty body claiming text", contentType: "text/plain", wantCode: corestrictjson.CodeDocumentEmpty},
+		{name: "an unknown member", body: `{"name":"lamp","admin":true}`, contentType: "application/json", wantCode: corestrictjson.CodeMemberUnknown},
+		{name: "past the bound", body: `{"name":"` + strings.Repeat("x", 200) + `"}`, contentType: "application/json", wantCode: corestrictjson.CodeDocumentTooLarge},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -97,7 +98,7 @@ func TestAnOversizedBodyClosesTheConnection(t *testing.T) {
 func TestDecodeRequestRefusesANilRequest(t *testing.T) {
 	t.Parallel()
 	var got item
-	if err := strictjson.DecodeRequest(nil, nil, &got, 64); !errs.HasCode(err, strictjson.CodeDecodeMisconfigured) {
+	if err := strictjson.DecodeRequest(nil, nil, &got, 64); !errs.HasCode(err, corestrictjson.CodeDecodeMisconfigured) {
 		t.Fatalf("DecodeRequest(nil request) = %v, want DECODE_MISCONFIGURED", err)
 	}
 }

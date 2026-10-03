@@ -61,6 +61,7 @@ package bson
 import (
 	"time"
 
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcbson "github.com/kitsunium/sdk/internal/service/data/codec/bson"
 )
@@ -99,30 +100,30 @@ const (
 // The error codes, range 0.3.36.*.
 const (
 	// CodeMarshalFailed identifies a value Marshal or Append cannot encode.
-	CodeMarshalFailed errs.Code = svcbson.CodeBSONMarshalFailed
+	CodeMarshalFailed errs.Code = corebson.CodeBSONMarshalFailed
 	// CodeUnmarshalFailed identifies input Unmarshal refuses.
-	CodeUnmarshalFailed errs.Code = svcbson.CodeBSONUnmarshalFailed
+	CodeUnmarshalFailed errs.Code = corebson.CodeBSONUnmarshalFailed
 	// CodeSizeExceeded identifies an Unmarshal input past 10 MiB.
-	CodeSizeExceeded errs.Code = svcbson.CodeBSONSizeExceeded
+	CodeSizeExceeded errs.Code = corebson.CodeBSONSizeExceeded
 	// CodeDepthExceeded identifies nesting past 100 levels.
-	CodeDepthExceeded errs.Code = svcbson.CodeBSONDepthExceeded
+	CodeDepthExceeded errs.Code = corebson.CodeBSONDepthExceeded
 	// CodeValueInvalid identifies a value type's constructor or parser
 	// refusing its input.
-	CodeValueInvalid errs.Code = svcbson.CodeBSONValueInvalid
+	CodeValueInvalid errs.Code = corebson.CodeBSONValueInvalid
 )
 
 // The sentinels, for errors.Is, and the nil ObjectID.
 var (
 	// MarshalFailed marks a value Marshal or Append cannot encode.
-	MarshalFailed = svcbson.MarshalFailed
+	MarshalFailed = corebson.MarshalFailed
 	// UnmarshalFailed marks input Unmarshal refuses.
-	UnmarshalFailed = svcbson.UnmarshalFailed
+	UnmarshalFailed = corebson.UnmarshalFailed
 	// SizeExceeded marks an Unmarshal input past 10 MiB.
-	SizeExceeded = svcbson.SizeExceeded
+	SizeExceeded = corebson.SizeExceeded
 	// DepthExceeded marks nesting past 100 levels.
-	DepthExceeded = svcbson.DepthExceeded
+	DepthExceeded = corebson.DepthExceeded
 	// ValueInvalid marks a value type's constructor or parser refusing its input.
-	ValueInvalid = svcbson.ValueInvalid
+	ValueInvalid = corebson.ValueInvalid
 	// NilObjectID is the zero ObjectID.
 	NilObjectID ObjectID
 )

@@ -19,7 +19,7 @@ ships without an experiment flag. Not a codec: it registers no Format.
 | `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `checkArguments`, `decode`, `classify`, `located`, `boundPointer`, `PointerOf`, `misconfigured` |
 | `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `causeOf`, which names a read failure by its type |
 | `request.go` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839) |
-| `codes.go` / `errors.go` | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status |
+| — | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status, are declared in `internal/core/data/codec/strictjson` (ADR 0160 §2) and used here as `corestrictjson.<Var>`; the statuses are literals there, because the core does not import `net/http` for a number |
 
 ## Why-this-shape
 

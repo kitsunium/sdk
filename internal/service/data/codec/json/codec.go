@@ -9,6 +9,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corejson "github.com/kitsunium/sdk/internal/core/data/codec/json"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -65,7 +66,7 @@ func (*jsonCodec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: wrap the stdlib error for reason-based matching.
 	return nil, errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeJSONMarshalFailed,
+		Code:    corejson.CodeJSONMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "JSON encoding failed",
 		Private: "service/data/codec/json.Marshal: encoding/json returned an error",
@@ -117,7 +118,7 @@ func (*jsonCodec) Unmarshal(data []byte, v any) error {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeJSONUnmarshalFailed,
+		Code:    corejson.CodeJSONUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "JSON decoding failed",
 		Private: "service/data/codec/json.Unmarshal: encoding/json returned an error",
@@ -152,7 +153,7 @@ func (*jsonCodec) Append(dst []byte, v any) (appended []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: return the untouched buffer plus the wrapped error.
 		return dst, errs.Wrap(jerr, errs.WrapParams{
-			Code:    CodeJSONMarshalFailed,
+			Code:    corejson.CodeJSONMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "JSON encoding failed",
 			Private: "service/data/codec/json.Append: encoding/json returned an error",

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/bson"
 )
@@ -39,7 +40,7 @@ func TestObjectID(t *testing.T) {
 			}
 			//: a wrong length and a non-digit.
 			for _, bad := range []string{"", "65102030010203040506070", "zz1020300102030405060708"} {
-				if _, err := bson.ObjectIDFromHex(bad); !errs.HasCode(err, bson.CodeBSONValueInvalid) {
+				if _, err := bson.ObjectIDFromHex(bad); !errs.HasCode(err, corebson.CodeBSONValueInvalid) {
 					t.Errorf("ObjectIDFromHex(%q) = %v, want BSON_VALUE_INVALID", bad, err)
 				}
 			}
@@ -223,7 +224,7 @@ func TestParseDecimal128(t *testing.T) {
 		t.Helper()
 		got, err := bson.ParseDecimal128(c.in)
 		if c.refused {
-			if !errs.HasCode(err, bson.CodeBSONValueInvalid) {
+			if !errs.HasCode(err, corebson.CodeBSONValueInvalid) {
 				t.Fatalf("ParseDecimal128(%q) = %v, %v, want BSON_VALUE_INVALID", c.in, got, err)
 			}
 			return

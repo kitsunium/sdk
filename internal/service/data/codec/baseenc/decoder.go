@@ -7,6 +7,7 @@ import (
 	stdjson "encoding/json"
 	"io"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -35,7 +36,7 @@ func (d *baseencDecoder) Decode(v any) error {
 	}
 	//: wrap the stdlib JSON error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeBaseEncUnmarshalFailed,
+		Code:    corebaseenc.CodeBaseEncUnmarshalFailed,
 		Reason:  "BASE_ENC_UNMARSHAL_FAILED",
 		Public:  "base-N decoding failed",
 		Private: "service/data/codec/baseenc.Decoder.Decode: encoding/json returned an error",

@@ -8,6 +8,7 @@ go_library(
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch",
     visibility = ["//visibility:public"],
     deps = [
+        "//internal/core/data/codec/jsonpatch",
         "//internal/kernel/errs",
         "//internal/service/data/codec/jsonpatch",
     ],

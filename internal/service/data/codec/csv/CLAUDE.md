@@ -18,6 +18,11 @@ CSV codec wrapping stdlib `encoding/csv`. Models the wire format as a `[][]strin
 
 ## Error codes (range `0.3.8.*`)
 
+Declared in `internal/core/data/codec/csv` — `codes.go` and `errors.go` — and used
+here as `corecsv.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.8.1`    | `MarshalFailed`   | `encoding/csv.Writer.WriteAll` returned an error |

@@ -12,6 +12,7 @@ import (
 	"reflect"
 	"strconv"
 
+	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -256,7 +257,7 @@ func wrapReadFailure(rerr error) error {
 	if errors.Is(rerr, io.ErrUnexpectedEOF) || errors.Is(rerr, io.EOF) {
 		//: surface the truncated sentinel.
 		return errs.Wrap(rerr, errs.WrapParams{
-			Code:    CodeTLVTruncated,
+			Code:    coretlv.CodeTLVTruncated,
 			Reason:  "TRUNCATED",
 			Public:  "TLV buffer truncated",
 			Private: "service/data/codec/tlv: reader exhausted before record completed",
@@ -264,7 +265,7 @@ func wrapReadFailure(rerr error) error {
 	}
 	//: generic decode failure.
 	return errs.Wrap(rerr, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv: reader returned an error",
@@ -1244,7 +1245,7 @@ func narrowFromFloat(f float64, target reflect.Type) (converted reflect.Value, o
 func truncatedError() error {
 	//: no cause to wrap.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVTruncated,
+		Code:    coretlv.CodeTLVTruncated,
 		Reason:  "TRUNCATED",
 		Public:  "TLV buffer truncated",
 		Private: "service/data/codec/tlv: buffer ended before the declared record length was satisfied",
@@ -1256,7 +1257,7 @@ func truncatedError() error {
 func malformedLengthError(expected, got uint64) error {
 	//: surface as decode failure with diagnostic fields.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv: declared length does not match the expected tag width",
@@ -1267,7 +1268,7 @@ func malformedLengthError(expected, got uint64) error {
 func unknownTagError(tag Tag) error {
 	//: include the byte for diagnostics.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv: unknown tag byte",
@@ -1278,7 +1279,7 @@ func unknownTagError(tag Tag) error {
 func sizeExceededError(length uint64) error {
 	//: surface as SIZE_EXCEEDED.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVSizeExceeded,
+		Code:    coretlv.CodeTLVSizeExceeded,
 		Reason:  "SIZE_EXCEEDED",
 		Public:  "TLV input exceeds size limit",
 		Private: "service/data/codec/tlv: declared length exceeds maxTLVBytes",
@@ -1289,7 +1290,7 @@ func sizeExceededError(length uint64) error {
 func cannotSetError() error {
 	//: surface as decode failure.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV codec requires a settable pointer target",
 		Private: "service/data/codec/tlv.assignToPointer: target is not settable",
@@ -1300,7 +1301,7 @@ func cannotSetError() error {
 func unhashableKeyError() error {
 	//: surface as decode failure.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv: decoded map key is not comparable",
@@ -1312,7 +1313,7 @@ func unhashableKeyError() error {
 func nonStringFieldNameError() error {
 	//: surface as decode failure.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv.decodeStruct: field name is not a string",
@@ -1326,7 +1327,7 @@ func nonStringFieldNameError() error {
 func fieldNameTooLongDecodeError(length uint64) error {
 	//: surface as decode failure with diagnostic fields.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv.decodeFieldName: declared field name length exceeds maxFieldNameBytes",
@@ -1338,7 +1339,7 @@ func fieldNameTooLongDecodeError(length uint64) error {
 func nonPointerTargetError() error {
 	//: surface as decode failure.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV codec requires a non-nil pointer target",
 		Private: "service/data/codec/tlv.Unmarshal: target is not a non-nil pointer",
@@ -1350,7 +1351,7 @@ func nonPointerTargetError() error {
 func trailingBytesError(trailing int) error {
 	//: surface as decode failure for callers that match by reason.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv.Unmarshal: trailing bytes after the first record",
@@ -1361,7 +1362,7 @@ func trailingBytesError(trailing int) error {
 func varintOverflowError() error {
 	//: surface as decode failure.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv: varint length overflow",
@@ -1373,7 +1374,7 @@ func varintOverflowError() error {
 func incompatibleTypeError(from, to string) error {
 	//: include both types for diagnostics.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeTLVUnmarshalFailed,
+		Code:    coretlv.CodeTLVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "TLV decoding failed",
 		Private: "service/data/codec/tlv.convertValue: decoded type not assignable to target",

@@ -10,6 +10,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corepem "github.com/kitsunium/sdk/internal/core/data/codec/pem"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -86,7 +87,7 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 	if !ok || block == nil {
 		//: shape-the-input rejection uses the VALUE_INVALID sentinel.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodePEMValueInvalid,
+			Code:    corepem.CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "PEM codec requires a non-nil *pem.Block value",
 			Private: "service/data/codec/pem.Marshal: argument is not a non-nil *pem.Block",
@@ -108,7 +109,7 @@ func (*pemCodec) Marshal(v any) (encoded []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodePEMMarshalFailed,
+			Code:    corepem.CodePEMMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "PEM encoding failed",
 			Private: "service/data/codec/pem.Marshal: encoding/pem.Encode returned an error",
@@ -239,7 +240,7 @@ func (*pemCodec) Unmarshal(data []byte, v any) error {
 	if !ok || dst == nil {
 		//: loud failure when the caller passed the wrong type.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodePEMValueInvalid,
+			Code:    corepem.CodePEMValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "PEM codec requires a non-nil **pem.Block target",
 			Private: "service/data/codec/pem.Unmarshal: target is not a non-nil **pem.Block",
@@ -251,7 +252,7 @@ func (*pemCodec) Unmarshal(data []byte, v any) error {
 	if block == nil {
 		//: loud failure — caller must be notified.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodePEMUnmarshalFailed,
+			Code:    corepem.CodePEMUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "PEM decoding failed",
 			Private: "service/data/codec/pem.Unmarshal: encoding/pem.Decode returned no block",

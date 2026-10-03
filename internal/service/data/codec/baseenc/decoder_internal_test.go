@@ -5,6 +5,7 @@ import (
 	stdjson "encoding/json"
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -100,7 +101,7 @@ func Test_baseencDecoder_Decode_badJSON(t *testing.T) {
 		d := c.NewDecoder(bytes.NewReader(envelope))
 		var got map[string]int
 		err := d.Decode(&got)
-		if !errs.HasCode(err, CodeBaseEncUnmarshalFailed) {
+		if !errs.HasCode(err, corebaseenc.CodeBaseEncUnmarshalFailed) {
 			t.Errorf("%s: expected CodeBaseEncUnmarshalFailed, got %v", tc.name, err)
 		}
 	}

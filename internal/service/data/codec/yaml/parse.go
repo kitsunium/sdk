@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -435,7 +436,7 @@ func (p *parser) documentStart() (explicit bool, err error) {
 	//: a directive (%YAML, %TAG, or any other).
 	if p.peek() == '%' {
 		//: refused by name.
-		return false, p.refuseAt(DirectiveRefused, p.line, p.pos)
+		return false, p.refuseAt(coreyaml.DirectiveRefused, p.line, p.pos)
 	}
 	//: no marker: the document starts with its content.
 	if !p.atMarker("---") {
@@ -471,7 +472,7 @@ func (p *parser) documentEnd() error {
 	//: a "---" opens a second document.
 	if p.atMarker("---") {
 		//: refused by name.
-		return p.refuseAt(MultipleDocumentsRefused, p.line, p.pos)
+		return p.refuseAt(coreyaml.MultipleDocumentsRefused, p.line, p.pos)
 	}
 	n, err := p.lineIndent()
 	//: a tab where the line is indented.
@@ -500,7 +501,7 @@ func (p *parser) afterDocumentEnd() error {
 		return err
 	}
 	//: anything after it opens another document.
-	return p.refuseAt(MultipleDocumentsRefused, p.line, p.pos)
+	return p.refuseAt(coreyaml.MultipleDocumentsRefused, p.line, p.pos)
 }
 
 // checkDuplicates refuses a mapping that holds the same key twice. Keys
@@ -525,7 +526,7 @@ func (p *parser) checkDuplicates(collection int32) error {
 		//: seen before.
 		if _, seen := p.dup[key.value]; seen {
 			//: refused at the second occurrence.
-			return p.refuseAt(DuplicateKey, int(key.line), int(key.off))
+			return p.refuseAt(coreyaml.DuplicateKey, int(key.line), int(key.off))
 		}
 		p.dup[key.value] = struct{}{}
 	}
@@ -544,7 +545,7 @@ func (p *parser) checkDuplicatesPairwise(n *node, pairs int32) error {
 			//: the same text.
 			if p.nodes[p.child(n, 2*j)].value == key.value {
 				//: refused at the second occurrence.
-				return p.refuseAt(DuplicateKey, int(key.line), int(key.off))
+				return p.refuseAt(coreyaml.DuplicateKey, int(key.line), int(key.off))
 			}
 		}
 	}
