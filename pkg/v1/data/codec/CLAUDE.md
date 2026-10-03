@@ -3,7 +3,7 @@
 
 ## Purpose
 
-Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/data/codec` registry, type-asserts the streaming extension when needed, and forwards. Blank-imports the 16 service codec packages (covering 24 Format names — `baseenc` alone registers 9) so a single `import _ ".../pkg/v1/data/codec"` activates the full registry.
+Public facade for the universal codec dispatch. Consumers address a codec by `Format` (string alias) and call `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` — the package looks the format up in the `internal/core/data/codec` registry, type-asserts the streaming extension when needed, and forwards. It is the AGGREGATE of the 16 per-format packages beneath it (covering 24 Format names — `baseenc` alone registers 9): it blank-imports each, each imports its service codec, and the codec registers itself — so a single `import _ ".../pkg/v1/data/codec"` activates the full registry, and importing one per-format package instead links that format alone.
 
 ## Contents
 
@@ -12,14 +12,15 @@ codec.go      — Format / Codec / Encoder / Decoder aliases, 24 Format constant
                 Marshal/Unmarshal/NewEncoder/NewDecoder, MarshalMany (one value into several
                 formats, failures joined, partial results kept),
                 Available/FromMIME/FromExtension, resolveStreaming + unknownFormat helpers,
-                blank imports for asn1|baseenc|bson|cbor|csv|flatbuffers|form|json|msgpack|multipart|ndjson|pem|tlv|toml|xml|yaml
+                blank imports of the per-format packages beneath it:
+                asn1|baseenc|bson|cbor|csv|flatbuffers|form|json|msgpack|multipart|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
                 (Gzip/Flate constants) + the self-describing compressed-frame codec
                 (ADR 0014 D1); blank-imports internal/service/data/transform, which
                 self-registers gzip+flate+zlib — only gzip and flate are framed
 multipart.go  — MultipartForm / MultipartPart aliases + MultipartContentType: exactly what a
                 consumer needs to build a file upload, send it, and read it back (see
-                §Multipart below)
+                §Multipart below) — the multipart package's Form, Part and ContentType
 promote.go    — the JSON-bridge promotion path for codecs whose native shape cannot hold an
                 arbitrary Go value (csv, form, pem, flatbuffers, tlv, ndjson): wrapForFormat
                 builds the container, containerForFormat + the extract* closures read it
@@ -85,9 +86,9 @@ no conversion at the edge and the `Codec` interface is not widened (ADR 0037):
 
 | Facade | Delegates to | Needed for |
 |---|---|---|
-| `MultipartForm` | `service/data/codec/multipart.FormValue` | the native shape to `Marshal`, and the `Unmarshal` target that yields every part |
-| `MultipartPart` | `service/data/codec/multipart.PartValue` | a file part: `Name`, `FileName`, `ContentType`, `Data` |
-| `MultipartContentType(body)` | `service/data/codec/multipart.ContentType` | the header the bytes must travel with |
+| `MultipartForm` | `multipart.Form`, an alias of `service/data/codec/multipart.FormValue` | the native shape to `Marshal`, and the `Unmarshal` target that yields every part |
+| `MultipartPart` | `multipart.Part`, an alias of `service/data/codec/multipart.PartValue` | a file part: `Name`, `FileName`, `ContentType`, `Data` |
+| `MultipartContentType(body)` | `multipart.ContentType`, over `service/data/codec/multipart.ContentType` | the header the bytes must travel with |
 
 A streaming client needs no further name: the `Encoder` from
 `NewEncoder(Multipart, w)` has a `Boundary() string` method a structural
@@ -105,23 +106,34 @@ proof that the three names suffice.
 Importing this package registers every format, and so links every codec —
 each written on the standard library, with no codec library left (the full
 yaml.v3 reader is the opt-in `third-party/codec/yaml`) — into a program that
-may read one of them. `json/`, `yaml/` and `toml/` are facades that
-each blank-import ONE service codec and nothing else: a program that reads its
-configuration through `config.FSSource` imports `pkg/v1/data/codec/yaml` and links
-the native YAML codec alone — no third-party library. Each exports only `Format`, an untyped constant that goes into a
-`string` or a `codec.Format` parameter without a conversion. Registration happens
-in the service codec's own initialisation, which Go runs once, so importing a
-per-format facade beside this package registers the format once —
-`TestAFormatImportedTwiceIsRegisteredOnce`. `bson/` is the fourth, and the one
-that is more than a registration: it also carries BSON's value types (`ObjectID`,
-`D`, `DateTime`, `Decimal128`…) and its own `Marshal` / `Append` / `Unmarshal`,
-because a program reading BSON holds those values. The other twelve codecs
-follow the same pattern when a consumer needs one of them alone.
+may read one of them. Every codec has a package of its own beneath this one —
+`asn1/`, `baseenc/`, `bson/`, `cbor/`, `csv/`, `flatbuffers/`, `form/`,
+`json/`, `msgpack/`, `multipart/`, `ndjson/`, `pem/`, `tlv/`, `toml/`, `xml/`,
+`yaml/` — that imports ONE service codec and nothing else: a program that
+reads its configuration through `config.FSSource` imports
+`pkg/v1/data/codec/yaml` and links the native YAML codec alone. Each exports
+its `Format` — `baseenc/` its nine — as an untyped constant that goes into a
+`string` or a `codec.Format` parameter without a conversion, and its error
+codes and sentinels, aliased from the core package that declares them
+(`internal/core/data/codec/<format>`, ADR 0160). `bson/` also carries BSON's
+value types and its own `Marshal` / `Append` / `Unmarshal`; `multipart/` its
+`Form`, `Part` and `ContentType`; `flatbuffers/` the two adapter interfaces;
+`toml/` its local date and time types.
+
+This package is their AGGREGATE: it blank-imports the sixteen and registers
+nothing itself. Registration happens in the service codec's own
+initialisation, which Go runs once, so importing a per-format package beside
+this one registers the format once — `TestAFormatImportedTwiceIsRegisteredOnce`
+imports all seventeen and finds each of the 24 names exactly once, and nothing
+else. Each per-format package's suite proves what it links: exactly its
+formats in the registry, no module outside the SDK in the binary
+(`TestItLinksNoModuleOutsideTheSDK`, the gate ADR 0156 §1 deferred), and no
+other codec in `go list -deps`.
 
 ## Conventions
 
 - **`Format` is the public dispatch key.** It's `type Format = corecodec.Format` — a string alias, but the 24 named constants (`JSON`, `NDJSON`, `XML`, `CSV`, `Form`, `ASN1DER`, `PEM`, `YAML`, `TOML`, `CBOR`, `MsgPack`, `TLV`, `FlatBuffers`, `Base64`, `Base64URL`, `Base32`, `Base16`, `Hex`, `ASCII85`, `Base45`, `Base58`, `Base62`, `BSON`, `Multipart`) are the contract. Their string values are frozen post-v1.0.0.
-- **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 16 service codec packages register themselves via package-level `var` side-effects driven by the blank imports in `codec.go`.
+- **Lookup is `// IFACE-PLUGIN`.** `corecodec.Lookup`, `LookupMIME`, `LookupExt`, and `Available` (the implementations behind the four facade entry points) are the canonical plugin discovery surface. The 16 service codec packages register themselves via package-level `var` side-effects, reached through the per-format packages `codec.go` blank-imports.
 - **Origin wins.** When the underlying codec returns an `*errs.Error`, this package forwards it untouched. Only dispatch-level failures (unknown format, non-streaming codec) get a new sentinel built in this package.
 - **Error codes use range 1.2.0.*** per ADR 0005:
   - `1.2.0.1` `CodeUnknownFormat` — `corecodec.Lookup` returned `false`.
@@ -134,7 +146,8 @@ follow the same pattern when a consumer needs one of them alone.
 
 - Add a new `Format` constant without registering its service codec under the same name and updating `MODULE.bazel` if a new external dependency is needed.
 - Re-export `corecodec.Register` here — registration happens in each service package's package-level `var` initialisation (none of the 16 uses `init()`); consumers do not register codecs.
-- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/data/codec`, or on a per-format facade (`json/`, `yaml/`, `toml/`, `bson/`) to link one format.
+- Bypass the registry from a consumer by importing a service codec package directly. Stay on `pkg/v1/data/codec`, or on a per-format package beneath it to link one format.
+- Blank-import a service codec here. The aggregate reaches every codec through its per-format package, so a format has one public door, and a format added without one is a format this package cannot reach.
 - Rename an existing `Format` string value — it's part of the frozen public contract.
 - Surface `errs.PrivateOf` output from codec errors to end users; the Private field names internal package paths.
 
@@ -150,10 +163,10 @@ cd pkg/v1 && GOWORK=off go test -race ./data/codec/...
 
 ## Subtree
 
-Every codec lives under `internal/service/data/codec/*` and is reached via the universal dispatch above; the legacy byte-level `baseenc/` subpackage was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`. The subpackages are not codecs, or register one:
+Every codec lives under `internal/service/data/codec/*` and is reached via the universal dispatch above, through the per-format package that imports it. The legacy byte-level `baseenc/` subpackage (raw bytes in, base-N text out) was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`; today's `baseenc/` is the per-format package of the nine JSON-mediated base-N Formats, and registers them. The subpackages are not codecs, or register one:
 
 - `strictjson/` — one JSON document read one way — see `strictjson/CLAUDE.md` (ADR 0102); its HTTP request body is `strictjson/httpbody/`
 - `jsonshape/` — a Go type's wire shape under encoding/json — see `jsonshape/CLAUDE.md` (ADR 0133)
 - `jsonpatch/` — two JSON documents' difference as RFC 6902 operations — see `jsonpatch/CLAUDE.md` (ADR 0143)
-- `json/`, `yaml/`, `toml/` — one format registered alone — see their `CLAUDE.md` (ADR 0134)
+- `asn1/`, `baseenc/`, `cbor/`, `csv/`, `flatbuffers/`, `form/`, `json/`, `msgpack/`, `multipart/`, `ndjson/`, `pem/`, `tlv/`, `toml/`, `xml/`, `yaml/` — one format registered alone, with its codes — see their `CLAUDE.md` (ADR 0134)
 - `bson/` — BSON registered alone, with its value types and verbs — see `bson/CLAUDE.md` (ADR 0134)

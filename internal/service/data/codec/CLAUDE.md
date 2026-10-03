@@ -42,12 +42,14 @@ writes and the value it replaces. Documents are read strictly with
 exactly; arrays are aligned before they are paired. It owns `0.3.90.*` and is
 reached through `pkg/v1/data/codec/jsonpatch`.
 
-Four of the codecs above are also reachable ONE AT A TIME: `pkg/v1/data/codec/json`,
-`pkg/v1/data/codec/yaml`, `pkg/v1/data/codec/toml` and `pkg/v1/data/codec/bson` each import
-their own package here and nothing else (ADR 0134), so a program reading YAML
-configuration links the native YAML reader — no third-party library at all — and
-no other codec. `pkg/v1/data/codec/bson`
-also aliases BSON's value types, which `bson/` owns. A codec package registers
+Every codec above is also reachable ONE AT A TIME: `pkg/v1/data/codec/<codec>`
+imports its own package here and nothing else (ADR 0134), so a program reading
+YAML configuration links the native YAML reader — no third-party library at
+all — and no other codec; each also names its codec's error codes, aliased
+from `internal/core/data/codec/<codec>`. `pkg/v1/data/codec` is the aggregate of
+those sixteen packages and imports no codec here directly. `pkg/v1/data/codec/bson`
+also aliases BSON's value types, which `bson/` owns, and `pkg/v1/data/codec/multipart`
+the `FormValue` / `PartValue` shapes `multipart/` owns. A codec package registers
 itself in its own initialisation, which Go runs once, so being imported by both
 a per-format facade and `pkg/v1/data/codec` registers it once.
 

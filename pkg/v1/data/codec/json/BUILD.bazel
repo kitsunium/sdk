@@ -7,7 +7,11 @@ go_library(
     srcs = ["json.go"],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/json",
     visibility = ["//visibility:public"],
-    deps = ["//internal/service/data/codec/json"],
+    deps = [
+        "//internal/core/data/codec/json",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/json",
+    ],
 )
 
 alias(
@@ -23,5 +27,6 @@ go_test(
         ":json",
         "//internal/core/data/codec",
         "//pkg/v1/app/config",
+        "//pkg/v1/errs",
     ],
 )

@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "multipart",
+    srcs = ["multipart.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/codec/multipart",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/multipart",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":multipart",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "multipart_test",
+    srcs = ["multipart_external_test.go"],
+    deps = [
+        ":multipart",
+        "//internal/core/data/codec",
+        "//pkg/v1/errs",
+    ],
+)

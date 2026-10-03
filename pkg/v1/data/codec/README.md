@@ -15,7 +15,7 @@ One verb, twenty\-four formats. [Marshal](<#Marshal>) and [Unmarshal](<#Unmarsha
 - One verb, many formats. codec.Marshal\(f, v\) reaches every registered wire format — your call site doesn't change when you swap JSON for CBOR.
 - Stable Format strings. Once registered, a Format string is frozen across minor versions. Code that compiles today keeps compiling.
 - Streaming when it pays. Codecs that implement StreamingCodec get NewEncoder / NewDecoder automatically — no need to buffer megabytes.
-- Zero registration code. Blank\-import the package; the 16 service codecs self\-register via init\(\). No Register\(\) calls in consumer code.
+- Zero registration code. Blank\-import the package; the 16 codecs register themselves as Go initialises them. No Register\(\) calls in consumer code. A program that needs one format imports that format's package beneath this one instead, and links it alone.
 - Append for hot paths. Codecs implementing Appender let you reuse a \[\]byte buffer across calls — handy in tight loops.
 - Broadcast marshal. MarshalMany\(v, formats...\) serialises the same value to N formats at once — content negotiation, replication, multi\-protocol message buses.
 
@@ -89,7 +89,7 @@ A single blank import activates the full registry:
 import _ "github.com/kitsunium/sdk/pkg/v1/data/codec"
 ```
 
-The package blank\-imports every internal/service/data/codec/\* package; each registers itself in core/data/codec.Lookup via init\(\). Consumers never call a Register\(\) function — registration is a side\-effect.
+The package is the aggregate of the sixteen per\-format packages beneath it — asn1, baseenc, bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml and yaml — and blank\-imports each. Every one of them imports its codec, which registers itself in the registry as Go initialises it, once however many packages import it. Consumers never call a Register\(\) function — registration is a side\-effect. Importing one of those packages instead registers its format alone, links nothing of the others, and names that format's error codes \(ADR 0134\).
 
 ### Extension interfaces
 
@@ -120,7 +120,7 @@ Dispatch failures carry typed dotted\-quad codes under range 1.2.0.\*:
 - 1.2.0.2 — [CodeCodecUnavailable](<#CodeCodecUnavailable>): reserved for future build\-tag gating.
 - 1.2.0.3 — [CodeStreamingUnsupported](<#CodeStreamingUnsupported>): NewEncoder / NewDecoder called on a non\-streaming codec.
 
-Per\-codec failures carry the codec's own range \(0.3.\* for service codecs\). Inspect with the accessors in github.com/kitsunium/sdk/pkg/v1/errs:
+Per\-codec failures carry the codec's own range \(0.3.\* for service codecs\), which each per\-format package names — cbor.CodeUnmarshalFailed, yaml.CodeAnchorRefused. Inspect with the accessors in github.com/kitsunium/sdk/pkg/v1/errs:
 
 ```
 if errs.HasCode(err, codec.CodeUnknownFormat) { … }
@@ -133,7 +133,7 @@ Package codec — compressed\-frame verbs \(ADR 0014 D1\). MarshalCompressed and
 
 Package codec — declares the sentinel \*errs.Error values the facade emits when dispatch fails.
 
-Package codec — the multipart/form\-data value types, and the one helper a consumer needs to send what Marshal\(Multipart, …\) returns. The format is a container whose delimiter lives in the Content\-Type header, which the Codec contract cannot carry, so the facade publishes the two shapes the codec speaks natively and the function that recovers that header from the body.
+Package codec — the multipart/form\-data value types, and the one helper a consumer needs to send what Marshal\(Multipart, …\) returns. The format is a container whose delimiter lives in the Content\-Type header, which the Codec contract cannot carry, so the facade publishes the two shapes the codec speaks natively and the function that recovers that header from the body — the multipart package's own Form, Part and ContentType, under the names this package has always given them.
 
 Package codec — JSON\-bridge promotion path for codecs whose runtime preconditions reject the public Marshal\(F, any\) / Unmarshal\(F, \*, any\) contract. Six of the twenty\-four registered codecs constrain their input shape: csv expects \[\]\[\]string, ndjson expects \[\]T, pem expects \*pem.Block, flatbuffers expects \[\]byte or BytesProvider, form expects url.Values, tlv's decoder cannot project composites into typed targets. Without promotion the facade's "format\-swap is a single string change" promise is a lie for 6/24. Promotion intercepts the VALUE\_INVALID / FLATBUFFERS\_BAD\_\* / UNMARSHAL\_FAILED responses, encodes the value to JSON, wraps the bytes in a codec\-specific container the codec will accept, and reverses the pipeline on Unmarshal. The fast \(native\-shape\) path is untouched so existing callers see zero overhead. See TestUniversalRoundtripAllCodecs for the contract pin.
 
@@ -222,7 +222,7 @@ var (
 ```
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L264>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L274>)
 
 ```go
 func Marshal(f Format, v any) (encoded []byte, err error)
@@ -240,7 +240,7 @@ func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err
 MarshalCompressed serialises v with the codec registered under f, compresses the result with the transform registered under algo, and wraps both in a self\-describing frame so UnmarshalCompressed needs no Format or Algorithm argument. It returns UnknownCompressor when algo has no frame id or no registered body, CompressedFrameInvalid when f exceeds the addressable length, and forwards any codec / compressor error untouched \(origin wins\).
 
 <a name="MarshalMany"></a>
-## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L330>)
+## func [MarshalMany](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L340>)
 
 ```go
 func MarshalMany(v any, formats ...Format) (encodedByFormat map[Format][]byte, err error)
@@ -259,7 +259,7 @@ out, err := codec.MarshalMany(payload, codec.JSON, codec.CBOR, codec.MsgPack)
 ```
 
 <a name="MultipartContentType"></a>
-## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L50>)
+## func [MultipartContentType](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L52>)
 
 ```go
 func MultipartContentType(body []byte) (value string, err error)
@@ -270,7 +270,7 @@ MultipartContentType returns the Content\-Type header value — "multipart/form\
 A caller streaming through NewEncoder\(Multipart, w\) must set the header before the first byte instead: the Encoder returned has a Boundary\(\) string method, and mime.FormatMediaType builds the same value from it.
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L289>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L299>)
 
 ```go
 func Unmarshal(f Format, data []byte, v any) error
@@ -288,7 +288,7 @@ func UnmarshalCompressed(box []byte, v any) error
 UnmarshalCompressed parses a frame produced by MarshalCompressed, decompresses the payload under a bomb guard, and decodes it into v using the inner Format the frame records. A malformed frame, an unknown algorithm id, or a payload that decompresses past the bomb guard returns CompressedFrameInvalid; codec and compressor faults are forwarded untouched.
 
 <a name="Codec"></a>
-## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L172>)
+## type [Codec](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L182>)
 
 Codec re\-exports core/data/codec.Codec for consumers who want direct access.
 
@@ -317,7 +317,7 @@ const (
 ```
 
 <a name="Decoder"></a>
-## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L178>)
+## type [Decoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L188>)
 
 Decoder re\-exports core/data/codec.Decoder for streaming callers.
 
@@ -326,7 +326,7 @@ type Decoder = corecodec.Decoder
 ```
 
 <a name="NewDecoder"></a>
-### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L403>)
+### func [NewDecoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L413>)
 
 ```go
 func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
@@ -335,7 +335,7 @@ func NewDecoder(f Format, r io.Reader) (dec Decoder, err error)
 NewDecoder returns a streaming decoder for the codec registered under f.
 
 <a name="Encoder"></a>
-## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L175>)
+## type [Encoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L185>)
 
 Encoder re\-exports core/data/codec.Encoder for streaming callers.
 
@@ -344,7 +344,7 @@ type Encoder = corecodec.Encoder
 ```
 
 <a name="NewEncoder"></a>
-### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L390>)
+### func [NewEncoder](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L400>)
 
 ```go
 func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
@@ -353,7 +353,7 @@ func NewEncoder(f Format, w io.Writer) (enc Encoder, err error)
 NewEncoder returns a streaming encoder for the codec registered under f.
 
 <a name="Format"></a>
-## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L169>)
+## type [Format](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L179>)
 
 Format re\-exports core/data/codec.Format so consumers only depend on pkg/v1.
 
@@ -438,7 +438,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L416>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L426>)
 
 ```go
 func Available() []Format
@@ -447,7 +447,7 @@ func Available() []Format
 Available returns the sorted list of registered formats.
 
 <a name="FromExtension"></a>
-### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L435>)
+### func [FromExtension](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L445>)
 
 ```go
 func FromExtension(ext string) (f Format, ok bool)
@@ -456,7 +456,7 @@ func FromExtension(ext string) (f Format, ok bool)
 FromExtension resolves a file extension to its registered Format.
 
 <a name="FromMIME"></a>
-### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L422>)
+### func [FromMIME](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/codec.go#L432>)
 
 ```go
 func FromMIME(mime string) (f Format, ok bool)
@@ -465,16 +465,16 @@ func FromMIME(mime string) (f Format, ok bool)
 FromMIME resolves a MIME string to its registered Format.
 
 <a name="MultipartForm"></a>
-## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L19>)
+## type [MultipartForm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L21>)
 
 MultipartForm is the native Go shape of the [Multipart](<#JSON>) format: a whole multipart/form\-data body — its RFC 2046 boundary and its parts, in wire order. Marshal one to build an upload; Unmarshal into a \*MultipartForm to read one. An empty Boundary asks Marshal to generate a delimiter; Unmarshal always fills it with the one it recovered, so a decode → encode round trip keeps the original delimiter — and reproduces the whole body byte for byte only for a body this codec encoded, since a part header other than the name, filename and media type is not carried through, and a filename is decoded to its last path element.
 
 ```go
-type MultipartForm = svcmultipart.FormValue
+type MultipartForm = multipart.Form
 ```
 
 <a name="MultipartPart"></a>
-## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L37>)
+## type [MultipartPart](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/multipart.go#L39>)
 
 MultipartPart is one section of a [MultipartForm](<#MultipartForm>): a named field, optionally a filename and a media type, and the bytes themselves — a file upload is a part with FileName and ContentType set. Marshal also accepts a single MultipartPart or a \[\]MultipartPart.
 
@@ -483,7 +483,7 @@ Name is required. Name, FileName and ContentType are written into the part's hea
 Decoding keeps only a filename's last path element, reading both '/' and '\\' as separators on every operating system — RFC 7578 §4.2 has the receiver drop the directory information a sender may include, and the sender writes it with its own separator. \`C:\\Users\\ada\\cv.pdf\` decodes to \`cv.pdf\` on Linux exactly as on Windows. Nothing else is removed, so a caller turning FileName into a path still validates it first.
 
 ```go
-type MultipartPart = svcmultipart.PartValue
+type MultipartPart = multipart.Part
 ```
 
 Generated by [gomarkdoc](<https://github.com/princjef/gomarkdoc>)

@@ -57,7 +57,7 @@ bazel test --config=race //pkg/v1/data/codec/bson:bson_test
 cd pkg && GOWORK=off go test -race ./v1/data/codec/bson/
 ```
 
-`TestItLinksNoThirdPartyLibrary` skips under Bazel, which records no module
+`TestItLinksNoModuleOutsideTheSDK` skips under Bazel, which records no module
 information in a binary, and `TestGoListDepsNamesNoOtherCodec` without a go
 tool on PATH; `TestItRegistersItsFormatAlone` holds under both.
 

@@ -22,8 +22,9 @@
 //     get NewEncoder / NewDecoder automatically — no need to buffer
 //     megabytes.
 //   - Zero registration code. Blank-import the package; the 16
-//     service codecs self-register via init(). No Register() calls
-//     in consumer code.
+//     codecs register themselves as Go initialises them. No Register()
+//     calls in consumer code. A program that needs one format imports
+//     that format's package beneath this one instead, and links it alone.
 //   - Append for hot paths. Codecs implementing Appender let you
 //     reuse a []byte buffer across calls — handy in tight loops.
 //   - Broadcast marshal. MarshalMany(v, formats...) serialises the
@@ -99,9 +100,14 @@
 //
 //	import _ "github.com/kitsunium/sdk/pkg/v1/data/codec"
 //
-// The package blank-imports every internal/service/data/codec/* package;
-// each registers itself in core/data/codec.Lookup via init(). Consumers
-// never call a Register() function — registration is a side-effect.
+// The package is the aggregate of the sixteen per-format packages beneath it
+// — asn1, baseenc, bson, cbor, csv, flatbuffers, form, json, msgpack,
+// multipart, ndjson, pem, tlv, toml, xml and yaml — and blank-imports each.
+// Every one of them imports its codec, which registers itself in the registry
+// as Go initialises it, once however many packages import it. Consumers never
+// call a Register() function — registration is a side-effect. Importing one
+// of those packages instead registers its format alone, links nothing of the
+// others, and names that format's error codes (ADR 0134).
 //
 // # Extension interfaces
 //
@@ -133,7 +139,9 @@
 //   - 1.2.0.3 — [CodeStreamingUnsupported]: NewEncoder / NewDecoder called on a non-streaming codec.
 //
 // Per-codec failures carry the codec's own range (0.3.* for service
-// codecs). Inspect with the accessors in github.com/kitsunium/sdk/pkg/v1/errs:
+// codecs), which each per-format package names — cbor.CodeUnmarshalFailed,
+// yaml.CodeAnchorRefused. Inspect with the accessors in
+// github.com/kitsunium/sdk/pkg/v1/errs:
 //
 //	if errs.HasCode(err, codec.CodeUnknownFormat) { … }
 //	if errs.HasReason(err, "UNKNOWN_FORMAT")       { … }
@@ -146,23 +154,25 @@ import (
 	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
-	//: blank imports drive each codec's self-registration side-effect.
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/asn1"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/baseenc"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/bson"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/cbor"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/csv"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/form"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/json"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/multipart"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/ndjson"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/pem"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/tlv"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/toml"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/xml"
-	_ "github.com/kitsunium/sdk/internal/service/data/codec/yaml"
+	//: the per-format packages, one per codec: each imports its service
+	//: codec, which registers itself as it is initialised (ADR 0134). This
+	//: package is their aggregate and registers nothing itself.
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/asn1"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/baseenc"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/bson"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/cbor"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/csv"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/form"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/json"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/ndjson"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/pem"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/tlv"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/toml"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/xml"
+	_ "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml"
 )
 
 // Format re-exports core/data/codec.Format so consumers only depend on pkg/v1.
