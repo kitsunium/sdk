@@ -92,7 +92,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 | `github.com/kitsunium/sdk/internal/core`    | `cd internal/core && GOWORK=off go build ./...`   |
 | `github.com/kitsunium/sdk/internal/service` | `cd internal/service && GOWORK=off go build ./...`|
 
-`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root lets `go build ./...` from the SDK root work without `replace`. Third-party deps live only in `internal/service/go.mod`: the codec libraries (bson through `go.mongodb.org/mongo-driver`, cbor, msgpack, toml, yaml) and `golang.org/x/mod` (`semver` for `entitlement` and `selfupdate`, `module` for `proc/self`).
+`replace` directives in each `go.mod` resolve intra-repo dependencies without published pseudo-versions; `go.work` at the repo root lets `go build ./...` from the SDK root work without `replace`. Third-party deps live only in `internal/service/go.mod`: the codec libraries (bson through `go.mongodb.org/mongo-driver`, cbor, msgpack, toml — YAML is native, and its yaml.v3 reader is the root module's opt-in `third-party/codec/yaml`) and `golang.org/x/mod` (`semver` for `entitlement` and `selfupdate`, `module` for `proc/self`).
 
 ## Conventions
 
