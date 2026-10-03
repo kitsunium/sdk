@@ -10,9 +10,8 @@ Package strictjson decodes exactly one JSON document into a Go value, within a b
 
 ```
 var in CreateItem
-if err := strictjson.DecodeRequest(w, r, &in, 1<<20); err != nil {
-	http.Error(w, errs.PublicOf(err), errs.HTTPStatusOf(err)) // 400, 413 or 415
-	return
+if err := strictjson.Decode(file, &in, 1<<20); err != nil {
+	return err // DOCUMENT_TOO_LARGE, MEMBER_UNKNOWN, VALUE_MISMATCHED…
 }
 ```
 
@@ -30,7 +29,7 @@ CodeDocumentEmpty         400  zero bytes: "no body", which a caller may accept
 CodeDocumentMalformed     400  syntax, truncation, trailing data, a duplicate name, invalid UTF-8
 CodeMemberUnknown         400  a member the target does not declare, including a case-only variant
 CodeValueMismatched       400  the wrong kind, a number out of range, a field's own unmarshaler refused
-CodeMediaTypeUnsupported  415  a request body that does not declare application/json or +json
+CodeMediaTypeUnsupported  415  a request body (httpbody) that does not declare application/json or +json
 CodeDocumentUnreadable    400  the reader failed before the document ended
 CodeDecodeMisconfigured   500  a non-positive bound, or a target that is not a non-nil pointer
 ```
@@ -43,14 +42,13 @@ No Public, no Private and no field of a refusal carries a value from the documen
 
 ### Request bodies
 
-DecodeRequest adds what only an HTTP body has. The body is read through http.MaxBytesReader, so a body past the bound also tells net/http to close the connection instead of draining what the client keeps sending. An empty body is CodeDocumentEmpty before its Content\-Type is looked at — treat that code as "no body" where the body is optional. A non\-empty body must declare application/json or a structured\-syntax \+json type \(RFC 6839\) or it is not parsed at all.
+The JSON body of an HTTP request is decoded by the package beneath this one, github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody, whose DecodeRequest adds what only an HTTP body has — a bound net/http enforces too, an empty body settled first, a media type that must declare JSON — and refuses with this package's codes. It is a package of its own so that this one links no net/http: a program decoding documents from files, queues or sockets does not carry an HTTP stack it never serves.
 
 ## Index
 
 - [Constants](<#constants>)
 - [Variables](<#variables>)
 - [func Decode\(r io.Reader, v any, maxBytes int64\) error](<#Decode>)
-- [func DecodeRequest\(w http.ResponseWriter, req \*http.Request, v any, maxBytes int64\) error](<#DecodeRequest>)
 - [func PointerOf\(err error\) \(pointer string, ok bool\)](<#PointerOf>)
 
 
@@ -136,7 +134,7 @@ var (
 ```
 
 <a name="Decode"></a>
-## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L125>)
+## func [Decode](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L123>)
 
 ```go
 func Decode(r io.Reader, v any, maxBytes int64) error
@@ -144,17 +142,8 @@ func Decode(r io.Reader, v any, maxBytes int64) error
 
 Decode reads exactly one JSON value from r into v, a non\-nil pointer, reading at most maxBytes bytes of it — the bound plus the one byte that proves it was exceeded, never more. On a refusal v may be partly written.
 
-<a name="DecodeRequest"></a>
-## func [DecodeRequest](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L135>)
-
-```go
-func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error
-```
-
-DecodeRequest decodes the JSON body of req into v as Decode does, through http.MaxBytesReader, after refusing an empty body \(CodeDocumentEmpty\) and a body that does not declare JSON \(CodeMediaTypeUnsupported\). w is used only to have net/http close the connection after an oversized body; nil is accepted.
-
 <a name="PointerOf"></a>
-## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L144>)
+## func [PointerOf](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/strictjson/strictjson.go#L132>)
 
 ```go
 func PointerOf(err error) (pointer string, ok bool)

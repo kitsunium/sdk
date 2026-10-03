@@ -152,7 +152,7 @@ cd pkg/v1 && GOWORK=off go test -race ./data/codec/...
 
 Every codec lives under `internal/service/data/codec/*` and is reached via the universal dispatch above; the legacy byte-level `baseenc/` subpackage was removed in favour of `codec.Marshal("base64"|"base64url"|"base32"|"base16"|"hex"|"ascii85", v)`. The subpackages are not codecs, or register one:
 
-- `strictjson/` — one JSON document read one way — see `strictjson/CLAUDE.md` (ADR 0102)
+- `strictjson/` — one JSON document read one way — see `strictjson/CLAUDE.md` (ADR 0102); its HTTP request body is `strictjson/httpbody/`
 - `jsonshape/` — a Go type's wire shape under encoding/json — see `jsonshape/CLAUDE.md` (ADR 0133)
 - `jsonpatch/` — two JSON documents' difference as RFC 6902 operations — see `jsonpatch/CLAUDE.md` (ADR 0143)
 - `json/`, `yaml/`, `toml/` — one format registered alone — see their `CLAUDE.md` (ADR 0134)

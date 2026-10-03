@@ -5,9 +5,11 @@
 
 Decodes exactly ONE JSON document into a Go value, within a byte bound, refusing
 what a permissive decoder lets through, with errors that never quote the input
-(ADR 0102). `Decode` for any reader; `DecodeRequest` for an HTTP request body;
-`PointerOf` for where a refused document went wrong. Public facade:
-`pkg/v1/data/codec/strictjson`.
+(ADR 0102). `Decode` for any reader; `PointerOf` for where a refused document
+went wrong. An HTTP request body is `httpbody/`'s (`DecodeRequest`), a package
+of its own so that this one links no `net/http` — `go list -deps` names none.
+Public facades: `pkg/v1/data/codec/strictjson` and
+`pkg/v1/data/codec/strictjson/httpbody`.
 
 Stdlib only — `encoding/json/v2` and `encoding/json/jsontext`, which Go 1.27
 ships without an experiment flag. Not a codec: it registers no Format.
@@ -16,9 +18,9 @@ ships without an experiment flag. Not a codec: it registers no Format.
 
 | File | Role |
 |---|---|
-| `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `checkArguments`, `decode`, `classify`, `located`, `boundPointer`, `PointerOf`, `misconfigured` |
-| `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `causeOf`, which names a read failure by its type |
-| `request.go` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839) |
+| `strictjson.go` | package doc, `MaxPointerBytes`, `Decode`, `CheckArguments`, `DecodeChecked`, `classify`, `located`, `boundPointer`, `PointerOf`, `Misconfigured` |
+| `reader.go` | `boundedReader` — hands the decoder the bound plus one byte, remembers what it delivered and the first real read failure, and `verdict`; `Unreadable`, the refusal of a failed reader; `causeOf`, which names a read failure by its type |
+| `httpbody/` | `DecodeRequest` — `http.MaxBytesReader`, the empty-body peek, the media-type check (`application/json` or `+json`, RFC 6839); see `httpbody/CLAUDE.md` |
 | — | the eight `0.3.72.*` codes and their sentinels, each with its HTTP status, are declared in `internal/core/data/codec/strictjson` (ADR 0160 §2) and used here as `corestrictjson.<Var>`; the statuses are literals there, because the core does not import `net/http` for a number |
 
 ## Why-this-shape
@@ -53,12 +55,16 @@ ships without an experiment flag. Not a codec: it registers no Format.
   never a value — and it is bounded to 256 bytes, cut at a token separator so
   what remains still names an ancestor. The facade says to render it as
   untrusted.
-- **A request body is three more rules, and only three.** `http.MaxBytesReader`
-  so net/http closes the connection instead of draining an oversized body
-  (`TestAnOversizedBodyClosesTheConnection` reads `Connection: close` back); an
-  empty body is `DocumentEmpty` BEFORE its media type is looked at, so a caller
-  with an optional body treats that one code as "no body"; and a non-empty body
-  must declare JSON or it is not parsed at all.
+- **A request body is three more rules, and only three — in `httpbody/`.**
+  `http.MaxBytesReader` so net/http closes the connection instead of draining
+  an oversized body; an empty body is `DocumentEmpty` BEFORE its media type is
+  looked at; and a non-empty body must declare JSON or it is not parsed at all.
+  They live in a package of their own because they are the only reason this
+  decoder would link `net/http`. The four exported hooks — `CheckArguments`,
+  `Misconfigured`, `DecodeChecked` (the decode with the caller's recogniser of
+  a size refusal, `http.MaxBytesError` there) and `Unreadable` — exist for that
+  package, so a request body is refused exactly as a document is, by the same
+  code paths, without this package naming an HTTP type.
 - **Zero is refused** (ADR 0031). A bound of zero reads as "unlimited" or as
   "nothing", opposites, and the first is a memory-exhaustion bug. A target that
   is not a non-nil pointer is refused before a byte is read.
@@ -71,12 +77,18 @@ ships without an experiment flag. Not a codec: it registers no Format.
 - Register this as a codec Format. A registered codec has no per-call bound and
   no media-type check, and `codec.Unmarshal("json")` would silently stop
   meaning what it has always meant.
-- Accept `text/json` or a missing Content-Type. A body that does not say it is
-  JSON is not parsed as JSON.
+- Accept `text/json` or a missing Content-Type (in `httpbody/`). A body that
+  does not say it is JSON is not parsed as JSON.
+- Import `net/http`, `mime` or anything HTTP here. The HTTP form is
+  `httpbody/`'s, and this package's `go list -deps` naming none is what lets a
+  program decode documents without an HTTP stack
+  (`pkg/v1/data/codec/strictjson`'s `TestTheDecoderLinksNoHTTP` asks the go
+  tool).
 
 ## Verification
 
 ```sh
 bazel test --config=race //internal/service/data/codec/strictjson:strictjson_test
-cd internal/service && GOWORK=off go test -race ./data/codec/strictjson/
+bazel test --config=race //internal/service/data/codec/strictjson/httpbody:httpbody_test
+cd internal/service && GOWORK=off go test -race ./data/codec/strictjson/...
 ```

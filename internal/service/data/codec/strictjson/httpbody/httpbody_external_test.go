@@ -1,4 +1,6 @@
-package strictjson_test
+// Package httpbody_test pins what a request body adds to a document: the
+// empty body first, the media type second, and a bound net/http enforces too.
+package httpbody_test
 
 import (
 	"net/http"
@@ -8,8 +10,14 @@ import (
 
 	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
+	"github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody"
 )
+
+// item is the target every case decodes into.
+type item struct {
+	Name  string `json:"name"`
+	Price int32  `json:"price"`
+}
 
 // TestDecodeRequest pins the three things a request body adds to a document:
 // an empty body is DOCUMENT_EMPTY whatever it claims to be, a non-empty one
@@ -43,7 +51,7 @@ func TestDecodeRequest(t *testing.T) {
 			req.Header.Set("Content-Type", c.contentType)
 		}
 		var got item
-		err := strictjson.DecodeRequest(httptest.NewRecorder(), req, &got, 64)
+		err := httpbody.DecodeRequest(httptest.NewRecorder(), req, &got, 64)
 		if c.wantCode == 0 {
 			if err != nil || got.Name != "lamp" {
 				t.Fatalf("DecodeRequest() = %v, %+v; want the body decoded", err, got)
@@ -70,7 +78,7 @@ func TestAnOversizedBodyClosesTheConnection(t *testing.T) {
 	t.Parallel()
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		var got item
-		err := strictjson.DecodeRequest(w, r, &got, 64)
+		err := httpbody.DecodeRequest(w, r, &got, 64)
 		w.WriteHeader(errs.HTTPStatusOf(err))
 	}))
 	defer server.Close()
@@ -98,7 +106,7 @@ func TestAnOversizedBodyClosesTheConnection(t *testing.T) {
 func TestDecodeRequestRefusesANilRequest(t *testing.T) {
 	t.Parallel()
 	var got item
-	if err := strictjson.DecodeRequest(nil, nil, &got, 64); !errs.HasCode(err, corestrictjson.CodeDecodeMisconfigured) {
+	if err := httpbody.DecodeRequest(nil, nil, &got, 64); !errs.HasCode(err, corestrictjson.CodeDecodeMisconfigured) {
 		t.Fatalf("DecodeRequest(nil request) = %v, want DECODE_MISCONFIGURED", err)
 	}
 }

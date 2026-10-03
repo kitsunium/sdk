@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody"
 )
 
 // DefaultMaxBody is the largest request body an endpoint reads, unless the
@@ -280,7 +281,7 @@ func (d *decoder) decodeBody[T any](w http.ResponseWriter, r *http.Request, maxB
 // not declare, no duplicate name — and says what it refused in kit's words,
 // never quoting the body. An empty body leaves v as it is when optional.
 func readJSON[T any](w http.ResponseWriter, r *http.Request, v *T, limit int64, optional bool) error {
-	err := strictjson.DecodeRequest(w, r, v, limit)
+	err := httpbody.DecodeRequest(w, r, v, limit)
 	if err == nil || (optional && errors.Is(err, strictjson.DocumentEmpty)) {
 		return nil
 	}

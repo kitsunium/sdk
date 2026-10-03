@@ -1,5 +1,13 @@
-// Package strictjson — decoding the JSON body of an HTTP request.
-package strictjson
+// Package httpbody decodes the JSON body of an HTTP request with the strict
+// decoder of its parent package, adding the three things only an HTTP body
+// has: a bound net/http enforces too, an empty body settled before anything
+// else, and a media type that must declare JSON.
+//
+// It is a package of its own so that the decoder alone links no net/http: a
+// program that reads JSON documents from files, queues or sockets imports
+// strictjson and nothing of HTTP, and only a server that reads request bodies
+// imports this package and the net/http it needs anyway.
+package httpbody
 
 import (
 	"bufio"
@@ -10,7 +18,7 @@ import (
 	"strings"
 
 	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
 )
 
 // Media types a request body may declare to be read as JSON.
@@ -24,9 +32,9 @@ const (
 )
 
 // DecodeRequest decodes the JSON body of req into v, which must be a non-nil
-// pointer, exactly as Decode does, reading at most maxBytes bytes.
+// pointer, exactly as strictjson.Decode does, reading at most maxBytes bytes.
 //
-// Around Decode it adds the three things only an HTTP body has:
+// Around that decoder it adds the three things only an HTTP body has:
 //
 //   - the body is read through http.MaxBytesReader, so a body past the bound
 //     is DocumentTooLarge (413) AND net/http is told to close the connection
@@ -39,15 +47,16 @@ const (
 //
 // w is used only to tell net/http to close the connection; nil is accepted.
 func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error {
-	//: a call that can never succeed is refused before reading a byte.
-	if invalid := checkArguments(v, maxBytes); invalid != nil {
+	//: a call that can never succeed is refused before reading a byte, the
+	//: same way Decode refuses it.
+	if invalid := strictjson.CheckArguments(v, maxBytes); invalid != nil {
 		//: DecodeMisconfigured, naming the argument.
 		return invalid
 	}
 	//: a request without a body to read is the caller's bug, not the client's.
 	if req == nil || req.Body == nil {
 		//: DecodeMisconfigured, naming the argument.
-		return misconfigured("req")
+		return strictjson.Misconfigured("req")
 	}
 	body := bufio.NewReader(http.MaxBytesReader(w, req.Body, maxBytes))
 	//: whether there is a body at all is settled first: an empty body has no
@@ -62,7 +71,7 @@ func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int
 		return corestrictjson.MediaTypeUnsupported
 	}
 	//: the bound is net/http's too, so its refusal reads as the size it is.
-	return decode(body, v, maxBytes, isMaxBytesError)
+	return strictjson.DecodeChecked(body, v, maxBytes, isMaxBytesError)
 }
 
 // emptyOrUnreadable classifies a failed first read.
@@ -73,7 +82,7 @@ func emptyOrUnreadable(peekErr error) error {
 		return corestrictjson.DocumentEmpty
 	}
 	//: the transport failed before the body began: its type, never its text.
-	return errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(peekErr)))
+	return strictjson.Unreadable(peekErr)
 }
 
 // isJSONMediaType reports whether a Content-Type header declares JSON.

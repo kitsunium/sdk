@@ -58,7 +58,9 @@ duplicate names and of trailing data, and errors that never quote the input —
 is a decoding POLICY for documents somebody else wrote, not a wire format. It is
 built on `encoding/json/v2`, owns `0.3.72.*`, and is reached through its own
 facade `pkg/v1/data/codec/strictjson`, so a server that only needs it does not link
-the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
+the sixteen codecs `pkg/v1/data/codec` blank-imports. The HTTP request body —
+`DecodeRequest` — is `strictjson/httpbody/`, with its own facade, so the decoder
+links no `net/http` either. `json/` is unchanged.
 
 ## File layout (per codec)
 
@@ -109,7 +111,7 @@ the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
 - `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
-- `strictjson/`  — see `strictjson/CLAUDE.md` (not a codec — ADR 0102)
+- `strictjson/`  — see `strictjson/CLAUDE.md` (not a codec — ADR 0102); `strictjson/httpbody/` — see `strictjson/httpbody/CLAUDE.md`
 - `tlv/`         — see `tlv/CLAUDE.md`
 - `toml/`        — see `toml/CLAUDE.md`
 - `xml/`         — see `xml/CLAUDE.md`

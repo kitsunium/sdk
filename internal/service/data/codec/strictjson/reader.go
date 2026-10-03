@@ -65,7 +65,7 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 		//: 400. The source's message is NOT carried: an arbitrary reader's
 		//: error may quote what it read, and fields are public — the failure's
 		//: type says which kind of reader failed, and nothing it held.
-		return errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(b.failure)))
+		return Unreadable(b.failure)
 	}
 	//: not one byte.
 	if b.delivered == 0 {
@@ -74,6 +74,15 @@ func (b *boundedReader) verdict(maxBytes int64, oversize func(error) bool) error
 	}
 	//: the reading was fine; the decoder decides.
 	return nil
+}
+
+// Unreadable is the refusal of a reader that failed before the document
+// ended: DocumentUnreadable, the origin, carrying the failure's TYPE as its
+// cause field and never its message, which a reader may have built from the
+// bytes it read. The HTTP form uses it for a body whose first read failed.
+func Unreadable(failure error) error {
+	//: the sentinel's code and its 400; the failure's type, not its text.
+	return errs.Wrap(corestrictjson.DocumentUnreadable, errs.WrapParams{}, errs.String(fieldCause, causeOf(failure)))
 }
 
 // causeOf names a read failure by its type — *net.OpError, *errors.errorString
