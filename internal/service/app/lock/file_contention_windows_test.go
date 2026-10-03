@@ -16,9 +16,10 @@ import (
 	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 )
 
-// This file carries the SAME build constraint as flock_windows.go, so it runs
-// everywhere the Windows backend exists and nowhere it does not. That is not a
-// rule-12 exclusion of the kind that hides a test: the lane that runs it is the
+// This file carries the SAME build constraint as the kernel lock's
+// flock_windows.go (internal/kernel/fs/flock), so it runs everywhere the
+// Windows backend exists and nowhere it does not. That is not a rule-12
+// exclusion of the kind that hides a test: the lane that runs it is the
 // `windows` job of .github/workflows/e2e-cross.yml, which executes
 // `go test ./app/lock` on a real windows-latest kernel. The Linux Bazel gate
 // compiles neither the backend nor this file.
@@ -26,7 +27,10 @@ import (
 // The bindings below are the TEST's own, deliberately separate from the ones
 // the backend uses. A foreign holder has to be a second HANDLE taking the same
 // range, and building that by hand is what makes the measurements in this file
-// measurements rather than assertions about our own code.
+// measurements rather than assertions about our own code — and, now that the
+// backend is a kernel primitive, measurements of THIS domain's needs (the
+// ledger inside the range, the gate) that the primitive's own suite does not
+// make.
 
 // kernel32 range-locking entry points, bound lazily (syscall.NewLazyDLL, no
 // golang.org/x/sys — the ADR 0018 discipline). Both are stable kernel32

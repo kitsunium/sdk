@@ -30,7 +30,7 @@ package declares no code.
 | `memory_config.go` / `mem_record.go` / `lease_expiry.go` | `MemoryConfig` and the two values the memory broker keeps |
 | `file.go` | `NewFile`, `Publish`, `Ack`, receipt resolution, `entriesOf` |
 | `file_config.go` | `FileConfig`, the directory preparation, and the refusals it runs on the queue directory AND each state directory — the shape half (a link, a reparse point, a non-directory), shared by every platform |
-| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through `internal/service/app/lock`'s reader |
+| `dirtrust_posix.go` / `dirtrust_windows.go` | the permission half of those refusals: the mode bits on Unix, the directory's DACL on Windows, read through the kernel's reader, `internal/kernel/fs/winacl` |
 | `file_name.go` | the NAME grammar — the durable broker's entire state machine — and `nameable`, the range of instants a name can carry. Every field is held to the exact width and spelling the renderers write (entropy and lease as wide as `randomHex` makes them, the count as `padCount` spells it), so a stray file of the right shape is skipped rather than delivered |
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
@@ -105,13 +105,16 @@ writable directory — so the rule refused EVERY queue directory there as
 `QUEUE_DIRECTORY_UNUSABLE`, a verdict that blames the deployment for the
 platform (ADR 0018 §(a)); the first Windows run of the whole suite found it on
 every `/file` case (ADR 0095). The two questions stayed; the vocabulary moved to
-the DACL, read by the one reader this repository has — `lock.GrantsAnyone`
-(ADR 0084/0086), exported for exactly this rather than copied:
+the DACL, read by the one reader this repository has —
+`internal/kernel/fs/winacl.GrantsAnyone` (ADR 0084/0086): the lock domain's
+reader, exported from `lock` for exactly this rather than copied, and moved to
+the kernel so that the queue no longer imports another service to call it
+(ADR 0159):
 
 | | Unix (mode) | Windows (DACL, an identifier meaning anybody) |
 |---|---|---|
-| root refused when anybody can | unlink an entry: other-write without sticky | `lock.ReplaceRights` — delete a child, rewrite the list, take ownership |
-| state refused when anybody can | write at all: other-write, sticky or not | add a file (a planted message) or a directory/junction, or `ReplaceRights`; or write a FILE created there (`lock.ContentRights`, through what it inherits — on Unix a message is 0600 whatever the directory allows) |
+| root refused when anybody can | unlink an entry: other-write without sticky | `winacl.ReplaceRights` — delete a child, rewrite the list, take ownership |
+| state refused when anybody can | write at all: other-write, sticky or not | add a file (a planted message) or a directory/junction, or `ReplaceRights`; or write a FILE created there (`winacl.ContentRights`, through what it inherits — on Unix a message is 0600 whatever the directory allows) |
 | an indirection | `ModeSymlink` | `ModeSymlink`, or any reparse point — a junction reads as a plain directory through `os.Lstat` |
 
 A permission refusal names what it was read from in an `observed` field — the
@@ -148,6 +151,37 @@ Two consequences, stated rather than discovered:
   `TestTheWindowsQueueDirectoryRuleIsTheDACL` /
   `TestAWindowsStateDirectoryIsCheckedWhoeverMadeIt` pin both rules through
   real ACLs (`icacls`) and a real junction (`mklink /J`).
+
+## The queue directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/secret` and `security/session` each refuse a
+directory by a rule of their own, compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`winacl` here; `pathchain` elsewhere) and no rule. This one's,
+and why it is not a neighbour's:
+
+- **Two levels, one notch apart.** The root takes `lock`'s decision —
+  other-write without sticky refused, group-writable accepted — because
+  nothing lives there but the three states; a STATE is refused as soon as an
+  outsider can write it at all, sticky or not, because there an entry IS a
+  message. No other domain has a directory whose entries are acted upon.
+- **Group-writable is accepted at both levels**, as `lock` accepts it: a queue
+  shared between two service accounts through a group is a deployment, and a
+  state another member of that group made is trusted as the share itself is.
+  `ipc`, `secret` and `session` refuse a group bit; their rule would refuse
+  the shared queue.
+- **An unreadable Windows list is REFUSED** (`why=unverifiable`) where `lock`
+  accepts and logs the same answer from the same reader — the asymmetry runs
+  the other way here (ADR 0095).
+- **The root's path is not walked**, and a link configured as `Dir` is
+  followed (`os.Stat`), where `lock`, `ipc` and `session` audit every
+  component through `pathchain`. The states are `Lstat`ed, so a link or a
+  junction planted AT a state is refused; one planted at a PARENT of `Dir`, in
+  a directory anybody can write, is not looked for. That is the gap
+  `pathchain` closed for the other three (ADR 0083), named here rather than
+  implied closed.
+- **Nothing is narrowed**: a state this broker made is checked like one it
+  found, and an existing directory is refused rather than chmod'ed.
 
 ## Where `internal/service/data/vfs` is used, and where it stops
 

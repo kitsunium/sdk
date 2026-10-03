@@ -1,0 +1,35 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/kernel:kernel_consumers"])
+
+go_library(
+    name = "winacl",
+    srcs = [
+        "dacl_windows.go",
+        "tokens_windows.go",
+        "winacl.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/kernel/fs/winacl",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":winacl",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/kernel:kernel_consumers",
+    ],
+)
+
+go_test(
+    name = "winacl_test",
+    srcs = [
+        "noverdict_external_windows_test.go",
+        "walk_internal_windows_test.go",
+    ],
+    embed = [":winacl"],
+)

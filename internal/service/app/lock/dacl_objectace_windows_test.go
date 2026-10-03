@@ -18,7 +18,10 @@ import (
 // This file drives an ACE shape `icacls` cannot spell. It builds the access
 // control list byte by byte and hands it to SetNamedSecurityInfoW, which is
 // bound here and NOWHERE in production — the check reads a DACL, it never
-// writes one, so the export belongs to the test that needs it.
+// writes one, so the export belongs to the test that needs it. The reader it
+// exercises is the kernel's (internal/kernel/fs/winacl); this file stays with
+// the lock because what it asserts is the lock's verdict on a real NTFS
+// directory, end to end.
 //
 // What it measures is whether an ordinary NTFS directory will STORE an
 // object-type entry, which is the premise ADR 0084 §Deferred rested on when it

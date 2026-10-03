@@ -58,6 +58,12 @@ const openReparsePoint int = syscall.FILE_FLAG_OPEN_REPARSE_POINT
 // both redirect the open.
 const kindReparsePoint string = "reparse_point"
 
+// hardenedOpen reports that this GOOS's [openLockFile] refuses an indirection
+// planted at the lock path — FILE_FLAG_OPEN_REPARSE_POINT and the handle check,
+// here. It is true exactly where internal/kernel/fs/flock.Native is: a platform
+// gains the lock and its hardening together, or neither (backend.go).
+const hardenedOpen bool = true
+
 // attrBase is the radix the refusal renders the attribute word in. Hexadecimal
 // is what winnt.h spells FILE_ATTRIBUTE_* in, so a reader can compare the
 // reported value against the header without converting it first.

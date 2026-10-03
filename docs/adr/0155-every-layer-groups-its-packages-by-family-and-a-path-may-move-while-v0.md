@@ -144,8 +144,10 @@ is on disk, never on a number someone maintains.
 - **As implemented in the kernel**, which took a family wherever one applies
   rather than only where `pkg/v1` publishes one: `buffer` joined `concur`
   beside the `recycler` it specialises, `cache` joined `collections`, and
-  `pathchain` heads a third family, `fs`; `errs`, `clock`, `backoff`, `semver`
-  and `plugin` stay at its root (ADR 0159, as implemented).
+  `pathchain` heads a third family, `fs`, which ADR 0159's `flock` and the
+  Windows DACL reader `winacl` joined when they left `lock`; `errs`, `clock`,
+  `backoff`, `semver` and `plugin` stay at its root (ADR 0159, as
+  implemented).
 - What does not change: the four layers and their direction
   (`check-layer-deps.sh` is keyed on layers, not on directories), every error
   code value (ADR 0160), the module boundaries, and the standard-library-only

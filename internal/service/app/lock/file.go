@@ -14,6 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/fs/flock"
 
 	corelock "github.com/kitsunium/sdk/internal/core/app/lock"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
@@ -229,7 +230,7 @@ func (l *fileLocker) contend(ctx context.Context, file *os.File, wait bool) (hel
 	//: attempt, sleep, attempt again — never a blocking flock(2), which parks
 	//: the thread inside a syscall no cancellation can reach.
 	for {
-		taken, flockErr := flockTry(file)
+		taken, flockErr := flock.TryLock(file)
 		//: the call itself failed.
 		if flockErr != nil {
 			//: LockBackendFailed.
@@ -302,7 +303,7 @@ func (l *fileLocker) pathFor(name string) string {
 
 // release gives the flock and the gate back, in that order.
 func (l *fileLocker) release(file *os.File, name string) error {
-	unlockErr := flockUnlock(file)
+	unlockErr := flock.Unlock(file)
 	closeErr := file.Close()
 	//: the gate is released LAST: while it is held, no goroutine of this
 	//: process can reach the flock, so the window in which the flock is free
@@ -358,7 +359,7 @@ func releaseIfLocked(file *os.File, locked bool) error {
 		return nil
 	}
 	//: give the flock up while the descriptor is still valid.
-	return flockUnlock(file)
+	return flock.Unlock(file)
 }
 
 // abandonDetail renders the unlock and close failures as one field value.

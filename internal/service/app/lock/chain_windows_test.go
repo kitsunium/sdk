@@ -24,10 +24,11 @@ import (
 //
 // checkChain refuses an indirection at a parent component only when the
 // directory holding it is writable by anyone — which on Windows is a DACL
-// question (dacl_windows.go), not a mode question, because os.Stat synthesises
-// 0777 for every writable directory here. A rule that read that synthesised
-// mode would refuse EVERY junction under a writable directory, including
-// C:\Users\All Users -> C:\ProgramData, which Windows installs itself.
+// question (internal/kernel/fs/winacl), not a mode question, because os.Stat
+// synthesises 0777 for every writable directory here. A rule that read that
+// synthesised mode would refuse EVERY junction under a writable directory,
+// including C:\Users\All Users -> C:\ProgramData, which Windows installs
+// itself.
 //
 // So a junction in a directory only its owner can write is ACCEPTED, and the
 // refusing half lives beside the rest of the DACL table in

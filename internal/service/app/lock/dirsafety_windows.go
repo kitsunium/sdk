@@ -3,6 +3,25 @@
 // Package lock — the lock directory's safety verdict on Windows, where the
 // question the POSIX rule asks has no answer and the attack it prevents has no
 // mechanism (ADR 0081).
+//
+// # Two questions, three masks, one reader
+//
+// Both rules here ask the kernel's DACL reader (internal/kernel/fs/winacl, the
+// reader this package wrote for ADR 0084 and that the queue now shares from
+// there), and they ask it different things — exactly as the POSIX pair differ
+// over the sticky bit, and drawn finer, because Windows spells create and
+// delete as separate bits rather than one sticky flag (ADR 0086):
+//
+//   - [checkDir] asks winacl.ReplaceRights of the lock directory — can a
+//     stranger take away the entry a holder created? — and
+//     winacl.ContentRights of what the lock FILES created there inherit;
+//   - [plantable] asks winacl.CreateRights of the directory holding a path
+//     component — can a stranger put a directory at a name nobody has taken?
+//
+// The reader measures and never decides. What this domain decides on an
+// inspection that could not run is to ACCEPT, and to log that it did (see
+// [checkDir], [noteUninspected]) — where the queue, asking the same reader,
+// refuses (ADR 0095).
 package lock
 
 import (
@@ -10,6 +29,7 @@ import (
 	"log"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/kernel/fs/winacl"
 )
 
 // checkDir refuses a directory whose DACL lets any account create or replace
@@ -50,7 +70,7 @@ import (
 // now done. It was deferred there and again in ADR 0082 §Deferred on a cost
 // estimate of roughly 250 lines of ABI; re-checking that estimate against the
 // pinned toolchain rather than restating it is what changed the answer. See
-// dacl_windows.go.
+// internal/kernel/fs/winacl's dacl_windows.go, where the reader now lives.
 //
 // It fails OPEN: any failure on the way to a verdict accepts. A wrong refusal
 // costs a caller a locker that never builds on a directory that is perfectly
@@ -76,7 +96,8 @@ import (
 // never has to. A lock file there is created 0600 whatever the directory's
 // mode says; here it takes the directory's inheritable entries instead, so a
 // directory nobody can unlink from can still hand every account the fencing
-// ledger. See contentRights in dacl_windows.go.
+// ledger, which LockFileEx protects only while somebody holds it. See
+// winacl.ContentRights.
 //
 // # What is still NOT checked
 //
@@ -92,7 +113,7 @@ import (
 // exclusion, it is what the accepting half of this rule buys, and it is the
 // same exposure /tmp has carried on Unix since ADR 0052.
 func checkDir(dir string, _ fs.FileInfo) error {
-	writable, observed := dirGrantsAnyone(dir, replaceRights, contentRights)
+	writable, observed := winacl.GrantsAnyone(dir, winacl.ReplaceRights, winacl.ContentRights)
 	//: nobody meaning "anybody" can put an entry here — or the question could
 	//: not be asked, which accepts and SAYS SO rather than passing silently.
 	if !writable {
@@ -112,8 +133,8 @@ func checkDir(dir string, _ fs.FileInfo) error {
 // The mode is ignored, because on Windows there is nothing in it: os.Stat
 // synthesises the permission bits from FILE_ATTRIBUTE_READONLY, so every
 // writable directory reports 0777. The answer comes from the directory's DACL
-// instead — see dacl_windows.go, which also carries why the cost that deferred
-// this twice is no longer what it was.
+// instead — see internal/kernel/fs/winacl, whose dacl_windows.go also carries
+// why the cost that deferred this twice is no longer what it was.
 //
 // It is a DIFFERENT question from [checkDir]'s and asks for different rights,
 // exactly as the POSIX pair differ over the sticky bit: a component is a
@@ -124,13 +145,13 @@ func checkDir(dir string, _ fs.FileInfo) error {
 func plantable(_ fs.FileMode, containerPath string) (yes bool, observed string) {
 	//: only the rights that put a directory at a free name; nothing is
 	//: inherited by a component, so the second mask is empty.
-	return dirGrantsAnyone(containerPath, createRights, 0)
+	return winacl.GrantsAnyone(containerPath, winacl.CreateRights, 0)
 }
 
 // acceptedDir accepts a directory, and says so out loud when the acceptance
 // rests on an inspection that could not run rather than on a verdict.
 //
-// [dirGrantsAnyone] answers "not writable by anybody" for both, because
+// winacl.GrantsAnyone answers "not writable by anybody" for both, because
 // there is no third verdict to return and refusing on a Win32 failure would
 // cost a caller a locker on a directory that is perfectly safe. The two are
 // still different facts, and an operator debugging why a lock directory was

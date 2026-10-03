@@ -13,10 +13,11 @@ import (
 	svclock "github.com/kitsunium/sdk/internal/service/app/lock"
 )
 
-// This file carries the SAME build constraint as dacl_windows.go. The lane
-// that executes it is the `windows` job of .github/workflows/e2e-cross.yml;
-// the Linux Bazel gate compiles neither the check nor this file, so this lane
-// is the only gate either has.
+// This file carries the SAME build constraint as dirsafety_windows.go, whose
+// rule it drives end to end over the kernel's DACL reader
+// (internal/kernel/fs/winacl). The lane that executes it is the `windows` job
+// of .github/workflows/e2e-cross.yml; the Linux Bazel gate compiles neither the
+// check nor this file, so this lane is the only gate either has.
 //
 // Every row drives the real Windows access-control model through `icacls`,
 // which ships with the operating system and needs no privilege to edit an ACL
@@ -36,13 +37,13 @@ const (
 // FAILS rather than skips when it cannot.
 //
 // A skip would be the comfortable choice and it is the wrong one. This lane is
-// the only gate `dacl_windows.go` has — the Linux Bazel gate compiles neither
-// the check nor this file — and `go test` runs here WITHOUT -v, so it buffers
-// a passing package's output and discards it. A skipped row and a passed row
-// are therefore the same green tick, which makes a test that quietly stopped
-// running indistinguishable from one that never existed. That is ADR 0082
-// §D5's own argument, applied to a table whose refusing rows are the entire
-// claim of ADR 0084 and ADR 0086.
+// the only gate the lock directory's Windows rule has — the Linux Bazel gate
+// compiles neither the check nor this file — and `go test` runs here WITHOUT
+// -v, so it buffers a passing package's output and discards it. A skipped row
+// and a passed row are therefore the same green tick, which makes a test that
+// quietly stopped running indistinguishable from one that never existed. That
+// is ADR 0082 §D5's own argument, applied to a table whose refusing rows are
+// the entire claim of ADR 0084 and ADR 0086.
 //
 // icacls ships with every supported Windows and needs no privilege to edit an
 // ACL on a directory the caller owns, so a failure here is a real change in

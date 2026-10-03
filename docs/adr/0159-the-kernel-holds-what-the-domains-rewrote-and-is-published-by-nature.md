@@ -167,7 +167,19 @@ published, which is why §2 comes first.
     compare-and-swap away. Its fan-out, the password policy's verification
     of former hashes, is `concur/group.Collect`. Its observer set stays, as
     §1 said, and so does its multi-producer ring until `ring` has the mode.
-  - Not yet: `ring`'s multi-producer mode and `flock`.
+  - `flock` landed in the `fs` family, as `kernel/fs/flock`: `TryLock`,
+    `Unlock` and `Native` over `flock(2)` and `LockFileEx`, never blocking,
+    the kernel's errno unwrapped and `errors.ErrUnsupported` where neither
+    exists — so no error code of its own. The copies in `lock` and `session`
+    are gone; each keeps its gate, its waits, its codes and a platform gate of
+    its own (`lock` pairs the lock with its hardened open, by a test; `session`
+    stays narrower and refuses Windows). A primitive this record did not list
+    joined it: `kernel/fs/winacl`, the Windows DACL reader `lock` wrote
+    (ADR 0084, 0086) and exported for `queue` (ADR 0095), which took the
+    queue's Windows-only edge onto the lock service with it. The five
+    "private directory" rules built on these primitives were compared and
+    kept five: each difference is a decision (`internal/kernel/fs/CLAUDE.md`).
+  - Not yet: `ring`'s multi-producer mode.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
 - Five service-to-service edges disappear from the dependency graph; the

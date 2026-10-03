@@ -6,8 +6,10 @@
 The concrete half of the session domain (ADR 0045): two stores implementing
 `internal/core/security/session.Store` — one in process memory, one on disk — and the
 AEAD `Sealer` that renders an identifier as a cookie value. Composes
-`internal/core/crypto` (AES-256-GCM), `internal/kernel/clock` and
-`internal/kernel/fs/pathchain`; it reimplements none of them.
+`internal/core/crypto` (AES-256-GCM), `internal/kernel/clock`,
+`internal/kernel/fs/pathchain` and `internal/kernel/fs/flock` (the store-wide
+lock, which this package and the lock domain each used to carry a copy of —
+ADR 0159); it reimplements none of them.
 
 Codes: none declared here. The engines' own refusals (`0.3.46.*`, allocated
 here — ADR 0045) and the port's verdicts (`0.2.14.*`) are both declared in
@@ -32,7 +34,7 @@ exactly as ADR 0018 §(a) prescribes.
 | `file_store.go` / `file_ops.go` / `file_write.go` / `file_publish.go` | `fileStore`: construction (`openStoreDir` → the held `os.Root`, `assertHeldDir`, `openLockFile`), the record path, publication |
 | `chain.go` | `checkChain` — the components ABOVE the store directory, audited through `pathchain` before anything is created (§The location) |
 | `file_entry.go` | `openEntry` / `readEntry` — the look before every open and the proof after it, so nothing is read or locked through a link (§The location) |
-| `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), `plantable` (the mode rule, Unix only), and the honest refusal — with the reason Windows is refused, corrected |
+| `fsguard_unix.go` / `fsguard_other.go` | the platform gate `platformNative` — narrower than `flock.Native`, since Windows has the kernel's lock and not the owner-only modes or the directory flush — `plantable` (the mode rule, Unix only), and the honest refusal, with the reason Windows is refused, corrected. The lock itself is `internal/kernel/fs/flock`, polled `LOCK_NB` by `file_ops.go` (ADR 0073) |
 | `sealer.go` | `sealer` + `NewSealer` |
 
 ## The two stores
@@ -61,7 +63,7 @@ rest on operating-system mechanics, and only one of those is portable:
 | `rename(2)` / `MoveFileEx` | atomic publication | **yes**, everywhere Go runs |
 | `os.Root` | one directory held for the store's lifetime | **yes** — the standard library's own `openat` walk |
 | enforced Unix permissions | owner-only records, and the `plantable` verdict on a link in `Dir`'s path | no |
-| `flock(2)` | serialised read-modify-write | no |
+| `flock(2)` — `internal/kernel/fs/flock` | serialised read-modify-write | no — the kernel's primitive has it on the six Unix kernels and `LockFileEx` on Windows, nothing on illumos/Solaris; `TestTheStoreIsBuiltOnlyWhereTheKernelCanLock` pins that this store never builds where it has none |
 | `fsync(2)` on the directory | a rename or unlink that survives a power cut | no — Windows has no directory flush (ADR 0056 D10), and the store is already refused there |
 
 Where either of the last two is missing, `NewFileStore` returns
@@ -84,19 +86,21 @@ solaris, illumos, android and ios.
 
 This row used to say the right DACL needs `CreateFileW` with a security
 descriptor "which stdlib `syscall` does not expose". That stopped being true
-with ADR 0081 and ADR 0084: `internal/service/app/lock` binds `LockFileEx` from
-`kernel32` and `GetNamedSecurityInfoW` + `GetAce` from `advapi32` through
-`syscall.NewLazyDLL`, no new dependency. Reusing that code does not get this
-store there, because three things are still missing:
+with ADR 0081 and ADR 0084: the kernel binds `LockFileEx` from `kernel32`
+(`internal/kernel/fs/flock`) and `GetNamedSecurityInfoW` + `GetAce` from
+`advapi32` (`internal/kernel/fs/winacl`) through `syscall.NewLazyDLL`, no new
+dependency — code the lock domain wrote and ADR 0159 moved down to the kernel.
+Reusing it does not get this store there, because three things are still
+missing:
 
-| Missing | Why lock's code does not supply it |
+| Missing | Why the kernel's primitives do not supply it |
 |---|---|
-| an owner-only DACL, BUILT and then verified | lock's reader (`GrantsAnyone`, ADR 0084/0086/0095) builds nothing, and answers a weaker question: does an identifier meaning ANYBODY — Everyone, Authenticated Users, BUILTIN\Users — hold a right. `0700`/`0600` exclude every other account, a named colleague included; a directory granting read to one named principal passes the reader and fails the Unix rule. Applying a protected owner-only DACL at creation is new ABI (`SetNamedSecurityInfoW`, or a `SECURITY_ATTRIBUTES` on the create) with its own tests |
+| an owner-only DACL, BUILT and then verified | the kernel's reader (`winacl.GrantsAnyone`, ADR 0084/0086/0095) builds nothing, and answers a weaker question: does an identifier meaning ANYBODY — Everyone, Authenticated Users, BUILTIN\Users — hold a right. `0700`/`0600` exclude every other account, a named colleague included; a directory granting read to one named principal passes the reader and fails the Unix rule. Applying a protected owner-only DACL at creation is new ABI (`SetNamedSecurityInfoW`, or a `SECURITY_ATTRIBUTES` on the create) with its own tests |
 | a directory flush | none exists: `FlushFileBuffers` on a directory handle returns `ERROR_ACCESS_DENIED` (ADR 0056 D10) — the reason `internal/service/data/vfs` refuses Windows too. Without it a power cut can undo a `Destroy` |
 | a lane that runs it | no Windows job runs this package; a green cross-compile is not ADR 0018's runtime bar |
 
-`LockFileEx` (ADR 0081) is the one piece that exists, and it is not enough on
-its own. `GOOS=windows go vet ./internal/service/security/session/...` is clean, which
+The kernel's `LockFileEx` (ADR 0081, `internal/kernel/fs/flock`) is the one
+piece that exists, and it is not enough on its own. `GOOS=windows go vet ./internal/service/security/session/...` is clean, which
 is the build bar and only that.
 
 ### Requesting a mode is not getting one
@@ -247,6 +251,40 @@ a change to `vfs` itself — the mode assertion in `WriteAtomic`, a durable
 remove or flush sibling (ADR 0039), and `fs.ReadLinkFS` — which changes `vfs`
 for every caller and is not this change.
 
+## The store directory's rule, beside the other four
+
+`app/lock`, `proc/ipc`, `security/secret` and `data/queue` each refuse a
+directory by a rule of their own, and the five are compared side by side in
+`internal/kernel/fs/CLAUDE.md` §Five directory rules. They share the kernel's
+measurements (`pathchain`, `winacl`) and lock (`flock`), and no rule. This
+store's, and why it is not a neighbour's:
+
+- **Owner-only, judged on the directory it HOLDS.** Any bit beyond `0700` is
+  `DirectoryUnsafe`, read through the `os.Root` every later operation uses,
+  and the path must still name that directory (`PathRedirected`). Stricter than
+  `lock` and `queue`, which accept a GROUP share because a lock or a queue
+  shared between two service accounts is their point; a session record is one
+  subject's secret. As strict as `secret` on a group READ bit — and, unlike
+  `ipc`, which admits group search, there is no peer check behind this
+  directory to make reading it harmless.
+- **The one rule that narrows.** A directory this call CREATED is `fchmod`ed
+  to `0700`, because `MkdirAll`'s mode is a request a default POSIX ACL can
+  widen; an operator's existing directory is refused, never narrowed — the line
+  every other domain draws at "never narrow".
+- **The path above is `lock`'s rule, verbatim** (ADR 0083): an indirection
+  whose holder is world-writable is refused, the sticky bit exempting nothing,
+  through `pathchain`, BEFORE anything is created. `plantable` on Unix is
+  byte-for-byte `lock`'s, and stays a copy: it is one bit test whose meaning —
+  who counts as "anybody" — is a policy this store adopted, and `lock`'s
+  Windows half (a DACL question) is one this store refuses the platform before
+  it could ask. `ipc` judges the same walk more strictly (a foreign owner, a
+  replaceable component); `queue` does not walk the path at all.
+- **Ownership is not checked** (§What is NOT closed), where `ipc` checks the
+  owner of the directory and of every component an outsider could write.
+- **Windows is refused** where `lock` and `queue` read the DACL:
+  `winacl.GrantsAnyone` answers "can ANYBODY write?", which is weaker than
+  owner-only (§Why Windows is still refused).
+
 ## Conventions
 
 - **Nothing waits on the wall clock, and nothing sleeps.** The memory store
@@ -323,7 +361,8 @@ Two more rules sit on the same call:
 Superseded by ADR 0154 (the charter); ADR 0073 stays as the incident's record, and its rules live here.
 
 - **Both waits observe the caller's context.** The cross-process lock is
-  `flock(LOCK_NB)` polled on the injected clock (`FileConfig.Poll`,
+  `flock(LOCK_NB)` — `internal/kernel/fs/flock.TryLock`, which has no blocking
+  call to fall back on — polled on the injected clock (`FileConfig.Poll`,
   `DefaultPoll` 25 ms — the `lock` domain's number; negative refused); the
   in-process gate is a one-slot channel selected against the context, taken
   FIRST, because `flock` on one open file description excludes no goroutine.
@@ -400,6 +439,7 @@ cd internal/service && GOWORK=off go test -race -cover ./security/session
 | `fixation_external_test.go` | the fixation attack end to end, `Save`'s refusal of a forged subject, the ordinary data path, the two rotation lifetime rules, a dead session refusing to be re-authenticated, the 4 KiB subject bound (4096 accepted and read back, 4097 refused with the session untouched) in both stores, and the ADR 0031 constructor refusals |
 | `file_cancel_external_test.go` | both waits being left: a cancelled caller parked on the lock poll, the poll ending in ACQUISITION once the holder goes (so "cancellable" is not satisfied by a store that never acquires), and a goroutine cancelled while parked on the in-process gate — in a `synctest` bubble, because the cancel has to happen after it is parked there or the context check at the top of `withLock` answers instead; and a caller gone by the time both are held never running the section (`TestACallerThatLeavesWhileAcquiringDoesNotRunTheSection`) |
 | `withlock_internal_test.go` | the in-process gate excluding goroutines that share the store's one `flock` descriptor — which `flock` itself does not, a re-lock of one open file description being a conversion rather than a wait — asserted on observed occupancy, not on a final counter |
+| `fsguard_internal_test.go` | the store's platform gate never wider than the kernel lock's (`platformNative` implies `flock.Native`), on every GOOS |
 | `file_store_external_test.go` | directory and record modes on disk, the operator-owned refusal, no identifier anywhere on disk, filename binding via AAD, tamper/truncation/foreign-key refusal, survival across a reopen, the failed-publish invariant checked byte-for-byte (a failure at temp creation), a sweep that leaves foreign `*.session` files alone, and context cancellation. The rename-onto-a-directory test fails at `Save`'s read and never reaches the rename — its doc says so |
 | `pathsafety_external_test.go` | the four planted-path attacks of §The location, each refused: a link at a record's name inside and outside the directory (`RecordCorrupt`, never read, the LINK swept), a link at the lock file dangling or not, inside or out (`PathRedirected`, nothing created through it), a link at a component of `Dir` over the whole container table — 1777, 0777, at a parent and at `Dir` itself refused, 0770 and 0755 honoured — and a parent swapped after construction moving nothing; plus a FIFO or a directory at a record's or the lock file's name, reported and never opened. Tagged like the store; every mutation named in its doc comments was run |
 | `pathsafety_internal_test.go` | the branches only a race reaches, driven with the swap already made: `assertHeldDir` against a swapped and a vanished `Dir` and a wide held directory; `sameEntry` against a swapped name, a created name that became a link or vanished, and a handle on a directory; `isLinkNow` after `os.Root` refuses an escaping link |

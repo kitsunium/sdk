@@ -36,6 +36,7 @@ go_library(
         "//internal/core/security/session",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/fs/flock",
         "//internal/kernel/fs/pathchain",
         "//internal/service/crypto/aead/aesgcm",
     ],
@@ -60,6 +61,7 @@ go_test(
         "file_cancel_external_test.go",
         "file_store_external_test.go",
         "fixation_external_test.go",
+        "fsguard_internal_test.go",
         "pathsafety_external_test.go",
         "pathsafety_internal_test.go",
         "sealer_external_test.go",
@@ -72,5 +74,6 @@ go_test(
         "//internal/core/security/session",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
+        "//internal/kernel/fs/flock",
     ],
 )
