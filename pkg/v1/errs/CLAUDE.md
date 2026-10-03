@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T19:30:00Z -->
 # pkg/v1/errs/
 
 ## Purpose
@@ -18,7 +18,9 @@ construct.go — construction surface: New, Wrap (+ WrapParams alias), the Field
                MinAppMajor/MaxMajor application-code-range constants
 accessors_external_test.go / construct_external_test.go — the facade suites
                (see Verification)
-accessors_bench_test.go — the benchmarks BENCH.md is generated from
+accessors_bench_test.go — the benchmarks BENCH.md's first table comes from
+facade_bench_test.go — one call to each forwarded name: BENCH.md §"Every
+               forwarded name, one call each"
 BENCH.md     — generated benchmark report
 USES.md      — the interactive use-case tabs, hand-authored because HTML in a Go
                doc comment renders as literal text

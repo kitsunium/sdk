@@ -26,6 +26,7 @@ go_test(
         "accessors_bench_test.go",
         "accessors_external_test.go",
         "construct_external_test.go",
+        "facade_bench_test.go",
     ],
     deps = [
         ":errs",
