@@ -15,7 +15,7 @@ product (ADR 0078 §1).
 It was the SDK library's `internal/service/entitlement` until ADR 0158 made it
 the framework's. Its own range `0.3.67.*` kept its value (ADR 0160), and it now
 reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
-(framework/CLAUDE.md rule 1): the cache lock is `pkg/v1/lock`'s file locker.
+(framework/CLAUDE.md rule 1): the cache lock is `pkg/v1/app/lock`'s file locker.
 
 ## Contents
 
@@ -24,7 +24,7 @@ reaches the SDK only through `pkg/v1/*` and `internal/kernel/errs`
 | `service.go` | the `Service` handle, `Verify`, the origin fallback, `matchSubject` |
 | `anchors.go` | the ORDERED list of vendor keys this verifier accepts, its bound, and the two readers |
 | `roster_parse.go` | `ParseRoster` — two documents, raw + detached signature |
-| `crypto.go` | the crypto domain's operations, asked through `pkg/v1/sign` and `pkg/v1/hash` (ADR 0158 §2): `verifiedBy`, the package's one ed25519 check (roster, bundle, Roughtime); `payloadDigest`, the SHA-256 a mark compares; `sha512Prefix`, a Roughtime Merkle node. RS256 is not here — see `oidc.go` |
+| `crypto.go` | the crypto domain's operations, asked through `pkg/v1/crypto/sign` and `pkg/v1/crypto/hash` (ADR 0158 §2): `verifiedBy`, the package's one ed25519 check (roster, bundle, Roughtime); `payloadDigest`, the SHA-256 a mark compares; `sha512Prefix`, a Roughtime Merkle node. RS256 is not here — see `oidc.go` |
 | `bundle.go` | `ParseBundle` — the one-document form the cache stores |
 | `cache.go` | the offline copy and the anti-rollback ratchet, over storage AND acceptance; `DefaultCacheDir`, `WithCache` |
 | `cache_lock.go` | exclusion over the cache directory — what rename does not give; `holdCacheForWrite` skips a write it cannot guard |
@@ -407,12 +407,12 @@ and lives in a module of its own because `golang.org/x/crypto/ssh` reaches
 ## Where ADR 0158 §2 is not followed, and why
 
 ADR 0158 §2 sends this package's signatures, digests, JSON, HTTP, locks and
-waits through `pkg/v1`. Signatures (`pkg/v1/sign`), digests (`pkg/v1/hash`)
-and the cache lock (`pkg/v1/lock`) go through it — `crypto.go` and
+waits through `pkg/v1`. Signatures (`pkg/v1/crypto/sign`), digests (`pkg/v1/crypto/hash`)
+and the cache lock (`pkg/v1/app/lock`) go through it — `crypto.go` and
 `cache_lock.go`. Four things do not, each for a reason measured on this tree,
 and each is said again at its code site:
 
-- **JSON: `jsonnames.go` stays, not `pkg/v1/codec/strictjson`.** strictjson
+- **JSON: `jsonnames.go` stays, not `pkg/v1/data/codec/strictjson`.** strictjson
   refuses a duplicate name, which is what this package needs, but it also
   refuses every member its target does not declare — ADR 0102's one reading,
   with no mode to relax it — and the four documents read here must ignore one:
@@ -424,10 +424,10 @@ and each is said again at its code site:
   vendor adds a field.
   Measured: a JWK carrying a member its decoding type does not declare is
   refused `MEMBER_UNKNOWN` by strictjson.
-- **HTTP: `net/http` over `http.DefaultTransport`, not `pkg/v1/client`.** The
+- **HTTP: `net/http` over `http.DefaultTransport`, not `pkg/v1/net/client`.** The
   guarded client's transport sets no `Proxy`, so it ignores `HTTP(S)_PROXY` and
   `NO_PROXY`. Measured with `HTTP_PROXY` set: `http.DefaultClient` sent the
-  request through the proxy, `pkg/v1/client` dialled the host directly. A
+  request through the proxy, `pkg/v1/net/client` dialled the host directly. A
   roster fetch or a CI token mint that cannot leave a network through its proxy
   refuses every customer behind one, so the roster client (`service.go`) and
   `DefaultBearerFetch` (`ci.go`) keep the default transport. The guarded
@@ -475,7 +475,7 @@ it.
 - Collapse `RosterUnreachable` into a refusal. It says "cannot decide", and
   reporting an outage as a revocation is the one wrong answer.
 - Swap `jsonnames.go` for `strictjson`, or the roster and mint clients for
-  `pkg/v1/client`, while the reasons in "Where ADR 0158 §2 is not followed"
+  `pkg/v1/net/client`, while the reasons in "Where ADR 0158 §2 is not followed"
   still hold: the first refuses a genuine Actions token and any roster with a
   field this build predates, the second every customer behind a proxy.
 - Read the anchor list anywhere but `parseBundleAnyAnchor` / `bundleMarkAnyAnchor`,

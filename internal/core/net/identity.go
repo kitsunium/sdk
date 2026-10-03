@@ -70,7 +70,7 @@ func (i IdentityValue) IsZero() bool {
 // ones already in use — which is the opposite of what an opaque, immutable
 // identity is for. Who pays that cost, and how often, is the CALLER's choice
 // and not a property of this method: net/client calls it once inside New and
-// net/server once per listener, but service/mail calls it per connection —
+// net/server once per listener, but service/app/mail calls it per connection —
 // which for SMTP is per message — deliberately, because StartTLS takes the
 // config and a transport that reused one would hand every send a *tls.Config
 // another send could still be mutating. Three slice clones are nothing beside

@@ -8,7 +8,7 @@ import (
 
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // SetCookie adds a Set-Cookie header to the HTTP response of the endpoint

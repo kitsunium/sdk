@@ -4,7 +4,7 @@
 
 ADR 0149: a port of numbers (`Emitter.Emit(*Event)`, zero allocations), `Nop`
 by default, and the `Exporter` that hands events to a tool attached on a
-private socket (`pkg/v1/ipc`, ADR 0148). The framework's `App` reports every
+private socket (`pkg/v1/proc/ipc`, ADR 0148). The framework's `App` reports every
 span and phase change on it when `KIT_TELEMETRY` names a socket at the start
 (`framework/kit/telemetry.go`).
 

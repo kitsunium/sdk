@@ -1,0 +1,40 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "docstore",
+    srcs = ["docstore.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/docstore",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/kernel/errs",
+        "//internal/service/data/docstore",
+        "//pkg/v1/data/sql",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":docstore",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "docstore_test",
+    srcs = ["docstore_external_test.go"],
+    deps = [
+        ":docstore",
+        "//pkg/v1/clock",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/data/vfs",
+        "//pkg/v1/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

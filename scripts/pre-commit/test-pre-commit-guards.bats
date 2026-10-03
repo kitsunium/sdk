@@ -1,7 +1,10 @@
 #!/usr/bin/env bats
-# BATS tests for the pre-commit guards that pipe into an early-exiting reader.
+# BATS tests for the guards in scripts/pre-commit/, in three groups: the two
+# guards that piped into an early-exiting reader, check-domain-docs.sh reading a
+# core grouped by family, and the portability of every guard. Each group says
+# below what it pins and why.
 #
-# Both cases below were found by finishing the sweep ADR 0088 opened and
+# The early-exit cases were found by finishing the sweep ADR 0088 opened and
 # recorded as INCOMPLETE: the former commit-msg hook was measured and fixed there,
 # but two `scripts/pre-commit/` checks pipe into `grep -q` the same way and had
 # not been. They fail in OPPOSITE directions, which is why both are covered:
@@ -116,6 +119,155 @@ mkroot() {
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"internal/core/widget"* ]]
+}
+
+# --- check-domain-docs.sh ---------------------------------------------------
+
+# ADR 0155 groups internal/core by family. The guard compared the tree's core/
+# list with the directories ONE level down, which a nested core turns into the
+# family names: a domain could then leave the tree, or never enter it, while
+# its family stayed. It now compares every Go package, at any depth, with a
+# block that may write a family's packages as family/{a, b}. Every case below
+# was confirmed RED against the guard as it was, for the reason its comment
+# gives, and green against the guard as it is.
+#
+# mkdocroot builds a root the rest of the guard passes — one Purpose paragraph
+# and its table, one ADR in all three indexes — so that the core/ block alone
+# decides each case. $1 is the block's lines under `├── core/`, `│` included;
+# every further argument is a package made under internal/core, holding one
+# non-test .go file.
+mkdocroot() {
+  block="$1"
+  shift
+  for pkg in "$@"; do
+    mkdir -p "internal/core/$pkg"
+    printf 'package %s\n' "${pkg##*/}" >"internal/core/$pkg/doc.go"
+  done
+  mkdir -p docs/adr
+  echo '# ADR 0001' >docs/adr/0001-fixture.md
+  echo '| `0001-fixture.md` | fixture |' >docs/adr/CLAUDE.md
+  echo '| `adr/0001-fixture.md` | fixture |' >docs/CLAUDE.md
+  {
+    printf '# fixture\n\n## Purpose\n\nGo SDK providing a fixture.\n\n'
+    printf '| Domain | What |\n|---|---|\n| `authz` | fixture |\n\n'
+    printf '## Architecture at a glance\n\n```\ninternal/\n'
+    printf '├── kernel/        primitives\n│                  errs\n'
+    printf '├── core/          domain interfaces + domain values\n'
+    printf '%s\n' "$block"
+    printf '└── service/       implementations\n```\n\n'
+    printf '## Reference\n\n- ADR 0001 — fixture — `docs/adr/0001-fixture.md`\n'
+  } >CLAUDE.md
+}
+
+# The shape the guard reads now: families as brace groups, one group wrapped
+# onto a second line and another nested in it, a note holding commas and
+# braces, packages three deep. Red before: commas were split first, so the
+# groups and the note came apart into fragments no directory is called —
+# `secret (a note`, `writer}`, `metrics}`.
+@test "domain-docs: a core grouped by family, written with brace groups, passes" {
+  mkdocroot \
+'│                  crypto, net,
+│                  security/{authz, secret (a note, {with} braces)},
+│                  observe/{logger, logger/{level, writer},
+│                           metrics},
+│                  data/{codec, codec/scratch}' \
+    crypto net security/authz security/secret \
+    observe/logger observe/logger/level observe/logger/writer observe/metrics \
+    data/codec data/codec/scratch
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+}
+
+# The regression the change exists for, written with full paths so the old
+# reading parses the block the same way. Red before: both sides came down to
+# `security`, and the guard passed with session missing from the tree.
+@test "domain-docs: a package the block leaves out is named, though its family is listed" {
+  mkdocroot '│                  security/authz, security/secret' \
+    security/authz security/secret security/session
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"on disk but NOT in the doc:"$'\n'"    security/session"$'\n'* ]]
+}
+
+# The other direction: a member no package answers to, and a family named on
+# its own, which holds no Go code and so is no package either. Red before: the
+# refusal named `token}`, a fragment of the group, instead of either.
+@test "domain-docs: a name that is no package is refused, a family named alone included" {
+  mkdocroot '│                  security, security/{authz, token}' security/authz
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"in the doc but NOT on disk:"$'\n'"    security"$'\n'"    security/token"$'\n'* ]]
+}
+
+# A package is a directory the go tool would build: one holding only tests, a
+# testdata tree, and a name starting with "." or "_" are not, and the block
+# need not name them. Red before: every top-level directory counted, so
+# `_scratch` and `.hidden` were required.
+@test "domain-docs: tests, testdata and dot or underscore names are not packages" {
+  mkdocroot '│                  security/authz' security/authz
+  mkdir -p internal/core/security/authz/testdata internal/core/security/authz/authztest \
+    internal/core/security/skipped internal/core/_scratch internal/core/.hidden
+  echo 'package fixture' >internal/core/security/authz/testdata/fixture.go
+  echo 'package authztest' >internal/core/security/authz/authztest/authz_test.go
+  echo 'package skipped' >internal/core/security/skipped/_skipped.go
+  echo 'package scratch' >internal/core/_scratch/scratch.go
+  echo 'package hidden' >internal/core/.hidden/hidden.go
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+}
+
+# A brace that does not pair into a group is refused as one. Read as text it
+# surfaces as a name no package has, which points at the wrong fix — and that
+# is what happened before: the refusal named `secret`, a package the disk does
+# hold, and nothing said "brace".
+@test "domain-docs: a brace left open is refused as a brace, not read as a path" {
+  mkdocroot '│                  security/{authz, secret' security/authz security/secret
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"does not pair into a group"* ]]
+}
+
+# Red before: `grep -v '^$'` exits 1 when it selects nothing, pipefail handed
+# that to the assignment and set -e ended the script — status 1 and no message,
+# the explanation written under it never printed.
+@test "domain-docs: a tree without a core/ block says so" {
+  mkdocroot '' security/authz
+  grep -v '^├── core/' CLAUDE.md >CLAUDE.md.new
+  mv CLAUDE.md.new CLAUDE.md
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"could not find the 'core/' block"* ]]
+}
+
+# The union merge the guard's header records left four competing core/ lists.
+# The reader takes one block, so a second must be refused rather than skipped:
+# here it sits in a second, stale tree below the first. Red before: the first
+# block matched the disk, the stale one was never read, and the guard passed.
+@test "domain-docs: a second core/ block is refused, not ignored" {
+  mkdocroot \
+'│                  security/authz
+└── service/       implementations
+internal/
+├── core/          a stale copy
+│                  authz, token' \
+    security/authz
+
+  run "$SCRIPTS/check-domain-docs.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"found 2 'core/' blocks"* ]]
 }
 
 # --- portability (#260) -----------------------------------------------------

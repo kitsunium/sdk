@@ -17,7 +17,7 @@ is the read-mostly, name-keyed, copy-on-write table a registrar publishes into
 error, for the reason `Unusable` returns a string: the registrar refuses with
 its own code. Its first two users are the metrics and trace exporter registries,
 which were one mechanism written twice (`publishExporter` + a map clone, in
-`core/metrics` and `core/trace`); the core registries that still carry their own
+`core/observe/metrics` and `core/observe/trace`); the core registries that still carry their own
 copy of it — codec, writer, crypto's `schemeRegistry`, transform, id, view — are
 the next candidates.
 
@@ -28,7 +28,7 @@ Code range: none. The answer is a string, not an error — see below.
 | File | Surface |
 |---|---|
 | `plugin.go` | `Unusable` — the entry guard |
-| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/snapshot` |
+| `registry.go` | `Registry[K cmp.Ordered, V comparable]` — `Publish` (conflict reported, identical value idempotent, check-and-publish atomic), `Lookup` (zero value AND false on a miss), `Names` (ascending, the caller's own slice) — over `kernel/concur/snapshot` |
 | `plugin_external_test.go` | both refusals, both acceptances, and the comparison a caller is about to make |
 | `registry_external_test.go` | the three publish outcomes, the two misses, the order of `Names`, and racing writers losing nothing |
 | `registry_internal_test.go` | the copy a publish makes leaves the source a reader may be walking untouched |

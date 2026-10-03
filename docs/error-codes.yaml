@@ -9,63 +9,63 @@ codes:
   - code: "0.1.3.1"
     const: CodeRingFull
     hex: "0x00_01_03_01"
-    package: internal/kernel/ring
+    package: internal/kernel/collections/ring
   - code: "0.1.3.2"
     const: CodeRingEmpty
     hex: "0x00_01_03_02"
-    package: internal/kernel/ring
+    package: internal/kernel/collections/ring
   - code: "0.1.3.3"
     const: CodeRingCapZero
     hex: "0x00_01_03_03"
-    package: internal/kernel/ring
+    package: internal/kernel/collections/ring
   - code: "0.1.5.1"
     const: CodeBatcherClosed
     hex: "0x00_01_05_01"
-    package: internal/kernel/batcher
+    package: internal/kernel/concur/batcher
   - code: "0.1.5.2"
     const: CodeBatcherDeliverFailed
     hex: "0x00_01_05_02"
-    package: internal/kernel/batcher
+    package: internal/kernel/concur/batcher
   - code: "0.2.2.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_02_01"
-    package: internal/core/codec
+    package: internal/core/data/codec
   - code: "0.2.2.2"
     const: CodeEmptyInput
     hex: "0x00_02_02_02"
-    package: internal/core/codec
+    package: internal/core/data/codec
   - code: "0.2.2.3"
     const: CodeTargetInvalid
     hex: "0x00_02_02_03"
-    package: internal/core/codec
+    package: internal/core/data/codec
   - code: "0.2.2.4"
     const: CodeValueInvalid
     hex: "0x00_02_02_04"
-    package: internal/core/codec
+    package: internal/core/data/codec
   - code: "0.2.2.5"
     const: CodeCodecNil
     hex: "0x00_02_02_05"
-    package: internal/core/codec
+    package: internal/core/data/codec
   - code: "0.2.3.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_03_01"
-    package: internal/core/writer
+    package: internal/core/observe/logger/writer
   - code: "0.2.3.2"
     const: CodeWriterUnknownName
     hex: "0x00_02_03_02"
-    package: internal/core/writer
+    package: internal/core/observe/logger/writer
   - code: "0.2.3.3"
     const: CodeWriterConfigInvalid
     hex: "0x00_02_03_03"
-    package: internal/core/writer
+    package: internal/core/observe/logger/writer
   - code: "0.2.3.4"
     const: CodeWriterNil
     hex: "0x00_02_03_04"
-    package: internal/core/writer
+    package: internal/core/observe/logger/writer
   - code: "0.2.3.5"
     const: CodeWriterNameEmpty
     hex: "0x00_02_03_05"
-    package: internal/core/writer
+    package: internal/core/observe/logger/writer
   - code: "0.2.4.1"
     const: CodeDuplicateRegistration
     hex: "0x00_02_04_01"
@@ -149,27 +149,27 @@ codes:
   - code: "0.2.5.1"
     const: CodeUnknownCompressor
     hex: "0x00_02_05_01"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.5.2"
     const: CodeCompressionFailed
     hex: "0x00_02_05_02"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.5.3"
     const: CodeDecompressionFailed
     hex: "0x00_02_05_03"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.5.4"
     const: CodeCompressedFrameInvalid
     hex: "0x00_02_05_04"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.5.5"
     const: CodeDuplicateRegistration
     hex: "0x00_02_05_05"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.5.6"
     const: CodeDecompressedTooLarge
     hex: "0x00_02_05_06"
-    package: internal/core/transform
+    package: internal/core/data/transform
   - code: "0.2.6.1"
     const: CodeUnsupportedPlatform
     hex: "0x00_02_06_01"
@@ -265,99 +265,99 @@ codes:
   - code: "0.2.7.1"
     const: CodeUnknownScheme
     hex: "0x00_02_07_01"
-    package: internal/core/id
+    package: internal/core/app/id
   - code: "0.2.7.5"
     const: CodeDuplicateRegistration
     hex: "0x00_02_07_05"
-    package: internal/core/id
+    package: internal/core/app/id
   - code: "0.2.8.1"
     const: CodeRetryExhausted
     hex: "0x00_02_08_01"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.2"
     const: CodeCircuitOpen
     hex: "0x00_02_08_02"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.3"
     const: CodeRateLimited
     hex: "0x00_02_08_03"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.4"
     const: CodeBulkheadFull
     hex: "0x00_02_08_04"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.5"
     const: CodeTimeoutExceeded
     hex: "0x00_02_08_05"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.6"
     const: CodePolicyMisconfigured
     hex: "0x00_02_08_06"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.8.7"
     const: CodeFallbackFailed
     hex: "0x00_02_08_07"
-    package: internal/core/resilience
+    package: internal/core/app/resilience
   - code: "0.2.9.1"
     const: CodeUnknownExporter
     hex: "0x00_02_09_01"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.2"
     const: CodeExportFailed
     hex: "0x00_02_09_02"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.3"
     const: CodeInstrumentKindConflict
     hex: "0x00_02_09_03"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.4"
     const: CodeInvalidAttribute
     hex: "0x00_02_09_04"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.5"
     const: CodeDuplicateRegistration
     hex: "0x00_02_09_05"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.6"
     const: CodeInvalidTemporality
     hex: "0x00_02_09_06"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.7"
     const: CodeInvalidDescription
     hex: "0x00_02_09_07"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.9.8"
     const: CodeDescriptionConflict
     hex: "0x00_02_09_08"
-    package: internal/core/metrics
+    package: internal/core/observe/metrics
   - code: "0.2.10.1"
     const: CodeConfigSourceFailed
     hex: "0x00_02_0A_01"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.2"
     const: CodeConfigDecodeFailed
     hex: "0x00_02_0A_02"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.3"
     const: CodeConfigValidationFailed
     hex: "0x00_02_0A_03"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.4"
     const: CodeConfigWatchFailed
     hex: "0x00_02_0A_04"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.5"
     const: CodeConfigSchemaInvalid
     hex: "0x00_02_0A_05"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.6"
     const: CodeConfigKeyMissing
     hex: "0x00_02_0A_06"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.10.7"
     const: CodeConfigUnknownKey
     hex: "0x00_02_0A_07"
-    package: internal/core/config
+    package: internal/core/app/config
   - code: "0.2.11.1"
     const: CodeListenFailed
     hex: "0x00_02_0B_01"
@@ -497,459 +497,459 @@ codes:
   - code: "0.2.12.1"
     const: CodeInvalidEntry
     hex: "0x00_02_0C_01"
-    package: internal/core/scheduler
+    package: internal/core/app/scheduler
   - code: "0.2.12.2"
     const: CodeDuplicateJob
     hex: "0x00_02_0C_02"
-    package: internal/core/scheduler
+    package: internal/core/app/scheduler
   - code: "0.2.12.3"
     const: CodeSchedulerRunning
     hex: "0x00_02_0C_03"
-    package: internal/core/scheduler
+    package: internal/core/app/scheduler
   - code: "0.2.12.4"
     const: CodeJobPanicked
     hex: "0x00_02_0C_04"
-    package: internal/core/scheduler
+    package: internal/core/app/scheduler
   - code: "0.2.13.1"
     const: CodeMalformed
     hex: "0x00_02_0D_01"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.2"
     const: CodeAlgorithmNone
     hex: "0x00_02_0D_02"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.3"
     const: CodeAlgorithmMismatch
     hex: "0x00_02_0D_03"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.4"
     const: CodeSignatureInvalid
     hex: "0x00_02_0D_04"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.5"
     const: CodeExpired
     hex: "0x00_02_0D_05"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.6"
     const: CodeNotYetValid
     hex: "0x00_02_0D_06"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.7"
     const: CodeExpiryRequired
     hex: "0x00_02_0D_07"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.8"
     const: CodeAudienceMismatch
     hex: "0x00_02_0D_08"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.9"
     const: CodeIssuerMismatch
     hex: "0x00_02_0D_09"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.10"
     const: CodeTooLarge
     hex: "0x00_02_0D_0A"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.11"
     const: CodeTooDeep
     hex: "0x00_02_0D_0B"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.12"
     const: CodeKeyUnsuitable
     hex: "0x00_02_0D_0C"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.13"
     const: CodePolicyMisconfigured
     hex: "0x00_02_0D_0D"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.14"
     const: CodeIssueFailed
     hex: "0x00_02_0D_0E"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.15"
     const: CodeClaimNameInvalid
     hex: "0x00_02_0D_0F"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.13.16"
     const: CodeLifetimeTooLong
     hex: "0x00_02_0D_10"
-    package: internal/core/token
+    package: internal/core/security/token
   - code: "0.2.14.1"
     const: CodeNotFound
     hex: "0x00_02_0E_01"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.2"
     const: CodeExpired
     hex: "0x00_02_0E_02"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.3"
     const: CodeInvalidID
     hex: "0x00_02_0E_03"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.4"
     const: CodeInvalidConfig
     hex: "0x00_02_0E_04"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.5"
     const: CodeIdentifierCollision
     hex: "0x00_02_0E_05"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.6"
     const: CodeEntropyFailed
     hex: "0x00_02_0E_06"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.7"
     const: CodeStoreUnavailable
     hex: "0x00_02_0E_07"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.8"
     const: CodeSealInvalid
     hex: "0x00_02_0E_08"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.14.9"
     const: CodeFixationRefused
     hex: "0x00_02_0E_09"
-    package: internal/core/session
+    package: internal/core/security/session
   - code: "0.2.15.1"
     const: CodeValidationFailed
     hex: "0x00_02_0F_01"
-    package: internal/core/validation
+    package: internal/core/app/validation
   - code: "0.2.15.2"
     const: CodeConstraintMisconfigured
     hex: "0x00_02_0F_02"
-    package: internal/core/validation
+    package: internal/core/app/validation
   - code: "0.2.17.1"
     const: CodeLevelUnknown
     hex: "0x00_02_11_01"
-    package: internal/core/logger/level
+    package: internal/core/observe/logger/level
   - code: "0.2.18.1"
     const: CodeCacheMisconfigured
     hex: "0x00_02_12_01"
-    package: internal/core/cache
+    package: internal/core/data/cache
   - code: "0.2.18.2"
     const: CodeCacheBackendFailed
     hex: "0x00_02_12_02"
-    package: internal/core/cache
+    package: internal/core/data/cache
   - code: "0.2.18.3"
     const: CodeCacheFillFailed
     hex: "0x00_02_12_03"
-    package: internal/core/cache
+    package: internal/core/data/cache
   - code: "0.2.18.4"
     const: CodeCacheEntryRejected
     hex: "0x00_02_12_04"
-    package: internal/core/cache
+    package: internal/core/data/cache
   - code: "0.2.19.1"
     const: CodeInvalidComponent
     hex: "0x00_02_13_01"
-    package: internal/core/lifecycle
+    package: internal/core/app/lifecycle
   - code: "0.2.19.2"
     const: CodeDuplicateComponent
     hex: "0x00_02_13_02"
-    package: internal/core/lifecycle
+    package: internal/core/app/lifecycle
   - code: "0.2.19.3"
     const: CodeLifecycleRunning
     hex: "0x00_02_13_03"
-    package: internal/core/lifecycle
+    package: internal/core/app/lifecycle
   - code: "0.2.19.4"
     const: CodeComponentPanicked
     hex: "0x00_02_13_04"
-    package: internal/core/lifecycle
+    package: internal/core/app/lifecycle
   - code: "0.2.20.1"
     const: CodeInvalidTraceParent
     hex: "0x00_02_14_01"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.2"
     const: CodeInvalidTraceState
     hex: "0x00_02_14_02"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.3"
     const: CodeUnknownExporter
     hex: "0x00_02_14_03"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.4"
     const: CodeExportFailed
     hex: "0x00_02_14_04"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.5"
     const: CodeDuplicateRegistration
     hex: "0x00_02_14_05"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.6"
     const: CodeInvalidSpanName
     hex: "0x00_02_14_06"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.20.7"
     const: CodeInvalidAttribute
     hex: "0x00_02_14_07"
-    package: internal/core/trace
+    package: internal/core/observe/trace
   - code: "0.2.21.1"
     const: CodeLockMisconfigured
     hex: "0x00_02_15_01"
-    package: internal/core/lock
+    package: internal/core/app/lock
   - code: "0.2.21.2"
     const: CodeLockNotHeld
     hex: "0x00_02_15_02"
-    package: internal/core/lock
+    package: internal/core/app/lock
   - code: "0.2.21.3"
     const: CodeLockBackendFailed
     hex: "0x00_02_15_03"
-    package: internal/core/lock
+    package: internal/core/app/lock
   - code: "0.2.21.4"
     const: CodeLockNameRejected
     hex: "0x00_02_15_04"
-    package: internal/core/lock
+    package: internal/core/app/lock
   - code: "0.2.22.1"
     const: CodeInvalidSubscription
     hex: "0x00_02_16_01"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.22.2"
     const: CodeDuplicateListener
     hex: "0x00_02_16_02"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.22.3"
     const: CodeUnknownListener
     hex: "0x00_02_16_03"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.22.4"
     const: CodeInvalidEventType
     hex: "0x00_02_16_04"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.22.5"
     const: CodeListenerPanicked
     hex: "0x00_02_16_05"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.22.6"
     const: CodeHalt
     hex: "0x00_02_16_06"
-    package: internal/core/events
+    package: internal/core/app/events
   - code: "0.2.23.1"
     const: CodeQueueMisconfigured
     hex: "0x00_02_17_01"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.2"
     const: CodeMessageTooLarge
     hex: "0x00_02_17_02"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.3"
     const: CodeUnknownReceipt
     hex: "0x00_02_17_03"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.4"
     const: CodeLeaseExpired
     hex: "0x00_02_17_04"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.5"
     const: CodeInvalidBatchSize
     hex: "0x00_02_17_05"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.6"
     const: CodeNotRetryable
     hex: "0x00_02_17_06"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.23.7"
     const: CodeDeadLetterNotFound
     hex: "0x00_02_17_07"
-    package: internal/core/queue
+    package: internal/core/data/queue
   - code: "0.2.24.1"
     const: CodeUnknownDialect
     hex: "0x00_02_18_01"
-    package: internal/core/sql
+    package: internal/core/data/sql
   - code: "0.2.24.2"
     const: CodeDialectRefused
     hex: "0x00_02_18_02"
-    package: internal/core/sql
+    package: internal/core/data/sql
   - code: "0.2.24.3"
     const: CodeNestedIsolation
     hex: "0x00_02_18_03"
-    package: internal/core/sql
+    package: internal/core/data/sql
   - code: "0.2.24.4"
     const: CodeInvalidMigration
     hex: "0x00_02_18_04"
-    package: internal/core/sql
+    package: internal/core/data/sql
   - code: "0.2.24.5"
     const: CodeMigrationIrreversible
     hex: "0x00_02_18_05"
-    package: internal/core/sql
+    package: internal/core/data/sql
   - code: "0.2.25.1"
     const: CodeInvalidPath
     hex: "0x00_02_19_01"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.2"
     const: CodeInvalidPermission
     hex: "0x00_02_19_02"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.3"
     const: CodePathEscaped
     hex: "0x00_02_19_03"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.4"
     const: CodeReadFailed
     hex: "0x00_02_19_04"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.5"
     const: CodeWriteFailed
     hex: "0x00_02_19_05"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.6"
     const: CodePublishFailed
     hex: "0x00_02_19_06"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.7"
     const: CodeNotRegularFile
     hex: "0x00_02_19_07"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.25.8"
     const: CodeDirectoryNotEmpty
     hex: "0x00_02_19_08"
-    package: internal/core/vfs
+    package: internal/core/data/vfs
   - code: "0.2.26.1"
     const: CodePermissionDenied
     hex: "0x00_02_1A_01"
-    package: internal/core/authz
+    package: internal/core/security/authz
   - code: "0.2.26.2"
     const: CodeAttributeMissing
     hex: "0x00_02_1A_02"
-    package: internal/core/authz
+    package: internal/core/security/authz
   - code: "0.2.26.3"
     const: CodeAttributeKindMismatch
     hex: "0x00_02_1A_03"
-    package: internal/core/authz
+    package: internal/core/security/authz
   - code: "0.2.26.4"
     const: CodePolicyMisconfigured
     hex: "0x00_02_1A_04"
-    package: internal/core/authz
+    package: internal/core/security/authz
   - code: "0.2.27.1"
     const: CodeViewMisconfigured
     hex: "0x00_02_1B_01"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.2"
     const: CodeTemplateNotFound
     hex: "0x00_02_1B_02"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.3"
     const: CodeRenderFailed
     hex: "0x00_02_1B_03"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.4"
     const: CodeRenderTooLarge
     hex: "0x00_02_1B_04"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.5"
     const: CodeUnsafeValue
     hex: "0x00_02_1B_05"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.6"
     const: CodeEngineUnknown
     hex: "0x00_02_1B_06"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.7"
     const: CodeEngineInvalid
     hex: "0x00_02_1B_07"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.27.8"
     const: CodeDuplicateEngine
     hex: "0x00_02_1B_08"
-    package: internal/core/view
+    package: internal/core/app/view
   - code: "0.2.29.1"
     const: CodeInvalidCheck
     hex: "0x00_02_1D_01"
-    package: internal/core/health
+    package: internal/core/app/health
   - code: "0.2.29.2"
     const: CodeDuplicateCheck
     hex: "0x00_02_1D_02"
-    package: internal/core/health
+    package: internal/core/app/health
   - code: "0.2.29.3"
     const: CodeUnknownProbe
     hex: "0x00_02_1D_03"
-    package: internal/core/health
+    package: internal/core/app/health
   - code: "0.2.29.4"
     const: CodeCheckPanicked
     hex: "0x00_02_1D_04"
-    package: internal/core/health
+    package: internal/core/app/health
   - code: "0.2.30.1"
     const: CodeInvalidTag
     hex: "0x00_02_1E_01"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.2"
     const: CodeInvalidKey
     hex: "0x00_02_1E_02"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.3"
     const: CodeInvalidPattern
     hex: "0x00_02_1E_03"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.4"
     const: CodeArgumentMissing
     hex: "0x00_02_1E_04"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.5"
     const: CodeMessageNotFound
     hex: "0x00_02_1E_05"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.6"
     const: CodePluralFormMissing
     hex: "0x00_02_1E_06"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.7"
     const: CodeInvalidCount
     hex: "0x00_02_1E_07"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.30.8"
     const: CodeInvalidForm
     hex: "0x00_02_1E_08"
-    package: internal/core/i18n
+    package: internal/core/app/i18n
   - code: "0.2.31.1"
     const: CodeHeaderInjection
     hex: "0x00_02_1F_01"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.2"
     const: CodeInvalidAddress
     hex: "0x00_02_1F_02"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.3"
     const: CodeMissingSender
     hex: "0x00_02_1F_03"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.4"
     const: CodeNoRecipients
     hex: "0x00_02_1F_04"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.5"
     const: CodeEmptyBody
     hex: "0x00_02_1F_05"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.6"
     const: CodeReservedHeader
     hex: "0x00_02_1F_06"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.7"
     const: CodeInvalidAttachment
     hex: "0x00_02_1F_07"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.8"
     const: CodeHeaderTooLong
     hex: "0x00_02_1F_08"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.31.9"
     const: CodeUnsupportedAddress
     hex: "0x00_02_1F_09"
-    package: internal/core/mail
+    package: internal/core/app/mail
   - code: "0.2.32.1"
     const: CodeInvalidCommand
     hex: "0x00_02_20_01"
-    package: internal/core/cli
+    package: internal/core/app/cli
   - code: "0.2.32.2"
     const: CodeAmbiguousCommand
     hex: "0x00_02_20_02"
-    package: internal/core/cli
+    package: internal/core/app/cli
   - code: "0.2.32.3"
     const: CodeDuplicateCommand
     hex: "0x00_02_20_03"
-    package: internal/core/cli
+    package: internal/core/app/cli
   - code: "0.2.32.4"
     const: CodeReservedFlag
     hex: "0x00_02_20_04"
-    package: internal/core/cli
+    package: internal/core/app/cli
   - code: "0.2.33.1"
     const: CodeRepositoryUnresolved
     hex: "0x00_02_21_01"
@@ -1101,347 +1101,347 @@ codes:
   - code: "0.2.37.1"
     const: CodeNotFound
     hex: "0x00_02_25_01"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.2"
     const: CodeInvalidName
     hex: "0x00_02_25_02"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.3"
     const: CodeReadOnly
     hex: "0x00_02_25_03"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.4"
     const: CodeStoreUnavailable
     hex: "0x00_02_25_04"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.5"
     const: CodeValueRefused
     hex: "0x00_02_25_05"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.6"
     const: CodeEmptyValue
     hex: "0x00_02_25_06"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.7"
     const: CodeInvalidKeep
     hex: "0x00_02_25_07"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.37.8"
     const: CodeInvalidSubject
     hex: "0x00_02_25_08"
-    package: internal/core/secret
+    package: internal/core/security/secret
   - code: "0.2.56.1"
     const: CodeTriggerUnknown
     hex: "0x00_02_38_01"
-    package: internal/core/statemachine
+    package: internal/core/app/statemachine
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.1.2"
     const: CodeHandlerNil
     hex: "0x00_03_01_02"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.1.3"
     const: CodeEncoderNil
     hex: "0x00_03_01_03"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.1.4"
     const: CodeSinkRequired
     hex: "0x00_03_01_04"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.1.10"
     const: CodeCtxCancelled
     hex: "0x00_03_01_0A"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.1.20"
     const: CodeWriteFailed
     hex: "0x00_03_01_14"
-    package: internal/service/logger
+    package: internal/service/observe/logger
   - code: "0.3.2.1"
     const: CodeJSONMarshalFailed
     hex: "0x00_03_02_01"
-    package: internal/service/codec/json
+    package: internal/service/data/codec/json
   - code: "0.3.2.2"
     const: CodeJSONUnmarshalFailed
     hex: "0x00_03_02_02"
-    package: internal/service/codec/json
+    package: internal/service/data/codec/json
   - code: "0.3.3.1"
     const: CodeXMLMarshalFailed
     hex: "0x00_03_03_01"
-    package: internal/service/codec/xml
+    package: internal/service/data/codec/xml
   - code: "0.3.3.2"
     const: CodeXMLUnmarshalFailed
     hex: "0x00_03_03_02"
-    package: internal/service/codec/xml
+    package: internal/service/data/codec/xml
   - code: "0.3.4.1"
     const: CodeYAMLMarshalFailed
     hex: "0x00_03_04_01"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.2"
     const: CodeYAMLUnmarshalFailed
     hex: "0x00_03_04_02"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.3"
     const: CodeYAMLAnchorRefused
     hex: "0x00_03_04_03"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.4"
     const: CodeYAMLAliasRefused
     hex: "0x00_03_04_04"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.5"
     const: CodeYAMLTagRefused
     hex: "0x00_03_04_05"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.6"
     const: CodeYAMLMergeKeyRefused
     hex: "0x00_03_04_06"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.7"
     const: CodeYAMLMultiDocRefused
     hex: "0x00_03_04_07"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.8"
     const: CodeYAMLComplexKeyRefused
     hex: "0x00_03_04_08"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.9"
     const: CodeYAMLDirectiveRefused
     hex: "0x00_03_04_09"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.10"
     const: CodeYAMLDuplicateKey
     hex: "0x00_03_04_0A"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.4.11"
     const: CodeYAMLLeadingZeroRefused
     hex: "0x00_03_04_0B"
-    package: internal/service/codec/yaml
+    package: internal/service/data/codec/yaml
   - code: "0.3.5.1"
     const: CodeTOMLMarshalFailed
     hex: "0x00_03_05_01"
-    package: internal/service/codec/toml
+    package: internal/service/data/codec/toml
   - code: "0.3.5.2"
     const: CodeTOMLUnmarshalFailed
     hex: "0x00_03_05_02"
-    package: internal/service/codec/toml
+    package: internal/service/data/codec/toml
   - code: "0.3.6.1"
     const: CodeCBORMarshalFailed
     hex: "0x00_03_06_01"
-    package: internal/service/codec/cbor
+    package: internal/service/data/codec/cbor
   - code: "0.3.6.2"
     const: CodeCBORUnmarshalFailed
     hex: "0x00_03_06_02"
-    package: internal/service/codec/cbor
+    package: internal/service/data/codec/cbor
   - code: "0.3.7.1"
     const: CodeMsgPackMarshalFailed
     hex: "0x00_03_07_01"
-    package: internal/service/codec/msgpack
+    package: internal/service/data/codec/msgpack
   - code: "0.3.7.2"
     const: CodeMsgPackUnmarshalFailed
     hex: "0x00_03_07_02"
-    package: internal/service/codec/msgpack
+    package: internal/service/data/codec/msgpack
   - code: "0.3.8.1"
     const: CodeCSVMarshalFailed
     hex: "0x00_03_08_01"
-    package: internal/service/codec/csv
+    package: internal/service/data/codec/csv
   - code: "0.3.8.2"
     const: CodeCSVUnmarshalFailed
     hex: "0x00_03_08_02"
-    package: internal/service/codec/csv
+    package: internal/service/data/codec/csv
   - code: "0.3.8.3"
     const: CodeCSVValueInvalid
     hex: "0x00_03_08_03"
-    package: internal/service/codec/csv
+    package: internal/service/data/codec/csv
   - code: "0.3.9.1"
     const: CodeASN1MarshalFailed
     hex: "0x00_03_09_01"
-    package: internal/service/codec/asn1
+    package: internal/service/data/codec/asn1
   - code: "0.3.9.2"
     const: CodeASN1UnmarshalFailed
     hex: "0x00_03_09_02"
-    package: internal/service/codec/asn1
+    package: internal/service/data/codec/asn1
   - code: "0.3.10.1"
     const: CodePEMMarshalFailed
     hex: "0x00_03_0A_01"
-    package: internal/service/codec/pem
+    package: internal/service/data/codec/pem
   - code: "0.3.10.2"
     const: CodePEMUnmarshalFailed
     hex: "0x00_03_0A_02"
-    package: internal/service/codec/pem
+    package: internal/service/data/codec/pem
   - code: "0.3.10.3"
     const: CodePEMValueInvalid
     hex: "0x00_03_0A_03"
-    package: internal/service/codec/pem
+    package: internal/service/data/codec/pem
   - code: "0.3.11.1"
     const: CodeNDJSONMarshalFailed
     hex: "0x00_03_0B_01"
-    package: internal/service/codec/ndjson
+    package: internal/service/data/codec/ndjson
   - code: "0.3.11.2"
     const: CodeNDJSONUnmarshalFailed
     hex: "0x00_03_0B_02"
-    package: internal/service/codec/ndjson
+    package: internal/service/data/codec/ndjson
   - code: "0.3.11.3"
     const: CodeNDJSONValueInvalid
     hex: "0x00_03_0B_03"
-    package: internal/service/codec/ndjson
+    package: internal/service/data/codec/ndjson
   - code: "0.3.13.1"
     const: CodeWriterNil
     hex: "0x00_03_0D_01"
-    package: internal/service/logger/sink/console
+    package: internal/service/observe/logger/sink/console
   - code: "0.3.13.10"
     const: CodeCtxCancelled
     hex: "0x00_03_0D_0A"
-    package: internal/service/logger/sink/console
+    package: internal/service/observe/logger/sink/console
   - code: "0.3.13.20"
     const: CodeWriteFailed
     hex: "0x00_03_0D_14"
-    package: internal/service/logger/sink/console
+    package: internal/service/observe/logger/sink/console
   - code: "0.3.14.1"
     const: CodePathEmpty
     hex: "0x00_03_0E_01"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.14.2"
     const: CodeOpenFailed
     hex: "0x00_03_0E_02"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.14.10"
     const: CodeCtxCancelled
     hex: "0x00_03_0E_0A"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.14.20"
     const: CodeWriteFailed
     hex: "0x00_03_0E_14"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.14.30"
     const: CodeSyncFailed
     hex: "0x00_03_0E_1E"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.14.40"
     const: CodeCloseFailed
     hex: "0x00_03_0E_28"
-    package: internal/service/logger/sink/file
+    package: internal/service/observe/logger/sink/file
   - code: "0.3.15.1"
     const: CodeSyslogAddrEmpty
     hex: "0x00_03_0F_01"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.15.2"
     const: CodeSyslogDialFailed
     hex: "0x00_03_0F_02"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.15.3"
     const: CodeSyslogWriteFailed
     hex: "0x00_03_0F_03"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.15.4"
     const: CodeSyslogCloseFailed
     hex: "0x00_03_0F_04"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.15.5"
     const: CodeSyslogProtoInvalid
     hex: "0x00_03_0F_05"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.15.6"
     const: CodeSyslogCtxCancelled
     hex: "0x00_03_0F_06"
-    package: internal/service/logger/sink/syslog
+    package: internal/service/observe/logger/sink/syslog
   - code: "0.3.16.1"
     const: CodeFanoutWriteFailed
     hex: "0x00_03_10_01"
-    package: internal/service/logger/middleware/multi
+    package: internal/service/observe/logger/middleware/multi
   - code: "0.3.17.1"
     const: CodeAsyncStopped
     hex: "0x00_03_11_01"
-    package: internal/service/logger/middleware/async
+    package: internal/service/observe/logger/middleware/async
   - code: "0.3.17.2"
     const: CodeAsyncBufferFull
     hex: "0x00_03_11_02"
-    package: internal/service/logger/middleware/async
+    package: internal/service/observe/logger/middleware/async
   - code: "0.3.17.3"
     const: CodeAsyncCtxCancelled
     hex: "0x00_03_11_03"
-    package: internal/service/logger/middleware/async
+    package: internal/service/observe/logger/middleware/async
   - code: "0.3.18.1"
     const: CodeRouteNoMatch
     hex: "0x00_03_12_01"
-    package: internal/service/logger/middleware/route
+    package: internal/service/observe/logger/middleware/route
   - code: "0.3.19.1"
     const: CodeFailoverExhausted
     hex: "0x00_03_13_01"
-    package: internal/service/logger/middleware/failover
+    package: internal/service/observe/logger/middleware/failover
   - code: "0.3.19.2"
     const: CodeFailoverEmpty
     hex: "0x00_03_13_02"
-    package: internal/service/logger/middleware/failover
+    package: internal/service/observe/logger/middleware/failover
   - code: "0.3.20.1"
     const: CodeSampleRateInvalid
     hex: "0x00_03_14_01"
-    package: internal/service/logger/middleware/sample
+    package: internal/service/observe/logger/middleware/sample
   - code: "0.3.20.2"
     const: CodeSampleDownstreamNil
     hex: "0x00_03_14_02"
-    package: internal/service/logger/middleware/sample
+    package: internal/service/observe/logger/middleware/sample
   - code: "0.3.21.1"
     const: CodeRecoverPanicked
     hex: "0x00_03_15_01"
-    package: internal/service/logger/middleware/recover
+    package: internal/service/observe/logger/middleware/recover
   - code: "0.3.21.2"
     const: CodeRecoverDownstreamNil
     hex: "0x00_03_15_02"
-    package: internal/service/logger/middleware/recover
+    package: internal/service/observe/logger/middleware/recover
   - code: "0.3.22.1"
     const: CodeTLVMarshalFailed
     hex: "0x00_03_16_01"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.22.2"
     const: CodeTLVUnmarshalFailed
     hex: "0x00_03_16_02"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.22.3"
     const: CodeTLVUnsupportedType
     hex: "0x00_03_16_03"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.22.4"
     const: CodeTLVDepthExceeded
     hex: "0x00_03_16_04"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.22.5"
     const: CodeTLVSizeExceeded
     hex: "0x00_03_16_05"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.22.6"
     const: CodeTLVTruncated
     hex: "0x00_03_16_06"
-    package: internal/service/codec/tlv
+    package: internal/service/data/codec/tlv
   - code: "0.3.23.1"
     const: CodeFlatbuffersBadType
     hex: "0x00_03_17_01"
-    package: internal/service/codec/flatbuffers
+    package: internal/service/data/codec/flatbuffers
   - code: "0.3.23.2"
     const: CodeFlatbuffersBadTarget
     hex: "0x00_03_17_02"
-    package: internal/service/codec/flatbuffers
+    package: internal/service/data/codec/flatbuffers
   - code: "0.3.23.3"
     const: CodeFlatbuffersTruncated
     hex: "0x00_03_17_03"
-    package: internal/service/codec/flatbuffers
+    package: internal/service/data/codec/flatbuffers
   - code: "0.3.24.1"
     const: CodeBaseEncMarshalFailed
     hex: "0x00_03_18_01"
-    package: internal/service/codec/baseenc
+    package: internal/service/data/codec/baseenc
   - code: "0.3.24.2"
     const: CodeBaseEncUnmarshalFailed
     hex: "0x00_03_18_02"
-    package: internal/service/codec/baseenc
+    package: internal/service/data/codec/baseenc
   - code: "0.3.24.3"
     const: CodeBaseEncDecodeFailed
     hex: "0x00_03_18_03"
-    package: internal/service/codec/baseenc
+    package: internal/service/data/codec/baseenc
   - code: "0.3.24.4"
     const: CodeBaseEncSizeExceeded
     hex: "0x00_03_18_04"
-    package: internal/service/codec/baseenc
+    package: internal/service/data/codec/baseenc
   - code: "0.3.25.2"
     const: CodeCWClientInitFailed
     hex: "0x00_03_19_02"
@@ -1457,63 +1457,63 @@ codes:
   - code: "0.3.26.1"
     const: CodeGzipFailed
     hex: "0x00_03_1A_01"
-    package: internal/service/transform
+    package: internal/service/data/transform
   - code: "0.3.26.2"
     const: CodeFlateFailed
     hex: "0x00_03_1A_02"
-    package: internal/service/transform
+    package: internal/service/data/transform
   - code: "0.3.26.3"
     const: CodeZlibFailed
     hex: "0x00_03_1A_03"
-    package: internal/service/transform
+    package: internal/service/data/transform
   - code: "0.3.27.1"
     const: CodeRotFileOpenFailed
     hex: "0x00_03_1B_01"
-    package: internal/service/writer/rotfile
+    package: internal/service/observe/logger/writer/rotfile
   - code: "0.3.27.2"
     const: CodeRotFileRotateFailed
     hex: "0x00_03_1B_02"
-    package: internal/service/writer/rotfile
+    package: internal/service/observe/logger/writer/rotfile
   - code: "0.3.27.3"
     const: CodeRotFileWriteFailed
     hex: "0x00_03_1B_03"
-    package: internal/service/writer/rotfile
+    package: internal/service/observe/logger/writer/rotfile
   - code: "0.3.27.4"
     const: CodeRotFileDecodeFailed
     hex: "0x00_03_1B_04"
-    package: internal/service/writer/rotfile
+    package: internal/service/observe/logger/writer/rotfile
   - code: "0.3.28.1"
     const: CodeEncWriteSealFailed
     hex: "0x00_03_1C_01"
-    package: internal/service/logger/middleware/encwrite
+    package: internal/service/observe/logger/middleware/encwrite
   - code: "0.3.28.2"
     const: CodeFramingFailed
     hex: "0x00_03_1C_02"
-    package: internal/service/logger/middleware/encwrite
+    package: internal/service/observe/logger/middleware/encwrite
   - code: "0.3.29.1"
     const: CodeTeeAllBranchesFailed
     hex: "0x00_03_1D_01"
-    package: internal/service/logger/middleware/tee
+    package: internal/service/observe/logger/middleware/tee
   - code: "0.3.29.2"
     const: CodeSpillFailed
     hex: "0x00_03_1D_02"
-    package: internal/service/logger/middleware/tee
+    package: internal/service/observe/logger/middleware/tee
   - code: "0.3.30.1"
     const: CodeNetTransportDialFailed
     hex: "0x00_03_1E_01"
-    package: internal/service/writer/nettransport
+    package: internal/service/observe/logger/writer/nettransport
   - code: "0.3.30.2"
     const: CodeNetTransportWriteFailed
     hex: "0x00_03_1E_02"
-    package: internal/service/writer/nettransport
+    package: internal/service/observe/logger/writer/nettransport
   - code: "0.3.31.1"
     const: CodeJournaldOpenFailed
     hex: "0x00_03_1F_01"
-    package: internal/service/writer/journald
+    package: internal/service/observe/logger/writer/journald
   - code: "0.3.31.2"
     const: CodeJournaldWriteFailed
     hex: "0x00_03_1F_02"
-    package: internal/service/writer/journald
+    package: internal/service/observe/logger/writer/journald
   - code: "0.3.32.1"
     const: CodeMySQLClientInitFailed
     hex: "0x00_03_20_01"
@@ -1549,23 +1549,23 @@ codes:
   - code: "0.3.36.1"
     const: CodeBSONMarshalFailed
     hex: "0x00_03_24_01"
-    package: internal/service/codec/bson
+    package: internal/service/data/codec/bson
   - code: "0.3.36.2"
     const: CodeBSONUnmarshalFailed
     hex: "0x00_03_24_02"
-    package: internal/service/codec/bson
+    package: internal/service/data/codec/bson
   - code: "0.3.36.3"
     const: CodeBSONSizeExceeded
     hex: "0x00_03_24_03"
-    package: internal/service/codec/bson
+    package: internal/service/data/codec/bson
   - code: "0.3.36.4"
     const: CodeBSONDepthExceeded
     hex: "0x00_03_24_04"
-    package: internal/service/codec/bson
+    package: internal/service/data/codec/bson
   - code: "0.3.36.5"
     const: CodeBSONValueInvalid
     hex: "0x00_03_24_05"
-    package: internal/service/codec/bson
+    package: internal/service/data/codec/bson
   - code: "0.3.37.1"
     const: CodeHCLMarshalFailed
     hex: "0x00_03_25_01"
@@ -1593,587 +1593,587 @@ codes:
   - code: "0.3.39.1"
     const: CodeIDEntropyFailed
     hex: "0x00_03_27_01"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.2"
     const: CodeIDClockBackwards
     hex: "0x00_03_27_02"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.3"
     const: CodeIDClockStalled
     hex: "0x00_03_27_03"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.4"
     const: CodeIDInvalidSize
     hex: "0x00_03_27_04"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.5"
     const: CodeIDInvalidPrefix
     hex: "0x00_03_27_05"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.6"
     const: CodeIDMalformed
     hex: "0x00_03_27_06"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.39.7"
     const: CodeIDTimestampRange
     hex: "0x00_03_27_07"
-    package: internal/service/id
+    package: internal/service/app/id
   - code: "0.3.40.1"
     const: CodeFormValueInvalid
     hex: "0x00_03_28_01"
-    package: internal/service/codec/form
+    package: internal/service/data/codec/form
   - code: "0.3.40.2"
     const: CodeFormUnmarshalFailed
     hex: "0x00_03_28_02"
-    package: internal/service/codec/form
+    package: internal/service/data/codec/form
   - code: "0.3.40.3"
     const: CodeFormMultiValue
     hex: "0x00_03_28_03"
-    package: internal/service/codec/form
+    package: internal/service/data/codec/form
   - code: "0.3.41.1"
     const: CodeMultipartMarshalFailed
     hex: "0x00_03_29_01"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.41.2"
     const: CodeMultipartUnmarshalFailed
     hex: "0x00_03_29_02"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.41.3"
     const: CodeMultipartValueInvalid
     hex: "0x00_03_29_03"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.41.4"
     const: CodeMultipartBoundaryInvalid
     hex: "0x00_03_29_04"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.41.5"
     const: CodeMultipartLimitExceeded
     hex: "0x00_03_29_05"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.41.6"
     const: CodeMultipartLimitsInvalid
     hex: "0x00_03_29_06"
-    package: internal/service/codec/multipart
+    package: internal/service/data/codec/multipart
   - code: "0.3.42.1"
     const: CodeJWKMalformed
     hex: "0x00_03_2A_01"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.2"
     const: CodeJWKMissingMember
     hex: "0x00_03_2A_02"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.3"
     const: CodeJWKUnsupportedKeyType
     hex: "0x00_03_2A_03"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.4"
     const: CodeJWKUnsupportedCurve
     hex: "0x00_03_2A_04"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.5"
     const: CodeJWKInvalidEncoding
     hex: "0x00_03_2A_05"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.6"
     const: CodeJWKKeyMismatch
     hex: "0x00_03_2A_06"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.7"
     const: CodeJWKNoPublicForm
     hex: "0x00_03_2A_07"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.8"
     const: CodeJWKNoPrivateMaterial
     hex: "0x00_03_2A_08"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.9"
     const: CodeJWKTypeMismatch
     hex: "0x00_03_2A_09"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.10"
     const: CodeJWKKeyNotFound
     hex: "0x00_03_2A_0A"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.42.11"
     const: CodeJWKAmbiguousKid
     hex: "0x00_03_2A_0B"
-    package: internal/service/crypto/jwk
+    package: internal/service/crypto/key/jwk
   - code: "0.3.43.1"
     const: CodeInvalidExpression
     hex: "0x00_03_2B_01"
-    package: internal/service/scheduler
+    package: internal/service/app/scheduler
   - code: "0.3.43.2"
     const: CodeUnsupportedSyntax
     hex: "0x00_03_2B_02"
-    package: internal/service/scheduler
+    package: internal/service/app/scheduler
   - code: "0.3.43.3"
     const: CodeUnreachableSchedule
     hex: "0x00_03_2B_03"
-    package: internal/service/scheduler
+    package: internal/service/app/scheduler
   - code: "0.3.43.4"
     const: CodeInvalidLocation
     hex: "0x00_03_2B_04"
-    package: internal/service/scheduler
+    package: internal/service/app/scheduler
   - code: "0.3.43.5"
     const: CodeInvalidInterval
     hex: "0x00_03_2B_05"
-    package: internal/service/scheduler
+    package: internal/service/app/scheduler
   - code: "0.3.44.1"
     const: CodeHeaderUnsupported
     hex: "0x00_03_2C_01"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.2"
     const: CodeKeyNotFound
     hex: "0x00_03_2C_02"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.3"
     const: CodeKeyIDMissing
     hex: "0x00_03_2C_03"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.4"
     const: CodeKeyIDAmbiguous
     hex: "0x00_03_2C_04"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.5"
     const: CodeFooterMismatch
     hex: "0x00_03_2C_05"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.6"
     const: CodeSchemeUnsupported
     hex: "0x00_03_2C_06"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.44.7"
     const: CodeDuplicateMember
     hex: "0x00_03_2C_07"
-    package: internal/service/token
+    package: internal/service/security/token
   - code: "0.3.45.1"
     const: CodeInvalidMetricName
     hex: "0x00_03_2D_01"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.2"
     const: CodeInvalidLabelName
     hex: "0x00_03_2D_02"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.3"
     const: CodeReservedLabelName
     hex: "0x00_03_2D_03"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.4"
     const: CodeUnsupportedTemporality
     hex: "0x00_03_2D_04"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.5"
     const: CodeOTLPUnresolvedTemporality
     hex: "0x00_03_2D_05"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.6"
     const: CodeOTLPInvalidBucketLayout
     hex: "0x00_03_2D_06"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.7"
     const: CodeOTLPEndpointInvalid
     hex: "0x00_03_2D_07"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.8"
     const: CodeOTLPExportRejected
     hex: "0x00_03_2D_08"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.9"
     const: CodeOTLPExportUnavailable
     hex: "0x00_03_2D_09"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.45.10"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_2D_0A"
-    package: internal/service/metrics
+    package: internal/service/observe/metrics
   - code: "0.3.46.1"
     const: CodeRecordCorrupt
     hex: "0x00_03_2E_01"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.46.2"
     const: CodeDirectoryUnsafe
     hex: "0x00_03_2E_02"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.46.3"
     const: CodeLockFailed
     hex: "0x00_03_2E_03"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.46.4"
     const: CodePayloadTooLarge
     hex: "0x00_03_2E_04"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.46.5"
     const: CodeInvalidPurpose
     hex: "0x00_03_2E_05"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.46.6"
     const: CodePathRedirected
     hex: "0x00_03_2E_06"
-    package: internal/service/session
+    package: internal/service/security/session
   - code: "0.3.47.1"
     const: CodeRequired
     hex: "0x00_03_2F_01"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.2"
     const: CodeOutOfRange
     hex: "0x00_03_2F_02"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.3"
     const: CodeLengthOutOfRange
     hex: "0x00_03_2F_03"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.4"
     const: CodeNotInSet
     hex: "0x00_03_2F_04"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.5"
     const: CodePatternMismatch
     hex: "0x00_03_2F_05"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.6"
     const: CodeInvalidRule
     hex: "0x00_03_2F_06"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.47.7"
     const: CodeUnsupportedTarget
     hex: "0x00_03_2F_07"
-    package: internal/service/validation
+    package: internal/service/app/validation
   - code: "0.3.48.1"
     const: CodeCacheChainMisconfigured
     hex: "0x00_03_30_01"
-    package: internal/service/cache
+    package: internal/service/data/cache
   - code: "0.3.48.2"
     const: CodeCacheTierFailed
     hex: "0x00_03_30_02"
-    package: internal/service/cache
+    package: internal/service/data/cache
   - code: "0.3.49.1"
     const: CodeStartFailed
     hex: "0x00_03_31_01"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.2"
     const: CodeStopFailed
     hex: "0x00_03_31_02"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.3"
     const: CodeStopTimeout
     hex: "0x00_03_31_03"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.4"
     const: CodeUnwindFailed
     hex: "0x00_03_31_04"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.5"
     const: CodeReadinessFailed
     hex: "0x00_03_31_05"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.6"
     const: CodeRunPanicked
     hex: "0x00_03_31_06"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.7"
     const: CodeSupervisorMisconfigured
     hex: "0x00_03_31_07"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.49.8"
     const: CodeSupervisorRunning
     hex: "0x00_03_31_08"
-    package: internal/service/lifecycle
+    package: internal/service/app/lifecycle
   - code: "0.3.50.1"
     const: CodeEntropyFailed
     hex: "0x00_03_32_01"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.2"
     const: CodeInvalidSampleRatio
     hex: "0x00_03_32_02"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.3"
     const: CodeOTLPInvalidSpanContext
     hex: "0x00_03_32_03"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.4"
     const: CodeOTLPSpanNotEnded
     hex: "0x00_03_32_04"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.5"
     const: CodeOTLPEndpointInvalid
     hex: "0x00_03_32_05"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.6"
     const: CodeOTLPExportRejected
     hex: "0x00_03_32_06"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.7"
     const: CodeOTLPExportUnavailable
     hex: "0x00_03_32_07"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.50.8"
     const: CodeOTLPPartialSuccess
     hex: "0x00_03_32_08"
-    package: internal/service/trace
+    package: internal/service/observe/trace
   - code: "0.3.51.1"
     const: CodeLockFenceCorrupt
     hex: "0x00_03_33_01"
-    package: internal/service/lock
+    package: internal/service/app/lock
   - code: "0.3.51.2"
     const: CodeLockDirectoryUnsafe
     hex: "0x00_03_33_02"
-    package: internal/service/lock
+    package: internal/service/app/lock
   - code: "0.3.51.3"
     const: CodeLockKeepaliveLost
     hex: "0x00_03_33_03"
-    package: internal/service/lock
+    package: internal/service/app/lock
   - code: "0.3.51.4"
     const: CodeLockPathRedirected
     hex: "0x00_03_33_04"
-    package: internal/service/lock
+    package: internal/service/app/lock
   - code: "0.3.51.5"
     const: CodeLockFileReplaced
     hex: "0x00_03_33_05"
-    package: internal/service/lock
+    package: internal/service/app/lock
   - code: "0.3.52.1"
     const: CodeListenerFailed
     hex: "0x00_03_34_01"
-    package: internal/service/events
+    package: internal/service/app/events
   - code: "0.3.52.2"
     const: CodeHaltNotPermitted
     hex: "0x00_03_34_02"
-    package: internal/service/events
+    package: internal/service/app/events
   - code: "0.3.53.1"
     const: CodeQueueBackendFailed
     hex: "0x00_03_35_01"
-    package: internal/service/queue
+    package: internal/service/data/queue
   - code: "0.3.53.2"
     const: CodeQueueDirectoryUnusable
     hex: "0x00_03_35_02"
-    package: internal/service/queue
+    package: internal/service/data/queue
   - code: "0.3.53.3"
     const: CodeConsumerMisconfigured
     hex: "0x00_03_35_03"
-    package: internal/service/queue
+    package: internal/service/data/queue
   - code: "0.3.53.4"
     const: CodeHandlerPanicked
     hex: "0x00_03_35_04"
-    package: internal/service/queue
+    package: internal/service/data/queue
   - code: "0.3.53.5"
     const: CodeSQLQueueMisconfigured
     hex: "0x00_03_35_05"
-    package: internal/service/queue
+    package: internal/service/data/queue
   - code: "0.3.54.1"
     const: CodeConfigInvalid
     hex: "0x00_03_36_01"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.2"
     const: CodePoolMisconfigured
     hex: "0x00_03_36_02"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.3"
     const: CodeBeginFailed
     hex: "0x00_03_36_03"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.4"
     const: CodeCommitFailed
     hex: "0x00_03_36_04"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.5"
     const: CodeRollbackFailed
     hex: "0x00_03_36_05"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.6"
     const: CodeSavepointFailed
     hex: "0x00_03_36_06"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.7"
     const: CodeTxPoisoned
     hex: "0x00_03_36_07"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.8"
     const: CodeTxClosed
     hex: "0x00_03_36_08"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.9"
     const: CodeHealthCheckFailed
     hex: "0x00_03_36_09"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.10"
     const: CodeHealthCheckTimeout
     hex: "0x00_03_36_0A"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.11"
     const: CodeMigrationFailed
     hex: "0x00_03_36_0B"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.12"
     const: CodeMigrationOutOfOrder
     hex: "0x00_03_36_0C"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.13"
     const: CodeMigrationLockUnsupported
     hex: "0x00_03_36_0D"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.14"
     const: CodeMigrationLockTimeout
     hex: "0x00_03_36_0E"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.15"
     const: CodeMigrationUnknownVersion
     hex: "0x00_03_36_0F"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.16"
     const: CodeVersionTableInvalid
     hex: "0x00_03_36_10"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.54.17"
     const: CodeDuplicateMigration
     hex: "0x00_03_36_11"
-    package: internal/service/sql
+    package: internal/service/data/sql
   - code: "0.3.55.1"
     const: CodeRootUnavailable
     hex: "0x00_03_37_01"
-    package: internal/service/vfs
+    package: internal/service/data/vfs
   - code: "0.3.55.2"
     const: CodeDirectorySyncFailed
     hex: "0x00_03_37_02"
-    package: internal/service/vfs
+    package: internal/service/data/vfs
   - code: "0.3.56.1"
     const: CodeGrantInvalid
     hex: "0x00_03_38_01"
-    package: internal/service/authz
+    package: internal/service/security/authz
   - code: "0.3.56.2"
     const: CodeRuleInvalid
     hex: "0x00_03_38_02"
-    package: internal/service/authz
+    package: internal/service/security/authz
   - code: "0.3.56.3"
     const: CodeConditionInvalid
     hex: "0x00_03_38_03"
-    package: internal/service/authz
+    package: internal/service/security/authz
   - code: "0.3.57.1"
     const: CodeTemplateSourceFailed
     hex: "0x00_03_39_01"
-    package: internal/service/view
+    package: internal/service/app/view
   - code: "0.3.57.2"
     const: CodeTemplateParseFailed
     hex: "0x00_03_39_02"
-    package: internal/service/view
+    package: internal/service/app/view
   - code: "0.3.59.1"
     const: CodeCheckFailed
     hex: "0x00_03_3B_01"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.2"
     const: CodeCheckTimeout
     hex: "0x00_03_3B_02"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.3"
     const: CodeStaleCacheWindow
     hex: "0x00_03_3B_03"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.4"
     const: CodeStartupPending
     hex: "0x00_03_3B_04"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.5"
     const: CodeDraining
     hex: "0x00_03_3B_05"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.6"
     const: CodeNotifyFailed
     hex: "0x00_03_3B_06"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.7"
     const: CodeAskMisconfigured
     hex: "0x00_03_3B_07"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.8"
     const: CodeAskUnreachable
     hex: "0x00_03_3B_08"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.9"
     const: CodeAskTimeout
     hex: "0x00_03_3B_09"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.59.10"
     const: CodeAskNotReady
     hex: "0x00_03_3B_0A"
-    package: internal/service/health
+    package: internal/service/app/health
   - code: "0.3.60.1"
     const: CodeUnsupportedLanguage
     hex: "0x00_03_3C_01"
-    package: internal/service/i18n
+    package: internal/service/app/i18n
   - code: "0.3.60.2"
     const: CodeCatalogInvalid
     hex: "0x00_03_3C_02"
-    package: internal/service/i18n
+    package: internal/service/app/i18n
   - code: "0.3.60.3"
     const: CodeCatalogLoadFailed
     hex: "0x00_03_3C_03"
-    package: internal/service/i18n
+    package: internal/service/app/i18n
   - code: "0.3.60.4"
     const: CodeTranslationIncomplete
     hex: "0x00_03_3C_04"
-    package: internal/service/i18n
+    package: internal/service/app/i18n
   - code: "0.3.60.5"
     const: CodeNegotiationEmpty
     hex: "0x00_03_3C_05"
-    package: internal/service/i18n
+    package: internal/service/app/i18n
   - code: "0.3.61.1"
     const: CodeComposeFailed
     hex: "0x00_03_3D_01"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.2"
     const: CodeInvalidConfig
     hex: "0x00_03_3D_02"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.3"
     const: CodeDialFailed
     hex: "0x00_03_3D_03"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.4"
     const: CodeGreetingFailed
     hex: "0x00_03_3D_04"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.5"
     const: CodeTLSRequired
     hex: "0x00_03_3D_05"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.6"
     const: CodeTLSFailed
     hex: "0x00_03_3D_06"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.7"
     const: CodeAuthInsecure
     hex: "0x00_03_3D_07"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.8"
     const: CodeAuthFailed
     hex: "0x00_03_3D_08"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.9"
     const: CodeSendRefused
     hex: "0x00_03_3D_09"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.61.10"
     const: CodeInvalidURL
     hex: "0x00_03_3D_0A"
-    package: internal/service/mail
+    package: internal/service/app/mail
   - code: "0.3.62.1"
     const: CodeUnknownCommand
     hex: "0x00_03_3E_01"
-    package: internal/service/cli
+    package: internal/service/app/cli
   - code: "0.3.62.2"
     const: CodeMissingCommand
     hex: "0x00_03_3E_02"
-    package: internal/service/cli
+    package: internal/service/app/cli
   - code: "0.3.62.3"
     const: CodeInvalidFlags
     hex: "0x00_03_3E_03"
-    package: internal/service/cli
+    package: internal/service/app/cli
   - code: "0.3.62.4"
     const: CodeCommandPanicked
     hex: "0x00_03_3E_04"
-    package: internal/service/cli
+    package: internal/service/app/cli
   - code: "0.3.62.5"
     const: CodeHelpWriteFailed
     hex: "0x00_03_3E_05"
-    package: internal/service/cli
+    package: internal/service/app/cli
   - code: "0.3.63.1"
     const: CodeZstdFailed
     hex: "0x00_03_3F_01"
@@ -2233,83 +2233,83 @@ codes:
   - code: "0.3.68.1"
     const: CodeInvalidConfig
     hex: "0x00_03_44_01"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.2"
     const: CodeRecordUnreadable
     hex: "0x00_03_44_02"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.3"
     const: CodeEnvRefused
     hex: "0x00_03_44_03"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.4"
     const: CodeSealInvalid
     hex: "0x00_03_44_04"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.5"
     const: CodeSignatureInvalid
     hex: "0x00_03_44_05"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.6"
     const: CodeKeyMaterialInvalid
     hex: "0x00_03_44_06"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.7"
     const: CodeGenerateFailed
     hex: "0x00_03_44_07"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.8"
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.9"
     const: CodeKeyDestroyed
     hex: "0x00_03_44_09"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.68.10"
     const: CodeSubjectKeyUnreadable
     hex: "0x00_03_44_0A"
-    package: internal/service/secret
+    package: internal/service/security/secret
   - code: "0.3.72.1"
     const: CodeDocumentTooLarge
     hex: "0x00_03_48_01"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.2"
     const: CodeDocumentEmpty
     hex: "0x00_03_48_02"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.3"
     const: CodeDocumentMalformed
     hex: "0x00_03_48_03"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.4"
     const: CodeMemberUnknown
     hex: "0x00_03_48_04"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.5"
     const: CodeValueMismatched
     hex: "0x00_03_48_05"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.6"
     const: CodeMediaTypeUnsupported
     hex: "0x00_03_48_06"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.7"
     const: CodeDocumentUnreadable
     hex: "0x00_03_48_07"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.72.8"
     const: CodeDecodeMisconfigured
     hex: "0x00_03_48_08"
-    package: internal/service/codec/strictjson
+    package: internal/service/data/codec/strictjson
   - code: "0.3.73.1"
     const: CodeDocumentInvalid
     hex: "0x00_03_49_01"
-    package: internal/service/redact
+    package: internal/service/security/redact
   - code: "0.3.73.2"
     const: CodeValueUnencodable
     hex: "0x00_03_49_02"
-    package: internal/service/redact
+    package: internal/service/security/redact
   - code: "0.3.77.1"
     const: CodeYAMLFullMarshalFailed
     hex: "0x00_03_4D_01"
@@ -2321,259 +2321,259 @@ codes:
   - code: "0.3.80.1"
     const: CodeDocumentNotFound
     hex: "0x00_03_50_01"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.2"
     const: CodeDocumentExists
     hex: "0x00_03_50_02"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.3"
     const: CodeUniqueKeyTaken
     hex: "0x00_03_50_03"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.4"
     const: CodeDocumentKeyEmpty
     hex: "0x00_03_50_04"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.5"
     const: CodeDocumentKeyChanged
     hex: "0x00_03_50_05"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.6"
     const: CodeIndexUnknown
     hex: "0x00_03_50_06"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.7"
     const: CodeIndexNotUnique
     hex: "0x00_03_50_07"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.8"
     const: CodeDocumentUndecodable
     hex: "0x00_03_50_08"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.9"
     const: CodeDocumentUnencodable
     hex: "0x00_03_50_09"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.10"
     const: CodePersistFailed
     hex: "0x00_03_50_0A"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.11"
     const: CodeLoadFailed
     hex: "0x00_03_50_0B"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.12"
     const: CodeIndexBroken
     hex: "0x00_03_50_0C"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.13"
     const: CodeStoreClosed
     hex: "0x00_03_50_0D"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.14"
     const: CodeStoreMisconfigured
     hex: "0x00_03_50_0E"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.15"
     const: CodeWriteUnconfirmed
     hex: "0x00_03_50_0F"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.16"
     const: CodeStatementFailed
     hex: "0x00_03_50_10"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.17"
     const: CodeKeyTooLong
     hex: "0x00_03_50_11"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.18"
     const: CodeVersionsNotKept
     hex: "0x00_03_50_12"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.19"
     const: CodeVersionNotFound
     hex: "0x00_03_50_13"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.80.20"
     const: CodeVersionsRewriteRefused
     hex: "0x00_03_50_14"
-    package: internal/service/docstore
+    package: internal/service/data/docstore
   - code: "0.3.81.1"
     const: CodeSpoolMisconfigured
     hex: "0x00_03_51_01"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.81.2"
     const: CodeSpoolClosed
     hex: "0x00_03_51_02"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.81.3"
     const: CodeMessageUndecodable
     hex: "0x00_03_51_03"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.81.4"
     const: CodeMessageUnencodable
     hex: "0x00_03_51_04"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.81.5"
     const: CodeTransportPanicked
     hex: "0x00_03_51_05"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.81.6"
     const: CodeInvalidMailID
     hex: "0x00_03_51_06"
-    package: internal/service/mail/spool
+    package: internal/service/app/mail/spool
   - code: "0.3.88.1"
     const: CodeTransitionRefused
     hex: "0x00_03_58_01"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.2"
     const: CodeEntityMissing
     hex: "0x00_03_58_02"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.3"
     const: CodeEntityExists
     hex: "0x00_03_58_03"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.4"
     const: CodeKeyEmpty
     hex: "0x00_03_58_04"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.5"
     const: CodeHookFailed
     hex: "0x00_03_58_05"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.6"
     const: CodeHookPanicked
     hex: "0x00_03_58_06"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.7"
     const: CodeHookChangedState
     hex: "0x00_03_58_07"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.8"
     const: CodeHookChangedKey
     hex: "0x00_03_58_08"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.9"
     const: CodeReentrant
     hex: "0x00_03_58_09"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.10"
     const: CodeStoreFailed
     hex: "0x00_03_58_0A"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.11"
     const: CodeJournalFailed
     hex: "0x00_03_58_0B"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.12"
     const: CodeLoopRunning
     hex: "0x00_03_58_0C"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.13"
     const: CodeFunctionPanicked
     hex: "0x00_03_58_0D"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.14"
     const: CodeInitialMissing
     hex: "0x00_03_58_0E"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.15"
     const: CodeEventInvalid
     hex: "0x00_03_58_0F"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.16"
     const: CodeTransitionDuplicate
     hex: "0x00_03_58_10"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.17"
     const: CodeDelayInvalid
     hex: "0x00_03_58_11"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.18"
     const: CodeFunctionMissing
     hex: "0x00_03_58_12"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.19"
     const: CodeStoreMissing
     hex: "0x00_03_58_13"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.20"
     const: CodeWaitAbandoned
     hex: "0x00_03_58_14"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.88.21"
     const: CodeLoopPanicked
     hex: "0x00_03_58_15"
-    package: internal/service/statemachine
+    package: internal/service/app/statemachine
   - code: "0.3.89.1"
     const: CodeWindowInvalid
     hex: "0x00_03_59_01"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.2"
     const: CodeProfilerBusy
     hex: "0x00_03_59_02"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.3"
     const: CodeCaptureCanceled
     hex: "0x00_03_59_03"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.4"
     const: CodeCaptureFailed
     hex: "0x00_03_59_04"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.5"
     const: CodeProfileMalformed
     hex: "0x00_03_59_05"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.6"
     const: CodeProfileTooLarge
     hex: "0x00_03_59_06"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.89.7"
     const: CodeSampleTypeMissing
     hex: "0x00_03_59_07"
-    package: internal/service/profiling
+    package: internal/service/observe/profiling
   - code: "0.3.90.1"
     const: CodeNotJSON
     hex: "0x00_03_5A_01"
-    package: internal/service/codec/jsonpatch
+    package: internal/service/data/codec/jsonpatch
   - code: "0.3.91.1"
     const: CodeMisconfigured
     hex: "0x00_03_5B_01"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.2"
     const: CodeDirectoryUnsafe
     hex: "0x00_03_5B_02"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.3"
     const: CodeInUse
     hex: "0x00_03_5B_03"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.4"
     const: CodeListenFailed
     hex: "0x00_03_5B_04"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.5"
     const: CodePeerRefused
     hex: "0x00_03_5B_05"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.6"
     const: CodeDialFailed
     hex: "0x00_03_5B_06"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.7"
     const: CodeEndpointForeign
     hex: "0x00_03_5B_07"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.8"
     const: CodeClosed
     hex: "0x00_03_5B_08"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.3.91.9"
     const: CodePathUnsafe
     hex: "0x00_03_5B_09"
-    package: internal/service/ipc
+    package: internal/service/proc/ipc
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"
@@ -2905,39 +2905,39 @@ codes:
   - code: "1.1.0.1"
     const: CodeWriterRequired
     hex: "0x01_01_00_01"
-    package: pkg/v1/logger
+    package: pkg/v1/observe/logger
   - code: "1.1.0.2"
     const: CodeSinkConfigRequired
     hex: "0x01_01_00_02"
-    package: pkg/v1/logger
+    package: pkg/v1/observe/logger
   - code: "1.1.0.3"
     const: CodeWriterSpecInvalid
     hex: "0x01_01_00_03"
-    package: pkg/v1/logger
+    package: pkg/v1/observe/logger
   - code: "1.1.0.4"
     const: CodeTopologyInvalid
     hex: "0x01_01_00_04"
-    package: pkg/v1/logger
+    package: pkg/v1/observe/logger
   - code: "1.1.1.1"
     const: CodeLoggerRequired
     hex: "0x01_01_01_01"
-    package: pkg/v1/logger/slogbridge
+    package: pkg/v1/observe/logger/slogbridge
   - code: "1.2.0.1"
     const: CodeUnknownFormat
     hex: "0x01_02_00_01"
-    package: pkg/v1/codec
+    package: pkg/v1/data/codec
   - code: "1.2.0.2"
     const: CodeCodecUnavailable
     hex: "0x01_02_00_02"
-    package: pkg/v1/codec
+    package: pkg/v1/data/codec
   - code: "1.2.0.3"
     const: CodeStreamingUnsupported
     hex: "0x01_02_00_03"
-    package: pkg/v1/codec
+    package: pkg/v1/data/codec
   - code: "1.2.0.4"
     const: CodePromoteFailed
     hex: "0x01_02_00_04"
-    package: pkg/v1/codec
+    package: pkg/v1/data/codec
   - code: "64.1.1.1"
     const: CodeUserNotFound
     hex: "0x40_01_01_01"

@@ -14,7 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/telemetry"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // A daemon started with an exporter reports each connection its listener

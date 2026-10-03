@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/authz"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // toolsEntry is what the module's operations take.

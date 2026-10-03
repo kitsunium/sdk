@@ -3,7 +3,7 @@
 
 A subsystem of `framework/kit`, enabled by a blank import:
 `import _ "github.com/kitsunium/sdk/framework/kit/config/yaml"`. It gives kit
-the `pkg/v1/codec/yaml` codec for configuration files of extension `yaml` and `yml`
+the `pkg/v1/data/codec/yaml` codec for configuration files of extension `yaml` and `yml`
 (`ikit.RegisterConfigFormat`). kit reads JSON itself; a product with a
 YAML file and without this import is refused at the start, the refusal
 naming the import.

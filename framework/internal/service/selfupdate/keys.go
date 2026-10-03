@@ -12,7 +12,7 @@ import (
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/sign"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/sign"
 )
 
 // maxVendorKeys bounds the key list, as ADR 0091 bounds the entitlement

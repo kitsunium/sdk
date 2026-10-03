@@ -18,7 +18,7 @@ import (
 
 	coreupd "github.com/kitsunium/sdk/framework/internal/core/selfupdate"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/pkg/v1/hash"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/hash"
 )
 
 // Checksum verification constants.

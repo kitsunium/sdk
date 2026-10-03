@@ -6,12 +6,12 @@ behind six public facades:
 
 | Facade | Built on |
 |---|---|
-| `pkg/v1/process` | `Process`, `Spec`, `ExitValue` |
-| `pkg/v1/signal` | `Signal`, `Parse` |
-| `pkg/v1/reaper` | `Reaper` |
-| `pkg/v1/rlimit` | `Resource`, `LimitValue` |
-| `pkg/v1/cgroup` | `Group` |
-| `pkg/v1/sdnotify` | `Listener`, `NotificationValue` |
+| `pkg/v1/proc/process` | `Process`, `Spec`, `ExitValue` |
+| `pkg/v1/proc/signal` | `Signal`, `Parse` |
+| `pkg/v1/proc/reaper` | `Reaper` |
+| `pkg/v1/proc/rlimit` | `Resource`, `LimitValue` |
+| `pkg/v1/proc/cgroup` | `Group` |
+| `pkg/v1/proc/systemd/notify` | `Listener`, `NotificationValue` |
 
 It is an `internal/` package — consumers import the `pkg/v1` facades, never this
 package directly.
@@ -29,7 +29,7 @@ package directly.
 ## Platform
 
 `process`, `signal`, and `rlimit` are Unix-wide; `reaper` (subreaper), `cgroup`,
-and the `sdnotify` listener's credential check are Linux-only. Non-supporting
+and the `systemd/notify` listener's credential check are Linux-only. Non-supporting
 platforms return a no-op plus the `UNSUPPORTED_PLATFORM` sentinel — they never
 panic and always compile.
 

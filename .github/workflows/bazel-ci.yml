@@ -452,7 +452,7 @@ jobs:
   # cannot prove it behaves. The two are different questions, and the gap is
   # where a 64-bit assumption survives: `int(0xffffffff)` is -1 where int is 32
   # bits and passes every "> cap" check, which is exactly the bound
-  # internal/service/session's at-rest frame relies on — two of its malformed
+  # internal/service/security/session's at-rest frame relies on — two of its malformed
   # frames can only fail here. Found by adding this job: a bench helper that did
   # not compile (Statfs_t.Type is int32 on 386, int64 elsewhere) and a test
   # synthesising a slice longer than a 32-bit len can hold.

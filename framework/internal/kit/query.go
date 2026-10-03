@@ -6,7 +6,7 @@ import (
 	"reflect"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/authz"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // Query reads and changes nothing: a typed input, a typed result, and one

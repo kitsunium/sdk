@@ -333,7 +333,7 @@ func TestSystemTickerLeavesNoStaleTickAcrossStopAndReset(t *testing.T) {
 }
 
 // twoMethodDouble is the shape every downstream hand-written clock double has:
-// Now and Since, nothing else. pkg/v1/cache.Config is a type alias whose Clock
+// Now and Since, nothing else. pkg/v1/data/cache.Config is a type alias whose Clock
 // field carries clock.Clock, so this exact shape is compilable by consumers of
 // the published module.
 type twoMethodDouble struct{ at time.Time }

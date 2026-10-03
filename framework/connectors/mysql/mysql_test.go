@@ -6,8 +6,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/connectors/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Describe says where a URL points and in which TLS mode, never who

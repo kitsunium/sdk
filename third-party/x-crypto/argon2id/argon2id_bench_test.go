@@ -12,7 +12,7 @@ import (
 
 	"golang.org/x/crypto/argon2"
 
-	"github.com/kitsunium/sdk/internal/service/crypto/pbkdf2pw"
+	"github.com/kitsunium/sdk/internal/service/crypto/password/pbkdf2pw"
 	"github.com/kitsunium/sdk/third-party/x-crypto/argon2id"
 )
 
@@ -224,7 +224,7 @@ func BenchmarkCalibrateThreads(b *testing.B) {
 }
 
 // BenchmarkPBKDF2Hash is the reference arm: the password hash a consumer gets
-// WITHOUT this dependency (internal/service/crypto/pbkdf2pw, PBKDF2-SHA256 at
+// WITHOUT this dependency (internal/service/crypto/password/pbkdf2pw, PBKDF2-SHA256 at
 // 600 000 iterations), measured in the same process under the same load.
 func BenchmarkPBKDF2Hash(b *testing.B) {
 	b.ReportAllocs()

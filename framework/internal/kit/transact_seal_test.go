@@ -9,7 +9,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // Sealing in a transaction (ADR 0004, ADR 0006): a data key is written apart

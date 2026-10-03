@@ -34,7 +34,7 @@ export default [
     title: "Universal Marshal / Unmarshal",
     blurb:
       "One Marshal/Unmarshal pair reaches all 18 wire formats (JSON, CBOR, MsgPack, TLV, XML, YAML, …) via a single Format string — swap formats with a one-word change.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -43,7 +43,7 @@ export default [
     title: "Streaming encode / decode",
     blurb:
       "NewEncoder / NewDecoder give incremental, bounded-memory I/O for every codec that supports streaming.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -52,7 +52,7 @@ export default [
     title: "Base-N byte encodings",
     blurb:
       "Base16 / Base32 / Base64 (std + URL) / Hex / ASCII85 are first-class Format constants behind the same dispatch.",
-    anchor: "pkg/v1/codec/codec.go",
+    anchor: "pkg/v1/data/codec/codec.go",
     links: { adr: "0003" },
   },
   {
@@ -61,7 +61,7 @@ export default [
     title: "Self-describing compression frame",
     blurb:
       "MarshalCompressed / UnmarshalCompressed wrap any format in a Gzip/Flate frame that decodes without the caller knowing the algorithm up front.",
-    anchor: "pkg/v1/codec/compressed.go",
+    anchor: "pkg/v1/data/codec/compressed.go",
     links: { adr: "0014" },
   },
 
@@ -72,7 +72,7 @@ export default [
     title: "Structured zero-alloc logger",
     blurb:
       "NewText / Default plus typed attribute constructors and Debug/Info/Warn/Error helpers — structured records on a zero-alloc hot path.",
-    anchor: "pkg/v1/logger/logger.go",
+    anchor: "pkg/v1/observe/logger/logger.go",
   },
   {
     id: "logger-builder",
@@ -80,7 +80,7 @@ export default [
     title: "Chainable zero-alloc builder",
     blurb:
       "Build(lg, lvl).Str(k, v).Send(ctx, msg) — a pooled, allocation-free fluent builder for the hottest log paths.",
-    anchor: "pkg/v1/logger/builder.go",
+    anchor: "pkg/v1/observe/logger/builder.go",
   },
   {
     id: "logger-multisink",
@@ -88,7 +88,7 @@ export default [
     title: "Named multi-writer fan-out",
     blurb:
       "DefaultMulti / NewMulti fan a record out to named writers (console, file, rotfile) from a config-driven registry.",
-    anchor: "pkg/v1/logger/writer.go",
+    anchor: "pkg/v1/observe/logger/writer.go",
     links: { adr: "0012" },
   },
   {
@@ -97,7 +97,7 @@ export default [
     title: "Custom sink topology",
     blurb:
       "NewWithSink + Multi / ConsoleStderr / ConsoleStdout / NewWriterSink compose an arbitrary sink tree behind the Logger.",
-    anchor: "pkg/v1/logger/sink.go",
+    anchor: "pkg/v1/observe/logger/sink.go",
   },
   {
     id: "logger-fromconfig",
@@ -105,7 +105,7 @@ export default [
     title: "Config-driven construction",
     blurb:
       "FromConfig builds a fully wired Logger from a config blob (any codec format) with zero Go glue.",
-    anchor: "pkg/v1/logger/fromconfig.go",
+    anchor: "pkg/v1/observe/logger/fromconfig.go",
     links: { adr: "0014" },
   },
   {
@@ -113,8 +113,8 @@ export default [
     domain: "logger",
     title: "Pluggable writer registry",
     blurb:
-      "Blank-import pkg/v1/logger/writer to register the console / file / rotfile sink factories used by the config-driven path.",
-    anchor: "pkg/v1/logger/writer/writer.go",
+      "Blank-import pkg/v1/observe/logger/writer to register the console / file / rotfile sink factories used by the config-driven path.",
+    anchor: "pkg/v1/observe/logger/writer/writer.go",
     links: { adr: "0015" },
   },
   {
@@ -123,7 +123,7 @@ export default [
     title: "Build-time version stamping",
     blurb:
       'Version (ldflags injection point) + FrameworkVersion() stamp every record with the framework version, defaulting to "dev".',
-    anchor: "pkg/v1/logger/version.go",
+    anchor: "pkg/v1/observe/logger/version.go",
     links: { adr: "0007" },
   },
 
@@ -174,7 +174,7 @@ export default [
     title: "Content hashing",
     blurb:
       "Sum / SumHex / New across 5 stdlib algorithms (SHA-256/512, SHA3-256, CRC32C, FNV-1a) for cache keys, content IDs and dedup — one-shot or streaming.",
-    anchor: "pkg/v1/hash/hash.go",
+    anchor: "pkg/v1/crypto/hash/hash.go",
     links: { adr: "0013" },
   },
   {
@@ -183,7 +183,7 @@ export default [
     title: "Content-addressed I/O",
     blurb:
       "DigestWriter tees writes while hashing; VerifyingReader checks an expected digest on EOF — content addressing without a second pass.",
-    anchor: "pkg/v1/hash/hash.go",
+    anchor: "pkg/v1/crypto/hash/hash.go",
     links: { adr: "0013" },
   },
 
@@ -194,7 +194,7 @@ export default [
     title: "Detached signatures",
     blurb:
       "GenerateKey / Sign / Verify with Ed25519 or ECDSA-P256 — constant-time verify, non-oracle (an invalid signature is (false, nil)).",
-    anchor: "pkg/v1/sign/sign.go",
+    anchor: "pkg/v1/crypto/sign/sign.go",
     links: { adr: "0013" },
   },
 
@@ -205,7 +205,7 @@ export default [
     title: "Message authentication",
     blurb:
       "Tag / Verify under a shared secret (HMAC-SHA256) with constant-time comparison for detached integrity + authenticity.",
-    anchor: "pkg/v1/mac/mac.go",
+    anchor: "pkg/v1/crypto/mac/mac.go",
     links: { adr: "0014" },
   },
 
@@ -216,7 +216,7 @@ export default [
     title: "Key derivation (HKDF)",
     blurb:
       "Subkey expands one strong secret into independent, purpose-bound subkeys (HKDF-SHA256) for key separation.",
-    anchor: "pkg/v1/kdf/kdf.go",
+    anchor: "pkg/v1/crypto/kdf/kdf.go",
     links: { adr: "0013" },
   },
   {
@@ -225,7 +225,7 @@ export default [
     title: "Hierarchical key tree",
     blurb:
       "NewKeyTree + Child(...).DeriveKey() derive path-addressed subkeys for structured key hierarchies.",
-    anchor: "pkg/v1/kdf/kdf.go",
+    anchor: "pkg/v1/crypto/kdf/kdf.go",
     links: { adr: "0014" },
   },
 
@@ -236,7 +236,7 @@ export default [
     title: "Key agreement (ECDH)",
     blurb:
       "GenerateKey / SharedKey (X25519) let two parties derive the same symmetric Key without transmitting it — the raw DH secret is HKDF'd, never returned.",
-    anchor: "pkg/v1/agree/agree.go",
+    anchor: "pkg/v1/crypto/agree/agree.go",
     links: { adr: "0014" },
   },
 
@@ -247,7 +247,7 @@ export default [
     title: "Password hashing + verify",
     blurb:
       "Hash / Verify / NeedsRehash with deliberately-slow PBKDF2-SHA256 and a self-describing PHC string for transparent upgrades.",
-    anchor: "pkg/v1/password/password.go",
+    anchor: "pkg/v1/crypto/password/password.go",
     links: { adr: "0013" },
   },
 ];

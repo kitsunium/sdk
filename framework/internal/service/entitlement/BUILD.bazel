@@ -35,10 +35,10 @@ go_library(
     deps = [
         "//framework/internal/core/entitlement",
         "//internal/kernel/errs",
-        "//pkg/v1/hash",
-        "//pkg/v1/lock",
-        "//pkg/v1/semver",
-        "//pkg/v1/sign",
+        "//pkg/v1/app/lock",
+        "//pkg/v1/crypto/hash",
+        "//pkg/v1/crypto/sign",
+        "//pkg/v1/data/semver",
     ],
 )
 
@@ -93,7 +93,7 @@ go_test(
     deps = [
         "//framework/internal/core/entitlement",
         "//internal/kernel/errs",
-        "//pkg/v1/lock",
+        "//pkg/v1/app/lock",
         "//pkg/v1/proc",
     ],
 )

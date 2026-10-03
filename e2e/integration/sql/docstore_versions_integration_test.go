@@ -19,8 +19,8 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // versionsEpoch is where every versioned case's clock starts.

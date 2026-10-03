@@ -124,8 +124,17 @@ published, which is why §2 comes first.
     construction: the registrar asks `Unusable` before publishing and refuses
     with its own code, so the kernel table builds no error. The codec, writer,
     crypto, transform, id and view registries are still their own copies.
-  - Not yet: `ring`'s multi-producer mode, `semver`, `flock`, and the `pkg/v1`
-    aliases of §4.
+  - `semver` landed in the kernel and is published as `pkg/v1/semver`.
+  - The kernel's families, as moved: `concur/{batcher, buffer, group,
+    recycler, singleflight, snapshot, worker}`, `collections/{cache, heap,
+    ring}` and `fs/{pathchain}`, with `errs`, `clock`, `backoff`, `semver` and
+    `plugin` at the root. That takes a family further than §4's last sentence:
+    `buffer` sits beside the `recycler` it specialises, `cache` is a container
+    like `heap` and `ring`, and `pathchain` heads a third family, `fs`, of
+    filesystem measurements. Publication is unchanged: those three stay
+    unpublished on their own.
+  - Not yet: `ring`'s multi-producer mode, `flock`, and the `pkg/v1` aliases
+    of §4 other than `semver`.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
 - Five service-to-service edges disappear from the dependency graph; the

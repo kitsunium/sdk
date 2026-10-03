@@ -3,13 +3,13 @@
 ## Purpose
 
 Protobuf codec — wraps `google.golang.org/protobuf` behind the universal
-`core/codec.Codec` dispatch. **Lives under `third-party/codec/` — the
-`third-party/codec/protobuf` module (ADR 0157) — NOT `internal/service/codec`**,
+`core/data/codec.Codec` dispatch. **Lives under `third-party/codec/` — the
+`third-party/codec/protobuf` module (ADR 0157) — NOT `internal/service/data/codec`**,
 and is **opt-in** (not blank-imported by
-`pkg/v1/codec`). The reason is not dep weight (protobuf is light) but the
+`pkg/v1/data/codec`). The reason is not dep weight (protobuf is light) but the
 **schema-bound contract**: Protobuf can only encode `proto.Message` values, so
 it cannot honour the universal "every registered codec round-trips any Go
-struct" guarantee that `pkg/v1/codec`'s `TestUniversalRoundtripAllCodecs`
+struct" guarantee that `pkg/v1/data/codec`'s `TestUniversalRoundtripAllCodecs`
 enforces. Schema codecs are therefore opt-in: a consumer blank-imports
 `…/third-party/codec/protobuf` to register the `"protobuf"` Format. ADR 0023.
 
@@ -77,7 +77,7 @@ size a decode-heavy service on the second number.
 
 ## Do NOT
 
-- Blank-import this into `pkg/v1/codec` — it would break the universal-round-trip
+- Blank-import this into `pkg/v1/data/codec` — it would break the universal-round-trip
   contract (schema codecs are opt-in by design).
 - Marshal a plain map/struct and expect success — Protobuf needs a message.
 - Use `fmt.Errorf`/`errors.New`; wrap through `errs.Wrap`.

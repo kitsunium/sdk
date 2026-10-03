@@ -15,9 +15,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // Sealing at rest, from inside (ADR 0006 §4): the documents as they rest,

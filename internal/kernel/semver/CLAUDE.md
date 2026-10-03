@@ -9,7 +9,7 @@ version string and answers about it — no release, no update, no product in any
 signature — so it passes SDK rule 1 like `heap` and `pathchain` did.
 
 Its consumers are `internal/service/proc/self` (pseudo-versions, in place of
-`x/mod/module`) and, through the public alias `pkg/v1/semver`, the distribution
+`x/mod/module`) and, through the public alias `pkg/v1/data/semver`, the distribution
 mechanisms (`selfupdate`, `entitlement`), which live in the framework (ADR 0158)
 and reach the SDK only through `pkg/v1` (ADR 0147). With them switched, no
 `go.mod` of the SDK or the framework requires `golang.org/x/mod` any more.
@@ -38,7 +38,7 @@ for "this string is not a pseudo-version" and nobody branched on x/mod's
 reasons.
 
 **Not provided, on purpose:** `Canonical`, `Major`, `MajorMinor`, `Build`,
-`Sort`, `Max`. Nothing calls them; `pkg/v1/semver` publishes this surface, and a
+`Sort`, `Max`. Nothing calls them; `pkg/v1/data/semver` publishes this surface, and a
 published function is frozen at v1 while an added one breaks nobody.
 `Canonical`, `Major` and `MajorMinor` would also need a `(string, bool)` shape
 here — x/mod's `""`-for-invalid is exactly what `KTN-FUNC-EMPTYSENTINEL`
@@ -85,7 +85,7 @@ refuses. Sorting is `slices.SortFunc(list, semver.Compare)`.
 
 - Add `Canonical`, `Major`, `MajorMinor` or `Build` in x/mod's
   `""`-for-invalid shape. When something needs one, it is `(string, bool)`, and
-  `pkg/v1/semver` forwards it in the same change.
+  `pkg/v1/data/semver` forwards it in the same change.
 - Import `golang.org/x/mod` here or in this suite. The vectors are written out
   so the comparison holds without it; the out-of-tree harness `BENCH.md`
   describes is where x/mod is measured.

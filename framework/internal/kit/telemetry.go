@@ -12,7 +12,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 // Telemetry: a server or a daemon reports every span and every phase change
@@ -26,7 +26,7 @@ import (
 // CLI run never exports.
 
 // Telemetry exports the app's telemetry on the private socket at path —
-// absolute, and short enough for a Unix socket (pkg/v1/ipc) — admitting the groups gids besides the
+// absolute, and short enough for a Unix socket (pkg/v1/proc/ipc) — admitting the groups gids besides the
 // product's own account. It wins over KIT_TELEMETRY.
 func Telemetry(path string, gids ...int) AppConfigurer {
 	return appOption(func(o *appOptions) { o.telemetry, o.telemetryGIDs = &path, gids })

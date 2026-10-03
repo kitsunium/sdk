@@ -1,0 +1,51 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "encoder",
+    srcs = [
+        "encoder.go",
+        "json.go",
+        "text.go",
+        "timestamp.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/encoder",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/kernel/clock",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":encoder",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "encoder_test",
+    srcs = [
+        "encoder_bench_test.go",
+        "json_external_test.go",
+        "json_internal_test.go",
+        "text_external_test.go",
+        "text_internal_test.go",
+        "timestamp_bench_test.go",
+        "timestamp_internal_test.go",
+        "trace_context_external_test.go",
+    ],
+    embed = [":encoder"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/kernel/clock",
+    ],
+)

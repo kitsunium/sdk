@@ -3,7 +3,7 @@ package kit
 
 import (
 	ikit "github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // SecretStore keeps the secrets in store instead of the environment's: a

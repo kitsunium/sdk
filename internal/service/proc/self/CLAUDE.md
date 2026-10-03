@@ -6,7 +6,7 @@ What the running process can say about ITSELF (ADR 0100): the build it came
 from (`build.go`) and its runtime state (`stats.go`, `cputime_*.go`). Every
 other `proc` package acts on another process — spawns, signals, reaps, limits a
 child; this one only reads, and only the process it runs in. Public facade:
-`pkg/v1/process` (`Self`, `Build`, `ParseBuild`, and the `Stats` /
+`pkg/v1/proc/process` (`Self`, `Build`, `ParseBuild`, and the `Stats` /
 `Distribution` / `BuildInfo` / `Module` aliases).
 
 Stdlib plus `internal/kernel/semver`, which recognises a pseudo-version and

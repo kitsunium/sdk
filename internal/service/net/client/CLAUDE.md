@@ -8,7 +8,7 @@ transport and the concrete policies it evaluates. The guarded `RoundTripper`, th
 timeouts, the response size cap, the concrete policies and the `Client` have all
 landed.
 
-Public façade: `pkg/v1/client`.
+Public façade: `pkg/v1/net/client`.
 
 ## Contents
 
@@ -170,7 +170,7 @@ this layer.
 ## Cost
 
 Measured in `BENCH.md` against a **stub transport**, so these are this package's
-own numbers and not the network's. `pkg/v1/client/BENCH.md` prices the
+own numbers and not the network's. `pkg/v1/net/client/BENCH.md` prices the
 end-to-end call and is the one to read for "what does a request cost"; this is
 what is inside the 1.17 % of allocated objects it attributes to
 `guard.RoundTrip`.
@@ -201,7 +201,7 @@ Two consequences a consumer should know, both in `BENCH.md` §4:
   only return nil after trying every pattern, so it has no best case. Prefer a
   precise allow list to a broad one plus a long deny list.
 
-`pkg/v1/client/BENCH.md` recommends denying by default and enumerating what you
+`pkg/v1/net/client/BENCH.md` recommends denying by default and enumerating what you
 allow. At fifty patterns that recommendation costs 1.8 % of its own loopback
 `Get`, so it **survives** — with those two qualifications, and with the note
 that ~500 patterns is where the linear scan stops being noise.

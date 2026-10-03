@@ -13,7 +13,7 @@ import (
 const middlewarePkg string = "github.com/kitsunium/sdk/framework/internal/kit"
 
 // httpLoopText says how kit's listener serves, for the Runtime view.
-const httpLoopText = "sdk/v1/server: the SDK's engine accepts each connection, bounds and drains it, and hands it to net/http, which serves it on its own goroutine — the library's loop, not the product's"
+const httpLoopText = "sdk/v1/net/server: the SDK's engine accepts each connection, bounds and drains it, and hands it to net/http, which serves it on its own goroutine — the library's loop, not the product's"
 
 // httpStats is the HTTP server's live counters: the requests kit's handler
 // sees. The connections are the SDK engine's to count (Server.State).
@@ -91,7 +91,7 @@ func (a *App) describeHTTP() *model.HTTPServer {
 	}
 	state := srv.State()
 	out := &model.HTTPServer{
-		Library:    "sdk/v1/server",
+		Library:    "sdk/v1/net/server",
 		Loop:       httpLoopText,
 		Addr:       addr,
 		Middleware: a.middleware(),

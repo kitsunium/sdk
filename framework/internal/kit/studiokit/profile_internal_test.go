@@ -7,7 +7,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit/plug"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/profiling"
+	"github.com/kitsunium/sdk/pkg/v1/observe/profiling"
 )
 
 const traceback = `goroutine 1 [running]:

@@ -51,7 +51,7 @@ the analyzer, the generator, `kit check`.
    same `X` as `pkg/vX` (ADR 0147 §9). `go.mod` requires `pkg` and
    `internal/kernel` at the last release and replaces them with the tree;
    the release commit pins and drops the replaces. It requires no vendor: the
-   entitlement and self-update engines compare versions with `pkg/v1/semver`,
+   entitlement and self-update engines compare versions with `pkg/v1/data/semver`,
    the SDK's standard-library semver (ADR 0156 §4, ADR 0158 §2), which
    replaced `golang.org/x/mod`; a connector carries its own vendor in its own
    module.

@@ -24,7 +24,7 @@ import remarkGithubBlockquoteAlert from "remark-github-blockquote-alert";
 //:      interfaces, Errors)
 //:   2. markdown pipe-tables that the doc author indented so they
 //:      survived through the Go-doc parser (e.g. the "What's shipped"
-//:      Format-x-MIME table in pkg/v1/codec/codec.go)
+//:      Format-x-MIME table in pkg/v1/data/codec/codec.go)
 //: Default both to Go and the table renders as red-keyword Go code —
 //: ridiculous. Discriminate:
 //:   - if every non-empty line starts with "|" → parse the bare fence

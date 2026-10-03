@@ -11,11 +11,11 @@
 package s3
 
 import (
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/service/logger/middleware/async"
-	"github.com/kitsunium/sdk/internal/service/writer/levelgate"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
+	"github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate"
 )
 
 // Writer is the registered s3 factory singleton (no init(); package-level var).

@@ -16,7 +16,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // The hub's bounds: what it keeps of the traces, and how far a slow Studio

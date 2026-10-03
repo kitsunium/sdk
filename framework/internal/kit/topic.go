@@ -10,9 +10,9 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // TopicService is an asynchronous channel of messages of type T. Every subscription

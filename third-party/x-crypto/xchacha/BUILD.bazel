@@ -31,7 +31,7 @@ go_test(
     deps = [
         "//internal/core/crypto",
         "//internal/kernel/errs",
-        "//internal/service/crypto/aesgcm",
+        "//internal/service/crypto/aead/aesgcm",
         "@org_golang_x_crypto//chacha20poly1305",
     ],
 )

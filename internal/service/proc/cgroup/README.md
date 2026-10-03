@@ -1,7 +1,7 @@
 # cgroup (internal/service/proc/cgroup)
 
 cgroup v2 control-group management implementing `core/proc.Group`. Internal
-service implementation behind the public `pkg/v1/cgroup` facade — consumers
+service implementation behind the public `pkg/v1/proc/cgroup` facade — consumers
 import the facade, not this package.
 
 ## API

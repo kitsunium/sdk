@@ -13,9 +13,9 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/mail"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/mail"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // Transactions (ADR 0004): kit.Transact on every backend — memory, the data

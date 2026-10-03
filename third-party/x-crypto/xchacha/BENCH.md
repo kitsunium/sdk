@@ -9,7 +9,7 @@ trade can be made on numbers.
 
 Every row is scheme against scheme through the *same* `core/crypto.AEAD` port,
 in the same process, in the same run, under the same machine load. The reference
-arm is `internal/service/crypto/aesgcm` — the SDK's dep-free default — sealing
+arm is `internal/service/crypto/aead/aesgcm` — the SDK's dep-free default — sealing
 the same plaintexts and producing the same self-framed box. Nothing here is
 quoted from another page.
 
@@ -292,7 +292,7 @@ Nothing in this package was changed to produce this report.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Library            | `golang.org/x/crypto` v0.55.0 |
-| Reference arm      | `internal/service/crypto/aesgcm` (same repo, same run) |
+| Reference arm      | `internal/service/crypto/aead/aesgcm` (same repo, same run) |
 | Git branch         | `jaimerias-que-tu-te-connect` |
 | Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |

@@ -1,15 +1,15 @@
 // Package crypto — holds the process-wide AEAD registry. Service- and
 // third-party-level scheme packages register themselves via package-level var
-// initialisers when imported (no init()), mirroring core/codec.
+// initialisers when imported (no init()), mirroring core/data/codec.
 package crypto
 
 import (
 	"fmt"
 	"maps"
 
+	"github.com/kitsunium/sdk/internal/kernel/concur/snapshot"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/plugin"
-	"github.com/kitsunium/sdk/internal/kernel/snapshot"
 )
 
 // aeads maps each Algorithm to its AEAD (the shared read-mostly schemeRegistry);

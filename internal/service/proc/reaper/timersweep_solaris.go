@@ -11,7 +11,7 @@ import "time"
 // On illumos and Solaris the Go runtime forks every child with
 // forkx(FORK_NOSIGCHLD) (go1.27.1 src/syscall/exec_libc.go), so the kernel
 // posts no SIGCHLD when a child the process itself spawned exits — through
-// pkg/v1/process, os/exec or syscall.ForkExec alike. A loop woken by SIGCHLD
+// pkg/v1/proc/process, os/exec or syscall.ForkExec alike. A loop woken by SIGCHLD
 // alone would never collect such a child: its zombie would wait for its own
 // Process.Wait, another child's signal, ReapOnce or Stop. Orphans re-parented
 // here still signal: the kernel clears the flag when it re-parents a process

@@ -9,7 +9,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/hash"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/hash"
 )
 
 // The privacy journal (ADR 0006 §7). Every export, erasure, deletion by

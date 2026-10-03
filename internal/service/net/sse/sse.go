@@ -15,8 +15,8 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // initialFrameCapacity pre-sizes the per-stream encode buffer. One frame of a

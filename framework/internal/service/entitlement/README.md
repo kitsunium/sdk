@@ -60,7 +60,7 @@ encoding/json accepts \{"a":1,"a":2\} and keeps the LAST value, silently. The ro
 
 Refusing is the only reading that cannot contradict anybody. RFC 8725 §2.6 states the same rule for the JWT case.
 
-It is not pkg/v1/codec/strictjson, although ADR 0158 §2 sends JSON there and strictjson refuses a duplicate name too. strictjson also refuses every member its target does not declare — ADR 0102's one reading, with no mode to relax it — and the four documents read here must ignore one: RFC 7517 §4 for a JWK member, RFC 7519 §4 for a claim, and a signed roster an older client still has to read once the vendor adds a field. Measured: a JWK carrying a member its decoding type does not declare is refused MEMBER\_UNKNOWN by strictjson.
+It is not pkg/v1/data/codec/strictjson, although ADR 0158 §2 sends JSON there and strictjson refuses a duplicate name too. strictjson also refuses every member its target does not declare — ADR 0102's one reading, with no mode to relax it — and the four documents read here must ignore one: RFC 7517 §4 for a JWK member, RFC 7519 §4 for a claim, and a signed roster an older client still has to read once the vendor adds a field. Measured: a JWK carrying a member its decoding type does not declare is refused MEMBER\_UNKNOWN by strictjson.
 
 Package entitlement \- the published keys GitHub signs its OIDC tokens with.
 
@@ -221,7 +221,7 @@ DefaultBearerFetch is the transport the mint request should use.
 
 It refuses redirects outright. checkTokenURL vouches for the URL it is GIVEN, and a redirect is a second destination nobody checked: Go's default client decides whether to forward an Authorization header by comparing HOSTS, not schemes, so a same\-host https→http redirect would put the runner's credential on the wire in plaintext. There is no legitimate redirect on this endpoint, so the safe answer and the correct one coincide.
 
-It builds a net/http client over http.DefaultTransport rather than reaching for pkg/v1/client: the guarded transport ignores HTTP\(S\)\_PROXY, which a self\-hosted runner may depend on, and its configuration documents no way to follow no redirect at all — a zero MaxRedirects is its default of three.
+It builds a net/http client over http.DefaultTransport rather than reaching for pkg/v1/net/client: the guarded transport ignores HTTP\(S\)\_PROXY, which a self\-hosted runner may depend on, and its configuration documents no way to follow no redirect at all — a zero MaxRedirects is its default of three.
 
 <a name="InCI"></a>
 ## func [InCI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L49>)

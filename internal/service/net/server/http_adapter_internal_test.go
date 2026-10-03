@@ -14,7 +14,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 )
 
 // httpDaemonSettleTimeout bounds how long a test waits for the adapter's

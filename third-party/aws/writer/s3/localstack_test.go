@@ -22,7 +22,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/aws"
 	awss3 "github.com/aws/aws-sdk-go-v2/service/s3"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // localCreds is a static CredentialProvider with the canned LocalStack keys.

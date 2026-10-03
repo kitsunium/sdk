@@ -79,7 +79,7 @@ The values a product declares are also its description. [App](<#App>).Graph retu
 - [Service](<#Service>).Workflow: a state machine over a store — event transitions fired by code, timer and guard transitions fired by the daemon's own loop, hooks on entry and after every transition.
 - [Service](<#Service>).Every and [Service](<#Service>).Cron: scheduled jobs.
 - [Service](<#Service>).Static: a frontend.
-- [Service](<#Service>).Listen: an inbound port that is not HTTP — a private socket on this machine speaking a versioned contract \(pkg/v1/ipc\).
+- [Service](<#Service>).Listen: an inbound port that is not HTTP — a private socket on this machine speaking a versioned contract \(pkg/v1/proc/ipc\).
 - [Service](<#Service>).CLI: a short command\-line command, run once by [App](<#App>).Main.
 
 The app, the composition root, says where the data lives: [Database](<#Database>) declares a database on an engine module the product's main imports — github.com/kitsunium/sdk/framework/connectors/postgres and its siblings, the only code that imports a driver — and [Keeps](<#Keeps>) which stores it keeps. A service never names a database: its handle is its store, which runs on the SDK's document store over SQL there, a table per store.
@@ -1151,7 +1151,7 @@ Set gives the setting name a value in code, over the environment and the files: 
 func Singleton(scope string) AppOption
 ```
 
-Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory \(pkg/v1/lock: flock, LockFileEx\) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
+Singleton keeps one process of the app alive per scope on this machine: the start takes an exclusive file lock named after scope in the app's runtime directory \(pkg/v1/app/lock: flock, LockFileEx\) and holds it until the process ends. A second process refuses to start with CodeSingletonHeld — for a daemon's client, the sign to talk to the one that runs. The kernel drops the lock with a dead process.
 
 <a name="SingletonPer"></a>
 ### func [SingletonPer](<https://github.com/kitsunium/sdk/blob/main/framework/kit/app_profiles.go#L51>)
@@ -1178,7 +1178,7 @@ Studio switches the Studio on or off in dev. It is always off in production.
 func Telemetry(path string, gids ...int) AppOption
 ```
 
-Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
+Telemetry exports the app's telemetry on the private socket at path — absolute, and short enough for a Unix socket \(pkg/v1/proc/ipc\) — admitting the groups gids besides the product's own account. It wins over KIT\_TELEMETRY.
 
 <a name="Authenticator"></a>
 ## type [Authenticator](<https://github.com/kitsunium/sdk/blob/main/framework/kit/auth.go#L23>)
@@ -1631,7 +1631,7 @@ type Keepable = ikit.Keeper
 <a name="ListenHandler"></a>
 ## type [ListenHandler](<https://github.com/kitsunium/sdk/blob/main/framework/kit/listener.go#L12>)
 
-ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/ipc\).
+ListenHandler serves one connection of a [Listener](<#Listener>) until it returns; the connection is closed after it. conn.Peer says who connected, as the kernel says where it can \(pkg/v1/proc/ipc\).
 
 ```go
 type ListenHandler = ikit.ListenHandler

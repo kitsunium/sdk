@@ -12,8 +12,8 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // Databases (ADR 0004), on kit's fake database: no network, no driver. The

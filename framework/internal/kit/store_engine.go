@@ -7,8 +7,8 @@ import (
 	"errors"
 	"sync"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/vfs"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/vfs"
 )
 
 // A store is a port: Service.Store[T] is what a service declares and calls,

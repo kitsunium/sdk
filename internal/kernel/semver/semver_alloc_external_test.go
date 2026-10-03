@@ -32,7 +32,7 @@ import (
 const allocRuns int = 500
 
 // mallocsOver reports the TOTAL number of heap allocations f performs across
-// runs calls — the bookkeeping of internal/service/writer/levelgate's gate,
+// runs calls — the bookkeeping of internal/service/observe/logger/writer/levelgate's gate,
 // which records why: testing.AllocsPerRun divides as integers, so a defect
 // allocating less than once per call reports exactly 0. GOMAXPROCS is pinned
 // so no other P allocates into the count, collection is held off for the

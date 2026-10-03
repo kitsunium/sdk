@@ -12,7 +12,7 @@ framework's: the surface is unchanged, the import path is
 `github.com/kitsunium/sdk/framework/git`, and a consumer requires the framework
 module rather than `pkg`. Every code keeps its value (ADR 0160).
 
-What a running program was BUILT from stays in the SDK: `pkg/v1/process`'s
+What a running program was BUILT from stays in the SDK: `pkg/v1/proc/process`'s
 `Build` and `Self` (ADR 0100) read the program itself; only `Head`, which asks git
 about a working tree, moved (ADR 0158 §6).
 

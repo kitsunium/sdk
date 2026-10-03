@@ -8,8 +8,8 @@ import (
 	"maps"
 	"slices"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // A store that seals, as kit's port sees it (ADR 0004, ADR 0006 §4): every

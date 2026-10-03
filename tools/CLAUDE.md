@@ -35,8 +35,8 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 ### `workspace_status.sh`
 
 1. Bazel runs `tools/workspace_status.sh` once per build (with `--stamp`); the output is a key/value table.
-2. `rules_go`'s `go_library` reads `STABLE_VERSION` via `x_defs` and rewrites the placeholder `{STABLE_VERSION}` in `pkg/v1/logger.Version` at link time.
-3. The resulting binary's `pkg/v1/logger.FrameworkVersion()` returns the same git SHA that built it — every emitted log record carries `framework_version` for traceability.
+2. `rules_go`'s `go_library` reads `STABLE_VERSION` via `x_defs` and rewrites the placeholder `{STABLE_VERSION}` in `pkg/v1/observe/logger.Version` at link time.
+3. The resulting binary's `pkg/v1/observe/logger.FrameworkVersion()` returns the same git SHA that built it — every emitted log record carries `framework_version` for traceability.
 
 ### `genindex/`
 
@@ -66,8 +66,8 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 
 ```
 # workspace_status.sh
-bazel build --stamp //pkg/v1/logger/... \
-  && bazel-bin/pkg/v1/logger/logger_/logger -version  # if a binary is wired
+bazel build --stamp //pkg/v1/observe/logger/... \
+  && bazel-bin/pkg/v1/observe/logger/logger_/logger -version  # if a binary is wired
 bazel info workspace_status_command
 cat $(bazel info output_path)/volatile-status.txt $(bazel info output_path)/stable-status.txt
 

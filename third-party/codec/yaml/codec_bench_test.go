@@ -5,7 +5,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/codec"
+	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/third-party/codec/yaml"
 )
 

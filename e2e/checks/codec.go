@@ -9,7 +9,7 @@ import (
 
 	// codec is imported by name; importing the package also activates the full
 	// codec registry (all 18 Format names) via its own init side-effects.
-	codec "github.com/kitsunium/sdk/pkg/v1/codec"
+	codec "github.com/kitsunium/sdk/pkg/v1/data/codec"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 )

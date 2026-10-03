@@ -36,7 +36,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-profile" "$(DIM)capture cpu+mem+block+mutex pprof per kernel package → profiles/<pkg>/$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench-compare" "$(DIM)benchstat .bench.main.out vs .bench.out (A/B vs main)$(RST)"
 
@@ -278,7 +278,7 @@ vuln-check:
 pre-commit-check:
 	bash scripts/pre-commit-test.sh
 
-# `bench` regenerates pkg/v1/codec/BENCH.md by running the full bench
+# `bench` regenerates pkg/v1/data/codec/BENCH.md by running the full bench
 # matrix programmatically (testing.Benchmark per row, no text-format
 # parsing) under the `benchmark` build tag. Stamps a reproducibility
 # envelope (CPU, RAM, OS, Go toolchain, git SHA, timestamp) at the top
@@ -296,9 +296,9 @@ pre-commit-check:
 #
 # `bazel run` (not `bazel test`) is the entry point so BUILD_WORKSPACE_DIRECTORY
 # is set + the sandbox is lifted; that lets the test write BENCH.md back
-# into the source tree at pkg/v1/codec/BENCH.md.
+# into the source tree at pkg/v1/data/codec/BENCH.md.
 bench:
-	bazel run //pkg/v1/codec:codec_bench_test -- \
+	bazel run //pkg/v1/data/codec:codec_bench_test -- \
 		-test.run=TestGenerateBenchMD \
 		-test.bench=^$$ \
 		-test.timeout=2h \
@@ -316,7 +316,7 @@ cover:
 #   - /getting-started, /philosophy, /architecture — handwritten
 #   - /packages/{logger,codec,errs} — render pkg/v1/<pkg>/README.md
 #   - /adr/ + /adr/<slug> — render every docs/adr/*.md
-#   - /benchmarks — render pkg/v1/codec/BENCH.md (the mean-baseline pivot)
+#   - /benchmarks — render pkg/v1/data/codec/BENCH.md (the mean-baseline pivot)
 # node_modules/ + dist/ are gitignored — the artefact is rebuilt from
 # source every run. Idempotent npm install is fast after first run.
 docs:
@@ -437,7 +437,7 @@ error-codes:
 #
 # COUNT defaults to 10 (benchstat needs ≥10 samples for mannwhitney);
 # BENCHTIME defaults to 5s (firms-up nanos on the small bench cells).
-# `pkg/v1/codec/main_test.go` toggles SetBlockProfileRate(1) +
+# `pkg/v1/data/codec/main_test.go` toggles SetBlockProfileRate(1) +
 # SetMutexProfileFraction(1) when the corresponding -*profile flag is set.
 WAVE ?= current
 BEFORE ?= baseline
@@ -451,7 +451,7 @@ profile:
 	  -memprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mem.out \
 	  -blockprofile=$(CURDIR)/.bench/profiles/$(WAVE)/block.out \
 	  -mutexprofile=$(CURDIR)/.bench/profiles/$(WAVE)/mutex.out \
-	  ./v1/codec/... \
+	  ./v1/data/codec/... \
 	  | tee $(CURDIR)/.bench/profiles/$(WAVE)/bench.txt
 	@echo "→ .bench/profiles/$(WAVE)/ {cpu,mem,block,mutex}.out + bench.txt"
 

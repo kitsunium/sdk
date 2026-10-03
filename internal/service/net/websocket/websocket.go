@@ -22,8 +22,8 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	"github.com/kitsunium/sdk/internal/kernel/worker"
 )
 
 // initialWriteCapacity pre-sizes the per-connection frame buffer. A few hundred

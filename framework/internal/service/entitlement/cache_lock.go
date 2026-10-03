@@ -23,7 +23,7 @@ import (
 	"log"
 	"time"
 
-	"github.com/kitsunium/sdk/pkg/v1/lock"
+	"github.com/kitsunium/sdk/pkg/v1/app/lock"
 )
 
 // cacheLockName is the lock every holder of one cache directory takes.

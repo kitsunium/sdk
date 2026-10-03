@@ -6,7 +6,7 @@
 The server side of Server-Sent Events (ADR 0029): an HTTP response held open and
 written one `text/event-stream` frame at a time, flushed after each.
 
-Public façade: `pkg/v1/server/sse`.
+Public façade: `pkg/v1/net/sse`.
 
 It is written against `net/http`'s own interfaces — `http.ResponseWriter`,
 `*http.Request`, `http.ResponseController` — not against the SDK's listener

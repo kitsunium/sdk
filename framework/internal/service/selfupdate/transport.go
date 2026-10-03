@@ -51,7 +51,7 @@ const (
 // times.
 //
 // It stays a net/http client over http.DefaultTransport rather than
-// pkg/v1/client, which ADR 0158 §2 names for HTTP: the guarded transport sets
+// pkg/v1/net/client, which ADR 0158 §2 names for HTTP: the guarded transport sets
 // no Proxy, so it ignores HTTP(S)_PROXY and NO_PROXY — measured, it dialled
 // the host directly where this client went through the proxy — and an update
 // that cannot leave a network through its proxy never arrives on any machine

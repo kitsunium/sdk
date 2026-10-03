@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // fakeProviderWithToken returns fixed credentials carrying a non-empty session

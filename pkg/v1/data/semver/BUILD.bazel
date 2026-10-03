@@ -1,0 +1,23 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "semver",
+    srcs = ["semver.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/semver",
+    visibility = ["//visibility:public"],
+    deps = ["//internal/kernel/semver"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":semver",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "semver_test",
+    srcs = ["semver_external_test.go"],
+    deps = [":semver"],
+)

@@ -11,8 +11,8 @@ import (
 	"time"
 
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
-	"github.com/kitsunium/sdk/pkg/v1/process"
-	"github.com/kitsunium/sdk/pkg/v1/reaper"
+	"github.com/kitsunium/sdk/pkg/v1/proc/process"
+	"github.com/kitsunium/sdk/pkg/v1/proc/reaper"
 
 	"github.com/kitsunium/sdk/e2e/harness"
 	perrs "github.com/kitsunium/sdk/pkg/v1/errs"

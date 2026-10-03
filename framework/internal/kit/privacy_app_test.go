@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // kit's own service in an app (ADR 0006, ADR 0004): where its stores are

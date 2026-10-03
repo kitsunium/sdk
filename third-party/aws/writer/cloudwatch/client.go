@@ -11,7 +11,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs"
 	cwtypes "github.com/aws/aws-sdk-go-v2/service/cloudwatchlogs/types"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // newDeliverFunc builds the AWS-backed delivery seam from cfg, adapting its

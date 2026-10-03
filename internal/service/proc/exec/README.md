@@ -1,6 +1,6 @@
 # exec — process spawn primitive
 
-`internal/service/proc/exec` is the concrete spawn behind `pkg/v1/process`. It
+`internal/service/proc/exec` is the concrete spawn behind `pkg/v1/proc/process`. It
 forks/execs an immutable `coreproc.Spec` into a running process and returns a
 `coreproc.Process` handle with `PID`, `Wait`, `Signal`, `SignalGroup`, and a
 group-aware `Stop`.
@@ -50,4 +50,4 @@ trampoline path a future iteration could take.
 Unix only. On non-Unix targets `Start` returns `UnsupportedPlatform`; the package
 compiles on every GOOS.
 
-This is an internal implementation package. Consumers import `pkg/v1/process`.
+This is an internal implementation package. Consumers import `pkg/v1/proc/process`.

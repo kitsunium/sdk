@@ -7,8 +7,8 @@
 // Unlike codec and crypto, proc ships no plug-in registry: each primitive has a
 // single canonical OS implementation chosen at build time by platform tag, not
 // a runtime-registered scheme. Core declares the ports and value types; concrete
-// behaviour lives in internal/service/proc/*; the pkg/v1 facades (process,
-// signal, reaper, rlimit, cgroup, sdnotify) re-export this surface.
+// behaviour lives in internal/service/proc/*; the pkg/v1/proc facades (process,
+// signal, reaper, rlimit, cgroup, systemd/notify) re-export this surface.
 //
 // proc is stdlib-only (os, syscall, time, strconv, strings) plus
 // internal/kernel/errs — no golang.org/x/sys — preserving the SDK's dep-light

@@ -1,7 +1,7 @@
 // Package crypto declares the authenticated-encryption port: the AEAD
 // contract, the redacting Key value type, and the process-wide registry that
 // maps an Algorithm (and its 1-byte wire id) to a registered AEAD. It is the
-// peer of internal/core/codec — the registry resolves an Algorithm to an AEAD
+// peer of internal/core/data/codec — the registry resolves an Algorithm to an AEAD
 // exactly as codec resolves a Format to a Codec.
 //
 // No algorithm bodies and no vendor types live here; concrete AEADs live under

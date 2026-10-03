@@ -2,7 +2,7 @@
 
 Derives the Go runtime soft memory limit from the control-group allowance
 already governing this process, and installs it. Internal service implementation
-behind the public `pkg/v1/memlimit` facade — consumers import the facade, not
+behind the public `pkg/v1/proc/memlimit` facade — consumers import the facade, not
 this package.
 
 ## API
@@ -55,7 +55,7 @@ leaves the runtime default in place.
 
 ## See also
 
-- `pkg/v1/memlimit` — the public facade
+- `pkg/v1/proc/memlimit` — the public facade
 - `internal/service/proc/cgroup` — the opposite direction: WRITES a control group
   to bound a child process
 - `internal/service/proc/rlimit` — a `setrlimit(2)` ceiling the kernel enforces

@@ -1,0 +1,41 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "level",
+    srcs = [
+        "level.go",
+        "level_compliance.go",
+        "leveler.go",
+        "parse.go",
+        "unknown.go",
+        "var.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/level",
+    visibility = ["//internal/core:core_consumers"],
+    deps = ["//internal/kernel/errs"],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":level",
+    visibility = ["//internal/core:core_consumers"],
+)
+
+go_test(
+    name = "level_test",
+    size = "small",
+    srcs = [
+        "level_external_test.go",
+        "parse_external_test.go",
+        "var_external_test.go",
+    ],
+    deps = [":level"],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/redact"
+	"github.com/kitsunium/sdk/pkg/v1/security/redact"
 )
 
 // What the model and the Studio see of what a store remembers (ADR 0007 §5,

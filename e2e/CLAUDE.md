@@ -37,7 +37,7 @@ e2e/
 │   ├── reaper.go        reaper (subreaper acquisition + orphan adoption)
 │   └── proc_systemd.go  sdnotify (readiness round-trip) + sdlisten (activation env)
 └── integration/       Docker-backed suites, //go:build integration only — see integration/CLAUDE.md
-    ├── sql/            pkg/v1/{sql,docstore,queue} on SQLite, PostgreSQL 17, MySQL 8.4
+    ├── sql/            pkg/v1/data/{sql,docstore,queue} on SQLite, PostgreSQL 17, MySQL 8.4
     └── writer/         third-party/db/writer/{clickhouse,mysql,redis} against real servers
 ```
 
@@ -71,7 +71,7 @@ e2e/
 - Imports may reach `internal/*` for the sentinel **codes only** (the e2e binary
   is internal tooling, not a consumer) — this is why it sits outside the Bazel
   graph the layer firewall queries (`.bazelignore`; ADR 0068). The one exception
-  is `integration/writer/*`, whose suites drive `internal/core/writer`'s registry
+  is `integration/writer/*`, whose suites drive `internal/core/observe/logger/writer`'s registry
   exactly as they did beside the writer packages they test.
 
 ## Build system

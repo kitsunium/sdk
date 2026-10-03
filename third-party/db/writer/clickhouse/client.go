@@ -12,8 +12,8 @@ import (
 
 	chdriver "github.com/ClickHouse/clickhouse-go/v2"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
-	"github.com/kitsunium/sdk/internal/core/writer"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 // colsPerRow is the number of columns each log row writes: (ts, level, message).

@@ -15,7 +15,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/framework/telemetry"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/ipc"
+	"github.com/kitsunium/sdk/pkg/v1/proc/ipc"
 )
 
 func socketPath(t *testing.T) string {

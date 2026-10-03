@@ -17,13 +17,13 @@ graph of every consumer of a database writer.
 
 | Directory | Suite | Servers |
 |---|---|---|
-| `sql/` | the SQL mechanisms (`pkg/v1/sql`, `docstore`, `queue`) on the three engines — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4` |
+| `sql/` | the SQL mechanisms (`pkg/v1/data/sql`, `docstore`, `queue`) on the three engines — see `sql/CLAUDE.md` | SQLite (none), `postgres:17`, `mysql:8.4` |
 | `writer/clickhouse/` | the `"clickhouse"` writer (`third-party/db/writer/clickhouse`) through `writer.Open`, rows read back | `clickhouse/clickhouse-server:24-alpine` |
 | `writer/mysql/` | the `"mysql"` writer over the bind-mounted Unix socket, rows read back | `mysql:8` |
 | `writer/redis/` | the `"redis"` writer over the bind-mounted Unix socket: XADD, MaxLen trimming, the `AddFailed` path | `redis:7-alpine` |
 
 The writer suites are external test packages: they import the writer module
-for its registration side effect and drive `internal/core/writer`'s registry,
+for its registration side effect and drive `internal/core/observe/logger/writer`'s registry,
 exactly as they did beside the package (`e2e/go.mod` replaces each writer
 module with this tree). That is the one place `e2e` imports more of `internal/`
 than sentinel codes — see `e2e/CLAUDE.md` §Rules.
@@ -42,9 +42,9 @@ GOWORK=off go vet -tags integration ./integration/...    # compiles them, no Doc
 ```
 
 Each suite self-skips the cases whose server cannot start, and removes every
-container it started. Run `sql/` on any change to `internal/service/sql`,
-`internal/core/sql`, the SQL engine of `internal/service/docstore` or the SQL
-broker of `internal/service/queue`; run `writer/<engine>/` before shipping a
+container it started. Run `sql/` on any change to `internal/service/data/sql`,
+`internal/core/data/sql`, the SQL engine of `internal/service/data/docstore` or the SQL
+broker of `internal/service/data/queue`; run `writer/<engine>/` before shipping a
 change to that writer's factory or batching chain.
 
 On macOS, the mysql and redis writer suites fail where the bind-mounted Unix

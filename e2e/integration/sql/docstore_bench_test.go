@@ -10,8 +10,8 @@ import (
 	"fmt"
 	"testing"
 
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 )
 
 // benchEngines are the engines every benchmark runs on.

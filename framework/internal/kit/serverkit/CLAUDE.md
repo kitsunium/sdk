@@ -2,8 +2,8 @@
 # framework/internal/kit/serverkit — the HTTP engine and the frontends' file server
 
 What `framework/kit/server` plugs into kit (`plug`): the HTTP engine an app
-in the server profile serves on (the SDK's `server`: one group, one socket,
-kit's bounds) and a frontend's file server (the SDK's `server/static`, a
+in the server profile serves on (the SDK's `net/server`: one group, one socket,
+kit's bounds) and a frontend's file server (the SDK's `net/static`, a
 single-page application under kit's CSP). A daemon or a CLI links and
 initialises neither.
 

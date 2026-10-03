@@ -6,7 +6,7 @@
 Declares the **authenticated-encryption port** of the SDK: the `AEAD` contract,
 the redacting `Key` value type, and the process-wide registry mapping an
 `Algorithm` (and its 1-byte wire id) to a registered `AEAD`. Peer of
-`internal/core/codec` — the registry resolves an `Algorithm` to an `AEAD`
+`internal/core/data/codec` — the registry resolves an `Algorithm` to an `AEAD`
 exactly as codec resolves a `Format` to a `Codec` (ADR 0013).
 
 No algorithm bodies and no vendor types live here. Concrete schemes live under
@@ -57,8 +57,9 @@ mix: a digest carries no secret, `Open`/`Verify`/`MACVerify` are constant-time
 or non-oracle, `Subkey` rejects passwords by contract, password hashing is the
 one deliberately-slow surface, the raw `Shared` secret is never handed back
 un-KDF'd, and `SealStream`/`OpenStream` reuse the AEAD `UnknownAlgorithm` miss
-because streaming extends the AEAD domain. `pkg/v1/{crypto,hash,sign,kdf,password,mac,agree}`
-re-export these surfaces (the streaming verbs ride `pkg/v1/crypto`).
+because streaming extends the AEAD domain. `pkg/v1/crypto` and its children
+`pkg/v1/crypto/{hash,sign,kdf,password,mac,agree}` re-export these surfaces
+(the streaming verbs ride `pkg/v1/crypto`).
 
 ## Wire format
 

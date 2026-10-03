@@ -9,9 +9,9 @@ import (
 	"sync"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // Queued commands (kit.Queued): Dispatch checks the command as its caller —
@@ -345,7 +345,7 @@ func (c *Command[C, R]) queueMechanic(a *App) model.Mechanic {
 	d := c.opts.deliveries
 	where := queueOf(a)
 	return model.Mechanic{
-		Kind: "queue", Label: fmt.Sprintf("%s · %d attempts", queuePlace[where], d.maxDeliveries), Package: "github.com/kitsunium/sdk/pkg/v1/queue",
+		Kind: "queue", Label: fmt.Sprintf("%s · %d attempts", queuePlace[where], d.maxDeliveries), Package: "github.com/kitsunium/sdk/pkg/v1/data/queue",
 		Config: map[string]string{"queue": where, "maxDeliveries": strconv.Itoa(d.maxDeliveries), "parallelism": strconv.Itoa(d.parallelism)},
 	}
 }

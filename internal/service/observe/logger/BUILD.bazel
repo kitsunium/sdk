@@ -1,0 +1,85 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "logger",
+    srcs = [
+        "builder.go",
+        "codes.go",
+        "errors.go",
+        "handler.go",
+        "logger.go",
+        "owning.go",
+        "pool.go",
+        "source.go",
+        "text_handler.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger",
+    visibility = ["//internal/service:service_consumers"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/kernel/clock",
+        "//internal/kernel/concur/buffer",
+        "//internal/kernel/concur/recycler",
+        "//internal/kernel/errs",
+        "//internal/service/observe/logger/encoder",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":logger",
+    visibility = ["//internal/service:service_consumers"],
+)
+
+go_test(
+    name = "logger_test",
+    size = "small",
+    srcs = [
+        "builder_bench_test.go",
+        "builder_external_test.go",
+        "builder_internal_test.go",
+        "handler_external_test.go",
+        "handler_internal_test.go",
+        "logger_external_test.go",
+        "logger_internal_test.go",
+        "owning_external_test.go",
+        "pool_internal_test.go",
+        "source_external_test.go",
+        "source_internal_test.go",
+        "stack_bench_test.go",
+        "text_handler_external_test.go",
+        "text_handler_internal_test.go",
+    ],
+    embed = [":logger"],
+    deps = [
+        "//internal/core/crypto",
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/kernel/clock",
+        "//internal/kernel/errs",
+        "//internal/service/crypto/aead/aesgcm",
+        "//internal/service/crypto/kdf/hkdfsha256",
+        "//internal/service/observe/logger/encoder",
+        "//internal/service/observe/logger/middleware/async",
+        "//internal/service/observe/logger/middleware/encwrite",
+        "//internal/service/observe/logger/middleware/failover",
+        "//internal/service/observe/logger/middleware/multi",
+        "//internal/service/observe/logger/middleware/recover",
+        "//internal/service/observe/logger/middleware/route",
+        "//internal/service/observe/logger/middleware/sample",
+        "//internal/service/observe/logger/middleware/tee",
+        "//internal/service/observe/logger/sink/console",
+        "//internal/service/observe/logger/sink/file",
+        "//internal/service/observe/logger/sink/memory",
+        "//internal/service/observe/logger/sink/syslog",
+    ],
+)
+
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

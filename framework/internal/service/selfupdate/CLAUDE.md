@@ -12,7 +12,7 @@ through `pkg/v1/*` and `internal/kernel/errs` alone (framework/CLAUDE.md rule
 1): the Windows refusal is `pkg/v1/proc`'s `UnsupportedPlatform`.
 
 It depends on no module outside the SDK. Versions are compared through
-`pkg/v1/semver` — `Compare`, `IsValid`, `Prerelease`, with the names and answers
+`pkg/v1/data/semver` — `Compare`, `IsValid`, `Prerelease`, with the names and answers
 of `golang.org/x/mod/semver`, which it replaced (ADR 0156 §4) — the SDK's own
 semver that ADR 0158 §2 routes every version through.
 
@@ -22,10 +22,10 @@ semver that ADR 0158 §2 routes every version through.
 |---|---|
 | `updater.go` | `Service`, the update flow, the atomic replacement |
 | `source.go` | `SourceValue` — the whole of what the original hard-coded |
-| `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/sign` |
-| `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies, through `pkg/v1/sign`), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` — the expiry read against the Service's `pkg/v1/clock` clock, the system one unless a suite injects a manual one |
+| `signature.go` | authenticity: detached ed25519 over the manifest, `WithVendorKey`; the check itself is `keys.go`'s, through `pkg/v1/crypto/sign` |
+| `keys.go` | ADR 0150: `WithVendorKeys` (an ordered list, at most four, any key verifies, through `pkg/v1/crypto/sign`), `WithSignatureDomain` (the signed bytes are domain + NUL + manifest, and the manifest must say `# tag` and `# expires`), `checkStatement` — the expiry read against the Service's `pkg/v1/clock` clock, the system one unless a suite injects a manual one |
 | `probe.go` | ADR 0150: `WithProbe` — the previous binary kept as `<binary>.prev` by a hard link (the `linker` sibling of the FileSystem port), the new one run with the product's arguments, `PROBE_FAILED` (`0.3.66.8`) and the rollback |
-| `checksum.go` | integrity: SHA-256, through `pkg/v1/hash`, against the ALREADY-AUTHENTICATED manifest |
+| `checksum.go` | integrity: SHA-256, through `pkg/v1/crypto/hash`, against the ALREADY-AUTHENTICATED manifest |
 | `transport.go` | bounded, https-only redirects and the response read cap |
 | `consent.go` | whether an unrequested upgrade may proceed, and the advice when it may not |
 | `consent_product.go` | ADR 0150: `Service.WithAutomaticConsent` (the product's consent; an explicit `<PREFIX>_AUTO_UPGRADE=0` still refuses) `Service.WithoutElevation` (never escalate), and `Service.AuthoriseUnattendedUpgrade` (the environment's answer, then the product's, then the source's prompt) |
@@ -229,11 +229,11 @@ temp file that cannot be created next to the running binary.
 
 ## Where ADR 0158 §2 is not followed, and why
 
-Signatures go through `pkg/v1/sign` (`keys.go`), the archive digest through
-`pkg/v1/hash` (`checksum.go`), the statement's expiry through an injected
+Signatures go through `pkg/v1/crypto/sign` (`keys.go`), the archive digest through
+`pkg/v1/crypto/hash` (`checksum.go`), the statement's expiry through an injected
 `pkg/v1/clock` clock and the Windows refusal is `pkg/v1/proc`'s. HTTP is the
 exception: `newReleaseHTTPClient` (`transport.go`) stays a `net/http` client over
-`http.DefaultTransport` rather than `pkg/v1/client`, because the guarded
+`http.DefaultTransport` rather than `pkg/v1/net/client`, because the guarded
 transport sets no `Proxy` and so ignores `HTTP(S)_PROXY` and `NO_PROXY` —
 measured, it dialled the host directly where the default transport went through
 the proxy — and an update that cannot leave a network through its proxy never
@@ -243,7 +243,7 @@ this client's https-only, bounded hops.
 
 ## Do NOT
 
-- Swap `newReleaseHTTPClient` for `pkg/v1/client` while the guarded transport
+- Swap `newReleaseHTTPClient` for `pkg/v1/net/client` while the guarded transport
   ignores the environment's proxy (see the section above).
 - Reorder the trust chain, or check a digest against a manifest whose signature
   has not been verified.

@@ -40,7 +40,7 @@ env:
   # split over a kernel primitive — flock(2) on Unix, LockFileEx on Windows
   # (ADR 0081) — and the two kernels give OPPOSITE answers to what a second
   # lock inside one process does. A green cross-compile proves neither. This is
-  # the lane that executes internal/service/lock's Windows suite; the Linux
+  # the lane that executes internal/service/app/lock's Windows suite; the Linux
   # Bazel gate compiles neither that suite nor the backend it covers.
   #
   # `entitlement` joins for a narrower reason: its offline cache installs a
@@ -66,12 +66,12 @@ env:
   # getrusage(2) where a Unix has it, the Go runtime's GC-refreshed estimate
   # where it does not, and a flag saying which (ADR 0100).
   #
-  # `ipc` joins them because its endpoint IS the platform: a Unix socket gated
+  # `proc/ipc` joins them because its endpoint IS the platform: a Unix socket gated
   # by its directory, SO_PEERCRED on Linux, a named pipe with its own DACL on
   # Windows (ADR 0148).
-  KERNEL_PKGS: "./pathchain"
+  KERNEL_PKGS: "./fs/pathchain"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./ipc ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
+  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one
@@ -82,7 +82,7 @@ env:
   # chmod injections, naming why (ADR 0095). Listing them for Windows here too
   # would only run them twice. ACL hardening of the Windows file sinks — a
   # security descriptor at creation — is named in their CLAUDE.md, not done.
-  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile ./internal/logfile"
+  SERVICE_FILE_PKGS: "./observe/logger/sink/file ./observe/logger/writer/rotfile ./observe/logger/internal/logfile"
   # Framework packages whose runtime is a kernel question — see `entitlement`
   # above. Relative to framework/, the module they belong to.
   FRAMEWORK_PKGS: "./internal/service/entitlement"

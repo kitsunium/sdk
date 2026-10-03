@@ -101,7 +101,7 @@ have — and only then renders it. Two entries make the point beyond doubt:
 
 `gohcl.getFieldTags` at 5.01 % is the other half: the struct tags are re-parsed
 by reflection **on every call**, with no per-type cache — the mechanism
-`internal/service/validation` uses to make its tag front end 48× cheaper, and
+`internal/service/app/validation` uses to make its tag front end 48× cheaper, and
 which this library does not have.
 
 None of that is a bug. It is `hclwrite` doing its actual job, which is to be the
@@ -214,7 +214,7 @@ conclusion here and the nanoseconds do not.
 | Architecture       | amd64 |
 | Go toolchain       | go1.27.1 linux/amd64 |
 | Library            | `github.com/hashicorp/hcl/v2` v2.24.0 |
-| Reference arms     | `internal/service/codec/json`, `internal/service/codec/cbor` (same repo, same run) |
+| Reference arms     | `internal/service/data/codec/json`, `internal/service/data/codec/cbor` (same repo, same run) |
 | Git branch         | `jaimerias-que-tu-te-connect` |
 | Git commit         | `c411206` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |

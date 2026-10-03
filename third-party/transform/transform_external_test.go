@@ -7,7 +7,7 @@ import (
 	"sync"
 	"testing"
 
-	coretransform "github.com/kitsunium/sdk/internal/core/transform"
+	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	tptransform "github.com/kitsunium/sdk/third-party/transform"
 )
@@ -192,7 +192,7 @@ func TestSchemesAreRegistered(t *testing.T) {
 
 // TestSchemesAreNotWireCompatible pins that the two formats are distinct
 // envelopes, not aliases. A stream produced by one must be REFUSED by the
-// other, not silently mis-decoded — the interop bug internal/service/transform
+// other, not silently mis-decoded — the interop bug internal/service/data/transform
 // documents at length for flate versus zlib, checked here before it can be
 // repeated with two new names.
 func TestSchemesAreNotWireCompatible(t *testing.T) {
@@ -321,7 +321,7 @@ func TestZstdLevelNeverYieldsAnInertCompressor(t *testing.T) {
 }
 
 // TestNoInternalImportNeeded is a compile-time claim in test form: an external
-// consumer reaches the compressors without importing internal/core/transform.
+// consumer reaches the compressors without importing internal/core/data/transform.
 // The whole test body uses only tptransform identifiers and inferred types, so
 // if the surface ever required naming an internal type this file would stop
 // compiling.

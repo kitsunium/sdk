@@ -8,7 +8,7 @@ import (
 	"io"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // The parts of a record that may keep a member in clear.

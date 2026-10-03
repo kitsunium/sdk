@@ -13,7 +13,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/kitsunium/sdk/pkg/v1/clock"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // maxUserAgent bounds the user agent a handler reads: a session list shows

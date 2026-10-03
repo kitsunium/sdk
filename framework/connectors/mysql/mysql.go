@@ -34,9 +34,9 @@ import (
 
 	driver "github.com/go-sql-driver/mysql"
 	"github.com/kitsunium/sdk/framework/kit"
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 const (

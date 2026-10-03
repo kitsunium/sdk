@@ -4,7 +4,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/kitsunium/sdk/internal/core/writer"
+	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 )
 
 func Test_credAdapter_Retrieve(t *testing.T) {

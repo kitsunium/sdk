@@ -4,7 +4,7 @@
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
 `Start` turns an immutable `coreproc.Spec` into a running, supervised process and
 returns a `coreproc.Process` handle. This is the only package in the domain that
-forks a process; the others (signal, reaper, rlimit, cgroup, sdnotify) act on a
+forks a process; the others (signal, reaper, rlimit, cgroup, systemd/notify) act on a
 process that already exists.
 
 ## Layering & deps

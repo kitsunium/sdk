@@ -12,7 +12,7 @@ import (
 	"strings"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/codec/jsonpatch"
+	"github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 

@@ -169,7 +169,7 @@ func validateSSELine(field, value string) error {
 	//: set per call or, for a value of eight bytes or fewer, decodes a rune per
 	//: byte. IndexByte is the assembly-backed primitive. Measured in BENCH.md;
 	//: the same substitution is made for the same reason in
-	//: internal/service/proc/sdnotify.
+	//: internal/service/proc/systemd/notify.
 	//: The empty test is not redundant with them, it is the row that made the
 	//: substitution a win instead of a wash: Validate calls this for id AND
 	//: event whether the frame carries them or not, and on the empty string

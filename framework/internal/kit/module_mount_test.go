@@ -14,7 +14,7 @@ import (
 
 	"github.com/kitsunium/sdk/framework/internal/kit"
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // The reviews module (module_test.go) mounted and run: its routes under a

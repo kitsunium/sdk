@@ -1,0 +1,54 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "signal",
+    srcs = ["signal.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/proc/signal",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/proc",
+        "//internal/service/proc/signal",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":signal",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "signal_test",
+    srcs = [
+        "signal_external_test.go",
+        "signal_other_test.go",
+        "signal_windows_test.go",
+    ],
+    deps = [
+        ":signal",
+    ] + select({
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
+            "//internal/kernel/errs",
+        ],
+        "//conditions:default": [],
+    }),
+)

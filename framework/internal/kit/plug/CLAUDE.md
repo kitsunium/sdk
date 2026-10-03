@@ -5,7 +5,7 @@ The hooks kit reads and a subsystem package sets as it is imported: the HTTP
 engine and the frontends' file server (`serverkit`, set by
 `framework/kit/server`), the Studio's event stream and profiler
 (`studiokit`, set by `framework/kit/studio`). kit imports none of the SDK
-packages behind them — `pkg/v1/server`, `server/static`, `server/sse`,
+packages behind them — `pkg/v1/net/server`, `net/static`, `net/sse`,
 `profiling` —, so a product that does not import a subsystem neither links
 nor initialises them.
 

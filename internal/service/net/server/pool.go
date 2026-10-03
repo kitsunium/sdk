@@ -6,7 +6,7 @@ import (
 	stdnet "net"
 	"slices"
 
-	"github.com/kitsunium/sdk/internal/kernel/buffer"
+	"github.com/kitsunium/sdk/internal/kernel/concur/buffer"
 )
 
 // acquire takes a pooled connection wrapper and fills it for this socket.

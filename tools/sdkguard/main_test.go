@@ -162,8 +162,8 @@ func Test_checkSlogPipeline(t *testing.T) {
 func Test_wrapsBridge(t *testing.T) {
 	t.Parallel()
 	const imports = "package p\nimport (\n\"log/slog\"\n" +
-		"\"github.com/kitsunium/sdk/pkg/v1/logger\"\n" +
-		"\"github.com/kitsunium/sdk/pkg/v1/logger/slogbridge\"\n)\n"
+		"\"github.com/kitsunium/sdk/pkg/v1/observe/logger\"\n" +
+		"\"github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge\"\n)\n"
 	type tc struct {
 		name string
 		src  string
@@ -251,7 +251,7 @@ func Test_checkStdoutDestination(t *testing.T) {
 	tests := []tc{
 		{
 			"a logger Config Writer",
-			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/observe/logger\")\n" +
 				"var _ = logger.Config{Writer: os.Stdout}\n", 1,
 		},
 		{
@@ -272,7 +272,7 @@ func Test_checkStdoutDestination(t *testing.T) {
 		},
 		{
 			"a fan-out slice inside a logging config",
-			"package p\nimport (\"io\"\n\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+			"package p\nimport (\"io\"\n\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/observe/logger\")\n" +
 				"var _ = logger.Config{Writers: []io.Writer{os.Stderr, os.Stdout}}\n", 1,
 		},
 		{
@@ -287,7 +287,7 @@ func Test_checkStdoutDestination(t *testing.T) {
 		},
 		{
 			"stderr is the correct destination",
-			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n" +
+			"package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/observe/logger\")\n" +
 				"var _ = logger.Config{Writer: os.Stderr}\n", 0,
 		},
 	}
@@ -318,7 +318,7 @@ func Test_isLoggingConfig(t *testing.T) {
 	tests := []tc{
 		{
 			"a logger package struct",
-			"package p\nimport \"github.com/kitsunium/sdk/pkg/v1/logger\"\n" +
+			"package p\nimport \"github.com/kitsunium/sdk/pkg/v1/observe/logger\"\n" +
 				"var _ = logger.Config{}\n", true,
 		},
 		{
@@ -360,7 +360,7 @@ func Test_stdoutInConfig(t *testing.T) {
 		src  string
 		want int
 	}
-	const head = "package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/logger\")\n"
+	const head = "package p\nimport (\"os\"\n\"github.com/kitsunium/sdk/pkg/v1/observe/logger\")\n"
 	tests := []tc{
 		{"a Writer field", head + "var _ = logger.Config{Writer: os.Stdout}\n", 1},
 		{"a field that names no destination", head + "var _ = logger.Config{MinLevel: os.Stdout}\n", 0},
@@ -435,7 +435,7 @@ func Test_checkVersionAssignment(t *testing.T) {
 		src  string
 		want int
 	}
-	const head = "package p\nimport \"github.com/kitsunium/sdk/pkg/v1/logger\"\n"
+	const head = "package p\nimport \"github.com/kitsunium/sdk/pkg/v1/observe/logger\"\n"
 	tests := []tc{
 		{"an assignment", head + "func f() { logger.Version = \"1.0\" }\n", 1},
 		{"a read", head + "var v = logger.Version\n", 0},
@@ -621,8 +621,8 @@ func Test_scanFile(t *testing.T) {
 // The bridge handler is recognised whether it is inlined or bound first.
 func Test_bridgeBoundNames(t *testing.T) {
 	t.Parallel()
-	const head = "package p\nimport (\n\"github.com/kitsunium/sdk/pkg/v1/logger\"\n" +
-		"\"github.com/kitsunium/sdk/pkg/v1/logger/slogbridge\"\n)\n"
+	const head = "package p\nimport (\n\"github.com/kitsunium/sdk/pkg/v1/observe/logger\"\n" +
+		"\"github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge\"\n)\n"
 	type tc struct {
 		name string
 		src  string
@@ -670,7 +670,7 @@ func Test_shadowedNames(t *testing.T) {
 		src  string
 		want string
 	}
-	const head = "package p\nimport \"github.com/kitsunium/sdk/pkg/v1/logger\"\n"
+	const head = "package p\nimport \"github.com/kitsunium/sdk/pkg/v1/observe/logger\"\n"
 	tests := []tc{
 		{"a short variable declaration", head + "func f() { logger := 1; _ = logger }\n", "logger"},
 		{"a parameter", head + "func f(logger int) { _ = logger }\n", "logger"},

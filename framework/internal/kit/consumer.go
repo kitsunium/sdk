@@ -9,9 +9,9 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/data/queue"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/queue"
-	"github.com/kitsunium/sdk/pkg/v1/trace"
+	"github.com/kitsunium/sdk/pkg/v1/observe/trace"
 )
 
 // A queue's consumer, whoever's queue it is — a subscription's, a watch's

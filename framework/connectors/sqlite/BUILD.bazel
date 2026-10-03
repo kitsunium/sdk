@@ -17,10 +17,10 @@ go_library(
     importpath = "github.com/kitsunium/sdk/framework/connectors/sqlite",
     deps = [
         "//framework/kit",
+        "//pkg/v1/data/sql",
         "//pkg/v1/errs",
         "//pkg/v1/proc",
-        "//pkg/v1/secret",
-        "//pkg/v1/sql",
+        "//pkg/v1/security/secret",
     ] + select({
         "@rules_go//go/platform:aix": [
             "@org_modernc_sqlite//:sqlite",
@@ -87,8 +87,8 @@ go_test(
         "//framework/kit/server",
         "//framework/kit/storetest",
         "//framework/model",
-        "//pkg/v1/secret",
-        "//pkg/v1/sql",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/security/secret",
     ],
 )
 

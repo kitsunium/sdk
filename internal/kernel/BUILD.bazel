@@ -32,9 +32,9 @@ go_test(
         "zeroalloc_gate_race_test.go",
     ],
     deps = [
-        "//internal/kernel/buffer",
         "//internal/kernel/clock",
+        "//internal/kernel/collections/ring",
+        "//internal/kernel/concur/buffer",
         "//internal/kernel/errs",
-        "//internal/kernel/ring",
     ],
 )

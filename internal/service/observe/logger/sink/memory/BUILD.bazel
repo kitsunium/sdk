@@ -1,0 +1,42 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/service:service_consumers"])
+
+go_library(
+    name = "memory",
+    srcs = [
+        "doc.go",
+        "memory.go",
+        "memory_compliance.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":memory",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/service:service_consumers",
+    ],
+)
+
+go_test(
+    name = "memory_test",
+    srcs = [
+        "memory_external_test.go",
+        "memory_internal_test.go",
+    ],
+    embed = [":memory"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+    ],
+)

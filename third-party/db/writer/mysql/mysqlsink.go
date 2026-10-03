@@ -10,7 +10,7 @@ import (
 	"context"
 	"database/sql"
 
-	corelogger "github.com/kitsunium/sdk/internal/core/logger"
+	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // mysqlSink decorates the composed dbsink chain with ownership of the *sql.DB.

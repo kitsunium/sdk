@@ -6,8 +6,8 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/kitsunium/sdk/pkg/v1/data/sql"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 
 // A transaction on a database (ADR 0004) is the database's own: the SDK's

@@ -10,7 +10,7 @@ failure, `BaseDelay × Multiplier^(n−1)`, held at `MaxDelay`, widened by
 domain-neutral — a duration, a factor, a ceiling and a jitter, with no `Retry`,
 `Job` or `Delivery` in a signature.
 
-It was published by ADR 0103 as `service/resilience.BackoffValue` and moved
+It was published by ADR 0103 as `service/app/resilience.BackoffValue` and moved
 here because every domain that backs off on its own terms — `lifecycle`'s
 supervisor, `queue`'s retry delay, `statemachine`'s per-entity backoff,
 `mail/spool`'s parked delivery, `net/server`'s failed `Accept` — imported the
@@ -38,9 +38,9 @@ func NormalMultiplier(multiplier float64) float64 // <= 1 and NaN -> 2
 func NormalJitter(jitter float64) float64         // clamp into [0, 1], NaN -> 0
 ```
 
-Public reach: `pkg/v1/resilience.Backoff` is an alias of `Value` (ADR 0074 —
+Public reach: `pkg/v1/app/resilience.Backoff` is an alias of `Value` (ADR 0074 —
 the alias points at the layer that owns the type), and
-`internal/service/resilience.BackoffValue` is another. **A method added to
+`internal/service/app/resilience.BackoffValue` is another. **A method added to
 `Value` is public API**; a package-level function is not, which is why the two
 halves and the normalisers are functions.
 
@@ -80,7 +80,7 @@ because `<= 1` lets NaN through and Go's `min`/`max` propagate it.
 ## Do NOT
 
 - Add a method to `Value` without deciding it as public API — it surfaces in
-  `pkg/v1/resilience.Backoff` through the alias.
+  `pkg/v1/app/resilience.Backoff` through the alias.
 - Convert the grown float to a `time.Duration` before comparing it with the
   bound. That conversion is the defect above.
 - Make jitter apply by default. Its zero being "deterministic" is what let it

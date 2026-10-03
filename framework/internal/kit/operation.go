@@ -10,9 +10,9 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
+	"github.com/kitsunium/sdk/pkg/v1/app/validation"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/validation"
+	"github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 // Operation takes a typed request and answers a typed response: an
@@ -77,7 +77,7 @@ var emptyType = reflect.TypeFor[EmptyValue]()
 
 // validateMechanic is the step of a pipeline that checks the validate tags.
 func validateMechanic() model.Mechanic {
-	return model.Mechanic{Kind: "validate", Label: "validate", Package: "github.com/kitsunium/sdk/pkg/v1/validation"}
+	return model.Mechanic{Kind: "validate", Label: "validate", Package: "github.com/kitsunium/sdk/pkg/v1/app/validation"}
 }
 
 // validate checks req against its validate tags: nil, or the 400 that lists

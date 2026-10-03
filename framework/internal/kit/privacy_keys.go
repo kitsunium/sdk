@@ -10,10 +10,10 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
-	"github.com/kitsunium/sdk/pkg/v1/kdf"
-	"github.com/kitsunium/sdk/pkg/v1/mac"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/kdf"
+	"github.com/kitsunium/sdk/pkg/v1/crypto/mac"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // References (ADR 0006 §2): a person's records are found by the reference

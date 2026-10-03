@@ -149,7 +149,7 @@ func benchBareFresh(b *testing.B, n int) {
 	}
 }
 
-// bareSeal is service/crypto/aesgcm.Seal transcribed onto the stdlib with the
+// bareSeal is service/crypto/aead/aesgcm.Seal transcribed onto the stdlib with the
 // SDK's registry, interface dispatch and typed-error wrapping removed. Keeping
 // it a function (rather than an inlined loop body) matters: the SDK's Seal is
 // one too, so the escape analysis the two get is the same.
@@ -325,7 +325,7 @@ func BenchmarkNewKey(b *testing.B) {
 }
 
 // BenchmarkWrapKey and BenchmarkUnwrapKey belong to the SLOW column, and they
-// are here rather than in pkg/v1/password because that is where a caller will
+// are here rather than in pkg/v1/crypto/password because that is where a caller will
 // be surprised by them: they stretch a passphrase with PBKDF2-SHA256 at 600 000
 // iterations, so they cost what a password hash costs, in a package whose other
 // verbs cost microseconds.

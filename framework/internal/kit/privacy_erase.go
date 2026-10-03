@@ -10,7 +10,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 

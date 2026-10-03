@@ -6,7 +6,7 @@ import (
 	"errors"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Where the data keys are, against what they seal (ADR 0006 §4).

@@ -12,9 +12,9 @@ This page walks you from "I have a fresh Go project" to running code that uses *
 The SDK is shipped as three importable subpackages under one module per major version. Install all three (they coexist; only the parts you import end up in your binary):
 
 ```bash
-go get github.com/kitsunium/sdk/pkg/v1/codec
+go get github.com/kitsunium/sdk/pkg/v1/data/codec
 go get github.com/kitsunium/sdk/pkg/v1/errs
-go get github.com/kitsunium/sdk/pkg/v1/logger
+go get github.com/kitsunium/sdk/pkg/v1/observe/logger
 ```
 
 A single `go get github.com/kitsunium/sdk/pkg/v1/...` works too if you want everything in one shot.
@@ -29,7 +29,7 @@ package main
 import (
     "fmt"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
 )
 
 func main() {
@@ -60,7 +60,7 @@ package main
 import (
     "context"
 
-    "github.com/kitsunium/sdk/pkg/v1/logger"
+    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 func main() {
@@ -98,7 +98,7 @@ package main
 import (
     "fmt"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
     "github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -130,9 +130,9 @@ import (
     "context"
     "os"
 
-    "github.com/kitsunium/sdk/pkg/v1/codec"
+    "github.com/kitsunium/sdk/pkg/v1/data/codec"
     "github.com/kitsunium/sdk/pkg/v1/errs"
-    "github.com/kitsunium/sdk/pkg/v1/logger"
+    "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 )
 
 func main() {

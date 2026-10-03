@@ -4,7 +4,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/docstore"
+	"github.com/kitsunium/sdk/pkg/v1/data/docstore"
 )
 
 // The model's table names fit what the SDK's document store takes.

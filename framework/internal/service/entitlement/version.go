@@ -8,7 +8,7 @@ import (
 	"strings"
 
 	coreent "github.com/kitsunium/sdk/framework/internal/core/entitlement"
-	"github.com/kitsunium/sdk/pkg/v1/semver"
+	"github.com/kitsunium/sdk/pkg/v1/data/semver"
 )
 
 // RequiresUpdate reports whether `current` is below the roster's floor.
@@ -74,7 +74,7 @@ func RequiresUpdate(current, floor string) bool {
 	return semver.Compare(currentTag, floorTag) < 0
 }
 
-// normaliseTag puts a version into the "vX.Y.Z" form pkg/v1/semver requires,
+// normaliseTag puts a version into the "vX.Y.Z" form pkg/v1/data/semver requires,
 // tolerating the bare "1.5.14" that a build stamp produces.
 func normaliseTag(version string) string {
 	trimmed := strings.TrimSpace(version)

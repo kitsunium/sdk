@@ -1,6 +1,6 @@
 // Package protobuf_test measures the quarantined Protobuf codec against the two
 // in-tree codecs a consumer gets by default, JSON and CBOR
-// (internal/service/codec/*). All three implement the same core/codec.Codec
+// (internal/service/data/codec/*). All three implement the same core/data/codec.Codec
 // port, but Protobuf is SCHEMA-BOUND — it encodes proto.Message values and
 // nothing else — so a shared Go value is impossible and the fixtures are two
 // representations of the same document: a map[string]any for JSON and CBOR, and
@@ -20,9 +20,9 @@ import (
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/structpb"
 
-	corecodec "github.com/kitsunium/sdk/internal/core/codec"
-	"github.com/kitsunium/sdk/internal/service/codec/cbor"
-	sdkjson "github.com/kitsunium/sdk/internal/service/codec/json"
+	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
+	"github.com/kitsunium/sdk/internal/service/data/codec/cbor"
+	sdkjson "github.com/kitsunium/sdk/internal/service/data/codec/json"
 	"github.com/kitsunium/sdk/third-party/codec/protobuf"
 )
 

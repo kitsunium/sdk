@@ -1,13 +1,13 @@
 # childwait (internal/service/proc)
 
 The ledger that decides who receives a child's exit status (ADR 0093). Internal:
-consumers never see it; they get its guarantee through `pkg/v1/process` and
-`pkg/v1/reaper`.
+consumers never see it; they get its guarantee through `pkg/v1/proc/process` and
+`pkg/v1/proc/reaper`.
 
 ## The guarantee
 
-A child spawned through `pkg/v1/process` reports its own exit status from
-`Wait`, even when a running `pkg/v1/reaper` collected it first: the reaper's
+A child spawned through `pkg/v1/proc/process` reports its own exit status from
+`Wait`, even when a running `pkg/v1/proc/reaper` collected it first: the reaper's
 `wait4(-1)` takes the zombie, and the status goes to the `Process` that owns it.
 
 ## How

@@ -23,4 +23,4 @@ Three edges worth knowing before you use it:
 
 `Grow` and `Widen` are the two halves `Delay` composes — the pure growth and
 the randomisation — for a caller that needs to assert one without the other.
-It is published as `pkg/v1/resilience.Backoff`. See `CLAUDE.md` for the design.
+It is published as `pkg/v1/app/resilience.Backoff`. See `CLAUDE.md` for the design.

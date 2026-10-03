@@ -1,0 +1,71 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//internal/core:core_consumers"])
+
+go_library(
+    name = "writer",
+    srcs = [
+        "codes.go",
+        "config_clickhouse.go",
+        "config_cloudwatch.go",
+        "config_console.go",
+        "config_decoder.go",
+        "config_file.go",
+        "config_mysql.go",
+        "config_redis.go",
+        "config_rotfile.go",
+        "config_s3.go",
+        "credentials.go",
+        "errors.go",
+        "registry.go",
+        "writer.go",
+        "writer_spec.go",
+    ],
+    importpath = "github.com/kitsunium/sdk/internal/core/observe/logger/writer",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/core/observe/logger/level",
+        "//internal/kernel/clock",
+        "//internal/kernel/concur/snapshot",
+        "//internal/kernel/errs",
+        "//internal/kernel/plugin",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":writer",
+    visibility = [
+        "//:__subpackages__",
+        "//internal/core:core_consumers",
+    ],
+)
+
+go_test(
+    name = "writer_test",
+    srcs = [
+        "config_decoder_external_test.go",
+        "credentials_external_test.go",
+        "registry_external_test.go",
+        "registry_guard_external_test.go",
+        "registry_internal_test.go",
+        "writer_external_test.go",
+    ],
+    embed = [":writer"],
+    deps = [
+        "//internal/core/observe/logger",
+        "//internal/kernel/errs",
+    ],
+)
+
+# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
+# audit (//:audit_sources) so its errs.Define call sites are scanned under Bazel.
+filegroup(
+    name = "audit_srcs",
+    srcs = glob(["*.go"]),
+    visibility = ["//:__pkg__"],
+)

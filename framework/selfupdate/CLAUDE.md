@@ -26,7 +26,7 @@ module rather than `pkg`. Every code keeps its value (ADR 0160).
 | `Code*` | const | all 26 codes, for `errs.HasCode` — the contract's eighteen (`0.2.34.*`) and the implementation's eight (`0.3.66.*`, `CodeProbeFailed` the eighth — ADR 0150) |
 | `NoVendorKey` … `ProbeFailed` | var | the 26 sentinels, one per code, for `errors.Is`; each keeps its `*errs.Error` |
 
-The codes are re-exported deliberately, following `pkg/v1/authz`: a consumer of
+The codes are re-exported deliberately, following `pkg/v1/security/authz`: a consumer of
 THIS domain must distinguish a transient failure from a supply-chain refusal, and
 a facade that hid the codes would force it to match on message text.
 

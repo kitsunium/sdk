@@ -24,10 +24,10 @@ const fmtPath string = "fmt"
 const errorsPath string = "errors"
 
 // loggerPath is the SDK's public logger facade.
-const loggerPath string = "github.com/kitsunium/sdk/pkg/v1/logger"
+const loggerPath string = "github.com/kitsunium/sdk/pkg/v1/observe/logger"
 
 // bridgePath is the sanctioned slog adapter (ADR 0032).
-const bridgePath string = "github.com/kitsunium/sdk/pkg/v1/logger/slogbridge"
+const bridgePath string = "github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge"
 
 // bridgeConstructorPath aliases bridgePath for the scanner, which resolves
 // bridge-bound identifiers before any rule runs.
@@ -71,7 +71,7 @@ var (
 			ID:     "SDK004",
 			Level:  LevelInvariant,
 			Title:  "logger.Version is stamped at link time, not assigned",
-			Source: "pkg/v1/logger/CLAUDE.md",
+			Source: "pkg/v1/observe/logger/CLAUDE.md",
 			Check:  checkVersionAssignment,
 		},
 		{

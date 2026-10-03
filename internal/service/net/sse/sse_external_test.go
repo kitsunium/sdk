@@ -570,7 +570,7 @@ func (w *wrapper) Unwrap() http.ResponseWriter {
 // "finishes in milliseconds instead of burning its whole budget" — and of
 // ADR 0043's "40 ms, clean".
 //
-// The only guard that existed anywhere was pkg/v1/server's
+// The only guard that existed anywhere was pkg/v1/net/server's
 // TestHTTPAdapterDrainsOnShutdown, which fails at three SECONDS with three
 // streams open. A regression from 40 ms to 2.9 s would have passed it, and
 // passed everything else in the repository. This measures the real number, over
@@ -636,7 +636,7 @@ func TestDrainWithOpenStreamsFinishesInMilliseconds(t *testing.T) {
 		if err != nil {
 			t.Fatalf("shutdown = %v, want a clean drain", err)
 		}
-		//: a third of the budget, against pkg/v1/server's three seconds. The
+		//: a third of the budget, against pkg/v1/net/server's three seconds. The
 		//: measured value on this machine is two orders of magnitude under it.
 		if elapsed > drainBudget/3 {
 			t.Fatalf("drain of %d open streams took %v, want under %v", drainStreamCount, elapsed, drainBudget/3)
