@@ -227,8 +227,24 @@ is redeclared here; this range holds only what an implementation has and a
 contract does not — a body that will not decode, a tar that will not open, a
 temp file that cannot be created next to the running binary.
 
+## Where ADR 0158 §2 is not followed, and why
+
+Signatures go through `pkg/v1/sign` (`keys.go`), the archive digest through
+`pkg/v1/hash` (`checksum.go`), the statement's expiry through an injected
+`pkg/v1/clock` clock and the Windows refusal is `pkg/v1/proc`'s. HTTP is the
+exception: `newReleaseHTTPClient` (`transport.go`) stays a `net/http` client over
+`http.DefaultTransport` rather than `pkg/v1/client`, because the guarded
+transport sets no `Proxy` and so ignores `HTTP(S)_PROXY` and `NO_PROXY` —
+measured, it dialled the host directly where the default transport went through
+the proxy — and an update that cannot leave a network through its proxy never
+reaches a machine behind one. Adopting it waits for a proxy option in the net
+domain's `ClientConfig`; the guarded policy would then also have to re-state
+this client's https-only, bounded hops.
+
 ## Do NOT
 
+- Swap `newReleaseHTTPClient` for `pkg/v1/client` while the guarded transport
+  ignores the environment's proxy (see the section above).
 - Reorder the trust chain, or check a digest against a manifest whose signature
   has not been verified.
 - Reintroduce a product name, a repository or an environment variable as a

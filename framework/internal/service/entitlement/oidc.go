@@ -417,6 +417,13 @@ func checkHeader(raw []byte) (kid string, err error) {
 }
 
 // verifySignature checks the RS256 signature over the signing input.
+//
+// It stays a verifier of this package's own, and the one RSA code in the
+// framework. The crypto domain registers Ed25519 and ECDSA P-256 and no RSA
+// scheme, and ADR 0158 §2 sends the CI seat's RS256 token to the crypto domain
+// by an ADR, or not at all; until that ADR exists this is the CI seat's alone.
+// It is typed like everything else here — every refusal is ErrCIUnverifiable
+// with its stage and condition — and it sees no key jwks.go has not bounded.
 func verifySignature(signingInput string, signature []byte, key *rsa.PublicKey) error {
 	//: A signature of the wrong length is not a PKCS#1 v1.5 signature for
 	//: this key, and rsa.VerifyPKCS1v15 would reject it anyway — refusing

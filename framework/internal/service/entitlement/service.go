@@ -230,6 +230,12 @@ func NewServiceWithAnchors(identity coreent.Identity, anchors [][]byte, product 
 	//: site is what keeps the gate, the daemon watchdog and `license status`
 	//: from disagreeing about whether this machine has a grace window.
 	return &Service{
+		// A net/http client over http.DefaultTransport, and deliberately not
+		// pkg/v1/client, which ADR 0158 §2 names: the guarded transport sets
+		// no Proxy, so a roster fetch through it ignores HTTP(S)_PROXY and
+		// NO_PROXY — measured, it dialled the origin directly where this one
+		// went through the proxy — and a licence check that cannot leave a
+		// network through its proxy refuses every customer behind one.
 		client:      &http.Client{Timeout: fetchTimeout},
 		identity:    identity,
 		anchors:     anchorList(anchors),

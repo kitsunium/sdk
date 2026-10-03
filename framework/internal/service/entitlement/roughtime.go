@@ -222,6 +222,11 @@ func roughtimeExchange(address string, request []byte) (response []byte, err err
 		}
 	}()
 
+	//: The one wall-clock read in this package, and it is not the clock port's
+	//: to inject: a socket deadline is an absolute instant the runtime's poller
+	//: measures against the real clock, so a manual clock here would set it in
+	//: the past or decades ahead. Every instant a decision rests on comes from
+	//: Verify's caller instead.
 	//: One deadline covers both halves; a server that never answers is the
 	//: ordinary case on a filtered network and must not hang a start-up.
 	if deadlineErr := conn.SetDeadline(time.Now().Add(roughtimeTimeout)); deadlineErr != nil {

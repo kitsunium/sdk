@@ -60,6 +60,8 @@ encoding/json accepts \{"a":1,"a":2\} and keeps the LAST value, silently. The ro
 
 Refusing is the only reading that cannot contradict anybody. RFC 8725 §2.6 states the same rule for the JWT case.
 
+It is not pkg/v1/codec/strictjson, although ADR 0158 §2 sends JSON there and strictjson refuses a duplicate name too. strictjson also refuses every member its target does not declare — ADR 0102's one reading, with no mode to relax it — and the four documents read here must ignore one: RFC 7517 §4 for a JWK member, RFC 7519 §4 for a claim, and a signed roster an older client still has to read once the vendor adds a field. Measured: a JWK carrying a member its decoding type does not declare is refused MEMBER\_UNKNOWN by strictjson.
+
 Package entitlement \- the published keys GitHub signs its OIDC tokens with.
 
 Unlike the roster, this set carries no vendor signature: it is authenticated by TLS to a fixed host and nothing else. That is weaker, and it is why a token verified against it grants only a free CI seat — never a licence. The worst a substituted JWKS can do is hand out seats it should not; it cannot make an unlicensed machine licensed, because the device path does not consult it at all.
@@ -209,7 +211,7 @@ var RoughtimeServers []RoughtimeServerValue
 ```
 
 <a name="DefaultBearerFetch"></a>
-## func [DefaultBearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L229>)
+## func [DefaultBearerFetch](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L234>)
 
 ```go
 func DefaultBearerFetch(url, bearer string) (resp *http.Response, err error)
@@ -218,6 +220,8 @@ func DefaultBearerFetch(url, bearer string) (resp *http.Response, err error)
 DefaultBearerFetch is the transport the mint request should use.
 
 It refuses redirects outright. checkTokenURL vouches for the URL it is GIVEN, and a redirect is a second destination nobody checked: Go's default client decides whether to forward an Authorization header by comparing HOSTS, not schemes, so a same\-host https→http redirect would put the runner's credential on the wire in plaintext. There is no legitimate redirect on this endpoint, so the safe answer and the correct one coincide.
+
+It builds a net/http client over http.DefaultTransport rather than reaching for pkg/v1/client: the guarded transport ignores HTTP\(S\)\_PROXY, which a self\-hosted runner may depend on, and its configuration documents no way to follow no redirect at all — a zero MaxRedirects is its default of three.
 
 <a name="InCI"></a>
 ## func [InCI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L49>)
@@ -377,7 +381,7 @@ type ActionsClaimsValue struct {
 ```
 
 <a name="VerifyActionsToken"></a>
-### func [VerifyActionsToken](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/oidc.go#L578>)
+### func [VerifyActionsToken](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/oidc.go#L585>)
 
 ```go
 func VerifyActionsToken(raw string, keys map[string]*rsa.PublicKey, audience string, now time.Time) (claims *ActionsClaimsValue, err error)
@@ -390,7 +394,7 @@ keys are the JWKS entries fetched from GitHub. Passing them in rather than fetch
 The order is deliberate: structure, then algorithm, then signature, then claims. Nothing about the payload is trusted until the signature over it has verified — reading a claim first and acting on it is how a forged token gets to choose what it is checked against.
 
 <a name="VerifyCI"></a>
-### func [VerifyCI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L268>)
+### func [VerifyCI](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/ci.go#L273>)
 
 ```go
 func VerifyCI(get BearerFetch, keys map[string]*rsa.PublicKey, roster *coreent.RosterValue, audience string, now time.Time) (claims *ActionsClaimsValue, err error)
@@ -625,7 +629,7 @@ NewServiceWithAnchors builds a verifier that accepts several vendor keys, in the
 This is what a build in the middle of a key rotation links in: the key being retired and the key replacing it, so rosters signed by either are authentic here while installations carrying only one of them keep working. See anchors.go for the rotation this opens and for the surface it costs.
 
 <a name="NewServiceWithGetter"></a>
-### func [NewServiceWithGetter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L245>)
+### func [NewServiceWithGetter](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L251>)
 
 ```go
 func NewServiceWithGetter(client Getter, identity coreent.Identity, vendor []byte, product *ProductValue) *Service
@@ -634,7 +638,7 @@ func NewServiceWithGetter(client Getter, identity coreent.Identity, vendor []byt
 NewServiceWithGetter builds a verifier over an injected getter.
 
 <a name="NewServiceWithOrigins"></a>
-### func [NewServiceWithOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L254>)
+### func [NewServiceWithOrigins](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L260>)
 
 ```go
 func NewServiceWithOrigins(client Getter, identity coreent.Identity, vendor []byte, origins []coreent.OriginValue) *Service
@@ -643,7 +647,7 @@ func NewServiceWithOrigins(client Getter, identity coreent.Identity, vendor []by
 NewServiceWithOrigins builds a verifier over an injected getter and an explicit origin list, so a test can exercise the fallback order — which origin wins, and what happens when the first few are unusable — without naming production endpoints.
 
 <a name="Service.Verify"></a>
-### func \(\*Service\) [Verify](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L279>)
+### func \(\*Service\) [Verify](<https://github.com/kitsunium/sdk/blob/main/framework/internal/service/entitlement/service.go#L285>)
 
 ```go
 func (s *Service) Verify(now time.Time) (grant coreent.GrantValue, err error)

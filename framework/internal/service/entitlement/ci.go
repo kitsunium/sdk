@@ -226,6 +226,11 @@ func fetchToken(get BearerFetch, endpoint, bearer string) (token string, err err
 // HOSTS, not schemes, so a same-host https→http redirect would put the
 // runner's credential on the wire in plaintext. There is no legitimate
 // redirect on this endpoint, so the safe answer and the correct one coincide.
+//
+// It builds a net/http client over http.DefaultTransport rather than reaching
+// for pkg/v1/client: the guarded transport ignores HTTP(S)_PROXY, which a
+// self-hosted runner may depend on, and its configuration documents no way to
+// follow no redirect at all — a zero MaxRedirects is its default of three.
 func DefaultBearerFetch(url, bearer string) (resp *http.Response, err error) {
 	client := &http.Client{
 		Timeout: fetchTimeout,

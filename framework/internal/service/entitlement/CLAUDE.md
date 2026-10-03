@@ -404,6 +404,49 @@ and lives in a module of its own because `golang.org/x/crypto/ssh` reaches
   `PublishedOrigins()`. A product publishing nowhere yields a verifier that
   refuses with `RosterUnreachable`, which a caller can handle.
 
+## Where ADR 0158 §2 is not followed, and why
+
+ADR 0158 §2 sends this package's signatures, digests, JSON, HTTP, locks and
+waits through `pkg/v1`. Signatures (`pkg/v1/sign`), digests (`pkg/v1/hash`)
+and the cache lock (`pkg/v1/lock`) go through it — `crypto.go` and
+`cache_lock.go`. Four things do not, each for a reason measured on this tree,
+and each is said again at its code site:
+
+- **JSON: `jsonnames.go` stays, not `pkg/v1/codec/strictjson`.** strictjson
+  refuses a duplicate name, which is what this package needs, but it also
+  refuses every member its target does not declare — ADR 0102's one reading,
+  with no mode to relax it — and the four documents read here must ignore one:
+  RFC 7517 §4 for a JWK member, RFC 7519 §4 for a claim (`strictUnmarshal`
+  tolerates unknown claims because GitHub adds them over time, and
+  `Test_VerifyActionsToken_ignoresTheClaimsNothingReads` presents two,
+  `event_name` and `runner_environment`, that `ActionsClaimsValue` does not
+  declare), and a signed roster an older client still has to read once the
+  vendor adds a field.
+  Measured: a JWK carrying a member its decoding type does not declare is
+  refused `MEMBER_UNKNOWN` by strictjson.
+- **HTTP: `net/http` over `http.DefaultTransport`, not `pkg/v1/client`.** The
+  guarded client's transport sets no `Proxy`, so it ignores `HTTP(S)_PROXY` and
+  `NO_PROXY`. Measured with `HTTP_PROXY` set: `http.DefaultClient` sent the
+  request through the proxy, `pkg/v1/client` dialled the host directly. A
+  roster fetch or a CI token mint that cannot leave a network through its proxy
+  refuses every customer behind one, so the roster client (`service.go`) and
+  `DefaultBearerFetch` (`ci.go`) keep the default transport. The guarded
+  client's configuration also documents no way to follow no redirect at all,
+  which the mint requires. Adopting it waits for a proxy option in the net
+  domain's `ClientConfig`, which is that domain's decision to make.
+- **RS256 stays local** (`oidc.go`'s `verifySignature`, `jwks.go`'s RSA keys).
+  The crypto domain registers Ed25519 and ECDSA P-256 and no RSA scheme, and
+  ADR 0158 §2 sends the CI seat's RS256 token to the crypto domain "by an ADR,
+  or not at all". Until that ADR exists it is the framework's one RSA code,
+  used by the CI seat alone, typed — every refusal `ErrCIUnverifiable` or
+  `ErrCIUnknownKey` with its stage and condition — and handed only keys
+  `jwks.go` has bounded (`maxRSAModulusBits`).
+- **No clock to inject.** `Verify(now)` takes its instant from the caller, and
+  every decision here rests on that instant. The one wall-clock read is
+  `roughtimeExchange`'s socket deadline, which the runtime's poller measures
+  against the real clock: a manual clock there would set it in the past or
+  decades ahead.
+
 ## Known debt
 
 A cache refresh can still be refused by a file holder outside this process —
@@ -431,6 +474,10 @@ it.
   0158 §2).
 - Collapse `RosterUnreachable` into a refusal. It says "cannot decide", and
   reporting an outage as a revocation is the one wrong answer.
+- Swap `jsonnames.go` for `strictjson`, or the roster and mint clients for
+  `pkg/v1/client`, while the reasons in "Where ADR 0158 §2 is not followed"
+  still hold: the first refuses a genuine Actions token and any roster with a
+  field this build predates, the second every customer behind a proxy.
 - Read the anchor list anywhere but `parseBundleAnyAnchor` / `bundleMarkAnyAnchor`,
   or let a roster field, an environment variable or the cache add to it. The list
   being a BUILD decision is the whole of what bounds the surface it costs, and a

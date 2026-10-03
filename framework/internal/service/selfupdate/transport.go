@@ -49,6 +49,14 @@ const (
 // redirects to the asset CDN — so the policy is the closest equivalent that
 // still works: follow, but only ever to https, and only a bounded number of
 // times.
+//
+// It stays a net/http client over http.DefaultTransport rather than
+// pkg/v1/client, which ADR 0158 §2 names for HTTP: the guarded transport sets
+// no Proxy, so it ignores HTTP(S)_PROXY and NO_PROXY — measured, it dialled
+// the host directly where this client went through the proxy — and an update
+// that cannot leave a network through its proxy never arrives on any machine
+// behind one. The guarded client's policy would have to re-state this one's
+// https-only hops as a request policy besides.
 func newReleaseHTTPClient() *http.Client {
 	//: Same timeout as before; only the redirect policy is tightened.
 	return &http.Client{
