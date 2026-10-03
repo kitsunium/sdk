@@ -7,6 +7,11 @@ import (
 	"testing"
 )
 
+// scratchProbeRents is how many buffers assertScratchPoolClean rents at once.
+// More than one, so a probe that drew a fresh buffer from the factory does
+// not stop it from reaching the one an Encode just returned.
+const scratchProbeRents int = 4
+
 // failingWriter rejects every Write call with a fixed error, used to
 // exercise the streaming encoder's writer-error branch.
 type failingWriter struct{}
@@ -26,8 +31,36 @@ func (failingWriter) Write(p []byte) (n int, err error) {
 // errFailingWriter is the sentinel returned by failingWriter.Write.
 var errFailingWriter = errors.New("writer failed (synthetic)")
 
+// assertScratchPoolClean rents scratchProbeRents buffers from the encode
+// scratch pool and fails when one is not empty or is wider than the retain
+// ceiling — the state every Encode, successful or not, must leave the pool
+// in. A pool that kept a buffer a record grew past the ceiling would hand it
+// to the very next rent on the same P, which is what this catches.
+func assertScratchPoolClean(t *testing.T, label string) {
+	t.Helper()
+	rented := make([]*[]byte, 0, scratchProbeRents)
+	for range scratchProbeRents {
+		bp := getScratch()
+		//: a rented buffer starts empty — nothing of the last record survives.
+		if len(*bp) != 0 {
+			t.Errorf("%s: rented scratch len=%d want 0", label, len(*bp))
+		}
+		//: and is never wider than the retain ceiling.
+		if cap(*bp) > maxRetainedScratchBytes {
+			t.Errorf("%s: rented scratch cap=%d exceeds the %d retain ceiling", label, cap(*bp), maxRetainedScratchBytes)
+		}
+		rented = append(rented, bp)
+	}
+	//: hand every probe back so the pool keeps serving the other subtests.
+	for _, bp := range rented {
+		putScratch(bp)
+	}
+}
+
 // Test_tlvEncoder_Encode covers the streaming encoder's success and
-// writer-error branches.
+// writer-error branches, and the state each leaves the scratch pool in: a
+// record that outgrows the retain ceiling still encodes, and its buffer is
+// not kept.
 func Test_tlvEncoder_Encode(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -40,6 +73,7 @@ func Test_tlvEncoder_Encode(t *testing.T) {
 		{"int encodes cleanly", int64(7), &bytes.Buffer{}, false},
 		{"writer error surfaces", int64(7), failingWriter{}, true},
 		{"unsupported type surfaces", make(chan int), &bytes.Buffer{}, true},
+		{"record past the retain ceiling encodes and is not pooled", make([]byte, 2*maxRetainedScratchBytes), io.Discard, false},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
@@ -48,6 +82,8 @@ func Test_tlvEncoder_Encode(t *testing.T) {
 		if (err != nil) != tc.wantErr {
 			t.Errorf("%s: Encode err=%v wantErr=%v", tc.name, err, tc.wantErr)
 		}
+		//: whatever the outcome, the scratch went back empty and bounded.
+		assertScratchPoolClean(t, tc.name)
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

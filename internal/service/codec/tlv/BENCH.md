@@ -193,7 +193,44 @@ callers. Recorded, not done — and it is the next thing to do here.
   price of a reflective decoder and there is nothing above them to remove.
 - **The encode scratch pool** is left exactly as documented: `Append` into a
   sized buffer is already 0 allocations, so there is nothing for a pool to
-  save on that path.
+  save on that path. The one path the pool does serve is the streaming
+  `Encoder`, measured in §7.
+
+## 7. The streaming encoder is the pool's only customer, and the pool is bounded
+
+None of the rows above touches the encode scratch pool: `Marshal` hands
+`Append` a nil destination and `Append` writes into the caller's. The one path
+that rents from it is the streaming `Encoder`, and until
+`BenchmarkEncoderStream` nothing measured it. An audit of the tree had flagged
+the pool as unbounded — a memory-retention bug. It is not, and the last row is
+the proof: a record twice the 256 KiB retain ceiling pays for a fresh buffer on
+**every** `Encode`, because the pool refuses to keep the one it grew. A pool
+with no ceiling would report that row at 0 B.
+
+| record (writer `io.Discard`, value boxed once) | ns/op | B/op | allocs/op |
+|---|---:|---:|---:|
+| scalar `int64`, 10 wire bytes | 51.94 | 0 | **0** |
+| one `benchMixed` (five fields) | 200.8 | 0 | **0** |
+| 1 000 `benchMixed`, 63 890 wire bytes | 185 047 | 28 | **0** |
+| a 512 KiB `[]byte` — twice the ceiling | 166 680 | 533 043 | **3** |
+
+The first three are the pool working: in a steady state the buffer it hands
+back is already wide enough, so the record costs no allocation at all — the
+28 B on the wide message is its first growth amortised over the run. The
+oversize row is the ceiling working: `append` grows the scratch to 532 480 B
+(the 524 292-byte record rounded up to whole pages), the pool orphans it, and
+since the orphaned buffer took its `*[]byte` with it, the next rent builds a
+256 B replacement — the other two allocations.
+
+Two gates now pin both halves, and each was shown to fail on the defect it
+guards: `TestAllocBudget/stream-encode` (ceiling 0, race-off lane) reports
+**2 allocs/op** when `Encode` bypasses the pool, and `Test_tlvEncoder_Encode`
+rents the pool back after every case and caught a **532 480-byte** buffer being
+handed out again once the cap-discard was removed.
+
+The nanoseconds here come from a different machine than §1–§6, under far
+heavier load, and carry a wide spread — see the envelope below. Only the
+allocation columns are claims.
 
 ## Reproducibility envelope
 
@@ -221,6 +258,27 @@ callers. Recorded, not done — and it is the next thing to do here.
 | Git commit         | `94dd6e7` (pre-commit) |
 | Generated (UTC)    | 2026-09-10 |
 | Bench wall-clock   | `-test.benchtime=1s`, `-count=3`, medians, machine under load |
+
+§7 was measured later, on another machine, while a dozen other build and test
+jobs shared it: load average 73.6 to 83.9 on 10 cores. Each figure is the
+**median of five `-benchtime=1s` runs**, and the spread is wide — 50.53 to
+63.97 ns on `scalar`, 189.3 to 253.8 ns on `mixed`, 151 to 248 µs on `large`,
+108 to 222 µs on `oversize`. The allocation columns did not move across runs
+except for the amortised first growth on `large` (0 to 37 B/op, always 0
+allocs/op).
+
+| Dimension (§7) | Value |
+|---|---|
+| CPU cores          | 10 |
+| CPU                | Apple M1 Pro |
+| RAM                | 16 GiB |
+| OS / kernel        | macOS 26.6.2 (Darwin 25.6.0) |
+| Architecture       | arm64 |
+| Go toolchain       | go1.27.1 darwin/arm64 |
+| Git branch         | `refactor/sdk-tree-reorg--p1-s4-tlv` |
+| Git commit         | `390aa80f` (pre-commit) |
+| Generated (UTC)    | 2026-10-03 |
+| Bench wall-clock   | `-test.benchtime=1s`, `-count=5`, medians, machine under heavy load |
 
 ## Results
 
@@ -250,4 +308,17 @@ BenchmarkTypeInfoHitParallel-8              	270113268	         3.712 ns/op	    
 BenchmarkTypeInfoBuild/1fields-8            	 4777681	       234.7 ns/op	     144 B/op	       4 allocs/op
 BenchmarkTypeInfoBuild/5fields-8            	 1345388	       896.1 ns/op	     632 B/op	      12 allocs/op
 BenchmarkTypeInfoBuild/16fields-8           	  486727	      2356 ns/op	    2200 B/op	      34 allocs/op
+```
+
+§7, median run of five per row, verbatim.
+
+```
+goos: darwin
+goarch: arm64
+pkg: github.com/kitsunium/sdk/internal/service/codec/tlv
+cpu: Apple M1 Pro
+BenchmarkEncoderStream/scalar-10         	61628533	        51.94 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/mixed-10          	 8839608	       200.8 ns/op	       0 B/op	       0 allocs/op
+BenchmarkEncoderStream/large-10          	   10000	    185047 ns/op	      28 B/op	       0 allocs/op
+BenchmarkEncoderStream/oversize-10       	    9600	    166680 ns/op	  533043 B/op	       3 allocs/op
 ```

@@ -120,3 +120,12 @@ decode, idempotence on a typed target, and — for the streaming decoder —
 progress on every record and agreement with the buffered path. Their seeds, and
 the corpus entry under `testdata/fuzz/`, run with the ordinary suite; the
 `go_test` ships `testdata/**` as data.
+
+The encode scratch pool has two gates, each shown to fail on the defect it
+guards (`BENCH.md` §7). `TestAllocBudget/stream-encode` holds the streaming
+`Encoder` at **0 allocations** — it reports 2 when `Encode` bypasses the pool —
+and runs only on the race-off alloc lane (`make test-alloc`), like every
+`codec_integration_test.go`. `Test_tlvEncoder_Encode` rents the pool back after
+every case, an over-ceiling record included, and fails if a buffer comes out
+non-empty or wider than the retain ceiling — which is what an unbounded pool
+would hand out.
