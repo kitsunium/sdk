@@ -13,6 +13,7 @@ import (
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/sql"
 
 	corequeue "github.com/kitsunium/sdk/internal/core/queue"
 )
@@ -442,14 +443,15 @@ func clockRefused(now time.Time) error {
 }
 
 // failed is QueueBackendFailed for step, with the driver's error beside it and
-// its text withheld. The two are JOINED rather than wrapped, so the verdict's
-// code stays the origin whatever the driver's chain holds.
+// its text withheld by service/sql's Withheld. The two are JOINED rather than
+// wrapped, so the verdict's code stays the origin whatever the driver's chain
+// holds.
 func (b *sqlBroker) failed(step string, cause error) error {
 	//: the verdict names the table and the step; the cause is reachable, and
 	//: silent.
 	return errors.Join(
 		kerrs.Wrap(QueueBackendFailed, kerrs.WrapParams{}, kerrs.String("op", step), kerrs.String("table", b.table)),
-		withheld{cause: cause})
+		svcsql.NewWithheld(cause))
 }
 
 // args binds the condition sqlHeldBy renders: the identifier, the lease, the

@@ -122,8 +122,8 @@ func (m *migrator) pending(
 // record writes the version row for a migration that just applied.
 func (m *migrator) record(ctx context.Context, ex coresql.Executor, migration coresql.MigrationValue) error {
 	query := "INSERT INTO " + m.plan.table + " (version, name, applied_at_unix) VALUES (" +
-		placeholder(m.cfg.dialect, bindVersion) + ", " + placeholder(m.cfg.dialect, bindName) + ", " +
-		placeholder(m.cfg.dialect, bindAppliedAt) + ")"
+		m.cfg.dialect.Placeholder(bindVersion) + ", " + m.cfg.dialect.Placeholder(bindName) + ", " +
+		m.cfg.dialect.Placeholder(bindAppliedAt) + ")"
 	//: bound as int64 because that is what BIGINT is on every engine, and
 	//: MigrationValue.Validate has already refused anything that would not
 	//: fit. The instant comes from the injected clock, never from time.Now.
@@ -135,7 +135,7 @@ func (m *migrator) record(ctx context.Context, ex coresql.Executor, migration co
 
 // forget removes the version row for a migration that was just reversed.
 func (m *migrator) forget(ctx context.Context, ex coresql.Executor, migration coresql.MigrationValue) error {
-	query := "DELETE FROM " + m.plan.table + " WHERE version = " + placeholder(m.cfg.dialect, bindVersion)
+	query := "DELETE FROM " + m.plan.table + " WHERE version = " + m.cfg.dialect.Placeholder(bindVersion)
 	//: same binding rule as record.
 	_, err := ex.ExecContext(ctx, query, int64(migration.Version))
 	//: the row and the reversal commit together, or neither does.

@@ -205,7 +205,7 @@ var (
 ```
 
 <a name="Irreversible"></a>
-## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L297>)
+## func [Irreversible](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L305>)
 
 ```go
 func Irreversible(ctx context.Context, ex Executor) error
@@ -214,7 +214,7 @@ func Irreversible(ctx context.Context, ex Executor) error
 Irreversible is the [Step](<#Step>) a migration assigns to Down to declare, out loud, that it cannot be reversed.
 
 <a name="Transact"></a>
-## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L338>)
+## func [Transact](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L346>)
 
 ```go
 func Transact(ctx context.Context, tm Transactor, fn TxFunc) error
@@ -234,7 +234,7 @@ type Checker = coresql.Checker
 ```
 
 <a name="NewChecker"></a>
-### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L310>)
+### func [NewChecker](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L318>)
 
 ```go
 func NewChecker(cfg Config) (probe Checker, err error)
@@ -243,7 +243,7 @@ func NewChecker(cfg Config) (probe Checker, err error)
 NewChecker returns a liveness probe bounded by cfg.CheckTimeout.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L215>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L223>)
 
 Config is the public alias for the parameters every port is built from.
 
@@ -261,9 +261,9 @@ type Deferrer = coresql.Deferrer
 ```
 
 <a name="Dialect"></a>
-## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L212>)
+## type [Dialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L220>)
 
-Dialect is the public alias for the closed set of SQL engines this SDK can spell.
+Dialect is the public alias for the closed set of SQL engines this SDK can spell. For SQL you write yourself, it spells the engine's vocabulary — the tokens the SDK's own statements are spelled with, never a statement: [Dialect](<#Dialect>).Placeholder renders a bind marker \($1 on PostgreSQL, ? on MySQL and SQLite\), [Dialect](<#Dialect>).QuoteIdent a delimited name, its delimiter doubled inside, and [Dialect](<#Dialect>).ForUpdate and [Dialect](<#Dialect>).ForUpdateSkipLocked a row\-lock clause, which SQLite — whose exclusion is its one write lock — renders as nothing. QuoteIdent validates nothing: check a name before you interpolate it. An unset Dialect renders no marker and no name, so a statement built from it fails rather than passing for another engine's.
 
 ```go
 type Dialect = coresql.Dialect
@@ -288,7 +288,7 @@ const DialectSQLite Dialect = coresql.DialectSQLite
 ```
 
 <a name="ParseDialect"></a>
-### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L290>)
+### func [ParseDialect](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L298>)
 
 ```go
 func ParseDialect(name string) (dialect Dialect, err error)
@@ -315,7 +315,7 @@ type Joiner = coresql.Joiner
 ```
 
 <a name="MigrateConfig"></a>
-## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L221>)
+## type [MigrateConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L229>)
 
 MigrateConfig is the public alias for the migration runner's parameters.
 
@@ -342,7 +342,7 @@ type Migrator = coresql.Migrator
 ```
 
 <a name="NewMigrator"></a>
-### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L317>)
+### func [NewMigrator](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L325>)
 
 ```go
 func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
@@ -351,7 +351,7 @@ func NewMigrator(cfg Config, mig MigrateConfig) (runner Migrator, err error)
 NewMigrator returns the migration runner. It refuses a dialect with no session\-scoped advisory lock, by name and at construction.
 
 <a name="PoolConfig"></a>
-## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L218>)
+## type [PoolConfig](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L226>)
 
 PoolConfig is the public alias for the connection\-pool policy.
 
@@ -378,7 +378,7 @@ type Step = coresql.Step
 ```
 
 <a name="Statements"></a>
-### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L328>)
+### func [Statements](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L336>)
 
 ```go
 func Statements(stmts ...string) Step
@@ -398,7 +398,7 @@ type Transactor = coresql.Transactor
 ```
 
 <a name="NewTransactor"></a>
-### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L304>)
+### func [NewTransactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/sql/sql.go#L312>)
 
 ```go
 func NewTransactor(cfg Config) (manager Transactor, err error)

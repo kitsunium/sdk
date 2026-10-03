@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T00:24:48Z -->
 # internal/core/sql/
 
 ## Purpose
@@ -22,7 +22,7 @@ Code range: `0.2.24.*` (ADR 0055).
 |---|---|
 | `sql.go` | package doc + `TxFunc func(ctx, Executor) error` |
 | `sql_interface.go` | the four ports and their siblings — `Executor`, `Preparer` (ADR 0039 sibling), `Transactor`, `Joiner` and `Deferrer` (its ADR 0039 siblings, ADR 0139), `Checker`, `Migrator` |
-| `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + `ParseDialect` |
+| `sql_dialect.go` | `Dialect` + `DialectUnknown/Postgres/MySQL/SQLite` + `String` / `Valid` / `SupportsAdvisoryLock` + the engine's vocabulary `Placeholder` / `QuoteIdent` / `ForUpdate` / `ForUpdateSkipLocked` + `ParseDialect` |
 | `sql_txoptions.go` | `TxOptionsValue` — `Isolation` / `ReadOnly` + `IsZero` / `StdOptions` |
 | `sql_migration.go` | `Step func(ctx, Executor) error`, `MigrationValue` + `Validate`, `Irreversible` |
 | `codes.go` | `Code*` constants — range 0.2.24.* |
@@ -72,6 +72,29 @@ Code range: `0.2.24.*` (ADR 0055).
 - **The zero `Dialect` is unusable.** `DialectUnknown` is what an unset
   configuration field looks like, and reading it as "probably Postgres" is how
   a MySQL deployment discovers the difference in production (ADR 0031).
+- **`Dialect` spells its engine's vocabulary, never a statement.**
+  `Placeholder(n)` (`$n` on PostgreSQL, `?` on MySQL and SQLite),
+  `QuoteIdent(name)` (backticks on MySQL, the standard's double quotes on the
+  other two, the delimiter doubled inside the name), `ForUpdate()` and
+  `ForUpdateSkipLocked()` (the clause, leading space included, on PostgreSQL
+  and MySQL; nothing on SQLite, whose exclusion is the database's one write
+  lock, taken by a transaction's first write — ADR 0140) are the tokens every
+  statement `service/sql`, `service/docstore` and `service/queue` render is
+  spelled with. Each of those packages used to carry its own copy; now a
+  fourth engine is spelled in this file or not at all. Composing a statement
+  stays in the package that sends it — a method that builds one is the query
+  builder ADR 0055 §D1 refuses — and so does a clause whose choice is a
+  package's reasoning rather than the engine's grammar: docstore's MySQL-only
+  `LOCK IN SHARE MODE` follows from each engine's default isolation, and
+  PostgreSQL's own share lock is not what that read needs.
+- **The vocabulary refuses to guess, too.** `QuoteIdent` validates nothing:
+  an identifier cannot be bound, so the SDK interpolates only names it
+  validated at construction, and doubling the delimiter only keeps such a name
+  one name. On a dialect that is not `Valid`, `Placeholder` and `QuoteIdent`
+  render the empty string — a statement built from an unset field parses on no
+  engine — while the two lock clauses still render, because an engine refusing
+  a clause is louder than a lock dropped in silence (ADR 0031). `pkg/v1/sql`
+  publishes all four through its `Dialect` alias.
 - **The zero `TxOptionsValue` IS a working configuration** — the driver's own
   default isolation, read-write. That is ADR 0031's *clamp* side: it is the
   only non-arbitrary default available, because every engine defines its own
@@ -94,7 +117,12 @@ Code range: `0.2.24.*` (ADR 0055).
   by type assertion, as `Preparer`, `Joiner` and `Deferrer` are.
 - **Grow an ORM here.** No entity mapping, no query builder, no lazy loading,
   no identity map, no change tracking, no repository generation, no schema
-  reflection. ADR 0055 §D1 is a decision, not an omission.
+  reflection. ADR 0055 §D1 is a decision, not an omission. `Dialect`'s
+  methods render tokens — a marker, a quoted name, a clause — and a method
+  that renders a whole statement is the first step of the builder.
+- **Spell a dialect token in a service package.** A bind marker, a quoted
+  identifier or a row-lock clause written by hand beside a statement is the
+  copy this file replaced; take it from `Dialect`.
 - **Import a driver, or `net`, or anything that opens a connection.** This
   package declares shapes; `internal/service/sql` runs statements.
 - **Invent a migration file format, directory layout or naming convention.**

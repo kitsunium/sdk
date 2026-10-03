@@ -519,6 +519,21 @@ rules:
       # isolation level and the read-only flag travel with it.
       - "**/internal/service/sql/**"
       - "internal/service/sql/**"
+      # core/sql.Dialect is the same VALUE case since it spells its engine's
+      # vocabulary itself — Placeholder, QuoteIdent, ForUpdate and
+      # ForUpdateSkipLocked. The SQL renderers of docstore and queue take the
+      # dialect their store or broker was configured with, and the rule now
+      # suggests `interface{ Placeholder(int) string }` or
+      # `interface{ QuoteIdent(string) string }` for them. Dialect is a CLOSED
+      # set, refused at construction when unset or unknown (ADR 0055 §D4,
+      # ADR 0031): an interface over its vocabulary would let any type pretend
+      # to be an engine — the one thing the type exists to make impossible —
+      # and the same renderers compare it against the three constants. Scoped
+      # to the two renderers.
+      - "**/internal/service/docstore/sql_dialect.go"
+      - "internal/service/docstore/sql_dialect.go"
+      - "**/internal/service/queue/sql_dialect.go"
+      - "internal/service/queue/sql_dialect.go"
       # The view engine's helpers take *html/template.Template, and here the
       # suggestion is not merely unactionable but actively dangerous: the rule
       # proposes `interface{ Execute(wr io.Writer, data any) error }`, which
@@ -1784,6 +1799,14 @@ rules:
       # framework module only.
       - "framework/**"
       - "**/framework/**"
+      # TEMPORARY — the same kodflow/ktn-linter#693, on service/sql.Withheld.
+      # Its Unwrap returns the driver's error it holds, and the rule asks for
+      # it to be renamed Cause; but Unwrap is the errors package's protocol,
+      # which errors.Is and errors.As call by that name, so the rename would
+      # leave the driver's error unreachable — the opposite of what the type
+      # exists for. Scoped to the one file; retire with #693.
+      - "**/internal/service/sql/withheld.go"
+      - "internal/service/sql/withheld.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on

@@ -149,6 +149,97 @@ func TestOnlyPostgresAndMySQLClaimAnAdvisoryLock(t *testing.T) {
 	}
 }
 
+// TestEachDialectSpellsItsOwnVocabulary pins, per engine, the four tokens every
+// statement the SDK renders is spelled with. The expectations are written out
+// by hand: a test that rebuilt them with the methods would keep exactly the bug
+// it should catch, and the service packages' statement logs compare against
+// text these produce.
+func TestEachDialectSpellsItsOwnVocabulary(t *testing.T) {
+	t.Parallel()
+	//: a slice, so a failure names the engines in the order the type lists them.
+	cases := []struct {
+		dialect                        coresql.Dialect
+		first, third, quoted           string
+		forUpdate, forUpdateSkipLocked string
+	}{
+		{coresql.DialectPostgres, "$1", "$3", `"order"`, " FOR UPDATE", " FOR UPDATE SKIP LOCKED"},
+		{coresql.DialectMySQL, "?", "?", "`order`", " FOR UPDATE", " FOR UPDATE SKIP LOCKED"},
+		{coresql.DialectSQLite, "?", "?", `"order"`, "", ""},
+	}
+	for _, tc := range cases {
+		dialect := tc.dialect
+		if got := dialect.Placeholder(1); got != tc.first {
+			t.Errorf("%v.Placeholder(1) = %q, want %q", dialect, got, tc.first)
+		}
+		if got := dialect.Placeholder(3); got != tc.third {
+			t.Errorf("%v.Placeholder(3) = %q, want %q", dialect, got, tc.third)
+		}
+		if got := dialect.QuoteIdent("order"); got != tc.quoted {
+			t.Errorf("%v.QuoteIdent(order) = %q, want %q", dialect, got, tc.quoted)
+		}
+		if got := dialect.ForUpdate(); got != tc.forUpdate {
+			t.Errorf("%v.ForUpdate() = %q, want %q", dialect, got, tc.forUpdate)
+		}
+		if got := dialect.ForUpdateSkipLocked(); got != tc.forUpdateSkipLocked {
+			t.Errorf("%v.ForUpdateSkipLocked() = %q, want %q", dialect, got, tc.forUpdateSkipLocked)
+		}
+	}
+}
+
+// TestQuoteIdentKeepsADelimiterInsideTheName pins that a quoted name cannot end
+// early: each engine's own delimiter is doubled, and only that one, so a name
+// holding a quote is still ONE identifier rather than the end of one followed
+// by whatever the name carried next.
+func TestQuoteIdentKeepsADelimiterInsideTheName(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		dialect    coresql.Dialect
+		name, want string
+	}{
+		{coresql.DialectPostgres, `a"b`, `"a""b"`},
+		{coresql.DialectSQLite, `a" OR 1=1 --`, `"a"" OR 1=1 --"`},
+		{coresql.DialectMySQL, "a`b", "`a``b`"},
+		{coresql.DialectMySQL, `a"b`, "`a\"b`"},
+		{coresql.DialectPostgres, "a`b", "\"a`b\""},
+	}
+	for _, tc := range cases {
+		if got := tc.dialect.QuoteIdent(tc.name); got != tc.want {
+			t.Errorf("%v.QuoteIdent(%q) = %q, want %q", tc.dialect, tc.name, got, tc.want)
+		}
+	}
+}
+
+// TestAnUnsetDialectSpellsNothingThatPassesForAnEngine pins ADR 0031 on the
+// vocabulary: the zero Dialect, and any value outside the closed set, has no
+// bind marker and no quoting — a statement built from it parses nowhere — and
+// keeps the lock clauses, because an engine refusing one is louder than a lock
+// dropped in silence.
+func TestAnUnsetDialectSpellsNothingThatPassesForAnEngine(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name    string
+		dialect coresql.Dialect
+	}{
+		{"the zero value", coresql.DialectUnknown},
+		{"a value outside the closed set", coresql.Dialect(9)},
+	}
+	for _, tc := range cases {
+		dialect := tc.dialect
+		if got := dialect.Placeholder(1); got != "" {
+			t.Errorf("%s: Placeholder(1) = %q, want no marker", tc.name, got)
+		}
+		if got := dialect.QuoteIdent("accounts"); got != "" {
+			t.Errorf("%s: QuoteIdent(accounts) = %q, want no quoting", tc.name, got)
+		}
+		if got := dialect.ForUpdate(); got != " FOR UPDATE" {
+			t.Errorf("%s: ForUpdate() = %q, want the clause", tc.name, got)
+		}
+		if got := dialect.ForUpdateSkipLocked(); got != " FOR UPDATE SKIP LOCKED" {
+			t.Errorf("%s: ForUpdateSkipLocked() = %q, want the clause", tc.name, got)
+		}
+	}
+}
+
 // TestZeroDialectIsUnusable pins ADR 0031's zero-value rule on the one field
 // where guessing would be silent: an unset dialect must not read as "probably
 // postgres".

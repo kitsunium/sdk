@@ -1,11 +1,18 @@
 // Package sql — hosts Dialect, the closed set of SQL engines this domain can
-// spell, and the two refusals that keep it closed.
+// spell, the vocabulary each one spells statements with, and the two refusals
+// that keep the set closed.
 package sql
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
+import (
+	"strconv"
+	"strings"
 
-// Dialect names a SQL engine whose savepoint grammar, placeholder syntax and
-// advisory-lock mechanism this SDK knows exactly.
+	"github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// Dialect names a SQL engine whose savepoint grammar, placeholder syntax,
+// identifier quoting, row-lock clauses and advisory-lock mechanism this SDK
+// knows exactly.
 //
 // The set is CLOSED and small on purpose. Every feature this domain adds — a
 // savepoint, a `CREATE TABLE IF NOT EXISTS`, an advisory lock — is spelled
@@ -119,6 +126,103 @@ func (d Dialect) SupportsAdvisoryLock() bool {
 	//: Postgres has pg_advisory_lock, MySQL has GET_LOCK; both die with the
 	//: session, which is the entire reason they were chosen.
 	return d == DialectPostgres || d == DialectMySQL
+}
+
+// Placeholder renders the bind marker of a statement's n-th argument, counted
+// from 1.
+//
+// This is the divergence that makes a "portable" hand-written query a fiction:
+// PostgreSQL numbers its markers — $1, $2 — while MySQL and SQLite share the
+// positional ?, whose position is the argument's order. Every statement the SDK
+// binds an argument to takes its markers from here, so a fourth engine is
+// spelled in one place or not at all.
+//
+// A dialect that is not [Dialect.Valid] — an unset field — has no marker and
+// renders the empty string, so a statement built from it parses on no engine
+// rather than on whichever one a guess favoured (ADR 0031).
+func (d Dialect) Placeholder(n int) string {
+	//: PostgreSQL's ordinal form.
+	if d == DialectPostgres {
+		//: $1, $2, … — the position is part of the marker.
+		return "$" + strconv.Itoa(n)
+	}
+	//: MySQL and SQLite both use the positional question mark.
+	if d == DialectMySQL || d == DialectSQLite {
+		//: ?, ?, … — the position is the argument's order.
+		return "?"
+	}
+	//: no engine's marker for a dialect nobody chose.
+	return ""
+}
+
+// QuoteIdent renders name as an identifier of the dialect: delimited, so a
+// table called "order" or "user" is a name rather than a keyword, and with the
+// delimiter doubled wherever the name holds it, which is how every engine
+// spells a delimiter inside a delimited identifier. MySQL delimits with
+// backticks, whatever its ANSI_QUOTES mode says; PostgreSQL and SQLite with
+// the standard's double quotes.
+//
+// It validates nothing. An identifier cannot be a bound argument, so the SDK
+// interpolates only names it validated at construction, and that check is the
+// whole defence: what a name may hold, and how long it may be — PostgreSQL
+// TRUNCATES a longer one, into what may be another table's name — is the
+// caller's to refuse before quoting it. A dialect that is not [Dialect.Valid]
+// renders the empty string, for the reason [Dialect.Placeholder] gives.
+func (d Dialect) QuoteIdent(name string) string {
+	//: MySQL's backticks.
+	if d == DialectMySQL {
+		//: `name`, a backtick inside it doubled.
+		return "`" + strings.ReplaceAll(name, "`", "``") + "`"
+	}
+	//: the standard's double quotes, which PostgreSQL and SQLite share.
+	if d == DialectPostgres || d == DialectSQLite {
+		//: "name", a double quote inside it doubled.
+		return `"` + strings.ReplaceAll(name, `"`, `""`) + `"`
+	}
+	//: no engine's quoting for a dialect nobody chose.
+	return ""
+}
+
+// ForUpdate renders the clause that ends a read by locking the rows it returns
+// until the transaction ends, leading space included: " FOR UPDATE" on
+// PostgreSQL and MySQL. On MySQL it is also a locking read, which reads the
+// latest committed rows rather than a REPEATABLE READ transaction's snapshot.
+//
+// SQLite has no row lock and no such clause, and renders the empty string: a
+// SQLite transaction excludes every other writer with the database's one write
+// lock, which it takes at its first WRITE, so a transaction that must read
+// under exclusion writes first (ADR 0140). A dialect that is not
+// [Dialect.Valid] renders the clause: an engine without one refuses the
+// statement, which is louder than a lock dropped in silence.
+func (d Dialect) ForUpdate() string {
+	//: SQLite: the database's write lock is the exclusion.
+	if d == DialectSQLite {
+		//: nothing to add.
+		return ""
+	}
+	//: the row lock both PostgreSQL and MySQL take on a locking read.
+	return " FOR UPDATE"
+}
+
+// ForUpdateSkipLocked renders the clause that ends a read by locking the rows
+// it returns and SKIPPING those another transaction holds, leading space
+// included: " FOR UPDATE SKIP LOCKED" on PostgreSQL and MySQL. Two readers
+// then never wait on each other's rows and never take the same one.
+//
+// It needs PostgreSQL 9.5, MySQL 8.0.1 or MariaDB 10.6 — later than the
+// floors [DialectPostgres] and [DialectMySQL] name — and an older server
+// refuses the statement. SQLite renders the empty string and a dialect that is
+// not [Dialect.Valid] the clause, for the reasons [Dialect.ForUpdate] gives: a
+// SQLite transaction that has written holds the database's only write lock,
+// so no row it reads is held by anybody else.
+func (d Dialect) ForUpdateSkipLocked() string {
+	//: SQLite: the database's write lock is the exclusion.
+	if d == DialectSQLite {
+		//: nothing to add.
+		return ""
+	}
+	//: locked, and never waited for.
+	return " FOR UPDATE SKIP LOCKED"
 }
 
 // ParseDialect resolves a dialect name. It never guesses.

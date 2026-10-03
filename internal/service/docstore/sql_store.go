@@ -11,6 +11,7 @@ import (
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+	svcsql "github.com/kitsunium/sdk/internal/service/sql"
 )
 
 // rowsHint is the capacity a read starts its answer with: a guess, grown by
@@ -384,11 +385,11 @@ func (s *SQLStore[T]) notFoundIn(index string) error {
 }
 
 // failed is StatementFailed for step, with the driver's error beside it and
-// its text withheld.
+// its text withheld by service/sql's Withheld.
 func (s *SQLStore[T]) failed(step string, cause error) error {
 	//: the verdict names the table and the step; the cause is reachable, and
 	//: silent.
 	return errors.Join(
 		kerrs.Wrap(StatementFailed, kerrs.WrapParams{}, kerrs.String("store", s.table), kerrs.String("step", step)),
-		withheld{cause: cause})
+		svcsql.NewWithheld(cause))
 }

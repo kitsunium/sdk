@@ -1,7 +1,8 @@
 // Package queue — the only place the SQL broker renders SQL. Every statement
 // it sends is built here, once, at NewSQL, for its dialect and its table; the
 // two whose length depends on a batch are rendered per call from the same
-// parts.
+// parts. Every one is spelled with the vocabulary core/sql's Dialect owns: the
+// bind markers, the quoting and the row lock.
 package queue
 
 import (
@@ -9,6 +10,7 @@ import (
 	"strings"
 
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
+	svcsql "github.com/kitsunium/sdk/internal/service/sql"
 )
 
 // sqlRowsPerStatement bounds how many identifiers one lease or burial of a
@@ -72,15 +74,21 @@ type sqlStatements struct {
 // renderSQLStatements renders every fixed statement of the broker keeping its
 // queue in table, on dialect. The table name was validated at NewSQL.
 func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
-	q := sqlQuoteIdent(dialect, table)
-	p := func(n int) string { return sqlPlaceholder(dialect, n) }
+	q := dialect.QuoteIdent(table)
+	p := dialect.Placeholder
 	causeSet := "dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) + ", code = " + p(4)
 	s := sqlStatements{
 		insert: "INSERT INTO " + q + " (id, dead, due, enqueued_at, deliveries, payload) VALUES (" +
 			p(1) + ", 0, " + p(2) + ", " + p(3) + ", 0, " + p(4) + ")",
 		probe: "SELECT MIN(due) FROM " + q + " WHERE dead = 0",
+		//: the lease's read locks the rows it returns and skips those another
+		//: transaction holds, so two consumers never wait on each other's
+		//: messages and never take the same one; MySQL needs 8.0.1 for it and
+		//: MariaDB 10.6, and an older server's refusal is QUEUE_BACKEND_FAILED.
+		//: SQLite has no such clause and needs none: its writer holds the
+		//: database's only write lock.
 		pick: "SELECT id, enqueued_at, deliveries, lease, payload FROM " + q + " WHERE dead = 0 AND due <= " + p(1) +
-			" ORDER BY due, id LIMIT " + p(2) + sqlSkipLockedClause(dialect),
+			" ORDER BY due, id LIMIT " + p(2) + dialect.ForUpdateSkipLocked(),
 		next:       "SELECT MIN(due) FROM " + q + " WHERE dead = 0 AND due > " + p(1),
 		ack:        "DELETE FROM " + q + " WHERE " + sqlHeldBy(dialect, 1),
 		retry:      "UPDATE " + q + " SET due = " + p(1) + ", lease = NULL WHERE " + sqlHeldBy(dialect, 2),
@@ -94,9 +102,10 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
-	//: its snapshot stale, so it writes first. ADR 0140's statement.
+	//: its snapshot stale, so it writes first — with ADR 0140's statement,
+	//: the one the migration runner takes the same lock with.
 	if dialect == coresql.DialectSQLite {
-		s.lock = "DELETE FROM " + q + " WHERE 1 = 0"
+		s.lock = svcsql.FileLockSQL(q)
 	}
 	//: rendered once, sent many times.
 	return s
@@ -108,7 +117,7 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 // deadline is still ahead of the instant the call read. The four placeholders
 // are numbered from first, in that order.
 func sqlHeldBy(dialect coresql.Dialect, first int) string {
-	p := func(n int) string { return sqlPlaceholder(dialect, first+n) }
+	p := func(n int) string { return dialect.Placeholder(first + n) }
 	//: an expired lease is refused whether or not anybody reclaimed it.
 	return "id = " + p(0) + " AND lease = " + p(1) + " AND deliveries = " + p(2) + " AND dead = 0 AND due > " + p(3)
 }
@@ -117,14 +126,14 @@ func sqlHeldBy(dialect coresql.Dialect, first int) string {
 // half, and their delivery count moved on — for the rows still live.
 func (s *sqlStatements) leaseRows(n int) string {
 	//: the deadline and the lease, then the identifiers from the third.
-	return "UPDATE " + s.table + " SET due = " + sqlPlaceholder(s.dialect, 1) + ", lease = " + sqlPlaceholder(s.dialect, 2) +
+	return "UPDATE " + s.table + " SET due = " + s.dialect.Placeholder(1) + ", lease = " + s.dialect.Placeholder(2) +
 		", deliveries = deliveries + 1 WHERE dead = 0 AND id IN (" + s.list(3, n) + ")"
 }
 
 // buryRows renders the burial of n rows whose leases lapsed with no attempt
 // left: dead, with the failure's instant and cause.
 func (s *sqlStatements) buryRows(n int) string {
-	p := func(k int) string { return sqlPlaceholder(s.dialect, k) }
+	p := s.dialect.Placeholder
 	//: the instant and the cause, then the identifiers from the fifth.
 	return "UPDATE " + s.table + " SET dead = 1, due = " + p(1) + ", lease = NULL, reason = " + p(2) + ", cause = " + p(3) +
 		", code = " + p(4) + " WHERE dead = 0 AND id IN (" + s.list(5, n) + ")"
@@ -135,51 +144,10 @@ func (s *sqlStatements) list(first, n int) string {
 	marks := make([]string, n)
 	//: one per identifier.
 	for i := range marks {
-		marks[i] = sqlPlaceholder(s.dialect, first+i)
+		marks[i] = s.dialect.Placeholder(first + i)
 	}
 	//: $3, $4 … or ?, ? …
 	return strings.Join(marks, ", ")
-}
-
-// sqlSkipLockedClause ends the lease's read: it locks the rows it returns and
-// skips those another transaction holds, so two consumers never wait on each
-// other's messages and never take the same one. SQLite has no such clause and
-// needs none — its writer holds the database's only write lock.
-//
-// MySQL has SKIP LOCKED since 8.0.1 and MariaDB since 10.6; an older server
-// refuses the statement, and the caller gets QUEUE_BACKEND_FAILED.
-func sqlSkipLockedClause(dialect coresql.Dialect) string {
-	//: PostgreSQL, MySQL and MariaDB.
-	if dialect != coresql.DialectSQLite {
-		//: locked, and never waited for.
-		return " FOR UPDATE SKIP LOCKED"
-	}
-	//: SQLite: the transaction's write lock is the exclusion.
-	return ""
-}
-
-// sqlPlaceholder renders the n-th bind marker (1-based) for the dialect:
-// PostgreSQL numbers its parameters, MySQL and SQLite do not.
-func sqlPlaceholder(dialect coresql.Dialect, n int) string {
-	//: PostgreSQL's ordinal form.
-	if dialect == coresql.DialectPostgres {
-		//: $1, $2, … — the position is part of the marker.
-		return "$" + strconv.Itoa(n)
-	}
-	//: MySQL and SQLite both use the positional question mark.
-	return "?"
-}
-
-// sqlQuoteIdent quotes a validated identifier for the dialect, so a table
-// name that is also a keyword — "order", "user" — is still a table name.
-func sqlQuoteIdent(dialect coresql.Dialect, name string) string {
-	//: MySQL quotes with backticks, whatever ANSI_QUOTES says.
-	if dialect == coresql.DialectMySQL {
-		//: `name`
-		return "`" + name + "`"
-	}
-	//: the standard's double quotes, which PostgreSQL and SQLite share.
-	return `"` + name + `"`
 }
 
 // createQueueTableStatements renders the DDL that creates a queue's table: one
@@ -197,7 +165,7 @@ func sqlQuoteIdent(dialect coresql.Dialect, name string) string {
 // dead-letter read walks in order, which PostgreSQL and SQLite declare no
 // other way inside CREATE TABLE.
 func createQueueTableStatements(dialect coresql.Dialect, table string) []string {
-	q := sqlQuoteIdent(dialect, table)
+	q := dialect.QuoteIdent(table)
 	//: the types and the table options are each engine's.
 	switch dialect {
 	//: MySQL and MariaDB: InnoDB, for transactions and row locks.
@@ -227,5 +195,5 @@ func createQueueTableStatements(dialect coresql.Dialect, table string) []string 
 // doing nothing when the table is gone.
 func dropQueueTableStatements(dialect coresql.Dialect, table string) []string {
 	//: every engine spells it alike.
-	return []string{"DROP TABLE IF EXISTS " + sqlQuoteIdent(dialect, table)}
+	return []string{"DROP TABLE IF EXISTS " + dialect.QuoteIdent(table)}
 }

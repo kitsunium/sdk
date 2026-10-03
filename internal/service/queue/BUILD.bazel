@@ -29,7 +29,6 @@ go_library(
         "sql_dialect.go",
         "sql_migration.go",
         "sql_receive.go",
-        "sql_withheld.go",
         "wake.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/queue",

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T00:24:48Z -->
 # pkg/v1/sql/
 
 ## Purpose
@@ -16,7 +16,7 @@ re-exports, thin delegating constructors, and one ergonomic helper.
 | Kind | Names |
 |---|---|
 | Port aliases | `Executor`, `Preparer`, `TxFunc`, `Transactor`, `Joiner` and `Deferrer` (the transactor's ADR 0039 siblings — ADR 0139), `Checker`, `Migrator`, `Step` |
-| Value aliases | `TxOptions` (= `coresql.TxOptionsValue`), `Migration` (= `coresql.MigrationValue`), `Dialect` |
+| Value aliases | `TxOptions` (= `coresql.TxOptionsValue`), `Migration` (= `coresql.MigrationValue`), `Dialect` — with the engine's vocabulary its core type spells: `Placeholder`, `QuoteIdent`, `ForUpdate`, `ForUpdateSkipLocked` |
 | Config aliases | `Config`, `PoolConfig`, `MigrateConfig` |
 | Constants | `DialectPostgres`, `DialectMySQL`, `DialectSQLite` |
 | Constructors | `NewTransactor`, `NewChecker`, `NewMigrator` |
@@ -40,6 +40,13 @@ re-exports, thin delegating constructors, and one ergonomic helper.
   (ADR 0039).
 - **No driver is imported here either**, so a `pkg` consumer stays dep-light.
   The consumer imports the driver it wants and hands over a `*sql.DB`.
+- **`Dialect`'s vocabulary is published through the alias, never re-spelled
+  here.** The four methods are `core/sql`'s, the tokens every statement of
+  `service/sql`, `docstore` and `queue` is spelled with; the alias's comment
+  says what a consumer gets from them, and
+  `TestTheDialectSpellsItsVocabularyThroughTheAlias` pins that claim. A
+  method that composes a statement does not belong on the type at all
+  (ADR 0055 §D1).
 - **The doc comment's examples are executable claims.**
   `TestTheDocumentedCodeMatchingActuallyCompiles` runs the two error-matching
   spellings the package doc offers, because a doc naming a symbol that does not

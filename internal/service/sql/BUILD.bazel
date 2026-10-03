@@ -26,6 +26,7 @@ go_library(
         "tx.go",
         "txscope.go",
         "txstate.go",
+        "withheld.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/sql",
     visibility = [
@@ -62,6 +63,7 @@ go_test(
         "sql_bench_test.go",
         "tx_external_test.go",
         "txcancel_external_test.go",
+        "withheld_external_test.go",
     ],
     # keep: TestPackageNeverWaitsOnTheWallClock parses this package's own .go
     # files at runtime. Bazel's sandbox strips the source-tree relationship, so

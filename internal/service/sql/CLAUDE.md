@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T00:24:48Z -->
 # internal/service/sql/
 
 ## Purpose
@@ -30,7 +30,7 @@ Code range: `0.3.54.*` (ADR 0055).
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
 | `statements.go` | `Statements(...string) coresql.Step` |
-| `dialect_sql.go` | **the only place dialect-specific SQL is rendered** — savepoints, placeholders, advisory lock, SQLite's `fileLockSQL` |
+| `dialect_sql.go` | **the only place this package renders dialect-specific SQL** — savepoints, advisory lock, and `FileLockSQL`, the write that writes nothing and takes SQLite's file lock (ADR 0140), exported because the queue's SQL broker takes the same lock with it before a lease's first read; the bind markers are `core/sql`'s `Dialect.Placeholder` |
 | `health.go` | `NewChecker`, `checker` — bounded ping on the injected clock |
 | `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down`, `serialised` — the work under whichever lock the dialect has |
 | `migrate_config.go` | `MigrateConfig`, `Default{VersionTable,LockTimeout,LockRetryInterval}` |
@@ -41,6 +41,7 @@ Code range: `0.3.54.*` (ADR 0055).
 | `codes.go` | `Code*` constants — range 0.3.54.* |
 | `savepoint_stmts.go` | `savepointStmts` — one savepoint's three rendered statements |
 | `errors.go` | the 17 `errs.Define` sentinels |
+| `withheld.go` | `Withheld` + `NewWithheld` — a driver's error kept for `errors.Is` / `errors.As` and out of every rendering, which `docstore` and `queue` join beside their own verdicts (pinned by `withheld_external_test.go`) |
 | `sql_bench_test.go` + `BENCH.md` | the measurements (rule 9) |
 
 ## Conventions
@@ -131,6 +132,18 @@ Code range: `0.3.54.*` (ADR 0055).
   driverErr)` so origin-wins (CLAUDE.md rule 6) cannot relabel the SDK's
   verdict with the driver's code. `errs.HasCode(err, CodeCommitFailed)` and the
   caller's `errors.Is(err, driverSentinel)` both answer.
+- **`Withheld` is for a package whose rows hold a caller's data.** A driver
+  describes the row a statement touched — MySQL's "Duplicate entry '…'", the
+  key PostgreSQL's unique violation details — and a document store's key is
+  routinely an e-mail address, a queue's row its payload. So `docstore` and
+  `queue` join the driver's error through `NewWithheld` beside their own
+  verdict (ADR 0139 §D7, ADR 0151 §D6): `errors.Is` and `errors.As` still
+  reach it, and `Error()` names only a context's end, or the driver error's Go
+  type with its SQLSTATE or result code. The two packages carried
+  byte-identical private copies of it until it moved here; their verdicts —
+  `STATEMENT_FAILED`, `QUEUE_BACKEND_FAILED` — stay their own, since what
+  they share is only how somebody else's error is rendered. This package's
+  own `failed()` joins the driver's error as it is, as ADR 0055 decided.
 - **No `Public` describes infrastructure.** A failed dial names the host, the
   port and often the user; a failed statement names the statement. Every
   `Public` is a fixed literal naming the *class* of failure, pinned by
@@ -221,8 +234,13 @@ never because a finding was inconvenient:
   design.
 - **Render dialect-specific SQL anywhere but `dialect_sql.go`.** The
   version-table statements `migrate_table.go` builds read the same on all
-  three engines and take their placeholders from `dialect_sql.go`. Adding a
+  three engines and take their bind markers from `core/sql`'s
+  `Dialect.Placeholder`, as every SQL renderer of the SDK does. Adding a
   fourth engine must not be possible by forgetting a file.
+- **Spell a bind marker by hand.** It was this package's own `placeholder`
+  until it became `Dialect.Placeholder`; docstore and queue carried
+  byte-identical copies of it, and a copy is how a fourth engine gets
+  forgotten in one of three places.
 - **Use `time.Now`, `time.After` or `time.Sleep`.** Take the injected clock.
 - **Read a driver error into a `Public`.** Join it; never rephrase it.
 - **Interpolate anything a caller supplied into SQL** other than the

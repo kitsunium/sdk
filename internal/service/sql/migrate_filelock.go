@@ -146,7 +146,7 @@ func (m *migrator) takeFileLock(ctx context.Context, ex coresql.Executor) error 
 		return err
 	}
 	//: the write that writes nothing, and takes the lock.
-	_, err := ex.ExecContext(ctx, fileLockSQL(m.plan.table))
+	_, err := ex.ExecContext(ctx, FileLockSQL(m.plan.table))
 	//: nil once this transaction is the one writer.
 	return err
 }
