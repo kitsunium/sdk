@@ -93,7 +93,7 @@ func TestTheDaemonDescribesItself(t *testing.T) {
 		"scheduler":                          {model.LoopScheduler, model.ProvenanceLibrary, "sdk/v1/app/scheduler"},
 		"audit/job/tally":                    {model.LoopJob, model.ProvenanceLibrary, "sdk/v1/app/scheduler"},
 		"shop/workflow/lifecycle timers":     {model.LoopTimer, model.ProvenanceLibrary, "sdk/v1/app/statemachine"},
-		"audit/subscription/record consumer": {model.LoopConsumer, model.ProvenanceLibrary, "sdk/v1/queue"},
+		"audit/subscription/record consumer": {model.LoopConsumer, model.ProvenanceLibrary, "sdk/v1/data/queue"},
 	}
 	for _, l := range rt.Loops {
 		w, ok := want[l.Name]
