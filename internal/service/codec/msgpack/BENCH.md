@@ -17,7 +17,7 @@ replaced it. This report is that comparison.
 | OS | macOS 26.6.2 (Darwin 25.6.0), arm64 |
 | Go toolchain | go1.27.1 darwin/arm64 |
 | Vendor binary | `go test -c` at df4ddb0e (vendor-backed codec, this benchmark file) |
-| Native binary | `go test -c` at 23fa0431 (native codec; later commits do not touch a measured path) |
+| Native binary | `go test -c` at 23fa0431 for every row but StreamDecode — the commits after it change only the stream decoder and a struct-layout path no benchmark reaches; StreamDecode at 9cd0b0b6 (in-place decoding), measured in its own session |
 | Generated | 2026-10-03 |
 | Machine load | 1-minute load average between 28 and 84 throughout — other builds and a fuzzer shared the machine |
 
@@ -82,11 +82,16 @@ boxing the record into `any` — in both columns.
 | UnmarshalAny/medium | 299 µs | 215 µs | ~ | 0.529 | 149 002 → 148 938 | 3 527 → 3 527 |
 | UnmarshalAny/large | 1.72 ms | 1.77 ms | ~ | 0.684 | 1 526 293 → 1 525 636 | 35 620 → 35 619 |
 | StreamEncode (64 × small) | 179 µs | 110 µs | −38.5 % | 0.000 | 33 944 → 25 636 | 772 → 193 |
-| StreamDecode (64 × small) | 483 µs | 482 µs | ~ | 0.853 | 221 388 → 206 527 | 3 976 → 3 398 |
+| StreamDecode (64 × small) | 592 µs | 524 µs | ~ | 0.052 | 221 404 → 206 574 | 3 976 → 3 398 |
 
-Geomean time: 120 µs → 75.9 µs, **−36.8 %**. An earlier interleaved session of
-the same ten rounds, run before the stream framer's read-ahead fast path,
-agreed on every direction and gave −36.0 %.
+Geomean time over the first thirteen rows: **−36.8 %** (120 µs → 75.9 µs in
+that session). An earlier interleaved session, run before the stream changes,
+agreed on every direction and gave −36.0 %. The StreamDecode row comes from a
+third, focused session interleaving three binaries — vendor, framed-only
+native (23fa0431) and in-place native (9cd0b0b6) — ten rounds each: 592 µs,
+586 µs and 524 µs. A full-table session run while this machine also ran this
+track's own vet and test sweeps is not reported: its intervals were too wide
+to separate anything.
 
 ## Reading the numbers
 
@@ -110,11 +115,14 @@ types (`int8` for a fixint, `map[string]any`, …) — pinned by the golden file
 and boxing each such value into an interface costs the same allocations in
 either implementation: 136 / 3 527 / 35 619 against 136 / 3 527 / 35 620.
 
-**Streams.** Encoding is 38 % faster and writes one `Write` per value. Decoding
-first frames each value — copies its bytes, already in the 4 KiB read-ahead,
-into a pooled buffer — then decodes it exactly as `Unmarshal` does; a CPU
-profile puts framing at roughly an eighth of the stream decode, which ends level
-with the vendor and with 15 % fewer allocations.
+**Streams.** Encoding is 38 % faster and writes one `Write` per value. The
+first native stream decoder framed every value — copied its bytes into a pooled
+buffer, header by header — before decoding it exactly as `Unmarshal` does, and
+a CPU profile put that framing at about 30 % of the stream decode: level with
+the vendor (586 µs against 592 µs). A value the 4 KiB read-ahead already holds
+whole is now decoded where it lies after a non-allocating extent scan, which
+brings the row to 524 µs (−11 %, p = 0.052 under this load), with 15 % fewer
+allocations than the vendor; a longer or straddling value is still framed.
 
 What the table does not show is what each implementation does with HOSTILE
 input: five bytes (`dd ff ff ff ff`) made the vendor size a four-billion-element
