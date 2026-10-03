@@ -73,7 +73,7 @@ refusal arrives where the program is wired rather than at the first login.
 | Platform | Verdict |
 |---|---|
 | linux, darwin, freebsd, openbsd, netbsd, dragonfly | native |
-| **windows** | `UnsupportedPlatform` — see §Why Windows is still refused. Not because stdlib `syscall` cannot reach `advapi32` (the reason this row used to give, stale since ADR 0081/0084), but because three things are missing: an owner-only DACL that is BUILT and verified, a directory flush, and a lane that runs the package there |
+| **windows** | `UnsupportedPlatform` — see §Why Windows is still refused. Not because stdlib `syscall` cannot reach `advapi32` (the reason this row used to give, stale since ADR 0081/0084), but because two things are missing: an owner-only DACL that is BUILT and verified, and a directory flush. The lane is not missing: `e2e-cross.yml`'s Windows job runs this package |
 | wasip1, solaris, illumos, aix | `UnsupportedPlatform` — `syscall.Flock` is absent from the stdlib there, or file ownership means nothing |
 | plan9, js | outside the SDK's build matrix entirely, and not because of this package: `internal/core/proc` does not compile on either (`syscall.Note` on plan9, no signal constants on js). Measured, pre-existing, and unchanged by this domain — `internal/service/security/session` itself compiles on both `GOOS` values in isolation |
 
@@ -90,18 +90,22 @@ with ADR 0081 and ADR 0084: the kernel binds `LockFileEx` from `kernel32`
 (`internal/kernel/fs/flock`) and `GetNamedSecurityInfoW` + `GetAce` from
 `advapi32` (`internal/kernel/fs/winacl`) through `syscall.NewLazyDLL`, no new
 dependency — code the lock domain wrote and ADR 0159 moved down to the kernel.
-Reusing it does not get this store there, because three things are still
+Reusing it does not get this store there, because two things are still
 missing:
 
 | Missing | Why the kernel's primitives do not supply it |
 |---|---|
 | an owner-only DACL, BUILT and then verified | the kernel's reader (`winacl.GrantsAnyone`, ADR 0084/0086/0095) builds nothing, and answers a weaker question: does an identifier meaning ANYBODY — Everyone, Authenticated Users, BUILTIN\Users — hold a right. `0700`/`0600` exclude every other account, a named colleague included; a directory granting read to one named principal passes the reader and fails the Unix rule. Applying a protected owner-only DACL at creation is new ABI (`SetNamedSecurityInfoW`, or a `SECURITY_ATTRIBUTES` on the create) with its own tests |
 | a directory flush | none exists: `FlushFileBuffers` on a directory handle returns `ERROR_ACCESS_DENIED` (ADR 0056 D10) — the reason `internal/service/data/vfs` refuses Windows too. Without it a power cut can undo a `Destroy` |
-| a lane that runs it | no Windows job runs this package; a green cross-compile is not ADR 0018's runtime bar |
 
 The kernel's `LockFileEx` (ADR 0081, `internal/kernel/fs/flock`) is the one
 piece that exists, and it is not enough on its own. `GOOS=windows go vet ./internal/service/security/session/...` is clean, which
-is the build bar and only that.
+is the build bar and only that. The runtime bar has its lane already:
+`e2e-cross.yml`'s Windows job runs this package — in its every-package step
+(ADR 0095) and in `SERVICE_PKGS` — where the store's suites skip today because
+the store is refused, so a Windows store would be held to ADR 0018's runtime
+bar the day it is written. A lane was the third missing piece this section
+listed until the series checked the workflow (ADR 0154, as built).
 
 ### Requesting a mode is not getting one
 

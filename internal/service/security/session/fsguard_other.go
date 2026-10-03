@@ -21,7 +21,7 @@
 // (internal/kernel/fs/flock) and GetNamedSecurityInfoW and GetAce from
 // advapi32 (internal/kernel/fs/winacl) through syscall.NewLazyDLL, with no new
 // dependency, and the same mechanism reaches every advapi32 export. What is
-// still missing is three things, and none of them is a reuse of that code:
+// still missing is two things, and neither of them is a reuse of that code:
 //
 //   - An owner-only DACL, BUILT and then VERIFIED. The kernel's reader
 //     (winacl.GrantsAnyone, ADR 0084/0086/0095) builds nothing, and the one
@@ -38,8 +38,11 @@
 //     cannot undo. Windows has no equivalent — FlushFileBuffers on a directory
 //     handle returns ERROR_ACCESS_DENIED (ADR 0056 D10) — which is why
 //     internal/service/data/vfs refuses Windows as well.
-//   - A lane that runs it. No Windows job runs this package, and ADR 0018's
-//     runtime bar is not cleared by a green cross-compile.
+//
+// The lane that would hold a Windows store to ADR 0018's runtime bar is not
+// missing: e2e-cross's Windows job runs this package, where the store's suites
+// skip today because the store is refused — a green cross-compile alone would
+// not clear that bar.
 //
 // The lock half is the one piece that exists: the kernel's LockFileEx (ADR
 // 0081) could serialise this store's read-modify-write, and it is what

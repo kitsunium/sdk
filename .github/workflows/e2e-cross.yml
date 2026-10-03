@@ -83,9 +83,21 @@ env:
   # uint64, and its signed variant and that variant's test compile on those two
   # kernels alone. It is the constructor `exec` and `rlimit` share; its tests ran
   # here inside those two packages before it moved.
+  #
+  # `security/session` joins them because its file store's path rules ARE the
+  # platform: `Dir` is walked with `fs/pathchain`, judged by the mode of the
+  # directory holding each component, then held as an os.Root, and the lock is
+  # `fs/flock`. Its path suites (pathsafety_*_test.go) plant a link at a
+  # record, at the lock file, at a parent of `Dir` and at `Dir` itself, and
+  # assert what each Unix kernel does with it — every attack was first run, and
+  # worked, against the store as it shipped (ADR 0154, as built). The macOS and
+  # Windows jobs ran the package already, in their whole-suite step; listed
+  # here, it also runs on Linux's native gate and on the three BSDs, and on
+  # illumos and Solaris, where the store is not built, its suite pins that it
+  # is built only where the kernel can lock.
   KERNEL_PKGS: "./fs/flock ./fs/pathchain ./fs/winacl"
   CORE_PKGS: "./proc"
-  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify"
+  SERVICE_PKGS: "./app/lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/internal/rlim ./proc/ipc ./proc/reaper ./proc/rlimit ./proc/self ./proc/signal ./proc/systemd/listen ./proc/systemd/notify ./security/session"
   # Unix file-security packages: their suites assert 0600 perms and inject
   # failures by chmod-freezing a directory — both are Unix mechanics. The
   # shared hardened open both sinks call, internal/logfile, carries the one
