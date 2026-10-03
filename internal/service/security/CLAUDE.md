@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:05:00Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/
 
 ## Purpose
@@ -28,18 +28,20 @@ ADR 0029).
 
 ## Members
 
-| Package | What it is | Implements | Code range | Facade |
+| Package | What it is | Implements | Range it allocated (declared in its core) | Facade |
 |---|---|---|---|---|
-| `authz/` | the RBAC evaluator over an inverted grant table, the ABAC evaluator over conditions, `DenyOverrides` and `Check` — the one closure where "nobody said Allow" becomes a refusal (ADR 0057) | `core/security/authz` | `0.3.56.*` (construction refusals; every verdict is a core sentinel) | `pkg/v1/security/authz` |
-| `redact/` | display redaction of values, JSON documents, texts and log attributes — names, declared fields, URL credentials — within an exact byte bound, never mutating its input (ADR 0101) | none yet — no core counterpart (ADR 0101 §D5; ADR 0160 §1 adds one) | `0.3.73.*` | `pkg/v1/security/redact` |
+| `authz/` | the RBAC evaluator over an inverted grant table, the ABAC evaluator over conditions, `DenyOverrides` and `Check` — the one closure where "nobody said Allow" becomes a refusal (ADR 0057) | `core/security/authz` | `0.3.56.*` (construction refusals; every verdict is the core's `0.2.26.*`) | `pkg/v1/security/authz` |
+| `redact/` | display redaction of values, JSON documents, texts and log attributes — names, declared fields, URL credentials — within an exact byte bound, never mutating its input (ADR 0101) | `core/security/redact` — the `Redactor` port, since ADR 0160 §1 | `0.3.73.*` | `pkg/v1/security/redact` |
 | `secret/` | memory, environment and sealed file stores, the `Keyring` over one secret's versions, the `Rotator` (ADR 0096); `SubjectKeys`, one data key per subject under a rotating root, destroyed to erase (ADR 0142) | `core/security/secret` | `0.3.68.*` | `pkg/v1/security/secret` |
 | `session/` | the memory store, the file store — its directory audited with `kernel/fs/pathchain`, then held as an `os.Root` — and the AEAD cookie sealer (ADR 0045) | `core/security/session` | `0.3.46.*` | `pkg/v1/security/session` |
 | `token/` | JWT over JWS Compact Serialization and PASETO v4.public, one constructor per algorithm, `kid` selection from a JWK Set (ADR 0042) | `core/security/token` | `0.3.44.*` | `pkg/v1/security/token` |
 
-Every range above kept its value when its package moved (ADR 0160):
-`codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
-names the new directories under the same keys, and `//:audit_sources` lists
-them by their new labels.
+None of these packages declares a code (ADR 0160 §2). Each range above was
+allocated by its engine and is declared, with its value unchanged, in the core
+package at the same path, beside the port's verdicts: `codeRangeOwners`
+(`internal/kernel/errs/registry_ownership_external_test.go`) names
+`internal/core/security/<domain>` under the same keys, and `//:audit_sources`
+lists the core labels, not these.
 
 ## Do NOT
 
@@ -48,6 +50,9 @@ them by their new labels.
 - Reimplement a primitive here because a security engine needs it: a scheme
   goes to `internal/service/crypto`, a path rule to `kernel/fs/pathchain`, a
   wait to `kernel/clock`.
+- Declare an error code here — an `errs.Define` or a `Code*` constant. A new
+  refusal gets its code and sentinel in the core package at the same path, in
+  the range its engine already owns (ADR 0160).
 - Import one member from another without saying so in both `CLAUDE.md` files:
   today none does, and `secret`'s file store reaches `lock` and `vfs`, not
   `session`.

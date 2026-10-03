@@ -37,10 +37,10 @@ var (
 	InvalidSubject = coresecret.InvalidSubject
 	// KeyDestroyed is returned by SubjectKeys.Open for a box whose data key is
 	// not held: the value was erased.
-	KeyDestroyed = svcsecret.KeyDestroyed
+	KeyDestroyed = coresecret.KeyDestroyed
 	// SubjectKeyUnreadable is returned when a subject's data key is held and
 	// does not unwrap under the root: a fault, never an erasure.
-	SubjectKeyUnreadable = svcsecret.SubjectKeyUnreadable
+	SubjectKeyUnreadable = coresecret.SubjectKeyUnreadable
 )
 
 // ValidateSubject reports whether subject is a subject reference, returning

@@ -1,36 +1,47 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/redact/
 
 ## Purpose
 
 Redaction for DISPLAY (ADR 0101): a Go value, a JSON document, a text or a set
 of log attributes, rendered with every secret the `Redactor` recognises replaced
-by `[redacted]`, within an exact byte bound, never mutating the input. Public
-facade: `pkg/v1/security/redact`.
+by `[redacted]`, within an exact byte bound, never mutating the input. The
+engine behind the `internal/core/security/redact` port (ADR 0160): `*Redactor`
+implements `coreredact.Redactor`, asserted at compile time in
+`redact_compliance.go`. Public facade:
+`pkg/v1/security/redact`.
 
 Stdlib (`encoding/json` for the wire form of a value, `encoding/json/jsontext`
 to stream a document, `reflect`, `regexp`) plus `internal/core/observe/logger` for the
-attribute shape and `internal/kernel/errs`. Code range `0.3.73.*`.
+attribute shape, `internal/core/security/redact` for the port, its values and
+its codes, and `internal/kernel/errs`. Codes: none declared here — the domain's
+`0.3.73.*` range was allocated here (ADR 0101) and is declared in the core
+since ADR 0160, with its values unchanged; this package raises it.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `redact.go` | package doc, `Placeholder` / `Ellipsis` / `MinBytes`, `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
+| `redact.go` | package doc, `DefaultWords`, `Config`, `Redactor`, `NewRedactor`, `Name`, `bound` |
 | `plan.go` | the per-type plan: which members of a type's JSON form are secret by declaration, cached per `Redactor` |
 | `fields.go` | `writtenFields` — for a struct, the one field `encoding/json` writes under each member name, selected by `encoding/json`'s own rules (`jsonName`, level-by-level embedding, `dominant`) |
-| `json.go` | `DocumentValue`, `JSON`, `Value`, and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
+| `json.go` | `JSON`, `Value` (both returning the core's `DocumentValue`), and the `copier` — a `jsontext` token stream re-emitted by hand so every byte is accounted against the bound |
 | `text.go` | `Text`, the URL-credential pattern (`credentials`, compiled at the first text holding "://" and "@", not at every program start), `clip` |
-| `attrs.go` | `Attrs` — an iterator over `(dotted key, text)` pairs, `Unencodable`, and the per-kind rendering |
-| `codes.go` / `errors.go` | `0.3.73.*`: `DocumentInvalid`, `ValueUnencodable` |
+| `attrs.go` | `Attrs` — an iterator over `(dotted key, text)` pairs, and the per-kind rendering |
+| `redact_compliance.go` | the compile-time assertion that `*Redactor` implements `coreredact.Redactor` |
 
 ## Why-this-shape
 
-- **A service package with no core counterpart.** Nothing here is a port: there
-  is one engine and no second implementation a contract would describe, so the
-  values are the engine's (ADR 0074) and the codes are the service's own. A
-  `core/security/redact` would have held two sentinels and nothing else, which
-  rule 5 calls a stub.
+- **The port and the values are the core's; the engine and its configuration
+  are here.** ADR 0101 §D5 first shipped this as one engine with no core;
+  ADR 0160 gave every service domain a core, so `internal/core/security/redact`
+  now holds the `Redactor` port (frozen at `Name` / `Text` / `JSON` / `Value` /
+  `Attrs`, so a consumer can hand a test double where a redactor is expected),
+  the values every implementation writes and a caller compares against
+  (`Placeholder`, `Ellipsis`, `MinBytes`, `Unencodable`, `DocumentValue`) and
+  the two codes. `Config` and `DefaultWords` stay here: they are this engine's
+  construction parameters, which a second implementation would not have to
+  accept (ADR 0074).
 - **The configuration is the policy, and it is small.** Words (defaulting to
   ten fragments; an empty list means the defaults, never "none" — a redactor
   that recognises no name is a formatter), a tag key (default `redact`, so a
@@ -95,6 +106,10 @@ attribute shape and `internal/kernel/errs`. Code range `0.3.73.*`.
 - Keep a document's bytes in an error, a Private or a field.
 - Mutate a value, a document or an attribute slice. Everything here reads.
 - Add a "no words" configuration. It is a formatter with a misleading name.
+- Declare an error code, or a value the port speaks, here. The codes, the
+  `Redactor` port and the values a caller compares results against are
+  `internal/core/security/redact`'s (ADR 0160); a new refusal gets its code and
+  sentinel there, in the range this package already owns (`0.3.73.*`).
 
 ## Verification
 

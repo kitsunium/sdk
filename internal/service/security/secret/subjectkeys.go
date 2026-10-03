@@ -82,7 +82,7 @@ type SubjectKeys struct {
 
 // NewSubjectKeys validates cfg and returns the engine. It refuses a nil root,
 // a nil store, a negative cache size, a cache without a CacheTTL and a
-// CacheTTL without a cache, each with [InvalidConfig] naming the setting, and
+// CacheTTL without a cache, each with [coresecret.InvalidConfig] naming the setting, and
 // touches nothing: a key is made by the first Seal of its subject.
 func NewSubjectKeys(cfg SubjectKeysConfig) (keys *SubjectKeys, err error) {
 	//: every refusal is decided before anything is built.
@@ -144,7 +144,7 @@ func (c SubjectKeysConfig) validate() error {
 //
 // It refuses a malformed subject with core/security/secret.InvalidSubject, returns
 // core/security/secret.NotFound while the root has no version, and
-// [SubjectKeyUnreadable] when subject's key is held and does not unwrap — it
+// [coresecret.SubjectKeyUnreadable] when subject's key is held and does not unwrap — it
 // never replaces such a key.
 func (s *SubjectKeys) Seal(ctx context.Context, subject string, plaintext []byte, bind ...string) (box []byte, err error) {
 	//: the subject is checked before the store is asked anything.
@@ -173,12 +173,12 @@ func (s *SubjectKeys) Seal(ctx context.Context, subject string, plaintext []byte
 // Open decrypts a box [SubjectKeys.Seal] made, under the key of the subject it
 // names, verifying bind. It answers:
 //
-//   - [KeyDestroyed] when that key is not held — destroyed by an erasure, or
+//   - [coresecret.KeyDestroyed] when that key is not held — destroyed by an erasure, or
 //     replaced by a newer key of the same subject after one: the value is
 //     erased, and a caller reading records reads it as such;
-//   - [SealInvalid] when the box is malformed, altered, or bound to other
+//   - [coresecret.SealInvalid] when the box is malformed, altered, or bound to other
 //     parts;
-//   - [SubjectKeyUnreadable] when the key is held and does not unwrap, which
+//   - [coresecret.SubjectKeyUnreadable] when the key is held and does not unwrap, which
 //     is a fault and never an erasure;
 //   - core/security/secret.StoreUnavailable when the store failed.
 func (s *SubjectKeys) Open(ctx context.Context, box []byte, bind ...string) (plaintext []byte, err error) {
@@ -186,7 +186,7 @@ func (s *SubjectKeys) Open(ctx context.Context, box []byte, bind ...string) (pla
 	//: not a box this engine makes.
 	if !ok {
 		//: SealInvalid.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	key, id, cached, acquireErr := s.acquire(ctx, parsed.subject, false)
 	//: destroyed, unreadable, or a store that failed.
@@ -215,7 +215,7 @@ func (s *SubjectKeys) Open(ctx context.Context, box []byte, bind ...string) (pla
 	//: altered, or bound to other parts.
 	if openErr != nil {
 		//: the one verdict for every box-shaped failure.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	//: the plaintext, authenticated.
 	return plaintext, nil
@@ -333,7 +333,7 @@ func (s *SubjectKeys) create(ctx context.Context, subject string) (opened *opene
 	//: crypto/rand fills the buffer or ends the program; its error is kept anyway.
 	if _, readErr := rand.Read(dek); readErr != nil {
 		//: GenerateFailed, with the entropy source's message.
-		return nil, false, wrapAs(GenerateFailed, readErr, errs.String("subject", subject))
+		return nil, false, wrapAs(coresecret.GenerateFailed, readErr, errs.String("subject", subject))
 	}
 	wrapped, wrapErr := s.root.sealAs(ctx, wrapLabel, dek, wrapAAD(subject))
 	//: no root version yet, one that is not a key, or a root store that failed.
@@ -468,11 +468,11 @@ func sameID(held, named [keyIDLen]byte) bool {
 // keyDestroyed is the KeyDestroyed verdict for one subject.
 func keyDestroyed(subject string) error {
 	//: the subject is a reference, and what an operator needs to act.
-	return errs.Wrap(KeyDestroyed, errs.WrapParams{}, errs.String("subject", subject))
+	return errs.Wrap(coresecret.KeyDestroyed, errs.WrapParams{}, errs.String("subject", subject))
 }
 
 // keyUnreadable is the SubjectKeyUnreadable verdict for one subject.
 func keyUnreadable(subject string) error {
 	//: the subject is a reference, and what an operator needs to act.
-	return errs.Wrap(SubjectKeyUnreadable, errs.WrapParams{}, errs.String("subject", subject))
+	return errs.Wrap(coresecret.SubjectKeyUnreadable, errs.WrapParams{}, errs.String("subject", subject))
 }

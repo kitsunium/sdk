@@ -8,6 +8,7 @@ import (
 	"os"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -61,12 +62,12 @@ func (c FileConfig) validate() error {
 	//: a store with nowhere to write is not a store.
 	if c.Dir == "" {
 		//: InvalidConfig, naming the setting.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "empty"))
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "empty"))
 	}
 	//: a key is either absent or a real 256-bit key; nothing in between.
 	if keyLen := len(c.Key.Bytes()); keyLen != 0 && keyLen != corecrypto.KeyLen {
 		//: InvalidConfig, naming the setting and never the material.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Key"), errs.String("problem", "not 32 bytes"))
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Key"), errs.String("problem", "not 32 bytes"))
 	}
 	//: usable as given.
 	return nil
@@ -101,14 +102,14 @@ func checkHeldRoot(root fs.FS, dir string) error {
 	//: directory other accounts cannot read.
 	if heldErr != nil || !held.IsDir() || held.Mode().Perm()&otherAccountBits != 0 {
 		//: InvalidConfig, naming the clause.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"),
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"),
 			errs.String("problem", "the directory opened is not an owner-only directory"))
 	}
 	named, namedErr := os.Stat(dir)
 	//: the path now names another directory, or nothing.
 	if namedErr != nil || !os.SameFile(held, named) {
 		//: InvalidConfig: the path moved while the store was opening it.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"),
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"),
 			errs.String("problem", "the directory changed while the store was opening it"))
 	}
 	//: one directory, owner-only, named by the path.
@@ -126,24 +127,24 @@ func prepareDir(dir string) error {
 		//: parents are created too; each gets the same owner-only mode.
 		if mkErr := os.MkdirAll(dir, storeDirMode); mkErr != nil {
 			//: InvalidConfig: the directory the caller named cannot exist.
-			return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "cannot be created"))
+			return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "cannot be created"))
 		}
 		info, statErr = os.Stat(dir)
 	}
 	//: anything else that stops a stat is a directory this store cannot use.
 	if statErr != nil {
 		//: InvalidConfig, without the path.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "cannot be inspected"))
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "cannot be inspected"))
 	}
 	//: a file where the directory should be.
 	if !info.IsDir() {
 		//: InvalidConfig.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "not a directory"))
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"), errs.String("problem", "not a directory"))
 	}
 	//: group or world bits: another account can at least list the secrets.
 	if info.Mode().Perm()&otherAccountBits != 0 {
 		//: InvalidConfig, naming the fix.
-		return wrapAs(InvalidConfig, nil, errs.String("setting", "Dir"),
+		return wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Dir"),
 			errs.String("problem", "accessible to other accounts; chmod 700 it"))
 	}
 	//: an owner-only directory.

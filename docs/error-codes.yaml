@@ -1721,31 +1721,31 @@ codes:
   - code: "0.3.44.1"
     const: CodeHeaderUnsupported
     hex: "0x00_03_2C_01"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.2"
     const: CodeKeyNotFound
     hex: "0x00_03_2C_02"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.3"
     const: CodeKeyIDMissing
     hex: "0x00_03_2C_03"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.4"
     const: CodeKeyIDAmbiguous
     hex: "0x00_03_2C_04"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.5"
     const: CodeFooterMismatch
     hex: "0x00_03_2C_05"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.6"
     const: CodeSchemeUnsupported
     hex: "0x00_03_2C_06"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.44.7"
     const: CodeDuplicateMember
     hex: "0x00_03_2C_07"
-    package: internal/service/security/token
+    package: internal/core/security/token
   - code: "0.3.45.1"
     const: CodeInvalidMetricName
     hex: "0x00_03_2D_01"
@@ -1789,27 +1789,27 @@ codes:
   - code: "0.3.46.1"
     const: CodeRecordCorrupt
     hex: "0x00_03_2E_01"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.46.2"
     const: CodeDirectoryUnsafe
     hex: "0x00_03_2E_02"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.46.3"
     const: CodeLockFailed
     hex: "0x00_03_2E_03"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.46.4"
     const: CodePayloadTooLarge
     hex: "0x00_03_2E_04"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.46.5"
     const: CodeInvalidPurpose
     hex: "0x00_03_2E_05"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.46.6"
     const: CodePathRedirected
     hex: "0x00_03_2E_06"
-    package: internal/service/security/session
+    package: internal/core/security/session
   - code: "0.3.47.1"
     const: CodeRequired
     hex: "0x00_03_2F_01"
@@ -2037,15 +2037,15 @@ codes:
   - code: "0.3.56.1"
     const: CodeGrantInvalid
     hex: "0x00_03_38_01"
-    package: internal/service/security/authz
+    package: internal/core/security/authz
   - code: "0.3.56.2"
     const: CodeRuleInvalid
     hex: "0x00_03_38_02"
-    package: internal/service/security/authz
+    package: internal/core/security/authz
   - code: "0.3.56.3"
     const: CodeConditionInvalid
     hex: "0x00_03_38_03"
-    package: internal/service/security/authz
+    package: internal/core/security/authz
   - code: "0.3.57.1"
     const: CodeTemplateSourceFailed
     hex: "0x00_03_39_01"
@@ -2233,43 +2233,43 @@ codes:
   - code: "0.3.68.1"
     const: CodeInvalidConfig
     hex: "0x00_03_44_01"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.2"
     const: CodeRecordUnreadable
     hex: "0x00_03_44_02"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.3"
     const: CodeEnvRefused
     hex: "0x00_03_44_03"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.4"
     const: CodeSealInvalid
     hex: "0x00_03_44_04"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.5"
     const: CodeSignatureInvalid
     hex: "0x00_03_44_05"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.6"
     const: CodeKeyMaterialInvalid
     hex: "0x00_03_44_06"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.7"
     const: CodeGenerateFailed
     hex: "0x00_03_44_07"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.8"
     const: CodeKeyFileInvalid
     hex: "0x00_03_44_08"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.9"
     const: CodeKeyDestroyed
     hex: "0x00_03_44_09"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.68.10"
     const: CodeSubjectKeyUnreadable
     hex: "0x00_03_44_0A"
-    package: internal/service/security/secret
+    package: internal/core/security/secret
   - code: "0.3.72.1"
     const: CodeDocumentTooLarge
     hex: "0x00_03_48_01"
@@ -2305,11 +2305,11 @@ codes:
   - code: "0.3.73.1"
     const: CodeDocumentInvalid
     hex: "0x00_03_49_01"
-    package: internal/service/security/redact
+    package: internal/core/security/redact
   - code: "0.3.73.2"
     const: CodeValueUnencodable
     hex: "0x00_03_49_02"
-    package: internal/service/security/redact
+    package: internal/core/security/redact
   - code: "0.3.77.1"
     const: CodeYAMLFullMarshalFailed
     hex: "0x00_03_4D_01"

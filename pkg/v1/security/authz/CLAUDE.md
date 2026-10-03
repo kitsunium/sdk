@@ -43,7 +43,9 @@ comment; maintainer rationale stays here.
   documented rather than removed.
 - **The codes are re-exported, the `Define` calls are not.** The constants here
   are cross-package selectors, so the ADR 0035 ownership audit correctly skips
-  them: `pkg/v1/security/authz` owns no range.
+  them: `pkg/v1/security/authz` owns no range. All seven — the four verdicts and
+  the engine's three construction refusals — alias `internal/core/security/authz`,
+  where every code of the domain is declared (ADR 0160, ADR 0074).
 
 ## Do NOT
 

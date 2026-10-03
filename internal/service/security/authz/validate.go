@@ -114,7 +114,7 @@ func validateRule(index int, rule RuleValue) error {
 // grantFault builds the GrantInvalid refusal, naming the offending row.
 func grantFault(detail string, index int, role string) error {
 	//: origin-wins keeps the sentinel's identity; the position is diagnostic.
-	return errs.Wrap(GrantInvalid, errs.WrapParams{},
+	return errs.Wrap(coreauthz.GrantInvalid, errs.WrapParams{},
 		errs.String("detail", detail),
 		errs.Int("grant_index", index),
 		errs.String("role", role))
@@ -123,7 +123,7 @@ func grantFault(detail string, index int, role string) error {
 // ruleFault builds the RuleInvalid refusal, naming the offending rule.
 func ruleFault(detail string, index int, name string) error {
 	//: origin-wins keeps the sentinel's identity; the position is diagnostic.
-	return errs.Wrap(RuleInvalid, errs.WrapParams{},
+	return errs.Wrap(coreauthz.RuleInvalid, errs.WrapParams{},
 		errs.String("detail", detail),
 		errs.Int("rule_index", index),
 		errs.String("rule", name))
@@ -133,7 +133,7 @@ func ruleFault(detail string, index int, name string) error {
 // constructor that cannot honour its arguments.
 func conditionFault(detail, attribute string) error {
 	//: origin-wins keeps the sentinel's identity; the argument is diagnostic.
-	return errs.Wrap(ConditionInvalid, errs.WrapParams{},
+	return errs.Wrap(coreauthz.ConditionInvalid, errs.WrapParams{},
 		errs.String("detail", detail),
 		errs.String("attribute", attribute))
 }

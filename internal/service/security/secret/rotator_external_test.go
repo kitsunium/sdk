@@ -152,11 +152,11 @@ func TestRotatorRefusesAnInertPolicy(t *testing.T) {
 		code   errs.Code
 	}
 	tests := []tc{
-		{"no store", func(c *svcsecret.RotatorConfig) { c.Store = nil }, svcsecret.CodeInvalidConfig},
+		{"no store", func(c *svcsecret.RotatorConfig) { c.Store = nil }, coresecret.CodeInvalidConfig},
 		{"a bad name", func(c *svcsecret.RotatorConfig) { c.Name = "Bad" }, coresecret.CodeInvalidName},
-		{"no interval", func(c *svcsecret.RotatorConfig) { c.Policy.Every = 0 }, svcsecret.CodeInvalidConfig},
-		{"keeping one", func(c *svcsecret.RotatorConfig) { c.Policy.Keep = 1 }, svcsecret.CodeInvalidConfig},
-		{"no generator", func(c *svcsecret.RotatorConfig) { c.Policy.Generate = nil }, svcsecret.CodeInvalidConfig},
+		{"no interval", func(c *svcsecret.RotatorConfig) { c.Policy.Every = 0 }, coresecret.CodeInvalidConfig},
+		{"keeping one", func(c *svcsecret.RotatorConfig) { c.Policy.Keep = 1 }, coresecret.CodeInvalidConfig},
+		{"no generator", func(c *svcsecret.RotatorConfig) { c.Policy.Generate = nil }, coresecret.CodeInvalidConfig},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -188,11 +188,11 @@ func TestRotatorGeneratorFailuresChangeNothing(t *testing.T) {
 		code     errs.Code
 	}
 	tests := []tc{
-		{"a secret too short to be one", svcsecret.Random(8), svcsecret.CodeInvalidConfig},
-		{"an empty secret", func() (coresecret.Value, error) { return coresecret.Value{}, nil }, svcsecret.CodeGenerateFailed},
+		{"a secret too short to be one", svcsecret.Random(8), coresecret.CodeInvalidConfig},
+		{"an empty secret", func() (coresecret.Value, error) { return coresecret.Value{}, nil }, coresecret.CodeGenerateFailed},
 		{"a generator error", func() (coresecret.Value, error) {
 			return coresecret.Value{}, context.DeadlineExceeded
-		}, svcsecret.CodeGenerateFailed},
+		}, coresecret.CodeGenerateFailed},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

@@ -251,7 +251,7 @@ func TestConditionConstructorRefusals(t *testing.T) {
 			if condition != nil {
 				t.Fatal("a refused constructor still produced a condition")
 			}
-			if !errs.HasCode(err, svcauthz.CodeConditionInvalid) {
+			if !errs.HasCode(err, coreauthz.CodeConditionInvalid) {
 				t.Fatalf("err = %v, want CONDITION_INVALID", err)
 			}
 		})

@@ -3,6 +3,7 @@ package secret
 import (
 	"testing"
 
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -37,7 +38,7 @@ func TestAWrappedValueThatIsNoKeyIsUnreadable(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewSubjectKeys: %v", err)
 	}
-	if _, sealErr := keys.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, CodeSubjectKeyUnreadable) {
+	if _, sealErr := keys.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Seal over a short key = %v, want SubjectKeyUnreadable", sealErr)
 	}
 }
@@ -82,7 +83,7 @@ func TestAShortKeyUnderAnOldVersionIsNeverMoved(t *testing.T) {
 		t.Fatalf("NewSubjectKeys: %v", err)
 	}
 	report, err := keys.Rewrap(t.Context())
-	if report != (RewrapValue{Root: 2, Unreadable: 1}) || !errs.HasCode(err, CodeSubjectKeyUnreadable) {
+	if report != (RewrapValue{Root: 2, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap = (%+v, %v), want the short key counted unreadable", report, err)
 	}
 	if held, _, getErr := store.Get(t.Context(), "user:1"); getErr != nil || string(held) != string(short) {

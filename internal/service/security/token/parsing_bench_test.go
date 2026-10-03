@@ -318,7 +318,7 @@ func checkNoDuplicateMembersByCopy(raw []byte) error {
 		}
 		//: the duplicate check itself is unchanged.
 		if _, dup := seen[key]; dup {
-			return DuplicateMember
+			return coretoken.DuplicateMember
 		}
 		seen[key] = struct{}{}
 		//: the one difference: the value is copied, then discarded.

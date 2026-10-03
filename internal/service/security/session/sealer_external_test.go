@@ -208,7 +208,7 @@ func TestSealerRefusesAnUnusableConstruction(t *testing.T) {
 	t.Run("empty purpose", func(t *testing.T) {
 		t.Parallel()
 		sealer, err := svcsession.NewSealer(testKey(t), "")
-		if !errs.HasCode(err, svcsession.CodeInvalidPurpose) {
+		if !errs.HasCode(err, coresession.CodeInvalidPurpose) {
 			t.Fatalf("NewSealer(no purpose) = %v, want CodeInvalidPurpose", err)
 		}
 		if sealer != nil {

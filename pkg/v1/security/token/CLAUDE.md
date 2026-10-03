@@ -20,15 +20,16 @@ half.
 | `token.go` | package doc + the type aliases (`Algorithm`, `Claims`, `Issuer`, `Verifier`, the four `*Config`) + `NewClaims` / `PrivateClaim` / `SetPrivateClaim` |
 | `constants.go` | the four `Algorithm*` values, the seven `Claim*` names, and the JWK vocabulary: three `KeyType*` and four `Curve*` values |
 | `constructors.go` | `Key` / `JWK` / `JWKSet` / `KeyType` / `Curve` aliases + the ten issuer/verifier `New*` delegates + the three JWK loaders `ParseJWK` / `ParseJWKSet` / `NewJWKSet` |
-| `sentinels.go` | the 29 verdict vars, re-exported from core, service and `service/crypto/key/jwk` (the six `JWK*` parse refusals) |
+| `sentinels.go` | the 29 verdict vars, re-exported from `core/security/token` (all 23 token verdicts, ADR 0160) and `service/crypto/key/jwk` (the six `JWK*` parse refusals) |
 | `codes.go` | the 29 `Code*` constants, re-exported for `errs.HasCode` |
 
 ## Why the codes are re-exported
 
 `codes.go` declares `const CodeExpired errs.Code = coretoken.CodeExpired` and
 twenty-eight siblings. These are **re-exports, not declarations**: the ranges
-`0.2.13.*`, `0.3.44.*` and `0.3.42.*` stay owned by `internal/core/security/token`,
-`internal/service/security/token` and `internal/service/crypto/key/jwk`, and the ADR 0035
+`0.2.13.*` and `0.3.44.*` stay owned by `internal/core/security/token` — where
+every code of the token domain is declared since ADR 0160 — and `0.3.42.*` by
+`internal/service/crypto/key/jwk`, and the ADR 0035
 ownership audit skips a cross-package selector for exactly this case ("pkg/v1
 aliasing an internal sentinel does not make it an owner"). For the same reason
 `scripts/gen-error-codes.sh` never lists them: it matches literal `= 0x…`

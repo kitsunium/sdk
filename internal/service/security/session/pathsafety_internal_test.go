@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	coresession "github.com/kitsunium/sdk/internal/core/security/session"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -60,9 +61,9 @@ func TestTheHeldDirectoryMustBeTheOneDirNames(t *testing.T) {
 		want errs.Code
 	}{
 		{"the directory dir names, owner-only", checked, checked, 0},
-		{"dir now names another directory", checked, other, CodePathRedirected},
-		{"dir now names nothing", checked, filepath.Join(base, "gone"), CodePathRedirected},
-		{"the held directory is readable by others", wide, wide, CodeDirectoryUnsafe},
+		{"dir now names another directory", checked, other, coresession.CodePathRedirected},
+		{"dir now names nothing", checked, filepath.Join(base, "gone"), coresession.CodePathRedirected},
+		{"the held directory is readable by others", wide, wide, coresession.CodeDirectoryUnsafe},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

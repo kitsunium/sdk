@@ -1,10 +1,10 @@
-<!-- updated: 2026-10-03T04:05:00Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/core/security/
 
 ## Purpose
 
 The security family's contracts (ADR 0155): the ports, the values and the
-codes of the security domains that have a core. This directory holds no Go
+codes of the five security domains — every one of them has a core (ADR 0160). This directory holds no Go
 code: it is a prefix, not a package, and nothing imports
 `internal/core/security` itself. Each member is a package of the
 `internal/core` module with its own `CLAUDE.md`, and each still follows the
@@ -27,23 +27,30 @@ whoever calls it. A transport's identity is not here either: the certificate a
 connection presents is the net family's (`internal/core/net`, ADR 0029),
 because it is what a server and a client hand each other.
 
-`redact`, the family's fifth domain, has no core package yet — its two codes
-are declared by its engine, `internal/service/security/redact` (ADR 0101 §D5).
-ADR 0160 §1 gives it one, as `redact/` beside the four below, when the
-reorganisation series reaches it.
+`redact`, the family's fifth domain, shipped as an engine alone (ADR 0101
+§D5); ADR 0160 §1 gave it a core, `redact/`, holding the port a test double
+implements, the values every implementation writes, and its two codes.
+
+Every code of the family is declared here (ADR 0160 §2): each member holds its
+port's verdicts AND the refusals its engine raises, so a domain's codes are in
+one place and the engines under `internal/service/security` declare none.
 
 ## Members
 
 | Package | What it declares | Code range | Engine |
 |---|---|---|---|
-| `authz/` | the `Policy` and `Condition` FUNC ports, the three-valued `Decision` (`Abstain` is the zero), the immutable `RequestValue` and the typed `AttrValue`; no registry (ADR 0057) | `0.2.26.*` | `internal/service/security/authz` |
-| `secret/` | the redacting `Value`, the `Store` port frozen at five over never-reused versions, `VersionValue` and the name grammar (ADR 0096); the `SubjectKeyStore` port frozen at five, `SubjectKeyValue` and the subject grammar (ADR 0142) | `0.2.37.*` | `internal/service/security/secret` |
-| `session/` | the `Store` port frozen at five with `Sweeper` as a sibling, the `Sealer`, the opaque redacting `ID` and the immutable `SessionValue` (ADR 0045) | `0.2.14.*` | `internal/service/security/session` |
-| `token/` | the one-method `Issuer` and `Verifier` ports, the redacting `ClaimsValue` and the closed `Algorithm` enum in which `none` has no representation; no registry, because its key would be the attacker-written `alg` header (ADR 0042) | `0.2.13.*` | `internal/service/security/token` |
+| `authz/` | the `Policy` and `Condition` FUNC ports, the three-valued `Decision` (`Abstain` is the zero), the immutable `RequestValue` and the typed `AttrValue`; no registry (ADR 0057) | `0.2.26.*`, `0.3.56.*` | `internal/service/security/authz` |
+| `redact/` | the `Redactor` port frozen at five methods, the `DocumentValue` a JSON rendering returns, and the values every implementation writes — `Placeholder`, `Ellipsis`, `MinBytes`, `Unencodable` (ADR 0101, ADR 0160) | `0.3.73.*` | `internal/service/security/redact` |
+| `secret/` | the redacting `Value`, the `Store` port frozen at five over never-reused versions, `VersionValue` and the name grammar (ADR 0096); the `SubjectKeyStore` port frozen at five, `SubjectKeyValue` and the subject grammar (ADR 0142) | `0.2.37.*`, `0.3.68.*` | `internal/service/security/secret` |
+| `session/` | the `Store` port frozen at five with `Sweeper` as a sibling, the `Sealer`, the opaque redacting `ID` and the immutable `SessionValue` (ADR 0045) | `0.2.14.*`, `0.3.46.*` | `internal/service/security/session` |
+| `token/` | the one-method `Issuer` and `Verifier` ports, the redacting `ClaimsValue` and the closed `Algorithm` enum in which `none` has no representation; no registry, because its key would be the attacker-written `alg` header (ADR 0042) | `0.2.13.*`, `0.3.44.*` | `internal/service/security/token` |
 
-A code keeps its value when its package moves (ADR 0160): the four ranges
-above are the ones these packages declared before the family existed, and
-`codeRangeOwners` names the new directories under the same keys.
+A code keeps its value when its declaration moves (ADR 0160): the `0.2.*`
+ranges above are the ones these packages declared before the family existed,
+and each `0.3.*` range is the one its engine allocated in the service layer —
+`LL` records the layer that allocated a range, not the directory its
+declaration lives in. `codeRangeOwners` names these directories under the same
+keys.
 
 ## Do NOT
 

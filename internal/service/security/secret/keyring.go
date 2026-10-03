@@ -79,7 +79,7 @@ const bindingPrefix string = "kitsunium/secret keyring v1\x00"
 // A version is key material and must be exactly one crypto.Key long (derived
 // from corecrypto.KeyLen). Generate the versions with Random(corecrypto.KeyLen);
 // a password stored under a keyring's
-// name is refused with [KeyMaterialInvalid] rather than stretched, because
+// name is refused with [coresecret.KeyMaterialInvalid] rather than stretched, because
 // stretching would hide that it was never random. Each version is split by
 // HKDF-SHA256 into an AES-256-GCM key and an HMAC-SHA256 key, so sealing and
 // signing never share a key — and, for the subject keys a keyring is the root
@@ -106,7 +106,7 @@ func NewKeyring(store coresecret.Store, name string) (keyring *Keyring, err erro
 	//: a keyring with no store has nowhere to read a key from.
 	if store == nil {
 		//: InvalidConfig, naming the setting.
-		return nil, wrapAs(InvalidConfig, nil, errs.String("setting", "Store"), errs.String("problem", "nil"))
+		return nil, wrapAs(coresecret.InvalidConfig, nil, errs.String("setting", "Store"), errs.String("problem", "nil"))
 	}
 	//: the name every call will use is checked once, here.
 	if nameErr := coresecret.ValidateName(name); nameErr != nil {
@@ -120,7 +120,7 @@ func NewKeyring(store coresecret.Store, name string) (keyring *Keyring, err erro
 // Seal encrypts plaintext under the NEWEST version, binding aad (which may be
 // nil), and returns a box carrying that version's number. It returns
 // core/security/secret.NotFound while the secret has no version, and
-// [KeyMaterialInvalid] when the newest version is not a 32-byte key.
+// [coresecret.KeyMaterialInvalid] when the newest version is not a 32-byte key.
 func (k *Keyring) Seal(ctx context.Context, plaintext, aad []byte) (box []byte, err error) {
 	//: the sealing purpose.
 	return k.sealAs(ctx, sealLabel, plaintext, aad)
@@ -162,7 +162,7 @@ func (k *Keyring) sealUnder(key corecrypto.Key, version int, plaintext, aad []by
 
 // Open decrypts a box Seal made, under the version its header names, verifying
 // aad. Every failure that concerns the box — malformed, a version no longer
-// kept, tampered, other associated data — is the one [SealInvalid] verdict. A
+// kept, tampered, other associated data — is the one [coresecret.SealInvalid] verdict. A
 // store that could not be READ is reported as such, because "retry" and
 // "reject the box" are different responses.
 func (k *Keyring) Open(ctx context.Context, box, aad []byte) (plaintext []byte, err error) {
@@ -177,20 +177,20 @@ func (k *Keyring) openAs(ctx context.Context, label string, box, aad []byte) (pl
 	//: too short, or a format this build does not make.
 	if !parsed {
 		//: SealInvalid.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	key, keyErr := k.keyFor(ctx, version, label)
 	//: the store could not answer, or the box names no key it holds.
 	if keyErr != nil {
 		//: StoreUnavailable passes through; anything else is SealInvalid.
-		return nil, verdictOr(keyErr, SealInvalid)
+		return nil, verdictOr(keyErr, coresecret.SealInvalid)
 	}
 	defer key.Zeroize()
 	plaintext, openErr := corecrypto.Open(key, sealed, k.binding(version, aad))
 	//: tampered, truncated, or bound to other data.
 	if openErr != nil {
 		//: the one verdict.
-		return nil, SealInvalid
+		return nil, coresecret.SealInvalid
 	}
 	//: the plaintext, authenticated.
 	return plaintext, nil
@@ -224,27 +224,27 @@ func (k *Keyring) Sign(ctx context.Context, message []byte) (signature []byte, e
 
 // Verify checks a signature Sign made, under the version it names, in constant
 // time. Every failure that concerns the signature is the one
-// [SignatureInvalid] verdict; a store that could not be read is reported as
+// [coresecret.SignatureInvalid] verdict; a store that could not be read is reported as
 // such.
 func (k *Keyring) Verify(ctx context.Context, message, signature []byte) error {
 	version, tag, parsed := parseHeader(signature)
 	//: too short, or a format this build does not make.
 	if !parsed {
 		//: SignatureInvalid.
-		return SignatureInvalid
+		return coresecret.SignatureInvalid
 	}
 	key, keyErr := k.keyFor(ctx, version, signLabel)
 	//: the store could not answer, or the signature names no key it holds.
 	if keyErr != nil {
 		//: StoreUnavailable passes through; anything else is SignatureInvalid.
-		return verdictOr(keyErr, SignatureInvalid)
+		return verdictOr(keyErr, coresecret.SignatureInvalid)
 	}
 	defer key.Zeroize()
 	valid, verifyErr := corecrypto.MACVerify(macAlgorithm, key, k.binding(version, message), tag)
 	//: a wrong tag, a wrong message, or a scheme that is not registered.
 	if verifyErr != nil || !valid {
 		//: the one verdict.
-		return SignatureInvalid
+		return coresecret.SignatureInvalid
 	}
 	//: authentic.
 	return nil
@@ -277,7 +277,7 @@ func (k *Keyring) subkey(version coresecret.VersionValue, label string) (key cor
 	//: compiles where int is 32 bits and a negative number is refused too.
 	if version.Value.Len() != corecrypto.KeyLen || version.Version < 1 || uint64(version.Version) > math.MaxUint32 {
 		//: KeyMaterialInvalid, naming the secret and the version, never bytes.
-		return corecrypto.Key{}, wrapAs(KeyMaterialInvalid, nil,
+		return corecrypto.Key{}, wrapAs(coresecret.KeyMaterialInvalid, nil,
 			errs.String("secret", k.name), errs.Int("version", version.Version))
 	}
 	material := version.Value.Reveal()

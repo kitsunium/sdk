@@ -6,11 +6,9 @@ go_library(
     name = "session",
     srcs = [
         "chain.go",
-        "codes.go",
         "compare.go",
         "config.go",
         "encode.go",
-        "errors.go",
         "file_config.go",
         "file_entry.go",
         "file_ops.go",
@@ -75,11 +73,4 @@ go_test(
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

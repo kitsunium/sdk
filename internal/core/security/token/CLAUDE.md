@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/core/security/token/
 
 ## Purpose
@@ -9,7 +9,11 @@ closed `Algorithm` enum, and the typed verdicts a caller matches on. The 13th
 core sibling, admitted by **ADR 0042**. Formats are concrete and live in
 `internal/service/security/token`; this package owns only the contract + the sentinels.
 
-Code range: `0.2.13.*` (ADR 0042).
+Code ranges: `0.2.13.*` — the verdicts a caller matches on (ADR 0042) — and
+`0.3.44.*` — what is specific to the two formats the engine in
+`internal/service/security/token` implements, allocated in the service layer
+and declared here since ADR 0160, with their values unchanged. Every code of
+the domain is in this package; the engine declares none.
 
 ## The decision this package exists to make
 
@@ -40,8 +44,8 @@ so no call site can request it and no configuration can enable it.
 | `token.go` | `Algorithm` (+ `String` / `Known`), `Issuer`, `Verifier` |
 | `claims.go` | the seven `Claim*` name constants, `MaxPrivateClaims`, `IsRegisteredClaim`, the immutable `ClaimsValue` + `NewClaimsValue` + accessors + the redacting `String`/`GoString` |
 | `claims_with.go` | the copy-on-write `With*` setters, including `WithPrivateRaw` |
-| `codes.go` | `Code*` constants — range 0.2.13.\* |
-| `errors.go` | `Malformed` (.1), `AlgorithmNone` (.2), `AlgorithmMismatch` (.3), `SignatureInvalid` (.4), `Expired` (.5), `NotYetValid` (.6), `ExpiryRequired` (.7), `AudienceMismatch` (.8), `IssuerMismatch` (.9), `TooLarge` (.10), `TooDeep` (.11), `KeyUnsuitable` (.12), `PolicyMisconfigured` (.13), `IssueFailed` (.14), `ClaimNameInvalid` (.15), `LifetimeTooLong` (.16) |
+| `codes.go` | `Code*` constants — ranges 0.2.13.\* (verdicts) and 0.3.44.\* (the formats' refusals) |
+| `errors.go` | `Malformed` (.1), `AlgorithmNone` (.2), `AlgorithmMismatch` (.3), `SignatureInvalid` (.4), `Expired` (.5), `NotYetValid` (.6), `ExpiryRequired` (.7), `AudienceMismatch` (.8), `IssuerMismatch` (.9), `TooLarge` (.10), `TooDeep` (.11), `KeyUnsuitable` (.12), `PolicyMisconfigured` (.13), `IssueFailed` (.14), `ClaimNameInvalid` (.15), `LifetimeTooLong` (.16); and the formats' refusals, raised only by the engine, whose `Private` names it — `HeaderUnsupported` (0.3.44.1), `KeyNotFound` (.2), `KeyIDMissing` (.3), `KeyIDAmbiguous` (.4), `FooterMismatch` (.5), `SchemeUnsupported` (.6), `DuplicateMember` (.7) |
 
 ## Conventions
 

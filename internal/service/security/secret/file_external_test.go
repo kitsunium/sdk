@@ -70,7 +70,7 @@ func TestFileStoreRefusesADirectoryOthersCanRead(t *testing.T) {
 			t.Fatalf("chmod: %v", err)
 		}
 		_, err := svcsecret.NewFile(svcsecret.FileConfig{Dir: dir})
-		if !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+		if !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 			t.Fatalf("NewFile(%o) = %v, want InvalidConfig", c.mode, err)
 		}
 		info, statErr := os.Stat(dir)
@@ -90,14 +90,14 @@ func TestFileStoreRefusesADirectoryOthersCanRead(t *testing.T) {
 // need no directory at all.
 func TestFileStoreRefusesAnUnusableConfig(t *testing.T) {
 	t.Parallel()
-	if _, err := svcsecret.NewFile(svcsecret.FileConfig{}); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+	if _, err := svcsecret.NewFile(svcsecret.FileConfig{}); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 		t.Errorf("NewFile(no Dir) = %v, want InvalidConfig", err)
 	}
 	file := filepath.Join(t.TempDir(), "not-a-dir")
 	if err := os.WriteFile(file, nil, 0o600); err != nil {
 		t.Fatalf("write: %v", err)
 	}
-	if _, err := svcsecret.NewFile(svcsecret.FileConfig{Dir: file}); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+	if _, err := svcsecret.NewFile(svcsecret.FileConfig{Dir: file}); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 		t.Errorf("NewFile(a file) = %v, want InvalidConfig", err)
 	}
 }
@@ -178,11 +178,11 @@ func TestFileStoreRefusesARecordItCannotRead(t *testing.T) {
 		}
 	}
 	otherKey := newFileStore(t, svcsecret.FileConfig{Dir: dir, Key: testKey(t)})
-	if _, err := otherKey.Get(t.Context(), "alpha"); !errs.HasCode(err, svcsecret.CodeRecordUnreadable) {
+	if _, err := otherKey.Get(t.Context(), "alpha"); !errs.HasCode(err, coresecret.CodeRecordUnreadable) {
 		t.Errorf("Get under another key = %v, want RecordUnreadable", err)
 	}
 	noKey := newFileStore(t, svcsecret.FileConfig{Dir: dir})
-	if _, err := noKey.Get(t.Context(), "alpha"); !errs.HasCode(err, svcsecret.CodeRecordUnreadable) {
+	if _, err := noKey.Get(t.Context(), "alpha"); !errs.HasCode(err, coresecret.CodeRecordUnreadable) {
 		t.Errorf("Get without a key = %v, want RecordUnreadable", err)
 	}
 	//: beta's record copied over alpha's name must not answer for alpha.
@@ -193,11 +193,11 @@ func TestFileStoreRefusesARecordItCannotRead(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "alpha.secret"), beta, 0o600); err != nil {
 		t.Fatalf("overwrite alpha: %v", err)
 	}
-	if _, err := writer.Get(t.Context(), "alpha"); !errs.HasCode(err, svcsecret.CodeRecordUnreadable) {
+	if _, err := writer.Get(t.Context(), "alpha"); !errs.HasCode(err, coresecret.CodeRecordUnreadable) {
 		t.Errorf("Get of a record renamed from beta = %v, want RecordUnreadable", err)
 	}
 	//: and a Put never writes over a record the store cannot read.
-	if _, err := writer.Put(t.Context(), "alpha", coresecret.FromString("x")); !errs.HasCode(err, svcsecret.CodeRecordUnreadable) {
+	if _, err := writer.Put(t.Context(), "alpha", coresecret.FromString("x")); !errs.HasCode(err, coresecret.CodeRecordUnreadable) {
 		t.Errorf("Put over an unreadable record = %v, want RecordUnreadable", err)
 	}
 	//: the refusal names the secret and quotes no byte of the record.

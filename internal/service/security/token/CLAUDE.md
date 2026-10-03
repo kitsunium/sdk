@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:00:30Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/token/
 
 ## Purpose
@@ -10,9 +10,11 @@ them — HMAC-SHA-256 from `service/crypto/mac/hmacsha2`, Ed25519 from
 `service/crypto/sign/ed25519sig`, key material from `service/crypto/key/jwk`. No
 dependency is added to `internal/service`.
 
-Code range: `0.3.44.*` (ADR 0042). The domain verdicts a caller matches on live
-in `core/security/token` (`0.2.13.*`); this block holds only what is specific to the two
-formats — header parameters, key-set selection, PASETO framing.
+Codes: none declared here. The domain verdicts a caller matches on
+(`0.2.13.*`) and what is specific to the two formats — header parameters,
+key-set selection, PASETO framing (`0.3.44.*`, allocated here — ADR 0042) — are
+both declared in `core/security/token` (ADR 0160) and only raised here; the
+`0.3.44.*` values were kept when their declarations moved.
 
 ## The decision this package exists to make
 
@@ -63,7 +65,6 @@ exactly as trustworthy as the key itself.
 | `jwkbridge.go` | `NewVerifierFromJWK`, `NewSetVerifier`, `setVerifier`, `indexByKid` (the set is bound ONCE, at construction — see §Cost) + `selectable` (a set no token could verify against is refused `POLICY_MISCONFIGURED`) |
 | `bound_key_value.go` | `boundKeyValue` — one JWK Set member with its verifying binding already derived, and whether that derivation succeeded |
 | `token_compliance.go` | the compile-time contract assertions |
-| `codes.go` / `errors.go` | `Code*` + `HeaderUnsupported` (.1), `KeyNotFound` (.2), `KeyIDMissing` (.3), `KeyIDAmbiguous` (.4), `FooterMismatch` (.5), `SchemeUnsupported` (.6), `DuplicateMember` (.7) |
 
 ## RFC 8725 coverage — what is addressed, and what is not
 
@@ -288,6 +289,12 @@ Two more PASETO decisions:
 - Do not fetch a JWKS here. Same rule as `service/crypto/key/jwk`: retrieval is a
   connector with its own failure modes (SSRF, TTL, retries), and none of them
   are token concerns.
+- Do not declare an error code here — an `errs.Define` or a `Code*` constant.
+  Every code of the domain is declared in `internal/core/security/token`, at
+  this package's path in the core (ADR 0160); a new format-specific refusal
+  gets its code and sentinel there, in the range this package already owns
+  (`0.3.44.*`). A `WrapParams` built here to wrap a stdlib cause names a core
+  code, as `es256.go` does with `CodeIssueFailed`.
 
 ## Verification
 

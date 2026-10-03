@@ -299,11 +299,11 @@ func TestDuplicateMembersAreRefused(t *testing.T) {
 		return mac.Sum(nil)
 	}
 	dupPayload := forge(`{"alg":"HS256","typ":"JWT"}`, `{"aud":"a","aud":"b"}`, sign)
-	if _, verr := verifier.Verify(dupPayload); !errs.HasCode(verr, svctoken.CodeDuplicateMember) {
+	if _, verr := verifier.Verify(dupPayload); !errs.HasCode(verr, coretoken.CodeDuplicateMember) {
 		t.Fatalf("duplicate claim: got %v, want DUPLICATE_MEMBER", verr)
 	}
 	dupHeader := forge(`{"alg":"HS256","alg":"none"}`, `{"sub":"a"}`, sign)
-	if _, verr := verifier.Verify(dupHeader); !errs.HasCode(verr, svctoken.CodeDuplicateMember) {
+	if _, verr := verifier.Verify(dupHeader); !errs.HasCode(verr, coretoken.CodeDuplicateMember) {
 		t.Fatalf("duplicate header member: got %v, want DUPLICATE_MEMBER", verr)
 	}
 }
@@ -395,7 +395,7 @@ func TestCritHeaderIsRefused(t *testing.T) {
 			mac.Write([]byte(input))
 			return mac.Sum(nil)
 		})
-	if _, verr := verifier.Verify(forged); !errs.HasCode(verr, svctoken.CodeHeaderUnsupported) {
+	if _, verr := verifier.Verify(forged); !errs.HasCode(verr, coretoken.CodeHeaderUnsupported) {
 		t.Fatalf("crit header: got %v, want HEADER_UNSUPPORTED", verr)
 	}
 }

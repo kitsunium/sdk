@@ -94,12 +94,12 @@ func TestSubjectKeysAPrunedVersionIsAFaultNotAnErasure(t *testing.T) {
 	if pruneErr := f.roots.Prune(t.Context(), rootName, 1); pruneErr != nil {
 		t.Fatalf("Prune: %v", pruneErr)
 	}
-	openFails(t, keys, box, svcsecret.CodeSubjectKeyUnreadable)
-	if _, sealErr := keys.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, svcsecret.CodeSubjectKeyUnreadable) {
+	openFails(t, keys, box, coresecret.CodeSubjectKeyUnreadable)
+	if _, sealErr := keys.Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Seal = %v, want SubjectKeyUnreadable", sealErr)
 	}
 	report, err := keys.Rewrap(t.Context())
-	if !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) || report.Unreadable != 1 {
+	if !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) || report.Unreadable != 1 {
 		t.Fatalf("Rewrap = (%+v, %v), want one unreadable key and SubjectKeyUnreadable", report, err)
 	}
 	if destroyed, destroyErr := keys.Destroy(t.Context(), "user:1"); !destroyed || destroyErr != nil {
@@ -220,7 +220,7 @@ func TestSubjectKeysRewrapNeverResurrectsADestroyedKey(t *testing.T) {
 	if entries := filed(t, f.store); len(entries) != 0 {
 		t.Fatalf("the re-wrap brought back %d destroyed key(s)", len(entries))
 	}
-	openFails(t, f.process(t, 0), box, svcsecret.CodeKeyDestroyed)
+	openFails(t, f.process(t, 0), box, coresecret.CodeKeyDestroyed)
 }
 
 // TestSubjectKeysABackupOpensOnlyWhileItsRootVersionIsKept pins the bound on
@@ -261,7 +261,7 @@ func TestSubjectKeysABackupOpensOnlyWhileItsRootVersionIsKept(t *testing.T) {
 		t.Fatalf("Prune: %v", err)
 	}
 	restore()
-	openFails(t, keys, box, svcsecret.CodeSubjectKeyUnreadable)
+	openFails(t, keys, box, coresecret.CodeSubjectKeyUnreadable)
 }
 
 // TestSubjectKeysOldestRoot pins the question a rotation asks: 0 on an empty
@@ -284,7 +284,7 @@ func TestSubjectKeysOldestRoot(t *testing.T) {
 		t.Fatalf("OldestRoot = (%d, %v), want (1, nil)", oldest, err)
 	}
 	report, err := keys.Rewrap(t.Context())
-	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Rewrapped: 1, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Rewrapped: 1, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap = (%+v, %v), want the garbage counted unreadable", report, err)
 	}
 	if oldest, err := keys.OldestRoot(t.Context()); oldest != 2 || err != nil {
@@ -334,7 +334,7 @@ func TestSubjectKeysRewrapWithoutARoot(t *testing.T) {
 	if _, putErr := roots.Put(t.Context(), rootName, coresecret.FromString("a password, not a key")); putErr != nil {
 		t.Fatalf("Put: %v", putErr)
 	}
-	if _, rewrapErr := keys.Rewrap(t.Context()); !errs.HasCode(rewrapErr, svcsecret.CodeKeyMaterialInvalid) {
+	if _, rewrapErr := keys.Rewrap(t.Context()); !errs.HasCode(rewrapErr, coresecret.CodeKeyMaterialInvalid) {
 		t.Fatalf("Rewrap under a password = %v, want KeyMaterialInvalid", rewrapErr)
 	}
 }
@@ -363,7 +363,7 @@ func TestSubjectKeysRewrapSkipsAnUnusableOldVersion(t *testing.T) {
 	}
 	box := seal(t, keys, "user:1", "value")
 	report, err := keys.Rewrap(t.Context())
-	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap = (%+v, %v), want the key under the password counted unreadable", report, err)
 	}
 	mustOpen(t, keys, box, "value")

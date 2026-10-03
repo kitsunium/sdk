@@ -30,7 +30,7 @@ type RewrapValue struct {
 	// wrapped under a version no longer kept, under another root secret or
 	// for another purpose, altered, or not one key long — and the entries
 	// whose subject is outside the grammar. They are left as they are, and
-	// the pass returns [SubjectKeyUnreadable].
+	// the pass returns [coresecret.SubjectKeyUnreadable].
 	Unreadable int
 }
 
@@ -64,7 +64,7 @@ const (
 // current and left for that pass.
 //
 // It returns the report with a nil error when every key is under the newest
-// version, the report with [SubjectKeyUnreadable] when some did not unwrap —
+// version, the report with [coresecret.SubjectKeyUnreadable] when some did not unwrap —
 // they are counted, the pass goes on without them — and the report so far with
 // the store's or the context's error when the pass could not finish.
 func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error) {
@@ -99,7 +99,7 @@ func (s *SubjectKeys) Rewrap(ctx context.Context) (report RewrapValue, err error
 	//: keys that stay under versions nothing may prune.
 	if report.Unreadable > 0 {
 		//: SubjectKeyUnreadable, with the count; the report says the rest.
-		return report, errs.Wrap(SubjectKeyUnreadable, errs.WrapParams{},
+		return report, errs.Wrap(coresecret.SubjectKeyUnreadable, errs.WrapParams{},
 			errs.Int("unreadable", report.Unreadable), errs.Int("root", report.Root))
 	}
 	//: every key is under the newest version.

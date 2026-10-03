@@ -84,7 +84,7 @@ func TestSubjectKeysARootOutageIsRetryableNotUnreadable(t *testing.T) {
 	}
 	keys := engineOver(t, downRoot, f.store)
 	_, openErr := keys.Open(t.Context(), box)
-	if !errs.HasCode(openErr, coresecret.CodeStoreUnavailable) || errs.HasCode(openErr, svcsecret.CodeSubjectKeyUnreadable) {
+	if !errs.HasCode(openErr, coresecret.CodeStoreUnavailable) || errs.HasCode(openErr, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Open during a root outage = %v, want StoreUnavailable only", openErr)
 	}
 }
@@ -104,7 +104,7 @@ func TestSubjectKeysABoxTheRootSealedIsNeverAKey(t *testing.T) {
 	if inserted, insertErr := f.store.Insert(t.Context(), "user:1", planted); !inserted || insertErr != nil {
 		t.Fatalf("Insert = (%v, %v)", inserted, insertErr)
 	}
-	if _, sealErr := f.process(t, 0).Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, svcsecret.CodeSubjectKeyUnreadable) {
+	if _, sealErr := f.process(t, 0).Seal(t.Context(), "user:1", []byte("x")); !errs.HasCode(sealErr, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Seal over a planted key = %v, want SubjectKeyUnreadable", sealErr)
 	}
 }
@@ -162,7 +162,7 @@ func TestSubjectKeysAKeyGoneDuringARereadIsDestroyed(t *testing.T) {
 	if _, err := writer.Destroy(t.Context(), "user:1"); err != nil {
 		t.Fatalf("Destroy: %v", err)
 	}
-	openFails(t, reader, fresh, svcsecret.CodeKeyDestroyed)
+	openFails(t, reader, fresh, coresecret.CodeKeyDestroyed)
 }
 
 // TestSubjectKeysRewrapReportsWhatItDidBeforeAFailure pins that a pass the
@@ -206,7 +206,7 @@ func TestSubjectKeysRewrapReportsWhatItDidBeforeAFailure(t *testing.T) {
 		},
 	}
 	report, err = engineOver(t, f.root, stray).Rewrap(t.Context())
-	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Rewrapped: 1, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+	if report != (svcsecret.RewrapValue{Root: 2, Current: 1, Rewrapped: 1, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap over a stray entry = (%+v, %v), want it counted unreadable and the rest moved", report, err)
 	}
 }
@@ -227,12 +227,12 @@ func TestSubjectKeysRewrapCountsAnAlteredKey(t *testing.T) {
 	}
 	//: under the newest version already: a header alone would call it current.
 	report, err := keys.Rewrap(t.Context())
-	if report != (svcsecret.RewrapValue{Root: 1, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+	if report != (svcsecret.RewrapValue{Root: 1, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap before a rotation = (%+v, %v), want the altered key counted unreadable, not current", report, err)
 	}
 	putRandomVersion(t, f.roots, rootName)
 	report, err = keys.Rewrap(t.Context())
-	if report != (svcsecret.RewrapValue{Root: 2, Unreadable: 1}) || !errs.HasCode(err, svcsecret.CodeSubjectKeyUnreadable) {
+	if report != (svcsecret.RewrapValue{Root: 2, Unreadable: 1}) || !errs.HasCode(err, coresecret.CodeSubjectKeyUnreadable) {
 		t.Fatalf("Rewrap = (%+v, %v), want the altered key counted unreadable", report, err)
 	}
 }
@@ -363,7 +363,7 @@ func TestOldestRootCountsOnlyKeysThatOpen(t *testing.T) {
 		OnRotate: func(coresecret.VersionValue) {
 			//: the live key moves on; the lost ones are reported, as they must be.
 			report, rewrapErr := keys.Rewrap(context.Background())
-			if report.Rewrapped != 1 || !errs.HasCode(rewrapErr, svcsecret.CodeSubjectKeyUnreadable) {
+			if report.Rewrapped != 1 || !errs.HasCode(rewrapErr, coresecret.CodeSubjectKeyUnreadable) {
 				t.Errorf("Rewrap = (%+v, %v), want the live key moved and the lost ones reported", report, rewrapErr)
 			}
 		},

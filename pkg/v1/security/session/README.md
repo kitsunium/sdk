@@ -144,26 +144,26 @@ var (
     FixationRefused = coresession.FixationRefused
     // RecordCorrupt is returned by the file store when a record could not be
     // read back — tampered, truncated, wrong key, or filed under another digest.
-    RecordCorrupt = svcsession.RecordCorrupt
+    RecordCorrupt = coresession.RecordCorrupt
     // DirectoryUnsafe is returned when the store location is readable beyond
     // its owner, or when the filesystem accepted a 0600 request without
     // enforcing it.
-    DirectoryUnsafe = svcsession.DirectoryUnsafe
+    DirectoryUnsafe = coresession.DirectoryUnsafe
     // LockFailed is returned when the store-wide exclusive lock could not be
     // taken; the operation is refused rather than run unserialised.
-    LockFailed = svcsession.LockFailed
+    LockFailed = coresession.LockFailed
     // PayloadTooLarge is returned by Save for a payload above the store's caps,
     // and by Regenerate for a subject longer than 4096 bytes — refused before
     // anything is minted, so the old session is untouched.
-    PayloadTooLarge = svcsession.PayloadTooLarge
+    PayloadTooLarge = coresession.PayloadTooLarge
     // InvalidPurpose is returned by NewSealer for an empty purpose.
-    InvalidPurpose = svcsession.InvalidPurpose
+    InvalidPurpose = coresession.InvalidPurpose
     // PathRedirected is returned by NewFileStore when the store's location is
     // reached through a link it refuses to follow: one at the lock file's
     // name, one at a component of FileConfig.Dir planted in a directory any
     // account can write, or a Dir that stopped naming the directory the store
     // had just opened. No retry helps; a human looks at the path.
-    PathRedirected = svcsession.PathRedirected
+    PathRedirected = coresession.PathRedirected
     // UnsupportedPlatform is returned by NewFileStore on a platform without the
     // mechanics its guarantees rest on. It is the SDK-wide sentinel, shared
     // with pkg/v1/proc (ADR 0018).

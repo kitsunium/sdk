@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcvfs "github.com/kitsunium/sdk/internal/service/data/vfs"
 )
@@ -63,7 +64,7 @@ func Test_checkHeldRoot(t *testing.T) {
 		if c.valid && heldErr != nil {
 			t.Fatalf("%s: checkHeldRoot = %v, want nil", c.name, heldErr)
 		}
-		if !c.valid && !errs.HasCode(heldErr, CodeInvalidConfig) {
+		if !c.valid && !errs.HasCode(heldErr, coresecret.CodeInvalidConfig) {
 			t.Fatalf("%s: checkHeldRoot = %v, want INVALID_CONFIG", c.name, heldErr)
 		}
 	}

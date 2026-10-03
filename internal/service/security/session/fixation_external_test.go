@@ -313,7 +313,7 @@ func TestASubjectLongerThanTheFrameHoldsIsRefused(t *testing.T) {
 			}
 			//: one byte past it: refused, with nothing to show for it.
 			refused, refusedErr := store.Regenerate(ctx, bound.ID(), atCap+"s")
-			if !errs.HasCode(refusedErr, svcsession.CodePayloadTooLarge) {
+			if !errs.HasCode(refusedErr, coresession.CodePayloadTooLarge) {
 				t.Fatalf("Regenerate(4097-byte subject) = %v, want CodePayloadTooLarge", refusedErr)
 			}
 			if !refused.ID().IsZero() {

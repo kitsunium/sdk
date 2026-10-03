@@ -43,3 +43,35 @@ func TestTheFacadeRedactsAValueATextAndARecord(t *testing.T) {
 		t.Error("the default words are not in force")
 	}
 }
+
+// fixedRedactor is the double a consumer writes: it embeds the port and
+// answers the one method the code under test calls, with no engine behind it.
+type fixedRedactor struct{ redact.Redactor }
+
+// Text shows every text as the placeholder.
+func (fixedRedactor) Text(string, int) string {
+	//: whatever was asked, nothing of it is shown.
+	return redact.Placeholder
+}
+
+// TestADoubleStandsWhereARedactorIsExpected pins what the port is for (ADR
+// 0160): code that accepts a Redactor takes New's engine and a consumer's own
+// double alike, through the facade alone.
+func TestADoubleStandsWhereARedactorIsExpected(t *testing.T) {
+	t.Parallel()
+	shown := func(r redact.Redactor) string { return r.Text("https://svc:hunter2@queue.local", 64) }
+	for _, tc := range []struct {
+		name     string
+		redactor redact.Redactor
+	}{
+		{"the SDK's engine", redact.New(redact.Config{})},
+		{"a consumer's double", fixedRedactor{}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := shown(tc.redactor); strings.Contains(got, "hunter2") || !strings.Contains(got, redact.Placeholder) {
+				t.Errorf("Text() through the port = %q", got)
+			}
+		})
+	}
+}

@@ -12,6 +12,7 @@ import (
 	"testing"
 
 	corecrypto "github.com/kitsunium/sdk/internal/core/crypto"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcsecret "github.com/kitsunium/sdk/internal/service/security/secret"
 )
@@ -86,7 +87,7 @@ func TestKeyFileRefusesWhatIsNotOneKey(t *testing.T) {
 			t.Fatalf("write: %v", err)
 		}
 		_, err := svcsecret.KeyFile(path)
-		if !errs.HasCode(err, svcsecret.CodeKeyFileInvalid) {
+		if !errs.HasCode(err, coresecret.CodeKeyFileInvalid) {
 			t.Fatalf("%s: KeyFile = %v, want KEY_FILE_INVALID", c.name, err)
 		}
 		if strings.Contains(err.Error()+errs.PrivateOf(err)+fieldText(err), "kkkk") {
@@ -117,14 +118,14 @@ func TestKeyFileRefusesAFileOthersCanRead(t *testing.T) {
 	if err := os.Chmod(readable, 0o640); err != nil {
 		t.Fatalf("chmod: %v", err)
 	}
-	if _, err := svcsecret.KeyFile(readable); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+	if _, err := svcsecret.KeyFile(readable); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 		t.Errorf("KeyFile(0640) = %v, want INVALID_CONFIG", err)
 	}
 	assertMode(t, readable, 0o640)
-	if _, err := svcsecret.KeyFile(dir); !errs.HasCode(err, svcsecret.CodeKeyFileInvalid) {
+	if _, err := svcsecret.KeyFile(dir); !errs.HasCode(err, coresecret.CodeKeyFileInvalid) {
 		t.Errorf("KeyFile(a directory) = %v, want KEY_FILE_INVALID", err)
 	}
-	if _, err := svcsecret.KeyFile(""); !errs.HasCode(err, svcsecret.CodeInvalidConfig) {
+	if _, err := svcsecret.KeyFile(""); !errs.HasCode(err, coresecret.CodeInvalidConfig) {
 		t.Errorf("KeyFile(\"\") = %v, want INVALID_CONFIG", err)
 	}
 	existing := filepath.Join(dir, "existing.key")

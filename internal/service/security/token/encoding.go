@@ -173,7 +173,7 @@ func checkNoDuplicateMembers(raw []byte) error {
 		//: the check this function exists for.
 		if _, dup := seen[key]; dup {
 			//: refuse; never "keep the last one".
-			return DuplicateMember
+			return coretoken.DuplicateMember
 		}
 		seen[key] = struct{}{}
 		//: skip the value without interpreting it (depth is already bounded).

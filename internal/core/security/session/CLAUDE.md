@@ -8,7 +8,11 @@ redacting `ID`, and the immutable `SessionValue` a store hands back. The 14th
 core sibling, admitted by **ADR 0045**. Both concrete stores — memory and file —
 and the AEAD sealer live in `internal/service/security/session`.
 
-Code range: `0.2.14.*` (ADR 0045).
+Code ranges: `0.2.14.*` — the port's verdicts (ADR 0045) — and `0.3.46.*` —
+the refusals specific to the engines in `internal/service/security/session`,
+allocated in the service layer and declared here since ADR 0160, with their
+values unchanged. Every code of the domain is in this package; the engines
+declare none.
 
 ## Contents
 
@@ -19,8 +23,8 @@ Code range: `0.2.14.*` (ADR 0045).
 | `id.go` | `ID` + `IDLen` + `NewID` / `ParseID` (strict base64url, one spelling); `Reveal` / `Digest` / `Equal` / `IsZero` / redacting `String` + `GoString` |
 | `session_value.go` | `SessionValue` + `NewSessionValue` (its only producer) — accessors, copy-on-write `Set` / `Delete`, `ExpiresAt` / `LiveAt`, shape-only `String` |
 | `state_value.go` | `StateValue` — the exported description a third-party `Store` hands to `NewSessionValue` |
-| `codes.go` | `Code*` constants — range 0.2.14.* |
-| `errors.go` | `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused` |
+| `codes.go` | `Code*` constants — ranges 0.2.14.* (verdicts) and 0.3.46.* (the engines' refusals) |
+| `errors.go` | the verdicts `NotFound` / `Expired` / `InvalidID` / `InvalidConfig` / `IdentifierCollision` / `EntropyFailed` / `StoreUnavailable` / `SealInvalid` / `FixationRefused`, and the engines' refusals `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` — raised only by `internal/service/security/session`, whose `Private` names it |
 
 ## A session is not a token — say it before anything else
 

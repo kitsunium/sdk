@@ -142,7 +142,7 @@ func TestPasetoFooterIsAuthenticatedAndExpected(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPasetoV4Verifier: %v", err)
 	}
-	if _, verr := noFooter.Verify(footered); !errs.HasCode(verr, svctoken.CodeFooterMismatch) {
+	if _, verr := noFooter.Verify(footered); !errs.HasCode(verr, coretoken.CodeFooterMismatch) {
 		t.Fatalf("unexpected footer: got %v, want FOOTER_MISMATCH", verr)
 	}
 }
@@ -260,7 +260,7 @@ func TestUnsupportedPasetoSchemesAreNamed(t *testing.T) {
 		svctoken.PasetoVerifierConfig{AllowMissingExpiry: true})
 	for _, scheme := range []string{"v4.local", "v3.local", "v2.public", "v1.local"} {
 		_, verr := verifier.Verify(scheme + "." + b64.EncodeToString([]byte("payload")))
-		if !errs.HasCode(verr, svctoken.CodeSchemeUnsupported) {
+		if !errs.HasCode(verr, coretoken.CodeSchemeUnsupported) {
 			t.Errorf("%s: got %v, want SCHEME_UNSUPPORTED", scheme, verr)
 		}
 	}

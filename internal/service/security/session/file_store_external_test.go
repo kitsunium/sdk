@@ -93,7 +93,7 @@ func TestAPreExistingPermissiveDirectoryIsRefused(t *testing.T) {
 	if errs.HasReason(err, "UNSUPPORTED_PLATFORM") {
 		t.Skip("file store has no native mechanic on this platform")
 	}
-	if !errs.HasCode(err, svcsession.CodeDirectoryUnsafe) {
+	if !errs.HasCode(err, coresession.CodeDirectoryUnsafe) {
 		t.Fatalf("NewFileStore(0755 dir) = %v, want CodeDirectoryUnsafe", err)
 	}
 	//: and it stayed 0755 — the refusal did not quietly repair it.
@@ -217,7 +217,7 @@ func TestARecordIsBoundToItsOwnFilename(t *testing.T) {
 	//: the identifier the attacker already holds now names a file whose
 	//: contents say "admin" — and it does not open.
 	_, loadErr := fixture.store.Load(ctx, first.ID())
-	if !errs.HasCode(loadErr, svcsession.CodeRecordCorrupt) {
+	if !errs.HasCode(loadErr, coresession.CodeRecordCorrupt) {
 		t.Fatalf("Load after a record swap = %v, want CodeRecordCorrupt", loadErr)
 	}
 }
@@ -259,7 +259,7 @@ func TestATamperedOrForeignRecordIsRefused(t *testing.T) {
 			_, loadErr := fixture.store.Load(ctx, fresh.ID())
 			//: one verdict for every cause: distinguishing them would tell
 			//: whoever arranged this which half of the attempt already worked.
-			if !errs.HasCode(loadErr, svcsession.CodeRecordCorrupt) {
+			if !errs.HasCode(loadErr, coresession.CodeRecordCorrupt) {
 				t.Errorf("Load = %v, want CodeRecordCorrupt", loadErr)
 			}
 		})
@@ -342,7 +342,7 @@ func TestAnotherKeyReadsNothing(t *testing.T) {
 		t.Fatalf("NewFileStore: %v", err)
 	}
 	//: the identifier is right; the key is not.
-	if _, loadErr := intruder.Load(ctx, fresh.ID()); !errs.HasCode(loadErr, svcsession.CodeRecordCorrupt) {
+	if _, loadErr := intruder.Load(ctx, fresh.ID()); !errs.HasCode(loadErr, coresession.CodeRecordCorrupt) {
 		t.Errorf("Load under another key = %v, want CodeRecordCorrupt", loadErr)
 	}
 }

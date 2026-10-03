@@ -1,11 +1,13 @@
-// Package authz — declares the sentinel *errs.Error port outcomes. Each var's
-// name equals its errs.Define Reason in SCREAMING_SNAKE form.
+// Package authz — declares the sentinel *errs.Error outcomes: the four
+// verdicts of the port, and the three construction refusals of the engine in
+// internal/service/security/authz (ADR 0160). Each var's name equals its
+// errs.Define Reason in SCREAMING_SNAKE form.
 package authz
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"
 
 // httpForbidden is RFC 9110 403 — the request was understood and the server
-// refuses to authorize it. It is the status EVERY outcome in this file carries,
+// refuses to authorize it. It is the status EVERY verdict of the port carries,
 // including the two that are really evaluation faults, because the alternative
 // (500 for an unevaluable rule) tells a client to retry a request that will be
 // refused identically forever, and tells an attacker which of their inputs the
@@ -18,12 +20,13 @@ const httpForbidden int = 403
 
 // exitConfig matches sysexits EX_CONFIG (78). A policy that was assembled
 // wrong is a permanent wiring fault: the same composition will refuse every
-// request forever, and the fix is a code change, never a retry.
+// request forever, and the fix is a code change, never a retry. The engine's
+// three construction refusals carry it for the same reason.
 const exitConfig int = 78
 
-// Every sentinel below carries the SAME Public sentence, "Access to the
-// requested resource is denied", spelled out at each call site because the
-// registry audit requires the argument to be a string literal.
+// Every verdict in the first block below carries the SAME Public sentence,
+// "Access to the requested resource is denied", spelled out at each call site
+// because the registry audit requires the argument to be a string literal.
 //
 // The repetition is the point, and it is a security property rather than an
 // oversight: a refusal message that explains itself is a description of the
@@ -97,5 +100,43 @@ var (
 		"Access to the requested resource is denied",
 		"core/security/authz: a policy could not be evaluated as assembled — a nil member, or a decision outside allow/deny/abstain; the fields carry the position and the value",
 		errs.WithHTTPStatus(httpForbidden),
+		errs.WithExitCode(exitConfig))
+
+	// The engine's construction refusals (0.3.56.*). They are raised by
+	// internal/service/security/authz while a policy is being ASSEMBLED — their
+	// Private names that package, the one that raises them — and declared here
+	// since ADR 0160, so every code of the domain is in one place.
+	//
+	// These three carry a Public that describes a server-side configuration
+	// fault rather than the neutral refusal sentence the verdicts above use.
+	// That is deliberate and is not a leak: a construction error is returned to
+	// the process that is starting up, on a path where no request exists yet
+	// and no client is listening. It never becomes a response, so it may be
+	// specific. Every one is a permanent wiring fault — the same arguments are
+	// refused forever, and the fix is a code change at the call site — so all
+	// three carry EX_CONFIG.
+
+	// GrantInvalid is returned by NewRBAC for a grant table that could never
+	// grant correctly. The fields name the offending row and role.
+	GrantInvalid = errs.Define(CodeGrantInvalid, "GRANT_INVALID",
+		"The role grant table is not usable and was refused",
+		"service/security/authz: NewRBAC received a grant table it cannot honour; the fields carry the detail, the row index and the role",
+		errs.WithExitCode(exitConfig))
+
+	// RuleInvalid is returned by NewABAC for a rule set that could never
+	// decide correctly. The fields name the offending rule and its position.
+	RuleInvalid = errs.Define(CodeRuleInvalid, "RULE_INVALID",
+		"The attribute rule set is not usable and was refused",
+		"service/security/authz: NewABAC received a rule it cannot honour; the fields carry the detail, the rule index and the rule name",
+		errs.WithExitCode(exitConfig))
+
+	// ConditionInvalid is returned by a condition constructor whose arguments
+	// it cannot honour. It is never an evaluation outcome: an attribute that
+	// is absent or of the wrong kind is AttributeMissing or
+	// AttributeKindMismatch, and both of those are refusals of a REQUEST,
+	// while this is a refusal of the RULE.
+	ConditionInvalid = errs.Define(CodeConditionInvalid, "CONDITION_INVALID",
+		"The condition cannot be built from the given arguments",
+		"service/security/authz: a condition constructor received an empty key, an empty member, a nil condition or an empty set; the fields carry the detail",
 		errs.WithExitCode(exitConfig))
 )

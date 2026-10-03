@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:00:00Z -->
+<!-- updated: 2026-10-03T07:14:15Z -->
 # internal/service/security/session/
 
 ## Purpose
@@ -9,9 +9,12 @@ AEAD `Sealer` that renders an identifier as a cookie value. Composes
 `internal/core/crypto` (AES-256-GCM), `internal/kernel/clock` and
 `internal/kernel/fs/pathchain`; it reimplements none of them.
 
-Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
-`0.2.14.*`, and the file store reuses `internal/core/proc.UnsupportedPlatform`
-(`0.2.6.1`) exactly as ADR 0018 §(a) prescribes.
+Codes: none declared here. The engines' own refusals (`0.3.46.*`, allocated
+here — ADR 0045) and the port's verdicts (`0.2.14.*`) are both declared in
+`internal/core/security/session` (ADR 0160) and only raised here, through
+`wrapAs`; the `0.3.46.*` values were kept when their declarations moved. The
+file store also reuses `internal/core/proc.UnsupportedPlatform` (`0.2.6.1`)
+exactly as ADR 0018 §(a) prescribes.
 
 ## Contents
 
@@ -31,7 +34,6 @@ Code range: `0.3.46.*` (ADR 0045). The stores also emit the core sentinels
 | `file_entry.go` | `openEntry` / `readEntry` — the look before every open and the proof after it, so nothing is read or locked through a link (§The location) |
 | `fsguard_unix.go` / `fsguard_other.go` | the two OS mechanics (`tryLockExclusive` is `LOCK_NB` — ADR 0073), `plantable` (the mode rule, Unix only), and the honest refusal — with the reason Windows is refused, corrected |
 | `sealer.go` | `sealer` + `NewSealer` |
-| `codes.go` / `errors.go` | `RecordCorrupt` / `DirectoryUnsafe` / `LockFailed` / `PayloadTooLarge` / `InvalidPurpose` / `PathRedirected` (`0.3.46.6`) |
 
 ## The two stores
 
@@ -376,6 +378,11 @@ Superseded by ADR 0154 (the charter); ADR 0073 stays as the incident's record, a
   unreachable behind the platform refusal.
 - **Give a link at a record's name its own code.** It is tampering, and it gets
   tampering's one verdict, `RecordCorrupt`.
+- **Declare an error code here** — an `errs.Define` or a `Code*` constant.
+  Every code of the domain is declared in `internal/core/security/session`, at
+  this package's path in the core (ADR 0160); a new refusal of a store or the
+  sealer gets its code and sentinel there, in the range this package already
+  owns (`0.3.46.*`), and is raised here through `wrapAs`.
 
 ## Verification
 

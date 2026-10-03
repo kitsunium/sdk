@@ -96,7 +96,7 @@ func checkChain(dir string) error {
 	return nil
 }
 
-// chainRedirected builds the [PathRedirected] refusal for a component of Dir.
+// chainRedirected builds the [coresession.PathRedirected] refusal for a component of Dir.
 //
 // It names both paths on purpose: Dir is what the operator configured and will
 // search for, and the component is where the redirection actually is — usually
@@ -104,7 +104,7 @@ func checkChain(dir string) error {
 // fields, never the Public string.
 func chainRedirected(dir string, step pathchain.StepValue, observed string) error {
 	//: the remedy is a human looking at the directory, never a retry.
-	return wrapAs(PathRedirected, nil,
+	return wrapAs(coresession.PathRedirected, nil,
 		kerrs.String("path", step.Path),
 		kerrs.String("dir", dir),
 		kerrs.String("kind", kindIndirection),

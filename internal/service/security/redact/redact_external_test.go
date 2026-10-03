@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/security/redact"
 )
@@ -148,7 +149,7 @@ func TestTheBoundIsExactAndTheOutputAlwaysWellFormed(t *testing.T) {
 	if err != nil || whole.Truncated {
 		t.Fatalf("JSON() of the whole = %v, truncated %v", err, whole.Truncated)
 	}
-	for limit := redact.MinBytes; limit <= len(whole.JSON)+4; limit++ {
+	for limit := coreredact.MinBytes; limit <= len(whole.JSON)+4; limit++ {
 		redacted, err := r.JSON(document, limit)
 		if err != nil {
 			t.Fatalf("bound %d: %v", limit, err)
@@ -163,7 +164,7 @@ func TestTheBoundIsExactAndTheOutputAlwaysWellFormed(t *testing.T) {
 			t.Fatalf("bound %d: truncated %v for a %d-byte whole", limit, redacted.Truncated, len(whole.JSON))
 		}
 	}
-	if below, err := r.JSON(document, 1); err != nil || len(below.JSON) > redact.MinBytes {
+	if below, err := r.JSON(document, 1); err != nil || len(below.JSON) > coreredact.MinBytes {
 		t.Errorf("a bound below the floor = %d bytes, %v; want at most MinBytes", len(below.JSON), err)
 	}
 }
@@ -175,7 +176,7 @@ func TestJSONRefusesWhatIsNotOneDocument(t *testing.T) {
 	r := redact.NewRedactor(redact.Config{})
 	for _, document := range []string{`{"password":"hunter2"`, `{"a":1} {"b":2}`, `hunter2`, ``} {
 		_, err := r.JSON([]byte(document), 1024)
-		if !errs.HasCode(err, redact.CodeDocumentInvalid) {
+		if !errs.HasCode(err, coreredact.CodeDocumentInvalid) {
 			t.Errorf("JSON(%q) = %v, want DOCUMENT_INVALID", document, err)
 		}
 		if strings.Contains(err.Error(), "hunter2") || strings.Contains(errs.PrivateOf(err), "hunter2") {
@@ -187,7 +188,7 @@ func TestJSONRefusesWhatIsNotOneDocument(t *testing.T) {
 		Stream chan int
 	}
 	_, err := r.Value(withChannel{Secret: "hunter2"}, 1024)
-	if !errs.HasCode(err, redact.CodeValueUnencodable) || strings.Contains(err.Error(), "hunter2") {
+	if !errs.HasCode(err, coreredact.CodeValueUnencodable) || strings.Contains(err.Error(), "hunter2") {
 		t.Errorf("Value(unencodable) = %v, want VALUE_UNENCODABLE naming no value", err)
 	}
 	for _, field := range errs.FieldsOf(err) {
@@ -231,7 +232,7 @@ func TestTextScrubsBeforeItCuts(t *testing.T) {
 		if strings.Contains(got, "hunter2") || strings.Contains(got, "hunter") {
 			t.Errorf("Text() showed the password: %q", got)
 		}
-		if len(got) > max(c.maxBytes, redact.MinBytes) {
+		if len(got) > max(c.maxBytes, coreredact.MinBytes) {
 			t.Errorf("Text() = %d bytes over a bound of %d", len(got), c.maxBytes)
 		}
 	}

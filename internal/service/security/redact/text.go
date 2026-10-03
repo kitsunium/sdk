@@ -7,6 +7,8 @@ import (
 	"strings"
 	"sync"
 	"unicode/utf8"
+
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 )
 
 // credentials matches the userinfo of a URL: the scheme, then everything up
@@ -39,7 +41,7 @@ func (r *Redactor) scrub(s string) string {
 		return s
 	}
 	//: the scheme is kept, so the reader still sees what kind of URL it was.
-	return credentials().ReplaceAllString(s, "${1}"+Placeholder+"@")
+	return credentials().ReplaceAllString(s, "${1}"+coreredact.Placeholder+"@")
 }
 
 // clip cuts s to at most limit bytes at a rune boundary, the Ellipsis
@@ -50,11 +52,11 @@ func clip(s string, limit int) string {
 		//: unchanged.
 		return s
 	}
-	cut := limit - len(Ellipsis)
+	cut := limit - len(coreredact.Ellipsis)
 	//: back to the start of the rune the cut fell in.
 	for cut > 0 && !utf8.RuneStart(s[cut]) {
 		cut--
 	}
 	//: the prefix and the marker, within the limit.
-	return s[:cut] + Ellipsis
+	return s[:cut] + coreredact.Ellipsis
 }

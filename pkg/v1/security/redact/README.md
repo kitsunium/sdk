@@ -15,6 +15,8 @@ line := r.Text(message, 2<<10)          // URL credentials replaced, cut
 for key, text := range r.Attrs(record.Attrs, 2<<10) { … }
 ```
 
+[Redactor](<#Redactor>) is a port frozen at five methods — Name, Text, JSON, Value and Attrs: [New](<#New>) returns the SDK's implementation, and code that accepts a Redactor can be handed a test double in its place.
+
 ### What counts as a secret
 
 Three rules, each stated so nobody has to guess:
@@ -41,7 +43,7 @@ JSON refuses a document that is not exactly one JSON value \(CodeDocumentInvalid
 - [type Config](<#Config>)
 - [type Document](<#Document>)
 - [type Redactor](<#Redactor>)
-  - [func New\(cfg Config\) \*Redactor](<#New>)
+  - [func New\(cfg Config\) Redactor](<#New>)
 
 
 ## Constants
@@ -49,37 +51,37 @@ JSON refuses a document that is not exactly one JSON value \(CodeDocumentInvalid
 <a name="CodeDocumentInvalid"></a>CodeDocumentInvalid identifies a document that is not one JSON value.
 
 ```go
-const CodeDocumentInvalid errs.Code = svcredact.CodeDocumentInvalid
+const CodeDocumentInvalid errs.Code = coreredact.CodeDocumentInvalid
 ```
 
 <a name="CodeValueUnencodable"></a>CodeValueUnencodable identifies a value encoding/json refuses to encode.
 
 ```go
-const CodeValueUnencodable errs.Code = svcredact.CodeValueUnencodable
+const CodeValueUnencodable errs.Code = coreredact.CodeValueUnencodable
 ```
 
 <a name="Ellipsis"></a>Ellipsis ends whatever was cut to fit a bound, and is counted in it.
 
 ```go
-const Ellipsis string = svcredact.Ellipsis
+const Ellipsis string = coreredact.Ellipsis
 ```
 
 <a name="MinBytes"></a>MinBytes is the smallest bound honoured; a smaller one is raised to it.
 
 ```go
-const MinBytes int = svcredact.MinBytes
+const MinBytes int = coreredact.MinBytes
 ```
 
 <a name="Placeholder"></a>Placeholder replaces every secret.
 
 ```go
-const Placeholder string = svcredact.Placeholder
+const Placeholder string = coreredact.Placeholder
 ```
 
 <a name="Unencodable"></a>Unencodable is the text a log attribute encoding/json refuses is shown as.
 
 ```go
-const Unencodable string = svcredact.Unencodable
+const Unencodable string = coreredact.Unencodable
 ```
 
 ## Variables
@@ -89,14 +91,14 @@ const Unencodable string = svcredact.Unencodable
 ```go
 var (
     // DocumentInvalid refuses a document that is not one JSON value.
-    DocumentInvalid = svcredact.DocumentInvalid
+    DocumentInvalid = coreredact.DocumentInvalid
     // ValueUnencodable refuses a value encoding/json will not encode.
-    ValueUnencodable = svcredact.ValueUnencodable
+    ValueUnencodable = coreredact.ValueUnencodable
 )
 ```
 
 <a name="DefaultWords"></a>
-## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L108>)
+## func [DefaultWords](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L115>)
 
 ```go
 func DefaultWords() []string
@@ -105,7 +107,7 @@ func DefaultWords() []string
 DefaultWords returns the name fragments a Redactor treats as secret when its Config gives none, as a fresh slice a caller may extend.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L89>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L94>)
 
 Config says what a Redactor treats as secret: the name Words, the struct Tag, an extra Field rule, and how an Error in a log attribute is shown. Its zero value is usable.
 
@@ -114,28 +116,28 @@ type Config = svcredact.Config
 ```
 
 <a name="Document"></a>
-## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L98>)
+## type [Document](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L105>)
 
 Document is a JSON document with its secrets replaced — never longer than its bound, always well\-formed — and whether it had to be cut.
 
 ```go
-type Document = svcredact.DocumentValue
+type Document = coreredact.DocumentValue
 ```
 
 <a name="Redactor"></a>
-## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L94>)
+## type [Redactor](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L101>)
 
-Redactor applies one Config: Name, Text, JSON, Value and Attrs. It caches what it learns about each Go type, so build one per configuration and keep it. It is safe for concurrent use.
+Redactor is the redaction port: Name, Text, JSON, Value and Attrs. [New](<#New>) returns the SDK's implementation, which caches what it learns about each Go type, so build one per configuration and keep it; it is safe for concurrent use. The port is frozen at those five methods \(ADR 0039\), so a consumer can accept a Redactor and hand a test double in its place.
 
 ```go
-type Redactor = svcredact.Redactor
+type Redactor = coreredact.Redactor
 ```
 
 <a name="New"></a>
-### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L101>)
+### func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/security/redact/redact.go#L108>)
 
 ```go
-func New(cfg Config) *Redactor
+func New(cfg Config) Redactor
 ```
 
 New returns a Redactor applying cfg.

@@ -8,11 +8,8 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreredact "github.com/kitsunium/sdk/internal/core/security/redact"
 )
-
-// Unencodable is the text an attribute holding a value encoding/json refuses
-// is rendered as.
-const Unencodable string = "[unencodable]"
 
 // floatFormat and floatBits render a float attribute the way strconv's
 // shortest round-trip form does.
@@ -61,7 +58,7 @@ func (r *Redactor) walk(
 		//: a secret's name hides whatever it holds, a whole group included.
 		if key != "" && r.Name(key) {
 			//: one redacted pair.
-			if !yield(key, Placeholder) {
+			if !yield(key, coreredact.Placeholder) {
 				//: the caller stopped.
 				return false
 			}
@@ -165,7 +162,7 @@ func (r *Redactor) renderAny(attr *corelogger.AttrValue, limit int) string {
 	//: encoding/json refused it.
 	if err != nil {
 		//: the marker, never the value.
-		return Unencodable
+		return coreredact.Unencodable
 	}
 	//: its JSON, with its declared secrets replaced, within the bound.
 	return string(redacted.JSON)

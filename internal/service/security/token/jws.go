@@ -137,12 +137,12 @@ func (p policyValue) checkHeader(header headerValue, bound coretoken.Algorithm) 
 	//: an unrecognised critical parameter is a mandatory rejection.
 	if header.critical {
 		//: refuse rather than ignore.
-		return HeaderUnsupported
+		return coretoken.HeaderUnsupported
 	}
 	//: explicit typing, when the recipient asked for it (RFC 8725 §3.11/§3.12).
 	if p.requireType != "" && header.typ != p.requireType {
 		//: refuse a token of the wrong kind from the right issuer.
-		return errs.Wrap(HeaderUnsupported, errs.WrapParams{},
+		return errs.Wrap(coretoken.HeaderUnsupported, errs.WrapParams{},
 			errs.String("expected_typ", p.requireType))
 	}
 	//: header accepted.

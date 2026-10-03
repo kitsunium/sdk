@@ -8,11 +8,9 @@ go_library(
         "bound_key_value.go",
         "bounds_value.go",
         "claims_codec.go",
-        "codes.go",
         "depth_scan.go",
         "ed25519.go",
         "encoding.go",
-        "errors.go",
         "es256.go",
         "hs256_binding.go",
         "issuer_config.go",
@@ -91,11 +89,4 @@ go_test(
         "//internal/service/crypto/mac/hmacsha2",
         "//internal/service/crypto/sign/ed25519sig",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

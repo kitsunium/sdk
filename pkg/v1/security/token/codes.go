@@ -1,9 +1,10 @@
 // Package token — the dotted-quad codes a consumer routes on.
 //
-// These are RE-EXPORTS, not declarations: the ranges 0.2.13.*, 0.3.44.* and
-// 0.3.42.* are owned by internal/core/security/token, internal/service/security/token and
-// internal/service/crypto/key/jwk, and the errs ownership audit skips a
-// cross-package selector for exactly this reason (ADR 0035). Matching on a code
+// These are RE-EXPORTS, not declarations: the ranges 0.2.13.* and 0.3.44.* are
+// owned by internal/core/security/token, where every code of the token domain
+// is declared (ADR 0160), and 0.3.42.* by internal/service/crypto/key/jwk; the
+// errs ownership audit skips a cross-package selector for exactly this reason
+// (ADR 0035). Matching on a code
 // rather than on a reason string is the stronger contract — a code is a number
 // in docs/error-codes.yaml, a reason is a spelling.
 //
@@ -23,7 +24,6 @@ package token
 import (
 	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
-	svctoken "github.com/kitsunium/sdk/internal/service/security/token"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
@@ -90,30 +90,30 @@ const CodeLifetimeTooLong errs.Code = coretoken.CodeLifetimeTooLong
 
 // CodeHeaderUnsupported identifies a non-empty "crit", or a "typ" mismatch
 // (0.3.44.1).
-const CodeHeaderUnsupported errs.Code = svctoken.CodeHeaderUnsupported
+const CodeHeaderUnsupported errs.Code = coretoken.CodeHeaderUnsupported
 
 // CodeKeyNotFound identifies a kid naming no key in the set (0.3.44.2).
-const CodeKeyNotFound errs.Code = svctoken.CodeKeyNotFound
+const CodeKeyNotFound errs.Code = coretoken.CodeKeyNotFound
 
 // CodeKeyIDMissing identifies a token presented to a set verifier with no kid
 // (0.3.44.3).
-const CodeKeyIDMissing errs.Code = svctoken.CodeKeyIDMissing
+const CodeKeyIDMissing errs.Code = coretoken.CodeKeyIDMissing
 
 // CodeKeyIDAmbiguous identifies more keys sharing a kid than the verifier will
 // try (0.3.44.4).
-const CodeKeyIDAmbiguous errs.Code = svctoken.CodeKeyIDAmbiguous
+const CodeKeyIDAmbiguous errs.Code = coretoken.CodeKeyIDAmbiguous
 
 // CodeFooterMismatch identifies a PASETO footer that is not the expected one
 // (0.3.44.5).
-const CodeFooterMismatch errs.Code = svctoken.CodeFooterMismatch
+const CodeFooterMismatch errs.Code = coretoken.CodeFooterMismatch
 
 // CodeSchemeUnsupported identifies a PASETO version+purpose that is not
 // v4.public (0.3.44.6).
-const CodeSchemeUnsupported errs.Code = svctoken.CodeSchemeUnsupported
+const CodeSchemeUnsupported errs.Code = coretoken.CodeSchemeUnsupported
 
 // CodeDuplicateMember identifies a header or claims object repeating a member
 // name (0.3.44.7).
-const CodeDuplicateMember errs.Code = svctoken.CodeDuplicateMember
+const CodeDuplicateMember errs.Code = coretoken.CodeDuplicateMember
 
 // CodeJWKMalformed identifies a key document that is not the JSON shape
 // RFC 7517 describes — invalid JSON, a key that is not an object, or a set

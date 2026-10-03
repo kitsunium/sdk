@@ -2,8 +2,9 @@
 
 Renders values, JSON documents, text and log attributes for DISPLAY with their
 secrets replaced, within an exact byte bound, never mutating the input.
-Internal service implementation behind the public `pkg/v1/security/redact` facade —
-consumers import the facade, not this package.
+Internal service implementation of the `internal/core/security/redact` port,
+behind the public `pkg/v1/security/redact` facade — consumers import the facade,
+not this package.
 
 ## API
 
@@ -13,8 +14,8 @@ func DefaultWords() []string
 
 func (r *Redactor) Name(name string) bool
 func (r *Redactor) Text(s string, maxBytes int) string
-func (r *Redactor) JSON(document []byte, maxBytes int) (DocumentValue, error)
-func (r *Redactor) Value(v any, maxBytes int) (DocumentValue, error)
+func (r *Redactor) JSON(document []byte, maxBytes int) (coreredact.DocumentValue, error)
+func (r *Redactor) Value(v any, maxBytes int) (coreredact.DocumentValue, error)
 func (r *Redactor) Attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string]
 ```
 
@@ -23,6 +24,8 @@ DECLARED secret by the configured tag or field rule, or the CREDENTIALS of a
 URL inside a string.
 
 ## Errors
+
+Declared in `internal/core/security/redact` (ADR 0160), raised here.
 
 | Code | Reason | When |
 |---|---|---|
