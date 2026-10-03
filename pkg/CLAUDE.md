@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T03:30:00Z -->
+<!-- updated: 2026-10-03T04:10:00Z -->
 # pkg/
 
 ## Purpose
@@ -11,7 +11,7 @@ The module's major is carried by **semver**: `v0.x.x` while alpha, `v1.x.x` at f
 
 | Major | Purpose | State |
 |---|---|---|
-| `v1/` | Stable public API — **64 packages** (46 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`, `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, `crypto/agree`, `crypto/hash`, `crypto/kdf`, `crypto/mac`, `crypto/password`, `crypto/sign`), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`, `profiling`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `statemachine`, `cache`, `clock`, `semver`, `resilience`, `lock`, `ipc`, `id`), network and web (`server` + `sse`/`websocket`/`static`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec` + `strictjson`/`jsonshape`/`jsonpatch`/`json`/`yaml`/`toml`/`bson`, `errs`, `crypto` + its six scheme facades as children (ADR 0155), `token`, `secret`, `session`, `authz`, `validation`, `sql`, `docstore`, `vfs`, `redact`), and process and platform (`proc` + the seven OS facades, `memlimit`); the distribution packages (`git`, `selfupdate`, `entitlement`, `gate`) are the framework's since ADR 0158 | Shipping |
+| `v1/` | Stable public API — **64 packages** (41 top-level + the nested `logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`, `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`, `crypto/agree`, `crypto/hash`, `crypto/kdf`, `crypto/mac`, `crypto/password`, `crypto/sign`, `security/authz`, `security/redact`, `security/secret`, `security/session`, `security/token`; `security/` itself is a family directory with no Go code — ADR 0155), grouped in the root `README.md`: observability (`logger`, `metrics`, `trace`, `health`, `profiling`), application plumbing (`config`, `lifecycle`, `cli`, `events`, `queue`, `scheduler`, `statemachine`, `cache`, `clock`, `semver`, `resilience`, `lock`, `ipc`, `id`), network and web (`server` + `sse`/`websocket`/`static`, `client`, `tlsid`, `view`, `i18n`, `mail`), data and security (`codec` + `strictjson`/`jsonshape`/`jsonpatch`/`json`/`yaml`/`toml`/`bson`, `errs`, `crypto` + its six scheme facades as children (ADR 0155), the five `security/` facades (`authz`, `redact`, `secret`, `session`, `token`), `validation`, `sql`, `docstore`, `vfs`), and process and platform (`proc` + the seven OS facades, `memlimit`); the distribution packages (`git`, `selfupdate`, `entitlement`, `gate`) are the framework's since ADR 0158 | Shipping |
 
 ## Versioning policy
 

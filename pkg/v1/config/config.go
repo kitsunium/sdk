@@ -146,7 +146,7 @@
 //	}
 //
 // An origin never carries a value. A key whose field holds a secret.Value
-// (pkg/v1/secret) is marked Secret, so a --show-config rendering knows to mask
+// (pkg/v1/security/secret) is marked Secret, so a --show-config rendering knows to mask
 // what it prints beside it — and such a field is filled from the environment's
 // RAW text: the JSON coercion that turns "8080" into an int would turn a
 // numeric secret like "1e3" into 1000, so it is bypassed for secrets, on every

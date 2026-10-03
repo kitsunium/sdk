@@ -119,7 +119,7 @@
 # package can see the regression; only a malloc count can. The gate is the
 # DELTA against a single-key verification of the SAME token, which measures 0,
 # and its mutation reports 49.0 per call.
-//internal/service/token:token_test
+//internal/service/security/token:token_test
 # The two claims that decide whether tracing belongs in a DEFAULT middleware
 # stack, neither of which had a gate — or a number — until 2026-09. A traced
 # request's latency surcharge is ~1.3 % of a full SDK HTTP request, which nobody

@@ -5,7 +5,7 @@
 // Every declaration below is written against pkg/v1 alone. Nothing here
 // imports internal/kernel/clock, because the consumer this package was added
 // for cannot — and a test that reached for the internal package would prove
-// the opposite of what it claims (the precedent is pkg/v1/token, whose facade
+// the opposite of what it claims (the precedent is pkg/v1/security/token, whose facade
 // test hid two constructors no downstream module could call).
 package clock_test
 
@@ -21,7 +21,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/lock"
 	"github.com/kitsunium/sdk/pkg/v1/queue"
 	"github.com/kitsunium/sdk/pkg/v1/scheduler"
-	"github.com/kitsunium/sdk/pkg/v1/session"
+	"github.com/kitsunium/sdk/pkg/v1/security/session"
 	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 

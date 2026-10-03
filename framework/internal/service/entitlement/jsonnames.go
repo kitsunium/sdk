@@ -43,9 +43,9 @@ type nameFrame struct {
 // checkNoDuplicateNames reports the first member name declared twice in one
 // JSON object, at ANY depth.
 //
-// # Why recursive, where internal/service/token's equivalent is not
+// # Why recursive, where internal/service/security/token's equivalent is not
 //
-// internal/service/token/encoding.go stops at the top level and skips nested
+// internal/service/security/token/encoding.go stops at the top level and skips nested
 // values wholesale, which is right for a JWT claim set. It is not enough here:
 // Subjects and CIAccounts are map[string]…, so a duplicated subject uuid — one
 // entry authorising a key, a second one at the same uuid revoking it — lives

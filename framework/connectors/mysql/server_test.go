@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/framework/connectors/mysql"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // A database on MySQL, end to end: KIT_TEST_MYSQL_URL names a server kit's

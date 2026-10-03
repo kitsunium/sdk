@@ -15,7 +15,7 @@ const exitConfig int = 78
 // developer wrote — and never an [Args] VALUE.
 //
 // That asymmetry is the security property, and it is the same one
-// internal/core/validation, internal/core/authz and internal/service/view each
+// internal/core/validation, internal/core/security/authz and internal/service/view each
 // state for themselves. A value is the untrusted half: a username, a filename,
 // an account number, a token someone pasted into a form. An identifier is the
 // trusted half and is useless to an attacker who can already read the binary.

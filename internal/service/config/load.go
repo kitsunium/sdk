@@ -234,7 +234,7 @@ func secretKeysOf[T any](schema *SchemaValue[T]) map[string]secretHold {
 // The coercion is right for a port and wrong for a secret: `12345` becomes an
 // int64 and survives, but `1e3` becomes 1000, `0.10` becomes 0.1 and a
 // twenty-digit token becomes a float64 that has lost its tail — a secret the
-// operator never wrote, decoded without an error. core/secret.Value refuses a
+// operator never wrote, decoded without an error. core/security/secret.Value refuses a
 // JSON number for exactly that reason, so without this step a numeric secret
 // in the environment would fail the load; with it, the secret arrives as the
 // operator typed it. Only a top-level key can be one variable; a secret nested

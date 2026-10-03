@@ -20,7 +20,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/mail"
 	"github.com/kitsunium/sdk/pkg/v1/resilience"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 	"github.com/kitsunium/sdk/pkg/v1/trace"
 )
 

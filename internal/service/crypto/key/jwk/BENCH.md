@@ -3,7 +3,7 @@
 
 A JWK is a key's serialised form, and this package's job is to get keys into
 and out of it. Nothing here runs on a hot path **by itself** — but one call
-does, through a consumer: `internal/service/token`'s JWK Set verifier called
+does, through a consumer: `internal/service/security/token`'s JWK Set verifier called
 `KeyValue.ECDSAPublic()` on **every authenticated request**, to rebuild a key
 that never changes.
 
@@ -30,7 +30,7 @@ The short answers, before the evidence:
    path — agreed with the end-to-end delta. §7 is that reconciliation, and it
    is the most useful thing in this report.
 
-The fix landed in `internal/service/token`, not here: `NewSetVerifier` now
+The fix landed in `internal/service/security/token`, not here: `NewSetVerifier` now
 derives every member's binding once at construction. **Nothing in this package
 changed.** Its numbers are what made the case, and its `BenchmarkPKIXRoundTrip`
 is what keeps the case checkable.
@@ -67,7 +67,7 @@ is what keeps the case checkable.
 - **Spread is `(max−min)/median` over all nine.** It is under 4 % for 22 of the
   27 rows here and never above 4.8 %.
 - **The before/after arms are two SEPARATE BINARIES**, built from the two
-  versions of `internal/service/token/jwkbridge.go` and run alternately. §8
+  versions of `internal/service/security/token/jwkbridge.go` and run alternately. §8
   records the control that proves they are genuinely different code: the
   single-key `BenchmarkVerify/ES256/realistic` row, which the change does not
   touch, measures 141 284 ns in one binary and 141 868 ns in the other —
@@ -84,7 +84,7 @@ is what keeps the case checkable.
 
 ## 1. The profiles, verbatim
 
-Both are of `BenchmarkSetVerify/ES256` in `internal/service/token` — the
+Both are of `BenchmarkSetVerify/ES256` in `internal/service/security/token` — the
 consumer, because that is where this package's cost is actually paid.
 
 ### 1.1 Allocation, BEFORE — `-memprofilerate=1`, `alloc_objects`, cumulative
@@ -173,7 +173,7 @@ the more expensive one.
 
 **Stage 3 is not overhead.** `ECDH()` is the stdlib's on-curve and
 non-identity check, which RFC 8725 §3.4 asks for and which
-`internal/service/token` runs deliberately. It is 958.6 ns of real validation,
+`internal/service/security/token` runs deliberately. It is 958.6 ns of real validation,
 and it moved to construction with the rest rather than being dropped.
 
 ## 3. The other two families, for contrast
@@ -286,7 +286,7 @@ nobody has to guess whether the refusal is free.
 
 Reproduced here because this package's numbers are what argued for the change,
 and a report that only shows the argument is half a report. The full table is
-in `internal/service/token/BENCH.md` §16.
+in `internal/service/security/token/BENCH.md` §16.
 
 | row | before | after | change |
 |---|---:|---:|---:|
@@ -434,7 +434,7 @@ was refused on three grounds, in increasing order of importance:
   all. Putting the index here would have satisfied nobody: `token` would still
   have had to build its own structure to hold the bindings.
 
-The index lives in `internal/service/token`'s `setVerifier`, built once at
+The index lives in `internal/service/security/token`'s `setVerifier`, built once at
 construction, and this package is unchanged. That is also why the O(1) lookup
 is a **side effect** of the fix and not its motivation — worth saying plainly,
 because a reader who takes the map for a performance decision will read §4 and

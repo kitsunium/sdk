@@ -8,7 +8,7 @@ import (
 	"testing"
 
 	coreconfig "github.com/kitsunium/sdk/internal/core/config"
-	coresecret "github.com/kitsunium/sdk/internal/core/secret"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	cfg "github.com/kitsunium/sdk/internal/service/config"
 )

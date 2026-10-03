@@ -19,7 +19,7 @@ go_library(
         "//framework/kit",
         "//pkg/v1/errs",
         "//pkg/v1/proc",
-        "//pkg/v1/secret",
+        "//pkg/v1/security/secret",
         "//pkg/v1/sql",
     ] + select({
         "@rules_go//go/platform:aix": [
@@ -87,7 +87,7 @@ go_test(
         "//framework/kit/server",
         "//framework/kit/storetest",
         "//framework/model",
-        "//pkg/v1/secret",
+        "//pkg/v1/security/secret",
         "//pkg/v1/sql",
     ],
 )

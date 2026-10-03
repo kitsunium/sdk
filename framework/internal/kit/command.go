@@ -8,7 +8,7 @@ import (
 	"sync/atomic"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/authz"
+	"github.com/kitsunium/sdk/pkg/v1/security/authz"
 )
 
 // Command changes something: a typed input, a typed result, and one handler

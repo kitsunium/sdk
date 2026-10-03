@@ -27,7 +27,7 @@ go_test(
         "//pkg/v1/lock",
         "//pkg/v1/queue",
         "//pkg/v1/scheduler",
-        "//pkg/v1/session",
+        "//pkg/v1/security/session",
         "//pkg/v1/sql",
     ],
 )

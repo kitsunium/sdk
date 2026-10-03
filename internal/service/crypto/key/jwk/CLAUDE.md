@@ -21,7 +21,7 @@ package owns them — see **Do NOT**.
 
 Code range: `0.3.42.*`.
 
-Public facade: `pkg/v1/token`, which aliases `KeyValue` as `JWK` and `Set` as
+Public facade: `pkg/v1/security/token`, which aliases `KeyValue` as `JWK` and `Set` as
 `JWKSet`, wraps `Parse` / `ParseSet` / `NewSet` as `ParseJWK` / `ParseJWKSet` /
 `NewJWKSet`, and re-exports the six parse refusals (`.1`–`.6`) as `CodeJWK*`
 codes and `JWK*` sentinels.
@@ -112,7 +112,7 @@ verification at n=1 and 0.54 % at n=64 (`BENCH.md` §4). A `map[string][]KeyValu
 field on `Set` was refused for a reason that outranks the number: `Set` is an
 **immutable value**, copied by every constructor and accessor, and a map field
 is a reference two copies would share. A consumer that needs an index builds one
-— `internal/service/token`'s set verifier does, at construction, because it
+— `internal/service/security/token`'s set verifier does, at construction, because it
 needs the derived binding grouped with it and that does not belong in a key
 format. See `BENCH.md` §10.
 
@@ -133,7 +133,7 @@ somebody has to run `x509.MarshalPKIXPublicKey` — and `encoding/asn1.Marshal`
 walks a struct reflectively. That is not a defect here; it is the reason a
 consumer must call it **once**, not per request.
 
-It was being called per request. `internal/service/token`'s JWK Set verifier
+It was being called per request. `internal/service/security/token`'s JWK Set verifier
 rebuilt the key on every token — marshal to DER, then immediately
 `x509.ParsePKIXPublicKey` the DER back — at **8.3 % of that verification's CPU
 and 28.2 % of its allocated objects**. Fixed on the consumer's side in 2026-09;

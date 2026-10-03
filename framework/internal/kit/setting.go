@@ -19,8 +19,8 @@ import (
 	jsoncodec "github.com/kitsunium/sdk/pkg/v1/codec/json"
 	sdkconfig "github.com/kitsunium/sdk/pkg/v1/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/redact"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/redact"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // The kinds of a setting.

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:00:00Z -->
+<!-- updated: 2026-10-03T04:15:00Z -->
 # kitsunium/sdk
 
 ## Purpose
@@ -60,13 +60,13 @@ internal/
 │                          snapshot, worker},
 │                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
-│                  authz, cache, cli, codec, codec/scratch, config, crypto,
+│                  cache, cli, codec, codec/scratch, config, crypto,
 │                  events, health, i18n, id, lifecycle, lock, logger,
 │                  logger/level, mail, metrics, net, otel, proc, queue,
-│                  resilience, scheduler, secret, session, sql, statemachine,
-│                  token, trace, transform, validation, vfs, view, writer
+│                  resilience, scheduler, sql, statemachine, trace,
+│                  transform, validation, vfs, view, writer,
+│                  security/{authz, secret, session, token}
 └── service/       concrete implementations
-                   authz  (RBAC + ABAC + deny-overrides + Check)
                    cache   (tagged memory store + L1/L2 chain)
                    cli    (resolution loop + generated help + config seam)
                    config (env, file and fs.FS sources + layered decode +
@@ -94,6 +94,18 @@ internal/
                            key/{jwk, keyenvelope}, mac/{hmacsha2},
                            password/{commonpw, pbkdf2pw},
                            sign/{ecdsasig, ed25519sig})
+                   security (the family — ADR 0155; a directory, no Go code:
+                           authz  — RBAC + ABAC + deny-overrides + Check;
+                           redact — display redaction: names, declared
+                             fields, URL credentials, within an exact
+                             byte bound;
+                           secret — memory, environment and sealed file
+                             stores, keyring over versions, rotator; subject
+                             keys under a rotating root, destroyed to erase;
+                           session — memory store, file store (its Dir
+                             audited with pathchain, then held as an
+                             os.Root), AEAD cookie sealer;
+                           token  — JWS compact + PASETO v4.public)
                    codec  (asn1, baseenc, bson, cbor, csv, flatbuffers,
                            form, json, msgpack, multipart, ndjson, pem, tlv, toml,
                            xml, yaml; + strictjson, a decoder and not a Format;
@@ -118,18 +130,11 @@ internal/
                            bulkhead, timeout, fallback, hedging; the backoff
                            curve, an alias of kernel/backoff's)
                    scheduler (cron parser + fixed interval + engine)
-                   secret (memory, environment and sealed file stores,
-                           keyring over versions, rotator; subject keys
-                           under a rotating root, destroyed to erase)
-                   session (memory store, file store — its Dir audited
-                           with pathchain, then held as an os.Root —
-                           AEAD cookie sealer)
                    statemachine (declarations + per-entity transitions +
                            an agenda heap the loop sleeps on)
                    sql    (transaction manager + savepoints + pool policy
                            + Join/Defer siblings + migration runner, SQLite's
                            on the database file's write lock — ADR 0140)
-                   token  (JWS compact + PASETO v4.public)
                    trace  (tracer + samplers + recorder + otlpjson
                              exporter + the OTLP/HTTP emitter + the
                              server/client HTTP middlewares)
@@ -137,8 +142,6 @@ internal/
                    validation (constraints + combinators + struct-tag plan)
                    view   (html/template engine + trust scan + parse-once)
                    vfs    (os.Root-confined FS + memory FS + atomic publish)
-                   redact (display redaction: names, declared fields, URL
-                           credentials, within an exact byte bound)
                    ipc    (a private socket between processes of one machine:
                            the directory gates, the path above it audited
                            with pathchain (PATH_UNSAFE), SO_PEERCRED on
@@ -165,6 +168,14 @@ pkg/
     │                 its children — a child never links its parent, ADR 0155:
     │                 agree/, hash/, kdf/, mac/, sign/, and password/ — IsCommon
     │                 since ADR 0143)
+    ├── security/  (a family directory, no Go code — ADR 0155:
+    │                 authz/ — RBAC + ABAC, no DSL, abstention is the zero — ADR 0057;
+    │                 redact/ — secrets replaced for display, exact bound — ADR 0101;
+    │                 secret/ — a Value no rendering writes down, versioned stores,
+    │                   keyring, rotator — ADR 0096; one key per subject, destroyed
+    │                   to erase — ADR 0142;
+    │                 session/ — memory + file Store, AEAD Sealer, Regenerate — ADR 0045;
+    │                 token/ — JWT over JWS compact + PASETO v4.public — ADR 0042)
     ├── id/        (UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID — ADR 0024, ADR 0038)
     ├── lifecycle/ (ordered start, reverse stop, per-component budget — ADR 0050;
     │                 the supervisor — ADR 0112)
@@ -185,15 +196,10 @@ pkg/
                      + static/ — a file tree served by name — ADR 0130)
     └── client/    (the guarded outbound HTTP client, posture enforced by the transport — ADR 0029)
     └── tlsid/     (TLS and mutual-TLS identities, shared by server and client — ADR 0029)
-    └── secret/    (a Value no rendering writes down, versioned stores, keyring, rotator — ADR 0096;
-                     one key per subject, destroyed to erase — ADR 0142)
     └── statemachine/ (entities moved by events, timers, deadlines, guards; an agenda, not a sweep — ADR 0120)
     └── profiling/ (the process's CPU, heap and goroutines, folded onto your owners — ADR 0121)
-    └── session/   (memory + file Store, AEAD Sealer, Regenerate — ADR 0045)
-    └── token/     (JWT over JWS compact + PASETO v4.public — ADR 0042)
     └── trace/     (W3C Trace Context + the OTel span model — ADR 0051)
     └── validation/ (Constraint / Violation / Report + the struct-tag front end — ADR 0046)
-    └── authz/      (RBAC + ABAC, no DSL, abstention is the zero — ADR 0057)
     └── i18n/       (CLDR plurals over a named 13-language subset — ADR 0063)
     └── cli/        (flag + sub-commands + generated help + typed exit — ADR 0065)
     └── mail/       (compose + Transport, injection refused — ADR 0064;
@@ -203,7 +209,6 @@ pkg/
                      Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140)
     └── vfs/        (io/fs reading unchanged + atomic publication — ADR 0056)
     └── ipc/         (a private socket, the peer the kernel names — ADR 0148)
-    └── redact/      (secrets replaced for display, exact bound — ADR 0101)
     └── view/       (html/template, one trust type, parse once — ADR 0058)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:

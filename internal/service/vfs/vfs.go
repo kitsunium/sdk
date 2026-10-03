@@ -70,7 +70,7 @@ func verdict(sentinel *kerrs.Error, fields ...kerrs.FieldValue) error {
 // restating its Reason/Public/Private/ExitCode.
 //
 // Restating rather than passing the sentinel is the whole point, and it is the
-// one place this domain deliberately diverges from internal/service/session.
+// one place this domain deliberately diverges from internal/service/security/session.
 // A session store hides the operating-system cause on purpose. A filesystem
 // must NOT: errors.Is(err, fs.ErrNotExist) is the sentence every Go program
 // that touches files already contains, and a filesystem that breaks it is a

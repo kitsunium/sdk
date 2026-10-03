@@ -30,7 +30,7 @@ the child of `pkg/v1/crypto` that publishes it:
 | `agree/` | `Agreement` | `pkg/v1/crypto/agree` | `x25519` |
 | `hash/` | `Hasher` | `pkg/v1/crypto/hash` | `stdhash` |
 | `kdf/` | `Deriver` | `pkg/v1/crypto/kdf` | `hkdfsha256`, `keytree` |
-| `key/` | none — a key's representation, not an algorithm | `pkg/v1/crypto` (`WrapKey`), `pkg/v1/token` (`JWK`) | `jwk`, `keyenvelope` |
+| `key/` | none — a key's representation, not an algorithm | `pkg/v1/crypto` (`WrapKey`), `pkg/v1/security/token` (`JWK`) | `jwk`, `keyenvelope` |
 | `mac/` | `MAC` | `pkg/v1/crypto/mac` | `hmacsha2` |
 | `password/` | `PasswordHasher` | `pkg/v1/crypto/password` | `commonpw`, `pbkdf2pw` |
 | `sign/` | `Signer` | `pkg/v1/crypto/sign` | `ecdsasig`, `ed25519sig` |
@@ -52,7 +52,7 @@ directory carries a `CLAUDE.md` naming its members and this rule.
 | `hash/stdhash/` | `Hasher` — unkeyed fingerprints | `sha256`, `sha512`, `sha3-256`, `crc32c`, `fnv1a-64` | `pkg/v1/crypto/hash` | core `0.2.4.*` |
 | `kdf/hkdfsha256/` | `Deriver` — key-separation KDF | `hkdf-sha256` | `pkg/v1/crypto/kdf` | core `0.2.4.*` |
 | `kdf/keytree/` | composition — path-addressed hierarchical derivation (HKDF) | *not registered* | `pkg/v1/crypto/kdf` | core `0.2.4.*` |
-| `key/jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/token` (`JWK`, `JWKSet`) | **`0.3.42.*`** |
+| `key/jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/security/token` (`JWK`, `JWKSet`) | **`0.3.42.*`** |
 | `key/keyenvelope/` | composition — password-wrapped DEK at rest (AEAD + PBKDF2) | *not registered* | `pkg/v1/crypto` | core `0.2.4.19` |
 | `mac/hmacsha2/` | `MAC` — keyed detached authentication | `hmac-sha256` | `pkg/v1/crypto/mac` | core `0.2.4.*` |
 | `password/commonpw/` | **data** — the ten thousand most common passwords (SecLists' xato-net top 10 000, MIT, embedded byte for byte at a pinned commit), `IsCommon` case-insensitive — ADR 0143 | *not registered* | `pkg/v1/crypto/password` (`IsCommon`) | none |

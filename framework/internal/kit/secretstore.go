@@ -17,7 +17,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/proc"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // Where an environment keeps its secrets. The environment itself is read

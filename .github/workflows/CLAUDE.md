@@ -119,7 +119,7 @@ tests now live in one module per vendor (ADR 0157), each in the census, and the
 ssh identity among them is the framework's connector module (ADR 0158). Compiling and
 behaving are different questions, and the gap between them is where a 64-bit
 assumption survives: `int(0xffffffff)` is `-1` where `int` is 32 bits and passes
-every `> cap` check, which is exactly the bound `internal/service/session`'s
+every `> cap` check, which is exactly the bound `internal/service/security/session`'s
 at-rest frame relies on — two of its malformed frames can only fail there.
 Adding the job found two defects immediately: a bench helper that did not
 compile (`Statfs_t.Type` is `int32` on 386 and `int64` elsewhere) and a test

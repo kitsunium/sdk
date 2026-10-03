@@ -8,7 +8,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/framework/model"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 

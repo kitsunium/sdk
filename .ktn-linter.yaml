@@ -300,8 +300,8 @@ rules:
   # deliberately rather than covered in advance.
   KTN-STRUCT-COHESION:
     exclude:
-      - "**/pkg/v1/authz/authz.go"
-      - "pkg/v1/authz/authz.go"
+      - "**/pkg/v1/security/authz/authz.go"
+      - "pkg/v1/security/authz/authz.go"
       - "**/pkg/v1/i18n/i18n.go"
       - "pkg/v1/i18n/i18n.go"
       - "**/pkg/v1/server/server.go"
@@ -565,8 +565,8 @@ rules:
       # unactionable. The suggestion is also wrong on the merits here: a policy
       # that took `interface{ Action() string }` could no longer read the
       # attributes, which is the half of the request ABAC exists for.
-      - "**/internal/service/authz/**"
-      - "internal/service/authz/**"
+      - "**/internal/service/security/authz/**"
+      - "internal/service/security/authz/**"
       # New takes a tlsid.Identity, the domain's single TLS value type. Narrowing
       # it to a one-method interface would hide that the client and the server
       # consume the very same identity, which is the point of sharing it.
@@ -616,20 +616,20 @@ rules:
       - "**/third-party/x-crypto/**"
       - "third-party/x-crypto/**"
       # The token domain is the same class, three times over. Its parameters
-      # are core/token.ClaimsValue (the redacting claim set), jwk.KeyValue,
-      # core/crypto.Key and core/token.Algorithm — every one of them fixed by a
+      # are core/security/token.ClaimsValue (the redacting claim set), jwk.KeyValue,
+      # core/crypto.Key and core/security/token.Algorithm — every one of them fixed by a
       # contract the function implements or by the value type the domain is
       # ABOUT. The suggestion for Algorithm is the clearest tell: a uint8 enum
       # would become `interface{ String() string }`, which is every type in Go
       # that can print itself, and the comparison it feeds exists precisely to
       # be against a closed set (ADR 0042 §Algorithm confusion).
-      - "**/internal/core/token/**"
-      - "internal/core/token/**"
-      - "**/internal/service/token/**"
-      - "internal/service/token/**"
-      - "**/pkg/v1/token/**"
-      - "pkg/v1/token/**"
-      # The session stores' lookup helpers take a core/session.ID and the rule
+      - "**/internal/core/security/token/**"
+      - "internal/core/security/token/**"
+      - "**/internal/service/security/token/**"
+      - "internal/service/security/token/**"
+      - "**/pkg/v1/security/token/**"
+      - "pkg/v1/security/token/**"
+      # The session stores' lookup helpers take a core/security/session.ID and the rule
       # suggests `interface{ Digest() string }`. That is the contract-required
       # class in its most dangerous form: ID is an OPAQUE BEARER SECRET whose
       # whole value is that no other type can stand in for it. The suggested
@@ -640,12 +640,12 @@ rules:
       # guard that keeps an unnamed session off the filesystem). Same reasoning
       # as the AEAD Key above: the parameter's type IS the security boundary
       # (ADR 0045 §D3).
-      - "**/internal/core/session/**"
-      - "internal/core/session/**"
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
-      - "**/pkg/v1/session/**"
-      - "pkg/v1/session/**"
+      - "**/internal/core/security/session/**"
+      - "internal/core/security/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
+      - "**/pkg/v1/security/session/**"
+      - "pkg/v1/security/session/**"
       # The trace domain is the same class as the token one above. The OTLP
       # encoder's helpers take core/trace.StatusValue, SpanValue, LinkValue and
       # SpanContextValue — the domain's own immutable value types, each fixed by
@@ -761,8 +761,8 @@ rules:
   # TestWithLockExcludesGoroutines pins, and which the rule would restore.
   KTN-GOROUTINE-RWOVERMU:
     exclude:
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
       #
       # service/trace/recorder.go — the rule's advice here is CORRECT about the
       # code and WRONG about the workload, and the difference was measured
@@ -1054,7 +1054,7 @@ rules:
       # satisfy — the same broken suggestion the jwk and metrics entries record.)
       - "**/internal/core/trace/**"
       - "internal/core/trace/**"
-      # core/authz.AttrValue has FOUR constructors on purpose — AttrString,
+      # core/security/authz.AttrValue has FOUR constructors on purpose — AttrString,
       # AttrInt64, AttrBool and AttrStrings — one per kind, each taking only
       # the payload its kind can hold. That is what makes the kind part of the
       # attribute's identity instead of a field somebody can forget to set, and
@@ -1065,8 +1065,8 @@ rules:
       # them through — precisely the "poorly initialized struct" the rule
       # exists to prevent, same shape as the jwk.KeyValue entry above. (The
       # message here likewise reads "constructor NewNewAttrValue()".)
-      - "**/internal/core/authz/**"
-      - "internal/core/authz/**"
+      - "**/internal/core/security/authz/**"
+      - "internal/core/security/authz/**"
       # service/codec/toml.LocalDateTime is a VALUE of exported fields — a
       # LocalDate and a LocalTime, embedded — written as a composite literal,
       # exactly as the LocalDate and LocalTime it is made of (which the rule
@@ -1155,7 +1155,7 @@ rules:
       - "**/internal/service/proc/childwait/childwait.go"
       - "internal/service/proc/childwait/childwait.go"
       # service/docstore.Store is the word the SDK's storage ports already use
-      # — core/session.Store, core/cache.Store, core/secret.Store — and the
+      # — core/security/session.Store, core/cache.Store, core/security/secret.Store — and the
       # rule only spares them because they are interfaces. The concrete
       # document store is the same role under the same name; the suffix the
       # rule infers ("Service") would read docstore.StoreService and name the
@@ -1282,7 +1282,7 @@ rules:
       - "internal/service/sql/**"
       - "**/pkg/v1/sql/**"
       - "pkg/v1/sql/**"
-      # service/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
+      # service/security/secret.RotatorConfig is 96 bytes — Store and Clock and Locker
       # (16 each, interfaces), Name (16), PolicySpec (24: Every, Keep and the
       # generator func) and OnRotate (8) — and every field is a collaborator a
       # rotator needs or an option a caller must be able to omit. Value
@@ -1293,12 +1293,12 @@ rules:
       # that costs a system call — so the performance concern the rule guards is
       # not measurable here.
       #
-      # pkg/v1/secret is included because NewRotator there is a pure forwarder
+      # pkg/v1/security/secret is included because NewRotator there is a pure forwarder
       # of the same alias; its whole body is `return svcsecret.NewRotator(cfg)`.
-      - "**/internal/service/secret/**"
-      - "internal/service/secret/**"
-      - "**/pkg/v1/secret/**"
-      - "pkg/v1/secret/**"
+      - "**/internal/service/security/secret/**"
+      - "internal/service/security/secret/**"
+      - "**/pkg/v1/security/secret/**"
+      - "pkg/v1/security/secret/**"
       # service/docstore.Config is 80 bytes and SQLConfig 88 since ADR 0143
       # gave both Versions (8), Clock (16, an interface) and Held (8): the key
       # function (8), the filesystem (16) and the path (16), or the transactor
@@ -1447,20 +1447,20 @@ rules:
       #      end to end. 80 is five whole 16-byte moves and 72 is not, so the
       #      memmove out of the map gets slower despite copying less. Reverted;
       #      the numbers, the spreads and a first measurement that was WRONG
-      #      are in internal/service/authz/BENCH.md §"The 80-byte AttrValue was
+      #      are in internal/service/security/authz/BENCH.md §"The 80-byte AttrValue was
       #      measured, and the first answer was wrong".
       #
       # Getting under 64 B would mean deleting the `key` member, which is what
       # lets the caller write one flat NewRequest(subj, act, res, attrs...)
       # list instead of building a map at the call site. Not worth it: the
       # evaluation path allocates ZERO as it stands.
-      - "**/internal/core/authz/**"
-      - "internal/core/authz/**"
+      - "**/internal/core/security/authz/**"
+      - "internal/core/security/authz/**"
       # The pkg/v1 facade forwards the same value types unchanged; a pointer
       # here would diverge the public API from the port it aliases, exactly as
       # ADR 0016 avoids for process.Spec above.
-      - "**/pkg/v1/authz/**"
-      - "pkg/v1/authz/**"
+      - "**/pkg/v1/security/authz/**"
+      - "pkg/v1/security/authz/**"
       # crypto/key/jwk.KeyValue (176 B) — the value receiver is the security
       # mechanism, not a style choice, and it is the SAME precedent as
       # core/net.IdentityValue and core/crypto.Key above.
@@ -1495,12 +1495,12 @@ rules:
       # policy validation that dwarf the copy — and by value so that filling in
       # the defaults cannot mutate the config the caller still holds. Same
       # argument as net/client.Config above.
-      - "**/internal/core/token/**"
-      - "internal/core/token/**"
-      - "**/internal/service/token/**"
-      - "internal/service/token/**"
-      - "**/pkg/v1/token/**"
-      - "pkg/v1/token/**"
+      - "**/internal/core/security/token/**"
+      - "internal/core/security/token/**"
+      - "**/internal/service/security/token/**"
+      - "internal/service/security/token/**"
+      - "**/pkg/v1/security/token/**"
+      - "pkg/v1/security/token/**"
       # The session domain, for the same two reasons as token and jwk above.
       #
       # SessionValue (144 B) is immutable by construction: Set/Delete copy,
@@ -1531,12 +1531,12 @@ rules:
       # net/client.Config above; taking a pointer here would also diverge from
       # every other SDK constructor (`logger.NewText(Config)`,
       # `scheduler.New(Config)`).
-      - "**/internal/core/session/**"
-      - "internal/core/session/**"
-      - "**/internal/service/session/**"
-      - "internal/service/session/**"
-      - "**/pkg/v1/session/**"
-      - "pkg/v1/session/**"
+      - "**/internal/core/security/session/**"
+      - "internal/core/security/session/**"
+      - "**/internal/service/security/session/**"
+      - "internal/service/security/session/**"
+      - "**/pkg/v1/security/session/**"
+      - "pkg/v1/security/session/**"
       # The metrics domain, for the two reasons already established above.
       # SnapshotValue (128 B) is the payload an Exporter receives, and
       # `Exporter.Export(snap SnapshotValue) error` is a PUBLISHED port —
@@ -1562,7 +1562,7 @@ rules:
       - "pkg/v1/metrics/**"
       # core/health.ResultValue (72 B) is one check's ANSWER, and value
       # semantics are the contract for the same two reasons core/net and
-      # core/session give above. It is PUBLISHED — pkg/v1/health.Result is a
+      # core/security/session give above. It is PUBLISHED — pkg/v1/health.Result is a
       # type alias to it — it is handed to Config.OnReport, which is a caller's
       # own hook, and it is carried in ReportValue.Results, which the handler
       # renders while that hook still holds it. Age is a pure accessor on that
@@ -1586,7 +1586,7 @@ rules:
 
   # KTN-RECEIVER-MIXPTR / KTN-VAR-RECVCONS / KTN-STRUCT-RECVTYPE (phase 4)
   # — encoding/json forces the asymmetry on core/net.DurationValue, and on
-  # core/secret.Value (ADR 0096).
+  # core/security/secret.Value (ADR 0096).
   #
   # MarshalJSON MUST take a value receiver, or a non-pointer struct field of
   # this type will not marshal through it. UnmarshalJSON MUST take a pointer
@@ -1618,8 +1618,8 @@ rules:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
       - "**/internal/service/codec/toml/localtime.go"
       - "internal/service/codec/toml/localtime.go"
   #
@@ -1633,8 +1633,8 @@ rules:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
       - "**/internal/service/codec/toml/localtime.go"
       - "internal/service/codec/toml/localtime.go"
       - "**/framework/internal/kit/seal_store.go"
@@ -1649,8 +1649,8 @@ rules:
     exclude:
       - "**/internal/core/net/**"
       - "internal/core/net/**"
-      - "**/internal/core/secret/**"
-      - "internal/core/secret/**"
+      - "**/internal/core/security/secret/**"
+      - "internal/core/security/secret/**"
       - "**/internal/service/codec/bson/types.go"
       - "internal/service/codec/bson/types.go"
       - "**/internal/service/codec/bson/objectid.go"

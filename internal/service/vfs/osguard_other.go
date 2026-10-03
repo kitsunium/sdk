@@ -20,7 +20,7 @@
 // a file created in a directory carrying an inheritable permissive DACL is
 // readable by whoever that DACL admits. Honouring the mode would mean building
 // a security descriptor through CreateFileW, which stdlib syscall does not
-// expose — the same wall internal/service/session hit for the same reason.
+// expose — the same wall internal/service/security/session hit for the same reason.
 //
 // And MoveFileEx with MOVEFILE_REPLACE_EXISTING, the closest thing to
 // rename(2), fails outright when the destination is open by another process

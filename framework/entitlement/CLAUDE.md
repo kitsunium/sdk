@@ -38,7 +38,7 @@ module rather than `pkg`. Every code keeps its value (ADR 0160).
 | `RequiresUpdate` / `UpdateRefusal` | func | the version floor, without a Service |
 
 **Both spellings of "why" are exported, and they must agree.** The codes follow
-`pkg/v1/authz` and `framework/selfupdate`; the sentinels follow `pkg/v1/vfs` and
+`pkg/v1/security/authz` and `framework/selfupdate`; the sentinels follow `pkg/v1/vfs` and
 `pkg/v1/cache`. A consumer of THIS domain must distinguish "cannot decide" from
 "decided no", and it will reach for `errors.Is` or for `errs.HasCode` depending
 on where it came from — a facade offering only one would force the other half of

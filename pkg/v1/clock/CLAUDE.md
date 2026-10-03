@@ -68,7 +68,7 @@ held back and nothing is added.
   facade re-exports it — a facade that grows logic is a second implementation.
 - Reach for `internal/kernel/clock` in this package's tests. A test that
   imports it proves the opposite of what this package claims; the precedent is
-  `pkg/v1/token`, whose facade test hid two constructors no downstream module
+  `pkg/v1/security/token`, whose facade test hid two constructors no downstream module
   could call.
 
 ## Verification

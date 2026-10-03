@@ -19,7 +19,7 @@ import (
 // reports through core/config.Describer, else "source" with the source's
 // position — and the DETAIL an operator acts on: the variable that set the
 // key ("APP_DATA_DIR"), the file that holds it. It never carries the value,
-// and a key whose field holds a core/secret.Value is marked Secret, so a
+// and a key whose field holds a core/security/secret.Value is marked Secret, so a
 // --show-config rendering knows to mask whatever it prints beside it. A key
 // absent from the merged layers — no layer supplied it, or a later one erased
 // it by replacing one of its tables with a scalar or a null — is reported with

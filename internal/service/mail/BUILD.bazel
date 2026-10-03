@@ -30,7 +30,7 @@ go_library(
     deps = [
         "//internal/core/mail",
         "//internal/core/net",
-        "//internal/core/secret",
+        "//internal/core/security/secret",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
     ],

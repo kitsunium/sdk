@@ -11,7 +11,7 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
 	"github.com/kitsunium/sdk/pkg/v1/logger/slogbridge"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 )
 
 // newRecorder wires a Logger onto a MemorySink so a test can assert on the

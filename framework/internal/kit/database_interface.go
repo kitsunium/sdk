@@ -6,7 +6,7 @@ import (
 	"context"
 	stdsql "database/sql"
 
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 	"github.com/kitsunium/sdk/pkg/v1/sql"
 )
 

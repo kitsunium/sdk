@@ -37,7 +37,7 @@ type OriginValue struct {
 	// Detail is what an operator acts on: the variable that set the key, the
 	// file that holds it. Empty when the layer has nothing more to say.
 	Detail string
-	// Secret reports that the key's field holds a core/secret.Value. The
+	// Secret reports that the key's field holds a core/security/secret.Value. The
 	// origin never carries a value either way; Secret is what tells a
 	// rendering that the value, if it shows one, must be masked.
 	Secret bool

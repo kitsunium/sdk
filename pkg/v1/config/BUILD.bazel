@@ -27,7 +27,7 @@ go_test(
         ":config",
         "//pkg/v1/codec",
         "//pkg/v1/errs",
-        "//pkg/v1/secret",
+        "//pkg/v1/security/secret",
     ],
 )
 

@@ -29,7 +29,7 @@ go_library(
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
-        "//internal/core/secret",
+        "//internal/core/security/secret",
         "//internal/core/validation",
         "//internal/kernel/clock",
         "//internal/kernel/errs",
@@ -70,7 +70,7 @@ go_test(
     deps = [
         "//internal/core/codec",
         "//internal/core/config",
-        "//internal/core/secret",
+        "//internal/core/security/secret",
         "//internal/core/validation",
         "//internal/kernel/clock",
         "//internal/kernel/errs",

@@ -53,7 +53,7 @@ var formNames = [formCount]string{
 //
 // "invalid" rather than a number, and never a silent "other": a corrupt Form
 // reaching a log must not read as if it were a category, which is the same
-// rule internal/core/authz applies to a corrupt Decision.
+// rule internal/core/security/authz applies to a corrupt Decision.
 func (f Form) String() string {
 	//: a value outside the enum is named as such.
 	if !f.Valid() {

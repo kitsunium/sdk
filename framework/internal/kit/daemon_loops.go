@@ -50,7 +50,7 @@ func provenanceOf(kind string) (provenance, library string) {
 	case model.LoopRoutine:
 		return model.ProvenanceProduct, ""
 	case model.LoopRotation:
-		return model.ProvenanceLibrary, "sdk/v1/secret"
+		return model.ProvenanceLibrary, "sdk/v1/security/secret"
 	default:
 		// A kind kit does not know has no provenance.
 	}

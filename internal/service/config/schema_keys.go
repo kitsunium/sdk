@@ -13,7 +13,7 @@ import (
 	"slices"
 	"strings"
 
-	coresecret "github.com/kitsunium/sdk/internal/core/secret"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 )
 
 // keySeparator is the one level-separator of the key grammar. It is the same
@@ -47,7 +47,7 @@ const expectedDepth int = 8
 // that contains itself would otherwise be peeled forever.
 const maxContainerDepth int = 8
 
-// secretHold says how a key's field holds a core/secret.Value, which decides
+// secretHold says how a key's field holds a core/security/secret.Value, which decides
 // two different things: whether a traced load reports the key Secret (either
 // hold), and whether the loader may hand the field the environment's raw text
 // (only a DIRECT hold — a slice or a map of secrets is a JSON document on the
@@ -197,7 +197,7 @@ func lookupKey(level map[string]any, segments []string) bool {
 // applies — the quietest way a configuration can be wrong — and what lets the
 // unknown-key pass stop descending where the type stops naming things.
 //
-// The same walk also returns the keys whose field holds a core/secret.Value,
+// The same walk also returns the keys whose field holds a core/security/secret.Value,
 // and how — directly, or inside a slice, an array or a map — so the loader's
 // idea of "a secret key" can never disagree with its idea of "a key"
 // (ADR 0097).
@@ -411,7 +411,7 @@ func derefStruct(typ reflect.Type) (target reflect.Type, deref bool) {
 	return typ, false
 }
 
-// secretHoldOf reports how a field of typ holds a core/secret.Value: directly
+// secretHoldOf reports how a field of typ holds a core/security/secret.Value: directly
 // (through pointers only), nested inside a slice, an array or a map, or not at
 // all. A field of []secret.Value is a secret key — its value is secrets — but
 // not a direct one.

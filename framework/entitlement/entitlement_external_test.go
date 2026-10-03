@@ -317,7 +317,7 @@ func (refusingGetter) Get(url string) (resp *http.Response, err error) {
 // *errs.Error, which carries Code, Reason, Public, Private and ExitCode, and a
 // consumer holding the package variable had to type-assert to reach any of
 // them — through a type they cannot name, since internal/kernel/errs is
-// internal. pkg/v1/lock, pkg/v1/cache and pkg/v1/authz all declare theirs
+// internal. pkg/v1/lock, pkg/v1/cache and pkg/v1/security/authz all declare theirs
 // without the annotation; this package was the outlier.
 //
 // The assertions below ARE the pin, and they are not merely non-nil checks:

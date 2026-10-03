@@ -10,7 +10,7 @@ import (
 	"time"
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
-	coresecret "github.com/kitsunium/sdk/internal/core/secret"
+	coresecret "github.com/kitsunium/sdk/internal/core/security/secret"
 )
 
 // viewTypeName and configTypeName are the two spellings of the struct's name

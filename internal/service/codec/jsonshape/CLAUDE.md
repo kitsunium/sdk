@@ -106,6 +106,6 @@ checks every tricky tag's name against the member `json.Marshal` writes.
 ## Reference
 
 - ADR 0133 — `docs/adr/0133-a-go-types-wire-shape-is-what-encoding-json-writes.md`
-- `internal/service/redact/fields.go` and `internal/service/validation/json_reach.go`
+- `internal/service/security/redact/fields.go` and `internal/service/validation/json_reach.go`
   resolve the same members for their own purposes; ADR 0133 §Deferred says why
   they are not moved onto this package here.

@@ -47,7 +47,7 @@ The consequence for a design is the same in both columns and worth stating
 plainly: **a token verified by N services costs N × the verification, and
 verification is the expensive half.** If a fan-out is large, the symmetric
 option — `mac.Verify` at 1.06 µs, 83× cheaper — is the trade to consider, and
-`pkg/v1/token/BENCH.md` prices the same decision at the JWT layer.
+`pkg/v1/security/token/BENCH.md` prices the same decision at the JWT layer.
 
 ## What the SDK costs over the bare primitive
 

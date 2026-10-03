@@ -11,7 +11,7 @@ import (
 	"github.com/kitsunium/sdk/framework/model"
 	"github.com/kitsunium/sdk/pkg/v1/clock"
 	"github.com/kitsunium/sdk/pkg/v1/logger"
-	"github.com/kitsunium/sdk/pkg/v1/redact"
+	"github.com/kitsunium/sdk/pkg/v1/security/redact"
 )
 
 // Logs: what product code writes through kit.Log is, in dev, also kept by

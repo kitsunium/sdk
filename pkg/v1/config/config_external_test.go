@@ -6,7 +6,7 @@ import (
 
 	"github.com/kitsunium/sdk/pkg/v1/config"
 	"github.com/kitsunium/sdk/pkg/v1/errs"
-	"github.com/kitsunium/sdk/pkg/v1/secret"
+	"github.com/kitsunium/sdk/pkg/v1/security/secret"
 
 	_ "github.com/kitsunium/sdk/pkg/v1/codec" // register the formats the file sources read
 )

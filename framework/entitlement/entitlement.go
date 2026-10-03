@@ -208,7 +208,7 @@ const CodeProductInvalid errs.Code = coreent.CodeProductInvalid
 // of which a consumer reads directly off the sentinel to render a message or
 // exit a process. Without it they are reachable only through a type assertion
 // to a type a consumer cannot name, since internal/kernel/errs is internal.
-// pkg/v1/lock, pkg/v1/cache and pkg/v1/authz all declare theirs this way;
+// pkg/v1/lock, pkg/v1/cache and pkg/v1/security/authz all declare theirs this way;
 // this package shipped as the outlier, when it was pkg/v1/entitlement.
 // TestTheSentinelsKeepTheirConcreteType
 // fails the BUILD if the annotation comes back.

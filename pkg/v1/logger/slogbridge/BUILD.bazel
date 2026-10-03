@@ -35,7 +35,7 @@ go_test(
     deps = [
         "//pkg/v1/errs",
         "//pkg/v1/logger",
-        "//pkg/v1/secret",
+        "//pkg/v1/security/secret",
     ],
 )
 

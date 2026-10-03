@@ -25,5 +25,5 @@ holder can check is a `mac/`.
 
 - Put Go code in this directory.
 - Re-encode a signature for one wire format here. The JOSE fixed-width `R||S`
-  form a JWT needs is built in `internal/service/token`, because DER is the
+  form a JWT needs is built in `internal/service/security/token`, because DER is the
   port's contract.

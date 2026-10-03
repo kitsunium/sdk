@@ -54,7 +54,7 @@ func requestMechanics() []model.Mechanic {
 func operationMechanics() []model.Mechanic {
 	return []model.Mechanic{
 		{
-			Kind: "authorize", Label: "authorization", Package: "github.com/kitsunium/sdk/pkg/v1/authz",
+			Kind: "authorize", Label: "authorization", Package: "github.com/kitsunium/sdk/pkg/v1/security/authz",
 			Doc:     "Checks, last before a command's or a query's handler, that the caller may run it: a permission as data, which the SDK's authz grants from the auth data's attributes (kit.Principal), and a rule that needs the data. Every refusal is the same 403.",
 			Snippet: "Service.Command(\"place-order\", placeOrder).Allow(Policy, \"place\", \"order\").Authorize(ownsOrder)",
 		},

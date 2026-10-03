@@ -33,7 +33,7 @@ rendered to `README.md` by gomarkdoc — edit the doc comment, not the README.
 
 This package keeps the AEAD (`aead/aesgcm`, `aead/streamaead`) and the passphrase
 envelope (`key/keyenvelope`). The JWK format (`key/jwk`) is published by
-`pkg/v1/token`, the domain that reads keys from a document. Each child has its own
+`pkg/v1/security/token`, the domain that reads keys from a document. Each child has its own
 `CLAUDE.md`, `README.md` and `BENCH.md`; this package's `BENCH.md` carries the
 family's choice table the children's link back to.
 

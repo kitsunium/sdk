@@ -27,7 +27,7 @@ import (
 //
 // The second measurement is the one that matters, because holding one
 // descriptor for the store's lifetime is the natural, efficient design — it is
-// what internal/service/session's file store does — and it makes flock a
+// what internal/service/security/session's file store does — and it makes flock a
 // complete no-op between goroutines while continuing to work perfectly between
 // processes. The bug is therefore invisible to any test that spawns processes
 // and only appears under goroutine concurrency, which is the opposite of where

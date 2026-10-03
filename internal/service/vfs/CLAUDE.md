@@ -66,7 +66,7 @@ durability problem, which is how a good file gets replaced by a worse one.
   name concurrently both succeed; the winner is whoever renamed last, and no
   reader ever sees a mixture. Adding a lock would buy ordering nobody asked for
   and cost the property that makes this usable across processes at all. (The
-  `flock(2)` lesson `internal/service/session` learned does **not** apply here,
+  `flock(2)` lesson `internal/service/security/session` learned does **not** apply here,
   because this package takes no `flock`.)
 - **The symlink refusal is a check, not a race-free guarantee.** See below.
 
@@ -130,7 +130,7 @@ lane runs all of it (ADR 0095).
   code inline so `errs` can keep the `*fs.PathError` as the cause. That is what
   keeps `errors.Is(err, fs.ErrNotExist)` — the sentence every Go program that
   touches files already contains — answering. This is the one place the domain
-  deliberately diverges from `internal/service/session`, which hides its cause.
+  deliberately diverges from `internal/service/security/session`, which hides its cause.
   `TestWrapHelpersRestateTheirSentinelExactly` stops the restatement drifting.
 - **`atomicOps` is a struct of functions so `publish` is a pure function of its
   dependencies.** That is the only reason the failure paths are reachable at

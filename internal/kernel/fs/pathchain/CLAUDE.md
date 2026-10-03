@@ -15,7 +15,7 @@ component and named the parents as deferred, on the grounds that closing them
 `internal/service/ipc` is the second: the components above a private socket's
 directory, judged by lock's rule for links plus the OWNER `StepValue.Info`
 carries (see `internal/service/ipc/chain_unix.go`).
-`internal/service/session` is the third: its file store audits `Dir` with the
+`internal/service/security/session` is the third: its file store audits `Dir` with the
 lock domain's rule before creating anything, then holds the directory as an
 `os.Root`, so a component replaced after the audit moves nothing.
 
