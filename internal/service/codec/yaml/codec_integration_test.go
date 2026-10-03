@@ -29,16 +29,18 @@ func TestAllocBudget(t *testing.T) {
 		ceil float64
 		fn   func()
 	}
-	//: ceilings captured on the race-off lane at the scratch-migration commit.
+	//: ceilings re-pinned for the native codec at measured + 2: marshal 6,
+	//: unmarshal 7, append 5 on go1.27.1 (gopkg.in/yaml.v3 needed 32, 60 and
+	//: 31 for the same map — see BENCH.md).
 	tests := []tc{
-		{"marshal", 32, func() {
+		{"marshal", 8, func() {
 			out, merr := c.Marshal(payload)
 			if merr != nil {
 				t.Fatalf("Marshal: %v", merr)
 			}
 			allocSink = out
 		}},
-		{"unmarshal", 60, func() {
+		{"unmarshal", 9, func() {
 			var dst map[string]int
 			if uerr := c.Unmarshal(seed, &dst); uerr != nil {
 				t.Fatalf("Unmarshal: %v", uerr)
@@ -49,7 +51,7 @@ func TestAllocBudget(t *testing.T) {
 	//: Append is optional — measure it only when the codec implements it.
 	if appender, ok := c.(corecodec.Appender); ok {
 		dst := make([]byte, 0, 256)
-		tests = append(tests, tc{"append", 31, func() {
+		tests = append(tests, tc{"append", 7, func() {
 			out, aerr := appender.Append(dst[:0], payload)
 			if aerr != nil {
 				t.Fatalf("Append: %v", aerr)

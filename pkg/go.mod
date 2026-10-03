@@ -8,11 +8,7 @@ require (
 	github.com/kitsunium/sdk/internal/service v0.1.16
 )
 
-require (
-	github.com/kr/text v0.2.0 // indirect
-	golang.org/x/mod v0.41.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
-)
+require golang.org/x/mod v0.41.0 // indirect
 
 replace github.com/kitsunium/sdk/internal/core => ../internal/core
 

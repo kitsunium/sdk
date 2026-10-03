@@ -7,9 +7,9 @@ import (
 	"testing"
 )
 
-// appendBadMarshaler implements yaml.v3's Marshaler returning an error so the
-// Append encode-error branch is reachable without a chan/func payload (which
-// yaml.v3 panics on) or a failing writer (Append owns its buffer).
+// appendBadMarshaler implements the MarshalYAML hook returning an error, so
+// the Append encode-error branch is reachable through a hook as well as
+// through a kind YAML cannot represent.
 type appendBadMarshaler struct{}
 
 // MarshalYAML returns a synthetic failure so the encoder surfaces an error.
@@ -194,13 +194,16 @@ func Test_yamlCodec_Append(t *testing.T) {
 		v       any
 		wantErr bool
 	}
+	//: the failing hook, handed over as the interface it implements.
+	var badHook marshalYAMLer = appendBadMarshaler{}
 	tests := []tc{
 		{"happy-empty-dst", nil, map[string]int{"a": 1}, false},
 		{"happy-prefix-dst", []byte("PRE-"), "value", false},
-		//: yaml.v3 panics on chan/func types instead of returning an
-		//: error, but a value whose MarshalYAML errors drives the encode-
-		//: error branch cleanly with dst left untouched.
-		{"reject-marshaler-error", []byte("PRE-"), appendBadMarshaler{}, true},
+		//: a value whose MarshalYAML errors drives the encode-error branch
+		//: with dst left untouched; handed over as the hook it implements.
+		{"reject-marshaler-error", []byte("PRE-"), badHook, true},
+		//: a kind YAML has no representation for is refused, not a panic.
+		{"reject-channel", []byte("PRE-"), make(chan int), true},
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()

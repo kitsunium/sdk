@@ -3,8 +3,6 @@ package yaml
 import (
 	"bytes"
 	"testing"
-
-	goyaml "gopkg.in/yaml.v3"
 )
 
 // Test_yamlDecoder_Decode covers both a success path and a malformed-input
@@ -22,7 +20,7 @@ func Test_yamlDecoder_Decode(t *testing.T) {
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &yamlDecoder{inner: goyaml.NewDecoder(bytes.NewReader(tc.data))}
+		dec := newStreamDecoder(bytes.NewReader(tc.data))
 		var out map[string]any
 		err := dec.Decode(&out)
 		//: treat EOF on the empty case as non-error.
@@ -48,7 +46,7 @@ func Test_yamlDecoder_More(t *testing.T) {
 	tests := []tc{{"idempotent before any Decode"}}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
-		dec := &yamlDecoder{inner: goyaml.NewDecoder(bytes.NewReader(nil))}
+		dec := newStreamDecoder(bytes.NewReader(nil))
 		first := dec.More()
 		second := dec.More()
 		if first != second {

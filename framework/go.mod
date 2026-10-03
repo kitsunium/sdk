@@ -10,8 +10,6 @@ require (
 require (
 	github.com/kitsunium/sdk/internal/core v0.1.16 // indirect
 	github.com/kitsunium/sdk/internal/service v0.1.16 // indirect
-	golang.org/x/mod v0.41.0 // indirect
-	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
 
 replace github.com/kitsunium/sdk/internal/core => ../internal/core

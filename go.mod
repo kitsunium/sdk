@@ -8,16 +8,19 @@ go 1.27.1
 // third-party/aws, third-party/codec/{hcl,protobuf},
 // third-party/db/writer/{clickhouse,mysql,redis}, third-party/transform and
 // third-party/x-crypto. What is left here is entitlement's ssh Identity
-// (third-party/entitlement, ADR 0079). The Docker-backed integration suites
+// (third-party/entitlement, ADR 0079) and the opt-in yaml.v3 codec
+// (third-party/codec/yaml, "yaml-full"). The Docker-backed integration suites
 // live in the auxiliary e2e module (e2e/integration), outside go.work.
 require (
 	github.com/kitsunium/sdk/internal/core v0.1.16
 	github.com/kitsunium/sdk/internal/kernel v0.1.16
 	github.com/kitsunium/sdk/internal/service v0.1.16
 	golang.org/x/crypto v0.55.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (
+	github.com/kr/text v0.2.0 // indirect
 	golang.org/x/mod v0.41.0 // indirect
 	golang.org/x/sys v0.47.0 // indirect
 )

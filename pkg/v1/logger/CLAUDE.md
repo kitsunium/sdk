@@ -75,7 +75,9 @@ sinks via `Multi`, and returns a Logger filtered at the topology's `Level`.
   codec the **consumer already registered** (blank-import `pkg/v1/codec` or a
   single service codec). It MUST NOT blank-import `pkg/v1/codec` or any service
   codec from this package — otherwise every `pkg/v1/logger` consumer inherits the
-  one vendor codec module left (yaml.v3 — bson, cbor, msgpack and toml are native). Proof:
+  whole codec tree — no vendor module any more, since every codec is native
+  and the yaml.v3 reader is the opt-in `third-party/codec/yaml`, but every
+  format's code. Proof:
 
   ```sh
   cd pkg/v1 && GOWORK=off go list -deps ./logger/... \

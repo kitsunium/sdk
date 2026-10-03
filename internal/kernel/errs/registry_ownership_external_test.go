@@ -140,6 +140,7 @@ var codeRangeOwners = map[uint64]string{
 	0x00_03_44_00: "internal/service/secret",
 	0x00_03_48_00: "internal/service/codec/strictjson",
 	0x00_03_49_00: "internal/service/redact",
+	0x00_03_4D_00: "third-party/codec/yaml", // yaml.v3 behind the opt-in "yaml-full" Format
 	0x00_03_50_00: "internal/service/docstore",
 	0x00_03_51_00: "internal/service/mail/spool",
 	0x00_03_58_00: "internal/service/statemachine",

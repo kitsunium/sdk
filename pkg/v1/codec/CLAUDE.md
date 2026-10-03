@@ -102,12 +102,13 @@ proof that the three names suffice.
 
 ## One format at a time (ADR 0134)
 
-Importing this package registers every format, and so links every codec — and
-the one codec library left, YAML's `yaml.v3`; BSON, CBOR, MessagePack and TOML
-are native and have none — into a program that may read one of them. `json/`, `yaml/` and `toml/` are facades that
+Importing this package registers every format, and so links every codec —
+each written on the standard library, with no codec library left (the full
+yaml.v3 reader is the opt-in `third-party/codec/yaml`) — into a program that
+may read one of them. `json/`, `yaml/` and `toml/` are facades that
 each blank-import ONE service codec and nothing else: a program that reads its
 configuration through `config.FSSource` imports `pkg/v1/codec/yaml` and links
-`yaml.v3` alone. Each exports only `Format`, an untyped constant that goes into a
+the native YAML codec alone — no third-party library. Each exports only `Format`, an untyped constant that goes into a
 `string` or a `codec.Format` parameter without a conversion. Registration happens
 in the service codec's own initialisation, which Go runs once, so importing a
 per-format facade beside this package registers the format once —

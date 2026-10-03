@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-26T00:00:00Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # pkg/v1/codec/yaml/
 
 ## Purpose
@@ -6,9 +6,15 @@
 Registers the YAML codec — and no other — with the SDK's codec registry when
 imported, blank usually (ADR 0134). Everything that dispatches by format name
 then reads and writes YAML: `config.FileSource` / `config.FSSource`,
-`i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the YAML
-codec and gopkg.in/yaml.v3, and nothing else — where `pkg/v1/codec` links every format
-the SDK ships.
+`i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the YAML codec
+and nothing else — the codec is native, a named subset of YAML 1.2.2 on the
+standard library alone (`internal/service/codec/yaml`) — where `pkg/v1/codec`
+links every format the SDK ships.
+
+The subset and its refusals by name are documented on the package comment
+(rendered into `README.md`) and in `internal/service/codec/yaml/CLAUDE.md`.
+The full yaml.v3 reader is `third-party/codec/yaml`, the opt-in `"yaml-full"`
+Format, which claims no extension.
 
 ## Surface
 
@@ -24,8 +30,9 @@ the SDK ships.
   registered once — `TestAFormatImportedTwiceIsRegisteredOnce` in
   `pkg/v1/codec` imports all four.
 - **What it links is tested, not asserted.** The suite reads the registry
-  (exactly one format), the modules the test binary was linked from, and
-  `go list -deps` when a go tool is on PATH.
+  (exactly one format), the modules the test binary was linked from — no other
+  format's library, and no YAML library at all — and `go list -deps` when a go
+  tool is on PATH.
 
 ## Do NOT
 

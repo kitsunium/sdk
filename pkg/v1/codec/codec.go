@@ -200,7 +200,10 @@ const (
 	ASN1DER Format = "asn1-der"
 	// PEM denotes the stdlib encoding/pem block format.
 	PEM Format = "pem"
-	// YAML denotes the gopkg.in/yaml.v3 wire format.
+	// YAML denotes YAML as the SDK reads and writes it: a named subset of
+	// YAML 1.2.2 on the standard library alone, which refuses anchors, tags,
+	// merge keys and the other constructs it leaves out by name. The full
+	// reader is the opt-in "yaml-full" Format of third-party/codec/yaml.
 	YAML Format = "yaml"
 	// TOML denotes TOML v1.0.0, read and written by the SDK's stdlib-only codec.
 	TOML Format = "toml"

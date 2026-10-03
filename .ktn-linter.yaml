@@ -371,6 +371,12 @@ rules:
       - "internal/core/codec/**"
       - "**/internal/service/codec/**"
       - "internal/service/codec/**"
+      # The full yaml.v3 codec (the opt-in "yaml-full" Format) implements the
+      # same Codec, Encoder and Decoder contracts as the in-tree codecs and
+      # streams documents into a `v any` for the same reason; it lives under
+      # third-party/ only because of the library it wraps.
+      - "**/third-party/codec/yaml/**"
+      - "third-party/codec/yaml/**"
       - "**/pkg/v1/codec/**"
       - "pkg/v1/codec/**"
       - "**/internal/core/logger/**"
