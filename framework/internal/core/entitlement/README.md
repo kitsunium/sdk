@@ -16,9 +16,9 @@ What that anchor cannot do is survive a patched binary. A check running on someo
 
 ### Why Identity is a port
 
-Proving possession needs key material the user already has, in a format the standard library cannot parse — OpenSSH, via golang.org/x/crypto/ssh, which brings golang.org/x/sys and is banned SDK\-wide \(ADR 0078\). Naming the capability as a port keeps the MECHANISM here, stdlib\-only, and puts the one implementation that needs a vendor dependency where a vendor dependency is allowed: third\-party/, which a consumer opts into.
+Proving possession needs key material the user already has, in a format the standard library cannot parse — OpenSSH, via golang.org/x/crypto/ssh, which brings golang.org/x/sys and is banned SDK\-wide \(ADR 0078\). Naming the capability as a port keeps the MECHANISM here, stdlib\-only, and puts the one implementation that needs a vendor dependency where a vendor dependency is allowed: the framework's connector module framework/connectors/ssh, which a consumer opts into \(ADR 0158\).
 
-A consumer that does not want that dependency supplies its own Identity. That is not a theoretical escape hatch — the product this was versed from does exactly that, keeping its 327 lines of SSH handling rather than pulling the root module's whole graph for them.
+A consumer that does not want that dependency supplies its own Identity. That is not a theoretical escape hatch — the product this was versed from does exactly that, keeping its 327 lines of SSH handling rather than pulling the connector's graph for them.
 
 There is \*\*no registry\*\*. A registry's key would name an identity scheme, and the whole trust chain is anchored to one vendor for one product.
 
@@ -316,7 +316,7 @@ Variadic rather than a fourth parameter so the two existing call sites compile u
 checkTiming allows clockSkew when ADMITTING an Actions token, which is the permissive direction and the right one there: refusing a genuine token over two minutes of drift would break a working runner. Adding the same allowance to a BOUND would run the opposite way — it would extend the grant past the proof — so the bound is the claim as written.
 
 <a name="BoundProver"></a>
-## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L113-L127>)
+## type [BoundProver](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L114-L128>)
 
 BoundProver is Identity's sibling for the one claim the three methods cannot make: possession of the key the ROSTER authorised, rather than of whatever this machine holds at the moment it is asked.
 
@@ -451,7 +451,7 @@ A POINTER receiver on a read\-only method, which is unusual and deliberate: the 
 It is a method\-set change and therefore a source\-level API change, named here rather than left to be discovered: Expired is no longer in GrantValue's VALUE method set, so a NON\-ADDRESSABLE grant — a map entry, a composite literal used inline — stops compiling against it. Every caller in this repository holds an addressable grant, and pkg/license has no consumer outside the module, which is what makes the trade payable; a released SDK would not.
 
 <a name="Identity"></a>
-## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L54-L76>)
+## type [Identity](<https://github.com/kitsunium/sdk/blob/main/framework/internal/core/entitlement/entitlement.go#L55-L77>)
 
 Identity is the machine's half of the proof: which subject this machine claims to be, and evidence that it holds the private key the roster publishes a fingerprint for.
 

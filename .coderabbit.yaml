@@ -27,7 +27,8 @@ reviews:
       instructions: |
         Core layer: domain interfaces + value types. May import stdlib,
         internal/kernel and other internal/core packages; a lateral import
-        is not a layer violation (core/trace builds on core/metrics, ADR 0051).
+        is not a layer violation (core/trace and core/metrics both build on
+        core/otel, the attribute, resource and scope types they share).
         Must NOT import internal/service, pkg/* or the repository's
         third-party/ tree — the direction scripts/check-layer-deps.sh asserts
         (ADR 0068).

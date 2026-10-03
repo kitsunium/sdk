@@ -70,6 +70,16 @@ them through the SDK's own domains, so nothing did.
   the four packages and the connector in the framework, their rewrite onto
   `pkg/v1`, the codes re-pointed, the facades removed. This record changes no
   code.
+- **As implemented**: the four packages are `framework/{entitlement,selfupdate,
+  gate,git}` over `framework/internal/{core,service}/<domain>` — `vcs` renamed
+  `git` — and the ssh identity is the connector module
+  `framework/connectors/ssh`. Through `pkg/v1` they verify ed25519 with `sign`,
+  digest with `hash`, lock the entitlement cache with `lock`, refuse Windows
+  with `proc`'s `UnsupportedPlatform`, read the self-update expiry on an
+  injected `clock`, and compare versions with `semver`, so the framework
+  module requires no vendor at all. Three adoptions §2 names did not happen,
+  each for a reason measured on the tree and said at its code site and in the
+  engines' `CLAUDE.md` (§Where ADR 0158 §2 is not followed): see §Deferred.
 - The SDK sheds four domains it carried for one kind of product — about
   13 000 production lines across core, service and facades, 14 000 with the
   ssh identity — and its families have no distribution group (ADR 0155).
@@ -99,7 +109,34 @@ change.
 
 ## Deferred
 
-None.
+Each of these waits for a decision in the domain that owns the mechanism, not
+in the framework:
+
+- **The guarded HTTP client.** The roster fetch and the CI token mint
+  (`entitlement`) and the release client (`selfupdate`) stay `net/http` over
+  `http.DefaultTransport`, because `pkg/v1/client`'s transport sets no `Proxy`:
+  measured with `HTTP_PROXY` set, the default client went through the proxy and
+  the guarded one dialled the host directly, so adopting it would cut every
+  customer behind a proxy off their licence checks and updates. It also
+  documents no setting that follows no redirect at all, which the mint
+  requires. The way forward is the net domain's: a proxy option — honouring
+  `HTTP(S)_PROXY` and `NO_PROXY` — and a documented no-redirect setting in
+  `core/net`'s `ClientConfig`, under its own ADR, after which the three clients
+  adopt `pkg/v1/client` and the guarded policy re-states `selfupdate`'s
+  https-only, bounded hops.
+- **RS256.** The CI seat's GitHub Actions token is RS256, and the crypto domain
+  registers Ed25519 and ECDSA P-256 and no RSA scheme. As §2 says, it is
+  answered in the crypto domain by an ADR or not at all; until then
+  `entitlement`'s verifier stays local, typed, used by the CI seat alone and
+  handed only the RSA keys its JWKS reader has bounded.
+- **`strictjson` stays out, by design, for documents that must ignore unknown
+  members.** It refuses a duplicate name, which `entitlement` needs, and also
+  every member its target does not declare, with no mode to relax it (ADR
+  0102); a JWK (RFC 7517 §4), a token's claims (RFC 7519 §4) and a roster an
+  older client still reads after the vendor adds a field must ignore one —
+  measured, strictjson refused a JWK carrying an undeclared member. So
+  `jsonnames.go`'s duplicate-name walker stays. This is not a gap to close by
+  relaxing strictjson: ADR 0102's one reading is the point of that decoder.
 
 ## References
 

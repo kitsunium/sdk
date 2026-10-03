@@ -111,36 +111,46 @@ what it was before ADR 0012: the workspace's anchor beside `go.work`,
 ## Consequences / Semantics
 
 - **Implemented by the reorganisation series.** Its vendor-module step created
-  eight of the nine modules — every one but `third-party/codec/yaml`, which
-  arrives with the YAML subset (ADR 0156) — with their `go.work` entries and
-  Bazel wiring (a module-root `BUILD.bazel` carrying its `gazelle:prefix`; for
+  eight of the nine modules with their `go.work` entries and Bazel wiring (a
+  module-root `BUILD.bazel` carrying its `gazelle:prefix`; for
   `third-party/aws` and `third-party/x-crypto`, which hold no package at their
   root, a `BUILD.bazel` whose only purpose is that `go_deps` can load their
   `go.mod`), moved the suites against real engines to `e2e`, and taught the
-  release automation the new tags. Until the ssh identity leaves (ADR 0158),
-  the root module still requires `x/crypto` for it.
+  release automation the new tags; the ninth, `third-party/codec/yaml`, followed
+  in the same shape with the YAML subset (ADR 0156).
+- **The root module is empty.** The ssh identity left for the framework's
+  connector module `framework/connectors/ssh` (ADR 0158), so §5 holds as
+  written: the root module holds no package, requires nothing, and has no
+  `go.sum`. It stays in the census, and the lanes that loop over it —
+  `cross-build`, `test-386`, `e2e-cross` and `scripts/ci/vuln-check.sh` — skip
+  `.` by name, and only while `go list` says it holds no package, because
+  `go vet ./...` and `go test ./...` exit 1 on a module with no package and
+  govulncheck exits 2: a package added there is built and scanned again.
 - **What a consumer's module graph holds**, measured with
   `GOWORK=off go list -m all` in each module (the module itself and the SDK's
   `internal/*` included). The root module named 174 before the split. At the
-  split, while `internal/service` still required the vendor codecs, and on the
-  integrated tree once ADR 0156 had made them native:
+  split, while `internal/service` still required the vendor codecs and
+  `x/mod`, and on the integrated tree once ADR 0156 had landed whole — every
+  codec native, `x/mod` replaced by `kernel/semver`:
 
-  | Module | At the split | With the native codecs |
+  | Module | At the split | Integrated |
   |---|---|---|
-  | `third-party/aws` | 30 | 21 |
-  | `third-party/codec/hcl` | 37 | 31 |
-  | `third-party/codec/protobuf` | 20 | 12 |
-  | `third-party/db/writer/clickhouse` | 94 | 88 — the driver's own graph, which lists testcontainers it never builds |
-  | `third-party/db/writer/mysql` | 20 | 11 |
-  | `third-party/db/writer/redis` | 27 | 20 |
-  | `third-party/transform` | 19 | 10 |
-  | `third-party/x-crypto` | 23 | 14 |
-  | the root (the ssh identity) | 24 | 15 |
-  | `e2e` (auxiliary: the suites, testcontainers, `moby`, the drivers) | 159 | 147 |
+  | `third-party/aws` | 30 | 16 |
+  | `third-party/codec/hcl` | 37 | 27 |
+  | `third-party/codec/protobuf` | 20 | 7 |
+  | `third-party/codec/yaml` | — | 6 |
+  | `third-party/db/writer/clickhouse` | 94 | 85 — the driver's own graph, which lists testcontainers it never builds |
+  | `third-party/db/writer/mysql` | 20 | 6 |
+  | `third-party/db/writer/redis` | 27 | 15 |
+  | `third-party/transform` | 19 | 5 |
+  | `third-party/x-crypto` | 23 | 9 |
+  | the root | 24 (the ssh identity) | 1 — itself: no package, no requirement |
+  | `framework/connectors/ssh` (the ssh identity, ADR 0158) | — | 11 |
+  | `e2e` (auxiliary: the suites, testcontainers, `moby`, the drivers) | 159 | 149 |
 - testcontainers and `moby` are required by `e2e` alone: they leave `go.work`,
   and `bazel mod tidy` drops them from `use_repo`.
-- `cut-tags.sh` publishes eight more tags and eight more GitHub Releases per
-  release — nine once `third-party/codec/yaml` exists.
+- `cut-tags.sh` publishes nine more tags and nine more GitHub Releases per
+  release, one per vendor module.
 - A pattern does not cross a module boundary. From the repository root,
   `go test ./third-party/aws/...` works in workspace mode; with `GOWORK=off` it
   reaches nothing, and each package's verification command runs from its

@@ -64,22 +64,38 @@ suite.
 
 ### 3. YAML is a named subset; the full grammar is opt-in
 
-The Format `yaml` becomes a native YAML 1.2 subset sized for configuration:
+The Format `yaml` becomes a native YAML 1.2.2 subset sized for configuration
+(`internal/service/codec/yaml`; the table is what it reads and refuses, as
+built):
 
-| Supported | Refused by name |
+| Read | Refused by name (code) |
 |---|---|
-| block mappings and block sequences | anchors (`&a`) |
-| flow mappings and flow sequences | aliases (`*a`) |
-| plain, single-quoted and double-quoted scalars | tags (`!x`, `!!str`) |
-| literal (`\|`) and folded (`>`) block scalars, with chomping | merge keys (`<<`) |
-| comments | multiple documents (a second `---`, or `...`) |
-| one document, a leading `---` accepted | complex keys (`? `) |
-| plain scalars resolved by the YAML 1.2 core schema | directives (`%YAML`, `%TAG`) |
+| block mappings and block sequences, the compact `- key: value` and `- - nested` entries | anchors, `&a` (`0.3.4.3`) |
+| flow mappings and flow sequences, across lines too, a single-pair mapping in a flow sequence (`[a: 1]`) and a key with no value (`{a, b: 2}`) | aliases, `*a` (`0.3.4.4`) |
+| plain scalars, across lines; single-quoted and double-quoted scalars with every YAML escape but `\/` | tags, `!x`, `!!str`, `!<uri>` (`0.3.4.5`) |
+| literal (`\|`) and folded (`>`) block scalars, with chomping and indentation indicators | merge keys, `<<` (`0.3.4.6`) |
+| comments | a second document, `---` after content (`0.3.4.7`) |
+| one document, with an optional `---` start and `...` end; a byte order mark first; CRLF line breaks | complex keys, `? k` or a flow collection as a key (`0.3.4.8`) |
+| plain scalars resolved by the YAML 1.2 core schema: `true` / `false` and never `yes`, `no`, `on`, `off`; `0o` octal and `0x` hexadecimal integers; `.inf`, `.nan`; everything else a string | directives, `%YAML`, `%TAG` (`0.3.4.9`) |
+| | a mapping holding one key twice (`0.3.4.10`) |
+| | an integer written with a leading zero, `0644`, wherever its value matters (`0.3.4.11`) |
 
-A refusal names the construct and the line it starts on, never the value
-(principle 8). A construct is refused rather than read some other way for the
-reason ADR 0063 refuses an unsupported language: a document read differently
-from what its author meant, and accepted, is the failure nothing observes.
+A refusal names the construct and the line and column it starts at, never the
+value (principle 8), and carries `UNMARSHAL_FAILED` (`0.3.4.2`) in its trail.
+A construct is refused rather than read some other way for the reason ADR 0063
+refuses an unsupported language: a document read differently from what its
+author meant, and accepted, is the failure nothing observes — which is why the
+duplicate key and the leading zero, two documents YAML readers read
+differently, are refused by name beside the constructs. Whatever else lies
+outside the subset — a reserved indicator (`@`, `` ` ``), a tab where
+indentation is, an unknown escape, a multi-line implicit key, content on the
+`---` line, a `...` closing nothing — is `UNMARSHAL_FAILED` with a constant
+detail naming it, and a document that is not UTF-8, carries a raw control
+character, a raw U+0085, U+2028 or U+2029, or a byte order mark anywhere but
+first is refused before the parse. A document is bounded at 10 MiB, 2^20 nodes,
+a nesting depth of 100 and implicit keys of 1 024 runes. `Unmarshal` reads one
+document; the streaming decoder reads a `---`-separated stream, one document
+per `Decode`.
 
 The full `yaml.v3` codec stays available as an opt-in module,
 `third-party/codec/yaml` (ADR 0157), registering the Format `yaml-full`. It
@@ -103,19 +119,36 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
   native YAML subset and the `yaml-full` module, `kernel/semver`, and the
   removal of the six requirements from `internal/service/go.mod`. After the
   last of them, `go list -m all` in `pkg` names the SDK's own modules only.
-- **As implemented so far**: the four native codecs have landed, each with its
-  consumer-visible deviations listed in its package `CLAUDE.md` and pinned by
-  its own suite — CBOR writes map pairs sorted by encoded key (RFC 8949
-  §4.2.1); BSON keeps the driver's v1 mapping, gains two codes in its own range
-  (`0.3.36.4` `BSON_DEPTH_EXCEEDED`, `0.3.36.5` `BSON_VALUE_INVALID`) and a
-  facade, `pkg/v1/codec/bson`, which registers BSON alone and aliases its value
-  types because a program reading BSON holds them (ADR 0074, ADR 0134); TOML's
-  `LocalDate`, `LocalTime` and `LocalDateTime` are the SDK's own types,
-  re-exported by `pkg/v1/codec/toml`, and its decoder still accepts the four
-  TOML 1.1.0 relaxations the replaced library accepted while its encoder writes
-  1.0.0. `go list -m all` in `pkg` names 12 modules instead of 35, and
-  `go list -deps ./...` links two outside the SDK, `gopkg.in/yaml.v3` and
-  `golang.org/x/mod` — what §3 and §4 remove.
+- **As implemented**: all of it has landed.
+  - The four native codecs, each with its consumer-visible deviations listed in
+    its package `CLAUDE.md` and pinned by its own suite — CBOR writes map pairs
+    sorted by encoded key (RFC 8949 §4.2.1); BSON keeps the driver's v1
+    mapping, gains two codes in its own range (`0.3.36.4`
+    `BSON_DEPTH_EXCEEDED`, `0.3.36.5` `BSON_VALUE_INVALID`) and a facade,
+    `pkg/v1/codec/bson`, which registers BSON alone and aliases its value types
+    because a program reading BSON holds them (ADR 0074, ADR 0134); TOML's
+    `LocalDate`, `LocalTime` and `LocalDateTime` are the SDK's own types,
+    re-exported by `pkg/v1/codec/toml`, and its decoder still accepts the four
+    TOML 1.1.0 relaxations the replaced library accepted while its encoder
+    writes 1.0.0.
+  - The native YAML subset reads and refuses exactly §3's table and keeps
+    `0.3.4.1` / `0.3.4.2`; the duplicate key and the leading-zero integer are
+    the two refusals by name the implementation added to the table this record
+    first carried. Two differential fuzzers hold it to `yaml.v3` — whatever the
+    subset accepts, `yaml.v3` reads as the same value — from
+    `third-party/codec/yaml`, the opt-in `yaml-full` module (range `0.3.77.*`),
+    which claims no MIME type and no extension.
+  - `kernel/semver` replaced `golang.org/x/mod` in `proc/self`, and the
+    framework's `entitlement` and `selfupdate` call it through
+    `pkg/v1/semver`.
+  - Measured on the merged tree with `GOWORK=off`: `go list -m all` in `pkg`
+    names the SDK's own four modules (`pkg`, `internal/core`,
+    `internal/kernel`, `internal/service`) and nothing else, and
+    `go list -deps -test ./...` reaches no package outside
+    `github.com/kitsunium/sdk` — nor does it in `internal/kernel`,
+    `internal/core`, `internal/service` or the framework. No `go.mod` of the
+    SDK or the framework requires a codec library or `golang.org/x/mod`;
+    `gopkg.in/yaml.v3` is required by `third-party/codec/yaml` alone.
 - **Not yet mechanical**: no gate fails when a vendor module enters `pkg`'s
   graph. Until one does, §1 is checked in review with `go list -m all`; see
   §Deferred.
@@ -130,8 +163,15 @@ reaches the SDK only through `pkg/v1` (ADR 0158).
 ## Breaking changes
 
 - A YAML document using anchors, aliases, tags, merge keys, several documents,
-  complex keys or directives is refused by the Format `yaml` — and so by every
-  YAML configuration file — where `yaml.v3` accepted it. `yaml-full` reads it.
+  complex keys or directives, holding a key twice or writing an integer with a
+  leading zero is refused by the Format `yaml` — and so by every YAML
+  configuration file — where `yaml.v3` accepted it. A document `yaml.v3` read
+  under YAML 1.1 rules reads by the core schema instead: `yes` / `no` / `on` /
+  `off` into a `bool` are refused, `1_000`, `0b101` and a timestamp are text in
+  an untyped target, a float decodes into an integer only when it is whole,
+  `UnmarshalYAML(*yaml.Node)` is refused, and a mapping with non-string keys
+  reads as `map[string]any`; `internal/service/codec/yaml/CLAUDE.md` lists them.
+  `yaml-full` reads every one of them as before.
 - Bytes written by the native MessagePack, CBOR, BSON and TOML codecs may differ
   from the library's wherever the specification leaves a choice; each
   difference is named in the pull request that makes it and in the codec's

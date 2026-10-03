@@ -25,12 +25,13 @@
 // brings golang.org/x/sys and is banned SDK-wide (ADR 0078). Naming the
 // capability as a port keeps the MECHANISM here, stdlib-only, and puts the one
 // implementation that needs a vendor dependency where a vendor dependency is
-// allowed: third-party/, which a consumer opts into.
+// allowed: the framework's connector module framework/connectors/ssh, which a
+// consumer opts into (ADR 0158).
 //
 // A consumer that does not want that dependency supplies its own Identity. That
 // is not a theoretical escape hatch — the product this was versed from does
 // exactly that, keeping its 327 lines of SSH handling rather than pulling the
-// root module's whole graph for them.
+// connector's graph for them.
 //
 // There is **no registry**. A registry's key would name an identity scheme, and
 // the whole trust chain is anchored to one vendor for one product.

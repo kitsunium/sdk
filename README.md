@@ -4,11 +4,14 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **65 packages**: 54 at the top level, plus eleven nested ones
+`pkg/v1` ships **64 packages**: 52 at the top level, plus twelve nested ones
 (`logger/writer`, `logger/slogbridge`, `server/sse`, `server/websocket`,
 `server/static`, `codec/strictjson`, `codec/jsonshape`, `codec/jsonpatch`,
-`codec/json`, `codec/yaml`, `codec/toml`). They are grouped below by the job they do, and each links
-to its own generated `README.md`.
+`codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`), and links the standard
+library and nothing else (ADR 0156). They are grouped below by the job they do,
+and each links to its own generated `README.md`. The distribution mechanisms
+that close the list are the framework's packages, imported from
+`github.com/kitsunium/sdk/framework/…` (ADR 0158).
 
 ### Observability
 
@@ -33,6 +36,7 @@ to its own generated `README.md`.
 | [`statemachine`](./pkg/v1/statemachine) | Entities of **your** store moved along declared states: events you fire, timers after a duration in a state, deadlines the entity carries, guards on it. One transition per entity at a time, a hook that panics never leaves one locked, and a replace never resurrects a deleted entity. The loop keeps an agenda — one heap entry per entity — so it sleeps until the next transition due or a write and finds it in O(log N), not by re-reading the store. |
 | [`cache`](./pkg/v1/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
 | [`clock`](./pkg/v1/clock) | The time port — `Clock` / `Waiter` / `Timed`, plus `System` and a `ManualClock` a test drives by hand. Every SDK `Clock` field takes one, so a timeout, a cron cadence or a lease expiry is asserted exactly, with no sleeping. |
+| [`semver`](./pkg/v1/semver) | Version precedence the way Go writes versions — SemVer 2.0.0 with a leading `v` — and Go pseudo-versions recognised and read, with `golang.org/x/mod`'s names and answers and nothing outside the standard library. An unreadable string sorts first, numbers of any size order exactly, nothing allocates. |
 | [`resilience`](./pkg/v1/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
 | [`lock`](./pkg/v1/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
 | [`id`](./pkg/v1/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
@@ -52,7 +56,7 @@ to its own generated `README.md`.
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) / [`bson`](./pkg/v1/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links `yaml.v3` and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. BSON, CBOR, MessagePack and TOML are implemented on the standard library alone. |
+| [`codec`](./pkg/v1/codec) + [`strictjson`](./pkg/v1/codec/strictjson), [`jsonshape`](./pkg/v1/codec/jsonshape), [`jsonpatch`](./pkg/v1/codec/jsonpatch), [`json`](./pkg/v1/codec/json) / [`yaml`](./pkg/v1/codec/yaml) / [`toml`](./pkg/v1/codec/toml) / [`bson`](./pkg/v1/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links the SDK's own YAML reader and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/hash), [`sign`](./pkg/v1/sign), [`mac`](./pkg/v1/mac), [`kdf`](./pkg/v1/kdf), [`agree`](./pkg/v1/agree), [`password`](./pkg/v1/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
@@ -71,10 +75,10 @@ to its own generated `README.md`.
 |---|---|
 | [`proc`](./pkg/v1/proc) + [`process`](./pkg/v1/process), [`signal`](./pkg/v1/signal), [`reaper`](./pkg/v1/reaper), [`rlimit`](./pkg/v1/rlimit), [`cgroup`](./pkg/v1/cgroup), [`sdnotify`](./pkg/v1/sdnotify), [`sdlisten`](./pkg/v1/sdlisten) | OS process supervision: spawn, signals, subreaping, resource limits, cgroups, systemd. Uniform typed `UnsupportedPlatform` where a kernel offers no native mechanism. `process` also reads the process itself: its runtime state and the build it came from, a module's release, commit and local directory kept apart. |
 | [`memlimit`](./pkg/v1/memlimit) | Reads the cgroup cap that already bounds **this** process — which the Go runtime does not — so a service in a 512 MiB container gets a soft limit instead of a SIGKILL. |
-| [`git`](./pkg/v1/git) | What a branch changed, as a value that can say it does not know: "nothing changed" and "I could not tell" are opposite instructions, so the resolver degrades rather than answering with an empty set. And what a working tree is at — its commit, that commit's time, whether a tracked file differs — through the same hardened invocations. |
-| [`selfupdate`](./pkg/v1/selfupdate) | Signature **then** digest **then** disk. Comparing an archive against a checksum file fetched beside it verifies nothing; a build with no vendor key installs nothing. |
-| [`entitlement`](./pkg/v1/entitlement) | Vendor-signed roster → grant, with an offline cache, an anti-rollback ratchet and a CI seat. Bring your own `Identity`: three methods, and none of them says "ssh". |
-| [`gate`](./pkg/v1/gate) | May this invocation run? A policy value and a pure decision — it verifies nothing, upgrades nothing and never ends a process. |
+| [`git`](./framework/git) (framework) | What a branch changed, as a value that can say it does not know: "nothing changed" and "I could not tell" are opposite instructions, so the resolver degrades rather than answering with an empty set. And what a working tree is at — its commit, that commit's time, whether a tracked file differs — through the same hardened invocations. |
+| [`selfupdate`](./framework/selfupdate) (framework) | Signature **then** digest **then** disk. Comparing an archive against a checksum file fetched beside it verifies nothing; a build with no vendor key installs nothing. |
+| [`entitlement`](./framework/entitlement) (framework) | Vendor-signed roster → grant, with an offline cache, an anti-rollback ratchet and a CI seat. Bring your own `Identity`: three methods, and none of them says "ssh". |
+| [`gate`](./framework/gate) (framework) | May this invocation run? A policy value and a pure decision — it verifies nothing, upgrades nothing and never ends a process. |
 
 ## Install
 
@@ -114,7 +118,7 @@ func main() {
   go run github.com/kitsunium/sdk/tools/sdkguard@latest -level=invariant ./...
   ```
   It catches the defects that never announce themselves — a second logging pipeline beside the SDK logger (two thresholds, two formats, half-stamped records), stdout used as a log destination under a stdio protocol, a `logger.Version` assigned at runtime. Rules target *constructs*, never imports, so `*slog.Logger` fields and `fmt.Fprintln(os.Stdout, …)` stay legitimate. It also warns — without failing your build — when your `go.mod` pins an SDK older than the latest release, which matters here because a patch is cut whenever an internal package changes, carrying fixes no public-API changelog would show. See ADR 0033 and `tools/sdkguard/CLAUDE.md`.
-- **Multi-module workspace** — `go.work` holds seventeen modules: `internal/kernel`, `internal/core`, `internal/service`, `pkg`, the `framework` and its three database connectors, one module per vendor integration under `third-party/` (ADR 0157), and the root. Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
+- **Multi-module workspace** — `go.work` holds nineteen modules: `internal/kernel`, `internal/core`, `internal/service`, `pkg`, the `framework` and its four connectors (three database engines and entitlement's ssh identity), nine vendor modules under `third-party/` — one per vendor, `codec/yaml` included (ADR 0157) — and the root, which holds no package. Each can be built standalone with `GOWORK=off`, and `bash scripts/ci/go-modules.sh` lists them all. `e2e/`, `tools/genindex/` and `tools/sdkguard/` are auxiliary modules held deliberately outside it (adding them breaks Bazel's `go_deps`, which reads `go.work`) — build those with `GOWORK=off`.
 
 ## Releases
 
@@ -138,7 +142,8 @@ docs/            ADRs + the Astro-based docs site
 scripts/release/ release tooling — see ADR 0007
 tools/           build-time helpers (workspace_status, genindex, alloc-lane-targets)
                  + sdkguard/ — consumer-facing rule enforcement (ADR 0033)
-framework/       the layer above pkg/v1 a product imports (ADR 0147)
+framework/       the layer above pkg/v1 a product imports (ADR 0147), the
+                 distribution mechanisms and their ssh connector included (ADR 0158)
 third-party/     opt-in vendor integrations, one Go module per vendor (ADR 0157)
 e2e/             real-kernel conformance harness + the Docker-backed integration
                  suites (auxiliary module, GOWORK=off)
