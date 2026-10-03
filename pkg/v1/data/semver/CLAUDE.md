@@ -12,9 +12,11 @@ It exists for the framework. The distribution mechanisms that compare versions
 (ADR 0158), which reaches the SDK through `pkg/v1` and `kernel/errs` only
 (ADR 0147), and call this package. Without it they would have kept
 `golang.org/x/mod` in the framework's graph, or re-implemented precedence a
-third time. It sits at the
-root of `pkg/v1`, beside `errs` and `clock`: a value every family may compare
-and none owns (ADR 0159 §4).
+third time. It sits in the `data` family, at `pkg/v1/data/semver`, as the
+reorganisation's target tree places it — a version string is data a program
+compares (`pkg/v1/data/CLAUDE.md`) — and not at the root of `pkg/v1` beside
+`errs` and `clock`, where ADR 0155 §1 and ADR 0159 §4 wrote it; the kernel
+package it forwards to stays at the kernel's root.
 
 ## Surface
 

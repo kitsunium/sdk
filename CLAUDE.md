@@ -58,7 +58,8 @@ internal/
 │                  backoff, clock, errs, plugin, semver,
 │                  concur/{batcher, buffer, group, recycler, singleflight,
 │                          snapshot, worker},
-│                  collections/{cache, heap, ring}, fs/{pathchain}
+│                  collections/{cache, heap, ring},
+│                  fs/{flock, pathchain, winacl}
 ├── core/          domain interfaces + domain values — each package by its path
 │                  crypto, crypto/key/jwk, net, proc, proc/ipc,
 │                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
@@ -90,7 +91,9 @@ internal/
                              otlpjson exporters + the OTLP/HTTP emitter;
                            trace — tracer + samplers + recorder + otlpjson
                              exporter + the OTLP/HTTP emitter + the
-                             server/client HTTP middlewares;
+                             server/client HTTP middlewares + the W3C
+                             traceparent/tracestate reader and writer
+                             (moved from the core — ADR 0160 §4);
                            profiling — CPU/heap capture + a stdlib pprof
                              decoder + fold onto owners + goroutine dumps,
                              grouped;
@@ -119,7 +122,8 @@ internal/
                            codec — asn1, baseenc, bson, cbor, csv,
                              flatbuffers, form, json, msgpack, multipart,
                              ndjson, pem, tlv, toml, xml, yaml; + strictjson,
-                             a decoder and not a Format; + jsonshape, a
+                             a decoder and not a Format, its request-body
+                             form in strictjson/httpbody; + jsonshape, a
                              type's wire shape, not a Format; + jsonpatch,
                              two documents' difference, not a Format;
                            docstore — typed JSON documents + unique/multi
@@ -143,22 +147,29 @@ internal/
                    proc   (the family — ADR 0155; a directory, no Go code:
                            cgroup, childwait, exec, memlimit, reaper,
                            rlimit, self, signal — process supervision,
-                           ADR 0016; systemd/{listen, notify} — socket
-                           activation and sd_notify; ipc — a private socket
-                           between processes of one machine: the directory
-                           gates, the path above it audited with pathchain
-                           (PATH_UNSAFE), SO_PEERCRED on Linux, a named pipe
-                           with its own DACL on Windows — ADR 0148)
+                           ADR 0016; internal/rlim — the syscall.Rlimit
+                           constructor exec and rlimit share;
+                           systemd/{listen, notify} — socket activation and
+                           sd_notify; ipc — a private socket between
+                           processes of one machine, the engines behind
+                           core/proc/ipc's Listener and Dialer ports: the
+                           directory gates, the path above it audited with
+                           pathchain (PATH_UNSAFE), SO_PEERCRED on Linux, a
+                           named pipe with its own DACL on Windows —
+                           ADR 0148, ADR 0160)
                    net    (the family — ADR 0155; a directory, no Go code:
                            client, server, sse, static, tlsid, websocket —
-                           one engine each over the one contract core/net)
+                           one engine each over the one contract core/net;
+                           the WebSocket and SSE wire formats are the
+                           engines' own — ADR 0160 §4)
                    app    (the family — ADR 0155; a directory, no Go code:
                            config — env, file and fs.FS sources + layered
                              decode + schema + origins + poll watcher;
                            cli — resolution loop + generated help + config
                              seam;
                            i18n — CLDR plural table + catalogue + negotiator
-                             + printer;
+                             + printer + the BCP 47 tag parser and pattern
+                             compiler (ADR 0160 §4);
                            validation — constraints + combinators +
                              struct-tag plan;
                            view — html/template engine + trust scan +
@@ -180,11 +191,18 @@ internal/
                              flock(2) or LockFileEx + keepalive;
                            id — uuidv4, uuidv7, ulid, snowflake, nanoid,
                              ksuid, typeid;
-                           mail — MIME composition + SMTP + memory and
-                             capture doubles; spool/ — the durable outbox)
+                           mail — the guards (Validate, the injection gate,
+                             Envelope — moved from the core, ADR 0160) +
+                             MIME composition + SMTP + memory and capture
+                             doubles; spool/ — the durable outbox)
 pkg/
 └── v1/            stable public API (type aliases + ergonomic helpers)
     ├── clock/     (the time port: Clock/Waiter/Timed + System + ManualClock — ADR 0090)
+    ├── concur/    (a family directory, no Go code — ADR 0159 §4: group/, singleflight/,
+    │                 worker/, batcher/, snapshot/, recycler/ — pure aliases of the
+    │                 kernel's concurrency primitives)
+    ├── collections/ (a family directory, no Go code — ADR 0159 §4: heap/, ring/ —
+    │                 pure aliases of the kernel's containers, ring single-producer)
     ├── observe/   (a family directory, no Go code — ADR 0155:
     │                 logger/ — + ldflags-injected Version, + writer/, + slogbridge/;
     │                 metrics/ — the OTel data model, zero OTel imports — ADR 0044;
@@ -193,12 +211,17 @@ pkg/
     │                   onto your owners — ADR 0121)
     ├── errs/      (construction + introspection: New, Wrap, CodeOf, …)
     ├── data/      (a family directory, no Go code — ADR 0155:
-    │                 codec/ — blank-imports all 16 service codecs + transform;
-    │                   + strictjson/ — one document read one way — ADR 0102;
+    │                 codec/ — the aggregate of its sixteen per-format packages,
+    │                   one format each with its codes — asn1/, baseenc/, bson/,
+    │                   cbor/, csv/, flatbuffers/, form/, json/, msgpack/,
+    │                   multipart/, ndjson/, pem/, tlv/, toml/, xml/, yaml/ —
+    │                   ADR 0134; bson/ also names BSON's value types;
+    │                   + strictjson/ — one document read one way — ADR 0102,
+    │                   its request-body form in strictjson/httpbody/;
     │                   + jsonshape/ — a type's wire shape — ADR 0133;
     │                   + jsonpatch/ — two documents' difference — ADR 0143;
-    │                   + json/, yaml/, toml/, bson/ — one format each — ADR 0134;
-    │                   bson/ also names BSON's value types;
+    │                 transform/ — compression without the codec package, the
+    │                   caller's ceiling honoured — ADR 0014;
     │                 sql/ — ports over database/sql, no driver, no ORM — ADR 0055;
     │                   Joiner/Deferrer — ADR 0139; SQLite migrations — ADR 0140;
     │                 docstore/ — typed JSON documents, indexes, one entry per write —
@@ -217,6 +240,7 @@ pkg/
     ├── security/  (a family directory, no Go code — ADR 0155:
     │                 authz/ — RBAC + ABAC, no DSL, abstention is the zero — ADR 0057;
     │                 redact/ — secrets replaced for display, exact bound — ADR 0101;
+    │                   the Redactor a port a test can double — ADR 0160;
     │                 secret/ — a Value no rendering writes down, versioned stores,
     │                   keyring, rotator — ADR 0096; one key per subject, destroyed
     │                   to erase — ADR 0142;
@@ -236,7 +260,8 @@ pkg/
     │                 Self and Build — ADR 0100; signal/, reaper/, rlimit/, cgroup/;
     │                 memlimit/ — the cap already bounding this process — ADR 0075;
     │                 systemd/{notify, listen}/ — sd_notify and socket activation;
-    │                 ipc/ — a private socket, the peer the kernel names — ADR 0148)
+    │                 ipc/ — a private socket, the peer the kernel names — ADR 0148;
+    │                   Listener/Dialer ports a test can double — ADR 0160)
     └── app/       (a family directory, no Go code — ADR 0155:
                       config/ — env, file and fs.FS layering, schema, origins,
                         poll watch — ADR 0028, ADR 0061, ADR 0097;
@@ -264,7 +289,7 @@ pkg/
                       id/ — UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID —
                         ADR 0024, ADR 0038;
                       mail/ — compose + Transport, injection refused — ADR 0064;
-                        the spool, the durable outbox — ADR 0111)
+                      mail/spool/ — the durable outbox — ADR 0111, ADR 0141)
 third-party/       opt-in vendor integrations, one Go module per vendor
                    (ADR 0157) — see third-party/CLAUDE.md:
                    aws (writer/{cloudwatch,s3}), codec/hcl, codec/protobuf,
@@ -314,7 +339,7 @@ every other codec.
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
 | Release dry-run | `make release-dry-run` (computes patch bumps locally without pushing tags — see ADR 0007) |
-| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 64 today — and of every package of the `framework` module declaring one — 26 today — from its package doc comment; not the four `framework/connectors/*` modules, which that `go generate` does not reach, though `check-readme-drift.sh` checks them too; see ADR 0008) |
+| Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 87 today — and of every package of the `framework` module declaring one — 26 today — from its package doc comment; not the four `framework/connectors/*` modules, which that `go generate` does not reach, though `check-readme-drift.sh` checks them too; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.
 

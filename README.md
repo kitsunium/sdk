@@ -4,19 +4,25 @@ A Go SDK providing a normed, performant toolbox for downstream applications: str
 
 ## Packages
 
-`pkg/v1` ships **64 packages**: 4 at the top level — `errs`, `clock`,
-`crypto` and `proc` — plus sixty nested ones (the six scheme facades under
-`crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — the five under
+`pkg/v1` ships **87 packages**: 4 at the top level — `errs`, `clock`,
+`crypto` and `proc` — plus eighty-three nested ones (the six scheme facades under
+`crypto/` — `agree`, `hash`, `kdf`, `mac`, `password`, `sign` — the six under
+`concur/` — `group`, `singleflight`, `worker`, `batcher`, `snapshot`,
+`recycler` — the two under `collections/` — `heap`, `ring` — the five under
 `security/` — `authz`, `redact`, `secret`, `session`, `token` — the six under
 `net/` — `server`, `client`, `tlsid`, `sse`, `websocket`, `static` — the six
 under `observe/` — `logger`, `logger/writer`, `logger/slogbridge`, `metrics`,
 `trace`, `profiling` — the nine under `proc/` — `process`, `signal`, `reaper`,
 `rlimit`, `cgroup`, `memlimit`, `ipc`, `systemd/notify`, `systemd/listen` —
-the fourteen under `data/` — `codec`, `codec/strictjson`, `codec/jsonshape`,
-`codec/jsonpatch`, `codec/json`, `codec/yaml`, `codec/toml`, `codec/bson`,
-`sql`, `docstore`, `queue`, `cache`, `vfs`, `semver` — and the fourteen under
-`app/` — `config`, `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`,
-`statemachine`, `resilience`, `lifecycle`, `health`, `lock`, `id`, `mail`),
+the twenty-eight under `data/` — `codec`, its sixteen per-format packages
+(`codec/asn1`, `codec/baseenc`, `codec/bson`, `codec/cbor`, `codec/csv`,
+`codec/flatbuffers`, `codec/form`, `codec/json`, `codec/msgpack`,
+`codec/multipart`, `codec/ndjson`, `codec/pem`, `codec/tlv`, `codec/toml`,
+`codec/xml`, `codec/yaml`), `codec/strictjson`, `codec/strictjson/httpbody`,
+`codec/jsonshape`, `codec/jsonpatch`, `transform`, `sql`, `docstore`,
+`queue`, `cache`, `vfs`, `semver` — and the fifteen under `app/` — `config`,
+`cli`, `i18n`, `validation`, `view`, `events`, `scheduler`, `statemachine`,
+`resilience`, `lifecycle`, `health`, `lock`, `id`, `mail`, `mail/spool`),
 and links the standard library and nothing else (ADR 0156). They are grouped
 below by the job they do, and each links to its own generated `README.md`. The
 distribution mechanisms that close the list are the framework's packages,
@@ -46,6 +52,7 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 | [`cache`](./pkg/v1/data/cache) | The LRU+TTL primitive **and** the domain above it: invalidation by tag, stampede protection, L1/L2 chaining. Stampede protection stops at the process boundary, and says so. |
 | [`clock`](./pkg/v1/clock) | The time port — `Clock` / `Waiter` / `Timed`, plus `System` and a `ManualClock` a test drives by hand. Every SDK `Clock` field takes one, so a timeout, a cron cadence or a lease expiry is asserted exactly, with no sleeping. |
 | [`semver`](./pkg/v1/data/semver) | Version precedence the way Go writes versions — SemVer 2.0.0 with a leading `v` — and Go pseudo-versions recognised and read, with `golang.org/x/mod`'s names and answers and nothing outside the standard library. An unreadable string sorts first, numbers of any size order exactly, nothing allocates. |
+| [`group`](./pkg/v1/concur/group), [`singleflight`](./pkg/v1/concur/singleflight), [`worker`](./pkg/v1/concur/worker), [`batcher`](./pkg/v1/concur/batcher), [`snapshot`](./pkg/v1/concur/snapshot), [`recycler`](./pkg/v1/concur/recycler) (`concur/`) + [`heap`](./pkg/v1/collections/heap), [`ring`](./pkg/v1/collections/ring) (`collections/`) | The kernel's concurrency primitives and containers, published as pure aliases (ADR 0159): a fan-out that joins every failure or collects every value, one execution per key for concurrent callers, a loop ticking on an injected clock, a size-or-time batcher, a copy-on-write value, a capped object pool, a binary heap and a single-producer ring. |
 | [`resilience`](./pkg/v1/app/resilience) | Retry, circuit breaker, rate limit — one bucket, or one per caller with the set of callers bounded — bulkhead, timeout, fallback, hedging: composable `Runner` policies. The backoff curve is public and never wraps negative, and the retry waits on a clock a test can move. A policy's zero value is a safe default or an explicit refusal, never an inert policy. |
 | [`lock`](./pkg/v1/app/lock) | Named exclusive leases over one process or one machine, with fencing tokens. What it does **not** guarantee is stated as loudly: the SDK can only issue a fence; where the resource cannot compare it, exclusion is not guaranteed against a GC pause. |
 | [`id`](./pkg/v1/app/id) | UUIDv4/v7, ULID, snowflake, NanoID, KSUID, TypeID. |
@@ -59,13 +66,14 @@ imported from `github.com/kitsunium/sdk/framework/…` (ADR 0158).
 | [`tlsid`](./pkg/v1/net/tlsid) | TLS/mTLS identity from memory or disk, shared by both halves. |
 | [`view`](./pkg/v1/app/view) | Server-side rendering **on** `html/template`, not a reimplementation — contextual escaping is an HTML parser, and a hand-written one is where the XSS would come from. `text/template` has no representation at all; an AST audit fails the build on the import. |
 | [`i18n`](./pkg/v1/app/i18n) | Message translation with CLDR plurals over a **named** 13-language subset. An unsupported language is refused by name at construction, because falling back to English's two categories renders a wrong Polish sentence that nothing observes. |
-| [`mail`](./pkg/v1/app/mail) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool**: a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |
+| [`mail`](./pkg/v1/app/mail) + [`spool`](./pkg/v1/app/mail/spool) | MIME composition + SMTP. A CR or LF in a header is **refused and never repaired**, because the three stdlib helpers that would repair it deliver a message you did not write while reporting success. And a durable outbox, the **spool** (its own package): a mail is validated at `Send` and queued, retried on a growing backoff, dead-lettered with its last failure. A redelivery of a mail it delivered is dropped; the one resend left, after a crash between the relay's acceptance and the acknowledgement, carries the same Message-ID, so a receiver can recognise it. |
 
 ### Data and security
 
 | Package | What it does |
 |---|---|
-| [`codec`](./pkg/v1/data/codec) + [`strictjson`](./pkg/v1/data/codec/strictjson), [`jsonshape`](./pkg/v1/data/codec/jsonshape), [`jsonpatch`](./pkg/v1/data/codec/jsonpatch), [`json`](./pkg/v1/data/codec/json) / [`yaml`](./pkg/v1/data/codec/yaml) / [`toml`](./pkg/v1/data/codec/toml) / [`bson`](./pkg/v1/data/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. `json`, `yaml`, `toml` and `bson` register one format each, so a program reading YAML links the SDK's own YAML reader and no other codec; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
+| [`codec`](./pkg/v1/data/codec) + one package per format, [`json`](./pkg/v1/data/codec/json) … [`xml`](./pkg/v1/data/codec/xml), and [`strictjson`](./pkg/v1/data/codec/strictjson) (+ [`httpbody`](./pkg/v1/data/codec/strictjson/httpbody)), [`jsonshape`](./pkg/v1/data/codec/jsonshape), [`jsonpatch`](./pkg/v1/data/codec/jsonpatch), [`json`](./pkg/v1/data/codec/json) / [`yaml`](./pkg/v1/data/codec/yaml) / [`toml`](./pkg/v1/data/codec/toml) / [`bson`](./pkg/v1/data/codec/bson) | Universal dispatch over a `Format` registry — 24 formats behind one `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder`: `asn1-der`, `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` + 9 base-N encodings. `strictjson` is the other JSON decoder, for documents somebody else wrote: one reading or a refusal — no duplicate name, no case-only match, no unknown member, no trailing data — within a byte bound, and no refusal ever quotes the input. `jsonshape` describes a Go type's wire shape under encoding/json — members resolved exactly as the encoder resolves them, each with the Go field behind it. `jsonpatch` says what changed between two JSON documents, as RFC 6902 operations with the value each writes and the value it replaces. Each per-format package — `asn1`, `baseenc` (nine base-N formats), `bson`, `cbor`, `csv`, `flatbuffers`, `form`, `json`, `msgpack`, `multipart`, `ndjson`, `pem`, `tlv`, `toml`, `xml`, `yaml` — registers its format and names its codes, so a program reading YAML links the SDK's own YAML reader and no other codec, and `codec` is their aggregate; `bson` also names BSON's value types and has its own `Marshal` / `Unmarshal`. A request body is `strictjson/httpbody`'s, so the decoder itself links no `net/http`. Every codec is implemented on the standard library alone — YAML as a named subset of YAML 1.2.2 that refuses anchors, tags, merge keys and the other constructs it leaves out by name; the full `yaml.v3` reader is the opt-in module `third-party/codec/yaml`, registered as `yaml-full`. |
+| [`transform`](./pkg/v1/data/transform) | Compression without the codec package: gzip, raw DEFLATE and the zlib envelope from the standard library, zstd and s2 from the opt-in `third-party/transform`. `DecompressBounded` takes your ceiling and refuses a stream past it rather than cutting it short; a scheme that can be told the ceiling stops at it, so it bounds the work and not only the verdict. |
 | [`errs`](./pkg/v1/errs) | Typed errors with dotted-quad codes (`MM.LL.PP.SS`) + a wire-safe Public / log-only Private split. Construction (`New`, `Wrap`, `Field`) and introspection (`CodeOf`, `HasCode`, `NewPrefixMatcher`). |
 | [`crypto`](./pkg/v1/crypto) + [`hash`](./pkg/v1/crypto/hash), [`sign`](./pkg/v1/crypto/sign), [`mac`](./pkg/v1/crypto/mac), [`kdf`](./pkg/v1/crypto/kdf), [`agree`](./pkg/v1/crypto/agree), [`password`](./pkg/v1/crypto/password) | AEAD seal/open with hidden nonces, hashing, signatures, MACs, key derivation, key agreement, password hashing and a check against the ten thousand most common passwords — and JWK/JWKS, where a private export is opt-in and never the default. |
 | [`token`](./pkg/v1/security/token) | JWT over JWS Compact + PASETO v4.public. The algorithm is bound by the constructor and never read from the token, so algorithm confusion is a call that does not compile; `alg:none` has no representation in the type. |
@@ -121,7 +129,7 @@ func main() {
 ## What makes this SDK different
 
 - **Layered architecture** — `kernel` (stdlib-only primitives) → `core` (interfaces + values) → `service` (implementations) → `pkg/v1` (stable public alias layer). Dependency direction enforced on the build graph by `scripts/check-layer-deps.sh` (ADR 0068).
-- **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. `make guard` gates it: the SDK runs its own `sdkguard` rule SDK002 over its production tree in `make lint` and CI.
+- **Typed errors throughout** — `fmt.Errorf` / `errors.New` are banned in production code. Every error carries a wire-safe `Public` message and a log-only `Private` envelope. `make guard` gates it: the SDK runs its own `sdkguard` rule SDK002 over its production tree in `make lint` and CI. And every code is declared in one place — the core package at the path of the engine that raises it, so a domain's codes are found together and its public sentinels all alias the core (ADR 0160, gated by `scripts/pre-commit/check-core-symmetry.sh`).
 - **One Marshal/Unmarshal for everything** — text, binary, base-encoded — `codec.Marshal(format, v)` works the same way regardless of the underlying wire shape.
 - **The rules are checkable from outside** — the conventions this SDK states in its ADRs are enforced on *your* codebase too, by a tool the SDK ships:
   ```sh
