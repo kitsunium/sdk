@@ -56,6 +56,7 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
 | `response.go` | `LenientInt64` (number OR decimal string) + `RejectedCounter` + `DecodeRejected` |
 | `wire_external_test.go` | scalars, attributes, messages, the marshal, the caller's code on a fault, the unset instant, the stream under concurrency |
 | `sender_external_test.go` | the three verdicts for two stand-in signals, every success shape, every endpoint refusal, the transport fault, header precedence, the defaults |
+| `marshal_bench_test.go` / `BENCH.md` | the cost of one document, and a pooled-buffer CONTROL kept beside it — measured not to pay |
 
 ## Why each signal still keeps four small things
 
@@ -102,6 +103,14 @@ public names a caller types — `OTLPHTTPConfig`, `NewOTLPHTTPExporter`,
   process can empty under a response that already arrived.
 - **Read a body unbounded** — the verdict read and the drain are both bounded,
   the drain always by `DefaultMaxResponseBytes`.
+- **Pool the marshal buffer.** Measured (`BENCH.md`): `encoding/json` already
+  renders into a pooled `encodeState` and writes the document once, so a fresh
+  `bytes.Buffer` costs one exact-size allocation that IS the returned
+  document; a pool saves two header allocations at small sizes and costs
+  5–9 % more bytes at 1 000 points, because the returned document must be
+  copied out. The cost of an export is the tree and the scalars' own
+  `MarshalJSON` — ~9 000 allocations at 1 000 points, of which the buffer is
+  one. The `_PooledControl` benchmarks keep the question re-askable.
 - **Move a signal's payload tree here.** What is shared is what both signals
   emit identically; a metric point and a span are not that.
 - **Register anything.** The OTLP/HTTP exporter is never registered (ADR 0030,

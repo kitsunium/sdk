@@ -41,6 +41,7 @@ alias(
 go_test(
     name = "otlp_test",
     srcs = [
+        "marshal_bench_test.go",
         "sender_external_test.go",
         "wire_external_test.go",
     ],
