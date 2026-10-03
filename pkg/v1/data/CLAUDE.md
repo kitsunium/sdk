@@ -22,9 +22,9 @@ data is for: the bytes a value is written as (`codec`, every format and the
 JSON tools in one tree — ADR 0155 §3), the tables of the caller's database
 (`sql`) and the documents kept above them or on a filesystem (`docstore`), the
 messages one process leaves for another (`queue`), the copies kept close
-(`cache`) and the files a value is published to (`vfs`). Compression has no
-facade of its own: `codec` publishes the compression frame and blank-imports
-the stdlib compressors.
+(`cache`) and the files a value is published to (`vfs`). Compression is
+`transform`: the same bytes made smaller, a registry of its own beside the
+codec's, which `codec`'s compression frame goes through.
 
 `semver` sits here as the reorganisation's target tree places it: a version
 string is data a program compares. ADR 0155 §1 and ADR 0159 §4 wrote it at the
@@ -46,6 +46,7 @@ stays at the kernel's root, `internal/kernel/semver`.
 | `queue/` | `NewFile` / `NewSQL` / `NewMemory` → a `Broker`, and `Consume` (ADR 0054, ADR 0104, ADR 0151) | `internal/core/data/queue`, `internal/service/data/queue` | `queue/README.md` |
 | `semver/` | `IsValid` / `Compare` / `Prerelease` and `IsPseudoVersion` / `PseudoVersionRev` / `PseudoVersionTime` (ADR 0156 §4) | `internal/kernel/semver` | `semver/README.md` |
 | `sql/` | `NewTransactor` / `NewChecker` / `NewMigrator` over `database/sql`, no driver and no ORM (ADR 0055, ADR 0139, ADR 0140) | `internal/core/data/sql`, `internal/service/data/sql` | `sql/README.md` |
+| `transform/` | `Compress` / `Decompress` / `DecompressBounded` / `Lookup` over the `Algorithm` registry, with `gzip`, `flate` and `zlib` registered by the import — compression without the codec package (ADR 0014) | `internal/core/data/transform`, `internal/service/data/transform` | `transform/README.md` |
 | `vfs/` | `NewOS` / `NewMem` → a `FullFS`, reading through `io/fs` unchanged and publishing atomically (ADR 0056) | `internal/core/data/vfs`, `internal/service/data/vfs` | `vfs/README.md` |
 
 `docstore` and `queue` name the `sql` facade's aliases in their SQL

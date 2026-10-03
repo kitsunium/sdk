@@ -8,8 +8,10 @@ library: **gzip** (`compress/gzip`), **flate** (raw DEFLATE, `compress/flate`)
 and **zlib** (the RFC 1950 envelope, `compress/zlib`). One Go package implements
 all three schemes. Blank-importing the package self-registers all three
 singletons with the core registry so they become resolvable by `Algorithm`
-(ADR 0014 D1). This package ships **stdlib only**, so the `pkg/v1/data/codec` module
-graph stays vendor-free. The vendor compressors ADR 0014 deferred have since
+(ADR 0014 D1). Its public door is `pkg/v1/data/transform` (`Compress`,
+`Decompress`, `DecompressBounded`, `Lookup`), which `pkg/v1/data/codec`'s
+compressed frame goes through too. This package ships **stdlib only**, so the
+`pkg` module graph stays vendor-free. The vendor compressors ADR 0014 deferred have since
 landed **outside** this module, in `third-party/transform` — **zstd** and **s2**
 over `github.com/klauspost/compress` (ADR 0066). They register into the same
 `core/data/transform` registry, so `transform.Lookup("zstd")` resolves once a

@@ -16,8 +16,9 @@ codec.go      — Format / Codec / Encoder / Decoder aliases, 24 Format constant
                 asn1|baseenc|bson|cbor|csv|flatbuffers|form|json|msgpack|multipart|ndjson|pem|tlv|toml|xml|yaml
 compressed.go — MarshalCompressed / UnmarshalCompressed verbs + CompressAlgorithm alias
                 (Gzip/Flate constants) + the self-describing compressed-frame codec
-                (ADR 0014 D1); blank-imports internal/service/data/transform, which
-                self-registers gzip+flate+zlib — only gzip and flate are framed
+                (ADR 0014 D1); compresses and decompresses through pkg/v1/data/transform
+                (DecompressBounded at the frame's 64 MiB), whose import registers
+                gzip+flate+zlib — only gzip and flate are framed
 multipart.go  — MultipartForm / MultipartPart aliases + MultipartContentType: exactly what a
                 consumer needs to build a file upload, send it, and read it back (see
                 §Multipart below) — the multipart package's Form, Part and ContentType
@@ -60,7 +61,7 @@ is a `pkg/v1` decision not yet taken. `innerFormat` is the
 codec Format string, so `UnmarshalCompressed(box, &v)` needs **no** Format or
 Algorithm argument. A **decompression-bomb guard** (absolute 64 MiB frame
 ceiling + an expansion-ratio bound above a 4 KiB small-payload floor) returns
-`core/data/transform.CompressedFrameInvalid` — the guard thresholds are policy (tunable),
+`CompressedFrameInvalid` (`pkg/v1/data/transform` names it, with its code) — the guard thresholds are policy (tunable),
 the frame **bytes** are frozen post-v1.0.0. Compression is a parallel transform
 registry, **never** a codec `Format` (ADR 0014 §Why-not).
 
@@ -71,8 +72,10 @@ vendor modules beyond what the codec facade already carries. zstd and s2 ship in
 here: the frame's `algID` table is frozen at `gzip=0x01` / `flate=0x02`, so
 `MarshalCompressed(f, "zstd", v)` returns `UnknownCompressor` — the same
 registered-but-not-framed position `zlib` has held since ADR 0014.
-`CompressAlgorithm = transform.Algorithm`
+`CompressAlgorithm = transform.Algorithm` — the `pkg/v1/data/transform` alias —
 is a type alias so consumers name a compressor without importing `internal/*`.
+A program that compresses bytes without encoding a value imports
+`pkg/v1/data/transform` alone, which links no codec.
 
 ## Multipart
 

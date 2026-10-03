@@ -77,8 +77,8 @@ engines that encode, store and move a caller's data — `codec` (every wire
 format, and the JSON tools that are not Formats beneath it), `transform`,
 `sql`, `docstore`, `queue`, `cache` and `vfs` — over the contracts under
 `internal/core/data`, with their facades at the same paths under
-`pkg/v1/data`, except that `transform` is published through `codec`, which
-blank-imports it, and `docstore` has no contract under `internal/core` yet.
+`pkg/v1/data` — `transform`'s too, which `codec`'s compression frame goes
+through — except that `docstore` has no contract under `internal/core` yet.
 `app/` holds the mechanisms an application is assembled from — `config`,
 `cli`, `i18n`, `validation`, `view`, `events`, `scheduler`, `statemachine`,
 `resilience`, `lifecycle`, `health`, `lock`, `id` and `mail`, with the mail

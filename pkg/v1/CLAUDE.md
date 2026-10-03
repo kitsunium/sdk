@@ -13,6 +13,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `observe/logger/` | Logger facade: `Config` / `NewText` / `Default` / `NewWithSink` / `Multi` / `LevelGate` (a per-branch floor that applies Info as a floor — ADR 0132), `Info\|Warn\|Error\|Debug`, `Build` builder, `String\|Int\|…` attr ctors, `Version` (ldflags injection point), `TraceContext` / `TraceContextFromContext` — the ONE place logging and tracing meet, wired into every constructor so `trace_id` / `span_id` land on every record emitted inside a span (ADR 0062) | `pkg/v1/observe/logger/README.md` |
 | `app/mail/` | Compose and send mail — ADR 0064; header injection is refused rather than sanitised, Bcc reaches the envelope and never a header, and `TLSMode`'s zero value is refused because neither "encrypt" nor "do not" is a safe guess And the durable outbox (ADR 0111): `NewSpool` → a `Spool` whose `Send` validates, stamps a Message-ID every retry keeps and queues, and whose `Run` delivers with a growing backoff, dead-letters after `MaxAttempts` with the last failure and drops a redelivery of a mail it delivered (a crash between acceptance and acknowledgement is the one resend left, under the same Message-ID); `SendWithID` queues under an identifier the caller minted before the spool had the mail — a dot-atom of at most `SpoolMaxIDBytes`, `InvalidMailID` otherwise — and a repeated one is dropped at delivery once its mail was delivered (ADR 0141); `NewCapture(keep)` is the bounded memory transport. | `pkg/v1/app/mail/README.md` |
 | `data/codec/` | Universal codec dispatch: `Marshal` / `Unmarshal` / `NewEncoder` / `NewDecoder` over a `Format` registry; the aggregate of the 16 per-format packages beneath it, one service codec each, covering 24 Format names — text/binary/base-N reached identically (asn1-der, baseenc family [base64/base64url/base32/base16/hex/ascii85/base45/base58/base62], bson, cbor, csv, flatbuffers, form, json, msgpack, multipart, ndjson, pem, tlv, toml, xml, yaml) | `pkg/v1/data/codec/README.md` |
+| `data/transform/` | Compression without the codec package (ADR 0014): `Compress` / `Decompress` / `DecompressBounded` / `Lookup` / `Available` over the `Algorithm` registry; importing it registers `Gzip`, `Flate` and `Zlib` (stdlib), and `third-party/transform` adds zstd and s2. `DecompressBounded` returns at most the caller's ceiling or `DecompressedTooLarge` — a scheme that can be told the ceiling stops at it, any other is judged after its own backstop. `Algorithm` / `Compressor` / `BoundedDecompressor` alias the core; links no codec. stdlib-only | `pkg/v1/data/transform/README.md` |
 | `errs/` | Error introspection **and construction** (ADR 0019): read — `CodeOf` / `ReasonOf` / `PublicOf` / `PrivateOf` / `HTTPStatusOf` / `ExitCodeOf` / `FieldsOf` (a `Field` reads with `Key()` / `StringValue()`) / `HasCode` / `HasReason` / `NewPrefixMatcher`; build — `New` / `Wrap` (+ `WrapParams`) / `Field` helpers (`String` / `Int` / `Int64` / `Bool` / `Float` / `NewFieldValue`); codes — `Pack` / `ParseCode` / `MinAppMajor` / `MaxMajor` + `Code` / `Major` / `Layer` / `PkgCode` / `Serial` / `Field` / `PrefixMatcher` type aliases + `MaskBy*` constants. Octets are composable on the typed `Code` (e.g. `code.Layer()`). | `pkg/v1/errs/README.md` |
 | `app/id/` | Identifier generation (ADR 0024): `New(scheme)` dispatch + helpers `UUIDv4` / `UUIDv7` / `ULID` / `Snowflake` / `NanoID` / `KSUID`; configured constructors `NewSnowflake(node)` / `NewNanoID(size)` / `NewTypeID(prefix)`; decoders `ParseKSUID` / `ParseTypeID` / `FormatTypeID`; `Available`; `Scheme` constants; stdlib-only, cross-OS | `pkg/v1/app/id/README.md` |
 | `app/i18n/` | Translated messages with CLDR plural forms that are right in Polish and Arabic — ADR 0063; an unsupported language and an incomplete translation are startup failures, and `Accept-Language` negotiation never fails a request | `pkg/v1/app/i18n/README.md` |
@@ -111,14 +112,14 @@ The data facades — `codec` (with a per-format child for each of its sixteen
 codecs, which it aggregates, and the JSON tools that are not Formats,
 `codec/strictjson` with `codec/strictjson/httpbody`, `codec/jsonshape` and
 `codec/jsonpatch`), `sql`,
-`docstore`, `queue`, `cache`, `vfs` and `semver` — are children of `data/`, a
+`docstore`, `queue`, `cache`, `vfs`, `transform` and `semver` — are children of `data/`, a
 family directory with no Go code of its own (ADR 0155):
 `github.com/kitsunium/sdk/pkg/v1/data/<name>`. They moved from the root of
 `pkg/v1` with no alias left behind, under the same v0 licence. `semver` sits
 with them as the reorganisation's target tree places it, where ADR 0155 §1 and
 ADR 0159 §4 wrote the root of `pkg/v1`; the kernel package it forwards to stays
-at `internal/kernel/semver`. `transform` has no facade of its own: `data/codec`
-blank-imports its engine and publishes the compression frame.
+at `internal/kernel/semver`. `transform` publishes the compressors beside
+`codec`, whose compression frame goes through it.
 
 The application facades — `config`, `cli`, `i18n`, `validation`, `view`,
 `events`, `scheduler`, `statemachine`, `resilience`, `lifecycle`, `health`,
@@ -202,6 +203,7 @@ GOWORK=off go test -race -cover ./v1/...
 - `app/mail/` — see `pkg/v1/app/mail/CLAUDE.md`
 - `observe/logger/slogbridge/` — see `pkg/v1/observe/logger/slogbridge/CLAUDE.md`
 - `data/codec/` — see `pkg/v1/data/codec/CLAUDE.md`
+- `data/transform/` — see `pkg/v1/data/transform/CLAUDE.md`
 - `errs/` — see `pkg/v1/errs/CLAUDE.md`
 - `app/events/` — see `pkg/v1/app/events/CLAUDE.md`
 - `app/id/` — see `pkg/v1/app/id/CLAUDE.md`

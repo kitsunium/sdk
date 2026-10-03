@@ -231,7 +231,7 @@ func Marshal(f Format, v any) (encoded []byte, err error)
 Marshal serialises v using the codec registered under f. The codec's native input shape is tried first \(fast path, zero overhead\); if the codec rejects v as the wrong shape \(csv requires \[\]\[\]string, pem requires \*pem.Block, etc.\) the facade promotes v via json\-encode \+ codec\-specific wrap so every Format accepts any Go value — see promote.go for the per\-format strategies and the uniform\-contract rationale.
 
 <a name="MarshalCompressed"></a>
-## func [MarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L68>)
+## func [MarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L69>)
 
 ```go
 func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err error)
@@ -279,7 +279,7 @@ func Unmarshal(f Format, data []byte, v any) error
 Unmarshal parses data into v using the codec registered under f. As with Marshal, the codec's native target shape is tried first; on shape mismatch the facade promotes via JSON\-bridge so every Format can decode into any Go target.
 
 <a name="UnmarshalCompressed"></a>
-## func [UnmarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L137>)
+## func [UnmarshalCompressed](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L132>)
 
 ```go
 func UnmarshalCompressed(box []byte, v any) error
@@ -297,12 +297,12 @@ type Codec = corecodec.Codec
 ```
 
 <a name="CompressAlgorithm"></a>
-## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L53>)
+## type [CompressAlgorithm](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/compressed.go#L54>)
 
-CompressAlgorithm re\-exports core/data/transform.Algorithm so consumers name a compressor without importing internal/\*. Use the Gzip / Flate constants.
+CompressAlgorithm is the transform package's Algorithm, so consumers name a compressor without importing internal/\*. Use the Gzip / Flate constants.
 
 ```go
-type CompressAlgorithm = coretransform.Algorithm
+type CompressAlgorithm = transform.Algorithm
 ```
 
 <a name="Gzip"></a>
