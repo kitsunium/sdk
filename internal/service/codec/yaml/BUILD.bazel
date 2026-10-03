@@ -54,6 +54,7 @@ go_test(
         "fuzz_external_test.go",
         "limits_external_test.go",
         "marshal_external_test.go",
+        "parse_internal_test.go",
         "refusal_external_test.go",
         "stream_external_test.go",
         "subset_external_test.go",

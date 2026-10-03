@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T00:00:00Z -->
+<!-- updated: 2026-10-03T05:45:00Z -->
 # internal/service/codec/yaml/
 
 ## Purpose
@@ -226,7 +226,12 @@ decoding failure through the trail.
 
 Tests: `subset_external_test.go` (what is read), `refusal_external_test.go`
 (every refusal by code, line and column; no refusal quotes the input),
-`limits_external_test.go` (every bound), `marshal_external_test.go` and
+`limits_external_test.go` (every bound; its two documents of 2^20 nodes are
+left out of a coverage build, where the race detector makes each counter an
+instrumented atomic and one of them took 55 s of the 60 s budget),
+`parse_internal_test.go` (the node bound at `maxNodes` itself, through the
+arena — what keeps that bound inside the coverage run),
+`marshal_external_test.go` and
 `unmarshal_external_test.go` (the Go mapping), `stream_external_test.go`,
 `fuzz_external_test.go` (`FuzzUnmarshal`), `codec_integration_test.go`
 (`//go:build !race` allocation ceilings — the alloc lane runs it),

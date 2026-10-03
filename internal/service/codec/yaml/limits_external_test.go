@@ -35,6 +35,16 @@ func nestedBlock(depth int) string {
 }
 
 // TestDocumentBounds decodes documents at and past each bound.
+//
+// The node bound is decoded end to end, with documents of 2^20 nodes, in
+// every build but a coverage one. There each basic block bumps a counter, and
+// under the race detector, which `bazel coverage` keeps on, every bump is an
+// instrumented atomic: one such document took 15 to 18 s to decode alone
+// (1.2 to 1.4 s under the race detector without coverage) and 55 s beside
+// this package's other parallel tests, against the 60 s .bazelrc gives every
+// target. The race suite, the alloc lane and `go test` decode both; the
+// coverage run reaches the same bound, at the constant itself, through
+// Test_parser_add.
 func TestDocumentBounds(t *testing.T) {
 	t.Parallel()
 	type tc struct {
@@ -47,8 +57,13 @@ func TestDocumentBounds(t *testing.T) {
 		{name: "flow past the depth bound", doc: nestedFlow(documentedDepth + 1), refuse: true},
 		{name: "block at the depth bound", doc: nestedBlock(documentedDepth)},
 		{name: "block past the depth bound", doc: nestedBlock(documentedDepth + 1), refuse: true},
-		{name: "nodes at the bound", doc: "[" + strings.Repeat("0,", documentedNodes-2) + "0]"},
-		{name: "nodes past the bound", doc: "[" + strings.Repeat("0,", documentedNodes-1) + "0]", refuse: true},
+	}
+	//: the node bound end to end, wherever a 2^20-node decode fits the budget.
+	if testing.CoverMode() == "" {
+		tests = append(tests,
+			tc{name: "nodes at the bound", doc: "[" + strings.Repeat("0,", documentedNodes-2) + "0]"},
+			tc{name: "nodes past the bound", doc: "[" + strings.Repeat("0,", documentedNodes-1) + "0]", refuse: true},
+		)
 	}
 	runCase := func(t *testing.T, tc tc) {
 		t.Helper()
