@@ -47,15 +47,17 @@ export const DOMAIN_LABEL = {
 // deriveProvenance returns { sha, short, date } for the FIRST commit that added
 // `anchor`, as seen from `ref` (a tag for a tagged release, or "HEAD" for the
 // local release). `--follow` tracks renames so a refactor does not reset the
-// date; `--reverse` puts the oldest add first. Throws when the anchor resolves
-// to no commit — a fail-loud signal that the registry points at a bad path.
+// date. The log lists newest first and the oldest add is its LAST line: git
+// does not follow a rename on a reversed walk, so `--reverse` would find no
+// add at all for a file that has ever moved — every anchor the tree-by-family
+// moves renamed (ADR 0155). Throws when the anchor resolves to no commit — a
+// fail-loud signal that the registry points at a bad path.
 export async function deriveProvenance(repoRoot, anchor, ref = "HEAD") {
   const args = [
     "log",
     ref,
     "--follow",
     "--diff-filter=A",
-    "--reverse",
     "--format=%H|%h|%cI",
     "--",
     anchor,
@@ -71,7 +73,8 @@ export async function deriveProvenance(repoRoot, anchor, ref = "HEAD") {
   const first = stdout
     .split("\n")
     .map((s) => s.trim())
-    .filter(Boolean)[0];
+    .filter(Boolean)
+    .at(-1);
   if (!first) {
     throw new Error(
       `deriveProvenance: no creation commit for anchor "${anchor}" (ref ${ref}). ` +
