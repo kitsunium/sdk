@@ -1,6 +1,6 @@
 # ADR 0087 — the root a caller named is a spelling it did not choose, and a probe that did not answer is not an answer
 
-- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/vcs/git/CLAUDE.md` §Rules from ADR 0087. Before that: Accepted (§1 amended by [ADR 0095](0095-windows-runs-every-test-and-gates.md): the canonical root is cleaned into the OS's form, and the single `EvalSymlinks` becomes two)
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `framework/internal/service/git/CLAUDE.md` §Rules from ADR 0087 (the package was `internal/service/vcs/git` until [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md) moved it). Before that: Accepted (§1 amended by [ADR 0095](0095-windows-runs-every-test-and-gates.md): the canonical root is cleaned into the OS's form, and the single `EvalSymlinks` becomes two)
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0076](0076-what-a-branch-changed-is-a-value-that-can-say-it-does-not-know.md) (the `vcs` domain, whose §Deferred this closes), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (a zero value is never an inert policy), [ADR 0040](0040-changing-a-published-shape-while-v0.md) (the v0 licence, and why it is not used here)

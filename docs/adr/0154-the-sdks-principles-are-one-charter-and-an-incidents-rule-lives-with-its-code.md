@@ -158,7 +158,7 @@ The fourteen superseded here, and where each rule now lives:
 | 0083 | a link at a parent moved the lock directory; a held lock lost its file | `internal/service/lock/CLAUDE.md`, `internal/kernel/pathchain/CLAUDE.md` |
 | 0084 | the Windows lock directory was accepted whatever its DACL said | `internal/service/lock/CLAUDE.md` |
 | 0086 | one Windows mask for two questions, and the files' inherited list unread | `internal/service/lock/CLAUDE.md` |
-| 0087 | a root reached through a link answered false to every query | `internal/service/vcs/git/CLAUDE.md` |
+| 0087 | a root reached through a link answered false to every query | `framework/internal/service/git/CLAUDE.md` (moved with the package by ADR 0158) |
 | 0088 | the release scripts' suites ran in no lane | `scripts/CLAUDE.md` |
 | 0093 | the reaper took the status a `Process` was waiting for | `internal/service/proc/childwait/CLAUDE.md` |
 | 0095 | nineteen packages failed on Windows behind `continue-on-error` | `.github/workflows/CLAUDE.md` |
