@@ -6,7 +6,6 @@ import (
 	"context"
 	"errors"
 	"io/fs"
-	"os"
 	"time"
 
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
@@ -232,14 +231,18 @@ func (f *fileStore) removeLocked(digest string) error {
 // unlinkLocked deletes a record file WITHOUT flushing the directory — the half
 // of removeLocked a sweep repeats per record before flushing once for the whole
 // pass. An already-absent file is success. The caller MUST hold the store lock.
+//
+// The unlink goes through the held directory and removes the ENTRY: a link at
+// a record's name is unlinked, never followed to whatever it points at — which
+// is how a sweep clears a planted link it refused to read.
 func (f *fileStore) unlinkLocked(digest string) error {
-	path, pathErr := recordPath(f.dir, digest)
+	name, nameErr := recordName(digest)
 	//: a malformed digest never reaches the filesystem.
-	if pathErr != nil {
+	if nameErr != nil {
 		//: InvalidID.
-		return pathErr
+		return nameErr
 	}
-	removeErr := os.Remove(path)
+	removeErr := f.root.Remove(name)
 	//: idempotence: destroying twice is not a fault.
 	if removeErr == nil || errors.Is(removeErr, fs.ErrNotExist) {
 		//: gone either way.
@@ -278,20 +281,24 @@ func (f *fileStore) New(ctx context.Context) (session coresession.SessionValue, 
 	return f.win.build(id, rec)
 }
 
-// exists reports whether a record file is present. The caller MUST hold the
-// store lock.
+// exists reports whether anything occupies a record's name. The caller MUST
+// hold the store lock.
+//
+// It looks WITHOUT following, so a link at the name — dangling or not — is an
+// occupant like any other entry, and minting is refused over it rather than
+// decided by wherever the link happens to point.
 func (f *fileStore) exists(digest string) bool {
-	path, pathErr := recordPath(f.dir, digest)
+	name, nameErr := recordName(digest)
 	//: a malformed digest names no record.
-	if pathErr != nil {
+	if nameErr != nil {
 		//: nothing there.
 		return false
 	}
-	_, statErr := os.Stat(path)
-	//: any stat that is not "absent" counts as present — including a stat that
-	//: failed for another reason, because minting over a file we cannot read is
-	//: the one outcome that must not happen.
-	return !errors.Is(statErr, fs.ErrNotExist)
+	_, present, lookErr := lookAt(f.root, name)
+	//: anything that is not "absent" counts as present — including a look
+	//: that failed, because minting over a file we cannot read is the one
+	//: outcome that must not happen.
+	return present || lookErr != nil
 }
 
 // Load resolves id and slides its idle window.

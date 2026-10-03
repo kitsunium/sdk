@@ -113,6 +113,18 @@
 // every write through a temporary file and rename(2), and serialises every
 // read-modify-write under one exclusive lock.
 //
+// The directory is a path, and other accounts may write parts of it, so the
+// store refuses to be led anywhere through it. Before creating anything it
+// walks every component of FileConfig.Dir and refuses, with [PathRedirected],
+// a symbolic link planted in a directory any account can write — the shape
+// /tmp has — while honouring one only a trusted account could have planted,
+// as /tmp is on macOS. It then holds the directory open for its lifetime and
+// resolves every name against that handle, so a parent renamed or replaced
+// afterwards moves nothing. And it never reads a record, nor takes its lock,
+// through a link planted at a file's own name: a link at the lock file is
+// [PathRedirected], a link at a record is [RecordCorrupt] like any other
+// tampering, and nothing is created through either.
+//
 // Waiting for that lock is ABANDONABLE, in both halves: the flock is taken
 // without blocking and retried every FileConfig.Poll on the injected clock,
 // and the in-process gate is a channel rather than a mutex. A blocking flock(2)
@@ -121,12 +133,14 @@
 // result of. A caller whose context ends gets StoreUnavailable, carrying its
 // own context error.
 //
-// Those guarantees rest on flock(2) and on a filesystem that enforces Unix
-// permissions. Where they do not exist — Windows, wasip1, and any other GOOS
-// without flock(2) — [NewFileStore] returns the SDK's [UnsupportedPlatform]
-// sentinel AT CONSTRUCTION rather than building a store that would report
-// success while providing neither (ADR 0018). Use [NewMemoryStore], an external
-// store, or another host.
+// Those guarantees rest on flock(2), on a filesystem that enforces Unix
+// permissions, and on a directory that can be flushed so a rename or an unlink
+// survives a power cut. Where they do not exist — Windows, which has no
+// directory flush and on which the SDK builds no owner-only access control
+// list, wasip1, and any other GOOS without flock(2) — [NewFileStore] returns
+// the SDK's [UnsupportedPlatform] sentinel AT CONSTRUCTION rather than
+// building a store that would report success while providing none of it (ADR
+// 0018). Use [NewMemoryStore], an external store, or another host.
 //
 // # Sweeping is yours to schedule
 //
@@ -134,7 +148,7 @@
 // through a wider [Store] (ADR 0039). Neither runs a background goroutine the
 // caller never asked for; driving Sweep on a cadence is what pkg/v1/scheduler
 // is for. The file store additionally implements io.Closer, which releases its
-// lock descriptor.
+// lock descriptor and the directory it holds.
 package session
 
 import (
@@ -221,6 +235,12 @@ var (
 	PayloadTooLarge = svcsession.PayloadTooLarge
 	// InvalidPurpose is returned by NewSealer for an empty purpose.
 	InvalidPurpose = svcsession.InvalidPurpose
+	// PathRedirected is returned by NewFileStore when the store's location is
+	// reached through a link it refuses to follow: one at the lock file's
+	// name, one at a component of FileConfig.Dir planted in a directory any
+	// account can write, or a Dir that stopped naming the directory the store
+	// had just opened. No retry helps; a human looks at the path.
+	PathRedirected = svcsession.PathRedirected
 	// UnsupportedPlatform is returned by NewFileStore on a platform without the
 	// mechanics its guarantees rest on. It is the SDK-wide sentinel, shared
 	// with pkg/v1/proc (ADR 0018).
@@ -237,7 +257,9 @@ func NewMemoryStore(cfg Config) (store Store, err error) {
 
 // NewFileStore returns a Store keeping one sealed file per session in cfg.Dir.
 // It refuses — at construction — an unusable configuration, an unsafe
-// directory, and a platform without flock(2) and enforced Unix permissions.
+// directory, a location reached through a link anybody could have planted
+// ([PathRedirected]), and a platform without flock(2), enforced Unix
+// permissions and a directory flush.
 func NewFileStore(cfg FileConfig) (store Store, err error) {
 	//: delegate to the service constructor.
 	return svcsession.NewFileStore(cfg)

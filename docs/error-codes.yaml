@@ -1770,6 +1770,10 @@ codes:
     const: CodeInvalidPurpose
     hex: "0x00_03_2E_05"
     package: internal/service/session
+  - code: "0.3.46.6"
+    const: CodePathRedirected
+    hex: "0x00_03_2E_06"
+    package: internal/service/session
   - code: "0.3.47.1"
     const: CodeRequired
     hex: "0x00_03_2F_01"

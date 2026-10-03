@@ -410,9 +410,10 @@ func TestAFailedPublishLeavesThePreviousRecord(t *testing.T) {
 // leaves no orphan behind.
 //
 // It does NOT reach the rename, despite the name it was given: Save reads the
-// record first, and reading a directory fails ("is a directory", op=read)
-// before publish ever creates a temporary — so its "no orphan" is true of a
-// publication that never started. Removing publish's orphan cleanup leaves it
+// record first, and a directory at the record's name is refused by the look
+// that precedes every open (op=read, kind=not-regular) before publish ever
+// creates a temporary — so its "no orphan" is true of a publication that never
+// started. Removing publish's orphan cleanup leaves it
 // green. The rename failure itself, over a temporary that really was written,
 // synced and closed, is TestAFailedRenameLeavesNoOrphan in
 // dirsync_internal_test.go, which calls publish directly.
@@ -464,7 +465,7 @@ func TestARenameOntoADirectoryLeavesNothingBehind(t *testing.T) {
 // Mutation: reducing isDigest to the length check — recognition by suffix and
 // length alone, as before — failed with `Sweep removed 3, want 1 — the dead
 // record and nothing else` and `a foreign file was swept: "zzzz…zzzz.session"`.
-// Reverting recordDigest alone does NOT fail it, and should not: recordPath
+// Reverting recordDigest alone does NOT fail it, and should not: recordName
 // applies the same test, so the unlink is refused anyway.
 func TestSweepLeavesAForeignFileAlone(t *testing.T) {
 	t.Parallel()
