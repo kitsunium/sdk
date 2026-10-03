@@ -1,6 +1,6 @@
 # ADR 0086 — creating an entry is not replacing one, and Windows says so in two bits
 
-- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/lock/CLAUDE.md` §Rules from ADR 0086. Before that: Accepted
+- **Status**: Superseded by [ADR 0154](0154-the-sdks-principles-are-one-charter-and-an-incidents-rule-lives-with-its-code.md) (2026-10-03) — this text is kept as the record of the incident, and its rule lives in `internal/service/app/lock/CLAUDE.md` §Rules from ADR 0086. Before that: Accepted
 - **Date**: 2026-09-13
 - **Deciders**: SDK maintainers
 - **Amends**: [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md) §D2 (`BUILTIN\Users` is now in the table), §D3 (one mask becomes three), §D3c (two ACE shapes become eight) and §Consequences (the claim that Windows has no `0777|sticky` equivalent). Its §Deferred items 1 and 3 are CLOSED here; items 2 and 4 are re-argued and made PERMANENT.

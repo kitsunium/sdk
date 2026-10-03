@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
-- **Amends**: [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve's home), [ADR 0071](0071-a-registry-refuses-what-it-cannot-store.md) (its "Why not: a generic registry primitive in the kernel" is reversed)
+- **Amends**: [ADR 0103](0103-a-bucket-per-caller-one-backoff-curve-and-a-retry-on-the-clock-it-is-given.md) (the backoff curve's home), [ADR 0071](0071-a-registry-refuses-what-it-cannot-store.md) (its "Why not: a generic registry primitive in the kernel" is reversed), [ADR 0045](0045-sdk-session-domain.md) §D5 (the reason its file store refuses Windows, restated once `flock` and `winacl` reached the kernel), [ADR 0151](0151-a-message-published-in-a-transaction-exists-if-and-only-if-it-commits.md) §D6 (a withholding kept per package, now one) and [ADR 0140](0140-sqlites-migration-lock-is-the-database-files-write-lock.md) (its private `fileLockSQL`, now exported) — each in §Consequences, as implemented
 - **Related**: [ADR 0006](0006-sdk-error-code-registry-extension.md) (`ring`), [ADR 0010](0010-kernel-recycler-primitive.md) (`recycler`), [ADR 0011](0011-kernel-snapshot-primitive.md) (`snapshot`), [ADR 0014](0014-sdk-transform-crypto-ports-config-topology.md) (`batcher`), [ADR 0025](0025-sdk-cache-kernel.md) (`cache`), [ADR 0049](0049-cache-becomes-a-domain.md) (`singleflight`), [ADR 0052](0052-sdk-lock-domain.md) / [ADR 0073](0073-session-waits-are-abandonable.md) / [ADR 0081](0081-the-windows-file-lock-is-a-different-primitive.md) (the two `flock` copies), [ADR 0053](0053-sdk-events-domain.md) (`topic` declined), [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) (`pathchain`), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (a kernel package published by alias), [ADR 0147](0147-the-framework-is-a-module-of-the-sdk-above-pkg.md) (the framework reaches only `pkg/v1`), [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md) (the families), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md) (`semver`)
 
 ## Context
@@ -102,8 +102,8 @@ published, which is why §2 comes first.
   registries rewritten as instances, the five service edges onto `resilience`
   replaced by `kernel/backoff`, then the `pkg/v1` aliases. This record changes
   no code.
-- **As implemented so far**, and where the code settled a detail this record
-  left open:
+- **As implemented by the series**, and where the code settled a detail this
+  record left open:
   - `topic` is deleted, and the five service edges are gone: `lifecycle`,
     `queue`, `statemachine`, `mail/spool` and `net/server` import
     `kernel/backoff`, whose `Value.Delay` is the curve and whose `Grow`,
@@ -133,15 +133,19 @@ published, which is why §2 comes first.
     extension indexes and the AEAD wire-id index are tables of their own,
     beside the main one. `Lookup` costs what the hand-written read cost
     (`internal/kernel/plugin/BENCH.md`).
-  - `semver` landed in the kernel and is published as `pkg/v1/data/semver`.
+  - `semver` landed in the kernel and is published as `pkg/v1/data/semver`:
+    in the `data` family — a version string is data a program compares —
+    where the series' target tree placed it, rather than at the root §4
+    wrote, so `errs` and `clock` are the only packages at the root of
+    `pkg/v1`.
   - The kernel's families, as moved: `concur/{batcher, buffer, group,
     recycler, singleflight, snapshot, worker}`, `collections/{cache, heap,
-    ring}` and `fs/{pathchain}`, with `errs`, `clock`, `backoff`, `semver` and
-    `plugin` at the root. That takes a family further than §4's last sentence:
-    `buffer` sits beside the `recycler` it specialises, `cache` is a container
-    like `heap` and `ring`, and `pathchain` heads a third family, `fs`, of
-    filesystem measurements. Publication is unchanged: those three stay
-    unpublished on their own.
+    ring}` and `fs/{pathchain}` — `flock` and `winacl` joined it, below —
+    with `errs`, `clock`, `backoff`, `semver` and `plugin` at the root. That
+    takes a family further than §4's last sentence: `buffer` sits beside the
+    `recycler` it specialises, `cache` is a container like `heap` and `ring`,
+    and `pathchain` heads a third family, `fs`, of filesystem measurements.
+    Publication is unchanged: those three stay unpublished on their own.
   - The §4 aliases landed: `pkg/v1/concur/{group, singleflight, worker,
     batcher, snapshot, recycler}` and `pkg/v1/collections/{heap, ring}`, each
     the kernel package's exported surface as type aliases, forwarding
@@ -173,12 +177,41 @@ published, which is why §2 comes first.
     exists — so no error code of its own. The copies in `lock` and `session`
     are gone; each keeps its gate, its waits, its codes and a platform gate of
     its own (`lock` pairs the lock with its hardened open, by a test; `session`
-    stays narrower and refuses Windows). A primitive this record did not list
-    joined it: `kernel/fs/winacl`, the Windows DACL reader `lock` wrote
-    (ADR 0084, 0086) and exported for `queue` (ADR 0095), which took the
-    queue's Windows-only edge onto the lock service with it. The five
+    stays narrower and refuses Windows). The reason ADR 0045 §D5 gave for that
+    refusal — that a DACL needs an `advapi32` call the standard library cannot
+    reach — is no longer the reason: the kernel reaches `kernel32` and
+    `advapi32` through `syscall.NewLazyDLL`. What `session` still lacks on
+    Windows is an owner-only DACL BUILT at creation and verified (`winacl`
+    builds nothing, and answers a weaker question — whether an identifier
+    meaning anybody holds a right — where `0700` excludes a named colleague
+    too) and a directory flush, which Windows does not have (ADR 0056 D10);
+    the session track kept the refusal and wrote both into
+    `internal/service/security/session/CLAUDE.md` §Why Windows is still
+    refused. (A third it named, a lane that runs the package on Windows, was
+    there already: `e2e-cross`'s Windows job runs every package.) A
+    primitive this record did not list joined it: `kernel/fs/winacl`, the
+    Windows DACL reader `lock` wrote (ADR 0084, 0086) and exported for
+    `queue` (ADR 0095), which took the queue's Windows-only edge onto the
+    lock service with it. The five
     "private directory" rules built on these primitives were compared and
     kept five: each difference is a decision (`internal/kernel/fs/CLAUDE.md`).
+  - What the domains rewrote ABOVE the kernel was folded where its
+    vocabulary lives, since the kernel takes nothing a domain names. The
+    attribute, resource and scope types `metrics` and `trace` each declared
+    are `internal/core/observe/otel`, and their two OTLP/HTTP emitters share
+    `internal/service/observe/internal/otlp`. The SQL dialect's helpers,
+    written three times, are methods of `core/data/sql`'s `Dialect`
+    (`Placeholder`, `QuoteIdent`, `ForUpdate`, `ForUpdateSkipLocked`), and the
+    withholding of a driver's error text that `docstore` and `queue` each kept
+    as a private copy — "kept per package", ADR 0151 §D6 said — is one
+    exported `Withheld` in `service/data/sql`, beside `FileLockSQL`, the write
+    that writes nothing and takes SQLite's file lock: ADR 0140's private
+    `fileLockSQL`, exported so the queue's SQL broker takes the lock the
+    migration runner takes. Every statement renders byte for byte what it
+    rendered (a golden dump of each, compared). The two file sinks' hardened
+    open is `observe/logger/internal/logfile`, the `syscall.Rlimit`
+    constructor `exec` and `rlimit` both wrote is `proc/internal/rlim`, and
+    `codec/scratch.DetachBuffer` replaces four copies of a detach-and-release.
   - Not yet: `ring`'s multi-producer mode.
 - The framework replaces its copy-on-write values, its fan-out and its ring
   with the published ones as it is next touched; its observer set stays.
@@ -222,6 +255,10 @@ None for the published surface: the new `pkg/v1` packages are additions, and
 - `go list` over the importers of every kernel package, on the tree this record
   was written against: `group` and `topic` imported by their own tests only.
 - `internal/kernel/worker/every.go`, `internal/kernel/batcher/batcher.go` — the
-  tickers that keep services from adopting them.
+  tickers that kept services from adopting them, on the tree this record was
+  written against; the clock they take now is in
+  `internal/kernel/concur/worker/every.go` and
+  `internal/kernel/concur/batcher/batcher.go`.
 - `internal/core/crypto/registry_generic.go` — the generic registry that already
-  existed, privately.
+  existed, privately; its table is `internal/kernel/plugin/registry.go` now,
+  and the file keeps the crypto domain's registrar, `schemeRegistry`.

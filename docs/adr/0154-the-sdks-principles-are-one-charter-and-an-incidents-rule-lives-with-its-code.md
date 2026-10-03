@@ -4,6 +4,7 @@
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Supersedes**: [ADR 0071](0071-a-registry-refuses-what-it-cannot-store.md), [ADR 0072](0072-health-bounds-every-wait-it-owns.md), [ADR 0073](0073-session-waits-are-abandonable.md), [ADR 0082](0082-the-lock-path-is-a-file-never-a-link-to-one.md), [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md), [ADR 0084](0084-the-windows-lock-directory-has-an-answer-and-it-is-not-a-mode.md), [ADR 0086](0086-creating-an-entry-is-not-replacing-one-and-windows-says-so-in-two-bits.md), [ADR 0087](0087-the-root-a-caller-named-is-a-spelling-it-did-not-choose.md), [ADR 0088](0088-a-suite-nothing-runs-is-not-a-test-suite.md), [ADR 0093](0093-a-sweep-takes-the-zombie-never-the-status.md), [ADR 0095](0095-windows-runs-every-test-and-gates.md), [ADR 0132](0132-a-floor-a-caller-names-is-the-floor-applied.md), [ADR 0137](0137-a-lane-that-loops-over-modules-reads-the-census.md), [ADR 0138](0138-a-doc-link-resolves-or-it-is-not-written.md) — each as a decision record; the text of every one is kept as the record of its incident
+- **Amends**: [ADR 0045](0045-sdk-session-domain.md) §D5, [ADR 0083](0083-a-path-is-a-chain-and-a-held-lock-can-lose-its-file.md) and [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) §1 — through the incidents §As built records: a sixth guarantee of the session file store, two more consumers of `pathchain`, and a socket gated by its whole path
 - **Related**: [ADR 0155](0155-every-layer-groups-its-packages-by-family-and-a-path-may-move-while-v0.md), [ADR 0156](0156-the-public-module-links-the-standard-library-and-nothing-else.md), [ADR 0157](0157-one-module-per-vendor-released-with-the-sdk.md), [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md), [ADR 0159](0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md), [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md), [ADR 0161](0161-an-untyped-error-fails-the-build.md) — the reorganisation this charter opens
 
 ## Context
@@ -147,22 +148,23 @@ The ADR file stays, unedited but for its `Status`, as the record of what
 happened and why the rule exists; a reader of the package no longer needs it to
 follow the rule.
 
-The fourteen superseded here, and where each rule now lives:
+The fourteen superseded here, and where each rule now lives — at the path each
+package reached once the families of ADR 0155 had moved it:
 
 | ADR | Incident | Rule now in |
 |---|---|---|
 | 0071 | a typed nil and a non-comparable plug-in passed every registrar's `== nil` | `internal/kernel/plugin/CLAUDE.md` |
-| 0072 | a deaf supervisor stopped every later probe; a run every caller left was never cancelled | `internal/service/health/CLAUDE.md` |
-| 0073 | a blocking `flock` and a mutex no cancellation could reach | `internal/service/session/CLAUDE.md` |
-| 0082 | a planted link redirected the lock and its fencing ledger | `internal/service/lock/CLAUDE.md` |
-| 0083 | a link at a parent moved the lock directory; a held lock lost its file | `internal/service/lock/CLAUDE.md`, `internal/kernel/pathchain/CLAUDE.md` |
-| 0084 | the Windows lock directory was accepted whatever its DACL said | `internal/service/lock/CLAUDE.md` |
-| 0086 | one Windows mask for two questions, and the files' inherited list unread | `internal/service/lock/CLAUDE.md` |
+| 0072 | a deaf supervisor stopped every later probe; a run every caller left was never cancelled | `internal/service/app/health/CLAUDE.md` |
+| 0073 | a blocking `flock` and a mutex no cancellation could reach | `internal/service/security/session/CLAUDE.md` |
+| 0082 | a planted link redirected the lock and its fencing ledger | `internal/service/app/lock/CLAUDE.md` |
+| 0083 | a link at a parent moved the lock directory; a held lock lost its file | `internal/service/app/lock/CLAUDE.md`, `internal/kernel/fs/pathchain/CLAUDE.md` |
+| 0084 | the Windows lock directory was accepted whatever its DACL said | `internal/service/app/lock/CLAUDE.md` |
+| 0086 | one Windows mask for two questions, and the files' inherited list unread | `internal/service/app/lock/CLAUDE.md` |
 | 0087 | a root reached through a link answered false to every query | `framework/internal/service/git/CLAUDE.md` (moved with the package by ADR 0158) |
 | 0088 | the release scripts' suites ran in no lane | `scripts/CLAUDE.md` |
 | 0093 | the reaper took the status a `Process` was waiting for | `internal/service/proc/childwait/CLAUDE.md` |
 | 0095 | nineteen packages failed on Windows behind `continue-on-error` | `.github/workflows/CLAUDE.md` |
-| 0132 | a writer gate read the floor `Info` as "inherit" | `internal/service/writer/levelgate/CLAUDE.md` |
+| 0132 | a writer gate read the floor `Info` as "inherit" | `internal/service/observe/logger/writer/levelgate/CLAUDE.md` |
 | 0137 | four module lists had drifted, and two modules ran in no 32-bit lane | `scripts/CLAUDE.md` |
 | 0138 | 152 doc links rendered as literal brackets | `pkg/v1/CLAUDE.md` |
 
@@ -197,6 +199,34 @@ departs from a principle says so in its own text, citing the number.
 ## Breaking changes
 
 None. No code, no published shape, no behaviour.
+
+## As built
+
+The reorganisation series found incidents of its own on the way. Each was
+reproduced on the shipped code before it was fixed (principle 27), and each
+rule went straight to the package it protects, as §2 provides, so no incident
+ADR was written. Two of them changed what a domain ADR had decided; those two
+ADRs, and ADR 0083, whose walk both fixes stand on, name this record in their
+`Amended by` line.
+
+| Incident | Reproduced on the shipped code | Rule now in | Amends |
+|---|---|---|---|
+| a link planted at a PARENT of `ipc`'s socket directory steered the socket: `Lstat` saw the directory's own entry, while `Mkdir`, `bind` and `connect` follow every parent | in a `0777\|sticky` directory, what `/tmp` is, `NewListener` bound its socket at the link's target, `Dial` accepted the same path, and once the planter re-pointed its link a client's first line reached another listener | `internal/service/proc/ipc/CLAUDE.md` — wherever anybody can write the directory holding a component above the socket's directory, an indirection, a component neither this account's nor root's, and — when that directory has no sticky bit — any component at all are refused, `PATH_UNSAFE` (`0.3.91.9`), at `Listen` before and after the `Mkdir` and at every `Dial` | [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) §1 — the directory is the gate, and so is every component above it |
+| `session`'s file store followed links it never checked | four substitutions, each one effective: a link at a record's name served a copy kept outside the directory, a dangling link at `.lock` had the store create and `flock` the planter's target, a link at a parent in a `1777` directory redirected every record, and `Dir` replaced after construction moved them all | `internal/service/security/session/CLAUDE.md` — `Dir` is audited with `pathchain` under the lock domain's rule before anything is created, then HELD as an `os.Root` every operation goes through; a link at a record's name is never read (`RecordCorrupt`, and a sweep unlinks the link, never its target), and a link at the lock file or at a component of `Dir` is refused, `PATH_REDIRECTED` (`0.3.46.6`) | [ADR 0045](0045-sdk-session-domain.md) §D5 — a sixth guarantee: no record is read or locked through a redirected path |
+| `ring.Len` counted a wrapped ring wrong whenever its slot count is not a power of two | the async logger's default ring, 1 025 slots, read as empty while it held 1 009 records, so its `Flush` could return with them still queued | `internal/kernel/collections/ring/CLAUDE.md` | — |
+| on darwin, `Stop` reported `SIGNAL_FAILED` for a process group whose leader had exited but was not yet reaped | XNU's `kill(-pgid)` skips a zombie and answers `EPERM`, where Linux and the BSDs report success | `internal/service/proc/exec/CLAUDE.md` §Stop | — |
+| `config` carried a codec's refusal as text, so `errs.HasCode` on the codec's code and `errors.Is(err, fs.ErrNotExist)` stopped answering through a configuration load | `TestACodecRefusalKeepsItsCodeThroughTheSource` fails against the old helper | `internal/service/app/config/CLAUDE.md` (`wrap.go`) | — |
+| `tools/sdkguard` read a struct field named `errors` as a shadow of the package, which silenced every rule for that file | `type r struct{ errors []error }` let `errors.New` through with exit 0 | [ADR 0161](0161-an-untyped-error-fails-the-build.md) §Consequences | — |
+
+Both path fixes stand on `internal/kernel/fs/pathchain`, the walk ADR 0083
+built for `lock`: it had one consumer and now has three, each applying its own
+policy over the same walk — the five private-directory rules built on the
+kernel's `fs` family are compared, and kept five, in
+`internal/kernel/fs/CLAUDE.md`. One audit finding was a false positive and is
+recorded here so that it is not reported again: `tlv`'s encode pool, reported
+as unbounded, had been capped since `e7cf8692`; it rests on the kernel's
+`recycler.CappedPool` now, under an allocation gate
+(`internal/service/data/codec/tlv/CLAUDE.md`).
 
 ## Alternatives considered
 

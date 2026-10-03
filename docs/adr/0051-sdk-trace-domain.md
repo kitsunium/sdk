@@ -3,7 +3,7 @@
 - **Status**: Accepted
 - **Date**: 2026-09-10
 - **Deciders**: SDK maintainers
-- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — `traceparent` and `tracestate` parsing move from `internal/core/trace` to the service
+- **Amended by**: [ADR 0160](0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md) — `traceparent` and `tracestate` parsing move from the core to the service, `internal/service/observe/trace`
 - **Related**: [ADR 0044](0044-metrics-adopts-the-otel-data-model.md) (the OTel data model, adopted without the code — the template this follows), [ADR 0048](0048-sdk-metrics-otlp-json.md) (OTLP/JSON, the encoder/emitter split and the four protobuf-JSON rules), [ADR 0029](0029-sdk-net-domain.md) (the network domain these middlewares plug into), [ADR 0030](0030-stdout-is-a-protocol-channel.md) (what a registered exporter may arm), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp vs refuse), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (sibling interfaces), [ADR 0041](0041-sdk-scheduler-domain.md) (func ports), [ADR 0047](0047-sdk-net-websocket.md) (the hijack defect this middleware must not re-create)
 - **Closes**: part of ADR 0044 §Deferred — "Exemplars … the field lands with the first trace context". The trace context now exists; §Deferred below states exactly what `metrics` needs from this domain to finish the job.
 

@@ -1,6 +1,6 @@
 # ADR 0091 — a single trust anchor is a key with no way out
 
-**Status**: Accepted; implemented in `internal/service/entitlement/anchors.go`.
+**Status**: Accepted; implemented in `framework/internal/service/entitlement/anchors.go` (in the framework since [ADR 0158](0158-distribution-mechanisms-are-the-frameworks-not-the-sdks.md)).
 **Date**: 2026-09-16
 **Deciders**: kitsunium maintainers
 **Amends**: ADR 0079 §trust model (the anchor is a list, not a key)
