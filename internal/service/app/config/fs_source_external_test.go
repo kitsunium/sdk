@@ -265,3 +265,31 @@ func TestFSSourceRefusesANameBeforeAskingTheFilesystem(t *testing.T) {
 		t.Fatalf("a valid name = %v after %d read(s), want nil after 1", err, reads.Load())
 	}
 }
+
+// TestACodecRefusalKeepsItsCodeThroughTheSource pins that a document a codec
+// refuses is CONFIG_SOURCE_FAILED — the code a caller of this domain routes
+// on — with the codec's own refusal still reachable through errs.HasCode,
+// rather than flattened into a field where only its text survived. The YAML
+// codec refuses an anchor by name (ADR 0156); the refusal's code is read from
+// the codec itself, so the test names no codec constant.
+func TestACodecRefusalKeepsItsCodeThroughTheSource(t *testing.T) {
+	t.Parallel()
+	doc := []byte("base: &shared 1\ncopy: *shared\n")
+	yaml, ok := codec.Lookup("yaml")
+	if !ok {
+		t.Fatal("the yaml codec is not registered")
+	}
+	var probe map[string]any
+	refusal, typed := errs.CodeOf(yaml.Unmarshal(doc, &probe))
+	if !typed {
+		t.Fatal("the yaml codec refused the anchor without a typed error")
+	}
+
+	_, err := cfg.FSSource(fstest.MapFS{"app.yaml": {Data: doc}}, "yaml", "app.yaml").Load()
+	if origin, _ := errs.CodeOf(err); origin != coreconfig.CodeConfigSourceFailed {
+		t.Fatalf("Load() = %v, want CONFIG_SOURCE_FAILED as the origin", err)
+	}
+	if !errs.HasCode(err, refusal) {
+		t.Fatalf("errs.HasCode(err, %v) = false: the codec's refusal did not survive the source (%v)", refusal, err)
+	}
+}
