@@ -58,6 +58,82 @@ func Test_queueRing_Len(t *testing.T) {
 	}
 }
 
+// lenAfter builds a ring of the given capacity, walks both cursors to start
+// (a write and a read each step), writes held items, and returns Len.
+func lenAfter(tb testing.TB, capacity, start, held int) int {
+	tb.Helper()
+	q := mustQueue(tb, capacity)
+	for i := range start {
+		if err := q.TryWrite(i); err != nil {
+			tb.Fatalf("TryWrite while walking the cursors: %v", err)
+		}
+		if _, err := q.TryRead(); err != nil {
+			tb.Fatalf("TryRead while walking the cursors: %v", err)
+		}
+	}
+	for i := range held {
+		if err := q.TryWrite(i); err != nil {
+			tb.Fatalf("TryWrite %d of %d: %v", i+1, held, err)
+		}
+	}
+	return q.Len()
+}
+
+// Test_queueRing_LenAfterWrap pins Len once the write cursor has wrapped past
+// the read cursor. A bare tail-head wraps modulo 2^64, which cap+1 divides
+// only when it is a power of two: the old arithmetic reported 2 for a ring of
+// capacity 2 holding one item, and an EMPTY ring for the async logger's
+// default capacity holding 1009 — a state in which its Flush, waiting for
+// Len() == 0, could return with those records still queued.
+func Test_queueRing_LenAfterWrap(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name                string
+		capacity, start, at int
+	}{
+		{"capacity 2 holding one item after the wrap", 2, 2, 1},
+		{"capacity 1024 holding 1009 after the wrap, read as empty before", 1024, 1024, 1009},
+		{"capacity 1024 holding one item after the wrap", 1024, 1024, 1},
+		{"capacity 3, four slots, a power of two", 3, 3, 2},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			if got := lenAfter(t, tc.capacity, tc.start, tc.at); got != tc.at {
+				t.Errorf("Len = %d, want %d", got, tc.at)
+			}
+		})
+	}
+}
+
+// Test_queueRing_LenAtEveryCursor checks Len against the number of items
+// written at every cursor position and every fill level of small rings, slot
+// counts that are and are not powers of two.
+func Test_queueRing_LenAtEveryCursor(t *testing.T) {
+	t.Parallel()
+	tests := []struct {
+		name     string
+		capacity int
+	}{
+		{"capacity 1", 1},
+		{"capacity 2", 2},
+		{"capacity 3", 3},
+		{"capacity 6", 6},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			for start := range tc.capacity + 1 {
+				for held := range tc.capacity + 1 {
+					if got := lenAfter(t, tc.capacity, start, held); got != held {
+						t.Errorf("start %d, %d held: Len = %d", start, held, got)
+					}
+				}
+			}
+		})
+	}
+}
+
 func Test_queueRing_TryWrite(t *testing.T) {
 	t.Parallel()
 	tests := []struct {

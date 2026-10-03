@@ -83,8 +83,13 @@ func (b *queueRing[T]) Len() int {
 	//: load both cursors atomically; the snapshot may shift before we return.
 	head := b.head.Load()
 	tail := b.tail.Load()
-	//: arithmetic over the cap+1 ring; the modulo handles wrap-around.
-	return int((tail - head) % (b.cap + 1))
+	//: both cursors lie in [0, cap], so adding cap+1 before subtracting
+	//: keeps the difference non-negative. A bare tail-head wraps modulo 2^64
+	//: once the write cursor has wrapped past the read cursor, and 2^64 is a
+	//: multiple of cap+1 only when cap+1 is a power of two: a ring of
+	//: capacity 2 holding one item reported 2, one of 1024 holding 1009
+	//: reported 0.
+	return int((tail + b.cap + 1 - head) % (b.cap + 1))
 }
 
 // TryWrite places item into the ring without blocking.
