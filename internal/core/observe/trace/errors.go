@@ -42,7 +42,9 @@ var (
 		"An attribute key is empty or repeated, or its value was never set",
 		"core/observe/trace: an attribute set must name each dimension once, with a non-empty key and a value from String/Bool/Int64/Float64")
 
-	// EntropyFailed wraps a crypto/rand.Read failure while drawing id bytes.
+	// EntropyFailed was the wrap of a crypto/rand.Read failure while drawing
+	// trace or span id bytes. Nothing returns it since Go 1.24, whose
+	// crypto/rand.Read never fails; it stays published with its value.
 	EntropyFailed = errs.Define(CodeEntropyFailed, "ENTROPY_FAILED",
 		"Trace identifier generation failed to read secure random bytes",
 		"service/observe/trace: crypto/rand.Read returned an error")

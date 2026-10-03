@@ -25,8 +25,9 @@ const CodeDuplicateRegistration errs.Code = 0x00_02_07_05 // 0.2.7.5
 // the value its allocation gave it whichever layer declares it, so the layer
 // byte still reads 3.
 
-// CodeIDEntropyFailed identifies a crypto/rand.Read failure while drawing the
-// random bytes of a UUID/ULID (a CSPRNG fault — extremely rare).
+// CodeIDEntropyFailed identified a crypto/rand.Read failure while drawing the
+// random bytes of an identifier. Nothing returns it since Go 1.24, whose
+// crypto/rand.Read cannot fail; the code stays allocated and published.
 const CodeIDEntropyFailed errs.Code = 0x00_03_27_01 // 0.3.39.1
 
 // CodeIDClockBackwards identifies a snowflake generation where the monotonic

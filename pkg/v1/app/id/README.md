@@ -66,7 +66,8 @@ var (
     // UnknownScheme is returned by New when no generator is registered under the
     // requested Scheme. Matchable via errs.HasReason(err, "UNKNOWN_SCHEME").
     UnknownScheme = coreid.UnknownScheme
-    // EntropyFailed wraps a crypto/rand failure while drawing id bytes.
+    // EntropyFailed is kept for code that matches it: nothing returns it since
+    // Go 1.24, whose crypto/rand.Read never fails.
     EntropyFailed = coreid.EntropyFailed
     // ClockBackwards is returned when a snowflake observes a backwards clock.
     ClockBackwards = coreid.ClockBackwards
@@ -85,7 +86,7 @@ var (
 ```
 
 <a name="FormatTypeID"></a>
-## func [FormatTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L192>)
+## func [FormatTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L193>)
 
 ```go
 func FormatTypeID(prefix, uuid string) (typeID string, err error)
@@ -94,7 +95,7 @@ func FormatTypeID(prefix, uuid string) (typeID string, err error)
 FormatTypeID renders prefix and a canonical dashed\-hex UUID as a TypeID. It is the migration path: an existing UUID column becomes typed without reissuing anything, so the UUID version is not enforced.
 
 <a name="KSUID"></a>
-## func [KSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L144>)
+## func [KSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L145>)
 
 ```go
 func KSUID() (newID string, err error)
@@ -103,7 +104,7 @@ func KSUID() (newID string, err error)
 KSUID returns a fresh KSUID: 27 base62 characters that sort by creation time as plain strings. Feed the result to ParseKSUID to recover that time.
 
 <a name="NanoID"></a>
-## func [NanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L137>)
+## func [NanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L138>)
 
 ```go
 func NanoID() (newID string, err error)
@@ -112,7 +113,7 @@ func NanoID() (newID string, err error)
 NanoID returns a fresh 21\-character NanoID over the URL\-safe alphabet. The characters are drawn by rejection sampling, so every symbol is equally likely; 21 of them carry 126 bits, slightly more than a UUIDv4.
 
 <a name="New"></a>
-## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L105>)
+## func [New](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L106>)
 
 ```go
 func New(scheme Scheme) (newID string, err error)
@@ -121,7 +122,7 @@ func New(scheme Scheme) (newID string, err error)
 New generates a fresh identifier using the generator registered under scheme.
 
 <a name="ParseKSUID"></a>
-## func [ParseKSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L177>)
+## func [ParseKSUID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L178>)
 
 ```go
 func ParseKSUID(ksuid string) (issued time.Time, payload [ksuidPayloadBytes]byte, err error)
@@ -130,7 +131,7 @@ func ParseKSUID(ksuid string) (issued time.Time, payload [ksuidPayloadBytes]byte
 ParseKSUID decodes a canonical 27\-character KSUID, returning the instant it was issued \(second resolution, UTC\) and its 16\-byte random payload.
 
 <a name="ParseTypeID"></a>
-## func [ParseTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L184>)
+## func [ParseTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L185>)
 
 ```go
 func ParseTypeID(typeID string) (prefix, uuid string, err error)
@@ -139,7 +140,7 @@ func ParseTypeID(typeID string) (prefix, uuid string, err error)
 ParseTypeID splits a canonical TypeID into its type prefix and the dashed\-hex UUID its suffix encodes. It is the exact inverse of FormatTypeID.
 
 <a name="Snowflake"></a>
-## func [Snowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L129>)
+## func [Snowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L130>)
 
 ```go
 func Snowflake() (newID string, err error)
@@ -148,7 +149,7 @@ func Snowflake() (newID string, err error)
 Snowflake returns a fresh id from the default\-node snowflake generator.
 
 <a name="ULID"></a>
-## func [ULID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L123>)
+## func [ULID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L124>)
 
 ```go
 func ULID() (newID string, err error)
@@ -157,7 +158,7 @@ func ULID() (newID string, err error)
 ULID returns a fresh ULID \(26\-char Crockford base32, lexically time\-sortable\).
 
 <a name="UUIDv4"></a>
-## func [UUIDv4](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L111>)
+## func [UUIDv4](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L112>)
 
 ```go
 func UUIDv4() (newID string, err error)
@@ -166,7 +167,7 @@ func UUIDv4() (newID string, err error)
 UUIDv4 returns a fresh random UUIDv4 in canonical dashed\-hex form.
 
 <a name="UUIDv7"></a>
-## func [UUIDv7](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L117>)
+## func [UUIDv7](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L118>)
 
 ```go
 func UUIDv7() (newID string, err error)
@@ -184,7 +185,7 @@ type Generator = coreid.Generator
 ```
 
 <a name="NewNanoID"></a>
-### func [NewNanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L160>)
+### func [NewNanoID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L161>)
 
 ```go
 func NewNanoID(size int) (g Generator, err error)
@@ -193,7 +194,7 @@ func NewNanoID(size int) (g Generator, err error)
 NewNanoID returns a NanoID Generator producing size characters, and refuses a non\-positive size rather than return one that mints empty strings. Not added to the global registry — the registered NanoID singleton is the 21\-character default.
 
 <a name="NewSnowflake"></a>
-### func [NewSnowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L151>)
+### func [NewSnowflake](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L152>)
 
 ```go
 func NewSnowflake(node int64) Generator
@@ -202,7 +203,7 @@ func NewSnowflake(node int64) Generator
 NewSnowflake returns a snowflake Generator bound to an explicit node id \(reduced into the 10\-bit node space\). Not added to the global registry.
 
 <a name="NewTypeID"></a>
-### func [NewTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L170>)
+### func [NewTypeID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L171>)
 
 ```go
 func NewTypeID(prefix string) (g Generator, err error)
@@ -246,7 +247,7 @@ const (
 ```
 
 <a name="Available"></a>
-### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L198>)
+### func [Available](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/app/id/id.go#L199>)
 
 ```go
 func Available() []Scheme

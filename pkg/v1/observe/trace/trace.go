@@ -242,7 +242,9 @@ var (
 	ExportFailed = coretrace.ExportFailed
 	// DuplicateRegistration is the boot-time registry panic sentinel.
 	DuplicateRegistration = coretrace.DuplicateRegistration
-	// EntropyFailed reports a crypto/rand failure while minting an identifier.
+	// EntropyFailed is kept for code that matches it: nothing returns it since
+	// Go 1.24, whose crypto/rand.Read never fails, so minting an identifier
+	// cannot fail.
 	EntropyFailed = coretrace.EntropyFailed
 	// InvalidSampleRatio reports a fraction Ratio will not accept — including
 	// exactly 0, which also spells "unconfigured".

@@ -84,7 +84,8 @@ var (
 	// UnknownScheme is returned by New when no generator is registered under the
 	// requested Scheme. Matchable via errs.HasReason(err, "UNKNOWN_SCHEME").
 	UnknownScheme = coreid.UnknownScheme
-	// EntropyFailed wraps a crypto/rand failure while drawing id bytes.
+	// EntropyFailed is kept for code that matches it: nothing returns it since
+	// Go 1.24, whose crypto/rand.Read never fails.
 	EntropyFailed = coreid.EntropyFailed
 	// ClockBackwards is returned when a snowflake observes a backwards clock.
 	ClockBackwards = coreid.ClockBackwards

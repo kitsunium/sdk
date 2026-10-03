@@ -24,7 +24,10 @@ var (
 	// here, with the registry's, so that the domain's codes and sentinels are in
 	// one place (ADR 0160).
 
-	// EntropyFailed wraps a crypto/rand.Read failure while drawing id bytes.
+	// EntropyFailed was the wrap of a crypto/rand.Read failure while drawing id
+	// bytes. Nothing returns it since Go 1.24, whose crypto/rand.Read never
+	// fails (a failing source crashes the program); it stays published with its
+	// value, so a consumer matching it keeps compiling.
 	EntropyFailed = errs.Define(CodeIDEntropyFailed, "ID_ENTROPY_FAILED",
 		"Identifier generation failed to read secure random bytes",
 		"service/app/id: crypto/rand.Read returned an error")

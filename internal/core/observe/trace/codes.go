@@ -45,8 +45,9 @@ const CodeInvalidAttribute errs.Code = 0x00_02_14_07 // 0.2.20.7
 // internal/service/observe/trace (ADR 0051 service/observe/trace block), and
 // declared here since ADR 0160: the engine returns these and declares none.
 
-// CodeEntropyFailed identifies a crypto/rand.Read failure while drawing the
-// bytes of a trace or span identifier.
+// CodeEntropyFailed identified a crypto/rand.Read failure while drawing the
+// bytes of a trace or span identifier. Nothing returns it since Go 1.24,
+// whose crypto/rand.Read cannot fail; the code stays allocated and published.
 const CodeEntropyFailed errs.Code = 0x00_03_32_01 // 0.3.50.1
 
 // CodeInvalidSampleRatio identifies a Ratio sampler asked for a fraction that
