@@ -316,7 +316,7 @@ func TestMailIsQueuedThenDelivered(t *testing.T) {
 		t.Error("the send is not drawn")
 	}
 	loop := loopNamed(g, "members/mailer/mail outbox")
-	if loop == nil || loop.Kind != model.LoopConsumer || loop.Provenance != model.ProvenanceLibrary || loop.Library != "sdk/v1/app/mail" ||
+	if loop == nil || loop.Kind != model.LoopConsumer || loop.Provenance != model.ProvenanceLibrary || loop.Library != "sdk/v1/app/mail/spool" ||
 		loop.Runs != 1 || loop.State != model.LoopWaiting {
 		t.Errorf("outbox loop %+v", loop)
 	}

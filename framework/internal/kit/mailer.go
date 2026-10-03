@@ -456,7 +456,7 @@ func (m *Mailer) start(ctx context.Context, a *App) error {
 		return failure(CodeMailQueue, "OUTBOX_OPEN", "a mailer's outbox cannot be opened", err, errs.String("mailer", m.id))
 	}
 	dead, deadErr := spool.DeadLetters(ctx, maxDeadLetters)
-	loop := a.kitLoop(m.id+" outbox", m.id, model.LoopConsumer, consumerHow, loopOrigin{model.ProvenanceLibrary, "sdk/v1/app/mail"})
+	loop := a.kitLoop(m.id+" outbox", m.id, model.LoopConsumer, consumerHow, loopOrigin{model.ProvenanceLibrary, "sdk/v1/app/mail/spool"})
 	ctx, cancel := context.WithCancel(context.WithoutCancel(a.baseCtx))
 	done := make(chan struct{})
 	m.mu.Lock()
