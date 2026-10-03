@@ -199,8 +199,10 @@ func (h *health) evaluateAll(ctx context.Context, probe corehealth.Probe) corehe
 	//: unreachable — no task returns an error — and still not a report: a probe
 	//: that could not collect its checks says so rather than answering healthy.
 	if err != nil {
-		//: the conservative answer, naming why.
-		return h.shortCircuit(probe, "collect", corehealth.StatusUnhealthy, err)
+		//: the conservative answer, under the domain's own code; the cause
+		//: travels as a field, never as the public text.
+		return h.shortCircuit(probe, "collect", corehealth.StatusUnhealthy,
+			kerrs.Wrap(CheckFailed, kerrs.WrapParams{}, kerrs.String("cause", err.Error())))
 	}
 	//: no checks at all is healthy: the process answering IS the evidence
 	//: (ADR 0031). That is also the seed the fold starts from.
