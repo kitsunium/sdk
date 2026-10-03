@@ -200,8 +200,9 @@ exists if and only if that transaction commits** — the transactional outbox.
 - **An idle Receive is one read and takes no lock**: `SELECT MIN(due)` over the
   live rows (the probe). Only when something is due does it open the lease
   transaction: on SQLite a write that writes nothing first (ADR 0140's
-  statement — SQLite's lock is taken by a transaction's first WRITE, and a
-  lease that read first could be refused busy at its update), then the due
+  statement, `service/sql`'s `FileLockSQL`, the migration runner's too —
+  SQLite's lock is taken by a transaction's first WRITE, and a lease that
+  read first could be refused busy at its update), then the due
   rows in `(due, id)` order `FOR UPDATE SKIP LOCKED` on PostgreSQL and MySQL,
   then one UPDATE leasing them all under one deadline and one random half, 500
   identifiers a statement. A lapsed lease with no attempt left is buried with

@@ -30,7 +30,7 @@ Code range: `0.3.54.*` (ADR 0055).
 | `scope_key_type.go` | the single unexported context key |
 | `executor.go` | `scopedExecutor` — the retiring guard handed to a `TxFunc` |
 | `statements.go` | `Statements(...string) coresql.Step` |
-| `dialect_sql.go` | **the only place this package renders dialect-specific SQL** — savepoints, advisory lock, SQLite's `fileLockSQL`; the bind markers are `core/sql`'s `Dialect.Placeholder` |
+| `dialect_sql.go` | **the only place this package renders dialect-specific SQL** — savepoints, advisory lock, and `FileLockSQL`, the write that writes nothing and takes SQLite's file lock (ADR 0140), exported because the queue's SQL broker takes the same lock with it before a lease's first read; the bind markers are `core/sql`'s `Dialect.Placeholder` |
 | `health.go` | `NewChecker`, `checker` — bounded ping on the injected clock |
 | `migrate.go` | `NewMigrator`, `migrator`, `Plan` / `Up` / `Down`, `serialised` — the work under whichever lock the dialect has |
 | `migrate_config.go` | `MigrateConfig`, `Default{VersionTable,LockTimeout,LockRetryInterval}` |

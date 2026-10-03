@@ -87,18 +87,25 @@ func unlockSQL(dialect coresql.Dialect, key string) (query string, arg any) {
 	return "SELECT RELEASE_LOCK(" + dialect.Placeholder(1) + ")", key
 }
 
-// fileLockSQL renders the statement that makes a SQLite transaction take the
+// FileLockSQL renders the statement that makes a SQLite transaction take the
 // database file's write lock at once, where BEGIN — which database/sql sends
 // as SQLite's deferred form — takes none.
 //
 // It is a DELETE that matches no row. SQLite starts the write transaction a
 // write statement needs when the statement STARTS, before its WHERE clause is
-// weighed, so the lock is taken and nothing is changed. It names the version
-// table because that is the one table the runner knows exists at this point:
-// it creates it first, in the same transaction (ADR 0140).
-func fileLockSQL(table string) string {
-	//: a write that writes nothing; the table name was validated at
-	//: construction, which is the whole defence of an interpolated identifier.
+// weighed, so the lock is taken and nothing is changed (ADR 0140). Two
+// transactions take it: the migration runner's, naming its version table —
+// the one table it knows exists at that point, since it creates it first in
+// the same transaction — and the queue's lease, naming its queue's table
+// before its first read, so the read cannot answer from a snapshot the update
+// after it would be refused for.
+//
+// table is interpolated exactly as given — bare, as the runner's validated
+// version table is, or already quoted, as the queue's is — and must have been
+// validated at construction, which is the whole defence of an interpolated
+// identifier.
+func FileLockSQL(table string) string {
+	//: a write that writes nothing.
 	return "DELETE FROM " + table + " WHERE 1 = 0"
 }
 

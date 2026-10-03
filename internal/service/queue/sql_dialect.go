@@ -10,6 +10,7 @@ import (
 	"strings"
 
 	coresql "github.com/kitsunium/sdk/internal/core/sql"
+	svcsql "github.com/kitsunium/sdk/internal/service/sql"
 )
 
 // sqlRowsPerStatement bounds how many identifiers one lease or burial of a
@@ -101,9 +102,10 @@ func renderSQLStatements(dialect coresql.Dialect, table string) sqlStatements {
 	}
 	//: SQLite's lock is the database's, taken by a transaction's first
 	//: WRITE: a lease that read first could be refused busy at its update,
-	//: its snapshot stale, so it writes first. ADR 0140's statement.
+	//: its snapshot stale, so it writes first — with ADR 0140's statement,
+	//: the one the migration runner takes the same lock with.
 	if dialect == coresql.DialectSQLite {
-		s.lock = "DELETE FROM " + q + " WHERE 1 = 0"
+		s.lock = svcsql.FileLockSQL(q)
 	}
 	//: rendered once, sent many times.
 	return s
