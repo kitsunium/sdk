@@ -49,7 +49,6 @@ use_repo(
     "com_github_kitsunium_sdk_pkg",
     "com_github_klauspost_compress",
     "com_github_moby_moby_api",
-    "com_github_pelletier_go_toml_v2",
     "com_github_redis_go_redis_v9",
     "com_github_testcontainers_testcontainers_go",
     "com_github_testcontainers_testcontainers_go_modules_clickhouse",

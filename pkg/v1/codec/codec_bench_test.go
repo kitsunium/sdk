@@ -808,9 +808,9 @@ func streamRecordsFor(name, size string) []any {
 	//: distinct values keep DCE honest.
 	case "tlv":
 		return []any{int64(-64_000_000_000), int64(1 << 30), int64(-1 << 29)}
-	//: toml is single-document by design — pelletier/go-toml.Decoder
-	//: reads the entire stream into one value, so the bench emits ONE
-	//: record per stream. Multi-record concat would yield invalid TOML.
+	//: toml is single-document by design — its streaming Decoder reads
+	//: the entire stream into one value, so the bench emits ONE record
+	//: per stream. Multi-record concat would yield invalid TOML.
 	case "toml":
 		base := tweakForCodec("toml", sampleComplex())
 		switch size {

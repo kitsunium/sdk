@@ -1,17 +1,29 @@
-// Package toml wraps github.com/pelletier/go-toml/v2 as a codec.Codec
-// implementation. The upstream library offers streaming Encoder/Decoder
-// pairs, so this codec implements StreamingCodec as well.
+// Package toml is the TOML codec, written against TOML v1.0.0
+// (https://toml.io/en/v1.0.0) with the standard library alone. It implements
+// codec.Codec, codec.StreamingCodec and codec.Appender.
+//
+// Decoding refuses what the specification refuses: a key or a table defined
+// twice, a table extended from a place the specification does not allow, an
+// integer outside int64, a control character in a string or a comment, bytes
+// that are not UTF-8. It also accepts the four TOML v1.1.0 relaxations the
+// library it replaced accepted — newlines, comments and a trailing comma in an
+// inline table, the \e and \xHH escapes, and a time without seconds — so that
+// no document that decoded before decodes no longer. Encoding writes TOML
+// v1.0.0 only.
+//
+// A document decodes into a map or a struct; an untyped target receives
+// map[string]any, []any, string, int64, float64, bool, time.Time for an offset
+// date-time, and LocalDateTime, LocalDate and LocalTime for the three local
+// kinds. A struct field is keyed by its toml tag, or by its name, matched
+// exactly first and then without regard to case.
 package toml
 
 import (
 	"io"
 	"slices"
 
-	gotoml "github.com/pelletier/go-toml/v2"
-
 	"github.com/kitsunium/sdk/internal/core/codec"
 	"github.com/kitsunium/sdk/internal/core/codec/scratch"
-	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // Package-level state: the codec singleton plus the hoisted MIME /
@@ -54,91 +66,53 @@ func (*tomlCodec) Extensions() []string {
 	return slices.Clone(extensions)
 }
 
-// Marshal serialises v as TOML bytes. Routes through a pooled
-// *bytes.Buffer + gotoml.NewEncoder so the per-call bytes.Buffer
-// allocation gotoml.Marshal pays internally is amortised across calls.
+// Marshal serialises v, a map or a struct, as a TOML document. The document is
+// written into a buffer from the shared codec pool and returned as a copy of
+// exactly its length.
 func (*tomlCodec) Marshal(v any) (encoded []byte, err error) {
 	//: rent an already-Reset buffer from the shared codec pool.
 	buf := scratch.AcquireBuffer()
-	//: pelletier Encoder has no Reset — fresh one per call.
-	enc := gotoml.NewEncoder(buf)
-	//: encode into the pooled buffer.
-	if merr := enc.Encode(v); merr != nil {
-		//: drop the buffer back to the pool if not oversized.
+	out, err := encodeDocument(buf.AvailableBuffer(), v)
+	//: a value TOML cannot represent.
+	if err != nil {
 		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeTOMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "TOML encoding failed",
-			Private: "service/codec/toml.Marshal: pelletier/go-toml/v2 returned an error",
-		})
+		//: MARSHAL_FAILED.
+		return nil, err
 	}
-	//: detach: clone the buffer's bytes so the returned slice does not
-	//: alias the pooled buffer (next caller would overwrite it).
-	out := slices.Clone(buf.Bytes())
-	//: cap-discard release.
+	encoded = slices.Clone(out)
+	//: a document that outgrew the pooled buffer leaves its size behind, so
+	//: the next one of that size does not grow from scratch again.
+	if cap(out) > buf.Cap() {
+		buf.Write(out)
+	}
 	scratch.ReleaseBuffer(buf)
 	//: success — bytes are the caller's now.
-	return out, nil
+	return encoded, nil
 }
 
-// Unmarshal parses data as TOML into v.
+// Unmarshal parses data as a TOML document into v, a non-nil pointer.
 func (*tomlCodec) Unmarshal(data []byte, v any) error {
-	//: delegate to the library for the actual decoding.
-	uerr := gotoml.Unmarshal(data, v)
-	//: success fast-path.
-	if uerr == nil {
-		//: nothing to wrap.
-		return nil
-	}
-	//: wrap the library error.
-	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeTOMLUnmarshalFailed,
-		Reason:  "UNMARSHAL_FAILED",
-		Public:  "TOML decoding failed",
-		Private: "service/codec/toml.Unmarshal: pelletier/go-toml/v2 returned an error",
-	})
+	//: parse, then decode; every failure is UNMARSHAL_FAILED.
+	return unmarshal(data, v)
 }
 
-// Append encodes v as TOML and appends the bytes to dst. Implements the
-// optional codec.Appender interface so hot-path callers can stream
-// records into a recycled buffer. Encodes directly into the pooled
-// *bytes.Buffer + appends onto dst — saves the slices.Clone the
-// Marshal-delegation shape paid.
+// Append encodes v as a TOML document directly onto dst. Implements the
+// optional codec.Appender interface; on failure dst is returned with its
+// length unchanged.
 func (*tomlCodec) Append(dst []byte, v any) (appended []byte, err error) {
-	//: rent an already-Reset buffer from the shared codec pool.
-	buf := scratch.AcquireBuffer()
-	//: pelletier's Encoder has no Reset(w) — fresh one per call.
-	enc := gotoml.NewEncoder(buf)
-	//: encode into the pooled buffer.
-	if merr := enc.Encode(v); merr != nil {
-		//: cap-discard release; dst stays pristine, error surfaces.
-		scratch.ReleaseBuffer(buf)
-		//: wrap the library error for reason-based matching.
-		return dst, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeTOMLMarshalFailed,
-			Reason:  "MARSHAL_FAILED",
-			Public:  "TOML encoding failed",
-			Private: "service/codec/toml.Append: pelletier/go-toml/v2 returned an error",
-		})
-	}
-	//: append the encoded bytes onto the caller's buffer (1 copy total).
-	dst = append(dst, buf.Bytes()...)
-	//: cap-discard release.
-	scratch.ReleaseBuffer(buf)
-	//: success — bytes are the caller's now.
-	return dst, nil
+	//: the encoder appends in place.
+	return encodeDocument(dst, v)
 }
 
-// NewEncoder wraps w in a streaming codec.Encoder.
+// NewEncoder returns a streaming codec.Encoder writing one document to w per
+// Encode call.
 func (*tomlCodec) NewEncoder(w io.Writer) codec.Encoder {
-	//: wrap the pelletier encoder.
-	return &tomlEncoder{inner: gotoml.NewEncoder(w)}
+	//: the encoder owns no state between documents.
+	return &tomlEncoder{w: w}
 }
 
-// NewDecoder wraps r in a streaming codec.Decoder.
+// NewDecoder returns a streaming codec.Decoder reading r as one document.
 func (*tomlCodec) NewDecoder(r io.Reader) codec.Decoder {
-	//: wrap the pelletier decoder.
-	return &tomlDecoder{inner: gotoml.NewDecoder(r)}
+	//: the decoder reads r whole on its first Decode.
+	return &tomlDecoder{r: r}
 }

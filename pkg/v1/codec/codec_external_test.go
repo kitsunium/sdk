@@ -1240,7 +1240,7 @@ func TestStreamingRoundTrip_AllCodecs(t *testing.T) {
 		//: decode into a non-complexRT target shape:
 		//:   - xml : encoding/xml requires the xmlDoc fixture (maps / []byte
 		//:           cannot round-trip through stdlib XML).
-		//:   - toml: go-toml/v2 Decoder reads ONE document per input stream;
+		//:   - toml: the TOML Decoder reads ONE document per input stream;
 		//:           multi-record streams are not part of its contract.
 		//:   - tlv : decodes structs into map[string]any so reflect-based
 		//:           equality on complexRT cannot work without a per-codec

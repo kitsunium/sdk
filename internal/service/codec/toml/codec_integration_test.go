@@ -29,16 +29,19 @@ func TestAllocBudget(t *testing.T) {
 		ceil float64
 		fn   func()
 	}
-	//: ceilings captured on the race-off lane at the scratch-migration commit.
+	//: ceilings re-pinned with intent when the codec became native: it
+	//: measures 5 / 5 / 4 allocations where github.com/pelletier/go-toml/v2
+	//: needed up to 17 / 15 / 16; two of headroom absorb a sync.Pool emptied
+	//: by a collection during the run.
 	tests := []tc{
-		{"marshal", 17, func() {
+		{"marshal", 7, func() {
 			out, merr := c.Marshal(payload)
 			if merr != nil {
 				t.Fatalf("Marshal: %v", merr)
 			}
 			allocSink = out
 		}},
-		{"unmarshal", 15, func() {
+		{"unmarshal", 7, func() {
 			var dst map[string]int
 			if uerr := c.Unmarshal(seed, &dst); uerr != nil {
 				t.Fatalf("Unmarshal: %v", uerr)
@@ -49,7 +52,7 @@ func TestAllocBudget(t *testing.T) {
 	//: Append is optional — measure it only when the codec implements it.
 	if appender, ok := c.(corecodec.Appender); ok {
 		dst := make([]byte, 0, 256)
-		tests = append(tests, tc{"append", 16, func() {
+		tests = append(tests, tc{"append", 6, func() {
 			out, aerr := appender.Append(dst[:0], payload)
 			if aerr != nil {
 				t.Fatalf("Append: %v", aerr)

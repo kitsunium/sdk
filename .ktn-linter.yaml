@@ -1045,6 +1045,17 @@ rules:
       # message here likewise reads "constructor NewNewAttrValue()".)
       - "**/internal/core/authz/**"
       - "internal/core/authz/**"
+      # service/codec/toml.LocalDateTime is a VALUE of exported fields — a
+      # LocalDate and a LocalTime, embedded — written as a composite literal,
+      # exactly as the LocalDate and LocalTime it is made of (which the rule
+      # does not flag), as time.Date's components are, and as the
+      # github.com/pelletier/go-toml/v2 type it replaces was: that library had
+      # no constructor either, and a type switch moving from one to the other
+      # must change its import and nothing else. NewLocalDateTime(date, clock)
+      # would be a second spelling of the literal with nothing to validate:
+      # the decoder fills it from a date and a time it has already checked.
+      - "**/internal/service/codec/toml/localtime.go"
+      - "internal/service/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-SYNCMAP / KTN-GOROUTINE-ATOMICVAL (phase 4) — the suggested
   # replacements cannot express what this map is for.
@@ -1155,6 +1166,16 @@ rules:
       # (KTN-STRUCT-ROLE-COMPATALIAS). Scoped to the one file.
       - "**/internal/service/codec/bson/types.go"
       - "internal/service/codec/bson/types.go"
+      # service/codec/toml's LocalDate, LocalTime and LocalDateTime are the
+      # names of the three TOML kinds they hold — TOML v1.0.0 §Local Date,
+      # §Local Time, §Local Date-Time — and the names the
+      # github.com/pelletier/go-toml/v2 types they replace had, so that code
+      # type-switching on a decoded map[string]any moves from one to the
+      # other by changing its import alone. The suffix the rule infers
+      # ("Service") would name a value a service, and "LocalDateValue" would
+      # break that one-line migration for every consumer.
+      - "**/internal/service/codec/toml/localtime.go"
+      - "internal/service/codec/toml/localtime.go"
 
   # KTN-GOROUTINE-LOCKSCOPE (warning) — "move unrelated statements outside the
   # critical section". In service/proc/childwait's spawn, the statement the
@@ -1558,6 +1579,13 @@ rules:
   # value) would be printed by reflection instead of redacted. UnmarshalJSON and
   # UnmarshalText are the only two that assign. Scoped to the two packages.
   #
+  # service/codec/toml's LocalDate, LocalTime and LocalDateTime are the same
+  # case under encoding.TextMarshaler: String, MarshalText and AsTime must be
+  # VALUE methods, or a local value held in a map[string]any — where every
+  # decode into an untyped target puts it — would not render through them;
+  # UnmarshalText assigns and must take a pointer. time.Time, which they sit
+  # beside, has exactly this method set. Scoped to the one file.
+  #
   # framework/internal/kit's sealedDoc (seal_store.go) is the same case as
   # the two above: the SDK's document store encodes a sealing store's records
   # BY VALUE — json.Marshal(v) in internal/service/docstore/write.go:123 —, so its
@@ -1570,6 +1598,8 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/secret/**"
       - "internal/core/secret/**"
+      - "**/internal/service/codec/toml/localtime.go"
+      - "internal/service/codec/toml/localtime.go"
   #
   # service/codec/bson's DateTime, ObjectID and Decimal128 are the same case:
   # their MarshalJSON / MarshalText — and their String, Hex, IsZero, which a
@@ -1583,6 +1613,8 @@ rules:
       - "internal/core/net/**"
       - "**/internal/core/secret/**"
       - "internal/core/secret/**"
+      - "**/internal/service/codec/toml/localtime.go"
+      - "internal/service/codec/toml/localtime.go"
       - "**/framework/internal/kit/seal_store.go"
       - "framework/internal/kit/seal_store.go"
       - "**/internal/service/codec/bson/types.go"
@@ -1603,6 +1635,8 @@ rules:
       - "internal/service/codec/bson/objectid.go"
       - "**/internal/service/codec/bson/decimal.go"
       - "internal/service/codec/bson/decimal.go"
+      - "**/internal/service/codec/toml/localtime.go"
+      - "internal/service/codec/toml/localtime.go"
 
   # KTN-TEST-PARALLEL (phase 8) — genuine false positive, fix pending upstream.
   #
