@@ -11,6 +11,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/logger"
 	"github.com/kitsunium/sdk/internal/core/logger/level"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/internal/logfile"
 )
 
 func mustOpenSink(tb testing.TB) (sink *fileSink, path string) {
@@ -294,11 +295,12 @@ func fieldValue(t *testing.T, err error, key string) (value string, present bool
 // TestBothSymlinkRefusalsNameTheIndirection pins the field that makes a planted
 // link legible. CodeOpenFailed covers every open failure in this package, so
 // without the field a full disk and someone redirecting the log path produce
-// the same line in the operator's log. The policy refusal (refuseSymlink,
-// before the open) and the kernel refusal (explainOpenFailure, after it) must
-// agree on the spelling — a consumer filtering on kind=symlink that saw only
-// one of the two would miss the common case or the attack case depending on
-// which one it got.
+// the same line in the operator's log. The policy refusal
+// (logfile.RefuseSymlink, before the open) and the kernel refusal
+// (logfile.ExplainOpenFailure, after it), each handed this sink's
+// openRefusals, must agree on the spelling — a consumer filtering on
+// kind=symlink that saw only one of the two would miss the common case or the
+// attack case depending on which one it got.
 func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 	t.Parallel()
 	dir := t.TempDir()
@@ -311,17 +313,22 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 		t.Fatalf("plant symlink: %v", lerr)
 	}
 	//: the third row needs a path that is a file and not a link; a seed that
-	//: failed would leave it absent, and "absent" is a state refuseSymlink
+	//: failed would leave it absent, and "absent" is a state RefuseSymlink
 	//: passes through — the row would then assert nothing about an ordinary
 	//: failure.
 	if werr := os.WriteFile(regular, []byte("x"), defaultFilePerm); werr != nil {
 		t.Fatalf("seed regular: %v", werr)
 	}
-	//: explainOpenFailure's cause is a stdlib sentinel rather than a fresh
+	//: ExplainOpenFailure's cause is a stdlib sentinel rather than a fresh
 	//: error so the row asserts the wrap, not an error value it invented.
-	fromKernel := func(path string) error { return explainOpenFailure(path, os.ErrPermission) }
+	fromKernel := func(path string) error {
+		return logfile.ExplainOpenFailure(path, os.ErrPermission, &openRefusals.Open)
+	}
+	byPolicy := func(path string) error {
+		return logfile.RefuseSymlink(path, &openRefusals.Symlink)
+	}
 	tests := []symlinkRefusalCase{
-		{"the check before the open names it", link, refuseSymlink, true},
+		{"the check before the open names it", link, byPolicy, true},
 		{"the kernel refusal after the open names it", link, fromKernel, true},
 		{"an ordinary open failure does not", regular, fromKernel, false},
 	}
@@ -338,9 +345,9 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 		}
 		got, ok := fieldValue(t, err, "kind")
 		//: absent is the assertion on the ordinary arm, not empty-string.
-		if ok != c.wantKind || (c.wantKind && got != kindSymlink) {
+		if ok != c.wantKind || (c.wantKind && got != logfile.KindSymlink) {
 			t.Errorf("%s: kind field = %q (present=%v), want present=%v value=%q",
-				c.name, got, ok, c.wantKind, kindSymlink)
+				c.name, got, ok, c.wantKind, logfile.KindSymlink)
 		}
 	}
 	//: parallel, unlike the O_NOFOLLOW table: these rows share no counter and

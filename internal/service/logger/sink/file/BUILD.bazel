@@ -8,8 +8,6 @@ go_library(
         "codes.go",
         "errors.go",
         "file.go",
-        "open_flags_other.go",
-        "open_flags_unix.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/logger/sink/file",
     visibility = [
@@ -19,6 +17,7 @@ go_library(
     deps = [
         "//internal/core/logger",
         "//internal/kernel/errs",
+        "//internal/service/internal/logfile",
     ],
 )
 
@@ -36,13 +35,13 @@ go_test(
     srcs = [
         "file_external_test.go",
         "file_internal_test.go",
-        "open_flags_unix_internal_test.go",
     ],
     embed = [":file"],
     deps = [
         "//internal/core/logger",
         "//internal/core/logger/level",
         "//internal/kernel/errs",
+        "//internal/service/internal/logfile",
     ],
 )
 

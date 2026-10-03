@@ -1,15 +1,17 @@
 //go:build unix
 
-// Package file — the proof that the OPEN refuses an indirection, and not only
-// the os.Lstat that ran a moment before it.
+// Package logfile — the proof that the OPEN refuses an indirection, and not
+// only the os.Lstat that ran a moment before it.
 //
-// TestNew_RejectsSymlink plants the link and then calls New, so refuseSymlink
-// answers first and the flag word is never asked anything: that case passes
+// Every other symlink case — this package's, file.New's, rotfile's
+// openHardened's — plants the link and then calls Open, so RefuseSymlink
+// answers first and the flag word is never asked anything: those cases pass
 // identically with and without O_NOFOLLOW. This file puts the question to the
 // flag word directly — what happens when the link appears AFTER the check has
 // already looked, which is the one state the package's own documentation says
-// O_NOFOLLOW exists to cover.
-package file
+// O_NOFOLLOW exists to cover. It is the one copy of a proof both file sinks
+// used to carry, for the one flag word they now share.
+package logfile
 
 import (
 	"io"
@@ -18,6 +20,9 @@ import (
 	"runtime"
 	"testing"
 )
+
+// sinkFilePerm is the mode both file sinks pass Open — 0600, the owner alone.
+const sinkFilePerm os.FileMode = 0o600
 
 // seededContent is planted in the link's target so a followed open can be seen
 // landing on it. The exact bytes are read back, because "the open failed" is a
@@ -53,7 +58,7 @@ func reportFollowed(t *testing.T, f io.WriteCloser, link, target string) {
 	cerr := f.Close()
 	landed, rerr := os.ReadFile(target)
 	t.Errorf("the open FOLLOWED the link planted at %s (write=%v close=%v): %s now holds %q (read=%v) — "+
-		"openFlags carries no O_NOFOLLOW on %s/%s, so refuseSymlink's os.Lstat is the only protection "+
+		"openFlags carries no O_NOFOLLOW on %s/%s, so RefuseSymlink's os.Lstat is the only protection "+
 		"and the window between it and this open is wide open",
 		link, werr, cerr, target, landed, rerr, runtime.GOOS, runtime.GOARCH)
 }
@@ -92,10 +97,10 @@ type nofollowCase struct {
 }
 
 // TestTheOpenRefusesALinkPlantedAfterTheLstatCheck opens with exactly the flag
-// word and mode New uses, against a path that IS a symbolic link — the state a
-// planter leaves behind by winning the race against refuseSymlink. It is not an
-// artificial state: it is the one the package's own documentation says
-// O_NOFOLLOW exists to cover.
+// word Open uses and the mode both sinks pass it, against a path that IS a
+// symbolic link — the state a planter leaves behind by winning the race against
+// RefuseSymlink. It is not an artificial state: it is the one the package's own
+// documentation says O_NOFOLLOW exists to cover.
 //
 // The errno is deliberately never inspected. O_NOFOLLOW reports a planted link
 // as ELOOP on linux, openbsd and darwin, EMLINK on freebsd and dragonfly, and
@@ -117,7 +122,7 @@ func TestTheOpenRefusesALinkPlantedAfterTheLstatCheck(t *testing.T) {
 		//: it; the dangling row leaves it absent so a follow CREATES it.
 		if !c.dangling {
 			//: a seed that fails makes the row meaningless, so stop here.
-			if werr := os.WriteFile(target, []byte(seededContent), defaultFilePerm); werr != nil {
+			if werr := os.WriteFile(target, []byte(seededContent), sinkFilePerm); werr != nil {
 				t.Fatalf("seed target: %v", werr)
 			}
 		}
@@ -126,7 +131,7 @@ func TestTheOpenRefusesALinkPlantedAfterTheLstatCheck(t *testing.T) {
 			return
 		}
 		planted++
-		f, oerr := os.OpenFile(link, openFlags, defaultFilePerm)
+		f, oerr := os.OpenFile(link, openFlags, sinkFilePerm)
 		//: a descriptor means the kernel traversed the link.
 		if oerr == nil {
 			reportFollowed(t, f, link, target)

@@ -1,9 +1,10 @@
 //go:build unix
 
-// Package file — the Unix half of openFlags: the kernel is asked not to
+// Package logfile — the Unix half of openFlags: the kernel is asked not to
 // traverse an indirection at the log path, so a symbolic link planted in the
-// window between refuseSymlink's os.Lstat and the os.OpenFile that follows it
-// fails the open instead of silently redirecting the sink (CWE-59).
+// window between RefuseSymlink's os.Lstat and the os.OpenFile that follows it
+// fails the open instead of silently redirecting the sink (CWE-59) — at
+// construction of either file sink, and on every reopen after a rotation.
 //
 // # Why the tag is `unix` and not a list of six GOOS
 //
@@ -40,21 +41,21 @@
 // belongs to whichever WASI host runs the module. No lane in this repository
 // runs one, so claiming the protection there would be a claim nothing here can
 // check. It takes the fallback and the CLAUDE.md table says so by name.
-package file
+package logfile
 
 import (
 	"os"
 	"syscall"
 )
 
-// openFlags is the OpenFile flag set used by New. O_NOFOLLOW closes the TOCTOU
-// window between refuseSymlink's os.Lstat and the open: with O_CREATE it refuses
-// a DANGLING link exactly as it refuses a live one, which matters because the
-// dangling one is the shape the attack takes — plant the link, let the victim's
-// O_CREATE make the file.
+// openFlags is the OpenFile flag set Open uses. O_NOFOLLOW closes the TOCTOU
+// window between RefuseSymlink's os.Lstat and the open: with O_CREATE it
+// refuses a DANGLING link exactly as it refuses a live one, which matters
+// because the dangling one is the shape the attack takes — plant the link, let
+// the victim's O_CREATE make the file.
 //
 // It governs the FINAL component only. A symbolic link at a PARENT component is
-// still traversed; that is the caller's own directory tree, and the package's
+// still traversed; that is the caller's own directory tree, and each sink's
 // "do NOT place the log file under an attacker-writable directory"
 // pre-condition is what covers it.
 const openFlags int = os.O_APPEND | os.O_CREATE | os.O_WRONLY | syscall.O_NOFOLLOW

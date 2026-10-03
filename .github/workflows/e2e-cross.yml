@@ -71,14 +71,16 @@ env:
   CORE_PKGS: "./proc"
   SERVICE_PKGS: "./entitlement ./ipc ./lock ./proc/childwait ./proc/exec ./proc/cgroup ./proc/reaper ./proc/rlimit ./proc/sdlisten ./proc/sdnotify ./proc/self ./proc/signal"
   # Unix file-security packages: their suites assert 0600 perms and inject
-  # failures by chmod-freezing a directory — both are Unix mechanics. They run
+  # failures by chmod-freezing a directory — both are Unix mechanics. The
+  # shared hardened open both sinks call, internal/logfile, carries the one
+  # O_NOFOLLOW proof (a link planted after the Lstat check) they used to copy. They run
   # here on the Unix lanes (the BSDs compile them below as well); on Windows
   # the whole-suite step runs them, and there their suites assert what a mode
   # means on that platform (the one read-only bit, not an ACL) and skip the
   # chmod injections, naming why (ADR 0095). Listing them for Windows here too
   # would only run them twice. ACL hardening of the Windows file sinks — a
   # security descriptor at creation — is named in their CLAUDE.md, not done.
-  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile"
+  SERVICE_FILE_PKGS: "./logger/sink/file ./writer/rotfile ./internal/logfile"
 
 jobs:
   # ── Native hosted runners: Go runs in place, no cross-compile ──────────────
