@@ -1,6 +1,7 @@
-// Package sse — an event's wire form (WHATWG HTML §9.2, "Server-sent
-// events"): the encoder that turns a corenet.SSEEventValue into the bytes a
-// stream writes, and a comment into the one frame no client dispatches.
+// Package sse — an event's wire form, as the WHATWG HTML standard's
+// Server-Sent Events format spells it: the encoder that turns a
+// corenet.SSEEventValue into the bytes a stream writes, and a comment into the
+// one frame no client dispatches.
 //
 // The value and the rules it must satisfy are the core's
 // (corenet.SSEEventValue.Validate); writing it is a mechanism, and it moved
