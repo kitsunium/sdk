@@ -1,6 +1,6 @@
 # ADR 0152 — consensus domain (`consensus`): a write is committed when a majority holds it on disk, and the log is compacted from the first version
 
-- **Status**: Proposed — review run 2, round 2 applied, split from ADR 0160; **the R5 version is not yet reviewed**
+- **Status**: Proposed — review run 2 complete (3 rounds); **R6 version not yet reviewed**
 - **Date**: 2026-10-02
 - **Deciders**: SDK maintainers
 - **Related**: [ADR 0052](0052-sdk-lock-domain.md) (fencing, and the guarantee a lock does NOT make — this domain is the first in the SDK that can make it across machines), [ADR 0056](0056-sdk-vfs-domain.md) (publication by rename, and the streaming writer it deferred), [ADR 0090](0090-a-port-named-in-public-must-be-implementable-in-public.md) (the clock port every timer here runs on), [ADR 0029](0029-sdk-net-domain.md) (the stream connection port and the TLS identity the transport rides), [ADR 0039](0039-extending-a-published-port-without-breaking-it.md) (frozen ports, siblings), [ADR 0031](0031-policy-zero-values-are-never-inert.md) (clamp or refuse), [ADR 0011](0011-kernel-snapshot-primitive.md) (withdrawn as the snapshot tool, D3, R1-14), [ADR 0068](0068-layer-firewall-is-a-checked-graph.md) (the layers), [ADR 0074](0074-what-a-public-alias-may-point-at.md) (which layer owns a type), [ADR 0005](0005-sdk-error-codes-dotted-quad.md) / [ADR 0035](0035-pp-range-ownership-enforcement.md) (the code ranges), [ADR 0120](0120-a-state-machine-keeps-an-agenda-not-a-sweep.md) (a different "state machine" — see D3), [ADR 0148](0148-a-private-socket-is-gated-by-its-directory-and-the-kernel-names-the-peer.md) (the first consumer's proposal socket, D19); **Split into** [ADR 0160](0160-divergence-is-prevented-by-construction-and-repaired-automatically.md) (divergence prevention and automatic repair, Q12); **Depends on** the TLS sibling ADR of D4, which must be Accepted before this one (R3-17)
@@ -273,15 +273,31 @@ offers:
 - **A deterministic `Apply`**, as this section states: a pure transition of
   state the state machine owns, no node-local precondition, log order, one
   goroutine.
-- **The extension points ADR 0160 needs:**
-  - `Entry.Version`;
-  - the entry kinds reserved for check and digest entries, which ADR 0152
-    admits under `NO_SPACE` like any control entry (D17);
-  - the entry checksum chain of D4;
-  - checksummed snapshots and their `SnapshotMeta`, which carries every
-    replicated alarm;
-  - alarms in `Health` and `Status`;
-  - frozen siblings discovered by assertion (ADR 0039).
+- **ADR 0160 is a cluster capability, activated all or nothing (R6-04).**
+  - A range of entry kinds is reserved for it. Until `RaiseClusterVersion`
+    raises the cluster to the version that enables ADR 0160, an entry of
+    that range is `VERSION_UNSUPPORTED`.
+  - After the raise, ADR 0160 applies those entries only beyond the gate
+    index of the raise. A node running ADR 0152 alone therefore never meets
+    one before the gate.
+  - `Message` carries no field of ADR 0160. `CheckIndex` and `RootHash` are
+    removed from it; ADR 0160 introduces them in `Message` version 2.
+  - `SnapshotMeta` has a reserved alarm field that ADR 0152 carries without
+    interpreting it.
+- **The internal hook points ADR 0160 gets (R6-04).** They are internal to
+  the engine, not published API:
+  - a per-node gate on three permissions: may campaign, may serve reads, may
+    acknowledge;
+  - batch boundaries imposed at given indexes;
+  - self-proposed control entries, their origin stamped from TLS;
+  - a floor on log retention, which compaction respects;
+  - state replacement through `Restore`;
+  - a pre-vote gate slot at step 4 of the start sequence (D14).
+- **What may delay what at start (R6-04).** Nothing beyond the checksums
+  blocks LOADING or REPLAY. Only ADR 0160, through its gate slot, may delay
+  the VOTE.
+- `Entry.Version`, the entry checksum chain of D4, checksummed snapshots and
+  the frozen siblings of ADR 0039 are the other extension points.
 - The error codes and metrics of ADR 0160 keep their serials in this ADR's
   range, which reserves them (D12).
 Nothing in ADR 0152 waits for ADR 0160, and a node can run without it.
@@ -402,7 +418,11 @@ vote or resurrecting an entry a later record truncated (`storage.js:35-37`,
   `SnapshotMeta` holds the authenticated chain tip at the snapshot's index,
   and the bytes of the retained suffix are preserved as written. A fixed
   seed is used only at genesis, or after a replicated chain reset.
-- What happens after repeated refusals at one index belongs to ADR 0160.
+- **No silent loop (R6-05).** After N identical chain refusals at the same
+  index, a follower stops answering that leader's heartbeats for the rest of
+  the term, so CheckQuorum deposes it. N defaults to 3, provisional, and zero
+  is refused. Each refusal is counted, and the follower reports itself
+  unready in `Health` while it lasts.
 
 **Durability, as the kernel gives it (R1-09).** On Linux, `segment_linux.go`
 calls `fdatasync(2)` and `fallocate(2)`. Elsewhere, `os.File.Sync` is the
@@ -468,22 +488,22 @@ the last unsynced write window, which the writer records as its sync
 watermark. A zeroed sector before the watermark is damage to synced data,
 and is quarantined.
 
-**The sync watermark itself (R5-02).**
-- *Representation:* a watermark record names the segment and the end offset
-  of the last batch whose `fdatasync` completed. It is a record of the log,
-  with its own CRC.
-- *Ordering:* the watermark covering a batch is written after that batch's
-  sync and made durable by a sync of its own. **No entry of the batch is
-  acknowledged before its watermark is durable**, because the
-  acknowledgement must wait for the evidence that classifies a later tear.
-  Under load, the watermark rides in the next batch's sync. At rest, a small
-  write and sync follows at once, and its cost is measured (D16).
-- *Recovery:* the last durable watermark splits the tail. Damage after it is
-  a tear of unacknowledged data, and is truncated. Damage before it is
-  corruption, and is quarantined.
-- *Tests:* crashes between the data's sync, the watermark's write, the
-  watermark's sync and the acknowledgement, in every order the kernel
-  allows.
+**The sync watermark is implicit in the write order (R5-02, R6-03).** Round 5
+wrote an explicit watermark record. It is replaced by the ordering the
+storage actor already keeps: it writes batch k, syncs it, and only then
+writes batch k+1.
+- **Proof:** any valid record of batch k+1 proves that batch k was synced.
+- **Only the last batch is ambiguous.** Under the declared crash-only model,
+  a tear in the last batch was never acknowledged, because acknowledgement
+  follows that batch's sync (D5b). It is truncated. Damage in any earlier
+  batch is corruption, and is quarantined.
+- **Nothing else changes.** D5b's sync-done still means "data durable", and
+  D16 keeps one `fsync` per side.
+- *Tests:* crashes between a batch's write, its sync, the next batch's write
+  and the acknowledgement, in every order the kernel allows.
+- **Fallback, stated in advance:** if review shows the implicit form unsafe,
+  the explicit watermark record of round 5 comes back, and D16 is rewritten
+  with two `fsync` per batch.
 
 Both are writes that were never acknowledged, because acknowledgement follows
 the sync. A node that truncated one of them **keeps voting and acknowledging**,
@@ -889,9 +909,14 @@ written.
     the decoded stream;
   - a node STARTS from its latest snapshot whose checksums pass, plus the log
     after it, as etcd and hashicorp/raft do;
-  - a snapshot whose checksum fails is not used. The node falls back to the
-    previous one if it is still retained, or starts with no state and waits
-    for an install;
+  - **the latest TWO complete snapshots are retained (R6-02).** A snapshot
+    whose checksum fails is not used, and the node falls back to the older
+    one, which is now always retained (R6-13). The log is kept back to the
+    older snapshot;
+  - **a node whose two snapshots both fail** starts with no table. It keeps
+    its term, vote and commit index, votes and stores the log (R6-13), and
+    applies nothing until an install at or below the commit index it knows.
+    A test corrupts every snapshot and cold-restarts (R6-02);
   - **integrity checks beyond the checksum never gate start-up.** ADR 0160
     may add anchors on top of these snapshots without changing that rule.
 - **Cut:** `StateMachine.Snapshot` on the apply goroutine; `WriteTo` streams
@@ -901,18 +926,29 @@ written.
   during one is coalesced.
 - **The engine's own replicated state rides in the snapshot (R2-12).**
   `SnapshotMeta` is versioned and carries the committed cluster version, the
-  committed timing contract, the no-space and divergence alarms, and the set
-  of retired IDs. A node that installs a snapshot restores them before it
+  committed timing contract, the no-space alarm, a reserved alarm field
+  carried uninterpreted for ADR 0160 (R6-04), and the set of retired IDs. A node that installs a snapshot restores them before it
   admits any peer, so a node rebuilt from a snapshot cannot forget a retired
   ID or an alarm.
-- **Compaction bound (R1-14):** after the snapshot is committed to disk,
-  `CompactPrefix` drops the log through
-  `min(snapshot.Index, applied) − SnapshotTrailing` (default 4 096), computed
+- **Compaction bound (R1-14, R6-02):** after the snapshot is committed to
+  disk, `CompactPrefix` drops the log through
+  `min(older retained snapshot.Index, applied) − SnapshotTrailing` (default
+  4 096), computed
   with saturating arithmetic so a small log never underflows. The term of the
   last compacted entry is kept, so the consistency check on the first
   retained entry still has a `prevLogTerm`. A follower whose `next` falls
   below the first retained index gets `COMPACTED` internally, and the leader
   switches it to the snapshot path.
+- **A transfer in flight defers, and does not get cancelled (R6-01).**
+  - While a snapshot is being sent to a peer, the next cut and the
+    replacement of the snapshot it reads are DEFERRED, and compaction is
+    pinned, as etcd skips compaction while a snapshot is in flight
+    (`server.go:2140-2141`).
+  - The transfer is cancelled only when the log reaches `LogReserveBytes`.
+  - On the receiving side, an install from a higher term, or of a newer
+    snapshot id, replaces a stale receive spool.
+  - A simulator case makes a transfer last longer than the cut interval,
+    under write load, and the follower must still catch up.
 - **Install (R1-15, R2-10):**
   - only from the leader of the receiver's current term;
   - the `InstallRequest` carries the sender's authenticated identity and
@@ -1254,13 +1290,19 @@ fence transition is defined: a resource that accepted fences of the old
 lineage accepts the new one only after the operator records the change, and
 from then on refuses the old lineage.
 
-**Outbox identities survive a recovery (R5-10).** An outbox item that
+**Outbox identities survive a recovery (R5-10, R6-07).** An outbox item that
 survives `Recover` keeps its ORIGINAL command identity, the one it was
-committed with, so a receiver that already saw it deduplicates it. Only
-commands committed after the recovery carry the new lineage. Dispatch
-authority after a recovery belongs to the new cluster's leader. The old
-cluster is fenced by the `Recover` attestation (D17), so no old node
-dispatches in parallel.
+committed with. Only commands committed after the recovery carry the new
+lineage.
+- **Each dispatch carries two things.** The original command identity, which
+  the receiver deduplicates on. And the dispatcher's CURRENT `LogIdentity`
+  and term, which is its authority, and which the receiver fences on.
+- After the switch, a receiver refuses any dispatcher of the old lineage,
+  even with a command identity it has never seen.
+- `Apply` receives the lineage-scoped command token of its entry, so a
+  retained entry keeps its identity across the recovery.
+- A test has an old-cluster node dispatch after the switch, and the
+  dispatch must be refused.
 
 This is the answer to ADR 0052 D11. A lock over this domain is a state
 machine whose acquire entry's `Index` is the lease's `Fence()`; it needs no
@@ -1320,8 +1362,8 @@ change that introduces them (ADR 0035):
 | `0.2.57.14` | reserved | `STATE_DIVERGED`, moved to ADR 0160 with its meaning (Q12) |
 | `0.2.57.15` | `VERSION_UNSUPPORTED` | an entry kind, record, frame or snapshot version this node does not know; the node stops (D18, R1-22) |
 | `0.2.57.16` | `NODE_ID_RETIRED` | a removed `NodeID` offered again (D8, R1-17) |
-| `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing and membership changes are still admitted (D17, R2-29) |
-| `0.2.57.18` | `RESULT_TYPE_MISMATCH` | `ProposeAs` got an `Apply` result of another type; the entry IS committed, and the error carries its `Position` (D14, R2-19) |
+| `0.2.57.17` | `NO_SPACE` | the replicated no-space alarm is raised: writes are refused until it is cleared; the alarm, its clearing, membership changes, `TransferLeadership` and the control entries of D3 are still admitted (D17, R2-29, R6-13) |
+| `0.2.57.18` | `RESULT_TYPE_MISMATCH` | `ProposeAs` got an `Apply` result of another type; the entry IS committed, and the error carries its `Token` (D14, R2-19, R5-14, R6-13) |
 | `0.2.57.19` | `PAYLOAD_VERSION_REFUSED` | a proposal's payload version is above what some member announced; refused before append, retryable after the upgrade (D18, R2-16) |
 | `0.2.57.20` | `LINEAGE_MISMATCH` | a position, outbox identity or fence from another `LogIdentity` lineage (D10, R3-22) |
 | `0.2.57.21` | reserved | `HASHER_FAULT`, moved to ADR 0160 with its meaning (Q12) |
@@ -1329,6 +1371,12 @@ change that introduces them (ADR 0035):
 | `0.2.57.23` | reserved | `APPLY_FINGERPRINT_REFUSED`, moved to ADR 0160 with its meaning (Q12) |
 | `0.2.57.24` | reserved | `SELF_TEST_FAILED`, moved to ADR 0160 with its meaning (Q12) |
 | `0.2.57.25` | `ADMIN_PRECONDITION_FAILED` | a clearing or raising operation named an alarm, version or contract that is not the current one (D17, R4-06) |
+
+**Reserved serials (R6-13).** The five serials reserved for ADR 0160 are
+declared by ADR 0160's package under this range's owner,
+`internal/core/consensus`. That keeps the errs registry's two rules: one
+owner per `MM.LL.PP` range (ADR 0035), and one `Define` per value. No
+`Define` in ADR 0152's code uses them.
 
 Service `0.3.92.*` (`0x00_03_5C_*`):
 
@@ -1411,7 +1459,7 @@ type (
 	EntryKind      = coreconsensus.EntryKind
 	HardState      = coreconsensus.HardState
 	Stamp          = coreconsensus.Stamp
-	Message        = coreconsensus.Message     // Version, Group, From (stamped from TLS), Term, Kind, CheckIndex, RootHash, Entries; AppendBinary/UnmarshalBinary, versioned, so a custom transport forwards opaque bytes (R4-21)
+	Message        = coreconsensus.Message     // v1: Version, Group, From (stamped from TLS), Term, Kind, Entries — no ADR 0160 field (R6-04); AppendBinary/UnmarshalBinary, versioned, so a custom transport forwards opaque bytes (R4-21)
 	SnapshotMeta   = coreconsensus.SnapshotMeta
 	SnapshotSink   = coreconsensus.SnapshotSink
 	InstallRequest = coreconsensus.InstallRequest
@@ -1446,6 +1494,7 @@ type (
 	RecoverOptions = svcconsensus.RecoverOptions // Force, Confirm, Operator, Joining, FencedAttestation (R2-25, R3-02, R4-04)
 	RestoreOptions = svcconsensus.RestoreOptions // Expected (non-zero), Confirm, Operator, MaxEncoded, MaxDecoded, Codecs (R3-15)
 	AlarmID        = coreconsensus.AlarmID       // the index that raised an alarm (R4-06)
+	Precondition   = coreconsensus.Precondition  // {LogIdentity, AlarmID or contract/version generation}; from Health/Status (R6-10)
 )
 
 // The consumer port, in core: the only algorithm-neutral interface (D1).
@@ -1535,11 +1584,13 @@ func (n *Node) Promote(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) Remove(ctx context.Context, op Operator, id NodeID) error
 func (n *Node) UpdateAddress(ctx context.Context, op Operator, id NodeID, addr string) error
 func (n *Node) TransferLeadership(ctx context.Context, op Operator, to NodeID) error
-// Each clearing or raising operation names what it acts on; Apply refuses a
-// mismatch, with ADMIN_PRECONDITION_FAILED (R4-06).
-func (n *Node) ProposeTimingContract(ctx context.Context, op Operator, expectedCurrent uint32, c TimingContract) error
-func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, expectedCurrent, v uint32) error
-func (n *Node) ClearNoSpace(ctx context.Context, op Operator, alarm AlarmID) error
+// Each clearing or raising operation names what it acts on, as a
+// lineage-scoped Precondition that Health and Status return and that the
+// forwarding envelope carries; Apply refuses a mismatch with
+// ADMIN_PRECONDITION_FAILED (R4-06, R5-09, R6-10).
+func (n *Node) ProposeTimingContract(ctx context.Context, op Operator, pre Precondition, c TimingContract) error
+func (n *Node) RaiseClusterVersion(ctx context.Context, op Operator, pre Precondition, v uint32) error
+func (n *Node) ClearNoSpace(ctx context.Context, op Operator, pre Precondition) error
 func (n *Node) SaveSnapshot(ctx context.Context, op Operator, w io.Writer) (SnapshotMeta, error) // R3-14
 func (n *Node) Membership() Membership
 func (n *Node) Status() Status
@@ -1599,19 +1650,20 @@ transport. The cross-field rules are checked after defaults are applied
   defaults and two peers, that is under 1 GiB. `NewRaft` reports the total,
   so a product can check it against its own limit.
 - **Snapshot slots are bounded and enforced, and the disk reservation is
-  their actual maximum (R4-28, R5-01).** At most three snapshots exist at
-  once: the latest, one being written, and one being received.
+  their actual maximum (R4-28, R5-01, R6-02).** At most FOUR snapshots exist
+  at once: the two retained, one being written, and one being received.
   - *Admission:* no cut starts and no install is accepted while its slot is
     taken.
-  - *Replacement:* the previous snapshot is deleted once the new one is
-    durable and no transfer handle pins it.
-  - *Transfer cancellation:* a transfer whose handle pins a snapshot that
-    must be replaced is cancelled. The peer resumes from the new one.
+  - *Replacement:* the oldest retained snapshot is deleted once a new one is
+    durable, unless a transfer in flight reads it, in which case the
+    replacement waits (R6-01).
+  - *Transfer cancellation:* only when the log reaches `LogReserveBytes`
+    (R6-01).
 
-  The reservation is therefore `MaxLogBytes + 3 × MaxSnapshotBytes +
+  The reservation is therefore `MaxLogBytes + 4 × MaxSnapshotBytes +
   LogReserveBytes`. On the three VPS, each with one shared 100 GB disk, the
-  recommended values give about 4.3 GiB. ADR 0160's anchors add their own
-  slots to that figure. All values are provisional, like D16's numbers.
+  recommended values give about **5.3 GiB**. D17 uses the same figure. All
+  values are provisional, like D16's numbers.
 - **Inside Forgejo (R3-24).** The replicator shares Forgejo's heap. The
   product sets `GOMEMLIMIT` with headroom for the engine, the ref table and
   the projector, computed from this budget with the MEASURED table (R5-15).
@@ -1629,8 +1681,9 @@ transport. The cross-field rules are checked after defaults are applied
   1. open the data directory under its lock;
   2. load the latest snapshot whose checksums pass;
   3. replay the log to the commit boundary;
-  4. vote;
-  5. serve.
+  4. the pre-vote gate slot, empty unless ADR 0160 is active (R6-04);
+  5. vote;
+  6. serve.
   The start-up replay is bounded by `SnapshotEvery` plus the entries applied
   since the last cut. The restart time is a D16 target, measured on the real
   ref count.
@@ -1875,8 +1928,8 @@ For the first consumer, that is Forgejo's site administration online, and
 these subcommands of the same `forgejo` binary, whose version is therefore
 the node's by construction (R4-29, R5-12): `forgejo cluster bootstrap`,
 `init`, `recover`, `restore`, `inspect` (with `--replay`, ADR 0160),
-`snapshot save`, `reproject`, `quarantine clear` and `objects
-verify|backfill`.
+`snapshot save`, `reproject`, `quarantine clear`, `objects
+verify|backfill` and `reconcile` (R6-09).
 
 **Online operations** (D14), each taking the `Operator` the caller vouches
 for. The SDK writes that identity into the membership or administrative entry
@@ -1984,7 +2037,7 @@ node, under the directory lock.
   - A restore pairs a ref snapshot with a PostgreSQL backup taken AFTER it, so
     the database never names a ref the snapshot lacks (R3-26).
   - The local backup file is NOT counted in the data directory's 5.3 GiB
-    budget (D14, R4-28). The operator guide says where it goes and how much it needs
+    budget (D14, R4-28, R6-02). The operator guide says where it goes and how much it needs
     (R3-26).
   - For the first consumer, `SaveSnapshot` is taken BEFORE the Git
     repositories are backed up. The refs then name objects the repository
@@ -2002,6 +2055,10 @@ node, under the directory lock.
     - repository lifecycle: a repository created, renamed or deleted between
       the three backups.
     Vault comes first in the restore runbook, for the new node certificates.
+  - **The tool (R6-09).** `forgejo cluster reconcile --dry-run|--apply`
+    enumerates every mismatch between the table, SQL and the repositories,
+    by category, and applies the named step for each. It is tested in a
+    restore followed by a cold restart.
 - **`Inspect`** reports a data directory read-only: its stamp and
   incarnation, segments, hard state, snapshot metadata, versions, quarantine
   marker (R2-01) and the first corruption found.
@@ -2073,8 +2130,11 @@ The rules:
   has a public input path, so a product can set the version it proposes. A
   node exposes its local capabilities through `Status`. Compatibility of
   persisted data — log records and snapshots written by older versions — is
-  tracked with the protocol floor, and decoders of every version still at or
-  above that floor are retained. The leader refuses a proposal whose version is above the
+  tracked SEPARATELY from the negotiated protocol floor (R6-12). Raising the
+  floor changes what nodes speak. It does not retire a decoder. A storage
+  decoder is retired only after a crash-safe migration has rewritten every
+  retained log record and snapshot that needed it. A test raises the floor,
+  then restarts a node on old storage. The leader refuses a proposal whose version is above the
   minimum announced, with `PAYLOAD_VERSION_REFUSED`, before anything is
   appended, so the refusal is retryable once every member is upgraded.
 - **Cluster version.** A committed cluster-version entry records the protocol
@@ -2131,14 +2191,22 @@ being used soundly.
   because the projection verifier below uses it. The consensus digest check
   built on it is ADR 0160's.
   - A **leaf** is the SHA-256 of a fixed, length-prefixed, big-endian
-    encoding of: the hash algorithm's version, the repository, the ref, the
-    object format, the binary SHA, the revision and the tombstone flag.
-    Nothing local to the node enters it.
+    encoding. **The encoding is versioned and discriminated (R6-11):** a
+    direct ref carries the object format and the binary SHA; a symbolic ref
+    carries its target ref name; a tombstone carries neither. All three
+    carry the hash algorithm's version, the repository, the ref and the
+    revision. Nothing local to the node enters it.
   - A **repository's hash** is the sum of its leaves modulo 2^256, so an
     update costs one subtraction and one addition.
-  - **The root is maintained incrementally (R5-07).** It is the sum modulo
-    2^256 of `SHA-256(repository id ‖ repository hash)` over every
-    repository. An update changes one term: O(1), whatever the number of
+  - **The root is maintained incrementally (R5-07, R6-11).** It is the sum
+    modulo 2^256 of `SHA-256(len(repository id) ‖ repository id ‖ repository
+    hash)` over every repository. The repository id is length-prefixed, so
+    no two ids can collide by concatenation. A repository without refs
+    contributes nothing. The sums are computed on four 64-bit limbs, least
+    significant first, each encoded big-endian, pinned by known-answer
+    vectors. The caveat stands: a sum of hashes resists accidental
+    divergence, not a chosen-input adversary, which the authenticated log
+    keeps out. An update changes one term: O(1), whatever the number of
     repositories. The round-3 root, a hash over the sorted list of
     repository hashes, cost O(n) per update. A benchmark against the
     repository count pins the claim (D15).
@@ -2167,18 +2235,25 @@ being used soundly.
     them to complete, and reconciles them before it certifies a repository's
     watermark.
   - **How native git transactions are tracked (R4-24, R5-04).**
-    - *One identity per transaction.* A 128-bit nonce from `crypto/rand`,
-      bound to `(repository, refs)`, is passed through the environment to
-      every phase of the hook, so `prepared`, `committed` and `aborted` of
-      one git transaction share it.
-    - *The owning git process is identified* from the socket's
-      `SO_PEERCRED` and the hook's parent PID, and supervised independently
-      of the hook's connections, which come and go between phases.
+    - *One identity per transaction (R6-06).* A 128-bit nonce from
+      `crypto/rand`, bound to `(repository, refs)`, is set in the
+      environment by **Forgejo's git launch wrapper on EVERY git
+      invocation** — pushes, merges, the API, pull requests and AGit
+      included — and never by the hook. Every phase of the hook reads it, so
+      `prepared`, `committed` and `aborted` of one git transaction share it.
+      `prepared` refuses a transaction that carries no nonce.
+    - *The owning git process is identified (R6-06)* by walking up from the
+      hook's parent to the git process, and is supervised with
+      `pidfd_open`, independently of the hook's connections, which come and
+      go between phases. When no nonce correlates, a fallback correlates on
+      `(repository, refs, old and new values)` plus the pidfd.
     - *Registration is atomic with certification.* The hook registers in
       `prepared`. The projector certifies a watermark under the same lock.
-    - *Bounded lifetime.* A registration lives at most git's ref-lock timeout
-      plus a margin. When that expires, or when the owning process dies, the
-      repository is reconciled from the table.
+    - *Bounded lifetime (R6-06).* A registration lives at most git's
+      ref-lock timeout plus a margin. When it expires, certification of
+      that repository stays FENCED until the transaction has completed, or
+      its process is confirmed terminated and unable to publish. Only then
+      is the repository reconciled from the table.
     - *Caps.* Registrations are capped per repository and in total. Above
       the cap, the hook refuses the transaction before git publishes
       anything.
@@ -2225,8 +2300,12 @@ being used soundly.
   - A local checker computes it under the projector's lock.
   - A difference triggers an automatic reprojection. An operator can force
     one with `forgejo cluster reproject <repo>`.
-  - Missing objects are fetched from a peer, then checked with
-    `git index-pack --strict`.
+  - **Every transfer of objects between nodes uses the object channel
+    (R6-08)**, in both directions: fetching a missing object, a backfill, a
+    restored node getting ready. It runs on `wg0`, with the same admission,
+    path check, quarantine, `git index-pack --strict` and budget. Never git
+    over a public endpoint with a cluster-wide credential. A test asserts
+    that the projector has no HTTP or SSH git remote.
   - The projector owns garbage collection: `gc.auto=0`,
     `maintenance.auto=false` and `receive.autogc=false`, so no git process
     prunes behind its back.
@@ -2277,8 +2356,8 @@ being used soundly.
   `forgejo` binary are every one D17 lists (R5-12): `cluster bootstrap
   --members`, `cluster init --cluster --node-id` (which prints the
   incarnation), `recover`, `restore`, `inspect`, `snapshot save`,
-  `reproject`, `quarantine clear` and `objects verify|backfill`. The Forgejo
-  server never calls `Bootstrap`.
+  `reproject`, `quarantine clear`, `objects verify|backfill` and `reconcile`
+  (R6-09). The Forgejo server never calls `Bootstrap`.
 - **No internal route reaches the engine (R3-14).** `Propose` and every
   function of D17 are never exposed under Forgejo's `/api/internal`. The hook
   reaches the replicator only through the ADR 0148 socket. Traefik denies
@@ -2303,10 +2382,13 @@ being used soundly.
   - A release WITH a schema migration stops all three nodes, upgrades them,
     and restarts them. The consensus survives a full stop, because its LOG is
     durable. The table is rebuilt from the log (R4-29).
-  - **On the full-stop path, the replay gate is mandatory on every node before
-    it votes (R4-20).** The runbook runs `forgejo cluster inspect --replay`
-    on each node first. "One voter at a time" belongs to the rolling path
-    only.
+  - **On the full-stop path, ADR 0152 relies on the payload-version gate of
+    D18 and on gate entries (R4-20, R6-04).** A new release's new semantics
+    start only at a gate entry, and a proposal above any member's announced
+    payload version is refused before append. `forgejo cluster inspect
+    --replay`, a mandatory replay before voting, is an ADDITION of ADR 0160,
+    not part of this ADR's runbook. "One voter at a time" belongs to the
+    rolling path only.
   - In both cases `RaiseClusterVersion` is called only once all three nodes
     run the new release (D18).
 - **Snapshot backup (R3-26, R4-05).** `forgejo cluster snapshot save` writes
@@ -2343,8 +2425,9 @@ being used soundly.
 - **This version is not yet reviewed.** The first review run stopped at its
   cap of three rounds. A second run reviewed the R3 version (round 1, applied
   as R4) and the R4 version (round 2, applied as R5). Round 2 also split the
-  divergence work into ADR 0160 (Q12). No reviewer has read the R5 version
-  yet. The next step is round 3, on this ADR alone.
+  divergence work into ADR 0160 (Q12). Round 3, the last of that run,
+  reviewed the R5 version alone and found no remaining core safety defect.
+  Its objections are applied here as R6. No reviewer has read the R6 version.
 - The root `CLAUDE.md` domain list, the error-code mirror and
   `codeRangeOwners` change in the implementing change set, not in this one.
 

@@ -1,6 +1,6 @@
 # ADR 0160 — divergence of replicated state: prevented by construction, detected at fixed indexes, repaired automatically
 
-- **Status**: Proposed — split from ADR 0152 by the owner's decision Q12; its own challenge is pending
+- **Status**: Proposed — split from ADR 0152 by the owner's decision Q12; its own challenge is pending; ADR 0152's R6 offer recorded, not yet reconciled
 - **Date**: 2026-10-03
 - **Deciders**: SDK maintainers
 - **Depends on**: [ADR 0152](0152-a-write-is-committed-when-a-majority-holds-it-on-disk.md) (the consensus domain whose state this ADR protects)
@@ -437,6 +437,44 @@ None. Nothing is implemented yet.
 ## Deferred
 
 - Every open objection below, as the input of this ADR's own challenge.
+
+## Contract from 0152 (as of ADR 0152's R6 version)
+
+ADR 0152's final round (R6) changed what it offers this ADR. This section
+records that offer. No other change is applied to this ADR: reconciling its
+decisions with the offer is part of its own challenge.
+
+- **Activation gate (0152 R6-04).** This ADR is a cluster capability,
+  activated all or nothing by `RaiseClusterVersion`. A reserved range of
+  entry kinds is `VERSION_UNSUPPORTED` until that version is raised. After
+  the raise, this ADR applies those entries only beyond the gate index, so a
+  node running ADR 0152 alone never meets one before the gate.
+- **Messages (0152 R6-04).** `CheckIndex` and `RootHash` are no longer in
+  ADR 0152's `Message`. This ADR introduces them in `Message` version 2.
+- **Snapshot metadata (0152 R6-04).** `SnapshotMeta` has a reserved alarm
+  field, which ADR 0152 carries without interpreting it.
+- **Internal hook points (0152 R6-04)**, internal to the engine:
+  - a per-node gate on three permissions: may campaign, may serve reads, may
+    acknowledge;
+  - batch boundaries imposed at given indexes;
+  - self-proposed control entries, their origin stamped from TLS;
+  - a floor on log retention;
+  - state replacement through `Restore`;
+  - a pre-vote gate slot at step 4 of ADR 0152's start sequence.
+- **Start rule (0152 R6-04).** Nothing beyond checksums blocks loading or
+  replay. Only this ADR, through the gate slot, may delay the vote.
+- **Replay before voting (0152 R6-04).** `forgejo cluster inspect --replay`
+  is an addition of this ADR, not part of ADR 0152's full-stop runbook.
+- **Chain refusals (0152 R6-05).** ADR 0152 now keeps a minimal deposition
+  rule itself: after N identical chain refusals at one index (N = 3 by
+  default, provisional), a follower stops answering that leader's heartbeats
+  for the term. Point 6 of D3 above predates that rule. Reconciling the two
+  is an open item.
+- **Snapshots (0152 R6-01, R6-02).** ADR 0152 retains the latest TWO
+  complete snapshots, and keeps the log back to the older one. A transfer in
+  flight defers the next cut and pins compaction. The disk reservation is
+  four snapshot slots, about 5.3 GiB. D4 above, written when ADR 0152 kept
+  one snapshot, reads against this offer.
 
 ## Open objections from the 0152 challenge
 
