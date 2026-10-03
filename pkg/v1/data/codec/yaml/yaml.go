@@ -43,11 +43,32 @@
 // Importing both this package and pkg/v1/data/codec is harmless: a format is
 // registered by the package that implements it, which Go initialises once
 // however many packages import it.
+//
+// # Errors
+//
+// Failures carry the range 0.3.4.*; match them with errs.HasCode, or the
+// sentinels with errors.Is. Every refusal by name also carries
+// CodeUnmarshalFailed in its trail, so testing for that code answers for all
+// of them:
+//
+//	CodeMarshalFailed          0.3.4.1   a value the encoder cannot write in the subset
+//	CodeUnmarshalFailed        0.3.4.2   not YAML of the subset, past a bound, or a value its target cannot hold
+//	CodeAnchorRefused          0.3.4.3   an anchor, &name
+//	CodeAliasRefused           0.3.4.4   an alias, *name
+//	CodeTagRefused             0.3.4.5   a tag, !x, !!str, !<uri>
+//	CodeMergeKeyRefused        0.3.4.6   a merge key, <<
+//	CodeMultiDocRefused        0.3.4.7   a second document where one was expected
+//	CodeComplexKeyRefused      0.3.4.8   a complex key, ? k, or a collection as a key
+//	CodeDirectiveRefused       0.3.4.9   a directive, %YAML, %TAG
+//	CodeDuplicateKey           0.3.4.10  a mapping holding one key twice
+//	CodeLeadingZeroRefused     0.3.4.11  an integer written with a leading zero where its value matters
 package yaml
 
 import (
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
-	// initialised; importing it is the whole of this package's job.
+	// initialised; importing it is what registers the format.
 	_ "github.com/kitsunium/sdk/internal/service/data/codec/yaml"
 )
 
@@ -55,3 +76,57 @@ import (
 // it goes wherever a format name is taken — config.FSSource's string,
 // i18n.LoadFS's codec.Format — without a conversion.
 const Format = "yaml"
+
+// The error codes, range 0.3.4.*, declared in the core (ADR 0160).
+const (
+	// CodeMarshalFailed identifies a value the encoder cannot write (0.3.4.1).
+	CodeMarshalFailed errs.Code = coreyaml.CodeYAMLMarshalFailed
+	// CodeUnmarshalFailed identifies a document the decoder cannot read into
+	// its target (0.3.4.2); every refusal below carries it in its trail.
+	CodeUnmarshalFailed errs.Code = coreyaml.CodeYAMLUnmarshalFailed
+	// CodeAnchorRefused identifies an anchor (0.3.4.3).
+	CodeAnchorRefused errs.Code = coreyaml.CodeYAMLAnchorRefused
+	// CodeAliasRefused identifies an alias (0.3.4.4).
+	CodeAliasRefused errs.Code = coreyaml.CodeYAMLAliasRefused
+	// CodeTagRefused identifies an explicit tag (0.3.4.5).
+	CodeTagRefused errs.Code = coreyaml.CodeYAMLTagRefused
+	// CodeMergeKeyRefused identifies a merge key (0.3.4.6).
+	CodeMergeKeyRefused errs.Code = coreyaml.CodeYAMLMergeKeyRefused
+	// CodeMultiDocRefused identifies a second document (0.3.4.7).
+	CodeMultiDocRefused errs.Code = coreyaml.CodeYAMLMultiDocRefused
+	// CodeComplexKeyRefused identifies a complex mapping key (0.3.4.8).
+	CodeComplexKeyRefused errs.Code = coreyaml.CodeYAMLComplexKeyRefused
+	// CodeDirectiveRefused identifies a directive (0.3.4.9).
+	CodeDirectiveRefused errs.Code = coreyaml.CodeYAMLDirectiveRefused
+	// CodeDuplicateKey identifies a mapping holding one key twice (0.3.4.10).
+	CodeDuplicateKey errs.Code = coreyaml.CodeYAMLDuplicateKey
+	// CodeLeadingZeroRefused identifies an integer with a leading zero where
+	// its value matters (0.3.4.11).
+	CodeLeadingZeroRefused errs.Code = coreyaml.CodeYAMLLeadingZeroRefused
+)
+
+// The sentinels, for errors.Is: each carries the code of the same name.
+var (
+	// MarshalFailed is the sentinel of [CodeMarshalFailed].
+	MarshalFailed = coreyaml.MarshalFailed
+	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+	UnmarshalFailed = coreyaml.UnmarshalFailed
+	// AnchorRefused is the sentinel of [CodeAnchorRefused].
+	AnchorRefused = coreyaml.AnchorRefused
+	// AliasRefused is the sentinel of [CodeAliasRefused].
+	AliasRefused = coreyaml.AliasRefused
+	// TagRefused is the sentinel of [CodeTagRefused].
+	TagRefused = coreyaml.TagRefused
+	// MergeKeyRefused is the sentinel of [CodeMergeKeyRefused].
+	MergeKeyRefused = coreyaml.MergeKeyRefused
+	// MultipleDocumentsRefused is the sentinel of [CodeMultiDocRefused].
+	MultipleDocumentsRefused = coreyaml.MultipleDocumentsRefused
+	// ComplexKeyRefused is the sentinel of [CodeComplexKeyRefused].
+	ComplexKeyRefused = coreyaml.ComplexKeyRefused
+	// DirectiveRefused is the sentinel of [CodeDirectiveRefused].
+	DirectiveRefused = coreyaml.DirectiveRefused
+	// DuplicateKey is the sentinel of [CodeDuplicateKey].
+	DuplicateKey = coreyaml.DuplicateKey
+	// LeadingZeroRefused is the sentinel of [CodeLeadingZeroRefused].
+	LeadingZeroRefused = coreyaml.LeadingZeroRefused
+)

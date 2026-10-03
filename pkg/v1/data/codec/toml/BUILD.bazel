@@ -7,7 +7,11 @@ go_library(
     srcs = ["toml.go"],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/toml",
     visibility = ["//visibility:public"],
-    deps = ["//internal/service/data/codec/toml"],
+    deps = [
+        "//internal/core/data/codec/toml",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/toml",
+    ],
 )
 
 alias(
@@ -23,5 +27,6 @@ go_test(
         ":toml",
         "//internal/core/data/codec",
         "//pkg/v1/app/config",
+        "//pkg/v1/errs",
     ],
 )

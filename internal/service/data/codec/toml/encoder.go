@@ -6,6 +6,7 @@ import (
 	"io"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -33,9 +34,9 @@ func (e *tomlEncoder) Encode(v any) error {
 	if _, werr := e.w.Write(out); werr != nil {
 		//: MARSHAL_FAILED over the writer's error.
 		return errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeTOMLMarshalFailed,
-			Reason:  MarshalFailed.Reason(),
-			Public:  MarshalFailed.Public(),
+			Code:    coretoml.CodeTOMLMarshalFailed,
+			Reason:  coretoml.MarshalFailed.Reason(),
+			Public:  coretoml.MarshalFailed.Public(),
 			Private: privateWriteFailed,
 		})
 	}

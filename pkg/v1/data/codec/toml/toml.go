@@ -31,9 +31,19 @@
 // Importing both packages is harmless: a format is registered by the package
 // that implements it, which Go initialises once however many packages import
 // it.
+//
+// # Errors
+//
+// Failures carry the range 0.3.5.*; match them with errs.HasCode, or the
+// sentinels with errors.Is:
+//
+//	CodeMarshalFailed    0.3.5.1  a Go value TOML cannot represent, or a writer that failed
+//	CodeUnmarshalFailed  0.3.5.2  a document that is not TOML, past a bound, or a value its target cannot hold
 package toml
 
 import (
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 	// The implementation registers itself with the codec registry as it is
 	// initialised; importing it is most of this package's job.
 	"github.com/kitsunium/sdk/internal/service/data/codec/toml"
@@ -43,6 +53,23 @@ import (
 // it goes wherever a format name is taken — config.FSSource's string,
 // i18n.LoadFS's codec.Format — without a conversion.
 const Format = "toml"
+
+// The error codes, range 0.3.5.*, declared in the core (ADR 0160).
+const (
+	// CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).
+	CodeMarshalFailed errs.Code = coretoml.CodeTOMLMarshalFailed
+	// CodeUnmarshalFailed identifies a document the decoder cannot read, or a
+	// value its target cannot hold (0.3.5.2).
+	CodeUnmarshalFailed errs.Code = coretoml.CodeTOMLUnmarshalFailed
+)
+
+// The sentinels, for errors.Is: each carries the code of the same name.
+var (
+	// MarshalFailed is the sentinel of [CodeMarshalFailed].
+	MarshalFailed = coretoml.MarshalFailed
+	// UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+	UnmarshalFailed = coretoml.UnmarshalFailed
+)
 
 // LocalDate is a calendar day in no time zone: what a TOML local date such as
 // 1979-05-27 decodes to in an untyped target. It writes and reads itself as

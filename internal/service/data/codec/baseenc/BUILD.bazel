@@ -11,11 +11,9 @@ go_library(
         "base_convert.go",
         "buffering_writer.go",
         "codec.go",
-        "codes.go",
         "decode_all_reader.go",
         "decoder.go",
         "encoder.go",
-        "errors.go",
         "helpers.go",
         "spec.go",
     ],
@@ -23,6 +21,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/baseenc",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
@@ -55,13 +54,8 @@ go_test(
     embed = [":baseenc"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/baseenc",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

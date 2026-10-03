@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"strings"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -58,14 +59,14 @@ func unmarshal(data []byte, v any) error {
 	//: a document past the cap is refused before it is read.
 	if len(data) > maxDocumentBytes {
 		//: refused, naming the bound.
-		return errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+		return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
 			errs.String(fieldProblem, problemTooLarge), errs.Int(fieldLimit, maxDocumentBytes))
 	}
 	rv := reflect.ValueOf(v)
 	//: the target must be somewhere to write.
 	if rv.Kind() != reflect.Pointer || rv.IsNil() {
 		//: refused, naming the type.
-		return errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+		return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
 			errs.String(fieldProblem, problemTarget), errs.String(fieldType, typeName(rv)))
 	}
 	p := parserPool.Get()
@@ -222,7 +223,7 @@ func (d *decoder) fail(n int32, problem string, target reflect.Type) error {
 		fields = append(fields, errs.String(fieldType, target.String()))
 	}
 	//: the sentinel's code and messages, with the location as fields.
-	return errs.Wrap(UnmarshalFailed, errs.WrapParams{}, fields...)
+	return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{}, fields...)
 }
 
 // keyPath returns the dotted key of node n, its array elements left out.

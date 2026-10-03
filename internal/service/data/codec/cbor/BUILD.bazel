@@ -6,7 +6,6 @@ go_library(
     name = "cbor",
     srcs = [
         "codec.go",
-        "codes.go",
         "decode.go",
         "decode_any.go",
         "decode_container.go",
@@ -32,6 +31,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/cbor",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
@@ -74,10 +74,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

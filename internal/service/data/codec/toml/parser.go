@@ -8,6 +8,7 @@ import (
 	"bytes"
 	"unicode/utf8"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -354,7 +355,7 @@ func (p *parser) skipRune(problem string) error {
 func (p *parser) fail(at int, problem string) error {
 	line, column := position(p.data, at)
 	//: the sentinel's code and messages, with the location as fields.
-	return errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+	return errs.Wrap(coretoml.UnmarshalFailed, errs.WrapParams{},
 		errs.String(fieldProblem, problem), errs.Int(fieldLine, line), errs.Int(fieldColumn, column))
 }
 

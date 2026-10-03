@@ -4,7 +4,8 @@
 ## Purpose
 
 Registers the YAML codec — and no other — with the SDK's codec registry when
-imported, blank usually (ADR 0134). Everything that dispatches by format name
+imported, blank usually (ADR 0134), and names its codes — the refusals by
+name among them. Everything that dispatches by format name
 then reads and writes YAML: `config.FileSource` / `config.FSSource`,
 `i18n.LoadFS`, `codec.Marshal` / `codec.Unmarshal`. It links the YAML codec
 and nothing else — the codec is native, a named subset of YAML 1.2.2 on the
@@ -21,6 +22,7 @@ Format, which claims no extension.
 | Symbol | Role |
 |---|---|
 | `Format` | the untyped constant `"yaml"`: goes into `config.FSSource`'s string and `i18n.LoadFS`'s `codec.Format` without a conversion |
+| `CodeMarshalFailed` … `CodeLeadingZeroRefused` and the sentinels of the same names (`MultipleDocumentsRefused` for `CodeMultiDocRefused`) | the eleven `0.3.4.*` codes — the two failures and the nine refusals by name — aliased from `internal/core/data/codec/yaml`, where they are declared (ADR 0160, ADR 0074) |
 
 ## Why-this-shape
 
@@ -28,11 +30,13 @@ Format, which claims no extension.
   initialises it; this package imports it and nothing else. Importing it beside
   `pkg/v1/data/codec` is harmless: Go initialises a package once, so the format is
   registered once — `TestAFormatImportedTwiceIsRegisteredOnce` in
-  `pkg/v1/data/codec` imports all four.
+  `pkg/v1/data/codec` imports every per-format package beside the umbrella,
+  which is itself built from them.
 - **What it links is tested, not asserted.** The suite reads the registry
-  (exactly one format), the modules the test binary was linked from — no other
-  format's library, and no YAML library at all — and `go list -deps` when a go
-  tool is on PATH.
+  (exactly one format), the modules the test binary was linked from — none
+  outside the SDK, so no YAML library at all (ADR 0156 §1) — and
+  `go list -deps` when a go tool is on PATH: no other codec, nothing outside
+  the SDK and the standard library.
 
 ## Do NOT
 
@@ -46,7 +50,7 @@ bazel test --config=race //pkg/v1/data/codec/yaml:yaml_test
 cd pkg && GOWORK=off go test -race ./v1/data/codec/yaml/
 ```
 
-`TestItLinksNoOtherFormatsLibrary` skips under Bazel, which records no module
+`TestItLinksNoModuleOutsideTheSDK` skips under Bazel, which records no module
 information in a binary, and `TestGoListDepsNamesNoOtherCodec` without a go
 tool on PATH; `TestItRegistersItsFormatAlone` holds under both.
 

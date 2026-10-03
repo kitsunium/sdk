@@ -41,15 +41,16 @@ Every code a family member's engine emits is declared here too, in the
 member's `codes.go` and `errors.go` (ADR 0160 §2): a member owns the range its
 contract allocated (`LL = 2`) and, beside it, the range its engine allocated,
 which keeps `LL = 3` because a code keeps its value when its declaration moves
-(ADR 0160 §3). The engines under `internal/service/data` declare none — except
-`codec`'s, whose move is the codec tree's own.
+(ADR 0160 §3). The engines under `internal/service/data` declare none, the
+codecs included: each `codec/<format>/` here holds the codes and sentinels of
+the service codec at the same path.
 
 ## Members
 
 | Package | What it declares | Code range | Engine |
 |---|---|---|---|
 | `cache/` | the `Store[V]` port frozen at three methods with `EntryFetcher[V]` / `Tagger` / `Loader[V]` as siblings, `EntryValue[V]`, the `Fill[V]` FUNC port and `NoExpiry`; no registry, because Go has no `map[Name]Store[V]` for an open `V` (ADR 0049) | `0.2.18.*`; the chain's `0.3.48.*` | `internal/service/data/cache` |
-| `codec/` | the `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` ports, the process-wide registry and the `Format` value (ADR 0003); `codec/scratch/` beneath it holds the codec-payload recycling threshold every engine shares | `0.2.2.*` | `internal/service/data/codec/*` |
+| `codec/` | the `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` ports, the process-wide registry and the `Format` value (ADR 0003); `codec/scratch/` beneath it holds the codec-payload recycling threshold every engine shares, and `codec/<format>/` the codes and sentinels of each service package at the same path — eighteen of them, codes only (ADR 0160 §2) | `0.2.2.*`; each `codec/<format>/` its service range, `0.3.<PP>.*` | `internal/service/data/codec/*` |
 | `docstore/` | the `Collection[T]` port for the file engine and `CollectionContext[T]`, the same calls each taking a context, for the SQL engine, with `Versioned[T]` / `VersionedContext[T]` as their siblings and `Announcer` (`OnWrite` / `OnDelete`) shared by both; `EntryValue`, `VersionValue`, `StampValue`, and the index declaration `IndexSpec[T]` with `Unique` / `Index` (ADR 0110, ADR 0139, ADR 0143, ADR 0160) | `0.3.80.*` | `internal/service/data/docstore` |
 | `queue/` | the `Broker` port frozen at four methods, the `Handler` FUNC port, the message, delivery, lease, receipt and dead-letter values, `PolicyValue`, and five ADR 0039 siblings; at-least-once in the type (ADR 0054, ADR 0104, ADR 0151) | `0.2.23.*`; the brokers' and the consumer engine's `0.3.53.*` | `internal/service/data/queue` |
 | `sql/` | the `Executor` / `Transactor` / `Checker` / `Migrator` ports over the stdlib's own `*sql.Rows` and `sql.Result`, the `Preparer`, `Joiner` and `Deferrer` siblings, and the closed `Dialect` set (ADR 0055, ADR 0139) | `0.2.24.*`; the transaction manager's, health probe's and migration runner's `0.3.54.*` | `internal/service/data/sql` |
@@ -58,9 +59,10 @@ which keeps `LL = 3` because a code keeps its value when its declaration moves
 
 A code keeps its value when its package moves (ADR 0160): the ranges above
 are the ones these packages and their engines declared before the family
-existed, and `codeRangeOwners`
-(`internal/kernel/errs/registry_ownership_external_test.go`) names these
-directories under the same keys.
+existed — the eighteen `0.3.*` ranges under `codec/<format>/` among them, which
+the service codecs declared before their declarations moved here — and
+`codeRangeOwners` (`internal/kernel/errs/registry_ownership_external_test.go`)
+names these directories under the same keys.
 
 ## Do NOT
 

@@ -12,6 +12,7 @@ import (
 	"strconv"
 	"strings"
 
+	corejsonpatch "github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -487,6 +488,6 @@ func notJSON(which string, offset int64, cause error) error {
 		problem = "the document ends before its value does"
 	}
 	//: the document and where, never what.
-	return kerrs.Wrap(NotJSON, kerrs.WrapParams{},
+	return kerrs.Wrap(corejsonpatch.NotJSON, kerrs.WrapParams{},
 		kerrs.String("document", which), kerrs.Int64("offset", offset), kerrs.String("problem", problem))
 }

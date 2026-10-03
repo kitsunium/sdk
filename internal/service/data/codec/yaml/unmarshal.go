@@ -7,6 +7,7 @@ import (
 	"reflect"
 	"unicode/utf8"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -46,7 +47,7 @@ func decodeDocument(data []byte, v any, firstLine int) error {
 	//: a target the decoder can write through.
 	if target.Kind() != reflect.Pointer || target.IsNil() {
 		//: refused before reading.
-		return errs.Wrap(UnmarshalFailed, errs.WrapParams{}, errs.String("detail", "the target must be a non-nil pointer"))
+		return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{}, errs.String("detail", "the target must be a non-nil pointer"))
 	}
 	src, err := prepareSource(data, firstLine)
 	//: not UTF-8, or a control character.
@@ -217,7 +218,7 @@ func (d *decoder) mismatch(n *node, detail string, t reflect.Type) error {
 		fields = append(fields, errs.String("type", t.String()))
 	}
 	//: the sentinel is the origin.
-	return errs.Wrap(UnmarshalFailed, errs.WrapParams{}, fields...)
+	return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{}, fields...)
 }
 
 // refuse is a refused construct at node n.
@@ -394,7 +395,7 @@ func (d *decoder) refuseResolved(n *node, kind resolvedKind, t reflect.Type) err
 	//: 0644: octal or decimal, depending on who reads it.
 	if kind == resolvedLeadingZero {
 		//: refused by name.
-		return d.refuse(LeadingZeroRefused, n)
+		return d.refuse(coreyaml.LeadingZeroRefused, n)
 	}
 	//: a number past 64 bits.
 	return d.mismatch(n, "a number no 64-bit Go value holds", t)

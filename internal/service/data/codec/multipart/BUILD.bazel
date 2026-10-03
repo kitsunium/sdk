@@ -7,12 +7,10 @@ go_library(
     srcs = [
         "boundary.go",
         "codec.go",
-        "codes.go",
         "counter.go",
         "decoder.go",
         "disposition.go",
         "encoder.go",
-        "errors.go",
         "form.go",
         "limits.go",
         "multipart_compliance.go",
@@ -21,6 +19,7 @@ go_library(
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/multipart",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
@@ -46,13 +45,8 @@ go_test(
     embed = [":multipart"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/multipart",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

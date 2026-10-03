@@ -1,111 +1,12 @@
-// Package yaml — range 0.3.4.* (ADR 0005 service/data/codec/yaml block).
+// Package yaml — how a refusal is built: the position every decoding refusal
+// carries, a syntax error at it, a construct refused by name, and an encoding
+// failure. The codes (range 0.3.4.*) and the sentinels are declared in
+// internal/core/data/codec/yaml (ADR 0160).
 package yaml
 
-import "github.com/kitsunium/sdk/internal/kernel/errs"
-
-// range: 0.3.4.0 - 0.3.4.255
-
-// CodeYAMLMarshalFailed identifies a value the encoder cannot write as YAML:
-// an unsupported Go kind, a string that is not UTF-8, a key that is not a
-// scalar, nesting past the bound, a MarshalYAML hook that failed, or a stream
-// whose writer failed.
-const CodeYAMLMarshalFailed errs.Code = 0x00_03_04_01 // 0.3.4.1
-
-// CodeYAMLUnmarshalFailed identifies a document the decoder cannot read: a
-// syntax error, input past a bound, or a value its Go target cannot hold.
-// Every refusal below carries it in its trail, so errs.HasCode answers for
-// all of them.
-const CodeYAMLUnmarshalFailed errs.Code = 0x00_03_04_02 // 0.3.4.2
-
-// CodeYAMLAnchorRefused identifies an anchor (&name): outside the subset.
-const CodeYAMLAnchorRefused errs.Code = 0x00_03_04_03 // 0.3.4.3
-
-// CodeYAMLAliasRefused identifies an alias (*name): outside the subset.
-const CodeYAMLAliasRefused errs.Code = 0x00_03_04_04 // 0.3.4.4
-
-// CodeYAMLTagRefused identifies an explicit tag (!local, !!str, !<uri>):
-// outside the subset.
-const CodeYAMLTagRefused errs.Code = 0x00_03_04_05 // 0.3.4.5
-
-// CodeYAMLMergeKeyRefused identifies a merge key (<<): outside the subset.
-const CodeYAMLMergeKeyRefused errs.Code = 0x00_03_04_06 // 0.3.4.6
-
-// CodeYAMLMultiDocRefused identifies a second document where one was
-// expected.
-const CodeYAMLMultiDocRefused errs.Code = 0x00_03_04_07 // 0.3.4.7
-
-// CodeYAMLComplexKeyRefused identifies a complex mapping key (the ? indicator,
-// or a collection used as a key): outside the subset.
-const CodeYAMLComplexKeyRefused errs.Code = 0x00_03_04_08 // 0.3.4.8
-
-// CodeYAMLDirectiveRefused identifies a directive (%YAML, %TAG): outside the
-// subset.
-const CodeYAMLDirectiveRefused errs.Code = 0x00_03_04_09 // 0.3.4.9
-
-// CodeYAMLDuplicateKey identifies a mapping that holds the same key twice.
-const CodeYAMLDuplicateKey errs.Code = 0x00_03_04_0A // 0.3.4.10
-
-// CodeYAMLLeadingZeroRefused identifies an integer written with a leading zero
-// read into a target whose value depends on it: YAML 1.1 reads 0644 as octal
-// 420, YAML 1.2 as decimal 644.
-const CodeYAMLLeadingZeroRefused errs.Code = 0x00_03_04_0B // 0.3.4.11
-
-var (
-	// MarshalFailed marks a value the encoder cannot write as YAML.
-	MarshalFailed = errs.Define(CodeYAMLMarshalFailed, "MARSHAL_FAILED",
-		"YAML encoding failed",
-		"service/data/codec/yaml: the value cannot be written in the supported YAML subset")
-
-	// UnmarshalFailed marks a document the decoder cannot read into its target.
-	UnmarshalFailed = errs.Define(CodeYAMLUnmarshalFailed, "UNMARSHAL_FAILED",
-		"YAML decoding failed",
-		"service/data/codec/yaml: not YAML of the supported subset, past a bound, or a value its target cannot hold")
-
-	// AnchorRefused marks an anchor, refused by name.
-	AnchorRefused = errs.Define(CodeYAMLAnchorRefused, "ANCHOR_REFUSED",
-		"YAML anchors (&) are outside the supported subset",
-		"service/data/codec/yaml: an anchor names a node for an alias to repeat; the subset has neither")
-
-	// AliasRefused marks an alias, refused by name.
-	AliasRefused = errs.Define(CodeYAMLAliasRefused, "ALIAS_REFUSED",
-		"YAML aliases (*) are outside the supported subset",
-		"service/data/codec/yaml: an alias repeats an anchored node; refused, so no document expands past its size")
-
-	// TagRefused marks an explicit tag, refused by name.
-	TagRefused = errs.Define(CodeYAMLTagRefused, "TAG_REFUSED",
-		"YAML tags (! and !!) are outside the supported subset",
-		"service/data/codec/yaml: a tag overrides the core schema; the subset resolves every scalar by the core schema alone")
-
-	// MergeKeyRefused marks a merge key, refused by name.
-	MergeKeyRefused = errs.Define(CodeYAMLMergeKeyRefused, "MERGE_KEY_REFUSED",
-		"YAML merge keys (<<) are outside the supported subset",
-		"service/data/codec/yaml: a merge key is a YAML 1.1 type that copies another mapping; quote it to mean the text <<")
-
-	// MultipleDocumentsRefused marks a second document in a single-document read.
-	MultipleDocumentsRefused = errs.Define(CodeYAMLMultiDocRefused, "MULTIPLE_DOCUMENTS_REFUSED",
-		"YAML input holds more than one document",
-		"service/data/codec/yaml: Unmarshal reads exactly one document; a stream of documents is read with NewDecoder")
-
-	// ComplexKeyRefused marks a complex mapping key, refused by name.
-	ComplexKeyRefused = errs.Define(CodeYAMLComplexKeyRefused, "COMPLEX_KEY_REFUSED",
-		"YAML complex keys (?) are outside the supported subset",
-		"service/data/codec/yaml: a mapping key must be a scalar on one line; ? and collection keys are refused")
-
-	// DirectiveRefused marks a directive, refused by name.
-	DirectiveRefused = errs.Define(CodeYAMLDirectiveRefused, "DIRECTIVE_REFUSED",
-		"YAML directives (%YAML, %TAG) are outside the supported subset",
-		"service/data/codec/yaml: the subset is YAML 1.2.2 with no tag handle, so a directive has nothing to declare")
-
-	// DuplicateKey marks a mapping that holds the same key twice.
-	DuplicateKey = errs.Define(CodeYAMLDuplicateKey, "DUPLICATE_KEY",
-		"YAML mapping holds the same key twice",
-		"service/data/codec/yaml: two keys of one mapping read the same; neither is chosen over the other")
-
-	// LeadingZeroRefused marks an integer whose leading zero changes its value
-	// between YAML versions.
-	LeadingZeroRefused = errs.Define(CodeYAMLLeadingZeroRefused, "LEADING_ZERO_REFUSED",
-		"YAML integer with a leading zero is octal in YAML 1.1 and decimal in 1.2",
-		"service/data/codec/yaml: write 0o644 for octal, 644 for decimal, or quote the text")
+import (
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
+	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
 // at returns the line and column fields every decoding refusal carries: both
@@ -119,7 +20,7 @@ func at(line, column int) []errs.FieldValue {
 // is wrong and never quotes the input.
 func syntaxError(line, column int, detail string) error {
 	//: the sentinel is the origin, so its code and public text win.
-	return errs.Wrap(UnmarshalFailed, errs.WrapParams{}, append(at(line, column), errs.String("detail", detail))...)
+	return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{}, append(at(line, column), errs.String("detail", detail))...)
 }
 
 // refused is a construct the subset names and refuses, at a position. The
@@ -127,7 +28,7 @@ func syntaxError(line, column int, detail string) error {
 // caller testing for "any decoding failure" by code still matches.
 func refused(sentinel *errs.Error, line, column int) error {
 	//: the construct's sentinel, then the decode failure it is.
-	return errs.Wrap(sentinel, errs.WrapParams{Code: CodeYAMLUnmarshalFailed}, at(line, column)...)
+	return errs.Wrap(sentinel, errs.WrapParams{Code: coreyaml.CodeYAMLUnmarshalFailed}, at(line, column)...)
 }
 
 // marshalError is MarshalFailed with a detail and, when known, the Go type
@@ -136,8 +37,8 @@ func marshalError(detail, goType string) error {
 	//: a type name describes the program, never the data.
 	if goType == "" {
 		//: no type to name.
-		return errs.Wrap(MarshalFailed, errs.WrapParams{}, errs.String("detail", detail))
+		return errs.Wrap(coreyaml.MarshalFailed, errs.WrapParams{}, errs.String("detail", detail))
 	}
 	//: the detail and the type.
-	return errs.Wrap(MarshalFailed, errs.WrapParams{}, errs.String("detail", detail), errs.String("type", goType))
+	return errs.Wrap(coreyaml.MarshalFailed, errs.WrapParams{}, errs.String("detail", detail), errs.String("type", goType))
 }

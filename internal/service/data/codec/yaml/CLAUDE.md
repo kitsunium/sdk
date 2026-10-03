@@ -186,6 +186,11 @@ reads every one of them as before.
 
 ## Error codes (range `0.3.4.*`)
 
+Declared in `internal/core/data/codec/yaml` — `codes.go` and `errors.go` — and used
+here as `coreyaml.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code | Var | Reason | Trigger |
 |---|---|---|---|
 | `0.3.4.1` | `MarshalFailed` | `MARSHAL_FAILED` | an unsupported kind, a non-UTF-8 string, a non-scalar key, a key past 1024 characters, nesting past `maxDepth`, a failed `MarshalYAML`/`MarshalText`, a malformed tag, a failing stream writer |
@@ -210,7 +215,7 @@ decoding failure through the trail.
 | File | Role |
 |---|---|
 | `codec.go` | package doc, the registered singleton, `Marshal`/`Unmarshal`/`Append`, the byte cap |
-| `failed.go` | the eleven codes and sentinels; `at`, `syntaxError`, `refused`, `marshalError` |
+| `failed.go` | `at`, `syntaxError`, `refused`, `marshalError`; the eleven codes and sentinels are `internal/core/data/codec/yaml`'s (ADR 0160) |
 | `node.go` | the node arena (one slice per document, children by index) and the bounds |
 | `parse.go` | the parser's state and cursor, document markers, directives, duplicate keys |
 | `block.go` | block mappings and sequences, implicit keys, the refusals at a node's start |

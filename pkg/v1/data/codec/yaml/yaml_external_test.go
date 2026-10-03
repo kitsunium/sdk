@@ -15,11 +15,8 @@ import (
 	corecodec "github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/pkg/v1/app/config"
 	"github.com/kitsunium/sdk/pkg/v1/data/codec/yaml"
+	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
-
-// foreignModules are the libraries this package must not link: another
-// format's, and — since the codec is native — any YAML library.
-var foreignModules = []string{"go.mongodb.org/", "github.com/fxamacker/cbor", "github.com/vmihailenco/msgpack", "github.com/pelletier/go-toml", "gopkg.in/yaml"}
 
 // TestItReadsItsFormatThroughTheRegistry decodes a YAML document through
 // config.FSSource — the path a framework reading its embedded configuration
@@ -57,10 +54,51 @@ func TestItRegistersItsFormatAlone(t *testing.T) {
 	}
 }
 
-// TestItLinksNoOtherFormatsLibrary reads the modules this test binary was
-// linked from. Bazel builds without module information, which only
-// `go test` records; the registry test above holds under both.
-func TestItLinksNoOtherFormatsLibrary(t *testing.T) {
+// TestGoListDepsNamesNoOtherCodec asks the go tool what this package depends
+// on: the codec registry, this format's own packages, nothing of another
+// codec, and nothing outside the SDK and the standard library. It needs the go
+// tool, which a Bazel sandbox does not have.
+func TestGoListDepsNamesNoOtherCodec(t *testing.T) {
+	t.Parallel()
+	goTool, err := exec.LookPath("go")
+	//: no go tool: the registry test stands alone.
+	if err != nil {
+		t.Skip("no go tool on PATH (a Bazel sandbox); TestItRegistersItsFormatAlone pins the registry")
+	}
+	output, err := exec.Command(goTool, "list", "-deps", "-f", "{{if not .Standard}}{{.ImportPath}}{{end}}", "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml").Output()
+	//: the go tool answers from the module this test runs in.
+	if err != nil {
+		t.Skipf("go list could not run here: %v", err)
+	}
+	//: every non-standard package the facade depends on.
+	for line := range strings.FieldsSeq(string(output)) {
+		//: a package outside the SDK, or another format's.
+		if !strings.HasPrefix(line, "github.com/kitsunium/sdk/") || isAnotherCodec(line) {
+			t.Errorf("go list -deps names %s", line)
+		}
+	}
+}
+
+// isAnotherCodec reports whether an import path is a codec package other than
+// this format's service package and its core mirror; the registry and the
+// shared scratch threshold are every codec's.
+func isAnotherCodec(path string) bool {
+	for _, layer := range []string{"github.com/kitsunium/sdk/internal/service/data/codec/", "github.com/kitsunium/sdk/internal/core/data/codec/"} {
+		rest, found := strings.CutPrefix(path, layer)
+		//: under a codec tree, and neither this format nor the shared scratch.
+		if found && rest != "yaml" && rest != "scratch" {
+			return true
+		}
+	}
+	//: not a codec package, or this format's own.
+	return false
+}
+
+// TestItLinksNoModuleOutsideTheSDK reads the modules this test binary was
+// linked from: the SDK's own, and nothing else — the gate ADR 0156 §1 states.
+// Bazel builds without module information, which only `go test` records;
+// TestItRegistersItsFormatAlone holds under both.
+func TestItLinksNoModuleOutsideTheSDK(t *testing.T) {
 	t.Parallel()
 	info, ok := debug.ReadBuildInfo()
 	//: no module information: built by Bazel.
@@ -69,37 +107,29 @@ func TestItLinksNoOtherFormatsLibrary(t *testing.T) {
 	}
 	//: every module linked.
 	for _, dependency := range info.Deps {
-		//: none of another format's libraries.
-		for _, foreign := range foreignModules {
-			//: a match is a library the program did not ask for.
-			if strings.HasPrefix(dependency.Path, foreign) {
-				t.Errorf("the program links %s", dependency.Path)
-			}
+		//: the SDK's own modules, and only those.
+		if dependency.Path != "github.com/kitsunium/sdk" && !strings.HasPrefix(dependency.Path, "github.com/kitsunium/sdk/") {
+			t.Errorf("the program links %s", dependency.Path)
 		}
 	}
 }
 
-// TestGoListDepsNamesNoOtherCodec asks the go tool itself what this package
-// depends on: no other codec package, and none of their libraries. It needs
-// the go tool, which a Bazel sandbox does not have.
-func TestGoListDepsNamesNoOtherCodec(t *testing.T) {
+// TestARefusalCarriesTheNamedCode pins that the facade's code and sentinel are
+// the ones the codec refuses with.
+func TestARefusalCarriesTheNamedCode(t *testing.T) {
 	t.Parallel()
-	goTool, err := exec.LookPath("go")
-	//: no go tool: the registry test stands alone.
-	if err != nil {
-		t.Skip("no go tool on PATH (a Bazel sandbox); TestItRegistersItsFormatAlone pins the registry")
+	c, ok := corecodec.Lookup(yaml.Format)
+	//: the format this package registers.
+	if !ok {
+		t.Fatal("yaml is not registered")
 	}
-	output, err := exec.Command(goTool, "list", "-deps", "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml").Output()
-	//: the go tool answers from the module this test runs in.
-	if err != nil {
-		t.Skipf("go list could not run here: %v", err)
+	err := c.Unmarshal([]byte("a: &x 1\n"), new(map[string]any))
+	//: the code the facade names.
+	if !errs.HasCode(err, yaml.CodeAnchorRefused) {
+		t.Fatalf("err = %v, want code %v", err, yaml.CodeAnchorRefused)
 	}
-	//: every package the facade depends on.
-	for line := range strings.FieldsSeq(string(output)) {
-		//: another codec's package, or its library.
-		if (strings.HasPrefix(line, "github.com/kitsunium/sdk/internal/service/data/codec/") && line != "github.com/kitsunium/sdk/internal/service/data/codec/yaml") ||
-			slices.ContainsFunc(foreignModules, func(foreign string) bool { return strings.HasPrefix(line, foreign) }) {
-			t.Errorf("go list -deps names %s", line)
-		}
+	//: and the sentinel bound to it.
+	if !errors.Is(err, yaml.AnchorRefused) {
+		t.Errorf("errors.Is(%v, sentinel) = false", err)
 	}
 }

@@ -9,6 +9,7 @@ package msgpack
 import (
 	"reflect"
 
+	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -69,7 +70,7 @@ func (f family) String() string {
 func marshalFault(detail string, fields ...errs.FieldValue) error {
 	//: a nil cause makes this code the origin.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeMsgPackMarshalFailed,
+		Code:    coremsgpack.CodeMsgPackMarshalFailed,
 		Reason:  reasonMarshal,
 		Public:  publicMarshal,
 		Private: privatePrefix + detail,
@@ -81,7 +82,7 @@ func marshalFault(detail string, fields ...errs.FieldValue) error {
 func unmarshalFault(detail string, fields ...errs.FieldValue) error {
 	//: a nil cause makes this code the origin.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeMsgPackUnmarshalFailed,
+		Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
 		Reason:  reasonUnmarshal,
 		Public:  publicUnmarshal,
 		Private: privatePrefix + detail,
@@ -94,7 +95,7 @@ func unmarshalFault(detail string, fields ...errs.FieldValue) error {
 func wrapMarshal(cause error, detail string, fields ...errs.FieldValue) error {
 	//: origin-wins wrap; a stdlib cause gets this code.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeMsgPackMarshalFailed,
+		Code:    coremsgpack.CodeMsgPackMarshalFailed,
 		Reason:  reasonMarshal,
 		Public:  publicMarshal,
 		Private: privatePrefix + detail,
@@ -106,7 +107,7 @@ func wrapMarshal(cause error, detail string, fields ...errs.FieldValue) error {
 func wrapUnmarshal(cause error, detail string, fields ...errs.FieldValue) error {
 	//: origin-wins wrap; a stdlib cause gets this code.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeMsgPackUnmarshalFailed,
+		Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
 		Reason:  reasonUnmarshal,
 		Public:  publicUnmarshal,
 		Private: privatePrefix + detail,

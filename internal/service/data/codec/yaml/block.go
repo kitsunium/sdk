@@ -5,6 +5,7 @@ import (
 	"strings"
 	"unicode/utf8"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -15,9 +16,9 @@ const noKeyStart string = "&*!%@`[{]},#|>"
 // nodeIndicatorRefusals maps the indicators that open a refused construct to
 // the sentinel naming it.
 var nodeIndicatorRefusals = map[byte]*errs.Error{
-	'&': AnchorRefused,
-	'*': AliasRefused,
-	'!': TagRefused,
+	'&': coreyaml.AnchorRefused,
+	'*': coreyaml.AliasRefused,
+	'!': coreyaml.TagRefused,
 }
 
 // isEntry reports whether the byte at i starts a block sequence entry: a "-"
@@ -375,7 +376,7 @@ func (p *parser) scanBlockKey(line, off int) (string, scalarStyle, error) {
 	//: a flow collection as a key.
 	case '[', '{':
 		//: a complex key.
-		return "", stylePlain, p.refuseAt(ComplexKeyRefused, line, off)
+		return "", stylePlain, p.refuseAt(coreyaml.ComplexKeyRefused, line, off)
 	//: a plain key.
 	default:
 		value, err := p.scanPlainKey(false)
@@ -416,7 +417,7 @@ func (p *parser) checkKey(line, off, end int, style scalarStyle, value string) e
 	//: the merge key.
 	if style == stylePlain && value == mergeKey {
 		//: refused by name.
-		return p.refuseAt(MergeKeyRefused, line, off)
+		return p.refuseAt(coreyaml.MergeKeyRefused, line, off)
 	}
 	//: an ordinary key.
 	return nil
@@ -436,7 +437,7 @@ func (p *parser) refuseNodeIndicator(flow bool) error {
 	//: "? key" — an explicit key; in flow context every "?" opens one.
 	if c == '?' && (flow || p.blankOrEnd(p.pos+1)) {
 		//: refused by name.
-		return p.refuseAt(ComplexKeyRefused, line, off)
+		return p.refuseAt(coreyaml.ComplexKeyRefused, line, off)
 	}
 	//: a directive, or a reserved indicator.
 	return p.refuseReserved(c, line, off)
@@ -449,7 +450,7 @@ func (p *parser) refuseReserved(c byte, line, off int) error {
 	//: % opens a directive at column 0.
 	case c == '%' && p.col() == 0:
 		//: refused by name.
-		return p.refuseAt(DirectiveRefused, line, off)
+		return p.refuseAt(coreyaml.DirectiveRefused, line, off)
 	//: a plain scalar cannot start with %, @ or `.
 	case c == '%' || c == '@' || c == '`':
 		//: refused.
@@ -524,7 +525,7 @@ func (p *parser) parseInlineFlow(parent, line, off int) (int32, error) {
 	//: a collection used as a key.
 	if p.followedByValueIndicator() {
 		//: a complex key.
-		return noNode, p.refuseAt(ComplexKeyRefused, line, off)
+		return noNode, p.refuseAt(coreyaml.ComplexKeyRefused, line, off)
 	}
 	//: the collection.
 	return idx, nil

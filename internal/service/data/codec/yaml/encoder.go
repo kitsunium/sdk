@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -53,7 +54,7 @@ func (e *yamlEncoder) Encode(v any) error {
 	//: the document, in one write.
 	if _, err := e.w.Write(buf.Bytes()); err != nil {
 		e.err = errs.Wrap(err, errs.WrapParams{
-			Code:    CodeYAMLMarshalFailed,
+			Code:    coreyaml.CodeYAMLMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "YAML encoding failed",
 			Private: "service/data/codec/yaml.Encoder: the writer failed",

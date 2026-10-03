@@ -22,6 +22,7 @@ import (
 	"bytes"
 	"reflect"
 
+	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -1144,7 +1145,7 @@ func assignFieldValue(target reflectView, info *structTypeInfo, fieldIdx int, va
 	if cerr != nil {
 		//: wrap once more so the caller sees a typed unmarshal error.
 		return errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeTLVUnmarshalFailed,
+			Code:    coretlv.CodeTLVUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "TLV decoding failed",
 			Private: "service/data/codec/tlv.decodeStructInto: field conversion failed",

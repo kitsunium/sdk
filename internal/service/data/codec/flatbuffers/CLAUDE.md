@@ -41,6 +41,11 @@ ownership) OR any `BytesAcceptor`.
 
 ## Error codes (range `0.3.23.*`)
 
+Declared in `internal/core/data/codec/flatbuffers` — `codes.go` and `errors.go` — and used
+here as `coreflatbuffers.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var                     | Reason                  | Trigger |
 |---|---|---|---|
 | `0.3.23.1`   | `FlatbuffersBadType`    | `FLATBUFFERS_BAD_TYPE`   | Marshal value is neither `[]byte` nor a `BytesProvider` |

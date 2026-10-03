@@ -20,9 +20,19 @@ A document decoded into map\[string\]any or any holds map\[string\]any, \[\]any,
 
 Importing both packages is harmless: a format is registered by the package that implements it, which Go initialises once however many packages import it.
 
+### Errors
+
+Failures carry the range 0.3.5.\*; match them with errs.HasCode, or the sentinels with errors.Is:
+
+```
+CodeMarshalFailed    0.3.5.1  a Go value TOML cannot represent, or a writer that failed
+CodeUnmarshalFailed  0.3.5.2  a document that is not TOML, past a bound, or a value its target cannot hold
+```
+
 ## Index
 
 - [Constants](<#constants>)
+- [Variables](<#variables>)
 - [type LocalDate](<#LocalDate>)
 - [type LocalDateTime](<#LocalDateTime>)
 - [type LocalTime](<#LocalTime>)
@@ -30,14 +40,39 @@ Importing both packages is harmless: a format is registered by the package that 
 
 ## Constants
 
+<a name="CodeMarshalFailed"></a>The error codes, range 0.3.5.\*, declared in the core \(ADR 0160\).
+
+```go
+const (
+    // CodeMarshalFailed identifies a Go value TOML cannot represent (0.3.5.1).
+    CodeMarshalFailed errs.Code = coretoml.CodeTOMLMarshalFailed
+    // CodeUnmarshalFailed identifies a document the decoder cannot read, or a
+    // value its target cannot hold (0.3.5.2).
+    CodeUnmarshalFailed errs.Code = coretoml.CodeTOMLUnmarshalFailed
+)
+```
+
 <a name="Format"></a>Format is the name TOML is registered under. It is an untyped constant, so it goes wherever a format name is taken — config.FSSource's string, i18n.LoadFS's codec.Format — without a conversion.
 
 ```go
 const Format = "toml"
 ```
 
+## Variables
+
+<a name="MarshalFailed"></a>The sentinels, for errors.Is: each carries the code of the same name.
+
+```go
+var (
+    // MarshalFailed is the sentinel of [CodeMarshalFailed].
+    MarshalFailed = coretoml.MarshalFailed
+    // UnmarshalFailed is the sentinel of [CodeUnmarshalFailed].
+    UnmarshalFailed = coretoml.UnmarshalFailed
+)
+```
+
 <a name="LocalDate"></a>
-## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L51>)
+## type [LocalDate](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L78>)
 
 LocalDate is a calendar day in no time zone: what a TOML local date such as 1979\-05\-27 decodes to in an untyped target. It writes and reads itself as YYYY\-MM\-DD, through String, MarshalText and UnmarshalText, and AsTime places it at midnight in a zone.
 
@@ -46,7 +81,7 @@ type LocalDate = toml.LocalDate
 ```
 
 <a name="LocalDateTime"></a>
-## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L61>)
+## type [LocalDateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L88>)
 
 LocalDateTime is a date and a time of day in no time zone: what a TOML local date\-time such as 1979\-05\-27T07:32:00 decodes to in an untyped target. AsTime places it in a zone.
 
@@ -55,7 +90,7 @@ type LocalDateTime = toml.LocalDateTime
 ```
 
 <a name="LocalTime"></a>
-## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L56>)
+## type [LocalTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/toml/toml.go#L83>)
 
 LocalTime is a time of day in no time zone: what a TOML local time such as 07:32:00.999 decodes to in an untyped target. Precision is the number of fractional digits the document wrote, which String writes back.
 

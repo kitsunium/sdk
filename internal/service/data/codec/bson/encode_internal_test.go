@@ -16,6 +16,7 @@ import (
 	"testing"
 	"time"
 
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -320,27 +321,27 @@ func TestMarshalRefusals(t *testing.T) {
 		in    string
 	}
 	tests := []tc{
-		{"a scalar at the top level", 42, CodeBSONMarshalFailed, "top level must be a document"},
-		{"a slice at the top level", []int{1}, CodeBSONMarshalFailed, "top level must be a document"},
-		{"a nil D at the top level", D(nil), CodeBSONMarshalFailed, "top level must be a document"},
-		{"a nil pointer at the top level", (*encodeTagged)(nil), CodeBSONMarshalFailed, "top level must be a document"},
-		{"nil", nil, CodeBSONMarshalFailed, "nil value"},
-		{"a channel", map[string]any{"c": make(chan int)}, CodeBSONMarshalFailed, "no BSON form"},
-		{"a function", map[string]any{"f": func() {}}, CodeBSONMarshalFailed, "no BSON form"},
-		{"a complex number", map[string]complex64{"c": 1}, CodeBSONMarshalFailed, "no BSON form"},
-		{"a uint64 past int64", map[string]uint64{"u": math.MaxInt64 + 1}, CodeBSONMarshalFailed, "overflows int64"},
-		{"a key holding a NUL", map[string]int{"a\x00b": 1}, CodeBSONMarshalFailed, "NUL"},
-		{"a string that is not UTF-8", map[string]string{"s": "\xff"}, CodeBSONMarshalFailed, "UTF-8"},
-		{"a key that is not UTF-8", map[string]int{"\xff": 1}, CodeBSONMarshalFailed, "UTF-8"},
-		{"a regex holding a NUL", map[string]Regex{"r": {Pattern: "a\x00"}}, CodeBSONMarshalFailed, "regex"},
-		{"a float map key", map[float64]int{1.5: 1}, CodeBSONMarshalFailed, "element-name form"},
-		{"an inline key colliding with a field", encodeInline{Rest: map[string]any{"x": 1}}, CodeBSONMarshalFailed, "collides"},
-		{"two fields with one name", encodeDuplicate{}, CodeBSONMarshalFailed, "two fields named k"},
-		{"a json.Number that is not a number", map[string]json.Number{"n": "abc"}, CodeBSONMarshalFailed, "json.Number"},
-		{"a CodeWithScope without a scope", map[string]CodeWithScope{"c": {Code: "f"}}, CodeBSONMarshalFailed, "nil scope"},
-		{"a CodeWithScope whose scope is a scalar", map[string]CodeWithScope{"c": {Code: "f", Scope: 5}}, CodeBSONMarshalFailed, "not a document"},
-		{"a pointer cycle", cycle, CodeBSONDepthExceeded, "nesting"},
-		{"a map that contains itself", selfMap, CodeBSONDepthExceeded, "nesting"},
+		{"a scalar at the top level", 42, corebson.CodeBSONMarshalFailed, "top level must be a document"},
+		{"a slice at the top level", []int{1}, corebson.CodeBSONMarshalFailed, "top level must be a document"},
+		{"a nil D at the top level", D(nil), corebson.CodeBSONMarshalFailed, "top level must be a document"},
+		{"a nil pointer at the top level", (*encodeTagged)(nil), corebson.CodeBSONMarshalFailed, "top level must be a document"},
+		{"nil", nil, corebson.CodeBSONMarshalFailed, "nil value"},
+		{"a channel", map[string]any{"c": make(chan int)}, corebson.CodeBSONMarshalFailed, "no BSON form"},
+		{"a function", map[string]any{"f": func() {}}, corebson.CodeBSONMarshalFailed, "no BSON form"},
+		{"a complex number", map[string]complex64{"c": 1}, corebson.CodeBSONMarshalFailed, "no BSON form"},
+		{"a uint64 past int64", map[string]uint64{"u": math.MaxInt64 + 1}, corebson.CodeBSONMarshalFailed, "overflows int64"},
+		{"a key holding a NUL", map[string]int{"a\x00b": 1}, corebson.CodeBSONMarshalFailed, "NUL"},
+		{"a string that is not UTF-8", map[string]string{"s": "\xff"}, corebson.CodeBSONMarshalFailed, "UTF-8"},
+		{"a key that is not UTF-8", map[string]int{"\xff": 1}, corebson.CodeBSONMarshalFailed, "UTF-8"},
+		{"a regex holding a NUL", map[string]Regex{"r": {Pattern: "a\x00"}}, corebson.CodeBSONMarshalFailed, "regex"},
+		{"a float map key", map[float64]int{1.5: 1}, corebson.CodeBSONMarshalFailed, "element-name form"},
+		{"an inline key colliding with a field", encodeInline{Rest: map[string]any{"x": 1}}, corebson.CodeBSONMarshalFailed, "collides"},
+		{"two fields with one name", encodeDuplicate{}, corebson.CodeBSONMarshalFailed, "two fields named k"},
+		{"a json.Number that is not a number", map[string]json.Number{"n": "abc"}, corebson.CodeBSONMarshalFailed, "json.Number"},
+		{"a CodeWithScope without a scope", map[string]CodeWithScope{"c": {Code: "f"}}, corebson.CodeBSONMarshalFailed, "nil scope"},
+		{"a CodeWithScope whose scope is a scalar", map[string]CodeWithScope{"c": {Code: "f", Scope: 5}}, corebson.CodeBSONMarshalFailed, "not a document"},
+		{"a pointer cycle", cycle, corebson.CodeBSONDepthExceeded, "nesting"},
+		{"a map that contains itself", selfMap, corebson.CodeBSONDepthExceeded, "nesting"},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -398,7 +399,7 @@ func TestNestingBound(t *testing.T) {
 			}
 			return
 		}
-		if !errs.HasCode(err, CodeBSONDepthExceeded) {
+		if !errs.HasCode(err, corebson.CodeBSONDepthExceeded) {
 			t.Fatalf("Marshal at %d levels = %v, want BSON_DEPTH_EXCEEDED", c.levels, err)
 		}
 	}

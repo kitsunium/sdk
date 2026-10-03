@@ -17,6 +17,7 @@ codec itself is documented in
 | Symbol | Role |
 |---|---|
 | `Format` | the untyped constant `"toml"`: goes into `config.FSSource`'s string and `i18n.LoadFS`'s `codec.Format` without a conversion |
+| `CodeMarshalFailed`, `CodeUnmarshalFailed` and the sentinels `MarshalFailed`, `UnmarshalFailed` | the `0.3.5.*` codes, aliased from `internal/core/data/codec/toml`, where they are declared (ADR 0160, ADR 0074) |
 | `LocalDate`, `LocalTime`, `LocalDateTime` | aliases of the codec's own types (ADR 0074: the alias points at the layer that owns the type): what a TOML local date, time and date-time decode to in `map[string]any` or `any`. They replaced the github.com/pelletier/go-toml/v2 types of the same names and fields, so a type switch migrates by changing its import |
 
 ## Why-this-shape
@@ -26,7 +27,8 @@ codec itself is documented in
   and does nothing else. Importing it beside
   `pkg/v1/data/codec` is harmless: Go initialises a package once, so the format is
   registered once — `TestAFormatImportedTwiceIsRegisteredOnce` in
-  `pkg/v1/data/codec` imports all four.
+  `pkg/v1/data/codec` imports every per-format package beside the umbrella,
+  which is itself built from them.
 - **What it links is tested, not asserted.** The suite reads the registry
   (exactly one format), the modules the test binary was linked from — the
   SDK's and nothing else (`TestItLinksNoModuleOutsideTheSDK`) — and
@@ -45,7 +47,7 @@ bazel test --config=race //pkg/v1/data/codec/toml:toml_test
 cd pkg && GOWORK=off go test -race ./v1/data/codec/toml/
 ```
 
-`TestItLinksNoOtherFormatsLibrary` and `TestItLinksNoModuleOutsideTheSDK` skip
+`TestItLinksNoModuleOutsideTheSDK` skips
 under Bazel, which records no module information in a binary, and
 `TestGoListDepsNamesNoOtherCodec` without a go tool on PATH;
 `TestItRegistersItsFormatAlone` and `TestLocalTypesAreTheDecodedOnes` hold under

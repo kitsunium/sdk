@@ -5,7 +5,9 @@
 
 Declares the domain contract every wire-format codec in the SDK satisfies (`Codec`), the optional streaming extension (`StreamingCodec`), the optional append-into-buffer extension (`Appender`), and the **process-wide registry** that maps `Format` / MIME / file extension to the registered codec. ADR 0003.
 
-No format-specific knowledge lives here — concrete codecs live under `internal/service/data/codec/<format>/` and self-register at package import. `pkg/v1/data/codec` blank-imports all sixteen of them (24 Format names) and re-exports `Marshal` / `Unmarshal` / `Lookup*` against this package.
+No format-specific knowledge lives in this package — concrete codecs live under `internal/service/data/codec/<format>/` and self-register at package import. `pkg/v1/data/codec` blank-imports all sixteen of them (24 Format names) and re-exports `Marshal` / `Unmarshal` / `Lookup*` against this package.
+
+What IS per format below it is the error codes. Each `<format>/` subdirectory is the core mirror of `internal/service/data/codec/<format>/` and holds that package's codes and `errs.Define` sentinels and nothing else (ADR 0160 §2) — eighteen of them: the sixteen codecs plus `strictjson` and `jsonpatch`, which are not codecs; `jsonshape` declares no code and has no mirror. `scratch/` is the payload-recycling threshold every engine shares.
 
 ## Contents
 
@@ -47,3 +49,8 @@ cd internal/core && GOWORK=off go test -race -cover ./data/codec/...
 ```
 
 The range-ownership audit (`registry_ownership_external_test.go`, in `bazel test //internal/kernel/errs:errs_test`, also run by `make test`) verifies the five `Code*` constants stay in the `0.2.2.*` block `codeRangeOwners` gives this package. The package's one `errs.Define`, `DuplicateRegistration`, is audited like any other (reason = `DUPLICATE_REGISTRATION`); the nil refusal spells its `CODEC_NIL` in the message.
+
+## Subtree
+
+- `scratch/` — the codec-payload recycling threshold every engine shares — see `scratch/CLAUDE.md`
+- `asn1/`, `baseenc/`, `bson/`, `cbor/`, `csv/`, `flatbuffers/`, `form/`, `json/`, `jsonpatch/`, `msgpack/`, `multipart/`, `ndjson/`, `pem/`, `strictjson/`, `tlv/`, `toml/`, `xml/`, `yaml/` — the codes and sentinels of the service package at the same path (ADR 0160), one `CLAUDE.md` each

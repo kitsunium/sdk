@@ -22,6 +22,11 @@ arbitrary Go values; decoder reconstructs them as Go-native types
 
 ## Error codes (range `0.3.22.*`)
 
+Declared in `internal/core/data/codec/tlv` — `codes.go` and `errors.go` — and used
+here as `coretlv.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var                | Trigger |
 |---|---|---|
 | `0.3.22.1`   | `MarshalFailed`    | encode-side failure (writer error, oversize field name) |

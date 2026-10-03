@@ -6,14 +6,13 @@ go_library(
     name = "flatbuffers",
     srcs = [
         "codec.go",
-        "codes.go",
-        "errors.go",
         "types.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/flatbuffers",
         "//internal/kernel/errs",
     ],
 )
@@ -37,10 +36,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

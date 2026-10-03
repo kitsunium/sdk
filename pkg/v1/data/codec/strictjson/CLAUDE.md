@@ -12,11 +12,10 @@ never quote the input.
 | Symbol | Kind | Notes |
 |---|---|---|
 | `Decode(r, v, maxBytes)` | func | one document from any reader; reads at most `maxBytes + 1` bytes |
-| `DecodeRequest(w, req, v, maxBytes)` | func | an HTTP body: `http.MaxBytesReader`, empty body first, media type second |
-| `PointerOf(err)` | func | where a refused document failed, as a JSON Pointer, bounded to `MaxPointerBytes` (256) |
+| `PointerOf(err)` | func | where a refused document failed, as a JSON Pointer, bounded to `MaxPointerBytes` (256) — a refused request body included |
 | `MaxPointerBytes` | const | the pointer's bound |
-| `Code*` | const | re-exported `0.3.72.*` codes |
-| `DocumentTooLarge` … `DecodeMisconfigured` | var | re-exported sentinels, each with its HTTP status (413 / 400 / 415 / 500) |
+| `Code*` | const | re-exported `0.3.72.*` codes, declared in `internal/core/data/codec/strictjson` (ADR 0160) |
+| `DocumentTooLarge` … `DecodeMisconfigured` | var | re-exported sentinels, each with its HTTP status (413 / 400 / 415 / 500), aliased from the core |
 
 ## Why a package of its own
 
@@ -29,6 +28,16 @@ and never its parent directory, exactly as `pkg/v1/crypto/hash` and
 (ADR 0155). It is not a codec Format: `codec.Unmarshal(codec.JSON, …)` keeps
 meaning what it meant.
 
+## Why the request body is `httpbody/`
+
+`DecodeRequest` lived here until it was the one reason this package linked
+`net/http`: a program decoding documents from files, queues or sockets carried
+an HTTP stack it never served. It is `httpbody/` now — a child, which links
+this package; this package does not link it (`TestTheDecoderLinksNoHTTP` asks
+`go list -deps`). A server imports both: `httpbody.DecodeRequest` for the body,
+this package's codes and `PointerOf` for the refusals. Moving it was a v0
+break of the import path (ADR 0155 §4); the framework moved with it.
+
 ## README is generated
 
 `README.md` is produced by `gomarkdoc` from the package doc comment in
@@ -39,5 +48,9 @@ hand-edit it.
 
 ```sh
 bazel test --config=race //pkg/v1/data/codec/strictjson:strictjson_test
-cd pkg && GOWORK=off go test -race ./v1/data/codec/strictjson/
+cd pkg && GOWORK=off go test -race ./v1/data/codec/strictjson/...
 ```
+
+## Subtree
+
+- `httpbody/` — the JSON body of an HTTP request — see `httpbody/CLAUDE.md`

@@ -22,6 +22,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -100,7 +101,7 @@ func (*bsonCodec) Unmarshal(data []byte, v any) error {
 	if len(data) > maxBSONBytes {
 		//: surface the size sentinel.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeBSONSizeExceeded,
+			Code:    corebson.CodeBSONSizeExceeded,
 			Reason:  "BSON_SIZE_EXCEEDED",
 			Public:  "BSON input exceeds size limit",
 			Private: "service/data/codec/bson.Unmarshal: len(data) > maxBSONBytes",

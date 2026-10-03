@@ -7,6 +7,7 @@ import (
 	"strings"
 	"testing"
 
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -134,7 +135,7 @@ func Test_bsonCodec_Marshal(t *testing.T) {
 		t.Helper()
 		got, err := (&bsonCodec{}).Marshal(c.in)
 		if c.wantErr {
-			if !errs.HasCode(err, CodeBSONMarshalFailed) {
+			if !errs.HasCode(err, corebson.CodeBSONMarshalFailed) {
 				t.Fatalf("Marshal(%T) = %v, want BSON_MARSHAL_FAILED", c.in, err)
 			}
 			//: a refused encode must produce no partial output.
@@ -169,14 +170,14 @@ func Test_bsonCodec_Unmarshal(t *testing.T) {
 	}
 	tests := []tc{
 		{name: "a valid document"},
-		{name: "truncated bytes", data: []byte{0x05}, wantCode: CodeBSONUnmarshalFailed},
-		{name: "junk", data: []byte("definitely not bson"), wantCode: CodeBSONUnmarshalFailed},
+		{name: "truncated bytes", data: []byte{0x05}, wantCode: corebson.CodeBSONUnmarshalFailed},
+		{name: "junk", data: []byte("definitely not bson"), wantCode: corebson.CodeBSONUnmarshalFailed},
 		{
 			//: one byte past the cap, so the refusal cannot be attributed to
 			//: the validator refusing the content.
 			name:     "one byte over the size cap",
 			data:     make([]byte, maxBSONBytes+1),
-			wantCode: CodeBSONSizeExceeded,
+			wantCode: corebson.CodeBSONSizeExceeded,
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -240,7 +241,7 @@ func Test_bsonCodec_Append(t *testing.T) {
 		appended := string(got)
 
 		if c.wantErr {
-			if !errs.HasCode(err, CodeBSONMarshalFailed) {
+			if !errs.HasCode(err, corebson.CodeBSONMarshalFailed) {
 				t.Fatalf("Append(%T) = %v, want BSON_MARSHAL_FAILED", c.in, err)
 			}
 			//: the caller's bytes must be exactly as they were.

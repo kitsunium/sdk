@@ -175,6 +175,7 @@ go_library(
         "//pkg/v1/data/codec/jsonpatch",
         "//pkg/v1/data/codec/jsonshape",
         "//pkg/v1/data/codec/strictjson",
+        "//pkg/v1/data/codec/strictjson/httpbody",
         "//pkg/v1/data/docstore",
         "//pkg/v1/data/queue",
         "//pkg/v1/data/sql",

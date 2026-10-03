@@ -8,6 +8,7 @@ import (
 	"io"
 	"strconv"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -50,7 +51,7 @@ func (b *bufferingWriter) Close() error {
 	if werr != nil {
 		//: wrap so the dotted-quad code propagates.
 		return errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeBaseEncMarshalFailed,
+			Code:    corebaseenc.CodeBaseEncMarshalFailed,
 			Reason:  "BASE_ENC_MARSHAL_FAILED",
 			Public:  "base-N encoding failed",
 			Private: "service/data/codec/baseenc.bufferingWriter.Close: underlying writer returned an error",
@@ -62,7 +63,7 @@ func (b *bufferingWriter) Close() error {
 	if n < len(encoded) {
 		//: wrap io.ErrShortWrite with the marshal-failed sentinel.
 		return errs.Wrap(io.ErrShortWrite, errs.WrapParams{
-			Code:    CodeBaseEncMarshalFailed,
+			Code:    corebaseenc.CodeBaseEncMarshalFailed,
 			Reason:  "BASE_ENC_MARSHAL_FAILED",
 			Public:  "base-N encoding failed",
 			Private: "service/data/codec/baseenc.bufferingWriter.Close: short write of encoded payload",

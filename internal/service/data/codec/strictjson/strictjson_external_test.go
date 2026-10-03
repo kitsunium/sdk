@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
 )
@@ -40,18 +41,18 @@ func TestDecode(t *testing.T) {
 	tests := []tc{
 		{name: "a well-formed document", document: `{"name":"lamp","price":12}`, maxBytes: 64},
 		{name: "exactly the bound", document: `{"name":"lamp","price":12}`, maxBytes: 26},
-		{name: "one byte past the bound", document: `{"name":"lamp","price":12} `, maxBytes: 26, wantCode: strictjson.CodeDocumentTooLarge},
-		{name: "far past the bound", document: `{"name":"` + strings.Repeat("x", 10_000) + `"}`, maxBytes: 64, wantCode: strictjson.CodeDocumentTooLarge},
-		{name: "an empty document", document: "", maxBytes: 64, wantCode: strictjson.CodeDocumentEmpty},
-		{name: "whitespace is not a document", document: "   ", maxBytes: 64, wantCode: strictjson.CodeDocumentMalformed},
-		{name: "a truncated document", document: `{"name":"lamp"`, maxBytes: 64, wantCode: strictjson.CodeDocumentMalformed},
-		{name: "trailing data", document: `{"name":"lamp"} {}`, maxBytes: 64, wantCode: strictjson.CodeDocumentMalformed},
-		{name: "a duplicated member", document: `{"name":"lamp","name":"desk"}`, maxBytes: 64, wantCode: strictjson.CodeDocumentMalformed},
-		{name: "invalid UTF-8", document: "{\"name\":\"\xff\"}", maxBytes: 64, wantCode: strictjson.CodeDocumentMalformed},
-		{name: "an unknown member", document: `{"name":"lamp","admin":true}`, maxBytes: 64, wantCode: strictjson.CodeMemberUnknown},
-		{name: "a name differing only by case", document: `{"Name":"lamp"}`, maxBytes: 64, wantCode: strictjson.CodeMemberUnknown},
-		{name: "the wrong kind", document: `{"price":"ten"}`, maxBytes: 64, wantCode: strictjson.CodeValueMismatched},
-		{name: "a number out of the field's range", document: `{"price":3000000000}`, maxBytes: 64, wantCode: strictjson.CodeValueMismatched},
+		{name: "one byte past the bound", document: `{"name":"lamp","price":12} `, maxBytes: 26, wantCode: corestrictjson.CodeDocumentTooLarge},
+		{name: "far past the bound", document: `{"name":"` + strings.Repeat("x", 10_000) + `"}`, maxBytes: 64, wantCode: corestrictjson.CodeDocumentTooLarge},
+		{name: "an empty document", document: "", maxBytes: 64, wantCode: corestrictjson.CodeDocumentEmpty},
+		{name: "whitespace is not a document", document: "   ", maxBytes: 64, wantCode: corestrictjson.CodeDocumentMalformed},
+		{name: "a truncated document", document: `{"name":"lamp"`, maxBytes: 64, wantCode: corestrictjson.CodeDocumentMalformed},
+		{name: "trailing data", document: `{"name":"lamp"} {}`, maxBytes: 64, wantCode: corestrictjson.CodeDocumentMalformed},
+		{name: "a duplicated member", document: `{"name":"lamp","name":"desk"}`, maxBytes: 64, wantCode: corestrictjson.CodeDocumentMalformed},
+		{name: "invalid UTF-8", document: "{\"name\":\"\xff\"}", maxBytes: 64, wantCode: corestrictjson.CodeDocumentMalformed},
+		{name: "an unknown member", document: `{"name":"lamp","admin":true}`, maxBytes: 64, wantCode: corestrictjson.CodeMemberUnknown},
+		{name: "a name differing only by case", document: `{"Name":"lamp"}`, maxBytes: 64, wantCode: corestrictjson.CodeMemberUnknown},
+		{name: "the wrong kind", document: `{"price":"ten"}`, maxBytes: 64, wantCode: corestrictjson.CodeValueMismatched},
+		{name: "a number out of the field's range", document: `{"price":3000000000}`, maxBytes: 64, wantCode: corestrictjson.CodeValueMismatched},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -89,14 +90,14 @@ func TestDecodeRefusesACallNoInputCanSatisfy(t *testing.T) {
 		"a nil pointer target": func(r io.Reader) error { return strictjson.Decode(r, nilTarget, 64) },
 		"no target at all":     func(r io.Reader) error { return strictjson.Decode(r, nil, 64) },
 	}
-	if err := strictjson.Decode(nil, &target, 64); !errs.HasCode(err, strictjson.CodeDecodeMisconfigured) {
+	if err := strictjson.Decode(nil, &target, 64); !errs.HasCode(err, corestrictjson.CodeDecodeMisconfigured) {
 		t.Errorf("Decode(nil reader) = %v, want DECODE_MISCONFIGURED", err)
 	}
 	for name, call := range calls {
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
 			source := &countingReader{source: strings.NewReader(`{"name":"lamp"}`)}
-			if err := call(source); !errs.HasCode(err, strictjson.CodeDecodeMisconfigured) {
+			if err := call(source); !errs.HasCode(err, corestrictjson.CodeDecodeMisconfigured) {
 				t.Fatalf("Decode() = %v, want DECODE_MISCONFIGURED", err)
 			}
 			if source.read != 0 {
@@ -138,7 +139,7 @@ func TestDecodeReadsNoFurtherThanTheBound(t *testing.T) {
 	source := &countingReader{source: io.MultiReader(strings.NewReader(`{"name":"lamp"}`), endless{})}
 	var got item
 	err := strictjson.Decode(source, &got, 1000)
-	if !errs.HasCode(err, strictjson.CodeDocumentTooLarge) {
+	if !errs.HasCode(err, corestrictjson.CodeDocumentTooLarge) {
 		t.Fatalf("Decode() = %v, want DOCUMENT_TOO_LARGE", err)
 	}
 	if source.read > 1001 {
@@ -248,14 +249,14 @@ func TestPointerOfIsBounded(t *testing.T) {
 func TestRefusalsCarryTheirStatus(t *testing.T) {
 	t.Parallel()
 	statuses := map[*errs.Error]int{
-		strictjson.DocumentTooLarge:     http.StatusRequestEntityTooLarge,
-		strictjson.DocumentEmpty:        http.StatusBadRequest,
-		strictjson.DocumentMalformed:    http.StatusBadRequest,
-		strictjson.MemberUnknown:        http.StatusBadRequest,
-		strictjson.ValueMismatched:      http.StatusBadRequest,
-		strictjson.MediaTypeUnsupported: http.StatusUnsupportedMediaType,
-		strictjson.DocumentUnreadable:   http.StatusBadRequest,
-		strictjson.DecodeMisconfigured:  http.StatusInternalServerError,
+		corestrictjson.DocumentTooLarge:     http.StatusRequestEntityTooLarge,
+		corestrictjson.DocumentEmpty:        http.StatusBadRequest,
+		corestrictjson.DocumentMalformed:    http.StatusBadRequest,
+		corestrictjson.MemberUnknown:        http.StatusBadRequest,
+		corestrictjson.ValueMismatched:      http.StatusBadRequest,
+		corestrictjson.MediaTypeUnsupported: http.StatusUnsupportedMediaType,
+		corestrictjson.DocumentUnreadable:   http.StatusBadRequest,
+		corestrictjson.DecodeMisconfigured:  http.StatusInternalServerError,
 	}
 	for sentinel, want := range statuses {
 		if got := errs.HTTPStatusOf(sentinel); got != want {
@@ -293,7 +294,7 @@ func TestAReadFailureCarriesItsTypeNotItsText(t *testing.T) {
 	var got item
 	err := strictjson.Decode(quotingReader{}, &got, 1024)
 	//: refused as unreadable.
-	if !errs.HasCode(err, strictjson.CodeDocumentUnreadable) {
+	if !errs.HasCode(err, corestrictjson.CodeDocumentUnreadable) {
 		t.Fatalf("Decode(failing reader) = %v, want DocumentUnreadable", err)
 	}
 	//: no field repeats what the reader held.

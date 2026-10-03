@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
 )
@@ -168,8 +169,8 @@ func TestUnmarshalHostile(t *testing.T) {
 			if !errs.HasReason(err, "UNMARSHAL_FAILED") {
 				t.Fatalf("want UNMARSHAL_FAILED, got %v", err)
 			}
-			if code, ok := errs.CodeOf(err); !ok || code != msgpack.CodeMsgPackUnmarshalFailed {
-				t.Fatalf("want code %s, got %v", msgpack.CodeMsgPackUnmarshalFailed, err)
+			if code, ok := errs.CodeOf(err); !ok || code != coremsgpack.CodeMsgPackUnmarshalFailed {
+				t.Fatalf("want code %s, got %v", coremsgpack.CodeMsgPackUnmarshalFailed, err)
 			}
 		})
 	}

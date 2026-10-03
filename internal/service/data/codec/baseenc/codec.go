@@ -23,6 +23,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -177,7 +178,7 @@ func (c *baseencCodec) Marshal(v any) (encoded []byte, err error) {
 	if merr != nil {
 		//: keep encoded nil so callers do not consume a partial buffer.
 		return nil, errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeBaseEncMarshalFailed,
+			Code:    corebaseenc.CodeBaseEncMarshalFailed,
 			Reason:  "BASE_ENC_MARSHAL_FAILED",
 			Public:  "base-N encoding failed",
 			Private: "service/data/codec/baseenc.Marshal: encoding/json.Marshal returned an error",
@@ -234,7 +235,7 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 	if len(data) > maxBaseEncBytes {
 		//: CWE-400 defence — refuse oversized inputs at the boundary.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeBaseEncSizeExceeded,
+			Code:    corebaseenc.CodeBaseEncSizeExceeded,
 			Reason:  "BASE_ENC_SIZE_EXCEEDED",
 			Public:  "base-N input exceeds size limit",
 			Private: "service/data/codec/baseenc.Unmarshal: len(data) > maxBaseEncBytes",
@@ -263,7 +264,7 @@ func (c *baseencCodec) Unmarshal(data []byte, v any) error {
 	}
 	//: wrap the stdlib JSON error.
 	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeBaseEncUnmarshalFailed,
+		Code:    corebaseenc.CodeBaseEncUnmarshalFailed,
 		Reason:  "BASE_ENC_UNMARSHAL_FAILED",
 		Public:  "base-N decoding failed",
 		Private: "service/data/codec/baseenc.Unmarshal: encoding/json.Unmarshal returned an error",
@@ -285,7 +286,7 @@ func (c *baseencCodec) Append(dst []byte, v any) (appended []byte, err error) {
 	if merr != nil {
 		//: leave dst exactly as the caller passed it.
 		return dst[:origLen], errs.Wrap(merr, errs.WrapParams{
-			Code:    CodeBaseEncMarshalFailed,
+			Code:    corebaseenc.CodeBaseEncMarshalFailed,
 			Reason:  "BASE_ENC_MARSHAL_FAILED",
 			Public:  "base-N encoding failed",
 			Private: "service/data/codec/baseenc.Append: encoding/json.Marshal returned an error",
@@ -428,7 +429,7 @@ func wrapMalformed(out []byte, ok bool) (decoded []byte, err error) {
 	}
 	//: malformed input — surface the shared decode reason.
 	return nil, errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeBaseEncDecodeFailed,
+		Code:    corebaseenc.CodeBaseEncDecodeFailed,
 		Reason:  "BASE_ENC_DECODE_FAILED",
 		Public:  "base-N decoding failed",
 		Private: "service/data/codec/baseenc: malformed base-conversion input (char outside the alphabet)",
@@ -622,7 +623,7 @@ func (c *baseencCodec) streamReader(r io.Reader) io.Reader {
 func convSizeExceeded(where string) error {
 	//: reuse the shared size sentinel — the cap differs, the reason does not.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeBaseEncSizeExceeded,
+		Code:    corebaseenc.CodeBaseEncSizeExceeded,
 		Reason:  "BASE_ENC_SIZE_EXCEEDED",
 		Public:  "base-N input exceeds size limit",
 		Private: where,
@@ -638,7 +639,7 @@ func wrapDecode(out []byte, derr error) (decoded []byte, err error) {
 	}
 	//: wrap the stdlib failure with the base-N reason.
 	return nil, errs.Wrap(derr, errs.WrapParams{
-		Code:    CodeBaseEncDecodeFailed,
+		Code:    corebaseenc.CodeBaseEncDecodeFailed,
 		Reason:  "BASE_ENC_DECODE_FAILED",
 		Public:  "base-N decoding failed",
 		Private: "service/data/codec/baseenc: stdlib base-N decoder returned an error",
@@ -661,7 +662,7 @@ func decodeASCII85(data []byte) (decoded []byte, err error) {
 	}
 	//: wrap the stdlib failure with the base-N reason.
 	return nil, errs.Wrap(rerr, errs.WrapParams{
-		Code:    CodeBaseEncDecodeFailed,
+		Code:    corebaseenc.CodeBaseEncDecodeFailed,
 		Reason:  "BASE_ENC_DECODE_FAILED",
 		Public:  "base-N decoding failed",
 		Private: "service/data/codec/baseenc: ascii85 decoder returned an error",

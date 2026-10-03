@@ -30,6 +30,7 @@ go_library(
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/scratch",
+        "//internal/core/data/codec/yaml",
         "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
     ],
@@ -63,12 +64,7 @@ go_test(
     embed = [":yaml"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/yaml",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

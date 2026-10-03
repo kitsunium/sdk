@@ -26,7 +26,7 @@ Sixteen wire-format codecs covering 24 registered Format names, one Go package e
 | `xml/`         | XML — encoding/xml                            | `0.3.3.*`  | yes | yes |
 | `yaml/`        | YAML — a named subset of YAML 1.2.2, native (standard library only); the full reader is `third-party/codec/yaml` (`"yaml-full"`) | `0.3.4.*`  | yes | yes |
 
-The `PP` slots above are authoritative — verified against each package's `Code*` constants (`codes.go`, or `failed.go` in `asn1`, `msgpack` and `yaml`). New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension) before being added.
+The `PP` slots above are authoritative — verified against each package's `Code*` constants. No package here declares one: since ADR 0160 every code and every `errs.Define` sentinel of `<codec>/` lives in `internal/core/data/codec/<codec>/` (`codes.go` and `errors.go`), the core path that mirrors it, and the package imports it as `core<codec>`. The values did not change when the declarations moved — `LL = 3` records the layer that allocated the range, not the directory that declares it. A check refuses `errs.Define` under `internal/service`. New codecs claim a fresh slot in ADR 0005's registry (or its ADR 0006 extension), in a new core mirror, before being added.
 
 `jsonshape/` is not a codec either (ADR 0133): it encodes nothing, and describes
 how values of a Go type look under `encoding/json` — the members an object has,
@@ -42,12 +42,14 @@ writes and the value it replaces. Documents are read strictly with
 exactly; arrays are aligned before they are paired. It owns `0.3.90.*` and is
 reached through `pkg/v1/data/codec/jsonpatch`.
 
-Four of the codecs above are also reachable ONE AT A TIME: `pkg/v1/data/codec/json`,
-`pkg/v1/data/codec/yaml`, `pkg/v1/data/codec/toml` and `pkg/v1/data/codec/bson` each import
-their own package here and nothing else (ADR 0134), so a program reading YAML
-configuration links the native YAML reader — no third-party library at all — and
-no other codec. `pkg/v1/data/codec/bson`
-also aliases BSON's value types, which `bson/` owns. A codec package registers
+Every codec above is also reachable ONE AT A TIME: `pkg/v1/data/codec/<codec>`
+imports its own package here and nothing else (ADR 0134), so a program reading
+YAML configuration links the native YAML reader — no third-party library at
+all — and no other codec; each also names its codec's error codes, aliased
+from `internal/core/data/codec/<codec>`. `pkg/v1/data/codec` is the aggregate of
+those sixteen packages and imports no codec here directly. `pkg/v1/data/codec/bson`
+also aliases BSON's value types, which `bson/` owns, and `pkg/v1/data/codec/multipart`
+the `FormValue` / `PartValue` shapes `multipart/` owns. A codec package registers
 itself in its own initialisation, which Go runs once, so being imported by both
 a per-format facade and `pkg/v1/data/codec` registers it once.
 
@@ -58,7 +60,9 @@ duplicate names and of trailing data, and errors that never quote the input —
 is a decoding POLICY for documents somebody else wrote, not a wire format. It is
 built on `encoding/json/v2`, owns `0.3.72.*`, and is reached through its own
 facade `pkg/v1/data/codec/strictjson`, so a server that only needs it does not link
-the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
+the sixteen codecs `pkg/v1/data/codec` blank-imports. The HTTP request body —
+`DecodeRequest` — is `strictjson/httpbody/`, with its own facade, so the decoder
+links no `net/http` either. `json/` is unchanged.
 
 ## File layout (per codec)
 
@@ -66,9 +70,7 @@ the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
 <codec>/
 ├── codec.go                      # New() + Codec interface methods + Codec singleton
 ├── decoder.go, encoder.go        # streaming helpers (only for StreamingCodec implementers)
-├── codes.go                      # const CodeXxx errs.Code  (PP slot)
-├── errors.go                     # var XxxSentinel = errs.Define(...)
-├── failed.go                     # codes + sentinels in one file, in place of the two above (asn1, msgpack, yaml)
+├── errors.go                     # failure constructors (errs.Wrap with the core's codes), where the codec has any
 │                                 # (yaml/ is a parser and an encoder of its own, laid out by concern — see yaml/CLAUDE.md)
 ├── codec_internal_test.go        # white-box (per-codec quirks)
 ├── codec_external_test.go        # black-box (interface contract)
@@ -84,7 +86,7 @@ the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
 - **Stateless singletons**: `New()` returns the same `Codec` singleton; the two opt-in modes — `csv.NewWithEscape(bool)` and `multipart.NewWithLimits(LimitsConfig)` — each return a fresh instance not added to the registry.
 - **Defensive copies on `MIMETypes()` / `Extensions()`**: every implementer returns a slice the caller owns — `slices.Clone(table)`, or a fresh literal in `asn1`, `csv` and `json` — so callers cannot mutate a package-level slice.
 - **Hardening lives in the codec**: byte caps (`maxYAMLBytes`, `maxMsgPackBytes`, `maxBSONBytes`, `scannerMaxCapacity`, `form.maxFormBytes`, `toml.maxDocumentBytes`), structural caps (`maxCBORArrayElements`, `maxCBORMapPairs`, `maxCBORNestedLevels`, `maxCBORStringChunks`, `maxBSONNestedLevels`, `form.maxFormPairs`, `msgpack.maxDepth`, `toml.maxDepth`, YAML's `maxDepth`, `maxNodes` and `maxKeyRunes`), and OWASP CSV-Injection mitigation (`csv.NewWithEscape`) are codec-local — never lifted into `core/data/codec`. They are `const`, not constructor options — except `multipart`'s three bounds, which `NewWithLimits` takes with a zero field meaning the package default and a negative one refused: a tunable bound whose zero value silently means "unlimited" is exactly what ADR 0031 forbids.
-- **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant from `codes.go` (`failed.go` in `asn1`, `msgpack` and `yaml`). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
+- **Errors use the package's dotted-quad code**: every wrapped failure carries the `CodeXxxMarshalFailed` / `CodeXxxUnmarshalFailed` / `CodeXxxValueInvalid` constant its core mirror declares (`internal/core/data/codec/<codec>/codes.go`, ADR 0160). Wrapping an `*errs.Error` cause is a no-op for params (origin wins).
 - **Optional extensions are opt-in by interface assertion**: callers use `if a, ok := c.(codec.Appender); ok { … }` — the public registry does not promise any extension.
 
 ## Do NOT
@@ -111,7 +113,7 @@ the sixteen codecs `pkg/v1/data/codec` blank-imports. `json/` is unchanged.
 - `multipart/`   — see `multipart/CLAUDE.md`
 - `ndjson/`      — see `ndjson/CLAUDE.md`
 - `pem/`         — see `pem/CLAUDE.md`
-- `strictjson/`  — see `strictjson/CLAUDE.md` (not a codec — ADR 0102)
+- `strictjson/`  — see `strictjson/CLAUDE.md` (not a codec — ADR 0102); `strictjson/httpbody/` — see `strictjson/httpbody/CLAUDE.md`
 - `tlv/`         — see `tlv/CLAUDE.md`
 - `toml/`        — see `toml/CLAUDE.md`
 - `xml/`         — see `xml/CLAUDE.md`

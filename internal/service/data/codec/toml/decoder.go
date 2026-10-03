@@ -6,6 +6,7 @@ import (
 	"errors"
 	"io"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -39,9 +40,9 @@ func (d *tomlDecoder) Decode(v any) error {
 	if err != nil {
 		//: UNMARSHAL_FAILED over the reader's error.
 		return errs.Wrap(err, errs.WrapParams{
-			Code:    CodeTOMLUnmarshalFailed,
-			Reason:  UnmarshalFailed.Reason(),
-			Public:  UnmarshalFailed.Public(),
+			Code:    coretoml.CodeTOMLUnmarshalFailed,
+			Reason:  coretoml.UnmarshalFailed.Reason(),
+			Public:  coretoml.UnmarshalFailed.Public(),
 			Private: privateReadFailed,
 		})
 	}

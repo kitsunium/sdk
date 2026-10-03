@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -242,7 +243,7 @@ func (d *decoder) callUnmarshalText(n *node, v reflect.Value) error {
 func (d *decoder) hookFailed(n *node, cause error, t reflect.Type) error {
 	//: the hook's error, located.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeYAMLUnmarshalFailed,
+		Code:    coreyaml.CodeYAMLUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "YAML decoding failed",
 		Private: "service/data/codec/yaml: a type's own decoding hook returned an error",
@@ -401,7 +402,7 @@ func (d *decoder) checkKeyCollision(keyNode *node, m *mapDecoding) error {
 	//: seen before.
 	if m.seen[key] {
 		//: refused at the second occurrence.
-		return d.refuse(DuplicateKey, keyNode)
+		return d.refuse(coreyaml.DuplicateKey, keyNode)
 	}
 	m.seen[key] = true
 	//: new.

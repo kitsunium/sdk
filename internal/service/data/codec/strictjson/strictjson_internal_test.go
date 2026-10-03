@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -52,14 +53,14 @@ func Test_boundedReader_verdict(t *testing.T) {
 	}
 	tests := []tc{
 		{name: "within the bound", reader: boundedReader{delivered: 10}, wantClean: true},
-		{name: "past the bound", reader: boundedReader{delivered: 65}, wantCode: CodeDocumentTooLarge},
-		{name: "past the bound beats a failure", reader: boundedReader{delivered: 65, failure: failure}, wantCode: CodeDocumentTooLarge},
-		{name: "a failure", reader: boundedReader{delivered: 3, failure: failure}, wantCode: CodeDocumentUnreadable},
+		{name: "past the bound", reader: boundedReader{delivered: 65}, wantCode: corestrictjson.CodeDocumentTooLarge},
+		{name: "past the bound beats a failure", reader: boundedReader{delivered: 65, failure: failure}, wantCode: corestrictjson.CodeDocumentTooLarge},
+		{name: "a failure", reader: boundedReader{delivered: 3, failure: failure}, wantCode: corestrictjson.CodeDocumentUnreadable},
 		{
 			name: "a failure that is a size refusal", reader: boundedReader{delivered: 64, failure: failure},
-			oversize: func(error) bool { return true }, wantCode: CodeDocumentTooLarge,
+			oversize: func(error) bool { return true }, wantCode: corestrictjson.CodeDocumentTooLarge,
 		},
-		{name: "nothing at all", reader: boundedReader{}, wantCode: CodeDocumentEmpty},
+		{name: "nothing at all", reader: boundedReader{}, wantCode: corestrictjson.CodeDocumentEmpty},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()

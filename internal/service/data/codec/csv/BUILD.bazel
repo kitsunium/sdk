@@ -4,15 +4,12 @@ package(default_visibility = ["//internal/service:service_consumers"])
 
 go_library(
     name = "csv",
-    srcs = [
-        "codec.go",
-        "codes.go",
-        "errors.go",
-    ],
+    srcs = ["codec.go"],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/csv",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/csv",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
@@ -38,10 +35,4 @@ go_test(
         "//internal/core/data/codec/scratch",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

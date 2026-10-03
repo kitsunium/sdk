@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coremultipart "github.com/kitsunium/sdk/internal/core/data/codec/multipart"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/multipart"
 )
@@ -844,7 +845,7 @@ func TestEncoderRefusesHeaderInjection(t *testing.T) {
 // names field, and that no rendering of it repeats the injected value.
 func assertHeaderRefused(t *testing.T, name, field string, err error) {
 	t.Helper()
-	if !errs.HasCode(err, multipart.CodeMultipartValueInvalid) || !errs.HasReason(err, "VALUE_INVALID") {
+	if !errs.HasCode(err, coremultipart.CodeMultipartValueInvalid) || !errs.HasReason(err, "VALUE_INVALID") {
 		t.Errorf("%s: expected VALUE_INVALID (0.3.41.3), got %v", name, err)
 		return
 	}

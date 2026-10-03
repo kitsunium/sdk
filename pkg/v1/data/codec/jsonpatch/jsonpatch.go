@@ -44,6 +44,7 @@
 package jsonpatch
 
 import (
+	corejsonpatch "github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcjsonpatch "github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch"
 )
@@ -59,11 +60,11 @@ const (
 )
 
 // CodeNotJSON is the code of [NotJSON] (0.3.90.1), for errs.HasCode.
-const CodeNotJSON errs.Code = svcjsonpatch.CodeNotJSON
+const CodeNotJSON errs.Code = corejsonpatch.CodeNotJSON
 
 // NotJSON refuses a document that is not exactly one JSON value; its fields
 // name the document — "from" or "to" — and the offset, never its content.
-var NotJSON = svcjsonpatch.NotJSON
+var NotJSON = corejsonpatch.NotJSON
 
 // Op is what an operation does, as RFC 6902 names it.
 type Op = svcjsonpatch.Op

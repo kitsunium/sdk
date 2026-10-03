@@ -15,8 +15,9 @@ carries a `CLAUDE.md` naming its members and the rule that put them together:
 with `logger/level` and `logger/writer` beneath it, and beneath those the
 code mirrors of the logger engine's `middleware/*`, `sink/*` and
 `writer/{journald, nettransport, rotfile}`, `metrics`, `otel`, `profiling`,
-`trace`), `data/` (`cache`, `codec` with `codec/scratch` beneath it,
-`docstore`, `queue`, `sql`, `transform`, `vfs`) and `app/` (`cli`, `config`, `events`,
+`trace`), `data/` (`cache`, `codec` with `codec/scratch` and one code
+package per codec beneath it, `docstore`, `queue`, `sql`, `transform`, `vfs`)
+and `app/` (`cli`, `config`, `events`,
 `health`, `i18n`, `id`, `lifecycle`, `lock`, `mail`, `resilience`,
 `scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
 one package, that package sits at the family's path (`crypto/`, `net/`,
@@ -29,6 +30,7 @@ ADR 0160). No domain sits at the root of this layer any more, and the root
 | Package | Purpose | Code range (ADR 0005/0006/0012/0013) |
 |---|---|---|
 | `data/codec/` | `Codec` / `StreamingCodec` / `Encoder` / `Decoder` / `Appender` + process-wide registry, `Format` value type | `0.2.2.*` |
+| `data/codec/<format>/` | the codes and `errs.Define` sentinels of `internal/service/data/codec/<format>` — eighteen packages, one per codec plus `strictjson` and `jsonpatch`, codes and nothing else (ADR 0160 §2) | each its service range, `0.3.<PP>.*` |
 | `observe/logger/writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012); beneath `observe/logger/` because what it produces is the logger's `Sink` | `0.2.3.*` |
 | `crypto/` | eight registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`), the detached `MAC` (`MACTag`/`MACVerify`), the `Agreement` DH port, and the chunked `StreamSealer` (ADR 0013 + ADR 0014) | `0.2.4.*` |
 | `crypto/key/jwk/` | the JSON Web Key format's codes and sentinels and nothing else — the format itself is `internal/service/crypto/key/jwk`, at the mirrored path (ADR 0160); `crypto/key/` holds no Go code | `0.3.42.*` (allocated to the service, value unchanged) |
@@ -148,3 +150,4 @@ cd internal/core && GOWORK=off go test -race -cover ./...
 - `observe/logger/level/` — see `internal/core/observe/logger/level/CLAUDE.md`
 - `app/health/` — see `internal/core/app/health/CLAUDE.md` (startup, readiness and liveness as three types, ADR 0060)
 - `data/codec/scratch/` — see `internal/core/data/codec/scratch/CLAUDE.md`
+- `data/codec/{asn1,baseenc,bson,cbor,csv,flatbuffers,form,json,jsonpatch,msgpack,multipart,ndjson,pem,strictjson,tlv,toml,xml,yaml}/` — one `CLAUDE.md` each: the codes and sentinels of the service package at the same path (ADR 0160)

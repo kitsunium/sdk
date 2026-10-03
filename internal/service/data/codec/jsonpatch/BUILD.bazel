@@ -5,8 +5,6 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "jsonpatch",
     srcs = [
-        "codes.go",
-        "errors.go",
         "jsonpatch.go",
         "tree.go",
     ],
@@ -15,7 +13,10 @@ go_library(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-    deps = ["//internal/kernel/errs"],
+    deps = [
+        "//internal/core/data/codec/jsonpatch",
+        "//internal/kernel/errs",
+    ],
 )
 
 alias(
@@ -34,12 +35,8 @@ go_test(
         "tree_internal_test.go",
     ],
     embed = [":jsonpatch"],
-    deps = ["//internal/kernel/errs"],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
+    deps = [
+        "//internal/core/data/codec/jsonpatch",
+        "//internal/kernel/errs",
+    ],
 )

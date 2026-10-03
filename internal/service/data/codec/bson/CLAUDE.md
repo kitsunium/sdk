@@ -48,7 +48,8 @@ decode*.go         dispatch and element walk, containers, scalars, value types, 
 types.go           D/E/M/A, Binary, Regex, DBPointer, Timestamp, CodeWithScope, DateTime, markers
 objectid.go        ObjectID and its hex / text / JSON forms
 decimal.go         Decimal128: BID layout, String and ParseDecimal128 (exact or refused)
-codes.go, errors.go  the 0.3.36.* codes and sentinels, and the detail constructors
+errors.go          the detail constructors; the 0.3.36.* codes and sentinels are
+                   internal/core/data/codec/bson's (ADR 0160)
 ```
 
 ## Mapping
@@ -142,6 +143,11 @@ Intentional, each refusing what the driver accepted or wrote silently:
   JSON, `KeyMarshaler`, ObjectID generation (an `id` scheme's job).
 
 ## Error codes (range `0.3.36.*`)
+
+Declared in `internal/core/data/codec/bson` — `codes.go` and `errors.go` — and used
+here as `corebson.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
 
 | Code | Var | Trigger |
 |---|---|---|

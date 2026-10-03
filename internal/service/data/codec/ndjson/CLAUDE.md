@@ -18,6 +18,11 @@ Newline-delimited JSON: one JSON value per line, `\n`-separated. `Marshal` emits
 
 ## Error codes (range `0.3.11.*`)
 
+Declared in `internal/core/data/codec/ndjson` — `codes.go` and `errors.go` — and used
+here as `corendjson.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.11.1`   | `MarshalFailed`   | `encoding/json.Marshal` failed on a single record |

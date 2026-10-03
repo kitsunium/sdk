@@ -7,6 +7,7 @@ import (
 	stdasn1 "encoding/asn1"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coreasn1 "github.com/kitsunium/sdk/internal/core/data/codec/asn1"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -53,7 +54,7 @@ func (*asn1Codec) Marshal(v any) (encoded []byte, err error) {
 	}
 	//: wrap the stdlib error for reason-based matching.
 	return nil, errs.Wrap(merr, errs.WrapParams{
-		Code:    CodeASN1MarshalFailed,
+		Code:    coreasn1.CodeASN1MarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "ASN.1 DER encoding failed",
 		Private: "service/data/codec/asn1.Marshal: encoding/asn1 returned an error",
@@ -93,7 +94,7 @@ func (*asn1Codec) Unmarshal(data []byte, v any) error {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(uerr, errs.WrapParams{
-		Code:    CodeASN1UnmarshalFailed,
+		Code:    coreasn1.CodeASN1UnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "ASN.1 DER decoding failed",
 		Private: "service/data/codec/asn1.Unmarshal: encoding/asn1 returned an error",

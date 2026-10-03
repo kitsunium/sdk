@@ -15,6 +15,7 @@ import (
 	"testing"
 	"time"
 
+	corebson "github.com/kitsunium/sdk/internal/core/data/codec/bson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -154,7 +155,7 @@ func TestDecodeConversions(t *testing.T) {
 		t.Helper()
 		got, err := c.decode(t, oneElement(t, c.bson))
 		if c.wantErr {
-			if !errs.HasCode(err, CodeBSONUnmarshalFailed) {
+			if !errs.HasCode(err, corebson.CodeBSONUnmarshalFailed) {
 				t.Fatalf("Unmarshal = %v (value %#v), want BSON_UNMARSHAL_FAILED", err, got)
 			}
 			return
@@ -471,7 +472,7 @@ func TestUnmarshalTargets(t *testing.T) {
 		if c.ok != (err == nil) {
 			t.Fatalf("Unmarshal(%T) = %v, want ok=%v", target, err, c.ok)
 		}
-		if err != nil && !errs.HasCode(err, CodeBSONUnmarshalFailed) {
+		if err != nil && !errs.HasCode(err, corebson.CodeBSONUnmarshalFailed) {
 			t.Errorf("Unmarshal(%T) = %v, want BSON_UNMARSHAL_FAILED", target, err)
 		}
 		//: a map passed by value is filled in place.
@@ -498,23 +499,23 @@ func TestMalformedInput(t *testing.T) {
 		rule string
 	}
 	tests := []tc{
-		{"empty input", "", CodeBSONUnmarshalFailed, "shorter than"},
-		{"a length shorter than the input", "0500000000ff", CodeBSONUnmarshalFailed, "declared length"},
-		{"a length longer than the input", "0600000000", CodeBSONUnmarshalFailed, "declared length"},
-		{"no terminator", "0500000001", CodeBSONUnmarshalFailed, "terminator"},
-		{"a boolean of 2", "090000000862000200", CodeBSONUnmarshalFailed, "boolean"},
-		{"a string length of zero", "0c0000000261000000000000", CodeBSONUnmarshalFailed, "string length"},
-		{"a string not terminated where its length ends", "1000000002610004000000616263ff00", CodeBSONUnmarshalFailed, "not terminated"},
-		{"a string that is not UTF-8", "0e00000002610002000000e90000", CodeBSONUnmarshalFailed, "UTF-8"},
-		{"an element name that is not UTF-8", "0c00000010ff000100000000", CodeBSONUnmarshalFailed, "UTF-8"},
-		{"an unknown type byte", "07000000800000", CodeBSONUnmarshalFailed, "unknown type"},
-		{"a truncated double", "0b0000000164000000f000", CodeBSONUnmarshalFailed, "truncated"},
-		{"a sub-document longer than its parent", "1800000003666f6f000f0000001062617200ffffff7f0000", CodeBSONUnmarshalFailed, "document length"},
-		{"an old binary whose inner length disagrees", "13000000057800060000000203000000ffff00", CodeBSONUnmarshalFailed, "subtype 0x02"},
-		{"a negative binary length", "0d000000057800ffffffff0000", CodeBSONUnmarshalFailed, "binary length"},
-		{"a regex that runs into the terminator", "0c0000000b61006162006300", CodeBSONUnmarshalFailed, "regex is not terminated"},
-		{"a code-with-scope too short for its parts", "160000000f61000d0000000100000000050000000000", CodeBSONUnmarshalFailed, "code-with-scope"},
-		{"a code-with-scope longer than its parts", "280000000f6100210000000500000061626364001300000010780001000000107900010000000000", CodeBSONUnmarshalFailed, ""},
+		{"empty input", "", corebson.CodeBSONUnmarshalFailed, "shorter than"},
+		{"a length shorter than the input", "0500000000ff", corebson.CodeBSONUnmarshalFailed, "declared length"},
+		{"a length longer than the input", "0600000000", corebson.CodeBSONUnmarshalFailed, "declared length"},
+		{"no terminator", "0500000001", corebson.CodeBSONUnmarshalFailed, "terminator"},
+		{"a boolean of 2", "090000000862000200", corebson.CodeBSONUnmarshalFailed, "boolean"},
+		{"a string length of zero", "0c0000000261000000000000", corebson.CodeBSONUnmarshalFailed, "string length"},
+		{"a string not terminated where its length ends", "1000000002610004000000616263ff00", corebson.CodeBSONUnmarshalFailed, "not terminated"},
+		{"a string that is not UTF-8", "0e00000002610002000000e90000", corebson.CodeBSONUnmarshalFailed, "UTF-8"},
+		{"an element name that is not UTF-8", "0c00000010ff000100000000", corebson.CodeBSONUnmarshalFailed, "UTF-8"},
+		{"an unknown type byte", "07000000800000", corebson.CodeBSONUnmarshalFailed, "unknown type"},
+		{"a truncated double", "0b0000000164000000f000", corebson.CodeBSONUnmarshalFailed, "truncated"},
+		{"a sub-document longer than its parent", "1800000003666f6f000f0000001062617200ffffff7f0000", corebson.CodeBSONUnmarshalFailed, "document length"},
+		{"an old binary whose inner length disagrees", "13000000057800060000000203000000ffff00", corebson.CodeBSONUnmarshalFailed, "subtype 0x02"},
+		{"a negative binary length", "0d000000057800ffffffff0000", corebson.CodeBSONUnmarshalFailed, "binary length"},
+		{"a regex that runs into the terminator", "0c0000000b61006162006300", corebson.CodeBSONUnmarshalFailed, "regex is not terminated"},
+		{"a code-with-scope too short for its parts", "160000000f61000d0000000100000000050000000000", corebson.CodeBSONUnmarshalFailed, "code-with-scope"},
+		{"a code-with-scope longer than its parts", "280000000f6100210000000500000061626364001300000010780001000000107900010000000000", corebson.CodeBSONUnmarshalFailed, ""},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -553,8 +554,8 @@ func TestDecodeNestingBound(t *testing.T) {
 	}
 	tests := []tc{
 		{"the bound itself", maxBSONNestedLevels, 0},
-		{"one past it", maxBSONNestedLevels + 1, CodeBSONDepthExceeded},
-		{"an array chain one past it", -(maxBSONNestedLevels + 1), CodeBSONDepthExceeded},
+		{"one past it", maxBSONNestedLevels + 1, corebson.CodeBSONDepthExceeded},
+		{"an array chain one past it", -(maxBSONNestedLevels + 1), corebson.CodeBSONDepthExceeded},
 	}
 	runCase := func(t *testing.T, c tc) {
 		t.Helper()
@@ -617,7 +618,7 @@ func TestSizeCap(t *testing.T) {
 	t.Parallel()
 	err := New().Unmarshal(make([]byte, maxBSONBytes+1), new(any))
 	//: the size sentinel, not a malformation.
-	if !errs.HasCode(err, CodeBSONSizeExceeded) {
+	if !errs.HasCode(err, corebson.CodeBSONSizeExceeded) {
 		t.Fatalf("Unmarshal = %v, want BSON_SIZE_EXCEEDED", err)
 	}
 }

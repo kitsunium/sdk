@@ -10,8 +10,9 @@ import (
 	"encoding/binary"
 	"errors"
 
-	coretransform "github.com/kitsunium/sdk/internal/core/data/transform"
-	_ "github.com/kitsunium/sdk/internal/service/data/transform" // self-registers gzip + flate + zlib
+	// The compressors: importing the transform package registers gzip, flate
+	// and zlib, of which this frame addresses gzip and flate.
+	"github.com/kitsunium/sdk/pkg/v1/data/transform"
 )
 
 const (
@@ -48,9 +49,9 @@ const (
 	maxDecompressedFrameBytes int = 64 << 20 // 64 MiB
 )
 
-// CompressAlgorithm re-exports core/data/transform.Algorithm so consumers name a
+// CompressAlgorithm is the transform package's Algorithm, so consumers name a
 // compressor without importing internal/*. Use the Gzip / Flate constants.
-type CompressAlgorithm = coretransform.Algorithm
+type CompressAlgorithm = transform.Algorithm
 
 const (
 	// Gzip selects the gzip compressor (frame algID 0x01).
@@ -71,12 +72,12 @@ func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err
 	//: an algorithm with no frame id cannot be encoded in this frame version.
 	if !ok {
 		//: name the missing compressor via the core sentinel.
-		return nil, coretransform.UnknownCompressor
+		return nil, transform.UnknownCompressor
 	}
 	//: an over-long Format name cannot fit the 2-byte length field.
 	if len(f) > maxInnerFormatLen {
 		//: a Format this long is a malformed request, not a valid frame.
-		return nil, coretransform.CompressedFrameInvalid
+		return nil, transform.CompressedFrameInvalid
 	}
 	//: encode v through the universal codec dispatch (reuses promotion).
 	encoded, mErr := Marshal(f, v)
@@ -89,24 +90,18 @@ func MarshalCompressed(f Format, algo CompressAlgorithm, v any) (box []byte, err
 	return compressFrame(f, id, encoded)
 }
 
-// compressFrame resolves the compressor for the frame id's algorithm, compresses
-// payload, and renders the header + compressed body. Split out of
-// MarshalCompressed to keep each function within the line budget.
+// compressFrame compresses payload with the frame id's algorithm and renders
+// the header + compressed body. Split out of MarshalCompressed to keep each
+// function within the line budget.
 func compressFrame(f Format, id byte, payload []byte) (box []byte, err error) {
 	//: the id was just validated, so the inverse lookup cannot miss.
 	algo, _ := algorithmForID(id)
-	//: resolve the compressor; an unregistered algorithm is a missing import.
-	c, ok := coretransform.Lookup(algo)
-	//: a framed algorithm with no registered body — name the miss.
-	if !ok {
-		//: surface the documented sentinel.
-		return nil, coretransform.UnknownCompressor
-	}
-	//: compress; the scheme wraps its own stdlib fault (origin wins).
-	compressed, cErr := c.Compress(nil, payload)
-	//: forward a compression fault untouched.
+	//: compress; a framed algorithm with no registered body is refused with
+	//: UnknownCompressor, and the scheme wraps its own stdlib fault (origin wins).
+	compressed, cErr := transform.Compress(algo, nil, payload)
+	//: forward the refusal or the fault untouched.
 	if cErr != nil {
-		//: pass the compressor error through.
+		//: pass the error through.
 		return nil, cErr
 	}
 	//: assemble the header then append the compressed payload.
@@ -140,7 +135,7 @@ func UnmarshalCompressed(box []byte, v any) error {
 	//: a header that fails any structural check is frame corruption.
 	if !ok {
 		//: typed, non-oracle frame-invalid sentinel.
-		return coretransform.CompressedFrameInvalid
+		return transform.CompressedFrameInvalid
 	}
 	//: decompress under the frame-layer bomb guard.
 	plain, err := decompressBounded(algo, payload)
@@ -185,28 +180,23 @@ func parseFrame(box []byte) (algo CompressAlgorithm, f Format, payload []byte, o
 // enforces the frame-layer decompression-bomb guard. A bomb is reported as
 // CompressedFrameInvalid; a missing compressor or a stdlib fault is forwarded.
 func decompressBounded(algo CompressAlgorithm, payload []byte) (plain []byte, err error) {
-	//: resolve the compressor; pkg/v1/data/codec always imports gzip + flate.
-	c, ok := coretransform.Lookup(algo)
-	//: a framed algorithm with no body means a missing import — name the miss.
-	if !ok {
-		//: surface the documented sentinel.
-		return nil, coretransform.UnknownCompressor
-	}
-	//: decompress under THIS layer's ceiling when the scheme can be told one.
+	//: decompress under THIS layer's ceiling — the transform package stops a
+	//: scheme that can be told one at it, and judges the others afterwards. A
+	//: framed algorithm with no registered body is refused UnknownCompressor.
 	//: Calling plain Decompress would let the service layer's 256 MiB backstop
 	//: govern the work while this layer's 64 MiB limit governs only the
 	//: verdict — so a few hundred kilobytes of crafted input drove the whole
 	//: backstop before isBomb ever ran. Measured before this changed: a
 	//: 260 169-byte frame allocated 828 MiB, 3 338x its wire size.
-	out, dErr := decompressUnderCeiling(c, payload)
+	out, dErr := transform.DecompressBounded(algo, nil, payload, int64(maxDecompressedFrameBytes))
 	//: a payload over THIS layer's ceiling is precisely what isBomb calls a
 	//: bomb, so the ceiling rejection carries the frame verdict rather than the
 	//: scheme's. Without this the fix would move the sentinel for every bomb
 	//: between 64 and 256 MiB from COMPRESSED_FRAME_INVALID to GZIP_FAILED —
 	//: bounding the work at the cost of the contract.
-	if errors.Is(dErr, coretransform.DecompressedTooLarge) {
+	if errors.Is(dErr, transform.DecompressedTooLarge) {
 		//: typed, non-oracle bomb rejection, same as the ratio guard below.
-		return nil, coretransform.CompressedFrameInvalid
+		return nil, transform.CompressedFrameInvalid
 	}
 	//: forward a stdlib decode fault (corrupt body / truncation) untouched.
 	if dErr != nil {
@@ -216,29 +206,10 @@ func decompressBounded(algo CompressAlgorithm, payload []byte) (plain []byte, er
 	//: a frame whose output trips the bomb guard is rejected as frame-invalid.
 	if isBomb(len(payload), len(out)) {
 		//: typed, non-oracle bomb rejection.
-		return nil, coretransform.CompressedFrameInvalid
+		return nil, transform.CompressedFrameInvalid
 	}
 	//: within bounds — hand back the plaintext.
 	return out, nil
-}
-
-// decompressUnderCeiling decodes payload under the frame layer's own ceiling
-// when the scheme implements BoundedDecompressor, and falls back to the
-// scheme's layer-local backstop when it does not.
-//
-// The fallback is not a formality: a scheme registered by a consumer need not
-// implement the optional interface, and such a scheme is still correct — it
-// simply costs what it always cost. The ceiling is an upper bound on work, so
-// declining to tighten it can never change a verdict, only the bytes touched
-// reaching one.
-func decompressUnderCeiling(c coretransform.Compressor, payload []byte) (plain []byte, err error) {
-	//: schemes that accept a ceiling get this layer's, not their own.
-	if bounded, ok := c.(coretransform.BoundedDecompressor); ok {
-		//: stop the work at the same number isBomb judges against.
-		return bounded.DecompressBounded(nil, payload, int64(maxDecompressedFrameBytes))
-	}
-	//: no ceiling to pass — the scheme's own backstop still applies.
-	return c.Decompress(nil, payload)
 }
 
 // isBomb reports whether an output of outLen bytes from a payload of inLen bytes

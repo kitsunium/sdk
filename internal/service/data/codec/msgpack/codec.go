@@ -18,6 +18,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -93,7 +94,7 @@ func (*msgpackCodec) Unmarshal(data []byte, v any) error {
 	if len(data) > maxMsgPackBytes {
 		//: surface an UNMARSHAL_FAILED with a diagnostic Private message.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeMsgPackUnmarshalFailed,
+			Code:    coremsgpack.CodeMsgPackUnmarshalFailed,
 			Reason:  reasonUnmarshal,
 			Public:  "MessagePack input exceeds size limit",
 			Private: "service/data/codec/msgpack.Unmarshal: len(data) exceeds maxMsgPackBytes",

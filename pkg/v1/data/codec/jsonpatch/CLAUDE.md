@@ -5,8 +5,9 @@
 
 Public facade for the structural difference between two JSON documents as
 RFC 6902 operations with both values (ADR 0143 §D9). Aliases onto
-`internal/service/data/codec/jsonpatch` plus the forwarding `Diff`. No logic lives
-here.
+`internal/service/data/codec/jsonpatch` plus the forwarding `Diff`, and onto
+`internal/core/data/codec/jsonpatch` for `CodeNotJSON` and `NotJSON`, which
+are declared there (ADR 0160). No logic lives here.
 
 ## Surface
 
@@ -21,7 +22,8 @@ here.
 
 The comparison is of JSON documents, so it lives in the codec tree beside
 `strictjson` and `jsonshape`; it has its own facade for their reason:
-`pkg/v1/data/codec` blank-imports every codec, and a diff links none of them.
+`pkg/v1/data/codec` blank-imports every codec, and a diff links none of them —
+nor `net/http`, since `NotJSON`'s 400 became a literal in the core.
 
 ## Do NOT
 

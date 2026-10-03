@@ -34,6 +34,7 @@ import (
 
 	jsonv2 "encoding/json/v2"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -72,41 +73,50 @@ const MaxPointerBytes int = 256
 // never read past maxBytes + 1 bytes.
 func Decode(r io.Reader, v any, maxBytes int64) error {
 	//: a call that can never succeed is refused before reading a byte.
-	if invalid := checkArguments(v, maxBytes); invalid != nil {
+	if invalid := CheckArguments(v, maxBytes); invalid != nil {
 		//: DecodeMisconfigured, naming the argument.
 		return invalid
 	}
 	//: nothing to read from is the caller's bug, not an empty document.
 	if r == nil {
 		//: DecodeMisconfigured, naming the argument.
-		return misconfigured("r")
+		return Misconfigured("r")
 	}
 	//: a plain reader has no size refusal of its own to recognise.
-	return decode(r, v, maxBytes, nil)
+	return DecodeChecked(r, v, maxBytes, nil)
 }
 
-// checkArguments refuses the two calls no input can make succeed.
-func checkArguments(v any, maxBytes int64) error {
+// CheckArguments refuses the two calls no input can make succeed — a
+// non-positive bound, and a v that is not a non-nil pointer — with
+// DecodeMisconfigured naming the argument, and returns nil otherwise. Decode
+// runs it first; a caller reading from something other than a plain reader
+// (the HTTP form in the httpbody package) runs it before touching its input,
+// so the same call is refused the same way through every door.
+func CheckArguments(v any, maxBytes int64) error {
 	//: the two readings of a non-positive bound are opposites.
 	if maxBytes <= 0 {
 		//: DecodeMisconfigured, naming the argument.
-		return misconfigured("maxBytes")
+		return Misconfigured("maxBytes")
 	}
 	//: a value decode cannot write into is the caller's bug, found before
 	//: reading a byte of somebody else's input.
 	if target := reflect.ValueOf(v); target.Kind() != reflect.Pointer || target.IsNil() {
 		//: DecodeMisconfigured, naming the argument.
-		return misconfigured("v")
+		return Misconfigured("v")
 	}
 	//: usable.
 	return nil
 }
 
-// decode reads and decodes one bounded document. oversize recognises a read
-// error that is itself a size refusal — http.MaxBytesError, for a request
-// body — so it is reported as DocumentTooLarge rather than as a failed read;
-// nil recognises none.
-func decode(r io.Reader, v any, maxBytes int64, oversize func(error) bool) error {
+// DecodeChecked reads and decodes one bounded document from r into v, for a
+// caller that has already refused what CheckArguments refuses and holds a
+// non-nil reader. oversize recognises a read error that is itself a size
+// refusal — http.MaxBytesError, for a request body — so it is reported as
+// DocumentTooLarge rather than as a failed read; nil recognises none.
+//
+// It is how the HTTP form reuses this decoder without this package naming
+// net/http: the recogniser is the caller's, and so is the import.
+func DecodeChecked(r io.Reader, v any, maxBytes int64, oversize func(error) bool) error {
 	//: one byte past the bound shows a document that does not fit — unless
 	//: the bound is already the largest there is.
 	budget := maxBytes
@@ -130,9 +140,9 @@ func decode(r io.Reader, v any, maxBytes int64, oversize func(error) bool) error
 	return classify(decodeErr)
 }
 
-// PointerOf returns where a document Decode or DecodeRequest refused went
-// wrong, as a JSON Pointer (RFC 6901) — "" is the document itself — and
-// reports whether err carries one.
+// PointerOf returns where a document Decode refused went wrong — or one the
+// httpbody package's DecodeRequest refused — as a JSON Pointer (RFC 6901),
+// "" being the document itself, and reports whether err carries one.
 //
 // The pointer is built from the document's own member names and array
 // indices, so it is the input's text, bounded to MaxPointerBytes: a location,
@@ -156,10 +166,10 @@ func PointerOf(err error) (pointer string, ok bool) {
 func classify(decodeErr error) error {
 	//: a semantic refusal: well-formed, but not what the target holds.
 	if semantic, isSemantic := errors.AsType[*jsonv2.SemanticError](decodeErr); isSemantic {
-		sentinel := ValueMismatched
+		sentinel := corestrictjson.ValueMismatched
 		//: the one semantic refusal with a code of its own.
 		if errors.Is(decodeErr, jsonv2.ErrUnknownName) {
-			sentinel = MemberUnknown
+			sentinel = corestrictjson.MemberUnknown
 		}
 		//: located, and nothing more.
 		return located(sentinel, semantic.JSONPointer, semantic.ByteOffset)
@@ -167,10 +177,10 @@ func classify(decodeErr error) error {
 	//: a syntactic refusal: not one well-formed value.
 	if syntactic, isSyntactic := errors.AsType[*jsontext.SyntacticError](decodeErr); isSyntactic {
 		//: located, and nothing more.
-		return located(DocumentMalformed, syntactic.JSONPointer, syntactic.ByteOffset)
+		return located(corestrictjson.DocumentMalformed, syntactic.JSONPointer, syntactic.ByteOffset)
 	}
 	//: an input that ended inside the value, reported without a location.
-	return errs.Wrap(DocumentMalformed, errs.WrapParams{})
+	return errs.Wrap(corestrictjson.DocumentMalformed, errs.WrapParams{})
 }
 
 // located builds a refusal carrying where the document failed.
@@ -201,8 +211,9 @@ func boundPointer(pointer string) string {
 	return ""
 }
 
-// misconfigured refuses a call before anything is read.
-func misconfigured(argument string) error {
+// Misconfigured refuses a call before anything is read: DecodeMisconfigured,
+// with the argument's name — never its value — as a field.
+func Misconfigured(argument string) error {
 	//: the argument's name, never its value.
-	return errs.Wrap(DecodeMisconfigured, errs.WrapParams{}, errs.String(fieldArgument, argument))
+	return errs.Wrap(corestrictjson.DecodeMisconfigured, errs.WrapParams{}, errs.String(fieldArgument, argument))
 }

@@ -6,7 +6,6 @@ go_library(
     name = "toml",
     srcs = [
         "codec.go",
-        "codes.go",
         "decode.go",
         "decode_scalar.go",
         "decode_value.go",
@@ -31,6 +30,7 @@ go_library(
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/scratch",
+        "//internal/core/data/codec/toml",
         "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
     ],
@@ -64,10 +64,4 @@ go_test(
         "//internal/core/data/codec",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

@@ -19,10 +19,6 @@ import (
 	"github.com/kitsunium/sdk/pkg/v1/errs"
 )
 
-// foreignModules are the libraries this package must not link: the BSON
-// library it replaced, and every other format's.
-var foreignModules = []string{"go.mongodb.org/", "github.com/fxamacker/cbor", "github.com/vmihailenco/msgpack", "gopkg.in/yaml.v3", "github.com/pelletier/go-toml"}
-
 // shipment is a struct the round trip encodes.
 type shipment struct {
 	// ID is an ObjectID.
@@ -161,33 +157,10 @@ func TestItRegistersItsFormatAlone(t *testing.T) {
 	}
 }
 
-// TestItLinksNoThirdPartyLibrary reads the modules this test binary was linked
-// from: BSON is implemented with the standard library, so none of a codec
-// library's. Bazel builds without module information, which only `go test`
-// records.
-func TestItLinksNoThirdPartyLibrary(t *testing.T) {
-	t.Parallel()
-	info, ok := debug.ReadBuildInfo()
-	//: no module information: built by Bazel.
-	if !ok || len(info.Deps) == 0 {
-		t.Skip("built without module information (Bazel's rules_go); TestItRegistersItsFormatAlone pins the registry under both")
-	}
-	//: every module linked.
-	for _, dependency := range info.Deps {
-		//: none of a codec library.
-		for _, foreign := range foreignModules {
-			//: a match is a library the program did not ask for.
-			if strings.HasPrefix(dependency.Path, foreign) {
-				t.Errorf("the program links %s", dependency.Path)
-			}
-		}
-	}
-}
-
-// TestGoListDepsNamesNoOtherCodec asks the go tool itself what this package
-// depends on: no other codec package, and no library outside the standard
-// library and the SDK. It needs the go tool, which a Bazel sandbox does not
-// have.
+// TestGoListDepsNamesNoOtherCodec asks the go tool what this package depends
+// on: the codec registry, this format's own packages, nothing of another
+// codec, and nothing outside the SDK and the standard library. It needs the go
+// tool, which a Bazel sandbox does not have.
 func TestGoListDepsNamesNoOtherCodec(t *testing.T) {
 	t.Parallel()
 	goTool, err := exec.LookPath("go")
@@ -202,10 +175,44 @@ func TestGoListDepsNamesNoOtherCodec(t *testing.T) {
 	}
 	//: every non-standard package the facade depends on.
 	for line := range strings.FieldsSeq(string(output)) {
-		//: another codec's package, or anything outside the SDK.
-		if !strings.HasPrefix(line, "github.com/kitsunium/sdk/") ||
-			(strings.HasPrefix(line, "github.com/kitsunium/sdk/internal/service/data/codec/") && line != "github.com/kitsunium/sdk/internal/service/data/codec/bson") {
+		//: a package outside the SDK, or another format's.
+		if !strings.HasPrefix(line, "github.com/kitsunium/sdk/") || isAnotherCodec(line) {
 			t.Errorf("go list -deps names %s", line)
+		}
+	}
+}
+
+// isAnotherCodec reports whether an import path is a codec package other than
+// this format's service package and its core mirror; the registry and the
+// shared scratch threshold are every codec's.
+func isAnotherCodec(path string) bool {
+	for _, layer := range []string{"github.com/kitsunium/sdk/internal/service/data/codec/", "github.com/kitsunium/sdk/internal/core/data/codec/"} {
+		rest, found := strings.CutPrefix(path, layer)
+		//: under a codec tree, and neither this format nor the shared scratch.
+		if found && rest != "bson" && rest != "scratch" {
+			return true
+		}
+	}
+	//: not a codec package, or this format's own.
+	return false
+}
+
+// TestItLinksNoModuleOutsideTheSDK reads the modules this test binary was
+// linked from: the SDK's own, and nothing else — the gate ADR 0156 §1 states.
+// Bazel builds without module information, which only `go test` records;
+// TestItRegistersItsFormatAlone holds under both.
+func TestItLinksNoModuleOutsideTheSDK(t *testing.T) {
+	t.Parallel()
+	info, ok := debug.ReadBuildInfo()
+	//: no module information: built by Bazel.
+	if !ok || len(info.Deps) == 0 {
+		t.Skip("built without module information (Bazel's rules_go); TestItRegistersItsFormatAlone pins the registry under both")
+	}
+	//: every module linked.
+	for _, dependency := range info.Deps {
+		//: the SDK's own modules, and only those.
+		if dependency.Path != "github.com/kitsunium/sdk" && !strings.HasPrefix(dependency.Path, "github.com/kitsunium/sdk/") {
+			t.Errorf("the program links %s", dependency.Path)
 		}
 	}
 }

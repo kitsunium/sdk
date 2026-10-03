@@ -2,10 +2,12 @@
 // consumer needs to send what Marshal(Multipart, …) returns. The format is a
 // container whose delimiter lives in the Content-Type header, which the Codec
 // contract cannot carry, so the facade publishes the two shapes the codec
-// speaks natively and the function that recovers that header from the body.
+// speaks natively and the function that recovers that header from the body —
+// the multipart package's own Form, Part and ContentType, under the names this
+// package has always given them.
 package codec
 
-import svcmultipart "github.com/kitsunium/sdk/internal/service/data/codec/multipart"
+import "github.com/kitsunium/sdk/pkg/v1/data/codec/multipart"
 
 // MultipartForm is the native Go shape of the [Multipart] format: a whole
 // multipart/form-data body — its RFC 2046 boundary and its parts, in wire
@@ -16,7 +18,7 @@ import svcmultipart "github.com/kitsunium/sdk/internal/service/data/codec/multip
 // only for a body this codec encoded, since a part header other than the name,
 // filename and media type is not carried through, and a filename is decoded to
 // its last path element.
-type MultipartForm = svcmultipart.FormValue
+type MultipartForm = multipart.Form
 
 // MultipartPart is one section of a [MultipartForm]: a named field, optionally
 // a filename and a media type, and the bytes themselves — a file upload is a
@@ -34,7 +36,7 @@ type MultipartForm = svcmultipart.FormValue
 // it with its own separator. `C:\Users\ada\cv.pdf` decodes to `cv.pdf` on
 // Linux exactly as on Windows. Nothing else is removed, so a caller turning
 // FileName into a path still validates it first.
-type MultipartPart = svcmultipart.PartValue
+type MultipartPart = multipart.Part
 
 // MultipartContentType returns the Content-Type header value —
 // "multipart/form-data; boundary=…", quoted when the boundary needs it — for a
@@ -48,6 +50,6 @@ type MultipartPart = svcmultipart.PartValue
 // before the first byte instead: the Encoder returned has a Boundary() string
 // method, and mime.FormatMediaType builds the same value from it.
 func MultipartContentType(body []byte) (value string, err error) {
-	//: delegate to the service helper, which owns the boundary recovery.
-	return svcmultipart.ContentType(body)
+	//: the multipart package's, which the service helper behind it owns.
+	return multipart.ContentType(body)
 }

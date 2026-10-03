@@ -19,6 +19,11 @@ PEM codec wrapping stdlib `encoding/pem`. PEM is block-structured (`-----BEGIN C
 
 ## Error codes (range `0.3.10.*`)
 
+Declared in `internal/core/data/codec/pem` — `codes.go` and `errors.go` — and used
+here as `corepem.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.10.1`   | `MarshalFailed`   | `encoding/pem.Encode` returned an error |

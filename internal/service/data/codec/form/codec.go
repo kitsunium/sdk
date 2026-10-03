@@ -24,6 +24,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coreform "github.com/kitsunium/sdk/internal/core/data/codec/form"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -152,7 +153,7 @@ func (*formCodec) Unmarshal(data []byte, v any) error {
 	if len(data) > maxFormBytes {
 		//: surface the documented sentinel with the offending sizes.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeFormUnmarshalFailed,
+			Code:    coreform.CodeFormUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "form body exceeds size limit",
 			Private: "service/data/codec/form.Unmarshal: payload length exceeds maxFormBytes",
@@ -165,7 +166,7 @@ func (*formCodec) Unmarshal(data []byte, v any) error {
 	if pairs := bytes.Count(data, []byte{'&'}) + 1; pairs > maxFormPairs {
 		//: surface the documented sentinel with the offending counts.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeFormUnmarshalFailed,
+			Code:    coreform.CodeFormUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "form body declares too many pairs",
 			Private: "service/data/codec/form.Unmarshal: pair count exceeds maxFormPairs",
@@ -181,7 +182,7 @@ func (*formCodec) Unmarshal(data []byte, v any) error {
 	if perr != nil {
 		//: wrap the stdlib error for reason-based matching.
 		return errs.Wrap(perr, errs.WrapParams{
-			Code:    CodeFormUnmarshalFailed,
+			Code:    coreform.CodeFormUnmarshalFailed,
 			Reason:  "UNMARSHAL_FAILED",
 			Public:  "form decoding failed",
 			Private: "service/data/codec/form.Unmarshal: net/url.ParseQuery returned an error",
@@ -279,7 +280,7 @@ func collapseSingle(values url.Values) (single map[string]string, err error) {
 	if offenderCount > 0 {
 		//: surface the documented sentinel naming the offending key.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeFormMultiValue,
+			Code:    coreform.CodeFormMultiValue,
 			Reason:  "MULTI_VALUE",
 			Public:  "form key carries multiple values",
 			Private: "service/data/codec/form.Unmarshal: map[string]string target cannot hold a repeated key",
@@ -527,7 +528,7 @@ func isUnreservedMark(c byte) bool {
 func valueInvalid(detail string) error {
 	//: one sentinel shape, one construction site.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeFormValueInvalid,
+		Code:    coreform.CodeFormValueInvalid,
 		Reason:  "VALUE_INVALID",
 		Public:  "form codec requires a url.Values-shaped value",
 		Private: "service/data/codec/form." + detail,

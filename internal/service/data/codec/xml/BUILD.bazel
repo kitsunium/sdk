@@ -6,16 +6,15 @@ go_library(
     name = "xml",
     srcs = [
         "codec.go",
-        "codes.go",
         "decoder.go",
         "encoder.go",
-        "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/data/codec/xml",
     visibility = ["//internal/service:service_consumers"],
     deps = [
         "//internal/core/data/codec",
         "//internal/core/data/codec/scratch",
+        "//internal/core/data/codec/xml",
         "//internal/kernel/errs",
     ],
 )
@@ -39,12 +38,7 @@ go_test(
     embed = [":xml"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/xml",
         "//internal/kernel/errs",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

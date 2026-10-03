@@ -6,7 +6,6 @@ go_library(
     name = "bson",
     srcs = [
         "codec.go",
-        "codes.go",
         "decimal.go",
         "decode.go",
         "decode_any.go",
@@ -31,6 +30,7 @@ go_library(
     ],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/bson",
         "//internal/core/data/codec/scratch",
         "//internal/kernel/concur/recycler",
         "//internal/kernel/errs",
@@ -44,15 +44,6 @@ alias(
         "//:__subpackages__",
         "//internal/service:service_consumers",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST
-# audit (errs.Define emitters must be in //:audit_sources). Kept out of the
-# gazelle-managed rules above so a re-run preserves it.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )
 
 go_test(
@@ -70,6 +61,7 @@ go_test(
     embed = [":bson"],
     deps = [
         "//internal/core/data/codec",
+        "//internal/core/data/codec/bson",
         "//internal/kernel/errs",
     ],
 )

@@ -1,0 +1,31 @@
+load("@rules_go//go:def.bzl", "go_library", "go_test")
+
+package(default_visibility = ["//visibility:public"])
+
+go_library(
+    name = "xml",
+    srcs = ["xml.go"],
+    importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/xml",
+    visibility = ["//visibility:public"],
+    deps = [
+        "//internal/core/data/codec/xml",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/xml",
+    ],
+)
+
+alias(
+    name = "go_default_library",
+    actual = ":xml",
+    visibility = ["//visibility:public"],
+)
+
+go_test(
+    name = "xml_test",
+    srcs = ["xml_external_test.go"],
+    deps = [
+        ":xml",
+        "//internal/core/data/codec",
+        "//pkg/v1/errs",
+    ],
+)

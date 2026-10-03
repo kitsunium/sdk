@@ -109,16 +109,16 @@ const (
 ```go
 const (
     // CodeMarshalFailed identifies a value Marshal or Append cannot encode.
-    CodeMarshalFailed errs.Code = svcbson.CodeBSONMarshalFailed
+    CodeMarshalFailed errs.Code = corebson.CodeBSONMarshalFailed
     // CodeUnmarshalFailed identifies input Unmarshal refuses.
-    CodeUnmarshalFailed errs.Code = svcbson.CodeBSONUnmarshalFailed
+    CodeUnmarshalFailed errs.Code = corebson.CodeBSONUnmarshalFailed
     // CodeSizeExceeded identifies an Unmarshal input past 10 MiB.
-    CodeSizeExceeded errs.Code = svcbson.CodeBSONSizeExceeded
+    CodeSizeExceeded errs.Code = corebson.CodeBSONSizeExceeded
     // CodeDepthExceeded identifies nesting past 100 levels.
-    CodeDepthExceeded errs.Code = svcbson.CodeBSONDepthExceeded
+    CodeDepthExceeded errs.Code = corebson.CodeBSONDepthExceeded
     // CodeValueInvalid identifies a value type's constructor or parser
     // refusing its input.
-    CodeValueInvalid errs.Code = svcbson.CodeBSONValueInvalid
+    CodeValueInvalid errs.Code = corebson.CodeBSONValueInvalid
 )
 ```
 
@@ -135,22 +135,22 @@ const Format = "bson"
 ```go
 var (
     // MarshalFailed marks a value Marshal or Append cannot encode.
-    MarshalFailed = svcbson.MarshalFailed
+    MarshalFailed = corebson.MarshalFailed
     // UnmarshalFailed marks input Unmarshal refuses.
-    UnmarshalFailed = svcbson.UnmarshalFailed
+    UnmarshalFailed = corebson.UnmarshalFailed
     // SizeExceeded marks an Unmarshal input past 10 MiB.
-    SizeExceeded = svcbson.SizeExceeded
+    SizeExceeded = corebson.SizeExceeded
     // DepthExceeded marks nesting past 100 levels.
-    DepthExceeded = svcbson.DepthExceeded
+    DepthExceeded = corebson.DepthExceeded
     // ValueInvalid marks a value type's constructor or parser refusing its input.
-    ValueInvalid = svcbson.ValueInvalid
+    ValueInvalid = corebson.ValueInvalid
     // NilObjectID is the zero ObjectID.
     NilObjectID ObjectID
 )
 ```
 
 <a name="Append"></a>
-## func [Append](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L181>)
+## func [Append](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L182>)
 
 ```go
 func Append(dst []byte, v any) ([]byte, error)
@@ -159,7 +159,7 @@ func Append(dst []byte, v any) ([]byte, error)
 Append encodes v and appends the document to dst; a dst with room allocates nothing. On failure dst is returned with its original length.
 
 <a name="Marshal"></a>
-## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L174>)
+## func [Marshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L175>)
 
 ```go
 func Marshal(v any) ([]byte, error)
@@ -168,7 +168,7 @@ func Marshal(v any) ([]byte, error)
 Marshal encodes v, which must encode as a document, into a slice the caller owns.
 
 <a name="Unmarshal"></a>
-## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L196>)
+## func [Unmarshal](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L197>)
 
 ```go
 func Unmarshal(data []byte, v any) error
@@ -177,7 +177,7 @@ func Unmarshal(data []byte, v any) error
 Unmarshal decodes one BSON document into v, a non\-nil pointer or map. The input is checked whole before v is written.
 
 <a name="A"></a>
-## type [A](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L139>)
+## type [A](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L140>)
 
 A is an array.
 
@@ -186,7 +186,7 @@ type A = svcbson.A
 ```
 
 <a name="Binary"></a>
-## type [Binary](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L149>)
+## type [Binary](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L150>)
 
 Binary is bytes and the subtype naming what they are.
 
@@ -195,7 +195,7 @@ type Binary = svcbson.Binary
 ```
 
 <a name="CodeWithScope"></a>
-## type [CodeWithScope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L161>)
+## type [CodeWithScope](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L162>)
 
 CodeWithScope is the deprecated JavaScript with its scope document.
 
@@ -204,7 +204,7 @@ type CodeWithScope = svcbson.CodeWithScope
 ```
 
 <a name="D"></a>
-## type [D](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L133>)
+## type [D](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L134>)
 
 D is a document whose element order matters.
 
@@ -213,7 +213,7 @@ type D = svcbson.D
 ```
 
 <a name="DBPointer"></a>
-## type [DBPointer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L155>)
+## type [DBPointer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L156>)
 
 DBPointer is the deprecated namespace\-and\-ObjectID pointer.
 
@@ -222,7 +222,7 @@ type DBPointer = svcbson.DBPointer
 ```
 
 <a name="DateTime"></a>
-## type [DateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L144>)
+## type [DateTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L145>)
 
 DateTime is milliseconds since the Unix epoch, UTC.
 
@@ -231,7 +231,7 @@ type DateTime = svcbson.DateTime
 ```
 
 <a name="NewDateTimeFromTime"></a>
-### func [NewDateTimeFromTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L210>)
+### func [NewDateTimeFromTime](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L211>)
 
 ```go
 func NewDateTimeFromTime(t time.Time) DateTime
@@ -240,7 +240,7 @@ func NewDateTimeFromTime(t time.Time) DateTime
 NewDateTimeFromTime returns the DateTime t falls in, truncated to the millisecond.
 
 <a name="Decimal128"></a>
-## type [Decimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L147>)
+## type [Decimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L148>)
 
 Decimal128 is an IEEE 754\-2008 128\-bit decimal, converted exactly or not at all.
 
@@ -249,7 +249,7 @@ type Decimal128 = svcbson.Decimal128
 ```
 
 <a name="NewDecimal128"></a>
-### func [NewDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L217>)
+### func [NewDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L218>)
 
 ```go
 func NewDecimal128(high, low uint64) Decimal128
@@ -258,7 +258,7 @@ func NewDecimal128(high, low uint64) Decimal128
 NewDecimal128 returns the decimal whose BID encoding is high \(the first eight bytes\) and low \(the last eight\).
 
 <a name="ParseDecimal128"></a>
-### func [ParseDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L224>)
+### func [ParseDecimal128](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L225>)
 
 ```go
 func ParseDecimal128(s string) (Decimal128, error)
@@ -267,7 +267,7 @@ func ParseDecimal128(s string) (Decimal128, error)
 ParseDecimal128 parses a decimal's string form — "1.23", "\-4E\+5", "NaN", "Infinity" — refusing one a decimal128 cannot hold exactly.
 
 <a name="E"></a>
-## type [E](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L135>)
+## type [E](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L136>)
 
 E is one element of a D.
 
@@ -276,7 +276,7 @@ type E = svcbson.E
 ```
 
 <a name="JavaScript"></a>
-## type [JavaScript](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L157>)
+## type [JavaScript](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L158>)
 
 JavaScript is JavaScript code.
 
@@ -285,7 +285,7 @@ type JavaScript = svcbson.JavaScript
 ```
 
 <a name="M"></a>
-## type [M](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L137>)
+## type [M](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L138>)
 
 M is a document whose element order does not; its keys are written sorted.
 
@@ -294,7 +294,7 @@ type M = svcbson.M
 ```
 
 <a name="MaxKey"></a>
-## type [MaxKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L165>)
+## type [MaxKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L166>)
 
 MaxKey sorts higher than every other value.
 
@@ -303,7 +303,7 @@ type MaxKey = svcbson.MaxKey
 ```
 
 <a name="MinKey"></a>
-## type [MinKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L163>)
+## type [MinKey](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L164>)
 
 MinKey sorts lower than every other value.
 
@@ -312,7 +312,7 @@ type MinKey = svcbson.MinKey
 ```
 
 <a name="Null"></a>
-## type [Null](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L169>)
+## type [Null](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L170>)
 
 Null is an explicit null, for a D.
 
@@ -321,7 +321,7 @@ type Null = svcbson.Null
 ```
 
 <a name="ObjectID"></a>
-## type [ObjectID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L142>)
+## type [ObjectID](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L143>)
 
 ObjectID is the twelve\-byte identifier; its text and JSON forms are 24 hexadecimal digits.
 
@@ -330,7 +330,7 @@ type ObjectID = svcbson.ObjectID
 ```
 
 <a name="ObjectIDFromHex"></a>
-### func [ObjectIDFromHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L203>)
+### func [ObjectIDFromHex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L204>)
 
 ```go
 func ObjectIDFromHex(s string) (ObjectID, error)
@@ -339,7 +339,7 @@ func ObjectIDFromHex(s string) (ObjectID, error)
 ObjectIDFromHex parses the 24\-digit hexadecimal form of an ObjectID, in either case.
 
 <a name="Regex"></a>
-## type [Regex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L151>)
+## type [Regex](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L152>)
 
 Regex is a pattern and its options.
 
@@ -348,7 +348,7 @@ type Regex = svcbson.Regex
 ```
 
 <a name="Symbol"></a>
-## type [Symbol](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L159>)
+## type [Symbol](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L160>)
 
 Symbol is the deprecated symbol.
 
@@ -357,7 +357,7 @@ type Symbol = svcbson.Symbol
 ```
 
 <a name="Timestamp"></a>
-## type [Timestamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L153>)
+## type [Timestamp](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L154>)
 
 Timestamp is the replication timestamp: seconds and an increment.
 
@@ -366,7 +366,7 @@ type Timestamp = svcbson.Timestamp
 ```
 
 <a name="Undefined"></a>
-## type [Undefined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L167>)
+## type [Undefined](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/data/codec/bson/bson.go#L168>)
 
 Undefined is the deprecated undefined value.
 

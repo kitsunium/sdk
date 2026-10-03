@@ -11,6 +11,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	corecsv "github.com/kitsunium/sdk/internal/core/data/codec/csv"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -109,7 +110,7 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 	if !ok {
 		//: caller passed something that is not [][]string — loud failure.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeCSVValueInvalid,
+			Code:    corecsv.CodeCSVValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/data/codec/csv.Marshal: argument is not [][]string",
@@ -139,7 +140,7 @@ func (c *csvCodec) Marshal(v any) (encoded []byte, err error) {
 		scratch.ReleaseBuffer(buf)
 		//: wrap the stdlib error.
 		return nil, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeCSVMarshalFailed,
+			Code:    corecsv.CodeCSVMarshalFailed,
 			Reason:  "MARSHAL_FAILED",
 			Public:  "CSV encoding failed",
 			Private: "service/data/codec/csv.Marshal: WriteAll returned an error",
@@ -304,7 +305,7 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 	if !ok {
 		//: caller passed something that is not *[][]string — loud failure.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeCSVValueInvalid,
+			Code:    corecsv.CodeCSVValueInvalid,
 			Reason:  "VALUE_INVALID",
 			Public:  "CSV codec requires a [][]string value",
 			Private: "service/data/codec/csv.Unmarshal: target is not *[][]string",
@@ -332,7 +333,7 @@ func (*csvCodec) Unmarshal(data []byte, v any) error {
 	}
 	//: wrap the stdlib error.
 	return errs.Wrap(rerr, errs.WrapParams{
-		Code:    CodeCSVUnmarshalFailed,
+		Code:    corecsv.CodeCSVUnmarshalFailed,
 		Reason:  "UNMARSHAL_FAILED",
 		Public:  "CSV decoding failed",
 		Private: "service/data/codec/csv.Unmarshal: ReadAll returned an error",

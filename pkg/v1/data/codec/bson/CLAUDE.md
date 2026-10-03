@@ -24,8 +24,10 @@ verbs in one import, without the full registry.
 | `CodeMarshalFailed` … `CodeValueInvalid`, `MarshalFailed` … `ValueInvalid` | the `0.3.36.*` codes and sentinels |
 
 Every type is an alias of `internal/service/data/codec/bson`, which owns them (ADR
-0074); every function forwards. The mapping, the hardening and the
-differences from the MongoDB driver are documented there.
+0074); every function forwards. The codes and sentinels alias
+`internal/core/data/codec/bson`, where they are declared (ADR 0160). The
+mapping, the hardening and the differences from the MongoDB driver are
+documented in the service package.
 
 ## Why-this-shape
 
@@ -44,7 +46,8 @@ differences from the MongoDB driver are documented there.
 ## Do NOT
 
 - Import another codec here, or `pkg/v1/data/codec`.
-- Declare a type here: alias the service package's, which owns it.
+- Declare a type here: alias the service package's, which owns it — and a
+  code or a sentinel from the core's, which declares it.
 - Hand-edit `README.md` — regenerate with `make docs-readme`.
 
 ## Verification
@@ -54,7 +57,7 @@ bazel test --config=race //pkg/v1/data/codec/bson:bson_test
 cd pkg && GOWORK=off go test -race ./v1/data/codec/bson/
 ```
 
-`TestItLinksNoThirdPartyLibrary` skips under Bazel, which records no module
+`TestItLinksNoModuleOutsideTheSDK` skips under Bazel, which records no module
 information in a binary, and `TestGoListDepsNamesNoOtherCodec` without a go
 tool on PATH; `TestItRegistersItsFormatAlone` holds under both.
 

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"testing"
 
+	corejsonpatch "github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch"
 )
@@ -172,7 +173,7 @@ func TestDocumentsThatAreNotJSON(t *testing.T) {
 				from, to = valid, []byte(doc)
 			}
 			edits, err := jsonpatch.Diff(from, to)
-			if !errs.HasCode(err, jsonpatch.CodeNotJSON) || edits != nil {
+			if !errs.HasCode(err, corejsonpatch.CodeNotJSON) || edits != nil {
 				t.Fatalf("%s as %s: Diff = %v, %v, want NotJSON", name, which, edits, err)
 			}
 			text := err.Error() + errs.PublicOf(err) + errs.PrivateOf(err)

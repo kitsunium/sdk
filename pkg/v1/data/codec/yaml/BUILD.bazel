@@ -7,7 +7,11 @@ go_library(
     srcs = ["yaml.go"],
     importpath = "github.com/kitsunium/sdk/pkg/v1/data/codec/yaml",
     visibility = ["//visibility:public"],
-    deps = ["//internal/service/data/codec/yaml"],
+    deps = [
+        "//internal/core/data/codec/yaml",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/yaml",
+    ],
 )
 
 alias(
@@ -23,5 +27,6 @@ go_test(
         ":yaml",
         "//internal/core/data/codec",
         "//pkg/v1/app/config",
+        "//pkg/v1/errs",
     ],
 )

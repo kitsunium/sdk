@@ -67,6 +67,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
 	"github.com/kitsunium/sdk/internal/core/data/codec/scratch"
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -134,7 +135,7 @@ func (*yamlCodec) Unmarshal(data []byte, v any) error {
 	//: the byte bound, before a byte is read.
 	if len(data) > maxYAMLBytes {
 		//: refused, with the sizes.
-		return errs.Wrap(UnmarshalFailed, errs.WrapParams{},
+		return errs.Wrap(coreyaml.UnmarshalFailed, errs.WrapParams{},
 			errs.Int("len", len(data)), errs.Int("cap", maxYAMLBytes),
 			errs.String("detail", "the document is larger than the decoder accepts"))
 	}

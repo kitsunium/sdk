@@ -13,6 +13,7 @@ import (
 	"strconv"
 	"unicode/utf8"
 
+	coretoml "github.com/kitsunium/sdk/internal/core/data/codec/toml"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -172,7 +173,7 @@ func encodeFail(problem string, t reflect.Type) error {
 		name = t.String()
 	}
 	//: the sentinel's code and messages, with the problem as fields.
-	return errs.Wrap(MarshalFailed, errs.WrapParams{}, errs.String(fieldProblem, problem), errs.String(fieldType, name))
+	return errs.Wrap(coretoml.MarshalFailed, errs.WrapParams{}, errs.String(fieldProblem, problem), errs.String(fieldType, name))
 }
 
 // table writes the key-values of table v, a map or a struct, then its

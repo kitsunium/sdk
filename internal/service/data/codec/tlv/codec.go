@@ -13,6 +13,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coretlv "github.com/kitsunium/sdk/internal/core/data/codec/tlv"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -76,7 +77,7 @@ func (*tlvCodec) Unmarshal(data []byte, v any) error {
 	if len(data) > maxTLVBytes {
 		//: surface the size sentinel with diagnostic Fields.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeTLVSizeExceeded,
+			Code:    coretlv.CodeTLVSizeExceeded,
 			Reason:  "SIZE_EXCEEDED",
 			Public:  "TLV input exceeds size limit",
 			Private: "service/data/codec/tlv.Unmarshal: len(data) exceeds maxTLVBytes",

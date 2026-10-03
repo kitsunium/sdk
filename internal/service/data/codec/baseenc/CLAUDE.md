@@ -66,6 +66,11 @@ the outer base-N step wraps the JSON.
 
 ## Error codes (range `0.3.24.*`)
 
+Declared in `internal/core/data/codec/baseenc` — `codes.go` and `errors.go` — and used
+here as `corebaseenc.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var                     | Trigger |
 |---|---|---|
 | `0.3.24.1`   | `BaseEncMarshalFailed`  | `encoding/json.Marshal` failed before the base-N step |

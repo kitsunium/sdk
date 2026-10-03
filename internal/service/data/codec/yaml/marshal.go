@@ -8,6 +8,7 @@ import (
 	"strconv"
 	"time"
 
+	coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -313,7 +314,7 @@ func callMarshalText(target reflect.Value, t reflect.Type) (resolved, bool, erro
 func hookMarshalFailed(cause error, t reflect.Type) error {
 	//: the hook's error, with the type that raised it.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeYAMLMarshalFailed,
+		Code:    coreyaml.CodeYAMLMarshalFailed,
 		Reason:  "MARSHAL_FAILED",
 		Public:  "YAML encoding failed",
 		Private: "service/data/codec/yaml: a type's own encoding hook returned an error",

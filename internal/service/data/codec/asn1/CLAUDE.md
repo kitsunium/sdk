@@ -18,6 +18,11 @@ ASN.1 DER codec wrapping stdlib `encoding/asn1`. Emits DER exclusively (the stdl
 
 ## Error codes (range `0.3.9.*`)
 
+Declared in `internal/core/data/codec/asn1` — `codes.go` and `errors.go` — and used
+here as `coreasn1.<Var>` (ADR 0160 §2: a code lives in the core at the path that
+mirrors the package emitting it). The values, reasons and texts are the ones this
+package always emitted; only the declaration moved.
+
 | Code         | Var               | Trigger |
 |---|---|---|
 | `0.3.9.1`    | `MarshalFailed`   | `encoding/asn1.Marshal` returned an error |

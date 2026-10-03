@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coremsgpack "github.com/kitsunium/sdk/internal/core/data/codec/msgpack"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/data/codec/msgpack"
 )
@@ -144,8 +145,8 @@ func checkFailure(t *testing.T, err error) {
 	if err == nil {
 		return
 	}
-	if code, ok := errs.CodeOf(err); !ok || code != msgpack.CodeMsgPackUnmarshalFailed || !errs.HasReason(err, "UNMARSHAL_FAILED") {
-		t.Fatalf("failure is not UNMARSHAL_FAILED %s: %v", msgpack.CodeMsgPackUnmarshalFailed, err)
+	if code, ok := errs.CodeOf(err); !ok || code != coremsgpack.CodeMsgPackUnmarshalFailed || !errs.HasReason(err, "UNMARSHAL_FAILED") {
+		t.Fatalf("failure is not UNMARSHAL_FAILED %s: %v", coremsgpack.CodeMsgPackUnmarshalFailed, err)
 	}
 }
 

@@ -1,6 +1,8 @@
 // Package yaml — flow collections: [a, b] and {k: v}, across lines.
 package yaml
 
+import coreyaml "github.com/kitsunium/sdk/internal/core/data/codec/yaml"
+
 // closingOf returns the indicator closing the flow collection opener opens.
 func closingOf(opener byte) byte {
 	//: a sequence.
@@ -152,7 +154,7 @@ func (p *parser) flowSequenceEntry(parent int) (int32, error) {
 		//: a collection followed by ":" is a key.
 		if p.peek() == ':' {
 			//: a complex key.
-			return noNode, p.refuseAt(ComplexKeyRefused, line, off)
+			return noNode, p.refuseAt(coreyaml.ComplexKeyRefused, line, off)
 		}
 		//: the collection.
 		return idx, nil
@@ -208,7 +210,7 @@ func (p *parser) flowPair(parent int) (key, value int32, err error) {
 	//: a collection as a key.
 	if c := p.peek(); c == '[' || c == '{' {
 		//: a complex key.
-		return noNode, noNode, p.refuseAt(ComplexKeyRefused, line, off)
+		return noNode, noNode, p.refuseAt(coreyaml.ComplexKeyRefused, line, off)
 	}
 	text, style, err := p.flowKey()
 	//: refused.

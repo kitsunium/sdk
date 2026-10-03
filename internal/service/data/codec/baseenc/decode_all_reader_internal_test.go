@@ -11,6 +11,7 @@ import (
 	"strings"
 	"testing"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -97,7 +98,7 @@ func Test_decodeAllReader_Read(t *testing.T) {
 			name:     "a malformed payload fails on the first Read",
 			v:        variantBase45,
 			src:      func(*testing.T) io.Reader { return strings.NewReader("ab8") },
-			wantCode: CodeBaseEncDecodeFailed,
+			wantCode: corebaseenc.CodeBaseEncDecodeFailed,
 		},
 		{
 			//: one byte past the cap: the refusal must fire before the decode,
@@ -107,7 +108,7 @@ func Test_decodeAllReader_Read(t *testing.T) {
 			src: func(*testing.T) io.Reader {
 				return bytes.NewReader(bytes.Repeat([]byte("1"), maxConvEncodedBytes+1))
 			},
-			wantCode: CodeBaseEncSizeExceeded,
+			wantCode: corebaseenc.CodeBaseEncSizeExceeded,
 		},
 		{
 			name:          "a source that fails reports its own error",

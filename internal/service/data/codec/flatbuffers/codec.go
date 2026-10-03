@@ -16,6 +16,7 @@ import (
 	"slices"
 
 	"github.com/kitsunium/sdk/internal/core/data/codec"
+	coreflatbuffers "github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -141,7 +142,7 @@ func (*flatbuffersCodec) Unmarshal(data []byte, v any) error {
 	}
 	//: anything else is a programming error for this codec.
 	return errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeFlatbuffersBadTarget,
+		Code:    coreflatbuffers.CodeFlatbuffersBadTarget,
 		Reason:  "FLATBUFFERS_BAD_TARGET",
 		Public:  "FlatBuffers codec requires a *[]byte or BytesAcceptor target",
 		Private: "service/data/codec/flatbuffers.Unmarshal: target is not *[]byte and does not implement BytesAcceptor",
@@ -180,7 +181,7 @@ func resolveSourceBytes(v any) (src []byte, err error) {
 	}
 	//: anything else is a programming error for this codec.
 	return nil, errs.Wrap(nil, errs.WrapParams{
-		Code:    CodeFlatbuffersBadType,
+		Code:    coreflatbuffers.CodeFlatbuffersBadType,
 		Reason:  "FLATBUFFERS_BAD_TYPE",
 		Public:  "FlatBuffers codec requires []byte or a BytesProvider value",
 		Private: "service/data/codec/flatbuffers.Marshal: argument is not []byte and does not implement BytesProvider",
@@ -195,7 +196,7 @@ func validateBuffer(data []byte) error {
 	if len(data) < flatBuffersHeaderBytes {
 		//: surface the typed truncation sentinel.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeFlatbuffersTruncated,
+			Code:    coreflatbuffers.CodeFlatbuffersTruncated,
 			Reason:  "FLATBUFFERS_TRUNCATED",
 			Public:  "FlatBuffers buffer is truncated",
 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) < flatBuffersHeaderBytes",
@@ -205,7 +206,7 @@ func validateBuffer(data []byte) error {
 	if len(data) > maxFlatBuffersBytes {
 		//: same sentinel; the size policy is documented on the const.
 		return errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeFlatbuffersTruncated,
+			Code:    coreflatbuffers.CodeFlatbuffersTruncated,
 			Reason:  "FLATBUFFERS_TRUNCATED",
 			Public:  "FlatBuffers buffer exceeds size limit",
 			Private: "service/data/codec/flatbuffers.validateBuffer: len(data) > maxFlatBuffersBytes",

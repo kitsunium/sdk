@@ -8,6 +8,7 @@ import (
 	stdjson "encoding/json"
 	"io"
 
+	corebaseenc "github.com/kitsunium/sdk/internal/core/data/codec/baseenc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -36,7 +37,7 @@ func (e *baseencEncoder) Encode(v any) error {
 	}
 	//: wrap the stdlib JSON error.
 	return errs.Wrap(jerr, errs.WrapParams{
-		Code:    CodeBaseEncMarshalFailed,
+		Code:    corebaseenc.CodeBaseEncMarshalFailed,
 		Reason:  "BASE_ENC_MARSHAL_FAILED",
 		Public:  "base-N encoding failed",
 		Private: "service/data/codec/baseenc.Encoder.Encode: encoding/json returned an error",
@@ -55,7 +56,7 @@ func (e *baseencEncoder) Close() error {
 	}
 	//: wrap the base-N writer's failure.
 	return errs.Wrap(cerr, errs.WrapParams{
-		Code:    CodeBaseEncMarshalFailed,
+		Code:    corebaseenc.CodeBaseEncMarshalFailed,
 		Reason:  "BASE_ENC_MARSHAL_FAILED",
 		Public:  "base-N encoding failed",
 		Private: "service/data/codec/baseenc.Encoder.Close: base-N writer returned an error",

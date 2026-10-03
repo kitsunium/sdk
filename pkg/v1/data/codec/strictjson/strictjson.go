@@ -5,9 +5,8 @@
 // no refusal ever repeats a byte of the document.
 //
 //	var in CreateItem
-//	if err := strictjson.DecodeRequest(w, r, &in, 1<<20); err != nil {
-//		http.Error(w, errs.PublicOf(err), errs.HTTPStatusOf(err)) // 400, 413 or 415
-//		return
+//	if err := strictjson.Decode(file, &in, 1<<20); err != nil {
+//		return err // DOCUMENT_TOO_LARGE, MEMBER_UNKNOWN, VALUE_MISMATCHED…
 //	}
 //
 // # Why a second JSON decoder
@@ -31,7 +30,7 @@
 //	CodeDocumentMalformed     400  syntax, truncation, trailing data, a duplicate name, invalid UTF-8
 //	CodeMemberUnknown         400  a member the target does not declare, including a case-only variant
 //	CodeValueMismatched       400  the wrong kind, a number out of range, a field's own unmarshaler refused
-//	CodeMediaTypeUnsupported  415  a request body that does not declare application/json or +json
+//	CodeMediaTypeUnsupported  415  a request body (httpbody) that does not declare application/json or +json
 //	CodeDocumentUnreadable    400  the reader failed before the document ended
 //	CodeDecodeMisconfigured   500  a non-positive bound, or a target that is not a non-nil pointer
 //
@@ -50,19 +49,19 @@
 //
 // # Request bodies
 //
-// DecodeRequest adds what only an HTTP body has. The body is read through
-// http.MaxBytesReader, so a body past the bound also tells net/http to close
-// the connection instead of draining what the client keeps sending. An empty
-// body is CodeDocumentEmpty before its Content-Type is looked at — treat that
-// code as "no body" where the body is optional. A non-empty body must declare
-// application/json or a structured-syntax +json type (RFC 6839) or it is not
-// parsed at all.
+// The JSON body of an HTTP request is decoded by the package beneath this one,
+// github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody, whose
+// DecodeRequest adds what only an HTTP body has — a bound net/http enforces
+// too, an empty body settled first, a media type that must declare JSON — and
+// refuses with this package's codes. It is a package of its own so that this
+// one links no net/http: a program decoding documents from files, queues or
+// sockets does not carry an HTTP stack it never serves.
 package strictjson
 
 import (
 	"io"
-	"net/http"
 
+	corestrictjson "github.com/kitsunium/sdk/internal/core/data/codec/strictjson"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svcstrict "github.com/kitsunium/sdk/internal/service/data/codec/strictjson"
 )
@@ -72,50 +71,50 @@ import (
 const MaxPointerBytes int = svcstrict.MaxPointerBytes
 
 // CodeDocumentTooLarge identifies a document longer than the bound (413).
-const CodeDocumentTooLarge errs.Code = svcstrict.CodeDocumentTooLarge
+const CodeDocumentTooLarge errs.Code = corestrictjson.CodeDocumentTooLarge
 
 // CodeDocumentEmpty identifies a document of zero bytes (400).
-const CodeDocumentEmpty errs.Code = svcstrict.CodeDocumentEmpty
+const CodeDocumentEmpty errs.Code = corestrictjson.CodeDocumentEmpty
 
 // CodeDocumentMalformed identifies a document that is not exactly one
 // well-formed JSON value (400).
-const CodeDocumentMalformed errs.Code = svcstrict.CodeDocumentMalformed
+const CodeDocumentMalformed errs.Code = corestrictjson.CodeDocumentMalformed
 
 // CodeMemberUnknown identifies a member the target does not declare (400).
-const CodeMemberUnknown errs.Code = svcstrict.CodeMemberUnknown
+const CodeMemberUnknown errs.Code = corestrictjson.CodeMemberUnknown
 
 // CodeValueMismatched identifies a value the target cannot hold (400).
-const CodeValueMismatched errs.Code = svcstrict.CodeValueMismatched
+const CodeValueMismatched errs.Code = corestrictjson.CodeValueMismatched
 
 // CodeMediaTypeUnsupported identifies a request body that does not declare
 // JSON (415).
-const CodeMediaTypeUnsupported errs.Code = svcstrict.CodeMediaTypeUnsupported
+const CodeMediaTypeUnsupported errs.Code = corestrictjson.CodeMediaTypeUnsupported
 
 // CodeDocumentUnreadable identifies a reader that failed before the document
 // ended (400).
-const CodeDocumentUnreadable errs.Code = svcstrict.CodeDocumentUnreadable
+const CodeDocumentUnreadable errs.Code = corestrictjson.CodeDocumentUnreadable
 
 // CodeDecodeMisconfigured identifies a call no input can satisfy: a
 // non-positive bound, or a target that is not a non-nil pointer.
-const CodeDecodeMisconfigured errs.Code = svcstrict.CodeDecodeMisconfigured
+const CodeDecodeMisconfigured errs.Code = corestrictjson.CodeDecodeMisconfigured
 
 var (
 	// DocumentTooLarge refuses a document longer than the bound.
-	DocumentTooLarge = svcstrict.DocumentTooLarge
+	DocumentTooLarge = corestrictjson.DocumentTooLarge
 	// DocumentEmpty reports a document of zero bytes.
-	DocumentEmpty = svcstrict.DocumentEmpty
+	DocumentEmpty = corestrictjson.DocumentEmpty
 	// DocumentMalformed refuses a document that is not one well-formed value.
-	DocumentMalformed = svcstrict.DocumentMalformed
+	DocumentMalformed = corestrictjson.DocumentMalformed
 	// MemberUnknown refuses a member the target does not declare.
-	MemberUnknown = svcstrict.MemberUnknown
+	MemberUnknown = corestrictjson.MemberUnknown
 	// ValueMismatched refuses a value the target cannot hold.
-	ValueMismatched = svcstrict.ValueMismatched
+	ValueMismatched = corestrictjson.ValueMismatched
 	// MediaTypeUnsupported refuses a request body that does not declare JSON.
-	MediaTypeUnsupported = svcstrict.MediaTypeUnsupported
+	MediaTypeUnsupported = corestrictjson.MediaTypeUnsupported
 	// DocumentUnreadable wraps a reader that failed before the document ended.
-	DocumentUnreadable = svcstrict.DocumentUnreadable
+	DocumentUnreadable = corestrictjson.DocumentUnreadable
 	// DecodeMisconfigured refuses a call no input can satisfy.
-	DecodeMisconfigured = svcstrict.DecodeMisconfigured
+	DecodeMisconfigured = corestrictjson.DecodeMisconfigured
 )
 
 // Decode reads exactly one JSON value from r into v, a non-nil pointer,
@@ -124,16 +123,6 @@ var (
 func Decode(r io.Reader, v any, maxBytes int64) error {
 	//: delegate verbatim to the service implementation.
 	return svcstrict.Decode(r, v, maxBytes)
-}
-
-// DecodeRequest decodes the JSON body of req into v as Decode does, through
-// http.MaxBytesReader, after refusing an empty body (CodeDocumentEmpty) and a
-// body that does not declare JSON (CodeMediaTypeUnsupported). w is used only
-// to have net/http close the connection after an oversized body; nil is
-// accepted.
-func DecodeRequest(w http.ResponseWriter, req *http.Request, v any, maxBytes int64) error {
-	//: delegate verbatim to the service implementation.
-	return svcstrict.DecodeRequest(w, req, v, maxBytes)
 }
 
 // PointerOf returns where a refused document went wrong, as a JSON Pointer
