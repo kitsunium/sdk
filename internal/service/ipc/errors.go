@@ -53,4 +53,10 @@ var (
 	Closed = errs.Define(CodeClosed, "CLOSED",
 		"The private socket is closed",
 		"service/ipc: Accept after Close")
+
+	// PathUnsafe refuses a socket path another account could steer.
+	PathUnsafe = errs.Define(CodePathUnsafe, "PATH_UNSAFE",
+		"The private socket's path runs through a directory another account controls",
+		"service/ipc: a component above the socket's directory is a link planted where anybody can write, a directory another account owns there, or an entry anybody can replace; the path, dir, kind and container fields say which, target and uid where they apply",
+		errs.WithExitCode(exitConfig))
 )

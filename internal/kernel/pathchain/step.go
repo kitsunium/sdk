@@ -37,6 +37,14 @@ type StepValue struct {
 	// Mode is the mode of the component itself, as lstat reports it: an
 	// indirection is described here, never traversed to describe its target.
 	Mode fs.FileMode
+	// Info is the whole of that lstat answer — Mode is Info.Mode() — for what
+	// a mode does not say. On Unix, Info.Sys() is the *syscall.Stat_t naming
+	// the component's OWNER, which is how a policy tells a component this
+	// account or root created from one another account did. It is read the
+	// way Container is, relative to the handle of the directory the component
+	// was found in, never by a second lookup of Path; and like Mode it
+	// describes an indirection itself, never its target.
+	Info fs.FileInfo
 	// Target is where the indirection points, exactly as the filesystem stores
 	// it — relative or absolute, unresolved. It is empty unless Indirect.
 	Target string

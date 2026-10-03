@@ -26,6 +26,20 @@
 //     from its process token ([Peer].SID) and refuses another one. Elsewhere
 //     [Peer].Verified is false and the directory is the only gate.
 //
+// # The path to the directory is part of the gate
+//
+// Every lookup — the directory's creation, the bind, the connect — follows a
+// link planted at a PARENT of the directory, so on Unix Listen and Dial walk
+// the whole path one component at a time and judge each by the directory
+// holding it, where ANYBODY can write that directory: a link there could have
+// been planted by anyone, a component another account owns could have been
+// created by anyone, and without the sticky bit anyone can replace what is
+// there. Each is refused ([CodePathUnsafe]) before anything is created or a
+// byte is sent. The links an operating system ships — /tmp and /var on macOS,
+// /var/run on Linux — live in directories only root writes and are accepted.
+// A socket placed under a tree another account owns trusts that account:
+// [RuntimeDir] places it under this account's own.
+//
 // # Nothing is taken over
 //
 // Listen dials a socket already at the path first. One that answers is left
@@ -51,8 +65,9 @@ import (
 )
 
 // The codes, for errs.HasCode: a caller must tell "another daemon runs"
-// (IN_USE: talk to it) from "the directory is not private" (fix the
-// deployment) from "nobody answers" (start one).
+// (IN_USE: talk to it) from "the directory or the path to it is not private"
+// (fix the deployment, or look for whoever planted a component) from "nobody
+// answers" (start one).
 const (
 	CodeMisconfigured   errs.Code = svcipc.CodeMisconfigured
 	CodeDirectoryUnsafe errs.Code = svcipc.CodeDirectoryUnsafe
@@ -62,6 +77,7 @@ const (
 	CodeDialFailed      errs.Code = svcipc.CodeDialFailed
 	CodeEndpointForeign errs.Code = svcipc.CodeEndpointForeign
 	CodeClosed          errs.Code = svcipc.CodeClosed
+	CodePathUnsafe      errs.Code = svcipc.CodePathUnsafe
 )
 
 type (

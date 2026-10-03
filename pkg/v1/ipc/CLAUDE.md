@@ -12,14 +12,17 @@ one.
 |---|---|---|
 | `Config`, `Peer`, `Conn`, `Listener` | type alias | the engine's values (ADR 0074) |
 | `Listen`, `Dial`, `RuntimeDir` | func | delegate verbatim |
-| `Code*` | const | the eight codes, for `errs.HasCode` |
+| `Code*` | const | the nine codes, for `errs.HasCode` |
 
 ## Why-this-shape
 
 The codes are re-exported because the caller's next move depends on them:
 `IN_USE` means another daemon runs (talk to it), `DIAL_FAILED` means nobody
 answers (start one), `DIRECTORY_UNSAFE` and `ENDPOINT_FOREIGN` mean the
-deployment is wrong (never retry).
+deployment is wrong (never retry), and `PATH_UNSAFE` means a component ABOVE
+the socket's directory is one another account could have planted or created,
+or can replace — a deployment to fix or an attack to look at, never a retry
+(the rule is `internal/service/ipc/chain_unix.go`'s).
 
 ## README is generated
 

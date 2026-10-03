@@ -21,6 +21,10 @@ Two gates, and the package says which one holds where:
 - The DIRECTORY, everywhere. The socket lives in a directory its account owns and nobody else may write to — created 0700 when missing, refused otherwise \([CodeDirectoryUnsafe](<#CodeMisconfigured>)\) — and the socket file is 0600. Connecting needs search permission on the directory, so only its owner \(and root\) get through. On Windows the endpoint is a named pipe named after the path, whose own DACL grants this account only, which refuses remote clients and which nobody can join once it exists.
 - The PEER'S CREDENTIALS, where the kernel gives them: on Linux, SO\_PEERCRED names the peer's user, group and process, and a peer that is neither this account nor in Config.AllowUIDs / AllowGIDs is closed before Accept returns it. On Windows each end reads the other's account from its process token \([Peer](<#Peer>).SID\) and refuses another one. Elsewhere [Peer](<#Peer>).Verified is false and the directory is the only gate.
 
+### The path to the directory is part of the gate
+
+Every lookup — the directory's creation, the bind, the connect — follows a link planted at a PARENT of the directory, so on Unix Listen and Dial walk the whole path one component at a time and judge each by the directory holding it, where ANYBODY can write that directory: a link there could have been planted by anyone, a component another account owns could have been created by anyone, and without the sticky bit anyone can replace what is there. Each is refused \([CodePathUnsafe](<#CodeMisconfigured>)\) before anything is created or a byte is sent. The links an operating system ships — /tmp and /var on macOS, /var/run on Linux — live in directories only root writes and are accepted. A socket placed under a tree another account owns trusts that account: [RuntimeDir](<#RuntimeDir>) places it under this account's own.
+
 ### Nothing is taken over
 
 Listen dials a socket already at the path first. One that answers is left alone and refused \([CodeInUse](<#CodeMisconfigured>)\); one that does not — what a killed daemon leaves — is removed and replaced, provided it IS a socket this account owns. A client refuses a socket file another account owns \([CodeEndpointForeign](<#CodeMisconfigured>)\) before it sends a byte: a request never reaches an impostor.
@@ -43,7 +47,7 @@ Listen dials a socket already at the path first. One that answers is left alone 
 
 ## Constants
 
-<a name="CodeMisconfigured"></a>The codes, for errs.HasCode: a caller must tell "another daemon runs" \(IN\_USE: talk to it\) from "the directory is not private" \(fix the deployment\) from "nobody answers" \(start one\).
+<a name="CodeMisconfigured"></a>The codes, for errs.HasCode: a caller must tell "another daemon runs" \(IN\_USE: talk to it\) from "the directory or the path to it is not private" \(fix the deployment, or look for whoever planted a component\) from "nobody answers" \(start one\).
 
 ```go
 const (
@@ -55,11 +59,12 @@ const (
     CodeDialFailed      errs.Code = svcipc.CodeDialFailed
     CodeEndpointForeign errs.Code = svcipc.CodeEndpointForeign
     CodeClosed          errs.Code = svcipc.CodeClosed
+    CodePathUnsafe      errs.Code = svcipc.CodePathUnsafe
 )
 ```
 
 <a name="RuntimeDir"></a>
-## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L87>)
+## func [RuntimeDir](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L103>)
 
 ```go
 func RuntimeDir(app string) string
@@ -68,7 +73,7 @@ func RuntimeDir(app string) string
 RuntimeDir is where an application's private sockets belong on this machine. It creates nothing.
 
 <a name="Config"></a>
-## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L70>)
+## type [Config](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L86>)
 
 Config is where a private socket lives and who, besides its own account, may use it.
 
@@ -77,7 +82,7 @@ type Config = svcipc.Config
 ```
 
 <a name="Conn"></a>
-## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L74>)
+## type [Conn](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L90>)
 
 Conn is a connection with its peer's identity.
 
@@ -86,7 +91,7 @@ type Conn = svcipc.Conn
 ```
 
 <a name="Dial"></a>
-### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L83>)
+### func [Dial](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L99>)
 
 ```go
 func Dial(ctx context.Context, cfg Config) (*Conn, error)
@@ -95,7 +100,7 @@ func Dial(ctx context.Context, cfg Config) (*Conn, error)
 Dial connects to the private socket at cfg.Path, within ctx and one second.
 
 <a name="Listener"></a>
-## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L76>)
+## type [Listener](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L92>)
 
 Listener accepts the connections of admitted peers only.
 
@@ -104,7 +109,7 @@ type Listener = svcipc.Listener
 ```
 
 <a name="Listen"></a>
-### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L80>)
+### func [Listen](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L96>)
 
 ```go
 func Listen(cfg Config) (*Listener, error)
@@ -113,7 +118,7 @@ func Listen(cfg Config) (*Listener, error)
 Listen opens the private socket at cfg.Path.
 
 <a name="Peer"></a>
-## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L72>)
+## type [Peer](<https://github.com/kitsunium/sdk/blob/main/pkg/v1/ipc/ipc.go#L88>)
 
 Peer is who is at the other end of a connection, as the kernel says.
 

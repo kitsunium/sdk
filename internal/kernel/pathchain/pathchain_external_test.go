@@ -153,6 +153,70 @@ func TestResolveReportsAnIndirectionAndWhereItWent(t *testing.T) {
 	}
 }
 
+// TestResolveCarriesEachComponentsOwnLstat pins StepValue.Info: the lstat of
+// the component ITSELF — the link and never its target — which is what a
+// policy reads an owner from (internal/service/ipc refuses a component another
+// account created where anybody could create one).
+//
+// It is compared with os.SameFile against an independent os.Lstat, so a step
+// carrying another entry's answer — the target's, or the container's — fails
+// here rather than in the verdict a domain builds on it.
+func TestResolveCarriesEachComponentsOwnLstat(t *testing.T) {
+	t.Parallel()
+	base := t.TempDir()
+	target := filepath.Join(base, "elsewhere")
+	if err := os.MkdirAll(filepath.Join(target, "run"), 0o700); err != nil {
+		t.Fatalf("building the target = %v", err)
+	}
+	link := filepath.Join(base, "app")
+	plant(t, target, link)
+
+	steps, err := pathchain.Resolve(filepath.Join(link, "run"))
+	if err != nil {
+		t.Fatalf("Resolve = %v", err)
+	}
+	//: every step, the operating system's own components included, carries an
+	//: answer, and its Mode is that answer's — two readings of one lstat.
+	for _, step := range steps {
+		if step.Info == nil {
+			t.Fatalf("step %s carries no lstat answer", step.Path)
+		}
+		if step.Info.Mode() != step.Mode {
+			t.Fatalf("step %s Info.Mode() = %v, Mode = %v: two different answers", step.Path, step.Info.Mode(), step.Mode)
+		}
+	}
+	var planted, below *pathchain.StepValue
+	//: located by identity, as everywhere in this file.
+	for i := range steps {
+		if namesSameEntry(t, steps[i].Path, link) {
+			planted = &steps[i]
+		}
+		if namesSameEntry(t, steps[i].Path, filepath.Join(target, "run")) {
+			below = &steps[i]
+		}
+	}
+	if planted == nil || below == nil {
+		t.Fatalf("the planted link or the directory below it was not described; got %d steps", len(steps))
+	}
+	//: the link's answer is the LINK's: a symbolic link, the same entry an
+	//: independent Lstat finds — not the directory it leads to.
+	linkInfo, linkErr := os.Lstat(link)
+	if linkErr != nil {
+		t.Fatalf("Lstat(%s) = %v", link, linkErr)
+	}
+	if planted.Info.Mode()&os.ModeSymlink == 0 || !os.SameFile(planted.Info, linkInfo) {
+		t.Fatalf("the planted step's Info = %v, which is not the link itself", planted.Info.Mode())
+	}
+	//: and the directory reached through it is described as itself.
+	runInfo, runErr := os.Lstat(filepath.Join(target, "run"))
+	if runErr != nil {
+		t.Fatalf("Lstat(run) = %v", runErr)
+	}
+	if !below.Info.IsDir() || !os.SameFile(below.Info, runInfo) {
+		t.Fatalf("the step below the link carries another entry's answer: %v", below.Info.Mode())
+	}
+}
+
 // TestResolveStopsWhereThePathStopsExisting pins the decision that a missing
 // component is an answer and not a fault.
 func TestResolveStopsWhereThePathStopsExisting(t *testing.T) {

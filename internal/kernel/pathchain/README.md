@@ -31,7 +31,10 @@ of a path string. It returns one `StepValue` per component, each carrying the
 mode of the directory it was found in — because a symbolic link is not
 evidence of anything on its own (`/tmp` is one on macOS, `/var/run` is one on
 most Linux distributions) and what separates those from an attack is who could
-have created it.
+have created it. Each step also carries the component's own `lstat` answer
+(`Info`) — the link itself, never its target — whose `Sys()` names the
+component's owner on Unix, for a policy that must tell this account's or
+root's components from another account's.
 
 It refuses nothing. A refusal needs a policy and a policy needs a domain; this
 package produces the measurement a policy cannot be written without.
