@@ -7,6 +7,7 @@ import (
 	"go/token"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 	"testing"
@@ -223,7 +224,36 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 				"a.go":       "// Package a links [OnlyLinux].\npackage a\n",
 				"a_linux.go": linuxOnly,
 			},
-			want: []string{"[OnlyLinux] darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64"},
+			want: []string{"[OnlyLinux] darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64, illumos/amd64, solaris/amd64"},
+		},
+		{
+			//: the go command compiles a _solaris.go file for illumos too, so
+			//: the symbol resolves on both cells and on no other.
+			name: "a symbol a _solaris.go file declares resolves on illumos and solaris alone",
+			files: map[string]string{
+				"a.go":         "// Package a links [OnlySunOS].\npackage a\n",
+				"a_solaris.go": "package a\n\n// OnlySunOS exists where the solaris tag holds.\nconst OnlySunOS = 1\n",
+			},
+			want: []string{"[OnlySunOS] linux/amd64, linux/arm64, linux/386, linux/arm, darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64"},
+		},
+		{
+			//: an _illumos.go file is illumos's alone: Solaris is judged apart.
+			name: "a symbol an _illumos.go file declares is dead on solaris",
+			files: map[string]string{
+				"a.go":         "// Package a links [OnlyIllumos].\npackage a\n",
+				"a_illumos.go": "package a\n\n// OnlyIllumos exists on illumos.\nconst OnlyIllumos = 1\n",
+			},
+			want: []string{"[OnlyIllumos] linux/amd64, linux/arm64, linux/386, linux/arm, darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64, solaris/amd64"},
+		},
+		{
+			//: a file only the two cells compile was judged by no platform while
+			//: the table held ten: its dead link reached no report.
+			name: "a dead link in a file only illumos and solaris compile is reported",
+			files: map[string]string{
+				"a.go":         "// Package a is fine.\npackage a\n",
+				"a_solaris.go": "package a\n\n// S links [Missing], which no file declares.\nconst S = 1\n",
+			},
+			want: []string{"[Missing] "},
 		},
 		{
 			//: the file only builds where the symbol exists.
@@ -259,6 +289,60 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 		}
 		if !slices.Equal(got, c.want) {
 			t.Fatalf("dead links = %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// crossBuildCell matches one cell of bazel-ci.yml's cross-build matrix — `{
+// goos: linux, goarch: "386" }` — the only flow mappings in that file naming a
+// goos.
+var crossBuildCell = regexp.MustCompile(`\{\s*goos:\s*"?([a-z0-9]+)"?\s*,\s*goarch:\s*"?([a-z0-9]+)"?\s*\}`)
+
+// Test_platforms pins the table the check judges on to the cells the
+// cross-build lane compiles, read from the workflow itself rather than from a
+// copy. A cell the lane gains is a platform whose doc comments nothing judges
+// until this table gains it too: illumos and solaris joined the lane with
+// ADR 0144 and stayed unjudged here until this test existed. Under Bazel the
+// workflow reaches the test as a data dependency, at the same relative path.
+func Test_platforms(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// workflow is the workflow file, relative to this package.
+		workflow string
+		// wantCells is how many cells the lane compiles.
+		wantCells int
+	}
+	tests := []tc{
+		{name: "the cross-build matrix", workflow: "../../.github/workflows/bazel-ci.yml", wantCells: 12},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		src, err := os.ReadFile(filepath.FromSlash(c.workflow))
+		if err != nil {
+			t.Fatalf("reading the workflow: %v", err)
+		}
+		var lane []string
+		for _, m := range crossBuildCell.FindAllStringSubmatch(string(src), -1) {
+			lane = append(lane, m[1]+"/"+m[2])
+		}
+		//: a pattern that stopped matching would compare an empty lane.
+		if len(lane) != c.wantCells {
+			t.Fatalf("the workflow lists %d cells (%q), want %d", len(lane), lane, c.wantCells)
+		}
+		table := make([]string, 0, len(platforms))
+		for _, p := range platforms {
+			table = append(table, p.String())
+		}
+		if !slices.Equal(table, lane) {
+			t.Fatalf("platforms = %q, want the cross-build cells in the workflow's order %q", table, lane)
 		}
 	}
 	for _, c := range tests {
