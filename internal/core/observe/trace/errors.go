@@ -9,12 +9,12 @@ var (
 	// Its Public never echoes the header: it is attacker-controlled text.
 	InvalidTraceParent = errs.Define(CodeInvalidTraceParent, "INVALID_TRACE_PARENT",
 		"The traceparent header is not a valid W3C trace context",
-		"core/observe/trace.ParseTraceParent: the header failed the W3C Trace Context grammar, or carried an all-zero trace-id or parent-id")
+		"service/observe/trace.ParseTraceParent: the header failed the W3C Trace Context grammar, or carried an all-zero trace-id or parent-id")
 
 	// InvalidTraceState is returned when a tracestate header cannot be read.
 	InvalidTraceState = errs.Define(CodeInvalidTraceState, "INVALID_TRACE_STATE",
 		"The tracestate header is not a valid W3C trace state list",
-		"core/observe/trace.ParseTraceState: the header failed the W3C list grammar, exceeded 32 members, or repeated a key")
+		"service/observe/trace.ParseTraceState, StateValue.Insert or StateBuilder.Add: a member failed the W3C list grammar, or the list exceeded 32 members or repeated a key")
 
 	// UnknownExporter is returned when no SpanExporter is registered under a Name.
 	UnknownExporter = errs.Define(CodeUnknownExporter, "UNKNOWN_EXPORTER",

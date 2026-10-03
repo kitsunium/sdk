@@ -51,7 +51,7 @@ below, when the reorganisation series reaches it.
 | `logger/writer/{journald, nettransport, rotfile}/` | the codes and sentinels of the three writers that declare any — codes only (ADR 0160 §2) | `0.3.31.*`, `0.3.30.*`, `0.3.27.*` | `internal/service/observe/logger/writer/{journald,nettransport,rotfile}` |
 | `metrics/` | the OpenTelemetry metrics data model: the instruments, the frozen `Meter` and its siblings, `Temporality`, the `Exporter` registry and `SnapshotValue` (ADR 0027, ADR 0044); and the engine's wire refusals (ADR 0160) | `0.2.9.*`; `0.3.45.*`, the engine's | `internal/service/observe/metrics` |
 | `otel/` | the types every signal shares — `AttrValue`, `ResourceValue`, `ScopeValue` — and no code: its guards panic with the sentinel their caller passes (ADR 0051 §Decision 2) | none | none — `metrics/` and `trace/` build on it |
-| `trace/` | the frozen `Tracer` and `Span` ports, `SpanContextValue`, the W3C Trace Context format, the span model, the `Sampler` and `SpanSink` FUNC ports, `Carrier` and the `SpanExporter` registry (ADR 0051); and the engine's codes (ADR 0160) | `0.2.20.*`; `0.3.50.*`, the engine's | `internal/service/observe/trace` |
+| `trace/` | the frozen `Tracer` and `Span` ports, `SpanContextValue`, the values of the W3C Trace Context headers (their parsing is the engine's, ADR 0160 §4), the span model, the `Sampler` and `SpanSink` FUNC ports, `Carrier` and the `SpanExporter` registry (ADR 0051); and the engine's codes (ADR 0160) | `0.2.20.*`; `0.3.50.*`, the engine's | `internal/service/observe/trace` |
 
 Three edges inside the family are decisions and are kept: `metrics` and `trace`
 both import `otel` and neither imports the other; `logger/writer` imports

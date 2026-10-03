@@ -1,5 +1,6 @@
 // Package trace — tracestate: the W3C vendor list that travels beside a
-// traceparent.
+// traceparent, as a value. Reading it out of a header is the engine's
+// (internal/service/observe/trace, ADR 0160 §4).
 package trace
 
 import (
@@ -30,14 +31,15 @@ const (
 	maxSystemIDLen int = 14
 )
 
-// The list punctuation, named so the parser reads as the grammar does. They are
-// strings rather than bytes because every use site splits or joins with them,
-// and a byte would be converted at each one.
+// The list punctuation, named so the rendering and the key grammar read as the
+// grammar does. They are strings rather than bytes because every use site
+// joins or cuts with them, and a byte would be converted at each one. The
+// header's parser, internal/service/observe/trace, names its own: reading the
+// header is the engine's mechanism (ADR 0160 §4).
 const (
 	traceStateListSep string = ","
 	traceStatePairSep string = "="
 	traceStateTenant  string = "@"
-	traceStateOWS     string = " \t"
 )
 
 // The bounds of `chr` — printable ASCII, %x20 through %x7E — plus the two
@@ -67,89 +69,14 @@ const (
 // This SDK writes NO entry of its own. It is not a tracing vendor with state to
 // carry, and inventing a key would put a name nobody registered on every
 // outbound request; Insert exists for a consumer who IS one.
+//
+// A list comes from three places only: the zero value, Insert, and a
+// StateBuilder — the one the engine's header parser fills, member by member.
+// Each of the last two checks every member against the grammar before it
+// enters the list, so no StateValue holds an entry the next hop would refuse.
 type StateValue struct {
 	// entries is the ordered list, leftmost first. nil is the empty list.
 	entries []traceStateEntry
-}
-
-// ParseTraceState reads a tracestate header value.
-//
-// It refuses the whole header rather than salvaging the members it understood.
-// §4.3 permits exactly that — "if the tracestate header cannot be parsed the
-// vendor MAY discard the entire header" — and salvaging is worse than it looks:
-// a half-parsed list forwarded to the next hop is a list this process INVENTED,
-// carrying somebody else's vendor key with entries silently missing.
-//
-// Empty and whitespace-only list members are SKIPPED rather than refused, which
-// §3.3.1.1 requires: `list-member = (key "=" value) / OWS`.
-//
-// One deliberate leniency, and it is the only one: OWS is stripped around EVERY
-// member, including before the first and after the last, where the `list` rule
-// grants no OWS slot. A strictly-positioned parser would refuse "a=1 " — the
-// value's last character must be nblk-chr — but RFC 7230 §3.2.4 already requires
-// a recipient to strip leading and trailing whitespace from a field value before
-// it is a field-value, so that check could only ever fire on input the HTTP layer
-// is specified to have normalised, and it would pay for that by discarding
-// another vendor's entire list over whitespace nobody can see. The nblk-chr rule
-// is enforced in Insert instead, where it still prevents something.
-func ParseTraceState(header string) (state StateValue, err error) {
-	//: an absent or blank header is the empty list, not a failure.
-	if strings.Trim(header, traceStateOWS) == "" {
-		//: the zero value is a valid empty tracestate.
-		return StateValue{}, nil
-	}
-	//: the list is comma-separated; OWS around each member is stripped below.
-	fields := strings.Split(header, traceStateListSep)
-	//: at most 32 real members can survive, so that is the capacity.
-	entries := make([]traceStateEntry, 0, min(len(fields), MaxTraceStateMembers))
-	//: one member at a time, in wire order.
-	for _, field := range fields {
-		//: parse it; present=false is the whitespace-only form §3.3.1.1 allows.
-		entry, present, ok := parseTraceStateMember(field)
-		//: a member the grammar cannot spell refuses the whole header.
-		if !ok {
-			//: refuse.
-			return StateValue{}, InvalidTraceState
-		}
-		//: skip the whitespace-only members without spending a slot.
-		if !present {
-			//: nothing to record.
-			continue
-		}
-		//: a repeated key makes the list ambiguous (§3.3.1.4), and the grammar
-		//: caps the list at 32 — both refuse rather than salvage.
-		if slices.ContainsFunc(entries, keyMatcher(entry.key)) || len(entries) == MaxTraceStateMembers {
-			//: refuse.
-			return StateValue{}, InvalidTraceState
-		}
-		//: the member is spellable; keep it in the order it arrived.
-		entries = append(entries, entry)
-	}
-	//: a parsed, ordered, duplicate-free list.
-	return StateValue{entries: entries}, nil
-}
-
-// parseTraceStateMember reads one `list-member`. It reports present=false for
-// the whitespace-only form the grammar allows, and ok=false for anything the
-// grammar cannot spell.
-func parseTraceStateMember(field string) (entry traceStateEntry, present, ok bool) {
-	//: strip the optional whitespace the grammar allows around a member.
-	member := strings.Trim(field, traceStateOWS)
-	//: `list-member = (key "=" value) / OWS` — the second alternative.
-	if member == "" {
-		//: legal, and it contributes nothing.
-		return traceStateEntry{}, false, true
-	}
-	//: split on the FIRST '=' — the separator is excluded from `value`, so a
-	//: later '=' would already have failed the value alphabet.
-	key, value, found := strings.Cut(member, traceStatePairSep)
-	//: a member with no '=' is neither a pair nor whitespace.
-	if !found || !isValidTraceStateKey(key) || !isValidMemberValue(value) {
-		//: unspellable.
-		return traceStateEntry{}, false, false
-	}
-	//: a well-formed pair.
-	return traceStateEntry{key: key, value: value}, true, true
 }
 
 // Len reports how many list members the state carries.

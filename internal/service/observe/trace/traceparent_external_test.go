@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
+	svctrace "github.com/kitsunium/sdk/internal/service/observe/trace"
 )
 
 // The W3C specification's own example header, used verbatim so a reader can
@@ -22,7 +23,7 @@ const (
 // asserts every field rather than only the error, so a parser that read the
 // components in the wrong order would still fail here.
 func TestParseTraceParentAcceptsTheSpecificationExample(t *testing.T) {
-	context, err := coretrace.ParseTraceParent(specHeader)
+	context, err := svctrace.ParseTraceParent(specHeader)
 	if err != nil {
 		t.Fatalf("ParseTraceParent(%q): %v", specHeader, err)
 	}
@@ -65,7 +66,7 @@ func TestParseTraceParentRefusals(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			context, err := coretrace.ParseTraceParent(tc.header)
+			context, err := svctrace.ParseTraceParent(tc.header)
 			if !errors.Is(err, coretrace.InvalidTraceParent) {
 				t.Fatalf("want InvalidTraceParent (%s), got %v", tc.why, err)
 			}
@@ -87,7 +88,7 @@ func TestParseTraceParentRefusals(t *testing.T) {
 func TestParseTraceParentIsForwardCompatible(t *testing.T) {
 	future := "cc-" + specTraceID + "-" + specSpanID + "-01"
 	t.Run("higher version parses", func(t *testing.T) {
-		context, err := coretrace.ParseTraceParent(future)
+		context, err := svctrace.ParseTraceParent(future)
 		if err != nil {
 			t.Fatalf("a higher version must still be parsed: %v", err)
 		}
@@ -96,12 +97,12 @@ func TestParseTraceParentIsForwardCompatible(t *testing.T) {
 		}
 	})
 	t.Run("higher version with a dashed tail parses", func(t *testing.T) {
-		if _, err := coretrace.ParseTraceParent(future + "-beefcafe"); err != nil {
+		if _, err := svctrace.ParseTraceParent(future + "-beefcafe"); err != nil {
 			t.Fatalf("unknown fields after a dash must be ignored, not refused: %v", err)
 		}
 	})
 	t.Run("higher version with an undashed tail is refused", func(t *testing.T) {
-		if _, err := coretrace.ParseTraceParent(future + "beefcafe"); !errors.Is(err, coretrace.InvalidTraceParent) {
+		if _, err := svctrace.ParseTraceParent(future + "beefcafe"); !errors.Is(err, coretrace.InvalidTraceParent) {
 			t.Fatalf("a tail that is not dash-delimited must be refused, got %v", err)
 		}
 	})
@@ -116,7 +117,7 @@ func TestParseTraceParentIsForwardCompatible(t *testing.T) {
 // is the only combination that satisfies both.
 func TestFormatTraceParentMasksUndefinedFlagBits(t *testing.T) {
 	header := "cc-" + specTraceID + "-" + specSpanID + "-ff"
-	context, err := coretrace.ParseTraceParent(header)
+	context, err := svctrace.ParseTraceParent(header)
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}
@@ -124,7 +125,7 @@ func TestFormatTraceParentMasksUndefinedFlagBits(t *testing.T) {
 		t.Errorf("received flags = %#x, want the byte kept verbatim (0xff)", context.Flags)
 	}
 	want := "00-" + specTraceID + "-" + specSpanID + "-01"
-	got, ok := coretrace.FormatTraceParent(context)
+	got, ok := svctrace.FormatTraceParent(context)
 	if !ok || got != want {
 		t.Errorf("FormatTraceParent = %q (%v), want %q (undefined bits masked, version 00 emitted)", got, ok, want)
 	}
@@ -135,7 +136,7 @@ func TestFormatTraceParentMasksUndefinedFlagBits(t *testing.T) {
 // is REQUIRED to ignore, so emitting one spends a header to say nothing and makes
 // "we lost the context" indistinguishable from "we never had one".
 func TestFormatTraceParentWritesNothingForAnInvalidContext(t *testing.T) {
-	got, ok := coretrace.FormatTraceParent(coretrace.SpanContextValue{})
+	got, ok := svctrace.FormatTraceParent(coretrace.SpanContextValue{})
 	if ok || got != "" {
 		t.Errorf("FormatTraceParent(invalid) = %q (%v), want no header at all", got, ok)
 	}
@@ -146,18 +147,18 @@ func TestFormatTraceParentWritesNothingForAnInvalidContext(t *testing.T) {
 // this SDK — and therefore the grammar — accepts. It is not a substitute for the
 // refusal table above, which is what actually pins the grammar.
 func TestFormatTraceParentRoundTripsItsOwnOutput(t *testing.T) {
-	original, err := coretrace.ParseTraceParent(specHeader)
+	original, err := svctrace.ParseTraceParent(specHeader)
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}
-	rendered, ok := coretrace.FormatTraceParent(original)
+	rendered, ok := svctrace.FormatTraceParent(original)
 	if !ok {
 		t.Fatal("a valid context must render a header")
 	}
-	if len(rendered) != coretrace.TraceParentLen {
-		t.Errorf("a version-00 traceparent is %d characters, got %d", coretrace.TraceParentLen, len(rendered))
+	if len(rendered) != svctrace.TraceParentLen {
+		t.Errorf("a version-00 traceparent is %d characters, got %d", svctrace.TraceParentLen, len(rendered))
 	}
-	reparsed, err := coretrace.ParseTraceParent(rendered)
+	reparsed, err := svctrace.ParseTraceParent(rendered)
 	if err != nil {
 		t.Fatalf("this SDK produced a header it cannot parse: %v", err)
 	}

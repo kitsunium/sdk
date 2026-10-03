@@ -115,7 +115,7 @@ func serveTraced(tracer coretrace.Tracer, next http.Handler, w http.ResponseWrit
 	//: r.Header is passed DIRECTLY: http.Header's Get/Set pair is exactly
 	//: coretrace.Carrier, which is what that interface was shaped against, so
 	//: there is no adapter here and none to keep in step.
-	parent := coretrace.Extract(r.Header)
+	parent := Extract(r.Header)
 	//: the parent goes on the context so Start inherits it exactly as it would
 	//: inherit a local one; there is one inheritance path, not two.
 	ctx := coretrace.ContextWithSpanContext(r.Context(), parent)

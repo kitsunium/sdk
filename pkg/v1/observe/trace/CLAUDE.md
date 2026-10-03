@@ -25,11 +25,11 @@ alphabetical order.
 | Config | `TracerConfig`, `RecorderConfig`, `OTLPHTTPConfig`, `Recorder`, `SDKTracer` |
 | Construction | `NewTracer`, `NewRecorder`, `NewTraceID`, `NewSpanID` |
 | Sampling | `AlwaysSample`, `NeverSample`, `ParentBased`, `Ratio` |
-| Propagation | `Inject`, `Extract`, `ParseTraceParent`, `FormatTraceParent`, `ParseTraceState`, `ParseTraceID`, `ParseSpanID`, `ContextWithSpanContext`, `SpanContextFromContext` |
+| Propagation | `Inject`, `Extract`, `ParseTraceParent`, `FormatTraceParent`, `ParseTraceState` — forwarding to `internal/service/observe/trace`, where reading and writing the headers moved (ADR 0160 §4); `ParseTraceID`, `ParseSpanID`, `ContextWithSpanContext`, `SpanContextFromContext` — the core's |
 | Instrumentation | `RecordError`, `ServerMiddleware`, `ClientMiddleware` |
 | Export | `EncodeOTLPJSON`, `NewOTLPJSONExporter`, `NewOTLPHTTPExporter`, `OTLPRetryable`, `RegisterExporter`, `LookupExporter`, `AvailableExporters`, `Export` |
 | Attributes | `String`, `Bool`, `Int64`, `Float64` |
-| Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported`, `MaxTraceStateMembers`; the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
+| Constants | `Kind*`, `Status*`, `AttrKind*`, `FlagSampled`; the W3C names and bounds `TraceParentHeader`, `TraceStateHeader`, `TraceParentLen`, `VersionSupported` (the engine's, beside its parser) and `MaxTraceStateMembers` (the core's, a bound of the list); the attribute keys `ServiceNameKey`, `ExceptionEventName`, `ExceptionTypeKey`, `ExceptionMessageKey`, `HTTPRequestMethodKey`, `HTTPResponseStatusCodeKey`, `URLPathKey`, `URLSchemeKey`, `URLFullKey`, `ServerAddressKey`; `DefaultScopeName`, `DefaultMaxSpans`, `OTLPTracesPath`, `DefaultOTLPTimeout`, `DefaultOTLPMaxResponseBytes` |
 | Sentinels | all aliased from `internal/core/observe/trace` (ADR 0074): its own `InvalidTraceParent`, `InvalidTraceState`, `InvalidSpanName`, `InvalidAttribute`, `UnknownExporter`, `ExportFailed`, `DuplicateRegistration`, and the engine's `EntropyFailed`, `InvalidSampleRatio`, `OTLPInvalidSpanContext`, `OTLPSpanNotEnded`, `OTLPEndpointInvalid`, `OTLPExportRejected`, `OTLPExportUnavailable`, `OTLPPartialSuccess`, declared there since ADR 0160 |
 
 ## `trace.Attr` IS `metrics.Attr`

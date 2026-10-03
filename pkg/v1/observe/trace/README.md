@@ -214,19 +214,19 @@ const ServiceNameKey string = coreotel.ServiceNameKey
 <a name="TraceParentHeader"></a>TraceParentHeader is the W3C header carrying the span context.
 
 ```go
-const TraceParentHeader string = coretrace.TraceParentHeader
+const TraceParentHeader string = svctrace.TraceParentHeader
 ```
 
 <a name="TraceParentLen"></a>TraceParentLen is the length of a version\-00 traceparent: 55 characters.
 
 ```go
-const TraceParentLen int = coretrace.TraceParentLen
+const TraceParentLen int = svctrace.TraceParentLen
 ```
 
 <a name="TraceStateHeader"></a>TraceStateHeader is the W3C header carrying the vendor list.
 
 ```go
-const TraceStateHeader string = coretrace.TraceStateHeader
+const TraceStateHeader string = svctrace.TraceStateHeader
 ```
 
 <a name="URLFullKey"></a>URLFullKey is the outbound URL attribute, recorded on CLIENT spans.
@@ -250,7 +250,7 @@ const URLSchemeKey string = svctrace.URLSchemeKey
 <a name="VersionSupported"></a>VersionSupported is the traceparent version this SDK emits: "00".
 
 ```go
-const VersionSupported string = coretrace.VersionSupported
+const VersionSupported string = svctrace.VersionSupported
 ```
 
 ## Variables

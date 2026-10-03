@@ -132,11 +132,11 @@ func TestRatioOneIsAlwaysSample(t *testing.T) {
 // TestParentBasedHonoursTheParentAndConsultsRootOnly pins the sampler almost
 // every deployment wants, in both directions.
 func TestParentBasedHonoursTheParentAndConsultsRootOnly(t *testing.T) {
-	sampled, err := coretrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
+	sampled, err := svctrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-01")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}
-	unsampled, err := coretrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
+	unsampled, err := svctrace.ParseTraceParent("00-4bf92f3577b34da6a3ce929d0e0e4736-00f067aa0ba902b7-00")
 	if err != nil {
 		t.Fatalf("ParseTraceParent: %v", err)
 	}

@@ -151,16 +151,16 @@ const AttrKindInt64 AttrKind = coreotel.AttrKindInt64
 const AttrKindFloat64 AttrKind = coreotel.AttrKindFloat64
 
 // TraceParentHeader is the W3C header carrying the span context.
-const TraceParentHeader string = coretrace.TraceParentHeader
+const TraceParentHeader string = svctrace.TraceParentHeader
 
 // TraceStateHeader is the W3C header carrying the vendor list.
-const TraceStateHeader string = coretrace.TraceStateHeader
+const TraceStateHeader string = svctrace.TraceStateHeader
 
 // TraceParentLen is the length of a version-00 traceparent: 55 characters.
-const TraceParentLen int = coretrace.TraceParentLen
+const TraceParentLen int = svctrace.TraceParentLen
 
 // VersionSupported is the traceparent version this SDK emits: "00".
-const VersionSupported string = coretrace.VersionSupported
+const VersionSupported string = svctrace.VersionSupported
 
 // FlagSampled is the traceparent sampled bit — the one flag version 00 defines,
 // and the one the whole sampling design travels in.
@@ -456,7 +456,7 @@ func Ratio(fraction float64) (sampler Sampler, err error) {
 // header, not a zero-filled one.
 func Inject(context SpanContext, carrier Carrier) {
 	//: the format lives in core; this facade only forwards.
-	coretrace.Inject(context, carrier)
+	svctrace.Inject(context, carrier)
 }
 
 // Extract reads a span context out of carrier, returning the invalid zero value
@@ -464,7 +464,7 @@ func Inject(context SpanContext, carrier Carrier) {
 // documentation.
 func Extract(carrier Carrier) SpanContext {
 	//: the format lives in core; this facade only forwards.
-	return coretrace.Extract(carrier)
+	return svctrace.Extract(carrier)
 }
 
 // ParseTraceParent reads a traceparent header value, with a typed error. It is
@@ -472,7 +472,7 @@ func Extract(carrier Carrier) SpanContext {
 // when you are serving a request.
 func ParseTraceParent(header string) (context SpanContext, err error) {
 	//: the format lives in core; this facade only forwards.
-	return coretrace.ParseTraceParent(header)
+	return svctrace.ParseTraceParent(header)
 }
 
 // FormatTraceParent renders a span context as a version-00 traceparent,
@@ -482,7 +482,7 @@ func ParseTraceParent(header string) (context SpanContext, err error) {
 // acts as a producer.
 func FormatTraceParent(context SpanContext) (header string, ok bool) {
 	//: the format lives in core; this facade only forwards.
-	return coretrace.FormatTraceParent(context)
+	return svctrace.FormatTraceParent(context)
 }
 
 // ParseTraceState reads a tracestate header value. It refuses the whole header
@@ -490,7 +490,7 @@ func FormatTraceParent(context SpanContext) (header string, ok bool) {
 // to the next hop is a list this process invented.
 func ParseTraceState(header string) (state TraceState, err error) {
 	//: the format lives in core; this facade only forwards.
-	return coretrace.ParseTraceState(header)
+	return svctrace.ParseTraceState(header)
 }
 
 // ParseTraceID reads 32 lowercase hex digits, refusing an all-zero result.

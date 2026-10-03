@@ -125,7 +125,7 @@ func fixtureSpans(t *testing.T) coretrace.SpansValue {
 		Flags:   coretrace.FlagSampled,
 		Remote:  true,
 	}
-	state, err := coretrace.ParseTraceState("congo=t61rcWkgMzE")
+	state, err := svctrace.ParseTraceState("congo=t61rcWkgMzE")
 	if err != nil {
 		t.Fatalf("ParseTraceState: %v", err)
 	}

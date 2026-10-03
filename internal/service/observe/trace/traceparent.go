@@ -1,9 +1,14 @@
-// Package trace — the traceparent header: parsing it, and writing it back.
+// Package trace — the traceparent header: parsing it, and writing it back. The
+// span context it carries is a value of internal/core/observe/trace; reading
+// and writing the header is this engine's mechanism (ADR 0160 §4).
 package trace
 
 import (
 	"encoding/hex"
+	"slices"
 	"strings"
+
+	coretrace "github.com/kitsunium/sdk/internal/core/observe/trace"
 )
 
 // The traceparent field offsets, derived from the grammar rather than counted
@@ -37,9 +42,9 @@ const (
 	// traceIDOffset is where trace-id starts: past the version and its dash.
 	traceIDOffset int = versionHexLen + 1
 	// parentIDOffset is where parent-id starts.
-	parentIDOffset int = traceIDOffset + TraceIDHexLen + 1
+	parentIDOffset int = traceIDOffset + coretrace.TraceIDHexLen + 1
 	// flagsOffset is where trace-flags starts.
-	flagsOffset int = parentIDOffset + SpanIDHexLen + 1
+	flagsOffset int = parentIDOffset + coretrace.SpanIDHexLen + 1
 )
 
 // The two versions the specification names explicitly.
@@ -90,12 +95,12 @@ const (
 // traceparent header and deletes tracestate" — the header is written by a
 // stranger, and a request rejected over it is a denial of service with extra
 // steps. See Extract, which is the shape that behaviour belongs in.
-func ParseTraceParent(header string) (context SpanContextValue, err error) {
+func ParseTraceParent(header string) (context coretrace.SpanContextValue, err error) {
 	//: a header shorter than the fixed prefix cannot carry the four fields, in
 	//: any version — the specification's own first test.
 	if len(header) < TraceParentLen {
 		//: nothing of the header is echoed; it is attacker-controlled.
-		return SpanContextValue{}, InvalidTraceParent
+		return coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
 	}
 	//: the version governs how the rest is read, so it is decided first.
 	version := header[:versionHexLen]
@@ -105,7 +110,7 @@ func ParseTraceParent(header string) (context SpanContextValue, err error) {
 	//: point, and a higher one may only continue after a dash.
 	if version == versionInvalid || !isLowerHex(version) || !hasValidTraceParentTail(version, header) {
 		//: nothing of the header is echoed; it is attacker-controlled.
-		return SpanContextValue{}, InvalidTraceParent
+		return coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
 	}
 	//: the first 55 characters are the same four fields in every version.
 	return parseTraceParentPrefix(header[:TraceParentLen])
@@ -125,7 +130,7 @@ func hasValidTraceParentTail(version, header string) bool {
 
 // parseTraceParentPrefix reads the four dash-separated fields of a 55-character
 // traceparent prefix.
-func parseTraceParentPrefix(prefix string) (context SpanContextValue, err error) {
+func parseTraceParentPrefix(prefix string) (context coretrace.SpanContextValue, err error) {
 	//: the three dashes sit at fixed positions in every version (§3.2.4), so
 	//: checking them in place is what splitting used to check by field count —
 	//: and it reads the fields without building a slice to hold them.
@@ -134,22 +139,22 @@ func parseTraceParentPrefix(prefix string) (context SpanContextValue, err error)
 	//: allocated objects.
 	if prefix[traceIDOffset-1] != '-' || prefix[parentIDOffset-1] != '-' || prefix[flagsOffset-1] != '-' {
 		//: a misplaced dash is a header this grammar cannot describe.
-		return SpanContextValue{}, InvalidTraceParent
+		return coretrace.SpanContextValue{}, coretrace.InvalidTraceParent
 	}
 	//: an all-zero or non-hex trace-id is refused by ParseTraceID, which also
 	//: enforces the width — so a dash landing inside the field is caught there.
-	traceID, traceErr := ParseTraceID(prefix[traceIDOffset : traceIDOffset+TraceIDHexLen])
+	traceID, traceErr := coretrace.ParseTraceID(prefix[traceIDOffset : traceIDOffset+coretrace.TraceIDHexLen])
 	//: surface the typed refusal.
 	if traceErr != nil {
 		//: refuse.
-		return SpanContextValue{}, traceErr
+		return coretrace.SpanContextValue{}, traceErr
 	}
 	//: an all-zero or non-hex parent-id is refused by ParseSpanID.
-	spanID, spanErr := ParseSpanID(prefix[parentIDOffset : parentIDOffset+SpanIDHexLen])
+	spanID, spanErr := coretrace.ParseSpanID(prefix[parentIDOffset : parentIDOffset+coretrace.SpanIDHexLen])
 	//: surface the typed refusal.
 	if spanErr != nil {
 		//: refuse.
-		return SpanContextValue{}, spanErr
+		return coretrace.SpanContextValue{}, spanErr
 	}
 	//: the flag byte is kept whole, undefined bits included — see
 	//: TraceFlags.Sanitized for why masking happens on output instead.
@@ -157,18 +162,18 @@ func parseTraceParentPrefix(prefix string) (context SpanContextValue, err error)
 	//: surface the typed refusal.
 	if flagsErr != nil {
 		//: refuse.
-		return SpanContextValue{}, flagsErr
+		return coretrace.SpanContextValue{}, flagsErr
 	}
 	//: a traceparent always names a span that ran somewhere else.
-	return SpanContextValue{TraceID: traceID, SpanID: spanID, Flags: flags, Remote: true}, nil
+	return coretrace.SpanContextValue{TraceID: traceID, SpanID: spanID, Flags: flags, Remote: true}, nil
 }
 
 // parseTraceFlags reads the two-hex-digit trace-flags field.
-func parseTraceFlags(text string) (flags TraceFlags, err error) {
+func parseTraceFlags(text string) (flags coretrace.TraceFlags, err error) {
 	//: width and alphabet before any decode.
 	if len(text) != flagsHexLen || !isLowerHex(text) {
 		//: refuse.
-		return 0, InvalidTraceParent
+		return 0, coretrace.InvalidTraceParent
 	}
 	//: decode into a fixed array, as ParseTraceID does: DecodeString RETURNS a
 	//: fresh slice, so it heap-allocated one byte per inbound request.
@@ -176,10 +181,10 @@ func parseTraceFlags(text string) (flags TraceFlags, err error) {
 	//: unreachable after the checks above, and still not ignored.
 	if _, decodeErr := hex.Decode(decoded[:], []byte(text)); decodeErr != nil {
 		//: refuse.
-		return 0, InvalidTraceParent
+		return 0, coretrace.InvalidTraceParent
 	}
 	//: the byte exactly as received.
-	return TraceFlags(decoded[0]), nil
+	return coretrace.TraceFlags(decoded[0]), nil
 }
 
 // FormatTraceParent renders a span context as a version-00 traceparent header
@@ -197,7 +202,7 @@ func parseTraceFlags(text string) (flags TraceFlags, err error) {
 // acting as a producer. A bit received from an upstream that defines it is
 // preserved in the SpanContextValue and dropped on the way out, which is the
 // only combination that satisfies both halves of the specification.
-func FormatTraceParent(context SpanContextValue) (header string, ok bool) {
+func FormatTraceParent(context coretrace.SpanContextValue) (header string, ok bool) {
 	//: an invalid context has no header at all.
 	if !context.IsValid() {
 		//: nothing to write, and the caller is told so.
@@ -217,4 +222,20 @@ func FormatTraceParent(context SpanContextValue) (header string, ok bool) {
 	out.WriteString(hex.EncodeToString([]byte{byte(context.Flags.Sanitized())}))
 	//: the rendered header value.
 	return out.String(), true
+}
+
+// isLowerHex reports whether text is drawn entirely from [0-9a-f].
+//
+// hex.Decode accepts uppercase, and the traceparent grammar does not
+// (2HEXDIGLC for the version and the flags), so the alphabet is checked here
+// rather than left to the decoder — as coretrace.ParseTraceID checks its own.
+func isLowerHex(text string) bool {
+	//: no allocation: the check walks the bytes in place.
+	return !slices.ContainsFunc([]byte(text), isNotLowerHexDigit)
+}
+
+// isNotLowerHexDigit reports whether c falls outside [0-9a-f].
+func isNotLowerHexDigit(c byte) bool {
+	//: digits and the six lowercase letters are the entire alphabet.
+	return (c < '0' || c > '9') && (c < 'a' || c > 'f')
 }
