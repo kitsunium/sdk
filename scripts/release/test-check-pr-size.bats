@@ -42,6 +42,26 @@ pr_commits() {
   [[ "$output" == *"touches nothing that can cut a release"* ]]
 }
 
+# The SDK is one module at the root (ADR 0162): its go.mod is consumer-visible,
+# and the rest of the root — lanes, scripts, ADRs, the workspace — is not.
+@test "a pull request touching only the SDK module's go.mod can be sized" {
+  pr_files 11 go.mod
+  pr_labels 11 release:minor
+  pr_commits 11 'chore: the go line'
+  run "$SCRIPT" --pr=11
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"released as a minor (label release:minor)"* ]]
+}
+
+@test "a pull request touching only root files no consumer sees sizes nothing" {
+  pr_files 12 go.work MODULE.bazel scripts/release/cut-tags.sh docs/adr/0162-x.md
+  pr_labels 12
+  pr_commits 12 $'chore: tooling\n\nRelease-bump: minor'
+  run "$SCRIPT" --pr=12
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"touches nothing that can cut a release"* ]]
+}
+
 # The case the merge would refuse: a request nobody with the authority decided.
 @test "an unlabelled pull request whose commits ask for a minor fails, naming the fix" {
   pr_files 2 pkg/v1/data/codec/codec.go

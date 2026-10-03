@@ -1,106 +1,108 @@
 #!/usr/bin/env bash
 # scripts/release/lib/tag-format.sh — single source of truth for the SDK
 # release tag format. Sourced by compute-bumps.sh + cut-tags.sh; the JS
-# counterpart at docs/site/scripts/lib/tag-format.mjs re-exports the same
-# regex so the docs sync stays in sync with the release pipeline.
+# counterpart at docs/site/scripts/lib/tag-format.mjs mirrors the same shapes
+# so the docs sync stays in step with the release pipeline (ADR 0007 §1).
 #
-# Tag shape (load-bearing — also enforced in ADR 0007 / ADR 0009):
-#     pkg/v<X>.<Y>.<Z>(-<prerelease>)?
-# Example: pkg/v0.1.0   pkg/v0.2.0-rc.1   pkg/v1.0.0
+# The SDK is ONE Go module, github.com/kitsunium/sdk, at the repository root
+# (ADR 0162). A release is one tag on it:
 #
-# The public module is github.com/kitsunium/sdk/pkg — a BARE module path with
-# NO /vN suffix. Go forbids /v0 and /v1 suffixes (v0/v1 are the suffix-free
-# major; only /v2+ carry one), so the proxy rejects a `…/pkg/v1` module path at
-# any version. The consumer-facing packages live under the pkg/v1/ directory
-# (import paths stay github.com/kitsunium/sdk/pkg/v1/*) but the module — and its
-# tag — is bare `pkg`. The semver major is therefore held to 0|1 here; a future
-# breaking v2 adopts a real `…/pkg/v2` module path with a `pkg/v2/v2.0.0` tag
-# (deferred — ADR 0009), at which point this lib grows a second shape.
+#     v<X>.<Y>.<Z>(-<prerelease>)?          e.g. v0.18.0   v1.0.0-rc.1
+#
+# and, for each module that requires a vendor and CHANGED since its own last
+# tag, one tag at the same version:
+#
+#     third-party/<path>/v<X>.<Y>.<Z>       e.g. third-party/aws/v0.18.0
+#     framework/connectors/<engine>/v<X>.<Y>.<Z>
+#
+# The module paths are bare (no /vN suffix), so the semver major is held to
+# 0|1 in every shape: a breaking v2 needs a real `…/v2` module path (deferred —
+# ADR 0009). The shapes before ADR 0162 — `pkg/vX.Y.Z`, `internal/<mod>/vX.Y.Z`,
+# `framework/vX.Y.Z` — are history: nothing cuts them any more, and the newest
+# `pkg/vX.Y.Z` is read once, as the version the first root tag continues.
 
 set -euo pipefail
 
-# Public regex used by every consumer. Anchored. Major constrained to 0|1
-# (bare module path — see header); v2+ deferred.
-TAG_REGEX='^pkg/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+# The SDK module's tag: the repository root, so no path prefix. Anchored, major
+# 0|1 (bare module path — see header).
+SDK_TAG_REGEX='^v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
-# Test a tag name against the canonical shape. Exits 0 on match. The major
-# bound (0|1) lives in the regex, so no path-major/semver-major cross-check is
-# needed: the module path is bare and there is no path-major to disagree with.
+# is_valid_tag <tag> — the SDK module's shape. Exits 0 on match.
 is_valid_tag() {
-  [[ "$1" =~ $TAG_REGEX ]]
+  [[ "$1" =~ $SDK_TAG_REGEX ]]
 }
 
-# Internal-module resolution tags (ADR 0009): `internal/<mod>/vX.Y.Z`. These are
-# cut alongside the pkg tag so the published module graph resolves without
-# `replace`; Go's internal/ rule still blocks direct consumer import. Bare
-# module paths only carry major 0/1, so the semver major is held to 0|1 (v2+
-# would need internal/<mod>/vN paths — deferred per ADR 0009).
-INTERNAL_TAG_REGEX='^internal/[a-z][a-z0-9]*/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+# The public module's tag before ADR 0162 (ADR 0017): `pkg/vX.Y.Z`. Kept only
+# to READ the history — the first root tag continues pkg's numbering.
+PKG_TAG_REGEX='^pkg/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
-# Test an internal-module tag against the canonical shape. Exits 0 on match.
-is_valid_internal_tag() {
-  [[ "$1" =~ $INTERNAL_TAG_REGEX ]]
-}
-
-# Framework-module tags (ADR 0147): `framework/vX.Y.Z` for the framework itself
-# and `framework/connectors/<engine>/vX.Y.Z` for each database connector, a Go
-# module of its own. Cut in lockstep with the pkg tag, same X.Y.Z, for the same
-# reason the internal tags are: each requires the one below it EXACTLY.
-FRAMEWORK_TAG_REGEX='^framework(/connectors/[a-z][a-z0-9]*)?/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
-
-# Test a framework-module tag against the canonical shape. Exits 0 on match.
-is_valid_framework_tag() {
-  [[ "$1" =~ $FRAMEWORK_TAG_REGEX ]]
+# is_valid_pkg_tag <tag> — a public-module tag from before ADR 0162. Exits 0 on
+# match.
+is_valid_pkg_tag() {
+  [[ "$1" =~ $PKG_TAG_REGEX ]]
 }
 
 # Vendor-module tags (ADR 0157): `third-party/<path>/vX.Y.Z`, one per vendor
-# module — `third-party/aws/v0.17.0`, `third-party/db/writer/mysql/v0.17.0`,
-# `third-party/x-crypto/v0.17.0`. Each module requires internal/* exactly, so
-# it is cut in the same lockstep, at the same X.Y.Z. A path component is
-# lowercase and may carry a hyphen (`x-crypto`), as the directory does; at least
-# one component is required, so a bare `third-party/vX.Y.Z` is no module's tag.
+# module — `third-party/aws/v0.18.0`, `third-party/db/writer/mysql/v0.18.0`. A
+# path component is lowercase and may carry a hyphen (`x-crypto`), as the
+# directory does; at least one component is required, so a bare
+# `third-party/vX.Y.Z` is no module's tag.
 THIRD_PARTY_TAG_REGEX='^third-party(/[a-z][a-z0-9-]*)+/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
 
-# Test a vendor-module tag against the canonical shape. Exits 0 on match.
+# is_valid_third_party_tag <tag> — a vendor module's shape. Exits 0 on match.
 is_valid_third_party_tag() {
   [[ "$1" =~ $THIRD_PARTY_TAG_REGEX ]]
 }
 
-# is_valid_chain_tag <tag> — one of the four shapes a release chain carries.
-is_valid_chain_tag() {
-  case "$1" in
-    pkg/*) is_valid_tag "$1" ;;
-    internal/*) is_valid_internal_tag "$1" ;;
-    framework/*) is_valid_framework_tag "$1" ;;
-    third-party/*) is_valid_third_party_tag "$1" ;;
-    *) return 1 ;;
-  esac
+# Connector-module tags (ADR 0147 §7, ADR 0158): one driver each,
+# `framework/connectors/<engine>/vX.Y.Z`. The framework itself is a part of the
+# SDK module since ADR 0162, so `framework/vX.Y.Z` is no longer a shape.
+CONNECTOR_TAG_REGEX='^framework/connectors/[a-z][a-z0-9]*/v[01]\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$'
+
+# is_valid_connector_tag <tag> — a connector module's shape. Exits 0 on match.
+is_valid_connector_tag() {
+  [[ "$1" =~ $CONNECTOR_TAG_REGEX ]]
 }
 
-# chain_modules [go.work] — the modules a release tags, one directory per line,
-# read from the workspace's `use` directives with the root module (`.`) left
-# out: nothing requires it and it is never tagged (ADR 0012) — every vendor
-# integration it used to host is a workspace module of its own now (ADR 0157).
-# Deriving the chain from go.work is what makes a module added to the workspace
-# released without anyone editing this file — ADR 0137's census argument,
-# applied to tags (ADR 0147 §9).
+# is_valid_vendor_tag <tag> — one of the two shapes a module that requires a
+# vendor is tagged with.
+is_valid_vendor_tag() {
+  is_valid_third_party_tag "$1" || is_valid_connector_tag "$1"
+}
+
+# is_valid_release_tag <tag> — any tag a release cuts: the SDK's or a vendor
+# module's.
+is_valid_release_tag() {
+  is_valid_tag "$1" || is_valid_vendor_tag "$1"
+}
+
+# is_vendor_dir <dir> — a directory that may hold a module requiring a vendor:
+# `third-party/<path>` or `framework/connectors/<engine>`, spelled as its tag
+# prefix must be.
+is_vendor_dir() {
+  is_valid_vendor_tag "$1/v0.0.0"
+}
+
+# vendor_modules [go.work] — the modules a release may tag beside the SDK, one
+# directory per line, sorted: the workspace's `use` directives with the SDK
+# module (`.`) left out. Deriving the list from go.work is what makes a module
+# added to the workspace released without anyone editing this file — ADR
+# 0137's census argument, applied to tags (ADR 0147 §9).
 #
-# It REFUSES rather than guesses: a missing go.work, one it cannot read, or one
-# whose chain lacks `pkg` is an exit 1 with the reason on stderr, because a
-# chain read as empty would publish nothing and one read without pkg would
-# publish a framework requiring a pkg version that does not exist.
+# It REFUSES rather than guesses: a missing go.work, one it cannot read, one
+# that does not use `.` — the SDK module itself —, or one that uses a directory
+# that is no vendor module is an exit 1 with the reason on stderr. The last is
+# the guard on ADR 0162 itself: `./pkg`, `./framework` or `./internal/core`
+# back in go.work would be a module split the release must not tag, since its
+# packages are the SDK module's too, and a consumer requiring both would get an
+# ambiguous import.
 #
-# Output order: internal/* first (by name — the tags are pushed atomically, so
-# no order among them matters), then pkg, then framework, then connectors —
-# the order each requires the one before, which is the order a reader of the
-# dry-run expects — and every other module last, by name: the vendor modules
-# under third-party/ (ADR 0157), which require internal/* and nothing above.
 # Both `use ./x` and a parenthesised `use ( ... )` block are read; a `//`
 # comment and blank lines are skipped.
-chain_modules() {
-  local work="${1:-go.work}" dirs="" rc=0
+vendor_modules() {
+  local work="${1:-go.work}" dirs="" rc=0 d bad=""
   if [ ! -r "$work" ]; then
-    echo "chain_modules: $work is missing or unreadable — refusing to guess the release chain" >&2
+    echo "vendor_modules: $work is missing or unreadable — refusing to guess the release's modules" >&2
     return 1
   fi
   dirs="$(awk '
@@ -109,27 +111,34 @@ chain_modules() {
     inblock && /^[[:space:]]*\)/          { inblock = 0; next }
     inblock && NF                          { print $1; next }
     /^[[:space:]]*use[[:space:]]+[^([:space:]]/ { print $2 }
-  ' "$work" | sed -e 's#^\./##' -e 's#/$##' | awk '$0 != "." && $0 != ""')" || rc=$?
+  ' "$work" | sed -e 's#^\./##' -e 's#/$##')" || rc=$?
   if [ "$rc" -ne 0 ]; then
-    echo "chain_modules: could not parse $work (exit $rc)" >&2
+    echo "vendor_modules: could not parse $work (exit $rc)" >&2
     return 1
   fi
-  if ! grep -qx 'pkg' <<<"$dirs"; then
-    echo "chain_modules: $work does not use ./pkg — refusing a chain without the public module" >&2
+  if ! grep -qx '\.' <<<"$dirs"; then
+    echo "vendor_modules: $work does not use . — refusing a release without the SDK module (ADR 0162)" >&2
     return 1
   fi
-  {
-    grep -E '^internal/' <<<"$dirs" | LC_ALL=C sort || true
-    echo pkg
-    grep -x 'framework' <<<"$dirs" || true
-    grep -E '^framework/' <<<"$dirs" | LC_ALL=C sort || true
-    grep -vE '^(internal/|pkg$|framework($|/))' <<<"$dirs" | LC_ALL=C sort || true
-  }
+  while IFS= read -r d; do
+    [ -z "$d" ] && continue
+    [ "$d" = "." ] && continue
+    if ! is_vendor_dir "$d"; then
+      bad="${bad:+$bad }$d"
+    fi
+  done <<<"$dirs"
+  if [ -n "$bad" ]; then
+    echo "vendor_modules: $work uses $bad, which is no vendor module — the SDK is one module (ADR 0162), and a module of its own lives under third-party/ or framework/connectors/" >&2
+    return 1
+  fi
+  grep -vx '\.' <<<"$dirs" | LC_ALL=C sort -u || true
 }
 
-# Extract the bare semver X.Y.Z(-rc)? from a pkg tag. "pkg/v0.1.0" -> "0.1.0".
+# version_from_tag <tag> — the bare semver X.Y.Z(-rc)? of any shape:
+# "v0.1.0" -> "0.1.0", "pkg/v0.1.0" -> "0.1.0",
+# "third-party/aws/v0.1.0" -> "0.1.0".
 version_from_tag() {
-  awk -F/ '{sub(/^v/, "", $2); print $2}' <<<"$1"
+  sed -e 's#^.*/##' -e 's#^v##' <<<"$1"
 }
 
 # Strip a pre-release suffix from a semver. "1.0.0-rc.1" -> "1.0.0".
@@ -137,11 +146,18 @@ strip_prerelease() {
   sed 's/-.*$//' <<<"$1"
 }
 
-# Bump the patch component of a tag. Refuses pre-release tags (the
-# release pipeline must not auto-bump from a pre-release base).
+# is_valid_base <tag> — a tag a version may be bumped FROM: the SDK's, or —
+# only until the first root tag exists — pkg's.
+is_valid_base() {
+  is_valid_tag "$1" || is_valid_pkg_tag "$1"
+}
+
+# next_patch <tag> — the next SDK tag, patch bumped, from an SDK or a pkg base:
+# "v0.1.0" -> "v0.1.1", "pkg/v0.17.0" -> "v0.17.1". Refuses a pre-release base
+# (the release pipeline must not auto-bump from one).
 next_patch() {
   local tag="$1"
-  is_valid_tag "$tag" || { echo "next_patch: invalid tag '$tag'" >&2; return 1; }
+  is_valid_base "$tag" || { echo "next_patch: invalid tag '$tag'" >&2; return 1; }
   local ver
   ver="$(version_from_tag "$tag")"
   case "$ver" in
@@ -149,13 +165,14 @@ next_patch() {
   esac
   local major minor patch
   IFS=. read -r major minor patch <<<"$ver"
-  printf 'pkg/v%s.%s.%s\n' "$major" "$minor" "$((patch + 1))"
+  printf 'v%s.%s.%s\n' "$major" "$minor" "$((patch + 1))"
 }
 
-# Bump the minor component (resets patch to 0). Same pre-release guard.
+# next_minor <tag> — the next SDK tag, minor bumped and patch reset, from an SDK
+# or a pkg base: "pkg/v0.17.0" -> "v0.18.0". Same pre-release guard.
 next_minor() {
   local tag="$1"
-  is_valid_tag "$tag" || { echo "next_minor: invalid tag '$tag'" >&2; return 1; }
+  is_valid_base "$tag" || { echo "next_minor: invalid tag '$tag'" >&2; return 1; }
   local ver
   ver="$(version_from_tag "$tag")"
   case "$ver" in
@@ -163,32 +180,71 @@ next_minor() {
   esac
   local major minor _patch
   IFS=. read -r major minor _patch <<<"$ver"
-  printf 'pkg/v%s.%s.0\n' "$major" "$((minor + 1))"
+  printf 'v%s.%s.0\n' "$major" "$((minor + 1))"
 }
 
-# Cross-platform version sort. GNU `sort -V` ships on Linux; BSD `sort`
-# (default on macOS) doesn't. Autodetect once per process.
+# version_sort — stdin: tags of any shape, one per line. stdout: the same tags,
+# ascending by their X.Y.Z, whatever their prefix. Decorate, sort numerically,
+# undecorate: GNU `sort -V` is not on every macOS, and the fallback this
+# replaces sorted on a fixed `pkg/v` prefix, which the root shape does not
+# carry.
 version_sort() {
-  if sort -V </dev/null >/dev/null 2>&1; then
-    sort -V "$@"
-  else
-    # Fallback: numeric on the dotted-quad after the shared "pkg/v" prefix.
-    # Good enough for X.Y.Z up to 99999.
-    sort -t. -k1.6,1n -k2,2n -k3,3n "$@"
-  fi
+  awk '{
+    v = $0
+    sub(/^.*\//, "", v)
+    sub(/^v/, "", v)
+    sub(/-.*$/, "", v)
+    split(v, p, ".")
+    printf "%d\t%d\t%d\t%s\n", p[1], p[2], p[3], $0
+  }' | LC_ALL=C sort -t "$(printf '\t')" -k1,1n -k2,2n -k3,3n | cut -f4-
 }
 
-# Find the highest valid STABLE pkg tag. Echoes empty if none. Internal tags
-# (internal/<mod>/v…) are excluded by the `pkg/v*` glob. Pre-release tags are
-# skipped: they are not a valid bump base (next_patch/minor refuse them), and
-# the BSD `version_sort` fallback only compares X.Y.Z — so pkg/v0.2.0 and
-# pkg/v0.2.0-rc.1 would tie and `tail -n1` could hand back the rc.
-latest_pkg_tag() {
-  git tag -l 'pkg/v*' |
+# stable_tags <glob> <validator> — every tag `git tag -l` lists for <glob> that
+# <validator> accepts and whose VERSION carries no pre-release suffix, one per
+# line. Pre-release tags are left out: they are not a valid bump base
+# (next_patch and next_minor refuse them), and a sort on X.Y.Z alone would tie
+# v0.2.0 with v0.2.0-rc.1. The hyphen is looked for in the version only:
+# `third-party/x-crypto/v0.18.0` is stable, and its path carries two.
+stable_tags() {
+  local glob="$1" check="$2"
+  git tag -l "$glob" |
     while IFS= read -r t; do
-      is_valid_tag "$t" || continue
-      case "$t" in *-*) continue ;; esac
+      "$check" "$t" || continue
+      case "$(version_from_tag "$t")" in *-*) continue ;; esac
       echo "$t"
+    done
+}
+
+# latest_sdk_tag — the highest stable SDK tag `vX.Y.Z`; empty when the root
+# module has never been released.
+latest_sdk_tag() {
+  stable_tags 'v*' is_valid_tag | version_sort | tail -n1
+}
+
+# latest_pkg_tag — the highest stable `pkg/vX.Y.Z` from before ADR 0162; empty
+# if none.
+latest_pkg_tag() {
+  stable_tags 'pkg/v*' is_valid_pkg_tag | version_sort | tail -n1
+}
+
+# latest_release_tag — the tag the last release was cut as: the higher of the
+# newest SDK tag and the newest pkg tag. Until the first SDK tag exists that is
+# pkg's, whose release cut the chain the SDK module replaced; after it, the SDK
+# tag continues pkg's numbering, so it is always the higher. Comparing the two
+# rather than preferring one is what keeps a stray low root tag from restarting
+# the numbering below the history. Empty on a repository that never released.
+latest_release_tag() {
+  { latest_sdk_tag; latest_pkg_tag; } | awk 'NF' | version_sort | tail -n1
+}
+
+# latest_vendor_tag <dir> — the highest stable tag of the module in <dir>
+# (`<dir>/vX.Y.Z`); empty when it has never been tagged. A tag whose prefix is
+# not exactly <dir> is not the module's, whatever the glob matched.
+latest_vendor_tag() {
+  local dir="$1"
+  stable_tags "$dir/v*" is_valid_vendor_tag |
+    while IFS= read -r t; do
+      if [ "${t%/v*}" = "$dir" ]; then echo "$t"; fi
     done |
     version_sort |
     tail -n1
@@ -206,10 +262,14 @@ latest_pkg_tag() {
 # not reachable from HEAD, so `git describe --tags` cannot see it and baselining
 # on the tag would compare HEAD against something outside its own history.
 #
+# The tag is latest_release_tag's: the newest SDK tag or, before the first one,
+# the newest pkg tag — the release the first root tag follows was cut as pkg's,
+# and the range must not reopen what it published (ADR 0162).
+#
 # Why this lives in the shared lib and not in compute-bumps.sh, where it was
 # born: the two halves of a release have to agree on it. compute-bumps.sh
 # decides WHETHER to release by diffing this baseline against HEAD; cut-tags.sh
-# decides HOW BIG by reading the maintainer's Release-bump trailer. While
+# decides HOW BIG by reading the maintainer's labels over the same range. While
 # cut-tags.sh read HEAD alone the two could disagree — and when they did, the
 # bump fell silently to patch (ADR 0085). One function is what keeps them
 # symmetric; two copies would drift the same way again.
@@ -218,10 +278,10 @@ latest_pkg_tag() {
 # the tag SHAPE, and the docs sync reads published GitHub releases, never the
 # commit graph.
 release_base() {
-  local last_pkg="" last_base=""
-  last_pkg="$(latest_pkg_tag 2>/dev/null || true)"
-  if [ -n "$last_pkg" ]; then
-    last_base="$(git rev-parse -q --verify "${last_pkg}^1^{commit}" 2>/dev/null || true)"
+  local last="" last_base=""
+  last="$(latest_release_tag 2>/dev/null || true)"
+  if [ -n "$last" ]; then
+    last_base="$(git rev-parse -q --verify "${last}^1^{commit}" 2>/dev/null || true)"
     if [ -n "$last_base" ]; then
       echo "$last_base"
       return 0
@@ -234,4 +294,12 @@ release_base() {
     return 0
   fi
   git rev-list --max-parents=0 HEAD | head -n1
+}
+
+# tag_base <tag> — the commit <tag> was cut FROM: its first parent, for the
+# reason release_base gives. A vendor module's change is measured from there,
+# never from the tag, whose go.mod the release rewrote. Exit 1 when the tag
+# names no commit with a parent.
+tag_base() {
+  git rev-parse -q --verify "${1}^1^{commit}"
 }

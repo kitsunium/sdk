@@ -25,17 +25,23 @@
 // "local" is reserved — it represents the working tree / HEAD and is
 // only emitted in bootstrap mode (no published releases for the major).
 
-// Two shapes are accepted (ADR 0017):
-//   - bare:   pkg/vX.Y.Z         — the public module …/pkg; semver major is
-//             constrained to 0|1 (Go forbids a /v1 module-path suffix). Its
-//             docs "major" axis is the on-disk API directory "v1" (the code
-//             lives under pkg/v1/), NOT the semver major — sync-versions uses
-//             `major` to select the pkg/<major>/ source directory, and pkg/v0
-//             does not exist.
+// Three shapes are accepted:
+//   - root:   vX.Y.Z             — the SDK module github.com/kitsunium/sdk, at
+//             the repository root, one tag per release since ADR 0162; semver
+//             major constrained to 0|1 (a bare module path takes no /v1
+//             suffix). Its docs "major" axis is the on-disk API directory
+//             "v1" (the code lives under pkg/v1/), NOT the semver major —
+//             sync-versions uses `major` to select the pkg/<major>/ source
+//             directory, and pkg/v0 does not exist.
+//   - bare:   pkg/vX.Y.Z         — the public module …/pkg the releases before
+//             ADR 0162 were cut as (ADR 0017); same 0|1 major, same "v1" axis.
+//             Nothing cuts it any more, and the published ones stay listed.
 //   - legacy: pkg/vN/vX.Y.Z      — reserved for a future real …/pkg/vN module
 //             (N≥2); the path-major must equal the semver major.
+// The vendor modules' tags (third-party/…, framework/connectors/…) are not
+// releases of their own: one GitHub release per SDK release lists them.
 export const TAG_REGEX =
-  /^pkg\/(?:v[0-9]+\/v[0-9]+|v[01])\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
+  /^(?:v[01]|pkg\/(?:v[0-9]+\/v[0-9]+|v[01]))\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?$/;
 export const LOCAL_RELEASE = "local";
 
 export function isValidTag(tag) {
@@ -45,19 +51,21 @@ export function isValidTag(tag) {
 export function parseTag(tag) {
   if (!isValidTag(tag)) return null;
   const segs = tag.split("/");
-  //: bare pkg/vX.Y.Z has 2 segments (no path-major); legacy pkg/vN/vX.Y.Z has 3.
+  //: root vX.Y.Z has 1 segment and bare pkg/vX.Y.Z 2 (no path-major); legacy
+  //: pkg/vN/vX.Y.Z has 3.
   let major;
-  const semverWithV = segs.length === 2 ? segs[1] : segs[2];
+  const semverWithV = segs.at(-1);
   const semver = semverWithV.slice(1);
   const dash = semver.indexOf("-");
   const core = dash === -1 ? semver : semver.slice(0, dash);
   const prerelease = dash === -1 ? null : semver.slice(dash + 1);
   const parts = core.split(".").map(Number);
   if (parts.length !== 3) return null;
-  if (segs.length === 2) {
-    //: bare module …/pkg: the grouping major is the on-disk API directory,
-    //: which is always "v1" (code lives under pkg/v1/; there is no pkg/v0).
-    //: The semver major (0 alpha → 1 stable) lives in `parts`/`semver`, not here.
+  if (segs.length <= 2) {
+    //: the SDK module (root) or the bare module …/pkg before it: the grouping
+    //: major is the on-disk API directory, which is always "v1" (code lives
+    //: under pkg/v1/; there is no pkg/v0). The semver major (0 alpha → 1
+    //: stable) lives in `parts`/`semver`, not here.
     major = "v1";
   } else {
     //: legacy/v2+ form: reject tags whose PATH major (pkg/vN) disagrees with the
@@ -169,7 +177,7 @@ export function localOnlyVersions(majors) {
 //   - site level: the newest non-EOL major is flagged default.
 // Pure (no I/O) so the defaulting policy is unit-testable — the property that
 // "local" stops being default the moment a real tag exists is what keeps the
-// dropdown honest once the first pkg/<major>/vX.Y.Z lands.
+// dropdown honest once a release tag lands.
 export function stitchVersions({
   majorsOnDisk,
   realByMajor,

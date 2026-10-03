@@ -174,7 +174,7 @@ func main() {
 
 ## Releases
 
-Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. The public module is the bare `github.com/kitsunium/sdk/pkg`, tagged `pkg/vX.Y.Z` (ADR 0017); every other module of the release chain — `internal/kernel`, `internal/core`, `internal/service`, the `framework` and its connectors, and the vendor modules under `third-party/` — is tagged at the same version in the same release (`internal/<layer>/vX.Y.Z`, `framework/vX.Y.Z`, `third-party/<path>/vX.Y.Z` — ADR 0147, ADR 0157). A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). A future breaking major is a second module, `…/pkg/v2`. The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
+Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
 
 ## Documentation
 

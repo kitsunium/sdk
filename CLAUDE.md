@@ -345,7 +345,7 @@ byte-level base-N API: `codec.Marshal("base64", v)` is the one verb.
 | Single-package test | `bazel test //<path>:<target>` (e.g. `bazel test //internal/kernel/errs:errs_test`) |
 | Regenerate BUILD.bazel | `bazel run //:gazelle` after changing imports or `go.mod` |
 | Coverage | `bazel coverage --combined_report=lcov //...` — LCOV at `$(bazel info output_path)/_coverage/_coverage_report.dat` |
-| Release dry-run | `make release-dry-run` (computes patch bumps locally without pushing tags — see ADR 0007) |
+| Release dry-run | `make release-dry-run` (computes the release — the SDK's `vX.Y.Z` and the vendor modules that changed — locally without pushing tags — see ADR 0007, ADR 0162) |
 | Regenerate READMEs | `make docs-readme` (regenerates the `README.md` of every `pkg/v1` package declaring `//go:generate gomarkdoc` — all 87 today — and of every `framework` package declaring one — 26 today — from its package doc comment; not the four `framework/connectors/*` modules, which that `go generate` does not reach, though `check-readme-drift.sh` checks them too; see ADR 0008) |
 
 Branch naming matches the conventional commit prefix: `feat/*`, `fix/*`, `refactor/*`, `chore/*`, `docs/*`.

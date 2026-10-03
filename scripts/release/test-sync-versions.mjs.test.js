@@ -18,6 +18,11 @@ import {
 test("TAG_REGEX matches canonical shape", () => {
   assert.match("pkg/v1/v1.32.1", TAG_REGEX);
   assert.match("pkg/v2/v2.0.0-rc.1", TAG_REGEX);
+  //: the SDK module's root tag (ADR 0162) and the pkg tag before it.
+  assert.match("v0.18.0", TAG_REGEX);
+  assert.match("pkg/v0.17.0", TAG_REGEX);
+  //: a vendor module's tag is no release of its own.
+  assert.doesNotMatch("third-party/aws/v0.18.0", TAG_REGEX);
 });
 
 test("TAG_REGEX rejects shell-injection bait", () => {

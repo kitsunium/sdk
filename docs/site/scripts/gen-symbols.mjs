@@ -6,8 +6,9 @@
 //
 // Runs strictly stdlib-only on both sides: Node here just spawns Go.
 // GOWORK=off because tools/genindex lives outside go.work (it's a
-// build tool, not a library — keeps the 5-module invariant from
-// /workspace/CLAUDE.md intact).
+// build tool, not a library — keeps the workspace invariant of the root
+// CLAUDE.md intact: go.work names the SDK module and the modules a
+// release may tag beside it, nothing else).
 
 import { spawnSync } from "node:child_process";
 import { existsSync, mkdirSync } from "node:fs";

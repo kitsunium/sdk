@@ -36,10 +36,12 @@ table, the base path, the versioning — is `docs/site/CLAUDE.md`.
 ## Attention points
 
 - Comments here still say `/workspace/CLAUDE.md` (the devcontainer path ADR
-  0153 removed) and, in `gen-symbols.mjs`, that the index lands in `src/data/`
-  and that the workspace has five modules; the code writes `public/_search/`
-  and reads the root `CLAUDE.md` of the tree it materialises — the checkout,
-  or a release's worktree.
+  0153 removed) and, in `gen-symbols.mjs`, that the index lands in `src/data/`;
+  the code writes `public/_search/` and reads the root `CLAUDE.md` of the tree
+  it materialises — the checkout, or a release's worktree.
+- `sync-versions.mjs` lists the releases from `gh release list`, or from
+  `git tag -l 'v*' 'pkg/v*'` without `gh`: the SDK module's root tags since ADR
+  0162 and the `pkg/vX.Y.Z` history before them, one list on the `v1` axis.
 
 ## Verify
 

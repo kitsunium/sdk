@@ -2,8 +2,8 @@
 # BATS tests for compute-bumps.sh. Each test stands up a disposable git repo so
 # the assertions are reproducible offline. No Bazel needed — when bazel is
 # absent the internal/* path falls back to a no-op (compute-bumps gracefully
-# skips the rdeps step). The public module is the bare `pkg`, so the script
-# emits the single token "pkg" (never per-major "vN").
+# skips the rdeps step). The SDK is one module at the root (ADR 0162), so the
+# script emits the single token "sdk" — never one per module family.
 
 # Every commit here is --no-verify. The fixtures are throwaway repositories, but
 # `core.hooksPath` is inherited from the developer's own git config, so without
@@ -35,20 +35,22 @@ setup() {
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
   mkdir -p pkg/v1 internal/kernel/errs
-  cat >pkg/go.mod <<'EOF'
-module github.com/kitsunium/sdk/pkg
+  cat >go.mod <<'EOF'
+module github.com/kitsunium/sdk
 
-go 1.26
+go 1.27
 EOF
   : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
-  # A real module directory carries Bazel targets, and compute-bumps now uses
-  # their PRESENCE to tell "this path has nothing to ask Bazel about" apart from
-  # "the query failed". A fixture without one is not a module, it is the
+  # A real layer directory carries Bazel targets, and compute-bumps uses their
+  # PRESENCE to tell "this path has nothing to ask Bazel about" apart from "the
+  # query failed". A fixture without one is not a Bazel subtree, it is the
   # CLAUDE.md case — which has its own test below.
   : > internal/kernel/errs/BUILD.bazel
   g add -A
   g commit -q --no-verify -m "init"
+  # The release before ADR 0162 was cut as pkg's: its tag is the base until the
+  # first root tag exists.
   g tag pkg/v0.1.0
 
   SCRIPT="$BATS_TEST_DIRNAME/compute-bumps.sh"
@@ -56,26 +58,73 @@ EOF
 
 teardown() { rm -rf "$REPO"; }
 
+# release_tag <tag> — tag a DETACHED child of HEAD, exactly how cut-tags.sh
+# publishes a release (ADR 0009): both halves of a release baseline on the
+# tag's FIRST PARENT.
+release_tag() {
+  local rel
+  rel="$(g commit-tree "HEAD^{tree}" -p "$(g rev-parse HEAD)" -m "release $1")"
+  g tag "$1" "$rel"
+}
+
 @test "no changes since last tag emits nothing" {
   run "$SCRIPT" --range="pkg/v0.1.0..HEAD"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "change under pkg/v1 emits pkg" {
+@test "change under pkg/v1 emits sdk" {
   echo "// patch" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
-@test "change to pkg/go.mod emits pkg" {
-  printf '\n// bump\n' >> pkg/go.mod
+# The SDK module's go.mod is at the root since ADR 0162: its go line is every
+# consumer's floor, so a change to it is consumer-visible — what pkg/go.mod was.
+@test "a change to the SDK module's go.mod emits sdk" {
+  printf '\n// bump\n' >> go.mod
   g commit -aq --no-verify -m "chore: module tweak"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
+}
+
+# pkg.go.dev shows the module root's README and LICENSE: what a consumer reads.
+@test "the root README.md and LICENSE emit sdk (ADR 0162)" {
+  printf '# kitsunium/sdk\n' > README.md
+  g add -A
+  g commit -q --no-verify -m "docs: the module page"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "sdk" ]
+  release_tag v0.2.0
+  printf 'MIT\n' > LICENSE
+  g add -A
+  g commit -q --no-verify -m "chore: licence"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "sdk" ]
+}
+
+# The rest of the root ships in the module zip and no consumer compiles or
+# reads it: the lanes, the scripts, the ADRs, the workspace. Root files used to
+# be in no released module at all; becoming the SDK module's must not make them
+# release triggers.
+@test "a root file no consumer sees releases nothing (ADR 0162)" {
+  mkdir -p docs/adr scripts .github/workflows
+  echo "# ADR" > docs/adr/0162-x.md
+  echo "echo hi" > scripts/x.sh
+  echo "name: x" > .github/workflows/x.yml
+  printf 'go 1.27\n\nuse .\n' > go.work
+  echo 'module(name = "x")' > MODULE.bazel
+  g add -A
+  g commit -q --no-verify -m "chore: tooling"
+  run bash -c "'$SCRIPT' --explain 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+  [[ "$output" != *$'\nsdk'* ]]
 }
 
 @test "bootstrap repo with no tags uses root commit as fallback" {
@@ -89,7 +138,7 @@ teardown() { rm -rf "$REPO"; }
   g commit -q --no-verify -m "first"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
 @test "empty repo with no pkg dirs emits nothing" {
@@ -97,7 +146,7 @@ teardown() { rm -rf "$REPO"; }
   g init -q -b main
   g config user.email "ci@example.invalid"
   g config user.name  "ci"
-  : > README.md
+  : > NOTES.md
   g add -A
   g commit -q --no-verify -m "first"
   run "$SCRIPT"
@@ -116,11 +165,12 @@ teardown() { rm -rf "$REPO"; }
 
 # The rdeps step was `bazel query … | grep -q .` inside an `if`. `grep -q .`
 # matches the FIRST line and exits, bazel takes SIGPIPE, `pipefail` reports 141,
-# and the `if` is FALSE — so a query that DID reach //pkg/... left need_bump at 0
-# and cut no release at all. Measured with a stub emitting 608 KB: rc=141,
-# `if` false. The stub is what makes this testable without a Bazel workspace, and
-# a real rdeps over this repository is far larger than the pipe buffer.
-@test "a large rdeps answer still counts as reaching pkg" {
+# and the `if` is FALSE — so a query that DID reach //pkg/... left the release
+# undecided and cut nothing at all. Measured with a stub emitting 608 KB:
+# rc=141, `if` false. The stub is what makes this testable without a Bazel
+# workspace, and a real rdeps over this repository is far larger than the pipe
+# buffer.
+@test "a large rdeps answer still counts as reaching a published package" {
   stub="$(mktemp -d)"
   cat >"$stub/bazel" <<'STUB'
 #!/usr/bin/env bash
@@ -135,7 +185,7 @@ STUB
   PATH="$stub:$PATH" run "$SCRIPT"
   rm -rf "$stub"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
 # --- #227: a failed query and an unreachable target used to be one silence ---
@@ -178,7 +228,7 @@ STUB
 }
 
 # Case 2 of 3 — the over-correction guard. `awk -F/ '{print $1"/"$2}'` reduces a
-# changed file to its module dir, which is right for internal/<mod>/go.mod but
+# changed file to its layer dir, which is right for internal/<layer>/x.go but
 # leaves a file ALREADY at depth two intact: internal/CLAUDE.md survives as the
 # bogus label //internal/CLAUDE.md/... . Measured against the real repository
 # that label is `exit 7, no targets found beneath` — the same exit code as case 1
@@ -196,9 +246,9 @@ echo "ERROR: no targets found beneath 'internal/CLAUDE.md'" >&2
 exit 7
 STUB
   chmod +x "$stub/bazel"
-  printf '# module notes\n' > internal/CLAUDE.md
+  printf '# layer notes\n' > internal/CLAUDE.md
   g add -A
-  g commit -q --no-verify -m "docs(internal): module notes"
+  g commit -q --no-verify -m "docs(internal): layer notes"
   PATH="$stub:$PATH" run "$SCRIPT"
   rm -rf "$stub"
   [ "$status" -eq 0 ]
@@ -229,39 +279,55 @@ STUB
 # Regression: the release tag lives on a DETACHED child of main (how cut-tags.sh
 # publishes it), so `git describe` can't see it. compute-bumps must baseline on
 # the tag's first parent, not fall back to root..HEAD and emit a spurious bump.
+# Before the first root tag the base is pkg's — the shape of every release cut
+# before ADR 0162.
 @test "detached release tag + no new main commits emits nothing (no spurious bump)" {
   cd "$(mktemp -d)"
   g init -q -b main
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
-  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
   : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
-  base="$(g rev-parse HEAD)"
-  # cut-tags-style: a detached commit whose parent is main HEAD, tagged, not on a branch.
-  rel="$(g commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
-  g tag pkg/v0.1.0 "$rel"
+  release_tag pkg/v0.1.0
   run "$SCRIPT"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
 }
 
-@test "detached release tag + a real pkg change after the base emits pkg" {
+@test "detached release tag + a real pkg change after the base emits sdk" {
   cd "$(mktemp -d)"
   g init -q -b main
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1
-  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
   : > pkg/v1/doc.go
   g add -A; g commit -q --no-verify -m "init"
-  base="$(g rev-parse HEAD)"
-  rel="$(g commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
-  g tag pkg/v0.1.0 "$rel"
+  release_tag pkg/v0.1.0
   echo "// new" >> pkg/v1/doc.go
   g commit -aq --no-verify -m "feat(v1): real change after release"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
+}
+
+# ADR 0162: once the SDK module has its first tag, that tag is the base — the
+# release cut as pkg's before it must not reopen. Measured against the pre-fix
+# lib, which read pkg tags only: the range opened at pkg/v0.1.0's base and
+# re-released the change v0.2.0 had already published.
+@test "a detached root tag is the release base, not the older pkg tag" {
+  echo "// published by v0.2.0" >> pkg/v1/doc.go
+  g commit -aq --no-verify -m "feat(v1): released as v0.2.0"
+  release_tag v0.2.0
+  run bash -c "'$SCRIPT' --explain 2>&1"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"range: $(g rev-parse v0.2.0^1)..HEAD"* ]]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+  echo "// after v0.2.0" >> pkg/v1/doc.go
+  g commit -aq --no-verify -m "feat(v1): next"
+  run "$SCRIPT"
+  [ "$status" -eq 0 ]
+  [ "$output" = "sdk" ]
 }
 
 # --- #238: the exclusion was a two-name list under a comment describing a ------
@@ -310,7 +376,7 @@ STUB
   g commit -q --no-verify -m "docs(errs): regenerate README"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
 @test "a .go file under pkg/ still cuts a release (control)" {
@@ -318,17 +384,17 @@ STUB
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
 # --- the half no list could have fixed: rule 2 -------------------------------
 #
 # Rule 1 had an exclusion and rule 2 had none, and rule 2 could not usefully
-# have had one of its own: it reduces a changed path to `internal/<mod>` before
-# asking anything, and after that reduction a BENCH.md and a .go file are the
-# same module dir (#220 predicted this; it is measured here). So a CLAUDE.md
-# under internal/ — a name rule 1 HAS excluded since before ADR 0089 — cut a
-# release anyway, through the other rule.
+# have had one of its own: it reduces a changed path to `internal/<layer>`
+# before asking anything, and after that reduction a BENCH.md and a .go file are
+# the same dir (#220 predicted this; it is measured here). So a CLAUDE.md under
+# internal/ — a name rule 1 HAS excluded since before ADR 0089 — cut a release
+# anyway, through the other rule.
 #
 # The stub records every invocation, so "the query did not run" is a counted
 # fact rather than an absence of red: a missing bazel produces the same silence.
@@ -341,15 +407,12 @@ bazel_subtree_fixture() {
   g init -q -b main
   g config user.email "ci@example.invalid"; g config user.name "ci"
   mkdir -p pkg/v1 internal/kernel/errs
-  printf 'module github.com/kitsunium/sdk/pkg\n\ngo 1.26\n' > pkg/go.mod
+  printf 'module github.com/kitsunium/sdk\n\ngo 1.27\n' > go.mod
   : > pkg/v1/doc.go
   : > internal/kernel/errs/errs.go
   printf 'go_library(name = "errs")\n' > internal/kernel/errs/BUILD.bazel
   g add -A; g commit -q --no-verify -m "init"
-  local base rel
-  base="$(g rev-parse HEAD)"
-  rel="$(g commit-tree "HEAD^{tree}" -p "$base" -m "release v0.1.0")"
-  g tag pkg/v0.1.0 "$rel"
+  release_tag v0.1.0
 }
 
 # counting_bazel_stub <dir> <callfile> — answers every query with one row, and
@@ -378,7 +441,7 @@ STUB
   rm -rf "$stub" "$calls"
   [ "$status" -eq 0 ]
   [ -z "$output" ]
-  # The positive witness. Before, this was 1 call and the token "pkg".
+  # The positive witness. Before, this was 1 call and a release.
   [ "$ncalls" -eq 0 ]
 }
 
@@ -390,16 +453,20 @@ STUB
   g commit -aq --no-verify -m "fix(errs): behaviour"
   PATH="$stub:$PATH" run "$SCRIPT"
   ncalls="$(awk 'END { print NR + 0 }' "$calls")"
+  query="$(cat "$calls")"
   rm -rf "$stub" "$calls"
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
   [ "$ncalls" -eq 1 ]
+  # The vendor modules import internal/ directly, so they are in the set a
+  # change is asked about, beside the SDK's published packages (ADR 0162).
+  [[ "$query" == *"rdeps(//pkg/... + //framework/... + //third-party/..., //internal/kernel/...)"* ]]
 }
 
 # --- #226: the log could not say why ------------------------------------------
 #
 # An internal/-only change published nothing and the reason was not recoverable
-# from the run. stdout stays the contract ("pkg" or nothing) and the reason goes
+# from the run. stdout stays the contract ("sdk" or nothing) and the reason goes
 # to stderr, so these tests read the two streams apart — `2>&1 >/dev/null`
 # keeps stderr and discards stdout.
 
@@ -420,8 +487,8 @@ STUB
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   run bash -c "'$SCRIPT' --explain 2>&1 >/dev/null"
   [ "$status" -eq 0 ]
-  [[ "$output" == *"rule 1: pkg/v1/doc.go is a public-module change -> bump"* ]]
-  [[ "$output" == *"verdict: RELEASE"* ]]
+  [[ "$output" == *"rule 1: pkg/v1/doc.go is an SDK-module change -> release"* ]]
+  [[ "$output" == *"verdict: RELEASE (token 'sdk')"* ]]
 }
 
 # Rule 1 read its paths from `git diff --name-only … || true`, so a git that
@@ -437,8 +504,8 @@ STUB
 
 # The `command -v bazel` guard is #227 defect 1 in different clothes: a missing
 # bazel and an rdeps set reaching nothing produce the same empty stdout and the
-# same verdict. A developer without bazel should still get rule 1, so the
-# default stays a skip; the release lane, for which rule 2 is load-bearing,
+# same verdict. A developer without bazel should still get rules 1 and 1c, so
+# the default stays a skip; the release lane, for which rule 2 is load-bearing,
 # passes --require-bazel. PATH is narrowed to the system directories, which is
 # where every tool the script needs lives and where bazel does not.
 @test "--require-bazel refuses when bazel is absent and internal/ changed" {
@@ -457,31 +524,34 @@ STUB
   g commit -aq --no-verify -m "feat(v1): a public symbol"
   PATH="/usr/bin:/bin" run "$SCRIPT" --require-bazel
   [ "$status" -eq 0 ]
-  [ "$output" = "pkg" ]
+  [ "$output" = "sdk" ]
 }
 
-# ── The framework module (ADR 0147) ─────────────────────────────────────────
-# framework/ is a public module of its own, released in lockstep with pkg. A
-# change to it emits the token `framework`; the chain is cut once either way.
+# ── The framework (ADR 0147), a part of the SDK module (ADR 0162) ───────────
+# framework/ holds packages of the SDK module, so a change to it releases the
+# SDK; a connector under framework/connectors/ is a module of its own, which a
+# release also tags when it changed (cut-tags.sh). Either is the one token.
 
-@test "a change under framework/ emits framework" {
+@test "a change under framework/ emits sdk" {
   mkdir -p framework/kit
   echo "package kit" > framework/kit/kit.go
   g add -A
   g commit -q --no-verify -m "feat(framework): a declaration"
-  run "$SCRIPT"
+  run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [ "$output" = "framework" ]
+  [[ "$output" == *"rule 1: framework/kit/kit.go is an SDK-module change"* ]]
+  [[ "$output" == *$'\nsdk'* ]]
 }
 
-@test "a change to a connector module emits framework" {
+@test "a change to a connector module emits sdk, as a connector's" {
   mkdir -p framework/connectors/postgres
   printf 'module github.com/kitsunium/sdk/framework/connectors/postgres\n\ngo 1.27\n' > framework/connectors/postgres/go.mod
   g add -A
   g commit -q --no-verify -m "feat(framework): the postgres connector"
-  run "$SCRIPT"
+  run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [ "$output" = "framework" ]
+  [[ "$output" == *"rule 1c: framework/connectors/postgres/go.mod is a connector-module change"* ]]
+  [[ "$output" == *$'\nsdk'* ]]
 }
 
 @test "a framework CLAUDE.md alone releases nothing" {
@@ -491,44 +561,46 @@ STUB
   g commit -q --no-verify -m "docs(framework): notes"
   run "$SCRIPT" --explain
   [ "$status" -eq 0 ]
-  [[ "$output" != *"pkg"$'\n'* ]]
+  [[ "$output" != *"sdk"$'\n'* ]]
   [[ "$output" == *"verdict: NO RELEASE"* ]]
 }
 
-@test "pkg and framework in one range emit both tokens, pkg first" {
+# Before ADR 0162 this emitted `pkg` and `framework`, two tokens for one
+# lockstep release; there is one module now, and one token.
+@test "pkg and framework in one range emit one token" {
   mkdir -p framework/model
   echo "package model" > framework/model/model.go
   echo "// patch" >> pkg/v1/doc.go
   g add -A
-  g commit -q --no-verify -m "feat: both modules"
+  g commit -q --no-verify -m "feat: both packages"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = $'pkg\nframework' ]
+  [ "$output" = "sdk" ]
 }
 
 # ── The vendor modules (ADR 0157) ───────────────────────────────────────────
-# Every vendor integration under third-party/ is a module of the chain, so a
-# change to one emits the token `third-party`; the chain is cut once whatever
-# the tokens.
+# A vendor module is a module of its own, released with the SDK: a change to
+# one releases the SDK, and cut-tags.sh tags the module because it changed.
 
-@test "a change under third-party/ emits third-party" {
+@test "a change under third-party/ emits sdk" {
   mkdir -p third-party/aws/writer/s3
   echo "package s3" > third-party/aws/writer/s3/s3.go
   g add -A
   g commit -q --no-verify -m "feat(s3): a declaration"
-  run "$SCRIPT"
+  run bash -c "'$SCRIPT' --explain 2>&1"
   [ "$status" -eq 0 ]
-  [ "$output" = "third-party" ]
+  [[ "$output" == *"rule 1c: third-party/aws/writer/s3/s3.go is a vendor-module change"* ]]
+  [[ "$output" == *$'\nsdk'* ]]
 }
 
-@test "a change to a vendor module's go.mod emits third-party" {
+@test "a change to a vendor module's go.mod emits sdk" {
   mkdir -p third-party/db/writer/mysql
   printf 'module github.com/kitsunium/sdk/third-party/db/writer/mysql\n\ngo 1.27\n' > third-party/db/writer/mysql/go.mod
   g add -A
   g commit -q --no-verify -m "chore(mysql): the module"
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = "third-party" ]
+  [ "$output" = "sdk" ]
 }
 
 @test "a vendor CLAUDE.md or BUILD.bazel alone releases nothing" {
@@ -539,21 +611,21 @@ STUB
   g commit -q --no-verify -m "docs(x-crypto): notes"
   run "$SCRIPT" --explain
   [ "$status" -eq 0 ]
-  [[ "$output" != *"third-party"$'\n'* ]]
+  [[ "$output" != *"sdk"$'\n'* ]]
   [[ "$output" == *"verdict: NO RELEASE"* ]]
 }
 
-@test "pkg, framework and third-party in one range emit the three tokens, in order" {
+@test "pkg, framework and third-party in one range emit one token, once" {
   mkdir -p framework/model third-party/transform
   echo "package model" > framework/model/model.go
   echo "package transform" > third-party/transform/zstd.go
   echo "// patch" >> pkg/v1/doc.go
   g add -A
-  g commit -q --no-verify -m "feat: three modules"
+  g commit -q --no-verify -m "feat: three places"
   run "$SCRIPT" --explain
   [ "$status" -eq 0 ]
-  [[ "$output" == *"verdict: RELEASE (tokens 'pkg', 'framework' and 'third-party')"* ]]
+  [[ "$output" == *"verdict: RELEASE (token 'sdk')"* ]]
   run "$SCRIPT"
   [ "$status" -eq 0 ]
-  [ "$output" = $'pkg\nframework\nthird-party' ]
+  [ "$output" = "sdk" ]
 }

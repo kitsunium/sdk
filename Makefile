@@ -372,22 +372,23 @@ docs-dev:
 	cd docs/site && npm install --silent && DOCS_BASE=/ npm run dev
 
 # `release-dry-run` previews the auto-bump pipeline without pushing
-# any tag. compute-bumps.sh emits the list of pkg/<major> dirs that
-# would receive a patch bump; cut-tags.sh shows the resulting tag for
-# each. Explicit /bin/bash because the SDK shell is zsh and the
+# any tag. compute-bumps.sh emits the token `sdk` when a release is
+# due; cut-tags.sh shows the release it would cut — the SDK module's
+# vX.Y.Z and the tag of each vendor module that changed since its own
+# (ADR 0162). Explicit /bin/bash because the SDK shell is zsh and the
 # release scripts use bash-only patterns (associative arrays,
 # `< <(...)` process substitution). See ADR 0007 §Bump semantics.
 #
 # The exit code is captured and propagated. It used to be dropped by the `;`
 # after the redirection, and make runs recipes under /bin/sh with no `-e`
 # (this Makefile sets neither SHELL nor .SHELLFLAGS), so a compute-bumps that
-# REFUSED to answer printed "no majors need bumping" and exited 0 — the same
+# REFUSED to answer printed "no release is due" and exited 0 — the same
 # two lines as a genuine no-op. Measured against a compute-bumps stub exiting 1:
 # its two stderr lines were shown and then contradicted by the verdict below
 # them. That would have re-swallowed, on the path a maintainer actually runs
 # before a release, the voice #227 gave the script.
 # `--explain` sends the verdict and the reason for it to stderr, which is this
-# terminal. Without it the recipe printed "no majors need bumping" and nothing
+# terminal. Without it the recipe printed "no release is due" and nothing
 # about WHY — the local twin of #226, where a release run that published nothing
 # left no recoverable reason either.
 #
@@ -403,9 +404,9 @@ release-dry-run:
 		exit "$$rc"; \
 	fi; \
 	if [ ! -s /tmp/sdk-release-majors.txt ]; then \
-		echo "no majors need bumping"; \
+		echo "no release is due"; \
 	else \
-		echo "majors to bump:"; cat /tmp/sdk-release-majors.txt; echo; \
+		echo "release token:"; cat /tmp/sdk-release-majors.txt; echo; \
 		/bin/bash scripts/release/cut-tags.sh --dry-run $(if $(BUMP),--bump=$(BUMP),) < /tmp/sdk-release-majors.txt; \
 	fi
 
