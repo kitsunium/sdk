@@ -23,7 +23,13 @@ load: they are exact.
 | OS | macOS 26.6.2 (25G83) |
 | Go toolchain | go1.27.1 darwin/arm64 |
 | Baseline | `390aa80f` (go-toml/v2 v2.4.3) |
-| Measured | 2026-10-02T23:50Z |
+| Measured | 2026-10-02T23:50Z, the native codec before the fixes below |
+
+The fixes committed after that measurement — a bound on pointer chains, and
+the typed-decode precedence made identical to go-toml's — were re-measured
+for allocations and bytes, which did not change; they were not re-timed,
+the machine being saturated by other work at the time, and they add at most
+a function call per scalar on the paths these benchmarks take.
 
 ## Results
 
