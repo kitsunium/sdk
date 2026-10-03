@@ -1717,6 +1717,14 @@ rules:
       # framework module only.
       - "framework/**"
       - "**/framework/**"
+      # TEMPORARY — the same kodflow/ktn-linter#693, on service/sql.Withheld.
+      # Its Unwrap returns the driver's error it holds, and the rule asks for
+      # it to be renamed Cause; but Unwrap is the errors package's protocol,
+      # which errors.Is and errors.As call by that name, so the rename would
+      # leave the driver's error unreachable — the opposite of what the type
+      # exists for. Scoped to the one file; retire with #693.
+      - "**/internal/service/sql/withheld.go"
+      - "internal/service/sql/withheld.go"
 
   # ── Audit 2026-05-28 — all five scoped overrides RETIRED (ktn-linter v1.34.5) ─
   # Every exclusion that used to live here was removed and the linter re-run on

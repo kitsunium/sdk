@@ -29,13 +29,12 @@ policy's `MaxRetryDelay` asks for one (`retry.go`).
 | `file_receive.go` | `Receive`, the reclaim scan, the rename that IS the exclusion |
 | `file_dead.go` | `Nack`, `Reject`, `Extend`, `DeadLetters`, the burial, the dead-letter record's encoding |
 | `file_replay.go` | `ReplayDeadLetter`, `DeleteDeadLetter`, `deadRecordsOf` — every record of one message by its ID |
-| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the withheld cause), the process-wide `sqlWakes` table |
+| `sql.go` | `NewSQL`, the SQL broker, `Publish`, `Ack`, `Nack`, `Extend`, `Wake`; `run` (a savepoint of the caller's transaction, a transaction of the broker's own, or one statement on the pool), `announce` (the wake through `Deferrer`), the receipt grammar, `failed` (QUEUE_BACKEND_FAILED + the driver's error through `service/sql`'s `Withheld`, its text out of every rendering), the process-wide `sqlWakes` table |
 | `sql_receive.go` | `Receive`: the probe, then — only when something is due — the lease transaction: `pickDue`, `buryLapsed`, `leaseRows`, `minDue` |
 | `sql_dead.go` | `Reject`, `DeadLetters`, `ReplayDeadLetter`, `DeleteDeadLetter` on the table |
 | `sql_config.go` | `SQLConfig`, `MaxSQLTableLen`, the table-name rule, the refusals (`SQL_QUEUE_MISCONFIGURED`) |
 | `sql_dialect.go` | **the only place the SQL broker renders SQL**: every statement per dialect, `leaseRows` / `buryRows` rendered per call, the DDL; every marker, quoted name and the lease's `FOR UPDATE SKIP LOCKED` is `core/sql.Dialect`'s (`Placeholder`, `QuoteIdent`, `ForUpdateSkipLocked`) |
 | `sql_migration.go` | `SQLMigration`: the one table as an idempotent `core/sql` migration the caller numbers |
-| `sql_withheld.go` | `withheld`: the driver's error for `errors.Is`/`errors.As`, its text out of every rendering |
 | `consume.go` | `Consume`, the pull loop, the panic guard, and the idle wait on a `Waker` (`idleFor`, `idle`) |
 | `wake.go` | `wakeSignal` (the broadcast every broker closes on Publish, Nack and a replay, and a durable broker's recorded due instant), `wakeValue`, `earliest`, and `wakeTable[K]` — the process-wide, weakly-held table that makes every durable broker over one queue share one signal: `fileWakes` by directory, `sqlWakes` by pool and table |
 | `consume_config.go` | `ConsumerConfig`, the idempotence assertion, the clamps |
@@ -229,8 +228,9 @@ exists if and only if that transaction commits** — the transactional outbox.
   refused `QUEUE_MISCONFIGURED` (field `Clock`) before any statement.
 - **A storage failure is `QUEUE_BACKEND_FAILED`**, JOINED with the driver's
   error — never wrapped, so the verdict stays the origin — whose text is
-  WITHHELD from every rendering (`withheld`, docstore's rule): a driver quotes
-  the row a statement touched. The transactor's own verdicts pass through.
+  WITHHELD from every rendering (through `service/sql`'s `Withheld`, which
+  docstore joins its own failures through too): a driver quotes the row a
+  statement touched. The transactor's own verdicts pass through.
 - **`SQLMigration(dialect, table, version)`** creates the table in one
   `CREATE TABLE IF NOT EXISTS`; the SDK numbers nothing (ADR 0055 §D12).
 - **Two brokers over one pool and table share a wake** (`sqlWakes`), keyed by
@@ -406,7 +406,8 @@ delivery count incremented. That is a contract now: a broker that answered
   clock. Spell no marker, quote or row lock by hand there either: they are
   `core/sql.Dialect`'s, which this file used to copy.
 - Parse a driver's error, or let its text into a rendering — join it through
-  `withheld`. The service module imports no driver (ADR 0055 §D2).
+  `service/sql`'s `Withheld`. The service module imports no driver (ADR 0055
+  §D2).
 - Fire the SQL broker's wake before the transaction a publication joined has
   committed: `announce` goes through `Defer`, and a wake for a rolled-back
   message would find nothing.

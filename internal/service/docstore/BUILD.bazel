@@ -20,7 +20,6 @@ go_library(
         "sql_reindex.go",
         "sql_store.go",
         "sql_version.go",
-        "sql_withheld.go",
         "sql_write.go",
         "version.go",
         "write.go",
