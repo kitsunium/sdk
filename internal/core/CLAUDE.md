@@ -20,8 +20,7 @@ with `logger/level` and `logger/writer` beneath it, `metrics`, `otel`,
 one package, that package sits at the family's path (`crypto/`, `net/`,
 `proc/`), and a service package beneath it with codes, values or ports of its
 own is mirrored beneath it at the same path (`crypto/key/jwk`, `proc/ipc` —
-ADR 0160). No
-domain sits at the root of this layer any more, and the root
+ADR 0160). No domain sits at the root of this layer any more, and the root
 `CLAUDE.md` architecture tree names every package by its path
 (`check-domain-docs.sh`).
 

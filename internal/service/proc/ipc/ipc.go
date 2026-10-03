@@ -189,8 +189,8 @@ func admit(p coreipc.PeerValue, self int, cfg *Config) error {
 }
 
 // Dialer connects to the private socket a configuration names: the engine
-// behind the core Dialer port, for a client that dials the same endpoint more
-// than once, or that a test hands a double instead.
+// behind the core Dialer port. Code that holds the port dials the same
+// endpoint as often as it needs to, and a test hands that code a double.
 type Dialer struct {
 	cfg Config
 }
