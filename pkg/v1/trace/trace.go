@@ -96,9 +96,8 @@ import (
 	"net/http"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
 )
@@ -137,19 +136,19 @@ const StatusOK StatusCode = coretrace.StatusOK
 const StatusError StatusCode = coretrace.StatusError
 
 // AttrKindInvalid is the zero value and names no type.
-const AttrKindInvalid AttrKind = coremetrics.AttrKindInvalid
+const AttrKindInvalid AttrKind = coreotel.AttrKindInvalid
 
 // AttrKindString marks a string-valued attribute.
-const AttrKindString AttrKind = coremetrics.AttrKindString
+const AttrKindString AttrKind = coreotel.AttrKindString
 
 // AttrKindBool marks a bool-valued attribute.
-const AttrKindBool AttrKind = coremetrics.AttrKindBool
+const AttrKindBool AttrKind = coreotel.AttrKindBool
 
 // AttrKindInt64 marks a signed 64-bit integer attribute.
-const AttrKindInt64 AttrKind = coremetrics.AttrKindInt64
+const AttrKindInt64 AttrKind = coreotel.AttrKindInt64
 
 // AttrKindFloat64 marks an IEEE-754 double attribute.
-const AttrKindFloat64 AttrKind = coremetrics.AttrKindFloat64
+const AttrKindFloat64 AttrKind = coreotel.AttrKindFloat64
 
 // TraceParentHeader is the W3C header carrying the span context.
 const TraceParentHeader string = coretrace.TraceParentHeader
@@ -179,7 +178,7 @@ const DefaultScopeName string = coretrace.DefaultScopeName
 // ServiceNameKey is the resource attribute a backend joins a trace to a metric
 // on. It is the same constant pkg/v1/metrics exports, so the two signals cannot
 // disagree about the spelling.
-const ServiceNameKey string = coremetrics.ServiceNameKey
+const ServiceNameKey string = coreotel.ServiceNameKey
 
 // ExceptionEventName is the reserved event name RecordError writes.
 const ExceptionEventName string = coretrace.ExceptionEventName
@@ -232,6 +231,11 @@ var (
 	InvalidTraceState = coretrace.InvalidTraceState
 	// InvalidSpanName is the panic sentinel for a Start with no name.
 	InvalidSpanName = coretrace.InvalidSpanName
+	// InvalidAttribute is the panic sentinel for an unusable attribute set —
+	// an empty or repeated key, or a value no constructor set — on a span, an
+	// event, a link or a Resource. It is this package's own code; the metrics
+	// one is a different sentinel for the same defect in that signal.
+	InvalidAttribute = coretrace.InvalidAttribute
 	// UnknownExporter reports a name no imported package registered.
 	UnknownExporter = coretrace.UnknownExporter
 	// ExportFailed wraps an exporter's failure.
@@ -256,18 +260,18 @@ var (
 	// OTLPPartialSuccess reports an accepted request with rejected spans.
 	OTLPPartialSuccess = svctrace.OTLPPartialSuccess
 
-	// The four attribute constructors below are the same functions
-	// [github.com/kitsunium/sdk/pkg/v1/metrics] exports, so a value built by
-	// either package is accepted by both.
+	// The four attribute constructors below are the shared model's own, the
+	// ones [github.com/kitsunium/sdk/pkg/v1/metrics] delegates to, so a value
+	// built by either package is accepted by both.
 
 	// String returns a string-valued attribute.
-	String = coremetrics.String
+	String = coreotel.String
 	// Bool returns a bool-valued attribute.
-	Bool = coremetrics.Bool
+	Bool = coreotel.Bool
 	// Int64 returns a signed-integer attribute.
-	Int64 = coremetrics.Int64
+	Int64 = coreotel.Int64
 	// Float64 returns a double attribute.
-	Float64 = coremetrics.Float64
+	Float64 = coreotel.Float64
 )
 
 // ── The ports ────────────────────────────────────────────────────────────────
@@ -344,18 +348,18 @@ type Spans = coretrace.SpansValue
 // [github.com/kitsunium/sdk/pkg/v1/metrics.Attr], deliberately: an attribute is
 // OTel's common.proto, shared by every signal, so a value built for a metric is
 // accepted by a span and the reverse.
-type Attr = coremetrics.AttrValue
+type Attr = coreotel.AttrValue
 
 // AttrKind discriminates an Attr's value type.
-type AttrKind = coremetrics.AttrKind
+type AttrKind = coreotel.AttrKind
 
 // Resource identifies the producer of the telemetry. The same type a MeterConfig
 // takes, so a process cannot carry two Resources that disagree about
 // service.name — which is the key a backend correlates a trace with a metric on.
-type Resource = coremetrics.ResourceValue
+type Resource = coreotel.ResourceValue
 
 // Scope identifies the instrumentation that started the spans.
-type Scope = coremetrics.ScopeValue
+type Scope = coreotel.ScopeValue
 
 // SpanParams are the facts a span is born with. The zero value is an INTERNAL
 // span starting now.

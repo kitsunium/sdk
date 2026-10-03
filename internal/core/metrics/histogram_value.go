@@ -2,6 +2,8 @@
 // distribution.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // HistogramValue is one series of a histogram metric: the attribute set that
 // identifies it, the explicit bucket upper bounds, the count per bucket
 // (len == len(Bounds)+1, the last being the +Inf overflow), and the Sum/Count
@@ -9,7 +11,7 @@ package metrics
 type HistogramValue struct {
 	// Attrs is the series' attribute set, sorted by Key; nil for the
 	// dimensionless series. See SumValue.Attrs for the aliasing rule.
-	Attrs []AttrValue
+	Attrs []coreotel.AttrValue
 	// Bounds holds the histogram's explicit upper bounds, ascending. OTLP
 	// calls this field explicit_bounds.
 	Bounds []float64

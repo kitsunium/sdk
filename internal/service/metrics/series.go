@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // maxStackAttrs is how many attributes the lookup path sorts without touching
@@ -31,7 +32,7 @@ const seriesKeyCap int = 192
 // be a string because a value was a string everywhere the snapshot was going;
 // that reason expired with the OTel attribute model. The Prometheus rendering
 // is byte-identical either way, and an OTLP payload now carries a real boolean.
-var overflowAttrs = []coremetrics.AttrValue{coremetrics.Bool(coremetrics.OverflowAttrKey, true)}
+var overflowAttrs = []coreotel.AttrValue{coreotel.Bool(coremetrics.OverflowAttrKey, true)}
 
 // sortAttrs returns attrs ordered by Key, writing into buf when it fits so the
 // common case never allocates.
@@ -43,7 +44,7 @@ var overflowAttrs = []coremetrics.AttrValue{coremetrics.Bool(coremetrics.Overflo
 //
 // The result aliases either buf or a fresh heap slice; callers must copy it
 // before storing it.
-func sortAttrs(buf, attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
+func sortAttrs(buf, attrs []coreotel.AttrValue) []coreotel.AttrValue {
 	//: the dimensionless series is the common case and needs no work.
 	if len(attrs) == 0 {
 		//: nil, not an empty slice — it is what gets stored on the entry.
@@ -54,11 +55,11 @@ func sortAttrs(buf, attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
 	//: an oversized set falls back to the heap rather than truncating.
 	if len(attrs) > cap(buf) {
 		//: fresh backing array; correctness before speed.
-		sorted = make([]coremetrics.AttrValue, 0, len(attrs))
+		sorted = make([]coreotel.AttrValue, 0, len(attrs))
 	}
 	//: copy in, then order by Key.
 	sorted = append(sorted, attrs...)
-	slices.SortFunc(sorted, coremetrics.CompareAttrKey)
+	slices.SortFunc(sorted, coreotel.CompareAttrKey)
 	//: hand back the ordered view.
 	return sorted
 }
@@ -82,7 +83,7 @@ func sortAttrs(buf, attrs []coremetrics.AttrValue) []coremetrics.AttrValue {
 // cross-kind conflict would never reach bindName — one name would silently
 // carry both monotonicities. One byte on a stack buffer buys that check back
 // without a second map read per observation.
-func appendSeriesKey(dst []byte, kind instrumentKind, name string, sorted []coremetrics.AttrValue) []byte {
+func appendSeriesKey(dst []byte, kind instrumentKind, name string, sorted []coreotel.AttrValue) []byte {
 	//: the instrument kind opens the key, before anything a caller controls.
 	dst = append(dst, byte(kind))
 	//: then the name.
@@ -109,7 +110,7 @@ func appendSized(dst []byte, s string) []byte {
 // cloneAttrs returns an owned copy of src, or nil for the dimensionless set.
 // The copy is what lets the meter share its attribute slice with every snapshot
 // while the caller's stack scratch stays on the stack.
-func cloneAttrs(src []coremetrics.AttrValue) []coremetrics.AttrValue {
+func cloneAttrs(src []coreotel.AttrValue) []coreotel.AttrValue {
 	//: nil in, nil out — the dimensionless series stores no attribute slice.
 	if len(src) == 0 {
 		//: nothing to own.
@@ -122,7 +123,7 @@ func cloneAttrs(src []coremetrics.AttrValue) []coremetrics.AttrValue {
 // compareAttrs orders two sorted attribute sets lexicographically — key, then
 // the value's canonical identity, then the shorter set first on a common
 // prefix. Used at Collect time to make a snapshot's series order deterministic.
-func compareAttrs(a, b []coremetrics.AttrValue) int {
+func compareAttrs(a, b []coreotel.AttrValue) int {
 	//: compare pairwise over the common prefix.
 	for i := range min(len(a), len(b)) {
 		//: keys decide first.
@@ -134,7 +135,7 @@ func compareAttrs(a, b []coremetrics.AttrValue) int {
 		//: across kinds and distinguishes every pair the series key keeps
 		//: apart, so two distinct series never sort equal and the snapshot
 		//: stays byte-deterministic.
-		if c := coremetrics.CompareAttrValue(a[i], b[i]); c != 0 {
+		if c := coreotel.CompareAttrValue(a[i], b[i]); c != 0 {
 			//: ordered.
 			return c
 		}

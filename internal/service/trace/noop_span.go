@@ -4,7 +4,7 @@ package trace
 import (
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // noopSpan is the core/trace.Span an unsampled — or unmintable — span becomes.
@@ -38,12 +38,12 @@ func (s noopSpan) SpanContext() coretrace.SpanContextValue {
 }
 
 // SetAttrs implements core/trace.Span and records nothing.
-func (s noopSpan) SetAttrs(_ ...coremetrics.AttrValue) {
+func (s noopSpan) SetAttrs(_ ...coreotel.AttrValue) {
 	//: deliberately dropped — the span is not recorded.
 }
 
 // AddEvent implements core/trace.Span and records nothing.
-func (s noopSpan) AddEvent(_ string, _ ...coremetrics.AttrValue) {
+func (s noopSpan) AddEvent(_ string, _ ...coreotel.AttrValue) {
 	//: deliberately dropped — the span is not recorded.
 }
 

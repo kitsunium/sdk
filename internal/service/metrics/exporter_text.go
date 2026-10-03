@@ -12,6 +12,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -130,7 +131,7 @@ func (e *textExporter) Export(snap coremetrics.SnapshotValue) error {
 }
 
 // appendResourceLine renders the producer's attributes, carried once.
-func appendResourceLine(buf []byte, resource coremetrics.ResourceValue) []byte {
+func appendResourceLine(buf []byte, resource coreotel.ResourceValue) []byte {
 	//: the header word.
 	buf = append(buf, "# resource"...)
 	//: then every attribute, space-separated, in the Resource's own order.
@@ -146,7 +147,7 @@ func appendResourceLine(buf []byte, resource coremetrics.ResourceValue) []byte {
 // appendScopeLine renders the instrumentation scope. Version is omitted when
 // empty rather than printed as an empty string, because the specification makes
 // it optional and an empty one says nothing.
-func appendScopeLine(buf []byte, scope coremetrics.ScopeValue) []byte {
+func appendScopeLine(buf []byte, scope coreotel.ScopeValue) []byte {
 	//: name is always present — a Meter normalises it.
 	buf = append(buf, "# scope name="...)
 	buf = appendQuoted(buf, scope.Name)
@@ -294,7 +295,7 @@ func appendMetricHeader(buf []byte, header metricHeader) []byte {
 }
 
 // appendSeriesLine appends "name{k=v,…} value\n" to buf.
-func appendSeriesLine(buf []byte, name string, attrs []coremetrics.AttrValue, value string) []byte {
+func appendSeriesLine(buf []byte, name string, attrs []coreotel.AttrValue, value string) []byte {
 	//: the instrument name opens the line, escaped for the same reason as a
 	//: key (see appendAttrPair).
 	buf = appendEscapedValue(buf, name)
@@ -308,7 +309,7 @@ func appendSeriesLine(buf []byte, name string, attrs []coremetrics.AttrValue, va
 }
 
 // appendAttrs renders {k=v,…}. A dimensionless series renders as a bare name.
-func appendAttrs(buf []byte, attrs []coremetrics.AttrValue) []byte {
+func appendAttrs(buf []byte, attrs []coreotel.AttrValue) []byte {
 	//: no braces at all for the dimensionless series.
 	if len(attrs) == 0 {
 		//: nothing to render.
@@ -342,12 +343,12 @@ func appendAttrs(buf []byte, attrs []coremetrics.AttrValue) []byte {
 // a hand-built snapshot, can carry a newline, and one line per series is this
 // format's only framing, so an unescaped key forged the very line the value
 // escaping exists to prevent. For an ordinary key the bytes are unchanged.
-func appendAttrPair(buf []byte, attr coremetrics.AttrValue) []byte {
+func appendAttrPair(buf []byte, attr coreotel.AttrValue) []byte {
 	//: the key, escaped like a value so it cannot end the line.
 	buf = appendEscapedValue(buf, attr.Key)
 	buf = append(buf, '=')
 	//: only a string can carry a byte that would break the line.
-	if attr.Kind() == coremetrics.AttrKindString {
+	if attr.Kind() == coreotel.AttrKindString {
 		//: quoted and escaped.
 		return appendQuoted(buf, attr.Str())
 	}

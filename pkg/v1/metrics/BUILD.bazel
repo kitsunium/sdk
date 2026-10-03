@@ -9,6 +9,7 @@ go_library(
     visibility = ["//visibility:public"],
     deps = [
         "//internal/core/metrics",
+        "//internal/core/otel",
         "//internal/service/metrics",
     ],
 )

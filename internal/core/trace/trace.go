@@ -18,7 +18,7 @@ package trace
 import (
 	"context"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // Tracer starts spans. It is the only way a span comes into existence.
@@ -63,9 +63,9 @@ type Span interface {
 	// SpanContext returns the span's identity — what Inject propagates.
 	SpanContext() SpanContextValue
 	// SetAttrs adds or replaces typed dimensions on the span.
-	SetAttrs(attrs ...coremetrics.AttrValue)
+	SetAttrs(attrs ...coreotel.AttrValue)
 	// AddEvent records a timestamped point inside the span.
-	AddEvent(name string, attrs ...coremetrics.AttrValue)
+	AddEvent(name string, attrs ...coreotel.AttrValue)
 	// SetStatus records the operation's outcome.
 	SetStatus(code StatusCode, message string)
 	// End closes the span and hands it to the Tracer's SpanSink.

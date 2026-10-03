@@ -7,9 +7,8 @@ import (
 	"strings"
 	"testing"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
@@ -373,7 +372,7 @@ type roundTripperFunc func(*http.Request) (*http.Response, error)
 func (f roundTripperFunc) RoundTrip(r *http.Request) (*http.Response, error) { return f(r) }
 
 // hasAttr reports whether attrs carries key with the given string value.
-func hasAttr(attrs []coremetrics.AttrValue, key, value string) bool {
+func hasAttr(attrs []coreotel.AttrValue, key, value string) bool {
 	for _, attr := range attrs {
 		if attr.Key == key && attr.Str() == value {
 			return true
@@ -383,7 +382,7 @@ func hasAttr(attrs []coremetrics.AttrValue, key, value string) bool {
 }
 
 // hasIntAttr reports whether attrs carries key with the given integer value.
-func hasIntAttr(attrs []coremetrics.AttrValue, key string, value int64) bool {
+func hasIntAttr(attrs []coreotel.AttrValue, key string, value int64) bool {
 	for _, attr := range attrs {
 		if attr.Key == key && attr.Int64() == value {
 			return true

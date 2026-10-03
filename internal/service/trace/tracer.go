@@ -7,8 +7,7 @@ package trace
 import (
 	"context"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -39,13 +38,13 @@ func NewTracer(cfg TracerConfig) *Tracer {
 }
 
 // Resource returns the producing resource this Tracer stamps on its payloads.
-func (t *Tracer) Resource() coremetrics.ResourceValue {
+func (t *Tracer) Resource() coreotel.ResourceValue {
 	//: already normalised at construction.
 	return t.cfg.Resource
 }
 
 // Scope returns the instrumentation scope this Tracer stamps on its payloads.
-func (t *Tracer) Scope() coremetrics.ScopeValue {
+func (t *Tracer) Scope() coreotel.ScopeValue {
 	//: already normalised at construction.
 	return t.cfg.Scope
 }

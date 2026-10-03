@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T00:00:00Z -->
 # internal/core/metrics/
 
 ## Purpose
@@ -6,11 +6,17 @@
 Declares the **observability port** — the natural twin of the logger — shaped on
 the **OpenTelemetry metrics DATA MODEL**. Instruments
 (`Counter`/`UpDownCounter`/`Gauge`/`Histogram` and their observable
-counterparts), the `Meter` that mints + `Collect`s them, typed `AttrValue`s,
-aggregation `Temporality`, the producing `ResourceValue` and the
-`ScopeValue` that instrumented it, the `Describer` sibling that documents an
-instrument name, plus the `Exporter` contract + process-wide registry that ships
-a `SnapshotValue` out. A core sibling admitted by **ADR 0027**, re-shaped by
+counterparts), the `Meter` that mints + `Collect`s them, aggregation
+`Temporality`, the `Describer` sibling that documents an instrument name, plus
+the `Exporter` contract + process-wide registry that ships a `SnapshotValue` out.
+
+The typed attribute, the producing Resource and the Scope that instrumented it
+are **not declared here**: they are OTel's shared `common.proto` /
+`resource.proto` and live in `internal/core/otel`, under this package AND
+`internal/core/trace` (ADR 0051 §Decision 2 named that extraction). What stays
+here is this signal's half of them: the refusal an unusable attribute set earns
+(`InvalidAttribute`, `0.2.9.4` — unchanged by the move), the `DefaultScopeName`
+only this signal may claim, and `OverflowAttrKey`, which only a meter writes. A core sibling admitted by **ADR 0027**, re-shaped by
 **ADR 0044** and given a description by **ADR 0067**. The in-memory meter and the stdlib
 `text` / `prometheus` / `otlpjson` exporters live in
 `internal/service/metrics`; exporters self-register via the registry
@@ -36,10 +42,9 @@ may hold.
 
 | File | Surface |
 |---|---|
-| `attr_value.go` | `AttrValue` + `AttrKind` + the four constructors (`String`/`Bool`/`Int64`/`Float64`) + accessors + `AppendIdentity`/`AppendText` + `CompareAttrKey`/`CompareAttrValue`/`ValidateAttrs`/`SortAttrs` + `OverflowAttrKey` |
+| `attrs.go` | this signal's half of the shared attribute model: `OverflowAttrKey`, `ValidateAttrs` (the per-fetch check, refusing with `InvalidAttribute`) and `NormalizeResource` (the Resource a Meter publishes) — both delegate the RULES to `internal/core/otel` and keep the CODE |
+| `scope.go` | `DefaultScopeName` + `NormalizeScope` — the default only this signal may claim |
 | `temporality.go` | `Temporality` (Unspecified/Delta/Cumulative) + `String` + `Resolved` |
-| `resource_value.go` | `ResourceValue` + `Normalized` + `ServiceNameKey`/`UnknownService` |
-| `scope_value.go` | `ScopeValue` + `Normalized` + `DefaultScopeName` |
 | `counter.go` / `down.go` / `gauge.go` / `histogram.go` | the four synchronous instrument interfaces (+ the package doc) |
 | `observable.go` | `ObserveInt64`/`ObserveFloat64` + `Int64Callback`/`Float64Callback` — FUNC ports |
 | `meter.go` | `Meter` — **frozen**: Counter/Gauge/Histogram + `Collect() SnapshotValue` — and `FullMeter`, the union |
@@ -50,20 +55,26 @@ may hold.
 | `exporter.go` | `Exporter` + `ExporterName` + registry (`RegisterExporter`/`LookupExporter`/`AvailableExporters`/`Export`) |
 | `codes.go` / `errors.go` | `0.2.9.*` (UNKNOWN_EXPORTER, EXPORT_FAILED, INSTRUMENT_KIND_CONFLICT, INVALID_ATTRIBUTE, DUPLICATE_REGISTRATION, INVALID_TEMPORALITY, INVALID_DESCRIPTION, DESCRIPTION_CONFLICT) |
 
-`pkg/v1/metrics` publishes these under shorter names — `Attr`, `Resource`,
-`Scope`, `Snapshot`, `SumPoint`/`SumMetric`, … — the same way `Snapshot` has
-always aliased `SnapshotValue`. The `Value` suffix is this layer's role-suffix
-convention, not part of the public vocabulary.
+`pkg/v1/metrics` publishes these under shorter names — `Snapshot`,
+`SumPoint`/`SumMetric`, … — and aliases `Attr`, `Resource` and `Scope` to
+`internal/core/otel`'s types, the owner (ADR 0074), which is what keeps
+`metrics.Attr` and `trace.Attr` one type. The `Value` suffix is this layer's
+role-suffix convention, not part of the public vocabulary.
+
+`ResourceValue.Normalized()` and `ScopeValue.Normalized()` no longer exist: the
+types moved to a package that owns no code and no default, so the two
+normalisers became this package's `NormalizeResource` and `NormalizeScope`
+(see `internal/core/otel/CLAUDE.md` §Why the two normalisers are functions).
 
 ## The OTel model, and which parts are here
 
 | Concept | Here | Where |
 |---|---|---|
-| Typed attributes (`string`/`bool`/`int64`/`double`) | yes | `AttrValue` + four constructors |
+| Typed attributes (`string`/`bool`/`int64`/`double`) | yes | `internal/core/otel.AttrValue` + four constructors; the refusal (`InvalidAttribute`) is this package's |
 | Homogeneous ARRAY attributes | **deferred** | ADR 0044 §Decision 2 — a boxed field on the hot path's stack scratch |
 | Aggregation temporality | yes | `Temporality`, on `SumMetricValue` / `HistogramMetricValue` |
-| Resource | yes | `ResourceValue`, once per `SnapshotValue` |
-| InstrumentationScope | yes (name + version) | `ScopeValue`; `SchemaURL` + scope attributes deferred |
+| Resource | yes | `internal/core/otel.ResourceValue`, once per `SnapshotValue`, normalised by `NormalizeResource` |
+| InstrumentationScope | yes (name + version) | `internal/core/otel.ScopeValue`, normalised by `NormalizeScope` with this package's `DefaultScopeName`; `SchemaURL` + scope attributes deferred |
 | Sum, with `is_monotonic` | yes | `SumMetricValue.Monotonic` — one point shape, two instruments |
 | Gauge (last value) | yes | `GaugeMetricValue` — and NO temporality, deliberately |
 | Explicit-bucket Histogram | yes | `HistogramMetricValue` |
@@ -78,8 +89,8 @@ convention, not part of the public vocabulary.
 
 ```go
 type SnapshotValue struct {
-    Resource   ResourceValue
-    Scope      ScopeValue
+    Resource   coreotel.ResourceValue
+    Scope      coreotel.ScopeValue
     StartTime  time.Time
     Time       time.Time
     Sums       map[string]SumMetricValue        // name -> {Temporality, Monotonic, Description, Points}
@@ -157,6 +168,11 @@ a reader is safe; a writer would corrupt every future snapshot.
   collectable without a second interface.
 - **Attributes are variadic** on every instrument accessor. That makes the
   dimensionless series the zero-argument case.
+- **The attribute rules are `internal/core/otel`'s; the refusal is this
+  package's.** `ValidateAttrs` and `NormalizeResource` are one-line wrappers
+  handing `InvalidAttribute` to the shared model, so the meter's panics carry
+  `0.2.9.4` exactly as they did before the model moved. The four bullets below
+  are the model's own conventions, restated because the meter is where they bite.
 - **An attribute KEY and an attribute KIND are structure; a VALUE is data.** Key
   and kind are written at the call site and constant for the process; values
   vary per observation. That asymmetry is why an unusable key or an unset value
@@ -188,6 +204,9 @@ a reader is safe; a writer would corrupt every future snapshot.
 
 - **Import `go.opentelemetry.io/*`.** The model is a specification; the code is
   ours. See §Purpose and ADR 0044 §Decision 1.
+- **Redeclare the shared model here.** `AttrValue`, `ResourceValue` and
+  `ScopeValue` are `internal/core/otel`'s; a twin would encode identically,
+  pass review, and split `metrics.Attr` from `trace.Attr` (ADR 0051 §Decision 2).
 - Put meter/instrument bodies here — they live in `service/metrics`.
 - Mutate an `Attrs` slice reached through a `SnapshotValue`. It is the meter's.
 - Add a method to `Meter` — **or to `FullMeter`**. Add a sibling interface

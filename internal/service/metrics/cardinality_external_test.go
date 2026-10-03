@@ -7,6 +7,7 @@ import (
 	"testing"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	svcmetrics "github.com/kitsunium/sdk/internal/service/metrics"
 )
 
@@ -20,50 +21,50 @@ func TestSeriesIdentity(t *testing.T) {
 	type tc struct {
 		name string
 		//: the two label sets being compared.
-		first, second []coremetrics.AttrValue
+		first, second []coreotel.AttrValue
 		wantSame      bool
 	}
 	tests := []tc{
 		{name: "no labels twice", wantSame: true},
 		{
 			name:     "the same label twice",
-			first:    []coremetrics.AttrValue{coremetrics.String("a", "1")},
-			second:   []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			first:    []coreotel.AttrValue{coreotel.String("a", "1")},
+			second:   []coreotel.AttrValue{coreotel.String("a", "1")},
 			wantSame: true,
 		},
 		{
 			//: a label set is a SET — declaration order is not identity.
 			name:     "the same labels in a different order",
-			first:    []coremetrics.AttrValue{coremetrics.String("a", "1"), coremetrics.String("b", "2")},
-			second:   []coremetrics.AttrValue{coremetrics.String("b", "2"), coremetrics.String("a", "1")},
+			first:    []coreotel.AttrValue{coreotel.String("a", "1"), coreotel.String("b", "2")},
+			second:   []coreotel.AttrValue{coreotel.String("b", "2"), coreotel.String("a", "1")},
 			wantSame: true,
 		},
 		{
 			name:   "a different value",
-			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
-			second: []coremetrics.AttrValue{coremetrics.String("a", "2")},
+			first:  []coreotel.AttrValue{coreotel.String("a", "1")},
+			second: []coreotel.AttrValue{coreotel.String("a", "2")},
 		},
 		{
 			name:   "a different key",
-			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
-			second: []coremetrics.AttrValue{coremetrics.String("b", "1")},
+			first:  []coreotel.AttrValue{coreotel.String("a", "1")},
+			second: []coreotel.AttrValue{coreotel.String("b", "1")},
 		},
 		{
 			//: the dimensionless series is its own series, not a wildcard.
 			name:   "labelled versus dimensionless",
-			second: []coremetrics.AttrValue{coremetrics.String("a", "1")},
+			second: []coreotel.AttrValue{coreotel.String("a", "1")},
 		},
 		{
 			name:   "an extra label",
-			first:  []coremetrics.AttrValue{coremetrics.String("a", "1")},
-			second: []coremetrics.AttrValue{coremetrics.String("a", "1"), coremetrics.String("b", "2")},
+			first:  []coreotel.AttrValue{coreotel.String("a", "1")},
+			second: []coreotel.AttrValue{coreotel.String("a", "1"), coreotel.String("b", "2")},
 		},
 		{
 			//: the adversarial pair: one value carrying what a delimiter
 			//: encoding would read as the boundary between two labels.
 			name:   "a value that tries to forge another label",
-			first:  []coremetrics.AttrValue{coremetrics.String("a", "x\x00b\x00y")},
-			second: []coremetrics.AttrValue{coremetrics.String("a", "x"), coremetrics.String("b", "y")},
+			first:  []coreotel.AttrValue{coreotel.String("a", "x\x00b\x00y")},
+			second: []coreotel.AttrValue{coreotel.String("a", "x"), coreotel.String("b", "y")},
 		},
 	}
 	runCase := func(t *testing.T, c tc) {
@@ -110,26 +111,26 @@ func TestInvalidAttributePanics(t *testing.T) {
 	tests := []tc{
 		{
 			"a counter with an empty key",
-			func(m coremetrics.Meter) { m.Counter("x", coremetrics.String("", "1")) },
+			func(m coremetrics.Meter) { m.Counter("x", coreotel.String("", "1")) },
 		},
 		{
 			//: a struct literal sets no value at all — the kind is
 			//: AttrKindInvalid, which is not "the empty string".
 			"a counter with a value no constructor set",
-			func(m coremetrics.Meter) { m.Counter("x", coremetrics.AttrValue{Key: "a"}) },
+			func(m coremetrics.Meter) { m.Counter("x", coreotel.AttrValue{Key: "a"}) },
 		},
 		{
 			"a gauge with a repeated key",
 			func(m coremetrics.Meter) {
 				m.Gauge("x",
-					coremetrics.String("a", "1"),
-					coremetrics.String("a", "2"))
+					coreotel.String("a", "1"),
+					coreotel.String("a", "2"))
 			},
 		},
 		{
 			"a histogram with an empty key",
 			func(m coremetrics.Meter) {
-				m.Histogram("x", nil, coremetrics.String("", "1"))
+				m.Histogram("x", nil, coreotel.String("", "1"))
 			},
 		},
 		{
@@ -137,7 +138,7 @@ func TestInvalidAttributePanics(t *testing.T) {
 			//: encoding keeps apart — so it is still a repeated key.
 			"a counter with one key under two kinds",
 			func(m coremetrics.Meter) {
-				m.Counter("x", coremetrics.String("a", "1"), coremetrics.Int64("a", 1))
+				m.Counter("x", coreotel.String("a", "1"), coreotel.Int64("a", 1))
 			},
 		},
 	}
@@ -206,7 +207,7 @@ func TestCardinalityBound(t *testing.T) {
 			MaxSeriesPerInstrument: c.configured,
 		})
 		for i := range c.pushed {
-			m.Counter("requests", coremetrics.String("id", strconv.Itoa(i))).Inc()
+			m.Counter("requests", coreotel.String("id", strconv.Itoa(i))).Inc()
 		}
 
 		series := m.Collect().Sums["requests"].Points
@@ -223,7 +224,7 @@ func TestCardinalityBound(t *testing.T) {
 					sawOverflow = true
 					//: the marker is a BOOL, not the string "true" — typed
 					//: attributes let it be the thing it always meant.
-					if a.Kind() != coremetrics.AttrKindBool || !a.Bool() {
+					if a.Kind() != coreotel.AttrKindBool || !a.Bool() {
 						t.Errorf("the overflow attribute is kind %d value %v, want a true bool",
 							a.Kind(), a.Bool())
 					}
@@ -271,7 +272,7 @@ func TestZeroBoundIsNotUnbounded(t *testing.T) {
 		})
 		//: push one label set past the default bound.
 		for i := range svcmetrics.DefaultMaxSeriesPerInstrument + 1 {
-			m.Counter("requests", coremetrics.String("id", strconv.Itoa(i))).Inc()
+			m.Counter("requests", coreotel.String("id", strconv.Itoa(i))).Inc()
 		}
 
 		series := m.Collect().Sums["requests"].Points
@@ -300,11 +301,11 @@ func TestBoundIsPerInstrumentName(t *testing.T) {
 	m := svcmetrics.NewMeterWithConfig(svcmetrics.MeterConfig{MaxSeriesPerInstrument: 2})
 	//: blow up one name.
 	for i := range 50 {
-		m.Counter("exploding", coremetrics.String("id", strconv.Itoa(i))).Inc()
+		m.Counter("exploding", coreotel.String("id", strconv.Itoa(i))).Inc()
 	}
 	//: the other name still gets its own quota.
 	for i := range 2 {
-		m.Counter("healthy", coremetrics.String("id", strconv.Itoa(i))).Inc()
+		m.Counter("healthy", coreotel.String("id", strconv.Itoa(i))).Inc()
 	}
 
 	snap := m.Collect().Sums
@@ -335,8 +336,8 @@ func TestSnapshotSeriesAreDeterministic(t *testing.T) {
 	for _, method := range []string{"PUT", "GET", "POST", "DELETE"} {
 		for _, status := range []string{"500", "200"} {
 			m.Counter("requests",
-				coremetrics.String("status", status),
-				coremetrics.String("method", method)).Inc()
+				coreotel.String("status", status),
+				coreotel.String("method", method)).Inc()
 		}
 	}
 

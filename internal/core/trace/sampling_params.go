@@ -1,7 +1,7 @@
 // Package trace — what a Sampler is given to decide with.
 package trace
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
 
 // SamplingParams is everything a Sampler sees. It describes a span that does not
 // exist yet, which is the point: the decision is taken before the span is
@@ -24,7 +24,7 @@ type SamplingParams struct {
 	// Attrs are the attributes supplied at Start, sorted by Key. Attributes
 	// added AFTER Start are invisible here — the decision has already been
 	// taken by then, which is the price of taking it once.
-	Attrs []coremetrics.AttrValue
+	Attrs []coreotel.AttrValue
 	// Links are the links supplied at Start.
 	Links []LinkValue
 }

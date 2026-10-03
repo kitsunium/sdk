@@ -4,6 +4,7 @@ package metrics
 
 import (
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -48,16 +49,16 @@ type MeterConfig struct {
 
 	// Resource identifies the producer of the telemetry and is carried once
 	// per snapshot. An absent service.name is filled with
-	// coremetrics.UnknownService, which is what the OpenTelemetry
+	// coreotel.UnknownService, which is what the OpenTelemetry
 	// specification mandates rather than a value this SDK invented.
-	Resource coremetrics.ResourceValue
+	Resource coreotel.ResourceValue
 
 	// Scope identifies the instrumentation that mints the instruments. An
 	// empty Name resolves to coremetrics.DefaultScopeName; Version stays
 	// empty when the caller has none, because it is optional in the
 	// specification and inventing one would be a claim about code this
 	// package cannot see.
-	Scope coremetrics.ScopeValue
+	Scope coreotel.ScopeValue
 
 	// Clock supplies the snapshot window's endpoints. Nil resolves to
 	// clock.System, matching every other port in this SDK that takes one.
@@ -89,9 +90,9 @@ func (c MeterConfig) resolve() MeterConfig {
 		//: unset means cumulative; an out-of-range cast panics here.
 		Temporality: c.Temporality.Resolved(),
 		//: sorted, validated, and carrying service.name.
-		Resource: c.Resource.Normalized(),
+		Resource: coremetrics.NormalizeResource(c.Resource),
 		//: named, so a backend can tell this SDK's metrics from the app's.
-		Scope: c.Scope.Normalized(),
+		Scope: coremetrics.NormalizeScope(c.Scope),
 		Clock: clk,
 	}
 }

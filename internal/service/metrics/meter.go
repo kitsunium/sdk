@@ -7,6 +7,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
 
@@ -24,8 +25,8 @@ type memMeter struct {
 	temporality coremetrics.Temporality
 	// resource and scope are normalised once and shared by every snapshot;
 	// neither is mutated after construction.
-	resource coremetrics.ResourceValue
-	scope    coremetrics.ScopeValue
+	resource coreotel.ResourceValue
+	scope    coreotel.ScopeValue
 	clk      clock.Clock
 
 	// collectMu serialises Collect against itself. Collect is a MUTATION
@@ -110,10 +111,10 @@ func newMemMeter(cfg MeterConfig) *memMeter {
 // it once. A name already bound to a different instrument kind panics with
 // InstrumentKindConflict; an unusable attribute set panics with
 // InvalidAttribute.
-func (m *memMeter) Counter(name string, attrs ...coremetrics.AttrValue) coremetrics.Counter {
+func (m *memMeter) Counter(name string, attrs ...coreotel.AttrValue) coremetrics.Counter {
 	//: stack scratch — the sorted set and the encoded key never reach the heap
 	//: on the hot path, which is what keeps an attributed fetch allocation-free.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)
@@ -132,9 +133,9 @@ func (m *memMeter) Counter(name string, attrs ...coremetrics.AttrValue) coremetr
 // attrs, creating it once. Fetching a Counter name as an UpDownCounter panics
 // with InstrumentKindConflict — it would flip Monotonic on a metric a backend
 // has already learned to read as never decreasing.
-func (m *memMeter) UpDownCounter(name string, attrs ...coremetrics.AttrValue) coremetrics.UpDownCounter {
+func (m *memMeter) UpDownCounter(name string, attrs ...coreotel.AttrValue) coremetrics.UpDownCounter {
 	//: same stack-scratch discipline as Counter.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)
@@ -150,9 +151,9 @@ func (m *memMeter) UpDownCounter(name string, attrs ...coremetrics.AttrValue) co
 }
 
 // Gauge returns the gauge series identified by name + attrs, creating it once.
-func (m *memMeter) Gauge(name string, attrs ...coremetrics.AttrValue) coremetrics.Gauge {
+func (m *memMeter) Gauge(name string, attrs ...coreotel.AttrValue) coremetrics.Gauge {
 	//: same stack-scratch discipline as Counter.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)
@@ -173,10 +174,10 @@ func (m *memMeter) Gauge(name string, attrs ...coremetrics.AttrValue) coremetric
 // re-bucketing would attach every stored count to a boundary it was never
 // measured against.
 func (m *memMeter) Histogram(
-	name string, buckets []float64, attrs ...coremetrics.AttrValue,
+	name string, buckets []float64, attrs ...coreotel.AttrValue,
 ) coremetrics.Histogram {
 	//: same stack-scratch discipline as Counter.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)
@@ -408,7 +409,7 @@ func sizeGroups(names map[string]*nameState, storeLen int) int {
 
 // sortPoints orders one name's series by attribute set so a snapshot renders
 // identically twice in a row given the same values.
-func sortPoints[V any](points []V, attrsOf func(V) []coremetrics.AttrValue) {
+func sortPoints[V any](points []V, attrsOf func(V) []coreotel.AttrValue) {
 	//: a single-series name — the overwhelming majority — is already ordered,
 	//: and the call would otherwise cost a func value per name.
 	if len(points) < minSortableSeries {
@@ -423,19 +424,19 @@ func sortPoints[V any](points []V, attrsOf func(V) []coremetrics.AttrValue) {
 }
 
 // sumAttrs projects a sum series' attribute set.
-func sumAttrs(p coremetrics.SumValue) []coremetrics.AttrValue {
+func sumAttrs(p coremetrics.SumValue) []coreotel.AttrValue {
 	//: identity only.
 	return p.Attrs
 }
 
 // gaugeAttrs projects a gauge series' attribute set.
-func gaugeAttrs(p coremetrics.GaugeValue) []coremetrics.AttrValue {
+func gaugeAttrs(p coremetrics.GaugeValue) []coreotel.AttrValue {
 	//: identity only.
 	return p.Attrs
 }
 
 // histogramAttrs projects a histogram series' attribute set.
-func histogramAttrs(p coremetrics.HistogramValue) []coremetrics.AttrValue {
+func histogramAttrs(p coremetrics.HistogramValue) []coreotel.AttrValue {
 	//: identity only.
 	return p.Attrs
 }

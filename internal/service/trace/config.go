@@ -3,7 +3,7 @@
 package trace
 
 import (
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 )
@@ -19,13 +19,13 @@ type TracerConfig struct {
 	// It is the SAME type a MeterConfig takes, deliberately: service.name is
 	// the key a backend correlates a trace with a metric on, so a process
 	// that built two of them could silently fail to correlate at all.
-	Resource coremetrics.ResourceValue
+	Resource coreotel.ResourceValue
 
 	// Scope identifies the instrumentation that starts the spans. An empty
 	// Name resolves to DefaultScopeName; Version stays empty when the caller
 	// has none, because it is optional in the specification and inventing one
 	// would be a claim about code this package cannot see.
-	Scope coremetrics.ScopeValue
+	Scope coreotel.ScopeValue
 
 	// Sampler decides which ROOT traces are recorded. It is consulted for a
 	// root span and for nothing else — every child inherits the answer through
@@ -61,7 +61,7 @@ type TracerConfig struct {
 func (c TracerConfig) resolved() TracerConfig {
 	//: the specification's own defaults for an unnamed producer and scope.
 	resolved := TracerConfig{
-		Resource: c.Resource.Normalized(),
+		Resource: coretrace.NormalizeResource(c.Resource),
 		Scope:    coretrace.NormalizeScope(c.Scope),
 		Sampler:  c.Sampler,
 		Sink:     c.Sink,

@@ -20,7 +20,7 @@ internal/
 │                  entitlement, events,
 │                  gate,
 │                  health, i18n, id, lifecycle, lock, logger, logger/level,
-│                  mail, metrics, net, proc, queue, resilience, scheduler,
+│                  mail, metrics, net, otel, proc, queue, resilience, scheduler,
 │                  secret, selfupdate, session, sql, statemachine, token,
 │                  trace, transform,
 │                  validation, vcs,

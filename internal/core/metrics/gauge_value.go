@@ -2,12 +2,14 @@
 // no window and therefore carries no temporality.
 package metrics
 
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
+
 // GaugeValue is one series of a gauge metric: the attribute set that identifies
 // it plus its instantaneous reading.
 type GaugeValue struct {
 	// Attrs is the series' attribute set, sorted by Key; nil for the
 	// dimensionless series. See SumValue.Attrs for the aliasing rule.
-	Attrs []AttrValue
+	Attrs []coreotel.AttrValue
 	// Value is the last reading taken.
 	Value float64
 }

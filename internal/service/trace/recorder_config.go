@@ -1,16 +1,16 @@
 // Package trace — the in-memory recorder's configuration.
 package trace
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
 
 // RecorderConfig configures a Recorder: who produced the spans, what
 // instrumented them, and how many may wait between collections.
 type RecorderConfig struct {
 	// Resource identifies the producer, stamped on every payload Collect
 	// hands out.
-	Resource coremetrics.ResourceValue
+	Resource coreotel.ResourceValue
 	// Scope identifies the instrumentation, stamped on every payload.
-	Scope coremetrics.ScopeValue
+	Scope coreotel.ScopeValue
 	// MaxSpans bounds how many finished spans are held between Collects.
 	//
 	// Non-positive CLAMPS to DefaultMaxSpans. It does NOT mean "unbounded",

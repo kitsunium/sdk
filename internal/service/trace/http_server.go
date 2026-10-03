@@ -4,9 +4,8 @@ package trace
 import (
 	"net/http"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
 	corenet "github.com/kitsunium/sdk/internal/core/net"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -117,11 +116,11 @@ func serveTraced(tracer coretrace.Tracer, next http.Handler, w http.ResponseWrit
 	//: runs, which is why they are passed at Start rather than set later.
 	ctx, span := tracer.Start(ctx, r.Method, coretrace.SpanParams{
 		Kind: coretrace.SpanKindServer,
-		Attrs: []coremetrics.AttrValue{
-			coremetrics.String(HTTPRequestMethodKey, r.Method),
-			coremetrics.String(URLPathKey, r.URL.EscapedPath()),
-			coremetrics.String(URLSchemeKey, requestScheme(r)),
-			coremetrics.String(ServerAddressKey, r.Host),
+		Attrs: []coreotel.AttrValue{
+			coreotel.String(HTTPRequestMethodKey, r.Method),
+			coreotel.String(URLPathKey, r.URL.EscapedPath()),
+			coreotel.String(URLSchemeKey, requestScheme(r)),
+			coreotel.String(ServerAddressKey, r.Host),
 		},
 	})
 	//: the span closes when the handler returns, panic included — a handler
@@ -134,7 +133,7 @@ func serveTraced(tracer coretrace.Tracer, next http.Handler, w http.ResponseWrit
 	//: a handler that wrote nothing still produced a 200 — net/http writes one.
 	status := recorder.resolvedStatus()
 	//: the outcome, recorded on the span the backend will render.
-	span.SetAttrs(coremetrics.Int64(HTTPResponseStatusCodeKey, int64(status)))
+	span.SetAttrs(coreotel.Int64(HTTPResponseStatusCodeKey, int64(status)))
 	//: 5xx is this service's failure; 4xx is the caller's, and is not marked.
 	if status >= httpServerErrorFloor {
 		//: the status is already an attribute, so the message adds nothing a

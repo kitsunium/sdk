@@ -1,7 +1,11 @@
 // Package metrics — the exportable snapshot: the OTel payload hierarchy in Go.
 package metrics
 
-import "time"
+import (
+	"time"
+
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
+)
 
 // SumMetricValue is every series of ONE sum instrument name, plus the two facts
 // the OTel data model attaches to the metric rather than to its points.
@@ -82,10 +86,10 @@ type HistogramMetricValue struct {
 //     special-case per exporter.
 type SnapshotValue struct {
 	// Resource identifies the producer, carried once for the whole payload.
-	Resource ResourceValue
+	Resource coreotel.ResourceValue
 	// Scope identifies the instrumentation, carried once for the whole
 	// payload.
-	Scope ScopeValue
+	Scope coreotel.ScopeValue
 	// StartTime opens the window every point covers. Under
 	// TemporalityCumulative it is the meter's own start and repeats across
 	// collections; under TemporalityDelta it advances to the previous

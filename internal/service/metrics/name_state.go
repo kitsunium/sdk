@@ -2,7 +2,10 @@
 // cardinality tally.
 package metrics
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import (
+	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
+)
 
 // instrumentKind discriminates a name's bound instrument type. There are seven
 // because the OTel instrument set has seven: four synchronous and three
@@ -103,7 +106,7 @@ func (s *nameState) seriesCap() int {
 
 // overflowSeries returns the key and attribute set of name's overflow series,
 // computing the key once.
-func (s *nameState) overflowSeries(name string) (key string, attrs []coremetrics.AttrValue) {
+func (s *nameState) overflowSeries(name string) (key string, attrs []coreotel.AttrValue) {
 	//: compute once per name, on the create path only.
 	if s.overflowKey == "" {
 		//: same encoding as any other series — the overflow marker is an

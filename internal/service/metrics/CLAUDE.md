@@ -60,8 +60,9 @@ big-endian bytes for an integer or a double.
 - **Kind-tagged**, which is what typed attributes added. `String("v", "1")` and
   `Int64("v", 1)` render identically on any wire with one value type; without
   the tag they would be one series here too, which is the same
-  forge-by-collision hazard one level up. The encoding lives on `AttrValue`
-  (`AppendIdentity`) so every `Meter` implementation inherits it.
+  forge-by-collision hazard one level up. The encoding lives on the shared
+  `internal/core/otel.AttrValue` (`AppendIdentity`) so every `Meter`
+  implementation inherits it.
 - **Opened by the INSTRUMENT KIND**, which the OTel sum model made necessary:
   four instrument kinds share one store because a Counter and an UpDownCounter
   produce the same point shape. Without the leading byte, `Counter("x")` and
@@ -71,7 +72,9 @@ big-endian bytes for an integer or a double.
   the check back without a second map read per observation.
 
 An empty attribute key, the same key twice, or a value no constructor ever set
-**panics** with `InvalidAttribute` (`0.2.9.4`) — the same call the meter already
+**panics** with `InvalidAttribute` (`0.2.9.4`, through `core/metrics.ValidateAttrs`,
+which hands this signal's sentinel to the shared `internal/core/otel` rules —
+the code did not change when the model moved there) — the same call the meter already
 makes for a cross-kind name reuse, and safe for the same reason: a key and a
 kind are both written at the call site, so they are wrong on the first call or
 never. The alternative is a series no exporter can emit (Prometheus and OTLP
@@ -324,7 +327,7 @@ case and append the other three verbatim. Names need no escaping at all — that
 is the second thing validation buys.
 
 **The overflow series is emitted like any other.** `sdk_metric_overflow` is a
-legal label name by construction (`core/metrics/attr_value.go` spells it with
+legal label name by construction (`core/metrics/attrs.go` spells it with
 underscores for this reason), so the folded series reaches the wire and an
 operator can alert on `{sdk_metric_overflow="true"}`. Hiding it would restore
 the silent failure the cardinality policy exists to avoid.

@@ -128,8 +128,10 @@ frame that holds the return slot (70 ms). Together ≈ 780 ms of 3.65 s — abou
 
 That fifth is exactly what `KTN-VAR-BIGSTRUCT` warns about (80 B, threshold
 64 B), so the obvious shrink was **tried** rather than argued about: fold
-`flag bool` into the `int64` payload and reorder the members — the shape
-`internal/core/metrics.AttrValue` already uses. It takes the struct to 72 B.
+`flag bool` into the `int64` payload and reorder the members — the shape the
+shared OTel attribute (`internal/core/otel.AttrValue`, declared in
+`internal/core/metrics` when this was measured) already uses. It takes the
+struct to 72 B.
 
 | | `AttrValue` | `ABACAllow` | `CheckAllow` | `CheckDenied` | `NewRequest` | `PerRequest` |
 |---|---:|---:|---:|---:|---:|---:|

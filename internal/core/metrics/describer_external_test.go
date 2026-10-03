@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // sevenMethodDouble is a hand-written implementation carrying EXACTLY the
@@ -14,17 +15,17 @@ import (
 // observables. It has no Describe, on purpose.
 type sevenMethodDouble struct{}
 
-func (sevenMethodDouble) Counter(string, ...metrics.AttrValue) metrics.Counter { return nil }
+func (sevenMethodDouble) Counter(string, ...coreotel.AttrValue) metrics.Counter { return nil }
 
-func (sevenMethodDouble) Gauge(string, ...metrics.AttrValue) metrics.Gauge { return nil }
+func (sevenMethodDouble) Gauge(string, ...coreotel.AttrValue) metrics.Gauge { return nil }
 
-func (sevenMethodDouble) Histogram(string, []float64, ...metrics.AttrValue) metrics.Histogram {
+func (sevenMethodDouble) Histogram(string, []float64, ...coreotel.AttrValue) metrics.Histogram {
 	return nil
 }
 
 func (sevenMethodDouble) Collect() metrics.SnapshotValue { return metrics.SnapshotValue{} }
 
-func (sevenMethodDouble) UpDownCounter(string, ...metrics.AttrValue) metrics.UpDownCounter {
+func (sevenMethodDouble) UpDownCounter(string, ...coreotel.AttrValue) metrics.UpDownCounter {
 	return nil
 }
 

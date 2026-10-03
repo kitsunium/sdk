@@ -955,16 +955,18 @@ rules:
       # NewNewKeyValue()", which is not a name anything could satisfy.)
       - "**/internal/service/crypto/jwk/**"
       - "internal/service/crypto/jwk/**"
-      # core/metrics.AttrValue is built by FOUR kind-specific constructors —
+      # core/otel.AttrValue is built by FOUR kind-specific constructors —
       # String / Bool / Int64 / Float64 — and by nothing else: the value payload
       # is unexported precisely so a struct literal cannot produce an attribute
       # whose kind and payload disagree. A NewAttrValue(key, kind, num, str)
       # would be exactly the "poorly initialized struct" the rule exists to
       # prevent, reachable in one call. (The rule's own message here reads
       # "constructor NewNewAttrValue()", which is not a name anything could
-      # satisfy — the same broken suggestion the jwk entry above records.)
-      - "**/internal/core/metrics/**"
-      - "internal/core/metrics/**"
+      # satisfy — the same broken suggestion the jwk entry above records.) It
+      # was declared in core/metrics until the shared OTel model moved to
+      # core/otel (ADR 0051 §Decision 2); the exclusion moved with the type.
+      - "**/internal/core/otel/**"
+      - "internal/core/otel/**"
       # The i18n values (ADR 0063) are the jwk and metrics case again: every
       # one comes out of a constructor that VALIDATES, and each is named for
       # what it does rather than for the type it returns. TagValue comes from

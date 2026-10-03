@@ -6,8 +6,7 @@ import (
 	"sync"
 	"testing"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
 )
@@ -45,8 +44,8 @@ func TestRecorderCollectDrains(t *testing.T) {
 // thousand copies of one fact.
 func TestRecorderStampsResourceAndScopeOncePerPayload(t *testing.T) {
 	recorder := svctrace.NewRecorder(svctrace.RecorderConfig{
-		Resource: coremetrics.ResourceValue{Attrs: []coremetrics.AttrValue{
-			coremetrics.String(coremetrics.ServiceNameKey, "checkout"),
+		Resource: coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+			coreotel.String(coreotel.ServiceNameKey, "checkout"),
 		}},
 	})
 	batch := recorder.Collect()
@@ -66,7 +65,7 @@ func TestRecorderStampsResourceAndScopeOncePerPayload(t *testing.T) {
 func TestRecorderFillsAnAbsentServiceName(t *testing.T) {
 	recorder := svctrace.NewRecorder(svctrace.RecorderConfig{})
 	attrs := recorder.Collect().Resource.Attrs
-	if len(attrs) != 1 || attrs[0].Key != coremetrics.ServiceNameKey {
+	if len(attrs) != 1 || attrs[0].Key != coreotel.ServiceNameKey {
 		t.Fatalf("Resource attrs = %+v, want a filled service.name", attrs)
 	}
 	if attrs[0].Str() != "unknown_service" {

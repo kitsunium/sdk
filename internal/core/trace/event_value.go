@@ -4,7 +4,7 @@ package trace
 import (
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 )
 
 // ExceptionEventName and the three attribute keys around it are the OpenTelemetry
@@ -43,7 +43,7 @@ type EventValue struct {
 	// Name is the event's low-cardinality label.
 	Name string
 	// Attrs are the event's typed dimensions, sorted by Key.
-	Attrs []coremetrics.AttrValue
+	Attrs []coreotel.AttrValue
 }
 
 // Normalized returns the event a span actually records: attributes sorted,
@@ -51,5 +51,5 @@ type EventValue struct {
 // through the span.
 func (e EventValue) Normalized() EventValue {
 	//: SortAttrs panics on an unusable set, at the call site that wrote it.
-	return EventValue{Time: e.Time, Name: e.Name, Attrs: coremetrics.SortAttrs(e.Attrs)}
+	return EventValue{Time: e.Time, Name: e.Name, Attrs: SortAttrs(e.Attrs)}
 }

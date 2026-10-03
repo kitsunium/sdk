@@ -2,7 +2,10 @@
 // that happens once per Collect.
 package metrics
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import (
+	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
+)
 
 // observer is one registered asynchronous instrument. Exactly one of the two
 // callbacks is set, decided by kind: the two sum kinds report integers, the
@@ -85,7 +88,7 @@ func (m *memMeter) runObservers(delta bool) {
 		//: a gauge reports a double, the two sum kinds an integer.
 		if obs.kind == kindObservableGauge {
 			//: the closure lives for exactly this call.
-			obs.floatCb(func(value float64, attrs ...coremetrics.AttrValue) {
+			obs.floatCb(func(value float64, attrs ...coreotel.AttrValue) {
 				//: resolve or create, then publish the reading.
 				m.observeGauge(obs.name, value, attrs)
 			})
@@ -93,7 +96,7 @@ func (m *memMeter) runObservers(delta bool) {
 			continue
 		}
 		//: an integer-valued observable sum.
-		obs.int64Cb(func(value int64, attrs ...coremetrics.AttrValue) {
+		obs.int64Cb(func(value int64, attrs ...coreotel.AttrValue) {
 			//: resolve or create, then convert to the meter's temporality.
 			m.observeSum(obs.name, obs.kind, value, attrs, delta)
 		})
@@ -111,12 +114,12 @@ func (m *memMeter) runObservers(delta bool) {
 // honest consequence of an absolute-valued instrument meeting a fold, and it is
 // why an observable's attributes should be a small fixed set.
 func (m *memMeter) observeSum(
-	name string, kind instrumentKind, value int64, attrs []coremetrics.AttrValue, delta bool,
+	name string, kind instrumentKind, value int64, attrs []coreotel.AttrValue, delta bool,
 ) {
 	//: same identity discipline as a synchronous fetch; this path runs once
 	//: per series per collection, so the stack scratch is a convenience
 	//: rather than a budget.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)
@@ -135,9 +138,9 @@ func (m *memMeter) observeSum(
 }
 
 // observeGauge publishes one sampled reading into its series.
-func (m *memMeter) observeGauge(name string, value float64, attrs []coremetrics.AttrValue) {
+func (m *memMeter) observeGauge(name string, value float64, attrs []coreotel.AttrValue) {
 	//: same identity discipline as observeSum.
-	var sortBuf [maxStackAttrs]coremetrics.AttrValue
+	var sortBuf [maxStackAttrs]coreotel.AttrValue
 	var keyBuf [seriesKeyCap]byte
 	sorted := sortAttrs(sortBuf[:0], attrs)
 	coremetrics.ValidateAttrs(sorted)

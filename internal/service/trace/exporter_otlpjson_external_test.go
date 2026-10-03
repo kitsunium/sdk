@@ -8,8 +8,7 @@ import (
 	"testing"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	svctrace "github.com/kitsunium/sdk/internal/service/trace"
 )
@@ -147,20 +146,20 @@ func fixtureSpans(t *testing.T) coretrace.SpansValue {
 		Kind:      coretrace.SpanKindServer,
 		StartTime: time.Unix(0, fixtureStartNanos).UTC(),
 		EndTime:   time.Unix(0, fixtureEndNanos).UTC(),
-		Attrs: coremetrics.SortAttrs([]coremetrics.AttrValue{
-			coremetrics.String("http.request.method", "GET"),
-			coremetrics.Int64("http.response.status_code", 503),
-			coremetrics.Bool("cache.hit", false),
-			coremetrics.Float64("sample.ratio", 0.25),
+		Attrs: coretrace.SortAttrs([]coreotel.AttrValue{
+			coreotel.String("http.request.method", "GET"),
+			coreotel.Int64("http.response.status_code", 503),
+			coreotel.Bool("cache.hit", false),
+			coreotel.Float64("sample.ratio", 0.25),
 		}),
 		Events: []coretrace.EventValue{{
 			Time:  time.Unix(0, fixtureEventNanos).UTC(),
 			Name:  coretrace.ExceptionEventName,
-			Attrs: coremetrics.SortAttrs([]coremetrics.AttrValue{coremetrics.String(coretrace.ExceptionMessageKey, "upstream refused")}),
+			Attrs: coretrace.SortAttrs([]coreotel.AttrValue{coreotel.String(coretrace.ExceptionMessageKey, "upstream refused")}),
 		}},
 		Links: []coretrace.LinkValue{{
 			Context: linked,
-			Attrs:   coremetrics.SortAttrs([]coremetrics.AttrValue{coremetrics.String("link.kind", "batch")}),
+			Attrs:   coretrace.SortAttrs([]coreotel.AttrValue{coreotel.String("link.kind", "batch")}),
 		}},
 		Status: coretrace.StatusValue{Code: coretrace.StatusError, Message: "upstream refused"},
 	}
@@ -172,10 +171,10 @@ func fixtureSpans(t *testing.T) coretrace.SpansValue {
 		EndTime:   time.Unix(0, fixtureRootEnd).UTC(),
 	}
 	return coretrace.SpansValue{
-		Resource: coremetrics.ResourceValue{Attrs: coremetrics.SortAttrs([]coremetrics.AttrValue{
-			coremetrics.String(coremetrics.ServiceNameKey, "checkout"),
+		Resource: coreotel.ResourceValue{Attrs: coretrace.SortAttrs([]coreotel.AttrValue{
+			coreotel.String(coreotel.ServiceNameKey, "checkout"),
 		})},
-		Scope: coremetrics.ScopeValue{Name: coretrace.DefaultScopeName, Version: "9.9.9"},
+		Scope: coreotel.ScopeValue{Name: coretrace.DefaultScopeName, Version: "9.9.9"},
 		Spans: []coretrace.SpanValue{server, root},
 	}
 }
@@ -249,8 +248,8 @@ func TestEncodeOTLPJSONRefusesAnUnendedSpan(t *testing.T) {
 // producer's for identical input.
 func TestEncodeOTLPJSONKeepsAmpersandsUnescaped(t *testing.T) {
 	batch := fixtureSpans(t)
-	batch.Spans[1].Attrs = coremetrics.SortAttrs([]coremetrics.AttrValue{
-		coremetrics.String("url.full", "https://api.example/search?q=a&limit=2"),
+	batch.Spans[1].Attrs = coretrace.SortAttrs([]coreotel.AttrValue{
+		coreotel.String("url.full", "https://api.example/search?q=a&limit=2"),
 	})
 	doc, err := svctrace.EncodeOTLPJSON(batch)
 	if err != nil {
@@ -266,10 +265,10 @@ func TestEncodeOTLPJSONKeepsAmpersandsUnescaped(t *testing.T) {
 // fail an entire export.
 func TestEncodeOTLPJSONNamesNonFiniteDoubles(t *testing.T) {
 	batch := fixtureSpans(t)
-	batch.Spans[1].Attrs = coremetrics.SortAttrs([]coremetrics.AttrValue{
-		coremetrics.Float64("a.nan", math.NaN()),
-		coremetrics.Float64("b.inf", math.Inf(1)),
-		coremetrics.Float64("c.neginf", math.Inf(-1)),
+	batch.Spans[1].Attrs = coretrace.SortAttrs([]coreotel.AttrValue{
+		coreotel.Float64("a.nan", math.NaN()),
+		coreotel.Float64("b.inf", math.Inf(1)),
+		coreotel.Float64("c.neginf", math.Inf(-1)),
 	})
 	doc, err := svctrace.EncodeOTLPJSON(batch)
 	if err != nil {

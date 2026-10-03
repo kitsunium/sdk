@@ -678,6 +678,10 @@ codes:
     const: CodeInvalidSpanName
     hex: "0x00_02_14_06"
     package: internal/core/trace
+  - code: "0.2.20.7"
+    const: CodeInvalidAttribute
+    hex: "0x00_02_14_07"
+    package: internal/core/trace
   - code: "0.2.21.1"
     const: CodeLockMisconfigured
     hex: "0x00_02_15_01"

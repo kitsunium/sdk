@@ -1,7 +1,7 @@
 // Package metrics — one live series.
 package metrics
 
-import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+import coreotel "github.com/kitsunium/sdk/internal/core/otel"
 
 // seriesEntry binds one instrument instance to the identity it was created
 // under. name and attrs are written once at creation and never mutated, which
@@ -9,6 +9,6 @@ import coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
 // instead of cloning one slice per series per collection.
 type seriesEntry[T any] struct {
 	name  string
-	attrs []coremetrics.AttrValue
+	attrs []coreotel.AttrValue
 	inst  T
 }

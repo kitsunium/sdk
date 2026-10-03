@@ -10,6 +10,7 @@ import (
 	"sync"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -417,7 +418,7 @@ func appendTypeLine(buf []byte, name, kind string) []byte {
 
 // appendSample appends one sample line: "<name><suffix>{<labels>} <value>\n".
 // It is the shape every family member but a bucket takes.
-func appendSample(buf []byte, name, suffix string, attrs []coremetrics.AttrValue, value string) []byte {
+func appendSample(buf []byte, name, suffix string, attrs []coreotel.AttrValue, value string) []byte {
 	//: the metric name, plus a family suffix for histogram members.
 	buf = append(buf, name...)
 	buf = append(buf, suffix...)
@@ -437,7 +438,7 @@ func appendSample(buf []byte, name, suffix string, attrs []coremetrics.AttrValue
 // a bucket line IS a different shape: it is the only one carrying the reserved
 // `le` dimension, and the only one whose value is a running total rather than
 // the series' own reading.
-func appendBucket(buf []byte, name string, attrs []coremetrics.AttrValue, bound, count string) []byte {
+func appendBucket(buf []byte, name string, attrs []coreotel.AttrValue, bound, count string) []byte {
 	//: the base name plus the family suffix the format reserves.
 	buf = append(buf, name...)
 	buf = append(buf, bucketSuffix...)
@@ -458,7 +459,7 @@ func appendBucket(buf []byte, name string, attrs []coremetrics.AttrValue, bound,
 // connector is named for — Int64("v", 1) and String("v", "1") are two series in
 // the snapshot and one series on this wire, and no encoding of a typed value
 // into a string avoids it, because the target has one value type.
-func appendPromLabels(buf []byte, attrs []coremetrics.AttrValue, bound string) []byte {
+func appendPromLabels(buf []byte, attrs []coreotel.AttrValue, bound string) []byte {
 	//: no braces at all when there is nothing inside them.
 	if len(attrs) == 0 && bound == noBound {
 		//: nothing to render.
@@ -479,7 +480,7 @@ func appendPromLabels(buf []byte, attrs []coremetrics.AttrValue, bound string) [
 		buf = append(buf, '=', '"')
 		//: only a string value can carry a byte that would close the quote;
 		//: a bool, an integer and a double render from [0-9a-zA-Z+-.] alone.
-		if attr.Kind() == coremetrics.AttrKindString {
+		if attr.Kind() == coreotel.AttrKindString {
 			//: the value is data — it must not be able to close the quote.
 			buf = appendEscapedValue(buf, attr.Str())
 		} else {
@@ -570,7 +571,7 @@ func checkMetricName(name string) error {
 // is not injective — "a.b", "a-b" and "a b" all become "a_b" — and merging two
 // distinct dimensions is the one failure a metrics pipeline cannot detect
 // afterwards. See CLAUDE.md §What the Prometheus connector loses.
-func checkAttrNames(attrs []coremetrics.AttrValue, bucketBound bool) error {
+func checkAttrNames(attrs []coreotel.AttrValue, bucketBound bool) error {
 	//: every key in the set must survive the wire.
 	for _, attr := range attrs {
 		//: the format's label-name grammar — no colon, unlike a metric name.

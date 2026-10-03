@@ -8,6 +8,7 @@ import (
 	"time"
 
 	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 )
 
@@ -18,40 +19,89 @@ import (
 // That matters because the twin would be invisible in review — it would encode
 // identically and behave identically — and would surface only when exemplars need
 // to carry a trace id onto a metric data point across a boundary that no longer
-// has one type.
+// has one type. Since the model moved to internal/core/otel the assertion
+// crosses BOTH signals: the attribute a span carries is the attribute a metric
+// point carries, with no conversion between them.
 func TestAttributesAreTheSameTypeAsMetrics(t *testing.T) {
-	//: every attribute-shaped field of this domain's model is coremetrics'
-	//: type. There is no coretrace.AttrValue to be a twin of it, and this
-	//: assignment is what stops compiling the day somebody adds one.
-	attr := coremetrics.String("k", "v")
-	span := coretrace.SpanValue{Attrs: []coremetrics.AttrValue{attr}}
+	//: every attribute-shaped field of this domain's model is the shared
+	//: type. There is no coretrace.AttrValue to be a twin of it, and these
+	//: assignments are what stop compiling the day somebody adds one.
+	attr := coreotel.String("k", "v")
+	span := coretrace.SpanValue{Attrs: []coreotel.AttrValue{attr}}
 	event := coretrace.EventValue{Attrs: span.Attrs}
 	link := coretrace.LinkValue{Attrs: event.Attrs}
 	params := coretrace.SpanParams{Attrs: link.Attrs}
 	if params.Attrs[0] != attr {
 		t.Error("an attribute must cross every model type unchanged")
 	}
-	batch := coretrace.SpansValue{Resource: coremetrics.ResourceValue{Attrs: params.Attrs}}
-	if batch.Resource.Attrs[0].Key != "k" {
-		t.Error("a Resource carries the same attribute type a span does")
+	//: and the metrics side holds the very same slice type.
+	point := coremetrics.SumValue{Attrs: params.Attrs}
+	if point.Attrs[0] != attr {
+		t.Error("an attribute must cross from a span to a metric point unchanged")
+	}
+	batch := coretrace.SpansValue{Resource: coreotel.ResourceValue{Attrs: params.Attrs}}
+	snapshot := coremetrics.SnapshotValue{Resource: batch.Resource}
+	if snapshot.Resource.Attrs[0].Key != "k" {
+		t.Error("a span batch and a snapshot carry the same Resource type")
 	}
 }
 
-// TestScopeDefaultNamesTheTracePackage pins the one place reusing the metrics
-// types would have produced a WRONG answer: an InstrumentationScope names the
-// library that produced THIS signal, so a span batch stamped
-// "…/pkg/v1/metrics" would tell a backend the metrics package emitted spans.
+// TestScopeDefaultNamesTheTracePackage pins the one place sharing the model
+// would have produced a WRONG answer: an InstrumentationScope names the library
+// that produced THIS signal, so a span batch stamped "…/pkg/v1/metrics" would
+// tell a backend the metrics package emitted spans.
 func TestScopeDefaultNamesTheTracePackage(t *testing.T) {
-	normalized := coretrace.NormalizeScope(coremetrics.ScopeValue{})
+	normalized := coretrace.NormalizeScope(coreotel.ScopeValue{})
 	if normalized.Name != coretrace.DefaultScopeName {
 		t.Errorf("scope name = %q, want %q", normalized.Name, coretrace.DefaultScopeName)
 	}
 	if normalized.Name == coremetrics.DefaultScopeName {
 		t.Error("the trace scope default must not be the metrics one")
 	}
-	named := coretrace.NormalizeScope(coremetrics.ScopeValue{Name: "mine", Version: "1"})
+	named := coretrace.NormalizeScope(coreotel.ScopeValue{Name: "mine", Version: "1"})
 	if named.Name != "mine" || named.Version != "1" {
 		t.Error("a named scope is the caller's and must never be overwritten")
+	}
+}
+
+// TestAnUnusableAttributeIsRefusedUnderTheTraceCode pins the code a trace
+// refusal carries. Before the model moved to internal/core/otel, a span's
+// unusable attribute panicked with the METRICS code (0.2.9.4), because the
+// refusal travelled with the type; now each signal names the defect with its
+// own, and this one is 0.2.20.7.
+func TestAnUnusableAttributeIsRefusedUnderTheTraceCode(t *testing.T) {
+	refusals := map[string]func(){
+		"SortAttrs": func() {
+			coretrace.SortAttrs([]coreotel.AttrValue{coreotel.String("", "x")})
+		},
+		"ValidateAttrs": func() {
+			coretrace.ValidateAttrs([]coreotel.AttrValue{{Key: "unset"}})
+		},
+		"NormalizeResource": func() {
+			coretrace.NormalizeResource(coreotel.ResourceValue{Attrs: []coreotel.AttrValue{
+				coreotel.String("a", "1"), coreotel.String("a", "2"),
+			}})
+		},
+		"EventValue.Normalized": func() {
+			coretrace.EventValue{Attrs: []coreotel.AttrValue{{Key: "unset"}}}.Normalized()
+		},
+		"LinkValue.Normalized": func() {
+			coretrace.LinkValue{Attrs: []coreotel.AttrValue{coreotel.String("", "x")}}.Normalized()
+		},
+	}
+	for name, refuse := range refusals {
+		t.Run(name, func(t *testing.T) {
+			defer func() {
+				r := recover()
+				if r != coretrace.InvalidAttribute.Error() {
+					t.Errorf("panicked with %v, want the trace InvalidAttribute message", r)
+				}
+				if r == coremetrics.InvalidAttribute.Error() {
+					t.Error("a trace refusal must not carry the metrics code")
+				}
+			}()
+			refuse()
+		})
 	}
 }
 

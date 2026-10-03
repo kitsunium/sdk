@@ -12,8 +12,7 @@ import (
 	"sync"
 	"time"
 
-	coremetrics "github.com/kitsunium/sdk/internal/core/metrics"
-
+	coreotel "github.com/kitsunium/sdk/internal/core/otel"
 	coretrace "github.com/kitsunium/sdk/internal/core/trace"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -343,7 +342,7 @@ func otlpLinks(links []coretrace.LinkValue) []otlpLink {
 
 // otlpAttrs renders an attribute set as the repeated KeyValue every OTLP message
 // spells its dimensions with. An empty set stays nil, which encoding/json omits.
-func otlpAttrs(attrs []coremetrics.AttrValue) []otlpKeyValue {
+func otlpAttrs(attrs []coreotel.AttrValue) []otlpKeyValue {
 	//: the dimensionless case has no attributes array at all.
 	if len(attrs) == 0 {
 		//: omitted by the omitempty tag.
@@ -366,23 +365,23 @@ func otlpAttrs(attrs []coremetrics.AttrValue) []otlpKeyValue {
 // Exactly one AnyValue field is non-nil, and it is emitted even when it holds the
 // type's zero: a oneof member has explicit presence, so an absent field means
 // "no case selected", not "the default".
-func otlpKeyValueOf(attr coremetrics.AttrValue) otlpKeyValue {
+func otlpKeyValueOf(attr coreotel.AttrValue) otlpKeyValue {
 	//: one oneof case per attribute kind.
 	switch attr.Kind() {
 	//: the common dimension.
-	case coremetrics.AttrKindString:
+	case coreotel.AttrKindString:
 		//: stringValue.
 		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{StringValue: new(attr.Str())}}
 	//: a flag.
-	case coremetrics.AttrKindBool:
+	case coreotel.AttrKindBool:
 		//: boolValue — false is a value, not an absence.
 		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{BoolValue: new(attr.Bool())}}
 	//: a signed 64-bit integer, which rides as a decimal string.
-	case coremetrics.AttrKindInt64:
+	case coreotel.AttrKindInt64:
 		//: intValue.
 		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{IntValue: new(otlpInt64(attr.Int64()))}}
 	//: an IEEE-754 double, non-finite values included.
-	case coremetrics.AttrKindFloat64:
+	case coreotel.AttrKindFloat64:
 		//: doubleValue.
 		return otlpKeyValue{Key: attr.Key, Value: otlpAnyValue{DoubleValue: new(otlpDouble(attr.Float64()))}}
 	//: AttrKindInvalid never reaches a batch — SortAttrs panics on it at the
