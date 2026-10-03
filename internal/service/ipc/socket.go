@@ -83,8 +83,9 @@ func clearStale(cfg *Config) error {
 // or a peer the kernel did not name — the directory admitted it.
 func (l *Listener) admits(p PeerValue) error { return admit(p, l.self, &l.cfg) }
 
-// dial connects to the Unix socket at cfg.Path, once its directory and its
-// file are known to be this account's (or an allowed one's). A directory
+// dial connects to the Unix socket at cfg.Path, once the path to its
+// directory is known to be steered by nobody else, the directory to be this
+// account's and its file this account's (or an allowed one's). A directory
 // that does not exist is nobody listening — the first client of a daemon not
 // started yet —, DIAL_FAILED, not an unsafe directory.
 func dial(ctx context.Context, cfg *Config) (*Conn, error) {

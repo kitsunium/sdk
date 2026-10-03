@@ -9,7 +9,10 @@
 //     process's account owns and nobody else may write to; connecting to a
 //     Unix socket needs search permission on every directory above it, so a
 //     0700 directory admits its owner and root and nobody else. It is checked
-//     at Listen and at Dial, never widened by this package.
+//     at Listen and at Dial, never widened by this package — and so is the
+//     PATH to it: a component above it that anybody could have planted or
+//     created, or can replace, is refused (PATH_UNSAFE, chain_unix.go), since
+//     every lookup follows a link planted at a parent.
 //   - THE PEER'S CREDENTIALS, where the kernel gives them: SO_PEERCRED on
 //     Linux. There the listener refuses a peer whose UID is neither its own
 //     nor allowed, whatever the directory says. Elsewhere Peer.Verified is

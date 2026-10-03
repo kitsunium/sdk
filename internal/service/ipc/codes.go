@@ -34,3 +34,15 @@ const CodeEndpointForeign errs.Code = 0x00_03_5B_07 // 0.3.91.7
 
 // CodeClosed identifies an Accept on a listener that was closed.
 const CodeClosed errs.Code = 0x00_03_5B_08 // 0.3.91.8
+
+// CodePathUnsafe identifies a socket path another account could steer: a
+// component ABOVE the socket's directory, or the directory holding it, lets
+// another account decide where the path leads — a link planted where anybody
+// can write, a directory another account created there, or an entry anybody
+// can replace. The socket directory's own entry stays [CodeDirectoryUnsafe]'s.
+//
+// It is its own code, as LOCK_PATH_REDIRECTED is lock's (ADR 0083), because
+// the remedy differs: DIRECTORY_UNSAFE asks for a chmod or a chown, this asks
+// a human to look at a component that may be an attack in progress — or to
+// move the socket under [RuntimeDir].
+const CodePathUnsafe errs.Code = 0x00_03_5B_09 // 0.3.91.9

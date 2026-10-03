@@ -2510,6 +2510,10 @@ codes:
     const: CodeClosed
     hex: "0x00_03_5B_08"
     package: internal/service/ipc
+  - code: "0.3.91.9"
+    const: CodePathUnsafe
+    hex: "0x00_03_5B_09"
+    package: internal/service/ipc
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"
