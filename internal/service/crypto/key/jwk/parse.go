@@ -19,6 +19,7 @@ import (
 	"encoding/json"
 	"slices"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -37,7 +38,7 @@ func Parse(document []byte) (key KeyValue, err error) {
 	//: JWK object at all, and a caller routing on the code must be told so.
 	if isJSONNull(document) {
 		//: the sentinel itself, so its HTTP status and exit code survive.
-		return KeyValue{}, errs.Wrap(Malformed, errs.WrapParams{},
+		return KeyValue{}, errs.Wrap(corejwk.Malformed, errs.WrapParams{},
 			errs.String("why", "the document is JSON null, not a JWK object"))
 	}
 	var raw keyJSON
@@ -45,7 +46,7 @@ func Parse(document []byte) (key KeyValue, err error) {
 	if uerr := json.Unmarshal(document, &raw); uerr != nil {
 		//: keep the decoder's cause — it names an offset, never the material.
 		return KeyValue{}, errs.Wrap(uerr, errs.WrapParams{
-			Code:    CodeJWKMalformed,
+			Code:    corejwk.CodeJWKMalformed,
 			Reason:  "MALFORMED",
 			Public:  "JWK document is malformed",
 			Private: "service/crypto/key/jwk.Parse: json.Unmarshal rejected the document",
@@ -67,7 +68,7 @@ func fromWire(raw keyJSON) (key KeyValue, err error) {
 	//: "kty" is the one member RFC 7517 §4.1 makes unconditionally required.
 	if raw.Kty == "" {
 		//: without it there is nothing to dispatch on.
-		return KeyValue{}, MissingMember
+		return KeyValue{}, corejwk.MissingMember
 	}
 	//: metadata is common to every family; material is family-specific.
 	base := KeyValue{
@@ -95,7 +96,7 @@ func fromWire(raw keyJSON) (key KeyValue, err error) {
 	//: RSA lands here on purpose — the SDK ships no RSA scheme.
 	default:
 		//: an unmodelled family, RSA included.
-		return KeyValue{}, UnsupportedKeyType
+		return KeyValue{}, corejwk.UnsupportedKeyType
 	}
 }
 
@@ -106,12 +107,12 @@ func parseEC(base KeyValue, raw keyJSON) (key KeyValue, err error) {
 	//: unknown curve, or a curve valid under another kty.
 	if size == 0 {
 		//: the declared curve has no fixed coordinate length here.
-		return KeyValue{}, UnsupportedCurve
+		return KeyValue{}, corejwk.UnsupportedCurve
 	}
 	//: both coordinates are required for a public EC key.
 	if raw.X == "" || raw.Y == "" {
 		//: an EC JWK without x/y describes nothing.
-		return KeyValue{}, MissingMember
+		return KeyValue{}, corejwk.MissingMember
 	}
 	//: fixed-length decode, twice.
 	xcoord, xerr := b64DecodeFixed(raw.X, size)
@@ -167,12 +168,12 @@ func parseOKP(base KeyValue, raw keyJSON) (key KeyValue, err error) {
 	//: exactly one accepted curve.
 	if base.crv != CurveEd25519 {
 		//: unknown curve, or a NIST curve mislabelled as OKP.
-		return KeyValue{}, UnsupportedCurve
+		return KeyValue{}, corejwk.UnsupportedCurve
 	}
 	//: the public key is required.
 	if raw.X == "" {
 		//: an OKP JWK without x describes nothing.
-		return KeyValue{}, MissingMember
+		return KeyValue{}, corejwk.MissingMember
 	}
 	//: Ed25519 public keys are exactly 32 octets.
 	pub, xerr := b64DecodeFixed(raw.X, ed25519KeyLen)
@@ -205,7 +206,7 @@ func attachOKPPrivate(base KeyValue, member string) (key KeyValue, err error) {
 	//: key; it must equal the declared x or the JWK contradicts itself.
 	if !bytes.Equal(ed25519.NewKeyFromSeed(seed)[ed25519KeyLen:], base.x) {
 		//: d and x describe different keys.
-		return KeyValue{}, KeyMismatch
+		return KeyValue{}, corejwk.KeyMismatch
 	}
 	base.priv = seed
 	//: a coherent private key.
@@ -218,12 +219,12 @@ func parseOct(base KeyValue, raw keyJSON) (key KeyValue, err error) {
 	//: a curve on a symmetric key is a contradiction, not a stray member.
 	if base.crv != "" {
 		//: reject rather than silently drop, so the confusion surfaces.
-		return KeyValue{}, UnsupportedCurve
+		return KeyValue{}, corejwk.UnsupportedCurve
 	}
 	//: "k" is required.
 	if raw.K == "" {
 		//: an oct JWK without k carries no key.
-		return KeyValue{}, MissingMember
+		return KeyValue{}, corejwk.MissingMember
 	}
 	//: no fixed length here — RFC 7518 §6.4 leaves the size to the algorithm;
 	//: Secret() applies the SDK's 32-octet rule at the crypto.Key boundary.

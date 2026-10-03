@@ -8,13 +8,20 @@ facade, not this package.
 
 ```go
 func NewListener(cfg *Config) (*Listener, error)
-func Dial(ctx context.Context, cfg *Config) (*Conn, error)
+func NewDialer(cfg *Config) (*Dialer, error)
+func Dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error)
 func RuntimeDir(app string) string
 
-func (l *Listener) Accept() (*Conn, error)
+func (l *Listener) Accept() (*coreipc.Conn, error)
+func (l *Listener) Addr() net.Addr
+func (l *Listener) Path() string
 func (l *Listener) Refused() int64
 func (l *Listener) Close() error
+
+func (d *Dialer) Dial(ctx context.Context) (*coreipc.Conn, error)
 ```
 
-See `CLAUDE.md` for the two gates (the directory, the peer's credentials) and
-ADR 0148 for the decision.
+`*Listener` and `*Dialer` implement the `Listener` and `Dialer` ports of
+`internal/core/proc/ipc`, which also holds `PeerValue`, `Conn` and the
+`0.3.91.*` codes (ADR 0160). See `CLAUDE.md` for the two gates (the directory,
+the peer's credentials) and ADR 0148 for the decision.

@@ -1,6 +1,8 @@
-// Package ipc — the sentinels of service/proc/ipc. Each var's name equals its
-// errs.Define Reason in SCREAMING_SNAKE form. None quotes a path in its Public
-// half: the path travels in the "path" field, for the log.
+// Package ipc — the sentinels internal/service/proc/ipc refuses with. Each
+// var's name equals its errs.Define Reason in SCREAMING_SNAKE form. None
+// quotes a path in its Public half: the path travels in the "path" field, for
+// the log. The Private strings name the service package, where each condition
+// is detected.
 package ipc
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

@@ -91,7 +91,7 @@ type Conn struct {
 	// a continuation frame does not repeat it.
 	msgOp corenet.WSOpCode
 	// hdr is the fixed scratch for one frame header. Reader goroutine only.
-	hdr [corenet.WSMaxHeaderLen]byte
+	hdr [MaxHeaderLen]byte
 	// ctl is the fixed scratch for one control-frame payload. It is a separate
 	// buffer from msg on purpose: a control frame may arrive BETWEEN two
 	// fragments, so answering it must not disturb the message being assembled.
@@ -252,7 +252,7 @@ func (c *Conn) Receive() (message corenet.WSMessageValue, err error) {
 // assemble applies the fragmentation rules to one data frame and appends its
 // payload to the message in progress, reporting whether that message is now
 // whole.
-func (c *Conn) assemble(header corenet.WSFrameHeaderValue) (complete bool, err error) {
+func (c *Conn) assemble(header FrameHeaderValue) (complete bool, err error) {
 	//: the fragmentation rules are checked before the payload is read, so a
 	//: frame that must not exist never grows the buffer.
 	if ferr := c.trackFragment(header); ferr != nil {
@@ -282,7 +282,7 @@ func (c *Conn) Send(message corenet.WSMessageValue) error {
 	//: it, so the caller would see a mysterious disconnect instead of an error.
 	if !message.Binary {
 		//: refuse before anything reaches the socket.
-		if verr := corenet.ValidateWSText(message.Data); verr != nil {
+		if verr := ValidateText(message.Data); verr != nil {
 			//: the error already names what was wrong with it.
 			return verr
 		}
@@ -338,7 +338,7 @@ func (c *Conn) CloseWith(code corenet.WSCloseCode, reason string) error {
 	//: validated BEFORE anything is torn down, so a caller bug is reported even
 	//: when the peer had already closed — otherwise the bug would hide behind
 	//: whichever end happened to finish first.
-	if _, verr := corenet.AppendWSClosePayload(scratch[:0], code, reason); verr != nil {
+	if _, verr := AppendClosePayload(scratch[:0], code, reason); verr != nil {
 		c.terminate()
 		c.join()
 		//: the error already names what was wrong with the code or the reason.
@@ -369,35 +369,35 @@ func (c *Conn) CloseWith(code corenet.WSCloseCode, reason string) error {
 }
 
 // nextHeader reads and validates one frame header.
-func (c *Conn) nextHeader() (header corenet.WSFrameHeaderValue, err error) {
+func (c *Conn) nextHeader() (header FrameHeaderValue, err error) {
 	//: exactly two bytes, because two bytes is what announces how many more the
 	//: header needs. Reading speculatively would consume payload this endpoint
 	//: has not yet decided it will accept.
-	if _, rerr := io.ReadFull(c.br, c.hdr[:corenet.WSMinHeaderLen]); rerr != nil {
+	if _, rerr := io.ReadFull(c.br, c.hdr[:MinHeaderLen]); rerr != nil {
 		//: the socket is gone, or the peer stopped mid-header.
-		return corenet.WSFrameHeaderValue{}, c.socketGone(rerr)
+		return FrameHeaderValue{}, c.socketGone(rerr)
 	}
-	want := corenet.WSFrameHeaderLen(c.hdr[:corenet.WSMinHeaderLen])
+	want := FrameHeaderLen(c.hdr[:MinHeaderLen])
 	//: the extended length and the mask key, when this frame carries them.
-	if want > corenet.WSMinHeaderLen {
+	if want > MinHeaderLen {
 		//: the socket is gone, or the peer stopped mid-header.
-		if _, rerr := io.ReadFull(c.br, c.hdr[corenet.WSMinHeaderLen:want]); rerr != nil {
+		if _, rerr := io.ReadFull(c.br, c.hdr[MinHeaderLen:want]); rerr != nil {
 			//: report the terminal state.
-			return corenet.WSFrameHeaderValue{}, c.socketGone(rerr)
+			return FrameHeaderValue{}, c.socketGone(rerr)
 		}
 	}
-	parsed, perr := corenet.ParseWSFrameHeader(c.hdr[:want])
+	parsed, perr := ParseFrameHeader(c.hdr[:want])
 	//: reserved bits, reserved opcodes, control-frame shape, minimal length.
 	if perr != nil {
 		//: fail the connection — §7.1.7.
-		return corenet.WSFrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, perr)
+		return FrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, perr)
 	}
 	//: §5.1 — a server that accepted an unmasked client frame would hand a
 	//: hostile script the one mechanism the design has against a transparent
 	//: proxy reading the payload as a second HTTP request.
 	if merr := parsed.ValidateFromClient(); merr != nil {
 		//: fail the connection.
-		return corenet.WSFrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, merr)
+		return FrameHeaderValue{}, c.failConnection(corenet.WSCloseProtocolError, merr)
 	}
 	//: the ceiling is checked against the ANNOUNCED length, before a single
 	//: byte is read or allocated. A control frame is exempt because the RFC
@@ -405,7 +405,7 @@ func (c *Conn) nextHeader() (header corenet.WSFrameHeaderValue, err error) {
 	//: make Ping unanswerable.
 	if !parsed.OpCode.IsControl() && parsed.Length > uint64(c.cfg.maxFrameSize) {
 		//: refuse before allocating from a number the peer chose.
-		return corenet.WSFrameHeaderValue{}, c.failConnection(corenet.WSCloseTooLarge,
+		return FrameHeaderValue{}, c.failConnection(corenet.WSCloseTooLarge,
 			errs.Wrap(corenet.WSMessageTooLarge, errs.WrapParams{},
 				errs.Int64("announced", int64(parsed.Length)),
 				errs.Int64("ceiling", c.cfg.maxFrameSize),
@@ -416,7 +416,7 @@ func (c *Conn) nextHeader() (header corenet.WSFrameHeaderValue, err error) {
 }
 
 // trackFragment applies RFC 6455 §5.4's ordering rules to a data frame.
-func (c *Conn) trackFragment(header corenet.WSFrameHeaderValue) error {
+func (c *Conn) trackFragment(header FrameHeaderValue) error {
 	//: a continuation continues something, so there must be something.
 	if header.OpCode == corenet.WSContinuation {
 		//: an orphan continuation means the two endpoints disagree about what
@@ -450,7 +450,7 @@ func (c *Conn) trackFragment(header corenet.WSFrameHeaderValue) error {
 }
 
 // readDataPayload appends one data frame's payload to the message in progress.
-func (c *Conn) readDataPayload(header corenet.WSFrameHeaderValue) error {
+func (c *Conn) readDataPayload(header FrameHeaderValue) error {
 	start := len(c.msg)
 	//: the accumulated total is what the ceiling is about: a peer that cannot
 	//: exceed it in one frame can still exceed it in a thousand, which is what
@@ -475,7 +475,7 @@ func (c *Conn) readDataPayload(header corenet.WSFrameHeaderValue) error {
 	//: unmasked in place: the payload already sits in the buffer the handler
 	//: will be handed, so copying it out to unmask would double the cost of
 	//: every frame for nothing.
-	corenet.ApplyWSMask(c.msg[start:], header.MaskKey)
+	ApplyMask(c.msg[start:], header.MaskKey)
 	//: appended.
 	return nil
 }
@@ -488,7 +488,7 @@ func (c *Conn) completeMessage() (message corenet.WSMessageValue, err error) {
 	//: reject valid messages whose only fault is where the sender split them.
 	if c.msgOp == corenet.WSText {
 		//: §8.1 — invalid UTF-8 fails the connection with 1007.
-		if verr := corenet.ValidateWSText(c.msg); verr != nil {
+		if verr := ValidateText(c.msg); verr != nil {
 			//: fail the connection.
 			return corenet.WSMessageValue{}, c.failConnection(corenet.WSCloseInvalidPayload, verr)
 		}
@@ -498,7 +498,7 @@ func (c *Conn) completeMessage() (message corenet.WSMessageValue, err error) {
 }
 
 // serveControl answers one control frame.
-func (c *Conn) serveControl(header corenet.WSFrameHeaderValue) error {
+func (c *Conn) serveControl(header FrameHeaderValue) error {
 	size := int(header.Length)
 	payload := c.ctl[:size]
 	//: a zero-length control frame is legal and common — an empty Ping is the
@@ -531,20 +531,20 @@ func (c *Conn) serveControl(header corenet.WSFrameHeaderValue) error {
 }
 
 // readControlPayload reads and unmasks one control frame's payload.
-func (c *Conn) readControlPayload(payload []byte, key [corenet.WSMaskLen]byte) error {
+func (c *Conn) readControlPayload(payload []byte, key [MaskLen]byte) error {
 	//: the socket is gone, or the peer announced more than it sent.
 	if _, rerr := io.ReadFull(c.br, payload); rerr != nil {
 		//: report the terminal state.
 		return c.socketGone(rerr)
 	}
-	corenet.ApplyWSMask(payload, key)
+	ApplyMask(payload, key)
 	//: read.
 	return nil
 }
 
 // serveClose completes the closing handshake the peer began.
 func (c *Conn) serveClose(payload []byte) error {
-	code, reason, perr := corenet.ParseWSClosePayload(payload)
+	code, reason, perr := ParseClosePayload(payload)
 	//: a one-byte payload, a reserved code, or a reason that is not UTF-8.
 	if perr != nil {
 		//: 1007 when the payload was the problem, 1002 when the framing was —
@@ -602,7 +602,7 @@ func (c *Conn) sendClose(code corenet.WSCloseCode, reason string) error {
 		return nil
 	}
 	var scratch [corenet.WSMaxControlPayload]byte
-	payload, perr := corenet.AppendWSClosePayload(scratch[:0], code, reason)
+	payload, perr := AppendClosePayload(scratch[:0], code, reason)
 	//: an unsendable code or an oversized reason.
 	if perr != nil {
 		//: nothing was written; report what the format cannot carry.
@@ -617,7 +617,7 @@ func (c *Conn) sendClose(code corenet.WSCloseCode, reason string) error {
 
 // writeLocked puts one encoded frame on the wire. The caller holds wmu.
 func (c *Conn) writeLocked(op corenet.WSOpCode, payload []byte) error {
-	frame, eerr := corenet.AppendWSFrame(c.wbuf[:0], op, true, payload)
+	frame, eerr := AppendFrame(c.wbuf[:0], op, true, payload)
 	//: a reserved opcode or an oversized control frame; the buffer is untouched.
 	if eerr != nil {
 		//: nothing was written; report what the format cannot carry.

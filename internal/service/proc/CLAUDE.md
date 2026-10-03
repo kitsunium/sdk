@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T04:55:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/proc/
 
 ## Purpose
@@ -42,15 +42,18 @@ The two systemd protocols are grouped under `systemd/`, a directory of its own
 | `self/` | what the running process says about itself: the build it came from and its runtime state (ADR 0100) | none — values of its own | none | `pkg/v1/proc/process` (`Self`, `Build`, `ParseBuild`) |
 | `systemd/notify/` | sd_notify(3): the notifier, bounded by its caller's context (ADR 0072), and the supervisor's listener with the kernel-verified sender on Linux | `core/proc.Listener`, `NotificationValue` | none (core `0.2.6.*`) | `pkg/v1/proc/systemd/notify` |
 | `systemd/listen/` | socket activation, sd_listen_fds(3): the inherited listeners, and `Prepare` for the activator | `core/proc.Spec` (`ExtraFiles`) | none (core `0.2.6.*`) | `pkg/v1/proc/systemd/listen` |
-| `ipc/` | a private socket between processes of one machine: the directory gates it, the path above it is audited with `kernel/fs/pathchain`, `SO_PEERCRED` names the peer on Linux, a named pipe with its own DACL on Windows (ADR 0148) | none — no core counterpart (ADR 0074) | `0.3.91.*` | `pkg/v1/proc/ipc` |
+| `ipc/` | a private socket between processes of one machine: the directory gates it, the path above it is audited with `kernel/fs/pathchain`, `SO_PEERCRED` names the peer on Linux, a named pipe with its own DACL on Windows (ADR 0148) | `core/proc/ipc.Listener`, `Dialer`, `PeerValue`, `Conn` — its own core, at the mirrored path (ADR 0160) | `0.3.91.*`, declared in `core/proc/ipc` | `pkg/v1/proc/ipc` |
 
-Only `ipc` declares a code. Every other member that reports a failure wraps a
-`0.2.6.*` sentinel of `internal/core/proc`, the domain's one block (ADR 0016):
+No member declares a code. Every member that reports a failure wraps a
+`0.2.6.*` sentinel of `internal/core/proc`, the domain's one block (ADR 0016),
+except `ipc`, whose `0.3.91.*` sentinels are declared in `internal/core/proc/ipc`
+— the core path that mirrors it, beside its ports and values (ADR 0160).
 `childwait` hands its causes to `exec` and `reaper`, which wrap them, and
 `memlimit` and `self` return values, not errors. `ipc`'s range kept its value
-when the package moved here from the root of `internal/service` (ADR 0160):
-`codeRangeOwners` names `internal/service/proc/ipc` under the same key
-`0x00_03_5B_00`, and `//:audit_sources` lists it by its new label.
+through both of its moves — from the root of `internal/service` to this
+family, then from the service to the core: `codeRangeOwners` names
+`internal/core/proc/ipc` under the same key `0x00_03_5B_00`, and
+`//:audit_sources` lists the core label.
 
 Two members import a sibling, and say so: `exec` and `reaper` share
 `childwait`, because the kernel hands a zombie's status to exactly one wait.
@@ -62,8 +65,9 @@ import `systemd/notify`, and `internal/service/net/server` imports
 
 - Put Go code in this directory. A file here would make `proc` a service
   package of its own, beside the contract that already carries the name.
-- Declare an error code in a member other than `ipc`: add the sentinel to
-  `internal/core/proc` and wrap it (`internal/core/proc/CLAUDE.md`).
+- Declare an error code in any member: add the sentinel to
+  `internal/core/proc` — or, for `ipc`, to `internal/core/proc/ipc` — and wrap
+  it (`internal/core/proc/CLAUDE.md`, ADR 0160).
 - Reach `golang.org/x/sys` from a member: every one is the standard library
   plus the kernel, and `syscall.NewLazyDLL` where Windows needs a kernel32
   entry point.

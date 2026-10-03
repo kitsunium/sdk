@@ -1657,47 +1657,47 @@ codes:
   - code: "0.3.42.1"
     const: CodeJWKMalformed
     hex: "0x00_03_2A_01"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.2"
     const: CodeJWKMissingMember
     hex: "0x00_03_2A_02"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.3"
     const: CodeJWKUnsupportedKeyType
     hex: "0x00_03_2A_03"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.4"
     const: CodeJWKUnsupportedCurve
     hex: "0x00_03_2A_04"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.5"
     const: CodeJWKInvalidEncoding
     hex: "0x00_03_2A_05"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.6"
     const: CodeJWKKeyMismatch
     hex: "0x00_03_2A_06"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.7"
     const: CodeJWKNoPublicForm
     hex: "0x00_03_2A_07"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.8"
     const: CodeJWKNoPrivateMaterial
     hex: "0x00_03_2A_08"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.9"
     const: CodeJWKTypeMismatch
     hex: "0x00_03_2A_09"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.10"
     const: CodeJWKKeyNotFound
     hex: "0x00_03_2A_0A"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.42.11"
     const: CodeJWKAmbiguousKid
     hex: "0x00_03_2A_0B"
-    package: internal/service/crypto/key/jwk
+    package: internal/core/crypto/key/jwk
   - code: "0.3.43.1"
     const: CodeInvalidExpression
     hex: "0x00_03_2B_01"
@@ -2541,39 +2541,39 @@ codes:
   - code: "0.3.91.1"
     const: CodeMisconfigured
     hex: "0x00_03_5B_01"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.2"
     const: CodeDirectoryUnsafe
     hex: "0x00_03_5B_02"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.3"
     const: CodeInUse
     hex: "0x00_03_5B_03"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.4"
     const: CodeListenFailed
     hex: "0x00_03_5B_04"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.5"
     const: CodePeerRefused
     hex: "0x00_03_5B_05"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.6"
     const: CodeDialFailed
     hex: "0x00_03_5B_06"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.7"
     const: CodeEndpointForeign
     hex: "0x00_03_5B_07"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.8"
     const: CodeClosed
     hex: "0x00_03_5B_08"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.3.91.9"
     const: CodePathUnsafe
     hex: "0x00_03_5B_09"
-    package: internal/service/proc/ipc
+    package: internal/core/proc/ipc
   - code: "0.4.1.1"
     const: CodeInvalidID
     hex: "0x00_04_01_01"

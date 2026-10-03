@@ -246,7 +246,7 @@ type Exporter struct {
 	seq      uint64
 
 	mu      sync.Mutex
-	ln      *ipc.Listener
+	ln      ipc.Listener
 	clients []*ipc.Conn
 	cancel  context.CancelFunc
 	done    sync.WaitGroup

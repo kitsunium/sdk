@@ -70,7 +70,7 @@ The first major version of the SDK's public API. Type signatures exposed here ar
 | `proc/systemd/listen/` | systemd socket activation: `Listeners` / `Files` / `WithNames`, and `Prepare` to pass listeners to a child `Spec` | `pkg/v1/proc/systemd/listen/README.md` |
 | `proc/systemd/notify/` | systemd notification: `Ready` / `Reloading` / `Stopping` / `Status` / `Watchdog` / `MainPID` / `Notify`, `WatchdogInterval`, and `Listen` for the receiving side | `pkg/v1/proc/systemd/notify/README.md` |
 | `proc/signal/` | `Notify` → a signal channel and its stop, `Relay` to a `Target`, `Parse` a signal name | `pkg/v1/proc/signal/README.md` |
-| `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` / `Dial(ctx, Config)` over a `0700` directory, `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the eight codes re-exported |
+| `proc/ipc/` | A private socket (ADR 0148): `Listen(Config)` returning the `Listener` port, `NewDialer(Config)` the `Dialer` port, `Dial(ctx, Config)` over a `0700` directory, `Conn.Peer` the kernel's word on the other end where it gives one (`Verified`), `RuntimeDir(app)`; the ports, `Peer` and `Conn` alias `internal/core/proc/ipc`, so a test can double either end (ADR 0160); the nine codes re-exported |
 
 The distribution packages — `git`, `selfupdate`, `entitlement` and `gate` — are
 the framework's since ADR 0158: `github.com/kitsunium/sdk/framework/<name>`,

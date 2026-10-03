@@ -17,7 +17,7 @@
 // close-code registry a second time, from the specification, so that a mask or
 // a bound edited in websocket_frame.go does not silently edit the expectation
 // with it.
-package net_test
+package websocket_test
 
 import (
 	"bytes"
@@ -29,6 +29,7 @@ import (
 
 	corenet "github.com/kitsunium/sdk/internal/core/net"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
+	"github.com/kitsunium/sdk/internal/service/net/websocket"
 )
 
 // The frame header's bit fields and length markers, transcribed from the
@@ -96,17 +97,17 @@ const wsFuzzProbeMargin int = 2
 // wsFuzzAnnouncedLen is the header width RFC 6455 §5.2 says the first two bytes
 // announce, or 0 when there are not two bytes to read it from.
 //
-// It is the expectation WSFrameHeaderLen is judged against, so it is written
+// It is the expectation FrameHeaderLen is judged against, so it is written
 // from the diagram: two fixed bytes, plus the extended length the marker in the
 // seven-bit field selects, plus four more when MASK is set.
 func wsFuzzAnnouncedLen(b []byte) int {
 	//: below two bytes the second byte does not exist, so nothing about the
 	//: rest of the header is knowable yet.
-	if len(b) < corenet.WSMinHeaderLen {
+	if len(b) < websocket.MinHeaderLen {
 		//: the reader must come back with more.
 		return 0
 	}
-	width := corenet.WSMinHeaderLen
+	width := websocket.MinHeaderLen
 	//: the seven-bit field is a length below 126 and a marker at or above it.
 	switch b[1] & wsFuzzLengthBits {
 	//: 126 selects the two-byte extended length.
@@ -118,7 +119,7 @@ func wsFuzzAnnouncedLen(b []byte) int {
 	}
 	//: §5.1 puts the masking key last, after whichever length form was used.
 	if b[1]&wsFuzzMaskBit != 0 {
-		width += corenet.WSMaskLen
+		width += websocket.MaskLen
 	}
 	//: the exact width, which is also the exact number of bytes a reader may
 	//: consume before it has bounded the payload.
@@ -151,11 +152,11 @@ func wsFuzzOpCodeDefined(op byte) bool {
 // assigned, the length is spelled in the narrowest form that can carry it, a
 // control frame is whole and short — so a parser that dropped one of them fails
 // this oracle even though it still agrees with itself.
-func wsFuzzHeaderOracle(head []byte) (want corenet.WSFrameHeaderValue, ok bool) {
+func wsFuzzHeaderOracle(head []byte) (want websocket.FrameHeaderValue, ok bool) {
 	//: a header shorter than the two fixed bytes announces nothing.
-	if len(head) < corenet.WSMinHeaderLen {
+	if len(head) < websocket.MinHeaderLen {
 		//: nothing to accept.
-		return corenet.WSFrameHeaderValue{}, false
+		return websocket.FrameHeaderValue{}, false
 	}
 	width := wsFuzzAnnouncedLen(head)
 	//: two rejections with one verdict. First: the slice must be the header and
@@ -167,20 +168,20 @@ func wsFuzzHeaderOracle(head []byte) (want corenet.WSFrameHeaderValue, ok bool) 
 	//: short-circuits before head[0] is read on a slice that has no width.
 	if len(head) != width || head[0]&wsFuzzRSVBits != 0 {
 		//: neither sufficient nor necessary, or reserved bits set.
-		return corenet.WSFrameHeaderValue{}, false
+		return websocket.FrameHeaderValue{}, false
 	}
 	opcode := head[0] & wsFuzzOpCodeBits
 	//: §5.2 — a reserved opcode fails the connection rather than being skipped.
 	if !wsFuzzOpCodeDefined(opcode) {
 		//: fail the connection.
-		return corenet.WSFrameHeaderValue{}, false
+		return websocket.FrameHeaderValue{}, false
 	}
 	length, lok := wsFuzzLengthOracle(head)
 	//: a length the encoding cannot honestly express — non-minimal, or with the
 	//: reserved most significant bit set.
 	if !lok {
 		//: fail the connection.
-		return corenet.WSFrameHeaderValue{}, false
+		return websocket.FrameHeaderValue{}, false
 	}
 	final := head[0]&wsFuzzFinBit != 0
 	//: §5.5 — a control frame must be whole, because a peer cannot answer a
@@ -188,9 +189,9 @@ func wsFuzzHeaderOracle(head []byte) (want corenet.WSFrameHeaderValue, ok bool) 
 	//: answer has to fit a buffer that is always available mid-message.
 	if opcode&wsFuzzControlBit != 0 && (!final || length > uint64(corenet.WSMaxControlPayload)) {
 		//: fail the connection.
-		return corenet.WSFrameHeaderValue{}, false
+		return websocket.FrameHeaderValue{}, false
 	}
-	parsed := corenet.WSFrameHeaderValue{
+	parsed := websocket.FrameHeaderValue{
 		Final:  final,
 		OpCode: corenet.WSOpCode(opcode),
 		Masked: head[1]&wsFuzzMaskBit != 0,
@@ -198,7 +199,7 @@ func wsFuzzHeaderOracle(head []byte) (want corenet.WSFrameHeaderValue, ok bool) 
 	}
 	//: §5.1 — the key is the last four bytes of the header when MASK is set.
 	if parsed.Masked {
-		copy(parsed.MaskKey[:], head[width-corenet.WSMaskLen:width])
+		copy(parsed.MaskKey[:], head[width-websocket.MaskLen:width])
 	}
 	//: a header the specification accepts, with the values it reads out of it.
 	return parsed, true
@@ -220,13 +221,13 @@ func wsFuzzLengthOracle(head []byte) (length uint64, ok bool) {
 	}
 	//: 126 — the two bytes that follow the fixed pair.
 	if marker == wsFuzzLen16Marker {
-		value := uint64(binary.BigEndian.Uint16(head[corenet.WSMinHeaderLen:]))
+		value := uint64(binary.BigEndian.Uint16(head[websocket.MinHeaderLen:]))
 		//: a value the seven-bit field could have carried is a second spelling
 		//: of a frame that already has one.
 		return value, value >= uint64(wsFuzzLen16Marker)
 	}
 	//: 127 — the eight bytes that follow.
-	value := binary.BigEndian.Uint64(head[corenet.WSMinHeaderLen:])
+	value := binary.BigEndian.Uint64(head[websocket.MinHeaderLen:])
 	//: §5.2 reserves the most significant bit, so a length that sets it is not
 	//: an enormous frame: it is a malformed one. And a value that fits sixteen
 	//: bits is the same non-minimal spelling, one form up.
@@ -262,15 +263,15 @@ func wsFuzzLengthIsInItsClass(second byte, length uint64) bool {
 // wsFuzzProbeLengths lists the prefix lengths one fuzz case checks.
 //
 // The sweep is what turns "the announced width is sufficient" and "it is
-// necessary" into one statement: ParseWSFrameHeader must accept AT MOST the
-// prefix whose length WSFrameHeaderLen announced, and must refuse every other
+// necessary" into one statement: ParseFrameHeader must accept AT MOST the
+// prefix whose length FrameHeaderLen announced, and must refuse every other
 // prefix of the same bytes. The window stops a little past the widest legal
 // header because a frame's payload can be gigabytes and probing every prefix of
 // it would spend the whole fuzz budget re-refusing the same shape — but the
 // FULL slice is probed too, because a header with its payload still attached is
 // exactly the input a reader hands in when it has over-read.
 func wsFuzzProbeLengths(b []byte) []int {
-	limit := min(len(b), corenet.WSMaxHeaderLen+wsFuzzProbeMargin)
+	limit := min(len(b), websocket.MaxHeaderLen+wsFuzzProbeMargin)
 	lengths := make([]int, 0, limit+wsFuzzProbeMargin)
 	for m := range limit + 1 {
 		lengths = append(lengths, m)
@@ -362,21 +363,21 @@ func wsFuzzFrameSeeds() [][]byte {
 	}
 }
 
-// FuzzParseWSFrameHeader drives the header parser from bytes nobody chose and
+// FuzzParseFrameHeader drives the header parser from bytes nobody chose and
 // judges every answer against RFC 6455 rather than against the parser.
 //
 // Four properties are asserted on every input, and each exists because a
 // different class of defect passes the other three:
 //
-//   - VERDICT. ParseWSFrameHeader accepts exactly what wsFuzzHeaderOracle
+//   - VERDICT. ParseFrameHeader accepts exactly what wsFuzzHeaderOracle
 //     accepts, and on acceptance returns exactly the value the oracle reads.
 //     A parser that refused everything fails this; so does one that accepts a
 //     non-minimal length or a reserved opcode.
 //
 //   - EXACTNESS. Over a sweep of prefix lengths, the ONLY prefix that may be
-//     accepted is the one WSFrameHeaderLen announced. Shorter is a field that
+//     accepted is the one FrameHeaderLen announced. Shorter is a field that
 //     is not all there; longer is payload the parser has not bounded. This is
-//     what pins WSFrameHeaderLen and ParseWSFrameHeader to the same number —
+//     what pins FrameHeaderLen and ParseFrameHeader to the same number —
 //     they are used as a pair by a reader that takes exactly what the first
 //     one says, and a disagreement between them is a read past the header.
 //
@@ -403,13 +404,13 @@ func wsFuzzFrameSeeds() [][]byte {
 // actually about. The search found it three times out of three from a cleared
 // fuzz cache, in 0.21 s, 1.73 s and 0.10 s, minimising to
 //
-//	ParseWSFrameHeader(89 fe 00 7d 30 30 30 30) err = <nil>; RFC 6455 accepts it = false (announced width 8)
+//	ParseFrameHeader(89 fe 00 7d 30 30 30 30) err = <nil>; RFC 6455 accepts it = false (announced width 8)
 //
 // and, on the third run, to the same eight bytes with a Text opcode. That is
 // the whole argument for fuzzing a length-prefixed parser: the inputs that
 // matter are the ones on the boundary between two spellings of the same frame,
 // and nobody writes those down.
-func FuzzParseWSFrameHeader(f *testing.F) {
+func FuzzParseFrameHeader(f *testing.F) {
 	//: one seed per branch of the format, plus the degenerate inputs.
 	for _, seed := range wsFuzzFrameSeeds() {
 		f.Add(seed)
@@ -418,11 +419,11 @@ func FuzzParseWSFrameHeader(f *testing.F) {
 		//: the parser is handed a buffer the caller still owns; PURITY is
 		//: checked against this copy at the end.
 		pristine := slices.Clone(b)
-		announced := corenet.WSFrameHeaderLen(b)
-		//: WSFrameHeaderLen is the number a reader sizes its next read from, so
+		announced := websocket.FrameHeaderLen(b)
+		//: FrameHeaderLen is the number a reader sizes its next read from, so
 		//: it is judged first and on its own.
 		if want := wsFuzzAnnouncedLen(b); announced != want {
-			t.Fatalf("WSFrameHeaderLen(% x) = %d, want %d", b, announced, want)
+			t.Fatalf("FrameHeaderLen(% x) = %d, want %d", b, announced, want)
 		}
 		//: EXACTNESS — every prefix, including the announced one, judged by the
 		//: same oracle. The oracle refuses any slice whose length is not the
@@ -431,41 +432,41 @@ func FuzzParseWSFrameHeader(f *testing.F) {
 		for _, m := range wsFuzzProbeLengths(b) {
 			head := b[:m]
 			want, ok := wsFuzzHeaderOracle(head)
-			header, err := corenet.ParseWSFrameHeader(head)
+			header, err := websocket.ParseFrameHeader(head)
 			//: VERDICT, both ways — accepting what the RFC forbids and refusing
 			//: what it allows are the same bug seen from two sides.
 			if ok != (err == nil) {
-				t.Fatalf("ParseWSFrameHeader(% x) err = %v; RFC 6455 accepts it = %v (announced width %d)",
+				t.Fatalf("ParseFrameHeader(% x) err = %v; RFC 6455 accepts it = %v (announced width %d)",
 					head, err, ok, announced)
 			}
 			//: a refusal is a framing violation and must say so: the code is
 			//: what decides the close status the peer is sent.
 			if !ok {
 				if !errs.HasCode(err, corenet.CodeWSProtocolViolation) {
-					t.Fatalf("ParseWSFrameHeader(% x) refused with code %v, want WS_PROTOCOL_VIOLATION",
+					t.Fatalf("ParseFrameHeader(% x) refused with code %v, want WS_PROTOCOL_VIOLATION",
 						head, wsCodeOf(err))
 				}
 				continue
 			}
 			if header != want {
-				t.Fatalf("ParseWSFrameHeader(% x) = %+v, want %+v", head, header, want)
+				t.Fatalf("ParseFrameHeader(% x) = %+v, want %+v", head, header, want)
 			}
 			//: BOUND — the length belongs to the field that selected it.
 			if !wsFuzzLengthIsInItsClass(head[1], header.Length) {
-				t.Fatalf("ParseWSFrameHeader(% x) length %d is outside the class marker %d selects",
+				t.Fatalf("ParseFrameHeader(% x) length %d is outside the class marker %d selects",
 					head, header.Length, head[1]&wsFuzzLengthBits)
 			}
 			//: and the ceiling §5.5 puts on a frame that must be answerable
 			//: inline, restated here because it is the one bound whose failure
 			//: is a buffer a peer chose the size of.
 			if header.OpCode.IsControl() && header.Length > uint64(corenet.WSMaxControlPayload) {
-				t.Fatalf("ParseWSFrameHeader(% x) accepted a %s frame carrying %d bytes, ceiling is %d",
+				t.Fatalf("ParseFrameHeader(% x) accepted a %s frame carrying %d bytes, ceiling is %d",
 					head, header.OpCode, header.Length, corenet.WSMaxControlPayload)
 			}
 			//: PURITY, first half — the same bytes must give the same answer.
-			again, aerr := corenet.ParseWSFrameHeader(head)
+			again, aerr := websocket.ParseFrameHeader(head)
 			if aerr != nil || again != header {
-				t.Fatalf("ParseWSFrameHeader(% x) is not deterministic: %+v/%v then %+v/%v",
+				t.Fatalf("ParseFrameHeader(% x) is not deterministic: %+v/%v then %+v/%v",
 					head, header, err, again, aerr)
 			}
 		}
@@ -512,18 +513,18 @@ func wsFuzzCloseOracle(b []byte) (code corenet.WSCloseCode, reason string, refus
 	}
 	//: one byte is not half a status code. Salvaging it would let the peer
 	//: choose which half of its own code this endpoint reads.
-	if len(b) < corenet.WSCloseCodeLen {
+	if len(b) < websocket.CloseCodeLen {
 		//: a framing violation.
 		return 0, "", corenet.CodeWSProtocolViolation
 	}
-	received := binary.BigEndian.Uint16(b[:corenet.WSCloseCodeLen])
+	received := binary.BigEndian.Uint16(b[:websocket.CloseCodeLen])
 	//: the registry governs what is received exactly as it governs what is
 	//: sent — a peer sending 1006 commits the error we refuse to commit.
 	if !wsFuzzCloseSendable(received) {
 		//: a framing violation.
 		return 0, "", corenet.CodeWSProtocolViolation
 	}
-	text := b[corenet.WSCloseCodeLen:]
+	text := b[websocket.CloseCodeLen:]
 	//: §5.5.1 makes the reason UTF-8 and §8.1 makes invalid UTF-8 fatal.
 	if !utf8.Valid(text) {
 		//: a payload violation, which is 1007 and not 1002.
@@ -538,7 +539,7 @@ func wsFuzzCloseOracle(b []byte) (code corenet.WSCloseCode, reason string, refus
 func wsFuzzCloseSeeds() [][]byte {
 	//: 120 bytes of reason puts the payload at the 125-byte ceiling once the
 	//: two-byte code is in front of it; 121 puts it one past.
-	atCeiling := append([]byte{0x03, 0xE8}, bytes.Repeat([]byte{'x'}, corenet.WSMaxControlPayload-corenet.WSCloseCodeLen)...)
+	atCeiling := append([]byte{0x03, 0xE8}, bytes.Repeat([]byte{'x'}, corenet.WSMaxControlPayload-websocket.CloseCodeLen)...)
 	pastCeiling := append(slices.Clone(atCeiling), 'x')
 	return [][]byte{
 		//: no payload at all, which is legal and means "no status".
@@ -586,7 +587,7 @@ func wsFuzzCloseSeeds() [][]byte {
 	}
 }
 
-// FuzzParseWSClosePayload drives the Close-payload parser the same way, and
+// FuzzParseClosePayload drives the Close-payload parser the same way, and
 // adds the property the frame header has no equivalent of: a round trip.
 //
 // Three properties, each covering what the others miss:
@@ -603,7 +604,7 @@ func wsFuzzCloseSeeds() [][]byte {
 //     sent, delivered to the application as if it were theirs.
 //
 //   - ROUND TRIP. Whatever this endpoint accepted, it must be able to say
-//     again: AppendWSClosePayload must rebuild the exact bytes for every
+//     again: AppendClosePayload must rebuild the exact bytes for every
 //     accepted payload that still fits a control frame, and must refuse the
 //     ones that do not. That is the one assertion the oracle cannot make on
 //     its own — it compares the parser against the WRITER, so a shared
@@ -619,11 +620,11 @@ func wsFuzzCloseSeeds() [][]byte {
 // stops AT the boundary and 3000 was already in it. The search minimised to the
 // two bytes below it in 1.3 s:
 //
-//	ParseWSClosePayload(0b b7) = (2999, "", nil); RFC 6455 refuses it with 0.2.11.29
+//	ParseClosePayload(0b b7) = (2999, "", nil); RFC 6455 refuses it with 0.2.11.29
 //
 // That input is a seed above now, and it fails against that same mutation in
 // four milliseconds without a search.
-func FuzzParseWSClosePayload(f *testing.F) {
+func FuzzParseClosePayload(f *testing.F) {
 	//: one seed per branch of §5.5.1 and per boundary of the registry.
 	for _, seed := range wsFuzzCloseSeeds() {
 		f.Add(seed)
@@ -633,18 +634,18 @@ func FuzzParseWSClosePayload(f *testing.F) {
 		//: not write into it.
 		pristine := slices.Clone(b)
 		wantCode, wantReason, refusal := wsFuzzCloseOracle(b)
-		code, reason, err := corenet.ParseWSClosePayload(b)
+		code, reason, err := websocket.ParseClosePayload(b)
 		//: PURITY FIRST, so it covers the REJECTION path as well as the
 		//: acceptance one. A parser that decoded half a payload into the
 		//: caller's buffer and only then refused it would otherwise slip
 		//: through: the refusal branch below returns early, and every
 		//: malformed input — which is most of the corpus — would never reach
 		//: a purity check placed after it.
-		againCode, againReason, againErr := corenet.ParseWSClosePayload(b)
+		againCode, againReason, againErr := websocket.ParseClosePayload(b)
 		//: the same bytes must yield the same verdict, refusal included.
 		if (againErr == nil) != (err == nil) || againCode != code || againReason != reason {
 			//: a parser whose answer depends on hidden state.
-			t.Fatalf("ParseWSClosePayload(% x) is not deterministic: (%d, %q, %v) then (%d, %q, %v)",
+			t.Fatalf("ParseClosePayload(% x) is not deterministic: (%d, %q, %v) then (%d, %q, %v)",
 				b, code, reason, err, againCode, againReason, againErr)
 		}
 		//: and neither call may have written into the input.
@@ -655,29 +656,29 @@ func FuzzParseWSClosePayload(f *testing.F) {
 		//: VERDICT — the refusal, and which refusal it is.
 		if refusal != 0 {
 			if err == nil {
-				t.Fatalf("ParseWSClosePayload(% x) = (%d, %q, nil); RFC 6455 refuses it with %v",
+				t.Fatalf("ParseClosePayload(% x) = (%d, %q, nil); RFC 6455 refuses it with %v",
 					b, code, reason, refusal)
 			}
 			if !errs.HasCode(err, refusal) {
-				t.Fatalf("ParseWSClosePayload(% x) refused with code %v, want %v", b, wsCodeOf(err), refusal)
+				t.Fatalf("ParseClosePayload(% x) refused with code %v, want %v", b, wsCodeOf(err), refusal)
 			}
 			//: nothing else is knowable about a refused payload.
 			return
 		}
 		if err != nil {
-			t.Fatalf("ParseWSClosePayload(% x) = %v; RFC 6455 accepts it as (%d, %q)", b, err, wantCode, wantReason)
+			t.Fatalf("ParseClosePayload(% x) = %v; RFC 6455 accepts it as (%d, %q)", b, err, wantCode, wantReason)
 		}
 		if code != wantCode || reason != wantReason {
-			t.Fatalf("ParseWSClosePayload(% x) = (%d, %q), want (%d, %q)", b, code, reason, wantCode, wantReason)
+			t.Fatalf("ParseClosePayload(% x) = (%d, %q), want (%d, %q)", b, code, reason, wantCode, wantReason)
 		}
 		//: the one code this endpoint may hold and must never send is also the
 		//: only unsendable one it may report — and only for an empty payload.
 		if !code.Sendable() && (len(b) != 0 || code != corenet.WSCloseNoStatus) {
-			t.Fatalf("ParseWSClosePayload(% x) returned %d, which must not travel", b, code)
+			t.Fatalf("ParseClosePayload(% x) returned %d, which must not travel", b, code)
 		}
 		//: VERBATIM — the reason is the bytes after the code, unaltered.
-		if len(b) >= corenet.WSCloseCodeLen && !bytes.Equal([]byte(reason), b[corenet.WSCloseCodeLen:]) {
-			t.Fatalf("ParseWSClosePayload(% x) reason = % x, want % x", b, reason, b[corenet.WSCloseCodeLen:])
+		if len(b) >= websocket.CloseCodeLen && !bytes.Equal([]byte(reason), b[websocket.CloseCodeLen:]) {
+			t.Fatalf("ParseClosePayload(% x) reason = % x, want % x", b, reason, b[websocket.CloseCodeLen:])
 		}
 		//: ROUND TRIP — only the empty payload has no code to write back.
 		if len(b) != 0 {
@@ -696,22 +697,22 @@ func FuzzParseWSClosePayload(f *testing.F) {
 // has already read it.
 func wsFuzzAssertCloseRoundTrip(t *testing.T, b []byte, code corenet.WSCloseCode, reason string) {
 	t.Helper()
-	wire, err := corenet.AppendWSClosePayload(nil, code, reason)
+	wire, err := websocket.AppendClosePayload(nil, code, reason)
 	//: past the ceiling the writer must refuse, and must leave the destination
 	//: exactly as it found it.
 	if len(b) > corenet.WSMaxControlPayload {
 		if err == nil {
-			t.Fatalf("AppendWSClosePayload(%d, %q) built %d bytes; the control-frame ceiling is %d",
+			t.Fatalf("AppendClosePayload(%d, %q) built %d bytes; the control-frame ceiling is %d",
 				code, reason, len(wire), corenet.WSMaxControlPayload)
 		}
 		//: refused as it must be.
 		return
 	}
 	if err != nil {
-		t.Fatalf("AppendWSClosePayload(%d, %q) = %v, but ParseWSClosePayload accepted those same %d bytes",
+		t.Fatalf("AppendClosePayload(%d, %q) = %v, but ParseClosePayload accepted those same %d bytes",
 			code, reason, err, len(b))
 	}
 	if !bytes.Equal(wire, b) {
-		t.Fatalf("AppendWSClosePayload(%d, %q) = % x, want % x", code, reason, wire, b)
+		t.Fatalf("AppendClosePayload(%d, %q) = % x, want % x", code, reason, wire, b)
 	}
 }

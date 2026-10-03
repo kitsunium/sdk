@@ -60,7 +60,7 @@ internal/
 │                          snapshot, worker},
 │                  collections/{cache, heap, ring}, fs/{pathchain}
 ├── core/          domain interfaces + domain values — each package by its path
-│                  crypto, net, proc,
+│                  crypto, crypto/key/jwk, net, proc, proc/ipc,
 │                  app/{cli, config, events, health, i18n, id, lifecycle, lock,
 │                       mail, resilience, scheduler, statemachine, validation,
 │                       view},

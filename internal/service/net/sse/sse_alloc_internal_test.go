@@ -114,11 +114,12 @@ func mallocsOver(runs int, f func()) uint64 {
 // payload that fits inside the retention ceiling.
 //
 // MUTATION-CHECKED, twice, and the second is the one this file was rewritten
-// for. Replacing `event.AppendTo(s.frame[:0])` with `event.AppendTo(nil)` — the
-// shape the buffer exists to avoid — is a PER-FRAME defect and fails under
-// either form. Giving Stream a `sent []int` field and appending len(frame) to
-// it inside write — the shape of every "how many bytes has this stream sent?"
-// instrument anyone would add — is an AMORTISED one, and it fails here at
+// for. Replacing `AppendEvent(s.frame[:0], event)` with
+// `AppendEvent(nil, event)` — the shape the buffer exists to avoid — is a
+// PER-FRAME defect and fails under either form. Giving Stream a `sent []int`
+// field and appending len(frame) to it inside write — the shape of every "how
+// many bytes has this stream sent?" instrument anyone would add — is an
+// AMORTISED one, and it fails here at
 // `200 Sends performed 4 allocations, want 0` while testing.AllocsPerRun
 // reported 0 for the very same path, every run. Four, not two hundred: the
 // slice doubles, so it allocates on the growth steps and not on the frames
@@ -149,9 +150,9 @@ func TestSteadyStateSendAllocatesNothing(t *testing.T) {
 // thousand idle streams writes nothing BUT keep-alive comments, so an
 // allocation here is one per stream per interval, forever.
 //
-// MUTATION-CHECKED, twice. Replacing `corenet.AppendSSEComment(s.frame[:0],
-// text)` with `corenet.AppendSSEComment(nil, text)` is the per-frame defect and
-// fails under either form. The amortised one — a `sent []int` field on Stream
+// MUTATION-CHECKED, twice. Replacing `AppendComment(s.frame[:0], text)` with
+// `AppendComment(nil, text)` is the per-frame defect and fails under either
+// form. The amortised one — a `sent []int` field on Stream
 // appended to inside write — fails here at
 // `200 Comments performed 4 allocations, want 0` and was reported as 0 by
 // testing.AllocsPerRun, every run. This arm is the one that matters most: a

@@ -397,8 +397,8 @@ func AllowAnyOrigin() Option {
 // primitive: its job is to prove the server parsed the handshake rather than
 // replaying it, so a cached 101 cannot pass for a live upgrade.
 func AcceptKey(key string) string {
-	//: the core contract; this facade only forwards.
-	return corenet.WSAcceptKey(key)
+	//: the engine computes it (ADR 0160 §4); this facade only forwards.
+	return svcws.AcceptKey(key)
 }
 
 // DrainSignal returns the channel closed when the server serving this request

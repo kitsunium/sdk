@@ -23,7 +23,7 @@ package stands alone for a consumer using plain `net/http`.
 | `CloseCode`, `Close*` | the §7.4.1 registry, plus `CloseCode.Sendable` / `Echoable` |
 | `Option`, `Subprotocols`, `MaxMessageSize`, `MaxFrameSize`, `PingInterval`, `WithoutPing`, `WriteTimeout`, `AllowOrigins`, `AllowAnyOrigin` | connection options |
 | `GUID`, `Version`, `MaxControlPayload`, `DefaultPingInterval`, `DefaultWriteTimeout`, `DefaultMaxMessageSize`, `DefaultMaxFrameSize` | the protocol's and the domain's constants |
-| `AcceptKey` | the §4.2.2 digest, for a hand-written client handshake or a test |
+| `AcceptKey` | the §4.2.2 digest, for a hand-written client handshake or a test — the engine's (`internal/service/net/websocket`), since ADR 0160 §4 moved the wire format out of the core |
 | `DrainSignal` | the shutdown signal, re-exported so a handler need not import `server` |
 | `HandshakeFailed`, `UpgradeUnsupported`, `ProtocolViolation`, `MessageTooLarge`, `InvalidPayload`, `ConnClosed`, `ConnMisconfigured` | sentinels |
 

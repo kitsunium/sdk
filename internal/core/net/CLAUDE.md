@@ -1,13 +1,17 @@
-<!-- updated: 2026-10-03T04:40:00Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/core/net/
 
 ## Purpose
 
 The network domain's contract layer (ADR 0029): the ports, immutable value types
 and **every** `0.2.11.*` sentinel for both faces of the domain — inbound
-(listeners, connection and datagram handlers, the Server-Sent Events frame, the
-WebSocket wire format, the static file handler's one refusal) and outbound (the
-guarded HTTP transport). Concrete behaviour lives in
+(listeners, connection and datagram handlers, the Server-Sent Events frame as a
+value, the WebSocket protocol's vocabulary — opcode, close code, message — the
+static file handler's one refusal) and outbound (the guarded HTTP transport).
+Reading and writing a wire format is a mechanism and is NOT here (ADR 0160 §4):
+the WebSocket frame codec, the close payload, the handshake digest and the
+UTF-8 check are `internal/service/net/websocket`'s, the SSE encoder is
+`internal/service/net/sse`'s. Concrete behaviour lives in
 `internal/service/net/{tlsid,client,server,sse,websocket,static}`; the public
 façades are `pkg/v1/net/{tlsid,client,server,sse,websocket,static}`, at the
 same paths (ADR 0155).
@@ -48,13 +52,12 @@ name.
 | `policy_compliance.go` | the compile-time proof that `PolicyFunc` satisfies `Policy` |
 | `response.go` | `ResponseValue` — a fully-read outbound response — and `RequestValue`, the request a `Policy` judges |
 | `call.go` | `CallValue` — one completed outbound call — and `CallHook`, the observation function port |
-| `sse.go` | `SSEEventValue` — the Server-Sent Events frame, its validation and its wire form, plus `AppendSSEComment` |
+| `sse.go` | `SSEEventValue` — the Server-Sent Events frame as a value: `IsZero`, `Validate` (what the format can carry), and `SSEContentType` / `SSEMinRetry` / `SSELastEventIDHeader`; the encoder is `service/net/sse`'s |
 | `drain.go` | `WithDrainSignal` / `DrainSignal` — the shutdown signal a long-lived handler observes |
-| `websocket.go` | the RFC 6455 opening handshake: `WSGUID`, `WSVersion`, the header names, `WSAcceptKey`, `ValidateWSKey` |
+| `websocket.go` | the RFC 6455 vocabulary: `WSGUID`, `WSVersion`, `WSKeyLen`, the header names, `WSMaxControlPayload` (§5.5); the key check and the accept digest are `service/net/websocket`'s |
 | `websocket_opcode.go` | `WSOpCode` — the six assigned opcodes, `IsControl` / `Defined` / `String` |
-| `websocket_frame.go` | `WSFrameHeaderValue` — `WSFrameHeaderLen`, `ParseWSFrameHeader`, `ValidateFromClient`, `ApplyWSMask`, `AppendWSFrame` |
-| `websocket_close.go` | `WSCloseCode` — the §7.4.1 registry, `Sendable` / `Echoable`, `AppendWSClosePayload`, `ParseWSClosePayload` |
-| `websocket_message.go` | `WSMessageValue` — the reassembled message, and `ValidateWSText` (§8.1) |
+| `websocket_close.go` | `WSCloseCode` — the §7.4.1 registry, `Sendable` / `Echoable`; the close payload's wire form is `service/net/websocket`'s |
+| `websocket_message.go` | `WSMessageValue` — the reassembled message and its `OpCode`; its §8.1 UTF-8 rule is checked by the engine |
 
 ## Why-this-shape
 
@@ -105,79 +108,34 @@ name.
   cannot leak the private API surface through a log line.
 - **`CallHook` is a func, not an interface**, so the domain needs no dependency
   on `logger` or `metrics`; the consumer wires it to whichever it uses.
-- **An SSE newline SPLITS rather than escapes.** The format has no escape
-  mechanism, so a terminator inside `Data` becomes another `data:` line and the
-  client rejoins them with `"\n"` — that is what makes a multi-line payload
-  expressible, and it is exactly why a terminator inside `ID` or `Name` is
-  refused instead of truncated. A silently shortened id is a resume token that
-  points at the wrong place. CRLF, CR and LF are all recognised, and all three
-  normalise to LF on reassembly: the VALUE round-trips, its byte spelling does
-  not, and the type comment says so.
-- **The SSE terminator scan keeps a cursor per byte and never rescans.** The
-  format has no escape, so finding the terminators in `Data` is the only
-  per-byte work an event stream does — and `strings.IndexAny`, the obvious call,
-  has no `bytealg` path: above eight bytes it builds a 32-byte ASCII set per
-  call and walks the string byte by byte, below eight it decodes a rune per
-  byte. A profile put it at **91 %** of encoding a 4 KiB single-line frame,
-  against 7 % for the `memmove` that is the actual work. `strings.IndexByte` is
-  the assembly-backed primitive, but it finds ONE byte, and the two obvious ways
-  to call it twice are each quadratic on half the possible payloads — unbounded,
-  a payload of LF-terminated lines rescans its whole tail for a CR that is not
-  there; with the CR scan bounded by the LF, the exact mirror (CR-terminated,
-  no LF) does the same. Both were measured at **16× SLOWER** than the code they
-  replaced before either was believed. What ships finds both terminators once
-  over the whole payload and moves each cursor only FORWARD, so each byte is
-  examined at most once per terminator whatever the payload's shape:
-  **2.1×–6.4×**, and the same substitution in `validateSSELine` is worth 1.7×
-  more. `BENCH.md` prints the profile, all four strategies and the corpus that
-  exposes each blow-up.
+- **A terminator inside an SSE `ID` or `Name` is refused, never truncated.**
+  The format has no escape mechanism: a terminator inside `Data` becomes
+  another `data:` line (the encoder's business, in `service/net/sse`), and the
+  same absence of escaping makes a terminator inside a single-line field
+  unrepresentable. A silently shortened id is a resume token that points at
+  the wrong place, so `Validate` refuses it. The check is two `IndexByte`
+  calls behind an emptiness test, not `ContainsAny` — `BENCH.md` prints why.
 - **An SSE `event:` with no `data:` is refused.** Every client discards a frame
   whose data buffer is empty and discards the event type with it, so a caller
   who names an event would watch it silently not arrive. A retry-only or id-only
   frame is *not* refused — both are meaningful, and an id-only frame is how a
   cursor is advanced without dispatching anything.
-- **The WebSocket frame parser refuses rather than tolerates, and the RSV bits
-  have no field.** RFC 6455 is mostly MUST-fail because a frame stream is
-  length-prefixed: two endpoints that disagree about one frame do not lose one
-  message, they lose the stream, and every byte after it is read as something
-  the sender never wrote. `WSFrameHeaderValue` therefore carries no RSV field —
-  a reserved bit only means something under a negotiated extension, this domain
-  negotiates none, so a set bit is a protocol error rather than a value to
-  carry. That is also the mechanical half of the permessage-deflate refusal
-  (ADR 0047 §D6).
-- **The masking rule lives in its own method, not in the parser.** It is the one
-  framing rule whose answer depends on the direction of travel, so
-  `ValidateFromClient` names the direction; every other rule is absolute and is
-  checked once, in `ParseWSFrameHeader`. Masking is a security requirement and
-  not ceremony: it stops a hostile script steering a browser into emitting bytes
-  a transparent intermediary would read as a second HTTP request.
-- **The masking transform moves a WORD at a time, and the byte order cancels.**
-  It runs over every inbound byte with no fast path and no way to opt out, so a
-  CPU profile put **88.99 %** of a 4 KiB receive in `ApplyWSMask` alone. It now
-  takes 32 bytes per iteration, then 8, then 1 — **16.1×** the byte-at-a-time
-  throughput, **6.17×** on the whole in-situ receive path — with no assembly, no
-  build-tagged per-architecture file and no `unsafe`, which is the only reason
-  it can be one implementation across every GOOS the SDK targets (ADR 0018, ADR 0144).
-  The compiler renders each word as a single memory-destination XOR; there is no
-  vector instruction involved and none is wanted. Endianness safety is not a
-  property of choosing little-endian — it is a property of using **one** order
-  for the payload word AND the key word, under which a fixed-order decode is a
-  bijection and XOR stays bytewise. Mixing two, or reinterpreting the slice as
-  words with `unsafe`, is what breaks it, and the second is why `unsafe` is
-  absent: a native-order reinterpretation would agree with a little-endian key
-  on this VM and disagree on a big-endian host, which is a defect no test here
-  can see. Every claim above is measured in `BENCH.md`.
 - **`WSCloseCode.Sendable` answers for both directions.** A peer that sends 1006
   is committing exactly the protocol error this endpoint must not commit, so one
   predicate governs both and the two cannot drift. `Echoable` exists because
   §5.5.1 says to echo the peer's code and the one code a peer can leave us
   holding — 1005, for a Close with no payload — is a code §7.4.1 forbids on the
   wire.
-- **`ValidateWSText` is documented as a whole-MESSAGE check.** A multi-byte
-  sequence may straddle a fragment boundary, so a per-frame validator would
-  reject conformant senders — the failure mode is refusing valid input, which is
-  worse than the one it was avoiding because it only shows up against peers that
-  chunk differently.
+- **The wire formats are the services', and that is a rule, not a split of
+  convenience** (ADR 0160 §4). What stays here is what a second
+  implementation would have to share: the opcode, the close code and its
+  predicates, the message, the SSE frame and the rules it must satisfy, the
+  protocol's constants. Reading or writing bytes — the frame parser that
+  refuses rather than tolerates, the word-at-a-time mask, the minimal-length
+  rule, the close payload, the accept digest, the UTF-8 check, the SSE
+  terminator scan — moved with their tests, fuzz targets and measurements to
+  `internal/service/net/websocket` and `internal/service/net/sse`, whose
+  `CLAUDE.md` and `BENCH.md` carry the reasoning that used to be here.
 - **The drain signal is a context VALUE, never a cancellation.** Cancelling the
   request context would tell every in-flight handler to abandon the response it
   is halfway through, which is the opposite of what a graceful drain exists for.
@@ -195,51 +153,17 @@ name.
 
 ## Cost
 
-Full numbers, methodology and the rejected alternatives are in `BENCH.md`. The
-facts that decide how this package is used:
-
-| WebSocket | |
-|---|---|
-| `ApplyWSMask`, 4 KiB | **186.8 ns** — 21.9 GB/s, 0 allocs |
-| `ValidateWSText`, 4 KiB ASCII | 140.7 ns — 29.1 GB/s, 0 allocs |
-| `ParseWSFrameHeader` | 29.5 ns, 0 allocs |
+`BENCH.md` holds this package's one benchmark — `SSEEventValue.Validate`, run
+on every frame a stream sends:
 
 | Server-Sent Events | |
 |---|---|
-| `AppendTo`, single-line 256 B | **57.85 ns** — 4.4 GB/s, 0 allocs |
-| `AppendTo`, single-line 4 KiB | **430.8 ns** — 9.5 GB/s, 0 allocs |
-| `AppendTo`, id + event + 256 B | 98.32 ns, 0 allocs |
-| `AppendSSEComment` (keep-alive) | 19.99 ns, 0 allocs |
-| `Validate` | 12.2 ns data-only, 36.3 ns with id + event |
+| `Validate`, data only | **12.16 ns**, 0 allocs |
+| `Validate`, id + event | 36.33 ns, 0 allocs |
 
-- **Masking is no longer what caps an inbound connection.** It was 96 % of the
-  per-byte work on an ASCII text message and is now 57 %, within 1.3× of UTF-8
-  validation. `BENCH.md` still opens with that inversion because the previous
-  version of this file asserted the opposite and was right at the time.
-- **The slowest per-byte thing here is now `ValidateWSText` on multibyte text**,
-  at 1.05 GB/s against 21.9 for the mask. Counting only this package's two
-  per-byte passes, 4 KiB of three-byte runes costs 12.5× what the same byte
-  count costs in ASCII; before the widening it was 2.2×, because the mask was
-  expensive on both sides of the comparison. That is where the next per-byte win
-  is, if one is ever wanted.
-- **Per-FRAME cost is what a fragmented message pays.** With the mask 16×
-  cheaper, 256 frames carrying 64 KiB improved only 2.53× against 9.06× for the
-  same bytes in one frame. A peer chooses its own chunk size and a server cannot
-  refuse it, so this is the axis a peer can turn against the reader for free.
-- **An SSE frame is now bounded by the memory hierarchy, not by a scan.**
-  Encoding a single-line frame got **2.56×–4.62×** faster, `Validate` 1.73× and the keep-alive
-  comment 1.59×, by replacing `strings.IndexAny` — which had no `bytealg` path
-  and was 91 % of a 4 KiB frame — with two forward cursors over `IndexByte`.
-  The scan is still the largest profile entry at 65 %, and now it should be:
-  two assembly passes is the floor for proving two bytes are absent.
-- **A multi-line SSE payload costs 5.1× a single-line one of the same size**
-  (33 653 ns against 6 582 for 64 KiB with CRLF every 64 bytes), because every
-  line is a separate `data:` field and a CRLF cut refreshes BOTH cursors. That
-  is per-FIELD cost, not per-byte cost, and it is the axis a payload's shape
-  turns rather than its size.
-
-The whole file is allocation-free except `ParseWSClosePayload`, which returns
-the close reason as a string once per connection.
+The per-byte costs — the WebSocket mask and UTF-8 check, the frame codec, the
+SSE terminator scan — moved with the code that pays them, to
+`internal/service/net/websocket/BENCH.md` and `internal/service/net/sse/BENCH.md`.
 
 ## Error range
 
@@ -286,12 +210,12 @@ the close reason as a string once per connection.
 
 ## Imports allowed
 
-stdlib (`context`, `crypto/tls`, `crypto/x509`, `crypto/sha1`, `encoding/base64`,
-`encoding/binary`, `math`, `net`, `net/http`, `slices`, `strconv`, `strings`,
-`time`, `unicode/utf8`) +
-`internal/kernel/errs`. `crypto/sha1` appears for one reason only: RFC 6455
-§1.3 names it, and the digest proves a handshake was parsed rather than
-replayed. It is not a security primitive here and the doc comment says so. Never `internal/service/*`, never `pkg/*`, and never
+stdlib (`context`, `crypto/tls`, `crypto/x509`, `net`, `net/http`, `slices`,
+`strconv`, `strings`, `time`) + `internal/kernel/errs`. `net/http` is here for
+`http.Header` in `ResponseValue`, a type the outbound value carries — not for a
+status constant. `crypto/sha1`, `encoding/base64`, `encoding/binary`, `math`
+and `unicode/utf8` left with the wire formats (ADR 0160 §4). Never
+`internal/service/*`, never `pkg/*`, and never
 `golang.org/x/sys` or `golang.org/x/net` — the dep-light invariant (ADR 0016 /
 ADR 0018) is why the datagram batch path uses raw stdlib `syscall` with cited
 ABI constants instead of `x/net/ipv4`.
@@ -313,37 +237,10 @@ ABI constants instead of `x/net/ipv4`.
   interface signatures, single-method function ports
   (`internal/core/CLAUDE.md`), and the `drain.go` accessors — which take and
   return one, and store nothing.
-- Escape a newline in an SSE value, or truncate a field that cannot carry one.
 - Signal a drain by cancelling the request context. See §Why-this-shape.
-- Add an RSV field to `WSFrameHeaderValue`, or tolerate a set reserved bit. It
-  is how permessage-deflate is refused where the wire can verify it.
-- Treat `crypto/sha1` here as a security primitive, or "upgrade" it. RFC 6455
-  §1.3 fixes the algorithm; changing it produces a server that talks to nothing.
-- Reach for `unsafe`, assembly or a build-tagged per-architecture file to make
-  `ApplyWSMask` faster. It is already 16× the byte-at-a-time form in pure
-  stdlib, the remaining bottleneck at realistic sizes is the memory hierarchy
-  rather than the CPU, and every one of those three costs the single-implementation
-  property ADR 0018 requires.
-- Read the payload with one `binary` byte order and build the key word with
-  another, or with hand-written shifts that assume a memory layout. One order,
-  used for both, is the entire endianness argument — and a mismatch is wrong on
-  every host, not only on the big-endian ones nobody here can test.
-- Delete `applyWSMaskReference` from `websocket_frame_external_test.go`, or
-  "simplify" it to call `ApplyWSMask`. It is the RFC §5.3 transform transcribed
-  and the oracle every masking test is judged against; an oracle that calls the
-  implementation proves the implementation equals itself.
-- Delete `splitIndexAny` from `sse_bench_test.go`, or "simplify" it to call
-  `appendSSEData`. It is the terminator scan this package shipped before the
-  campaign, transcribed, and it is the oracle both SSE equivalence tests are
-  judged against — over every string of length 0 to 9 in `{'a', '\n', '\r'}`.
-  The bound is 9 rather than 8 because `strings.IndexAny` itself changes
-  strategy at `len(s) > 8`, so a corpus stopping at eight would exercise only
-  one of the oracle's own two code paths.
-- Rewrite `appendSSEData`'s two cursors as an `IndexByte` pair per line. It
-  reads as the same thing and is quadratic — in one of two mirror-image halves
-  depending on which scan is left unbounded, both measured at 16× slower than
-  the `IndexAny` form they would replace. The forward-only refresh IS the
-  algorithm, not an optimisation layered on it.
+- Truncate an `ID` or `Name` that cannot carry a terminator: refuse it.
+- Put a wire format back here — a parser, an encoder, the mask, the scan. It is
+  a mechanism and belongs to the service that speaks it (ADR 0160 §4).
 
 ## Verification
 

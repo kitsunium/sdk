@@ -277,11 +277,11 @@ func wireOpcodes(t *testing.T, wire []byte) []corenet.WSOpCode {
 	var ops []corenet.WSOpCode
 	//: one frame per iteration, header first, exactly as a peer reads them.
 	for len(wire) > 0 {
-		size := corenet.WSFrameHeaderLen(wire)
+		size := FrameHeaderLen(wire)
 		if size == 0 || size > len(wire) {
 			t.Fatalf("a truncated frame header on the wire: % x", wire)
 		}
-		header, err := corenet.ParseWSFrameHeader(wire[:size])
+		header, err := ParseFrameHeader(wire[:size])
 		if err != nil {
 			t.Fatalf("an unparseable frame on the wire: %v", err)
 		}

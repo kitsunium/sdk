@@ -24,11 +24,13 @@ an `aead/`.
 
 | Package | What it is | Code range | In `pkg/v1` |
 |---|---|---|---|
-| `jwk/` | **format** — RFC 7517 JWK / JWK Set, private export opt-in and never the default | **`0x00_03_2A_00`** (`0.3.42.*`), the only range in the crypto subtree | `pkg/v1/security/token` — `JWK`, `JWKSet` |
+| `jwk/` | **format** — RFC 7517 JWK / JWK Set, private export opt-in and never the default | **`0x00_03_2A_00`** (`0.3.42.*`), the only range of its own in the crypto subtree, declared in `internal/core/crypto/key/jwk` | `pkg/v1/security/token` — `JWK`, `JWKSet` |
 | `keyenvelope/` | composition — a password-wrapped DEK at rest, a frozen wire grammar (ADR 0014 §D3) | core sentinel `0.2.4.19` | `pkg/v1/crypto` — `WrapKey` / `UnwrapKey` |
 
-`jwk`'s range kept its value when the package moved here; only the owner path in
-`codeRangeOwners` followed it (ADR 0160).
+`jwk`'s range kept its value when the package moved here, and again when its
+declaration moved to the core path that mirrors this one,
+`internal/core/crypto/key/jwk`; only the owner path in `codeRangeOwners`
+followed it (ADR 0160).
 
 ## Do NOT
 

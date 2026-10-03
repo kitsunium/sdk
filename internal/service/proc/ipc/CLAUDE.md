@@ -12,24 +12,36 @@ socket, the statusline daemon.
 Stdlib only (`net`, `syscall` for `SO_PEERCRED` and `Stat_t`; on Windows
 `syscall.NewLazyDLL` for the named pipe's kernel32/advapi32 entry points, no
 `x/sys`) plus the kernel's `pathchain` for the path above the socket's
-directory. Code range `0.3.91.*`.
+directory. The contract is `internal/core/proc/ipc`, at the mirrored path and
+imported as `coreipc` (ADR 0160): `PeerValue`, `Conn`, the `Listener` and
+`Dialer` ports this package's engines implement, and the `0.3.91.*` codes and
+sentinels — this package returns them and declares none.
 
 ## Contents
 
 | File | Role |
 |---|---|
-| `ipc.go` | package doc, `Config`, `PeerValue` (`SID` on Windows), `Conn`, `Listener` over an `acceptor`, `NewListener`, `Accept` (refused peers closed and counted), `Dial`, `RuntimeDir`, `admit`, `closeBestEffort` |
+| `ipc.go` | package doc, `Config` (the engine's, ADR 0074), `Listener` over an `acceptor` — the engine behind `coreipc.Listener` —, `NewListener`, `Accept` (refused peers closed and counted), `Dialer` + `NewDialer` — the engine behind `coreipc.Dialer`, its allow-lists copied —, `Dial`, `RuntimeDir`, `admit`, `closeBestEffort`, and the compile-time proof that both engines satisfy their ports |
 | `socket.go` (`!windows`) | the Unix socket: `listen` (dial-then-remove of a leftover socket, `0600`), `socketAcceptor`, `admits`, `dial` (directory, path and owner checked before a byte is sent, within one second) |
 | `pipe_windows.go` | the named pipe (ADR 0148 §3): `pipeName`, `pipeAcceptor` (DACL `D:P(A;;GA;;;<SID>)`, `PIPE_REJECT_REMOTE_CLIENTS`, `FILE_FLAG_FIRST_PIPE_INSTANCE`, next instance before a connection is handed out, `Close` cancels a waiting `ConnectNamedPipe`), `clientPeer`/`accountOf` (process token → SID), `admits`, `dial` (`SECURITY_IDENTIFICATION`, server of another account refused) |
 | `dir_unix.go` / `dir_other.go` | `prepareDir` (path audited before AND after the `Mkdir`), `checkDir` (path above, own entry, holder), `checkEntry` (mode, owner, not a link), `ownerOf`: on Unix; a refusal elsewhere |
 | `chain_unix.go` | `checkChain` over `pathchain.Resolve` of the socket directory's parent, `checkHolder`, `steerable` (the rule), `ours`, `pathUnsafe` — see §Why-this-shape |
 | `peer_linux.go` / `peer_other.go` (`!linux && !windows`) | `peerOf`: `SO_PEERCRED`, or an unverified peer |
-| `codes.go` / `errors.go` | `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`, `LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED`, `PATH_UNSAFE` |
+
+The codes — `0.3.91.1`–`9`: `MISCONFIGURED`, `DIRECTORY_UNSAFE`, `IN_USE`,
+`LISTEN_FAILED`, `PEER_REFUSED`, `DIAL_FAILED`, `ENDPOINT_FOREIGN`, `CLOSED`,
+`PATH_UNSAFE` — are `internal/core/proc/ipc`'s `codes.go` and `errors.go`.
 
 ## Why-this-shape
 
-- **No core package.** One engine, no port a second implementation would
-  satisfy: the values are the engine's (ADR 0074), as `redact`'s are.
+- **A core of its own, with two ports** (ADR 0160 §1). This was "one engine,
+  no port" until the reorganisation, and its callers — the framework's
+  listeners, the telemetry exporter — held the engine itself, so testing the
+  code around them needed a socket on disk. `coreipc.Listener` and
+  `coreipc.Dialer` are what a caller holds now; `NewListener` and `NewDialer`
+  return the engines behind them, and a test hands the same code `net.Pipe`
+  doubles. `Config` stays here: it is the one engine's configuration
+  (ADR 0074), and the ports take none.
 - **The directory is the gate everywhere; the peer's credentials are a second
   one where they exist.** Connecting to a Unix socket needs search permission
   on its directory, so a 0700 directory already keeps other accounts out; on

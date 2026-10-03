@@ -1,4 +1,10 @@
-// Package jwk — range 0.3.42.* (ADR 0005 service/crypto/key/jwk block).
+// Package jwk — the JSON Web Key format's codes, range 0.3.42.* (ADR 0005).
+//
+// The range was allocated to internal/service/crypto/key/jwk, which reads and
+// writes the format, and is declared here, at the same path in the core, since
+// ADR 0160: a domain's codes live in its core and the service only uses them.
+// The values did not change with the move, and the LL byte still records the
+// service layer that allocated them.
 package jwk
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

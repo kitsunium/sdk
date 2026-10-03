@@ -133,7 +133,8 @@ var (
 // frame at a time and flushed after each. It is safe for concurrent use.
 type Stream = svcsse.Stream
 
-// Event is one Server-Sent Events frame.
+// Event is one Server-Sent Events frame. [Event].Validate reports whether the
+// wire format can carry it; [AppendEvent] writes it.
 type Event = corenet.SSEEventValue
 
 // Option configures a Stream.
@@ -148,6 +149,18 @@ type Option = svcsse.Option
 func New(w http.ResponseWriter, r *http.Request, opts ...Option) (stream *Stream, err error) {
 	//: the service layer owns the wiring; this facade only forwards.
 	return svcsse.New(w, r, opts...)
+}
+
+// AppendEvent appends ev's wire form to dst and returns the extended slice —
+// the bytes [Stream].Send writes, for a caller that frames events onto a
+// transport of its own.
+//
+// It appends nothing when the frame is invalid: the whole frame is validated
+// first, so a partial frame never reaches dst. Appending rather than returning
+// a fresh slice is what lets a caller reuse one buffer for every frame.
+func AppendEvent(dst []byte, ev Event) (wire []byte, err error) {
+	//: the engine owns the wire form (ADR 0160 §4); this facade only forwards.
+	return svcsse.AppendEvent(dst, ev)
 }
 
 // KeepAlive sets the interval between keep-alive comments.

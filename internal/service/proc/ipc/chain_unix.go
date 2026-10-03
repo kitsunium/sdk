@@ -68,6 +68,7 @@ import (
 	"os"
 	"path/filepath"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/kernel/fs/pathchain"
 )
@@ -101,7 +102,7 @@ const (
 func checkChain(dir string) error {
 	steps, err := pathchain.Resolve(filepath.Dir(dir))
 	if err != nil {
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the path to it cannot be resolved"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the path to it cannot be resolved"),
 			errs.String("path", dir), errs.String("cause", err.Error()))
 	}
 	self := os.Geteuid()
@@ -119,11 +120,11 @@ func checkChain(dir string) error {
 func checkHolder(dir string) error {
 	holder, err := os.Stat(filepath.Dir(dir))
 	if err != nil {
-		return errs.Wrap(DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory holding it cannot be read"),
+		return errs.Wrap(coreipc.DirectoryUnsafe, errs.WrapParams{}, errs.String("rule", "the directory holding it cannot be read"),
 			errs.String("path", dir), errs.String("cause", err.Error()))
 	}
 	if mode := holder.Mode(); mode&worldWritable != 0 && mode&os.ModeSticky == 0 {
-		return errs.Wrap(PathUnsafe, errs.WrapParams{}, errs.String("path", dir), errs.String("dir", dir),
+		return errs.Wrap(coreipc.PathUnsafe, errs.WrapParams{}, errs.String("path", dir), errs.String("dir", dir),
 			errs.String("kind", kindReplaceable), errs.String("container", mode.String()))
 	}
 	return nil
@@ -172,5 +173,5 @@ func pathUnsafe(dir string, step *pathchain.StepValue, kind string) error {
 	if uid, known := ownerOf(step.Info); known {
 		fields = append(fields, errs.Int("uid", uid))
 	}
-	return errs.Wrap(PathUnsafe, errs.WrapParams{}, fields...)
+	return errs.Wrap(coreipc.PathUnsafe, errs.WrapParams{}, fields...)
 }

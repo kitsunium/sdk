@@ -5,6 +5,7 @@ import (
 	"strings"
 	"testing"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
@@ -54,18 +55,18 @@ func TestParseSetRejects(t *testing.T) {
 		doc      string
 		wantCode errs.Code
 	}{
-		{"keys member absent", `{"issuer":"x"}`, jwk.CodeJWKMissingMember},
-		{"keys member null", `{"keys":null}`, jwk.CodeJWKMissingMember},
+		{"keys member absent", `{"issuer":"x"}`, corejwk.CodeJWKMissingMember},
+		{"keys member null", `{"keys":null}`, corejwk.CodeJWKMissingMember},
 		//: a null ENVELOPE is not an object at all, and neither is a null
 		//: member; both read as MISSING_MEMBER before.
-		{"the envelope is null", `null`, jwk.CodeJWKMalformed},
-		{"a member is null", `{"keys":[null]}`, jwk.CodeJWKMalformed},
-		{"keys member is not an array", `{"keys":{}}`, jwk.CodeJWKMalformed},
-		{"a member is not an object", `{"keys":["EC"]}`, jwk.CodeJWKMalformed},
+		{"the envelope is null", `null`, corejwk.CodeJWKMalformed},
+		{"a member is null", `{"keys":[null]}`, corejwk.CodeJWKMalformed},
+		{"keys member is not an array", `{"keys":{}}`, corejwk.CodeJWKMalformed},
+		{"a member is not an object", `{"keys":["EC"]}`, corejwk.CodeJWKMalformed},
 		//: a bad member keeps ITS OWN code through the set wrapper — origin
 		//: wins, so a caller still learns the curve was the problem.
-		{"a member fails its own validation", setDoc(`{"kty":"EC","crv":"P-192","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`), jwk.CodeJWKUnsupportedCurve},
-		{"a member is off-curve", setDoc(`{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`), jwk.CodeJWKKeyMismatch},
+		{"a member fails its own validation", setDoc(`{"kty":"EC","crv":"P-192","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`), corejwk.CodeJWKUnsupportedCurve},
+		{"a member is off-curve", setDoc(`{"kty":"EC","crv":"P-256","x":"` + ecXCoord + `","y":"` + ecXCoord + `"}`), corejwk.CodeJWKKeyMismatch},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -111,9 +112,9 @@ func TestByKidIsUnambiguousOrRefuses(t *testing.T) {
 	}{
 		{"a unique kid resolves", "current", "current", 0},
 		{"the other unique kid resolves", "previous", "previous", 0},
-		{"an unknown kid is KeyNotFound", "absent", "", jwk.CodeJWKKeyNotFound},
-		{"an empty kid resolves nothing", "", "", jwk.CodeJWKKeyNotFound},
-		{"a duplicated kid is refused, not guessed", "shared", "", jwk.CodeJWKAmbiguousKid},
+		{"an unknown kid is KeyNotFound", "absent", "", corejwk.CodeJWKKeyNotFound},
+		{"an empty kid resolves nothing", "", "", corejwk.CodeJWKKeyNotFound},
+		{"a duplicated kid is refused, not guessed", "shared", "", corejwk.CodeJWKAmbiguousKid},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -204,9 +205,9 @@ func TestSetSerialisationInheritsTheKeyPolicy(t *testing.T) {
 		{"a public set publishes", publicSet.MarshalPublic, 0, `"d":`},
 		{"a private set publishes its public half only", privateSet.MarshalPublic, 0, `"d":`},
 		{"json.Marshal of a private set is public too", func() ([]byte, error) { return json.Marshal(privateSet) }, 0, `"d":`},
-		{"a symmetric member blocks the public path", mixedSet.MarshalPublic, jwk.CodeJWKNoPublicForm, ""},
-		{"json.Marshal refuses it as well", func() ([]byte, error) { return json.Marshal(mixedSet) }, jwk.CodeJWKNoPublicForm, ""},
-		{"a public member blocks the private path", publicSet.MarshalPrivate, jwk.CodeJWKNoPrivateMaterial, ""},
+		{"a symmetric member blocks the public path", mixedSet.MarshalPublic, corejwk.CodeJWKNoPublicForm, ""},
+		{"json.Marshal refuses it as well", func() ([]byte, error) { return json.Marshal(mixedSet) }, corejwk.CodeJWKNoPublicForm, ""},
+		{"a public member blocks the private path", publicSet.MarshalPrivate, corejwk.CodeJWKNoPrivateMaterial, ""},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string

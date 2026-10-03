@@ -197,7 +197,7 @@ func (s *Stream) Send(event corenet.SSEEventValue) error {
 		//: the stream is over.
 		return err
 	}
-	frame, err := event.AppendTo(s.frame[:0])
+	frame, err := AppendEvent(s.frame[:0], event)
 	//: an invalid frame leaves the buffer untouched by contract.
 	if err != nil {
 		//: nothing was written; report what the format cannot carry.
@@ -221,7 +221,7 @@ func (s *Stream) Comment(text string) error {
 		//: the stream is over.
 		return err
 	}
-	frame, err := corenet.AppendSSEComment(s.frame[:0], text)
+	frame, err := AppendComment(s.frame[:0], text)
 	//: an invalid comment leaves the buffer untouched by contract.
 	if err != nil {
 		//: nothing was written; report what the format cannot carry.

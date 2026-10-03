@@ -196,6 +196,40 @@ func TestMultiLinePayloadSplitsRatherThanEscapes(t *testing.T) {
 	}
 }
 
+// TestAppendEventFramesWithoutAStream pins the wire form at the public edge,
+// for a caller that frames events onto a transport of its own: the bytes are
+// the ones Send writes, and a frame the format cannot carry leaves the buffer
+// exactly as it was, refused with the code Send would have returned.
+func TestAppendEventFramesWithoutAStream(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		name    string
+		event   sse.Event
+		want    string
+		refused bool
+	}
+	tests := []tc{
+		{name: "a named event", event: sse.Event{ID: "7", Name: "tick", Data: "a\nb"}, want: "PRIOR" + "id: 7\nevent: tick\ndata: a\ndata: b\n\n"},
+		{name: "an id with a line terminator", event: sse.Event{ID: "7\n8", Data: "x"}, want: "PRIOR", refused: true},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		got, err := sse.AppendEvent([]byte("PRIOR"), c.event)
+		if c.refused != errors.Is(err, sse.FieldInvalid) {
+			t.Fatalf("AppendEvent() = %v, refused %t", err, c.refused)
+		}
+		if string(got) != c.want {
+			t.Fatalf("AppendEvent() wrote %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
 // closeOrFail closes a stream in a defer, failing the test if it reports a
 // problem.
 func closeOrFail(t *testing.T, closer io.Closer) {

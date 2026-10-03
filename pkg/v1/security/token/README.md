@@ -8,7 +8,7 @@ import "github.com/kitsunium/sdk/pkg/v1/security/token"
 
 Package token — the dotted\-quad codes a consumer routes on.
 
-These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\* and 0.3.44.\* are owned by internal/core/security/token, where every code of the token domain is declared \(ADR 0160\), and 0.3.42.\* by internal/service/crypto/key/jwk; the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
+These are RE\-EXPORTS, not declarations: the ranges 0.2.13.\* and 0.3.44.\* are owned by internal/core/security/token, where every code of the token domain is declared \(ADR 0160\), and 0.3.42.\* by internal/core/crypto/key/jwk; the errs ownership audit skips a cross\-package selector for exactly this reason \(ADR 0035\). Matching on a code rather than on a reason string is the stronger contract — a code is a number in docs/error\-codes.yaml, a reason is a spelling.
 
 ```
 switch {
@@ -250,37 +250,37 @@ const CodeIssuerMismatch errs.Code = coretoken.CodeIssuerMismatch
 <a name="CodeJWKInvalidEncoding"></a>CodeJWKInvalidEncoding identifies a member that is not unpadded base64url, or not the fixed length its curve mandates \(0.3.42.5\).
 
 ```go
-const CodeJWKInvalidEncoding errs.Code = jwk.CodeJWKInvalidEncoding
+const CodeJWKInvalidEncoding errs.Code = corejwk.CodeJWKInvalidEncoding
 ```
 
 <a name="CodeJWKKeyMismatch"></a>CodeJWKKeyMismatch identifies material that is not a key on the declared curve: an off\-curve point, an out\-of\-range scalar, or a "d" that does not derive the declared public key \(0.3.42.6\).
 
 ```go
-const CodeJWKKeyMismatch errs.Code = jwk.CodeJWKKeyMismatch
+const CodeJWKKeyMismatch errs.Code = corejwk.CodeJWKKeyMismatch
 ```
 
 <a name="CodeJWKMalformed"></a>CodeJWKMalformed identifies a key document that is not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an object, or a set whose "keys" is not an array \(0.3.42.1\).
 
 ```go
-const CodeJWKMalformed errs.Code = jwk.CodeJWKMalformed
+const CodeJWKMalformed errs.Code = corejwk.CodeJWKMalformed
 ```
 
 <a name="CodeJWKMissingMember"></a>CodeJWKMissingMember identifies a key missing a member its declared type requires, or a set missing "keys" \(0.3.42.2\).
 
 ```go
-const CodeJWKMissingMember errs.Code = jwk.CodeJWKMissingMember
+const CodeJWKMissingMember errs.Code = corejwk.CodeJWKMissingMember
 ```
 
 <a name="CodeJWKUnsupportedCurve"></a>CodeJWKUnsupportedCurve identifies an unknown "crv", or one paired with the wrong "kty" \(0.3.42.4\).
 
 ```go
-const CodeJWKUnsupportedCurve errs.Code = jwk.CodeJWKUnsupportedCurve
+const CodeJWKUnsupportedCurve errs.Code = corejwk.CodeJWKUnsupportedCurve
 ```
 
 <a name="CodeJWKUnsupportedKeyType"></a>CodeJWKUnsupportedKeyType identifies a "kty" other than EC, OKP or oct — RSA included, since the SDK verifies nothing with RSA \(0.3.42.3\).
 
 ```go
-const CodeJWKUnsupportedKeyType errs.Code = jwk.CodeJWKUnsupportedKeyType
+const CodeJWKUnsupportedKeyType errs.Code = corejwk.CodeJWKUnsupportedKeyType
 ```
 
 <a name="CodeKeyIDAmbiguous"></a>CodeKeyIDAmbiguous identifies more keys sharing a kid than the verifier will try \(0.3.44.4\).
@@ -433,23 +433,23 @@ var (
     // JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is
     // not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an
     // object, or a set whose "keys" is not an array.
-    JWKMalformed = jwk.Malformed
+    JWKMalformed = corejwk.Malformed
     // JWKMissingMember is returned for a key missing a member its declared type
     // requires ("kty", "crv", "x", "y" or "k"), or a set missing "keys".
-    JWKMissingMember = jwk.MissingMember
+    JWKMissingMember = corejwk.MissingMember
     // JWKUnsupportedKeyType is returned for a "kty" other than EC, OKP or oct.
     // RSA is refused here on purpose: the SDK verifies nothing with RSA.
-    JWKUnsupportedKeyType = jwk.UnsupportedKeyType
+    JWKUnsupportedKeyType = corejwk.UnsupportedKeyType
     // JWKUnsupportedCurve is returned for an unknown "crv", or a known one
     // paired with the wrong "kty" (P-256 under OKP, Ed25519 under EC).
-    JWKUnsupportedCurve = jwk.UnsupportedCurve
+    JWKUnsupportedCurve = corejwk.UnsupportedCurve
     // JWKInvalidEncoding is returned for a member that is not unpadded
     // base64url, or not the fixed length its curve mandates.
-    JWKInvalidEncoding = jwk.InvalidEncoding
+    JWKInvalidEncoding = corejwk.InvalidEncoding
     // JWKKeyMismatch is returned for well-encoded material that is not a key on
     // the declared curve: an off-curve point, an out-of-range scalar, or a "d"
     // that does not derive the declared public key.
-    JWKKeyMismatch = jwk.KeyMismatch
+    JWKKeyMismatch = corejwk.KeyMismatch
 )
 ```
 

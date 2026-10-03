@@ -150,7 +150,7 @@ func verifyHandshake(w http.ResponseWriter, r *http.Request, cfg *config) error 
 	//: of the wrong length was not produced by a WebSocket client, and
 	//: answering it with a 101 hands a socket to something that will never
 	//: speak the protocol.
-	if kerr := corenet.ValidateWSKey(r.Header.Get(corenet.WSKeyHeader)); kerr != nil {
+	if kerr := ValidateKey(r.Header.Get(corenet.WSKeyHeader)); kerr != nil {
 		http.Error(w, "bad websocket handshake", http.StatusBadRequest)
 		//: refuse.
 		return kerr
@@ -458,7 +458,7 @@ func writeAccept(socket stdnet.Conn, key, subprotocol string) error {
 	//: §4.2.2 step 5 — the proof that this server parsed the handshake rather
 	//: than replaying it, which is what stops a cached 101 from passing for a
 	//: live upgrade.
-	response = append(response, corenet.WSAcceptHeader+": "+corenet.WSAcceptKey(key)+crlf...)
+	response = append(response, corenet.WSAcceptHeader+": "+AcceptKey(key)+crlf...)
 	//: the single agreed subprotocol, echoed only when there is one. §4.2.2
 	//: allows exactly one value here, never the client's whole list.
 	if subprotocol != "" {

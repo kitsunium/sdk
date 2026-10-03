@@ -589,15 +589,28 @@ rules:
       # one-method interface would hide that both ends share it.
       - "**/internal/service/net/server/**"
       - "internal/service/net/server/**"
-      # Stream.Send takes a core/net.SSEEventValue, the domain's event-stream
-      # frame. The suggested `interface{ AppendTo([]byte) ([]byte, error) }`
+      # Stream.Send and AppendEvent take a core/net.SSEEventValue, the domain's
+      # event-stream frame. The suggested one-method interface (its Validate)
       # would let any caller append arbitrary bytes to an open stream, which is
       # precisely what the value type exists to prevent: it validates that no
-      # single-line field carries a terminator before a byte reaches the wire.
-      # Narrowing the parameter would move that guarantee from the type system
-      # to a convention.
+      # single-line field carries a terminator before a byte reaches the wire,
+      # and the encoder reads all four of its fields. Narrowing the parameter
+      # would move that guarantee from the type system to a convention.
       - "**/internal/service/net/sse/**"
       - "internal/service/net/sse/**"
+      # The WebSocket codec takes core/net's two protocol enums, WSOpCode (four
+      # bits) and WSCloseCode (sixteen), and WRITES them: AppendClosePayload
+      # puts uint16(code) on the wire and validateOutbound builds the frame
+      # header around op. The suggested `interface{ Sendable() bool }` and
+      # `interface{ Defined() bool }` keep the predicate and lose the number,
+      # so the codec could no longer emit the bytes it exists to emit — and a
+      # closed set of RFC 6455 values would accept any type with a method of
+      # that name. Scoped to the two codec files (ADR 0160 §4 moved them here
+      # from internal/core/net, where the same parameters raised nothing).
+      - "**/internal/service/net/websocket/close.go"
+      - "internal/service/net/websocket/close.go"
+      - "**/internal/service/net/websocket/frame.go"
+      - "internal/service/net/websocket/frame.go"
       # The slog bridge converts a stdlib slog.Value, whose type is fixed by the
       # slog.Handler contract it implements — the same contract-required-type
       # class as the AEAD Key below. The suggested `interface{ Any() any }` is

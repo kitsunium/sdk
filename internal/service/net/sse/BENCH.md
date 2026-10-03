@@ -1,4 +1,4 @@
-<!-- generated from internal/service/net/sse/sse_bench_test.go — run `cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s -count=3 ./net/sse/` to refresh; every published number is the MEDIAN of the runs stated per section -->
+<!-- generated from internal/service/net/sse/{sse,frame}_bench_test.go — run `cd internal/service && GOWORK=off go test -run='^$' -bench=. -benchmem -benchtime=1s -count=3 ./net/sse/` to refresh; every published number is the MEDIAN of the runs stated per section -->
 # Benchmarks — `internal/service/net/sse`
 
 An SSE server is defined by how many streams it holds **open**, not by its event
@@ -132,8 +132,10 @@ a virtualised host has somewhere to look first.
 
 ## What the frame-encoder change was worth in situ
 
-`internal/core/net`'s terminator scan was 91 % of encoding a frame and is now
-two assembly passes (see that package's `BENCH.md`). Isolated, `AppendTo` got
+The terminator scan — in `internal/core/net` when this was measured, this
+package's `appendData` since ADR 0160 moved the encoder here — was 91 % of
+encoding a frame and is now two assembly passes (§The encoder, below).
+Isolated, the encoder (`SSEEventValue.AppendTo` then, `AppendEvent` now) got
 2.56×–4.62×. In situ, through `Send` — which adds a mutex, a terminal check, a
 write and a flush, and on the production path a clock read — it is:
 
@@ -371,3 +373,240 @@ BenchmarkStreamFootprint/without_keepalive    1.000 goroutines/stream  1713 heap
 The `—` rows have no `before` because they measure this package's own
 lifecycle, which this change did not touch; they are new numbers rather than
 improved ones, and they are the ones an operator actually needs.
+
+## The encoder — moved here from `internal/core/net` (ADR 0160 §4)
+
+`AppendEvent` and `AppendComment` (`frame.go`) write an event's wire form; they
+were `SSEEventValue.AppendTo` and `AppendSSEComment` in `internal/core/net`
+until writing a wire format was recognised as a mechanism rather than the
+domain's contract. Their benchmarks moved with them (`frame_bench_test.go`),
+and so did the measurements below. The value and `Validate` stayed in the
+core, with `Validate`'s one benchmark.
+
+### SSE: 91 % of encoding a frame was one standard-library call
+
+An event stream's per-byte work is finding the line terminators in `Data`,
+because the SSE format has no escape: a terminator SPLITS the payload into
+another `data:` line. `cutSSELine` asked `strings.IndexAny(s, "\n\r")` for the
+first one, which is the obvious call and reads like the cheap one.
+
+It is not. `IndexAny` has no `bytealg` path: for `len(s) > 8` it builds a
+32-byte ASCII set **per call** and then walks the string one byte at a time
+through `asciiSet.contains`; for `len(s) <= 8` it decodes a RUNE per byte and
+calls `IndexRune` on each. `strings.IndexByte` is the assembly-backed
+primitive — measured over 64 KiB it is ~30 GB/s per pass against `IndexAny`'s
+2.4 — and the common SSE event, a single-line JSON payload with no terminator
+anywhere in it, pays a full scan of the whole payload at the slow rate purely to
+prove the absence.
+
+The CPU profile of one 4 KiB single-line frame, before, verbatim — taken when
+the encoder lived in `internal/core/net`, which is the package path the frames
+below still name:
+
+```
+Showing nodes accounting for 3.57s, 100% of 3.57s total
+      flat  flat%   sum%        cum   cum%
+     2.77s 77.59% 77.59%      2.77s 77.59%  strings.(*asciiSet).contains (inline)
+     0.51s 14.29% 91.88%      3.28s 91.88%  strings.IndexAny
+     0.26s  7.28% 99.16%      0.26s  7.28%  runtime.memmove
+     0.02s  0.56% 99.72%      0.28s  7.84%  github.com/kitsunium/sdk/internal/core/net.appendSSEField (inline)
+     0.01s  0.28%   100%      3.57s   100%  github.com/kitsunium/sdk/internal/core/net.AppendEvent
+         0     0%   100%      3.53s 98.88%  github.com/kitsunium/sdk/internal/core/net.appendSSEData
+         0     0%   100%      3.25s 91.04%  github.com/kitsunium/sdk/internal/core/net.cutSSELine
+```
+
+`runtime.memmove` — copying the payload, which is the only work the function
+actually has to do — is **7.28 %**. The scan is 91 %.
+
+And after, on the same benchmark:
+
+```
+Showing nodes accounting for 3.61s, 99.72% of 3.62s total
+      flat  flat%   sum%        cum   cum%
+     2.36s 65.19% 65.19%      2.36s 65.19%  indexbytebody
+     1.02s 28.18% 93.37%      1.02s 28.18%  runtime.memmove
+     0.08s  2.21% 95.58%      3.54s 97.79%  github.com/kitsunium/sdk/internal/core/net.appendSSEData
+     0.04s  1.10% 96.69%      0.04s  1.10%  internal/bytealg.IndexByteString
+     0.03s  0.83% 97.51%      1.05s 29.01%  github.com/kitsunium/sdk/internal/core/net.appendSSEField (inline)
+     0.02s  0.55% 98.07%      0.02s  0.55%  github.com/kitsunium/sdk/internal/core/net.validateSSELine
+```
+
+The scan is still the largest entry, and now it should be: two assembly passes
+over the payload is the floor for proving two bytes are absent from it. The
+copy went from 7 % to 28 % of a function that got 4.5× faster, which is the
+same statement.
+
+### Encoding a frame: 1.6× to 4.6×, and where each number comes from
+
+Medians of three, `-benchtime=1s`. Zero allocations on every row, before and
+after — this was never an allocation problem, which is exactly why nothing in
+the tree had noticed it.
+
+| `AppendEvent` | before | after | | after |
+|---|---:|---:|---:|---:|
+| single-line, 64 B | 104.5 ns | **40.80 ns** | **2.56×** | 1 569 MB/s |
+| single-line, 256 B | 193.1 ns | **57.85 ns** | **3.34×** | 4 425 MB/s |
+| single-line, 1 KiB | 538.8 ns | **147.1 ns** | **3.66×** | 6 961 MB/s |
+| single-line, 4 KiB | 1 945 ns | **430.8 ns** | **4.51×** | 9 507 MB/s |
+| single-line, 64 KiB | 30 397 ns | **6 582 ns** | **4.62×** | 9 956 MB/s |
+| LF every 64 B, 4 KiB | 5 195 ns | **1 624 ns** | 3.20× | 2 522 MB/s |
+| LF every 64 B, 64 KiB | 81 836 ns | **25 122 ns** | 3.26× | 2 609 MB/s |
+| CRLF every 64 B, 4 KiB | 5 238 ns | **2 153 ns** | 2.43× | 1 903 MB/s |
+| CRLF every 64 B, 64 KiB | 81 465 ns | **33 653 ns** | 2.42× | 1 947 MB/s |
+| id + event + 256 B payload | 276.6 ns | **98.32 ns** | **2.81×** | — |
+| `AppendComment` (keep-alive) | 31.85 ns | **19.99 ns** | 1.59× | — |
+
+The single-line rows are the ones that matter: a payload with no terminator is
+the overwhelmingly common event, and it is also the worst case for the scan,
+which cannot stop early. A multi-line payload gains less because the CRLF rows
+refresh both cursors on every line — see the next section.
+
+The arithmetic cross-checks against the isolated scan rows below. At 64 KiB the
+scan alone is 4 329 ns and the profile puts `memmove` at 28 % of 6 582, i.e.
+≈ 1 840 ns; 4 329 + 1 840 = 6 169 against 6 582 measured, a 6 % gap that is the
+field framing. At 4 KiB: 296.3 + ≈ 120 = 416 against 430.8, a 3 % gap.
+
+`Validate` — which `AppendEvent` runs on every frame before it touches the
+buffer — moved too, by 1.72×–1.73×, for a second, smaller reason; it is the
+core's method, and `internal/core/net/BENCH.md` keeps that measurement.
+
+### Two obvious scans are quadratic, in mirror-image halves
+
+`IndexAny` finds the first of two bytes in one pass. `IndexByte` finds one byte,
+so replacing it means two calls — and where those two calls go decides whether
+the walk stays linear.
+
+`cutSSELine` used to be called once per LINE, over the remaining payload. Two
+unbounded `IndexByte` calls per line means the scan for a byte that is **not in
+the payload at all** re-reads the whole tail on every line. Bounding the CR scan
+by where the LF was found fixes the LF-terminated payload and leaves the exact
+mirror broken, because now it is the LF scan that is unbounded when there is no
+LF. Both were measured before either was believed:
+
+| 64 KiB payload, whole-payload split | no terminator | LF every 64 B | CRLF every 64 B | CR every 64 B |
+|---|---:|---:|---:|---:|
+| `index_any` (the form replaced) | 27 737 ns | 67 534 ns | 67 210 ns | 69 034 ns |
+| `two_index_byte` | 4 346 ns | **1 115 791 ns** | 20 920 ns | **1 109 329 ns** |
+| `bounded_index_byte` | 4 347 ns | 18 601 ns | 28 181 ns | **1 114 228 ns** |
+| `cursor` (shipped) | **4 329 ns** | **19 730 ns** | **27 311 ns** | **19 715 ns** |
+
+The three bold blow-ups are 16× SLOWER than the code being replaced, on inputs
+a caller supplies. `Data` is application data, so "a payload of LF-terminated
+lines" is a log tail and "a payload of CR-terminated lines" is something a
+stranger can send; neither is exotic and both are quadratic.
+
+The shipped form keeps a cursor per terminator byte over the whole payload and
+only ever moves each one FORWARD, re-scanning a cursor only when the cut just
+made consumed or overtook it. Each byte is therefore examined at most once by
+each of the two searches — two linear passes, whatever the shape:
+
+| whole-payload split, `cursor` vs `index_any` | 64 B | 256 B | 1 KiB | 4 KiB | 64 KiB |
+|---|---:|---:|---:|---:|---:|
+| no terminator | 3.76× | 4.92× | 5.98× | 6.00× | **6.41×** |
+| LF every 64 B | 2.68× | 3.22× | 3.20× | 3.35× | 3.42× |
+| CRLF every 64 B | 2.14× | 2.31× | 2.33× | 2.46× | 2.46× |
+| CR every 64 B | 2.64× | 3.18× | 3.35× | 3.38× | 3.50× |
+
+It costs about **3 % more than the two naive forms on the common case** (18.67
+against 18.08 ns at 64 B; at 64 KiB it is 4 329 against 4 346, i.e. inside the
+noise), and that is the whole price of not having a quadratic corpus. CRLF is
+the slowest shape because a CRLF cut consumes BOTH cursors and therefore
+refreshes both — two `IndexByte` calls per line instead of one. It is still
+linear; the row is there so nobody reads 2.46× as a defect.
+
+Equivalence is not assumed. `TestSSELineSplitStrategiesAgreeExhaustively`
+judges all four strategies against the `index_any` oracle over every string of
+length 0 to 9 in `{'a', '\n', '\r'}` — 29 524 payloads, which is every
+arrangement of LF, CR, CRLF, LFCR, a leading terminator, a trailing one and a
+run of them — plus hand-written multi-byte cases, and the bound is 9 rather
+than 8 because `IndexAny` itself changes strategy at `len(s) > 8`.
+`TestAppendEventMatchesTheIndexAnyOracle` then re-encodes the same corpus from the
+ORACLE's lines and requires byte-identical frames, because agreeing on a split
+proves nothing if the encoder does not use that split.
+
+### What was refused
+
+- **A single pass that finds either byte.** There is no `bytealg` primitive for
+  "first of two bytes", and a hand-written SWAR pass in pure Go would be
+  competing with assembly that already runs at 15 GB/s. Two passes at that rate
+  beat one pass at 2.2.
+- **Skipping the scan when `Data` is known to be single-line.** Proving the
+  absence IS the scan; there is nothing cheaper to check first.
+- **Escaping a terminator instead of splitting on it.** The format has no
+  escape (ADR 0029), and this is a benchmark file, not a licence to change the
+  wire.
+
+### Reproducibility envelope of the encoder rows
+
+> **Numbers vary across machines**; the allocation column is exact, and what
+> these rows assert is the **ratios**. Every published number is the median of
+> three runs at `-benchtime=1s`. The encoder rows sit inside 6 % apart from
+> `AppendComment` before (4.7 %) and `AppendEvent single_line/64 B` after
+> (5.6 %), both of which are tens of nanoseconds where the timer's own
+> resolution is a visible share.
+>
+> **One row-set was thrown away**, and the cause is worth recording because
+> nothing about the numbers looked wrong: the "before" arm reported IDENTICAL
+> medians to the "after" arm on all nineteen rows, 0.98×–1.02×. The backup the
+> revert restored from had been taken AFTER the patch, so both arms ran the new
+> code. It was caught by arithmetic and not by inspection — a 4.5× change had
+> already been measured in a single-run pass, and a comparison that says 1.00×
+> against a known 4.5× is reporting on the harness. The re-run restored the
+> original from `git show HEAD:` instead of from a local copy.
+
+| Dimension | Value |
+|---|---|
+| CPU cores          | 8 |
+| RAM                | 15 GiB |
+| OS / kernel        | Linux 6.12.101+deb13-amd64 |
+| Architecture       | amd64 |
+| Go toolchain       | go1.27.1 linux/amd64 |
+| Git branch         | jaimerias-que-tu-te-connect |
+| Git commit         | f2d263d |
+| Generated (UTC)    | 2026-09-10 |
+| Bench wall-clock   | `-test.benchtime=1s`, `-test.count=3`, medians |
+
+
+### Results of the encoder benchmarks
+
+Medians of three at `-benchtime=1s`. The `before` block is `git show
+HEAD:internal/core/net/sse.go` restored into the tree and re-measured on the
+same binary; the `after` block is what ships. Recorded on 2026-09-10 at
+f2d263d, when the encoder lived in `internal/core/net` and the benchmarks were
+`BenchmarkSSEAppendTo`, `BenchmarkSSEAppendToFullFrame` and
+`BenchmarkAppendSSEComment`; they are `BenchmarkAppendEvent`,
+`BenchmarkAppendEventFullFrame` and `BenchmarkAppendComment` in
+`frame_bench_test.go` now, over the same code (ADR 0160 §4). The two
+`BenchmarkSSEValidate` rows stayed with `Validate`, in
+`internal/core/net/BENCH.md`.
+
+```
+goos: linux
+goarch: amd64
+pkg: github.com/kitsunium/sdk/internal/core/net
+cpu: AMD EPYC 7351P 16-Core Processor
+                                            BEFORE          AFTER
+BenchmarkSSEAppendTo/single_line/0000064      104.5 ns/op    40.80 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/single_line/0000256      193.1 ns/op    57.85 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/single_line/0001024      538.8 ns/op    147.1 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/single_line/0004096       1945 ns/op    430.8 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/single_line/0065536      30397 ns/op     6582 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_lf/0000064    137.6 ns/op    57.99 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_lf/0000256    378.2 ns/op    151.4 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_lf/0001024     1357 ns/op    441.7 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_lf/0004096     5195 ns/op     1624 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_lf/0065536    81836 ns/op    25122 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_crlf/0000064  136.9 ns/op    66.08 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_crlf/0000256  360.7 ns/op    190.6 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_crlf/0001024   1336 ns/op    589.7 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_crlf/0004096   5238 ns/op     2153 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendTo/multi_line_crlf/0065536  81465 ns/op    33653 ns/op   0 B/op  0 allocs/op
+BenchmarkSSEAppendToFullFrame                 276.6 ns/op    98.32 ns/op   0 B/op  0 allocs/op
+BenchmarkAppendSSEComment                     31.85 ns/op    19.99 ns/op   0 B/op  0 allocs/op
+```
+
+The whole-payload line-split sweep — four strategies × four corpus shapes ×
+five sizes, 80 rows, all zero-allocation — is summarised in §Two obvious scans
+are quadratic. The 64 KiB column is reproduced there in full; the smaller sizes
+scale linearly for every strategy except the three diagnosed blow-ups, which
+scale with the SQUARE of the payload and are the reason the sweep exists.

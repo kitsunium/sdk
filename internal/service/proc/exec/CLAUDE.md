@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T16:42:12Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/proc/exec
 
 The keystone spawn primitive of the process-supervision domain (ADR 0016).
@@ -36,6 +36,7 @@ process that already exists.
 | `handshake_unix.go` | `unix` | the parent side of the trampoline's status pipe and `handshakeError` (status byte → sentinel) |
 | `creds_unix.go` | `unix` | `Spec.User/Group/Groups` → `syscall.Credential` via `os/user` |
 | `attrs_unix.go` | `unix` | best-effort `Nice` (setpriority) + `OOMScoreAdj` (procfs); ESRCH detection |
+| `zombie_darwin.go` / `zombie_other.go` | `darwin` / `unix && !darwin` | `leaderIsZombie`: on darwin, `getpgid(2)` answers ESRCH for an exited, unreaped child (see §Stop); `false` on every other kernel, which never needs it |
 | `limits_unix.go` | `unix` | `checkLimits`: `UnknownResource` for unmapped, `RlimitFailed` for unhonourable |
 | `cgroup_placement_linux.go` | `linux` | `validateCgroupPath` (pre-spawn: missing/not-a-cgroup ⇒ `CgroupUnavailable`) + `applyCgroupPlacement` (trampoline writes pid → `cgroup.procs`) |
 | `cgroup_placement_other.go` | `unix && !linux` | `validateCgroupPath` rejects a non-empty path with `UnsupportedPlatform`; no cgroup v2 off Linux |
@@ -81,6 +82,23 @@ returns `nil` once the group is gone, `ctx.Err()` if cancelled first, or
 A group that vanished (`ESRCH`) at any phase is treated as success. The reap runs
 under `sync.Once`, so concurrent `Stop`/`Wait` callers share one wait4 and one
 `close(done)`.
+
+**darwin says "gone" differently.** A group whose leader has exited but not
+been reaped holds nothing alive, and XNU's `kill(-pgid)` skips zombies, finds
+nobody to signal and answers **EPERM**, where Linux and the BSDs count the
+zombie and report success. That happens on the graceful signal when the leader
+died before `Stop` was called, and on the escalation when it died inside the
+grace window before the background reap collected it — and `Stop` used to
+report either as `SIGNAL_FAILED`. `zombieGroupRefused` reads that EPERM as
+gone only when the leader was still unreaped when the signal left and is dead
+now: collected since, or a zombie by `leaderIsZombie` (darwin's `getpgid(2)`
+answers ESRCH for one, measured on darwin 25.6, while a live child answers with
+its group; the pid cannot be reused while unreaped). An EPERM from a LIVE
+member this process may not signal — a leader that changed its credentials —
+or one sent after the leader was collected stays `SIGNAL_FAILED`.
+`Test_handle_StopOnALeaderThatDiedUnreaped` and
+`Test_handle_zombieGroupRefused` pin both sides, with an oracle independent of
+the probe (darwin: the group's own EPERM; Linux: `/proc`'s state letter).
 
 The grace window is a timer on the handle's clock — `clock.System` from
 `newHandle`, on Unix and on Windows alike — so `Test_handle_graceOnInjectedClock`
@@ -218,7 +236,8 @@ back from inside the child, trampoline failures arriving typed (`RlimitFailed`
 `Spec.Env` leaking nothing, and the three stdio modes. The handle is pinned
 white-box in `handle_unix_internal_test.go`: `Stop` escalates
 `SIGTERM`→`SIGKILL` for a child that ignores `SIGTERM`, `SignalGroup` reaches a
-grandchild, `Wait` is memoised, and a signalled exit reports code −1;
+grandchild, `Wait` is memoised, a signalled exit reports code −1, and a leader
+that died unreaped stops cleanly on darwin too (§Stop);
 `creds_unix_internal_test.go` pins `UnknownUser` / `UnknownGroup`.
 `exec_windows_test.go` covers the Windows backend (skipped where `cmd.exe` is
 not found) and `exec_other_test.go` the `UnsupportedPlatform` stub.

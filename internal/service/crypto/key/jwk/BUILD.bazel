@@ -6,9 +6,7 @@ go_library(
     name = "jwk",
     srcs = [
         "bridge.go",
-        "codes.go",
         "curve.go",
-        "errors.go",
         "jwk.go",
         "marshal.go",
         "parse.go",
@@ -22,6 +20,7 @@ go_library(
     ],
     deps = [
         "//internal/core/crypto",
+        "//internal/core/crypto/key/jwk",
         "//internal/kernel/errs",
     ],
 )
@@ -48,15 +47,9 @@ go_test(
     embed = [":jwk"],
     deps = [
         "//internal/core/crypto",
+        "//internal/core/crypto/key/jwk",
         "//internal/kernel/errs",
         "//internal/service/crypto/sign/ecdsasig",
         "//internal/service/crypto/sign/ed25519sig",
     ],
-)
-
-# audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

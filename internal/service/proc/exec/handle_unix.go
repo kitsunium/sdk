@@ -301,16 +301,46 @@ func (h *handle) Stop(ctx context.Context, grace time.Duration, sig coreproc.Sig
 }
 
 // signalGroupAllowGone delivers sig to the group but treats an already-exited
-// group (ESRCH) as success, since a vanished target needs no further signal.
+// group as success, since a vanished target needs no further signal: ESRCH on
+// every kernel, and darwin's EPERM for a group whose leader died before it was
+// reaped (zombieGroupRefused).
 func (h *handle) signalGroupAllowGone(sig coreproc.Signal) error {
+	//: whether the leader was collected BEFORE the signal decides what an
+	//: EPERM can mean, so it is read first.
+	reapedBefore := h.leaderReaped()
 	err := h.SignalGroup(sig)
-	//: a group already gone (ESRCH) is success — nothing left to signal.
-	if err != nil && processGone(err) {
-		//: swallow the benign "no such process" race.
+	//: a group already gone is success — nothing left to signal: ESRCH, or a
+	//: group that holds nothing alive however the kernel says it.
+	if err != nil && (processGone(err) || h.zombieGroupRefused(err, reapedBefore)) {
+		//: swallow the benign race; Stop's wait collects a dead leader.
 		return nil
 	}
 	//: any other outcome (success or a real fault) passes through unchanged.
 	return err
+}
+
+// zombieGroupRefused reports whether err is darwin's answer for a process
+// group none of whose members is alive. kill(-pgid) there skips zombies and,
+// finding nobody left to signal, answers EPERM — POSIX's "no process could be
+// signalled" — where Linux and the BSDs count the zombie and report success.
+// So a leader that died inside the grace window, before the reaper collected
+// it, made Stop's escalation report SIGNAL_FAILED for a group that was already
+// gone.
+//
+// It reads EPERM as gone only when the leader was still unreaped when the
+// signal was sent and is dead now: collected since (leaderReaped), or a zombie
+// the kernel no longer lists (leaderIsZombie, darwin's own probe). An EPERM
+// from a group whose LIVE members this process may not signal — a leader that
+// changed its credentials — or one sent after the leader was collected, stays
+// the SIGNAL_FAILED it is.
+func (h *handle) zombieGroupRefused(err error, reapedBefore bool) bool {
+	//: only a private group's refusal, and only while its leader was unreaped.
+	if !h.setpgid || reapedBefore || !errs.HasCode(err, coreproc.CodeSignalFailed) || !errors.Is(err, syscall.EPERM) {
+		//: not the zombie-only group this rule is about.
+		return false
+	}
+	//: dead either way: collected since the signal, or a zombie awaiting it.
+	return h.leaderReaped() || leaderIsZombie(h.pid)
 }
 
 // awaitExit blocks until the process is reaped, ctx is cancelled, or (when grace

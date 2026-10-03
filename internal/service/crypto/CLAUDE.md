@@ -52,7 +52,7 @@ directory carries a `CLAUDE.md` naming its members and this rule.
 | `hash/stdhash/` | `Hasher` — unkeyed fingerprints | `sha256`, `sha512`, `sha3-256`, `crc32c`, `fnv1a-64` | `pkg/v1/crypto/hash` | core `0.2.4.*` |
 | `kdf/hkdfsha256/` | `Deriver` — key-separation KDF | `hkdf-sha256` | `pkg/v1/crypto/kdf` | core `0.2.4.*` |
 | `kdf/keytree/` | composition — path-addressed hierarchical derivation (HKDF) | *not registered* | `pkg/v1/crypto/kdf` | core `0.2.4.*` |
-| `key/jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/security/token` (`JWK`, `JWKSet`) | **`0.3.42.*`** |
+| `key/jwk/` | **format** — RFC 7517 JWK / JWK Set for EC, OKP and oct keys | *not registered* | `pkg/v1/security/token` (`JWK`, `JWKSet`) | **`0.3.42.*`**, declared in `core/crypto/key/jwk` |
 | `key/keyenvelope/` | composition — password-wrapped DEK at rest (AEAD + PBKDF2) | *not registered* | `pkg/v1/crypto` | core `0.2.4.19` |
 | `mac/hmacsha2/` | `MAC` — keyed detached authentication | `hmac-sha256` | `pkg/v1/crypto/mac` | core `0.2.4.*` |
 | `password/commonpw/` | **data** — the ten thousand most common passwords (SecLists' xato-net top 10 000, MIT, embedded byte for byte at a pinned commit), `IsCommon` case-insensitive — ADR 0143 | *not registered* | `pkg/v1/crypto/password` (`IsCommon`) | none |
@@ -60,12 +60,15 @@ directory carries a `CLAUDE.md` naming its members and this rule.
 | `sign/ecdsasig/` | `Signer` — ECDSA P-256, SHA-256, ASN.1/DER | `ecdsa-p256` | `pkg/v1/crypto/sign` | core `0.2.4.*` |
 | `sign/ed25519sig/` | `Signer` — Ed25519, the modern default | `ed25519` | `pkg/v1/crypto/sign` | core `0.2.4.*` |
 
-`jwk` is the only package in this subtree that owns a `PP` slot: every scheme
-routes through a core port and therefore emits the shared `core/crypto`
+`jwk` is the only package in this subtree with a `PP` slot of its own: every
+scheme routes through a core port and therefore emits the shared `core/crypto`
 sentinels, whereas a key format has rejections of its own (malformed document,
 unsupported `kty`, off-curve point, ambiguous `kid`) that no port models. Its
-range `0x00_03_2A_00` kept its value when the package moved to `key/jwk`; only
-the owner path in `codeRangeOwners` followed it (ADR 0160).
+range `0x00_03_2A_00` is DECLARED in `internal/core/crypto/key/jwk`, the core
+path that mirrors this package's, and `key/jwk` only returns those sentinels:
+no `errs.Define` stays in this subtree (ADR 0160). The value never changed —
+not when the package moved to `key/jwk`, not when its declaration moved to the
+core; only the owner path in `codeRangeOwners` followed it.
 
 ## Conventions
 
@@ -76,7 +79,8 @@ the owner path in `codeRangeOwners` followed it (ADR 0160).
 - **Schemes mint no error codes.** They return the shared `core/crypto`
   sentinels (`SigningFailed`, `DecryptionFailed`, …) or wrap a `crypto/rand`
   fault as `KeyGenerationFailed`, `EntropyFailed` or `PasswordHashFailed`.
-  `jwk` is the documented exception.
+  `jwk` has a range of its own, and it too is declared in the core, at
+  `core/crypto/key/jwk`.
 - **Secrets stay redacting.** `core/crypto.Key` answers `<redacted>` under
   `%v` / `%s` / `%#v`, and anything here that holds or re-wraps key material
   keeps that property — including `jwk.KeyValue`, whose whole export surface is
@@ -88,7 +92,8 @@ the owner path in `codeRangeOwners` followed it (ADR 0160).
 
 - Add a non-stdlib crypto dependency here. It belongs in
   `third-party/x-crypto/*`, opt-in (ADR 0013).
-- Mint an error code in a scheme package — they live in `core/crypto`.
+- Mint an error code anywhere in this subtree — a scheme's live in
+  `core/crypto`, `jwk`'s in `core/crypto/key/jwk` (ADR 0160).
 - Add remote key retrieval (JWKS over HTTP, KMS clients) to `jwk` or anywhere
   else in this subtree. Fetching is a connector concern, not a crypto one — see
   `key/jwk/CLAUDE.md` §Do NOT.

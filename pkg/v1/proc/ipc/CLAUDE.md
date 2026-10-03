@@ -4,15 +4,33 @@
 
 Public facade over `internal/service/proc/ipc` (ADR 0148): a private socket between
 processes of one machine, with the kernel's word on the peer where it gives
-one.
+one. Its contract — the two ports, the values and the codes — is
+`internal/core/proc/ipc` (ADR 0160), and the aliases point there (ADR 0074).
 
 ## Surface
 
 | Symbol | Kind | Notes |
 |---|---|---|
-| `Config`, `Peer`, `Conn`, `Listener` | type alias | the engine's values (ADR 0074) |
-| `Listen`, `Dial`, `RuntimeDir` | func | delegate verbatim |
-| `Code*` | const | the nine codes, for `errs.HasCode` |
+| `Listener`, `Dialer` | type alias, port | `internal/core/proc/ipc`'s two ports — frozen, so a double written against them keeps compiling (ADR 0039) |
+| `Peer`, `Conn` | type alias, value | `internal/core/proc/ipc`'s `PeerValue` and `Conn` |
+| `Config` | type alias | the engine's configuration, `internal/service/proc/ipc.Config` (ADR 0074 — one engine's configuration is the engine's) |
+| `Listen` | func | returns the socket engine behind the `Listener` port, or a nil port with the refusal |
+| `NewDialer` | func | returns the engine behind the `Dialer` port; the configuration is checked and copied once |
+| `Dial`, `RuntimeDir` | func | delegate verbatim |
+| `Code*` | const | the nine codes, for `errs.HasCode`, aliasing the core |
+
+## The ports, and what changed for a caller
+
+`Listener` was the engine's own handle until ADR 0160 gave `ipc` a core; it is
+now the core port, exactly as `systemd/notify`'s `Listener` is, and `Listen`
+returns the engine behind it. Every method the handle had is on the port —
+`Accept`, `Addr`, `Close`, `Path`, `Refused` — so a caller that only called
+them compiles unchanged; one that spelled the type `*ipc.Listener` writes
+`ipc.Listener` (a v0 shape change, ADR 0040). The framework's two holders
+(`framework/internal/kit`, `framework/telemetry`) moved in the same change.
+
+Both constructors return a NIL port with the refusal, never a nil engine
+wrapped in a non-nil interface — the trap `if ln != nil` would fall into.
 
 ## Why-this-shape
 

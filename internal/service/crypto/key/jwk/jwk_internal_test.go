@@ -4,6 +4,7 @@ import (
 	"crypto/elliptic"
 	"testing"
 
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -141,7 +142,7 @@ func TestCurveChecksRejectUnmappedCurves(t *testing.T) {
 		t.Helper()
 		//: a curve with no ecdh counterpart cannot be validated, so the check
 		//: refuses instead of reporting a key it never examined as valid.
-		if err := c.invoke(); !errs.HasCode(err, CodeJWKUnsupportedCurve) {
+		if err := c.invoke(); !errs.HasCode(err, corejwk.CodeJWKUnsupportedCurve) {
 			t.Errorf("err=%v want UnsupportedCurve", err)
 		}
 	}
@@ -161,9 +162,9 @@ func TestWireRejectsIncompleteKeys(t *testing.T) {
 		public   bool
 		wantCode errs.Code
 	}{
-		{"an EC key with no coordinates cannot be published", KeyValue{kty: TypeEC, crv: CurveP256}, true, CodeJWKMissingMember},
-		{"an OKP key with no x cannot be published", KeyValue{kty: TypeOKP, crv: CurveEd25519}, true, CodeJWKMissingMember},
-		{"a private EC key with no coordinates cannot be exported", KeyValue{kty: TypeEC, crv: CurveP256, priv: []byte{1}}, false, CodeJWKMissingMember},
+		{"an EC key with no coordinates cannot be published", KeyValue{kty: TypeEC, crv: CurveP256}, true, corejwk.CodeJWKMissingMember},
+		{"an OKP key with no x cannot be published", KeyValue{kty: TypeOKP, crv: CurveEd25519}, true, corejwk.CodeJWKMissingMember},
+		{"a private EC key with no coordinates cannot be exported", KeyValue{kty: TypeEC, crv: CurveP256, priv: []byte{1}}, false, corejwk.CodeJWKMissingMember},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -200,11 +201,11 @@ func TestThumbprintInputRejects(t *testing.T) {
 		key      KeyValue
 		wantCode errs.Code
 	}{
-		{"the zero key has no required members", KeyValue{}, CodeJWKMissingMember},
-		{"an unmodelled family has no canonical form", KeyValue{kty: Type("RSA")}, CodeJWKUnsupportedKeyType},
-		{"an EC key without y", KeyValue{kty: TypeEC, crv: CurveP256, x: []byte{1}}, CodeJWKMissingMember},
-		{"an OKP key without x", KeyValue{kty: TypeOKP, crv: CurveEd25519}, CodeJWKMissingMember},
-		{"an oct key without k", KeyValue{kty: TypeOct}, CodeJWKNoPrivateMaterial},
+		{"the zero key has no required members", KeyValue{}, corejwk.CodeJWKMissingMember},
+		{"an unmodelled family has no canonical form", KeyValue{kty: Type("RSA")}, corejwk.CodeJWKUnsupportedKeyType},
+		{"an EC key without y", KeyValue{kty: TypeEC, crv: CurveP256, x: []byte{1}}, corejwk.CodeJWKMissingMember},
+		{"an OKP key without x", KeyValue{kty: TypeOKP, crv: CurveEd25519}, corejwk.CodeJWKMissingMember},
+		{"an oct key without k", KeyValue{kty: TypeOct}, corejwk.CodeJWKNoPrivateMaterial},
 	}
 	runCase := func(t *testing.T, c struct {
 		name     string
@@ -364,7 +365,7 @@ func TestB64DecodeFixedReportsBothSizes(t *testing.T) {
 			return
 		}
 		//: the refused rows carry the typed code …
-		if !errs.HasCode(err, CodeJWKInvalidEncoding) {
+		if !errs.HasCode(err, corejwk.CodeJWKInvalidEncoding) {
 			t.Fatalf("err=%v want InvalidEncoding", err)
 		}
 		//: … plus both sizes as fields, so a caller sees the mismatch without

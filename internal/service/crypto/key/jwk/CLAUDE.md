@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-03T12:00:00Z -->
 # internal/service/crypto/key/jwk/
 
 ## Purpose
@@ -19,7 +19,9 @@ Those are transport and policy concerns with their own failure modes (retries,
 TTLs, SSRF against a caller-supplied URL) and they belong to whatever later
 package owns them — see **Do NOT**.
 
-Code range: `0.3.42.*`.
+Code range: `0.3.42.*`, declared in `internal/core/crypto/key/jwk` — the core
+path that mirrors this one (ADR 0160) — and imported here as `corejwk`. This
+package returns those sentinels and declares none.
 
 Public facade: `pkg/v1/security/token`, which aliases `KeyValue` as `JWK` and `Set` as
 `JWKSet`, wraps `Parse` / `ParseSet` / `NewSet` as `ParseJWK` / `ParseJWKSet` /
@@ -64,8 +66,12 @@ methods are removed.
 | `curve.go` | curve tables (`coordLen`, `ecdhCurve`, `ellipticCurve`, `curveFromElliptic`) and the two real checks: `checkECPoint`, `checkECScalar` |
 | `set.go` | `Set`, `NewSet`, `ParseSet`, `Keys`, `Len`, `ByKid`, `AllByKid`, the three set marshallers, redacting `String`/`GoString` |
 | `wire.go` | `keyJSON` / `setJSON` (the only json-tagged structs) and the strict base64url codec |
-| `codes.go` | `Code*` constants — range 0.3.42.\* |
-| `errors.go` | `Malformed` (.1), `MissingMember` (.2), `UnsupportedKeyType` (.3), `UnsupportedCurve` (.4), `InvalidEncoding` (.5), `KeyMismatch` (.6), `NoPublicForm` (.7), `NoPrivateMaterial` (.8), `TypeMismatch` (.9), `KeyNotFound` (.10), `AmbiguousKid` (.11) |
+
+The codes and sentinels — `Malformed` (.1), `MissingMember` (.2),
+`UnsupportedKeyType` (.3), `UnsupportedCurve` (.4), `InvalidEncoding` (.5),
+`KeyMismatch` (.6), `NoPublicForm` (.7), `NoPrivateMaterial` (.8),
+`TypeMismatch` (.9), `KeyNotFound` (.10), `AmbiguousKid` (.11) — are
+`internal/core/crypto/key/jwk`'s `codes.go` and `errors.go`.
 
 ## Key types
 

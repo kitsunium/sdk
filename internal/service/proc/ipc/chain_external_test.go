@@ -10,6 +10,7 @@ import (
 	"strings"
 	"testing"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/proc/ipc"
 )
@@ -160,7 +161,7 @@ func TestAComponentAboveTheSocketDirectoryIsJudgedByTheDirectoryHoldingIt(t *tes
 			closeOrLog(t, ln)
 			t.Fatalf("%s: accepted, so the socket lives wherever it leads", r.name)
 		}
-		if !errs.HasCode(err, ipc.CodePathUnsafe) {
+		if !errs.HasCode(err, coreipc.CodePathUnsafe) {
 			t.Fatalf("NewListener under a %v container (link=%v) = %v, want PATH_UNSAFE", r.container, r.link, err)
 		}
 		if got := fieldsOf(err)["kind"]; got != r.kind {
@@ -179,7 +180,7 @@ func TestAComponentAboveTheSocketDirectoryIsJudgedByTheDirectoryHoldingIt(t *tes
 			real = cfg.Path
 		}
 		rawListener(t, real)
-		if c, dialErr := ipc.Dial(t.Context(), &cfg); !errs.HasCode(dialErr, ipc.CodePathUnsafe) || fieldsOf(dialErr)["kind"] != r.kind {
+		if c, dialErr := ipc.Dial(t.Context(), &cfg); !errs.HasCode(dialErr, coreipc.CodePathUnsafe) || fieldsOf(dialErr)["kind"] != r.kind {
 			if c != nil {
 				closeOrLog(t, c)
 			}
@@ -238,7 +239,7 @@ func TestAStrangerCannotRetargetAClientThroughALinkItPlanted(t *testing.T) {
 	if c != nil {
 		closeOrLog(t, c)
 	}
-	if !errs.HasCode(err, ipc.CodePathUnsafe) {
+	if !errs.HasCode(err, coreipc.CodePathUnsafe) {
 		t.Errorf("Dial through a link planted in a 0777|sticky directory = %v, want PATH_UNSAFE", err)
 	}
 	if err := impostor.Close(); err != nil {
@@ -337,12 +338,12 @@ func TestTheSocketDirectoryItselfIsJudgedByTheDirectoryHoldingIt(t *testing.T) {
 		if ln != nil {
 			closeOrLog(t, ln)
 		}
-		if !errs.HasCode(err, ipc.CodePathUnsafe) || fieldsOf(err)["kind"] != "replaceable" {
+		if !errs.HasCode(err, coreipc.CodePathUnsafe) || fieldsOf(err)["kind"] != "replaceable" {
 			t.Fatalf("NewListener in a %v holder = %v, want PATH_UNSAFE kind replaceable", r.holder, err)
 		}
 		//: the client refuses it too, on a directory and a socket that exist.
 		rawListener(t, cfg.Path)
-		if c, dialErr := ipc.Dial(t.Context(), &cfg); !errs.HasCode(dialErr, ipc.CodePathUnsafe) {
+		if c, dialErr := ipc.Dial(t.Context(), &cfg); !errs.HasCode(dialErr, coreipc.CodePathUnsafe) {
 			if c != nil {
 				closeOrLog(t, c)
 			}
@@ -415,7 +416,7 @@ func TestADirectoryAnotherAccountCreatedAboveTheSocketIsRefused(t *testing.T) {
 		t.Fatalf("setting the container's mode = %v", err)
 	}
 	_, err := ipc.NewListener(&ipc.Config{Path: filepath.Join(foreign, "run", "d.sock")})
-	if !errs.HasCode(err, ipc.CodePathUnsafe) || fieldsOf(err)["kind"] != "foreign" {
+	if !errs.HasCode(err, coreipc.CodePathUnsafe) || fieldsOf(err)["kind"] != "foreign" {
 		t.Fatalf("NewListener under a directory uid %d owns = %v, want PATH_UNSAFE kind foreign", nobody, err)
 	}
 	if _, statErr := os.Lstat(filepath.Join(foreign, "run")); !errors.Is(statErr, os.ErrNotExist) {

@@ -10,8 +10,8 @@
 package token
 
 import (
+	corejwk "github.com/kitsunium/sdk/internal/core/crypto/key/jwk"
 	coretoken "github.com/kitsunium/sdk/internal/core/security/token"
-	"github.com/kitsunium/sdk/internal/service/crypto/key/jwk"
 )
 
 var (
@@ -87,21 +87,21 @@ var (
 	// JWKMalformed is returned by ParseJWK / ParseJWKSet for a document that is
 	// not the JSON shape RFC 7517 describes — invalid JSON, a key that is not an
 	// object, or a set whose "keys" is not an array.
-	JWKMalformed = jwk.Malformed
+	JWKMalformed = corejwk.Malformed
 	// JWKMissingMember is returned for a key missing a member its declared type
 	// requires ("kty", "crv", "x", "y" or "k"), or a set missing "keys".
-	JWKMissingMember = jwk.MissingMember
+	JWKMissingMember = corejwk.MissingMember
 	// JWKUnsupportedKeyType is returned for a "kty" other than EC, OKP or oct.
 	// RSA is refused here on purpose: the SDK verifies nothing with RSA.
-	JWKUnsupportedKeyType = jwk.UnsupportedKeyType
+	JWKUnsupportedKeyType = corejwk.UnsupportedKeyType
 	// JWKUnsupportedCurve is returned for an unknown "crv", or a known one
 	// paired with the wrong "kty" (P-256 under OKP, Ed25519 under EC).
-	JWKUnsupportedCurve = jwk.UnsupportedCurve
+	JWKUnsupportedCurve = corejwk.UnsupportedCurve
 	// JWKInvalidEncoding is returned for a member that is not unpadded
 	// base64url, or not the fixed length its curve mandates.
-	JWKInvalidEncoding = jwk.InvalidEncoding
+	JWKInvalidEncoding = corejwk.InvalidEncoding
 	// JWKKeyMismatch is returned for well-encoded material that is not a key on
 	// the declared curve: an off-curve point, an out-of-range scalar, or a "d"
 	// that does not derive the declared public key.
-	JWKKeyMismatch = jwk.KeyMismatch
+	JWKKeyMismatch = corejwk.KeyMismatch
 )

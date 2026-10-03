@@ -25,6 +25,12 @@
 // exists (FILE_FLAG_FIRST_PIPE_INSTANCE); each end reads the other's account
 // from its process token (Peer.SID), and a client refuses a listener of
 // another account before it sends a byte.
+//
+// The contract is internal/core/proc/ipc (ADR 0160): the peer and the
+// connection that carries it, the Listener and Dialer ports this package's
+// Listener and Dialer implement, and the codes every refusal carries. This
+// package is the engine — and Config, the one configuration both ends share,
+// is the engine's (ADR 0074).
 package ipc
 
 import (
@@ -40,6 +46,7 @@ import (
 	"sync"
 	"time"
 
+	coreipc "github.com/kitsunium/sdk/internal/core/proc/ipc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -51,24 +58,6 @@ const maxPath int = 103
 // already at the path. A local socket answers in microseconds; a second is a
 // process that is not coming.
 const dialTimeout time.Duration = time.Second
-
-// PeerValue is who is at the other end of a connection, as the kernel says:
-// the peer's user, group and process where the kernel names them, and whether
-// it did (Verified) — false where only the directory's permissions admitted it.
-type PeerValue struct {
-	// UID and GID are the peer's effective user and group; -1 when the
-	// kernel does not say (Verified is then false).
-	UID, GID int
-	// PID is the peer's process, 0 when the kernel does not say.
-	PID int
-	// SID is the peer's account on Windows, read from its process token;
-	// empty elsewhere.
-	SID string
-	// Verified is true when the kernel named the peer — UID and GID by
-	// SO_PEERCRED on Linux, SID from the process token on Windows —, false
-	// when only the directory's permissions admitted it.
-	Verified bool
-}
 
 // Config is where a private socket lives and who, besides its own account,
 // may use it. The same value serves the listener and its clients.
@@ -86,16 +75,9 @@ type Config struct {
 	AllowUIDs, AllowGIDs []int
 }
 
-// Conn is a connection with its peer's identity: what Accept returns to a
-// listener and Dial to a client, Peer naming the other end.
-type Conn struct {
-	net.Conn
-	// Peer is who connected (for a listener) or who listens (for a dialer).
-	Peer PeerValue
-}
-
 // Listener accepts the connections of admitted peers only; a peer the
 // kernel names and the configuration does not admit is closed and counted.
+// It is the engine behind the core Listener port.
 type Listener struct {
 	cfg  Config
 	ln   acceptor
@@ -113,7 +95,7 @@ type Listener struct {
 // next connection and what the kernel says of its peer; admission is the
 // Listener's.
 type acceptor interface {
-	accept() (net.Conn, PeerValue, error)
+	accept() (net.Conn, coreipc.PeerValue, error)
 	Close() error
 	Addr() net.Addr
 }
@@ -122,12 +104,12 @@ type acceptor interface {
 func (c *Config) validate() error {
 	switch {
 	case c.Path == "" || !filepath.IsAbs(c.Path):
-		return errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "path must be absolute"))
+		return errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "path must be absolute"))
 	case len(c.Path) > maxPath:
-		return errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "path longer than sun_path"),
+		return errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "path longer than sun_path"),
 			errs.Int("length", len(c.Path)), errs.Int("max", maxPath))
 	case slices.ContainsFunc(c.AllowUIDs, negative), slices.ContainsFunc(c.AllowGIDs, negative):
-		return errs.Wrap(Misconfigured, errs.WrapParams{}, errs.String("rule", "a UID or GID is negative"))
+		return errs.Wrap(coreipc.Misconfigured, errs.WrapParams{}, errs.String("rule", "a UID or GID is negative"))
 	}
 	return nil
 }
@@ -151,7 +133,7 @@ func NewListener(cfg *Config) (*Listener, error) {
 // Accept returns the next connection of an admitted peer. A peer the kernel
 // names and the configuration does not admit is closed at once, counted
 // (Refused), and never returned.
-func (l *Listener) Accept() (*Conn, error) {
+func (l *Listener) Accept() (*coreipc.Conn, error) {
 	for {
 		c, p, err := l.ln.accept()
 		if err != nil {
@@ -159,9 +141,9 @@ func (l *Listener) Accept() (*Conn, error) {
 			closed := l.closed
 			l.mu.Unlock()
 			if closed {
-				return nil, errs.Wrap(Closed, errs.WrapParams{}, errs.String("path", l.cfg.Path))
+				return nil, errs.Wrap(coreipc.Closed, errs.WrapParams{}, errs.String("path", l.cfg.Path))
 			}
-			return nil, errs.Wrap(ListenFailed, errs.WrapParams{}, errs.String("path", l.cfg.Path), errs.String("cause", err.Error()))
+			return nil, errs.Wrap(coreipc.ListenFailed, errs.WrapParams{}, errs.String("path", l.cfg.Path), errs.String("cause", err.Error()))
 		}
 		if err := l.admits(p); err != nil {
 			closeBestEffort(c, l.cfg.Path)
@@ -170,7 +152,7 @@ func (l *Listener) Accept() (*Conn, error) {
 			l.mu.Unlock()
 			continue
 		}
-		return &Conn{Conn: c, Peer: p}, nil
+		return &coreipc.Conn{Conn: c, Peer: p}, nil
 	}
 }
 
@@ -199,11 +181,35 @@ func (l *Listener) Close() error {
 
 // admit says whether p may use a socket of account self under cfg. An
 // unverified peer passed the directory, which is the only gate there is.
-func admit(p PeerValue, self int, cfg *Config) error {
+func admit(p coreipc.PeerValue, self int, cfg *Config) error {
 	if !p.Verified || p.UID == self || slices.Contains(cfg.AllowUIDs, p.UID) || slices.Contains(cfg.AllowGIDs, p.GID) {
 		return nil
 	}
-	return errs.Wrap(PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))
+	return errs.Wrap(coreipc.PeerRefused, errs.WrapParams{}, errs.Int("uid", p.UID), errs.Int("gid", p.GID))
+}
+
+// Dialer connects to the private socket a configuration names: the engine
+// behind the core Dialer port. Code that holds the port dials the same
+// endpoint as often as it needs to, and a test hands that code a double.
+type Dialer struct {
+	cfg Config
+}
+
+// NewDialer validates cfg and returns a Dialer for it. The allow-lists are
+// copied, so a caller that later edits its slices does not change who this
+// dialer admits.
+func NewDialer(cfg *Config) (*Dialer, error) {
+	if err := cfg.validate(); err != nil {
+		return nil, err
+	}
+	own := Config{Path: cfg.Path, AllowUIDs: slices.Clone(cfg.AllowUIDs), AllowGIDs: slices.Clone(cfg.AllowGIDs)}
+	return &Dialer{cfg: own}, nil
+}
+
+// Dial connects to the dialer's socket, exactly as the package-level Dial
+// does with the same configuration.
+func (d *Dialer) Dial(ctx context.Context) (*coreipc.Conn, error) {
+	return dial(ctx, &d.cfg)
 }
 
 // Dial connects to the private socket at cfg.Path, within ctx and
@@ -212,7 +218,7 @@ func admit(p PeerValue, self int, cfg *Config) error {
 // a client never hands a request to an impostor; and where the kernel names
 // the listener, it refuses one that is neither this account nor allowed. On
 // Windows it refuses a pipe whose server runs as another account.
-func Dial(ctx context.Context, cfg *Config) (*Conn, error) {
+func Dial(ctx context.Context, cfg *Config) (*coreipc.Conn, error) {
 	if err := cfg.validate(); err != nil {
 		return nil, err
 	}
