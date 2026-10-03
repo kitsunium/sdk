@@ -12,6 +12,7 @@ import (
 	"context"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corerecover "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/recover"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -43,7 +44,7 @@ func NewWithConfig(downstream corelogger.Sink, cfg Config) (sink corelogger.Sink
 	//: refuse a nil downstream — there would be nothing to wrap.
 	if downstream == nil {
 		//: documented sentinel — caller must supply a downstream sink.
-		return nil, DownstreamNil
+		return nil, corerecover.DownstreamNil
 	}
 	//: substitute the no-op default when the caller did not wire a hook.
 	observer := cfg.OnPanic
@@ -75,7 +76,7 @@ func (s *recoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p [
 			//: rich rendering stays in Private (log-only); Source() chain
 			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
-				Code:    CodeRecoverPanicked,
+				Code:    corerecover.CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
 				Private: "service/observe/logger/middleware/recover.Write caught panic: " + safeString(rv),
@@ -98,7 +99,7 @@ func (s *recoverSink) Flush(ctx context.Context) (err error) {
 			//: rich rendering stays in Private (log-only); Source() chain
 			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
-				Code:    CodeRecoverPanicked,
+				Code:    corerecover.CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
 				Private: "service/observe/logger/middleware/recover.Flush caught panic: " + safeString(rv),
@@ -121,7 +122,7 @@ func (s *recoverSink) Close() (err error) {
 			//: rich rendering stays in Private (log-only); Source() chain
 			//: carries only the type via panicValue.Error() to prevent leak.
 			err = errs.Wrap(panicValue{v: rv}, errs.WrapParams{
-				Code:    CodeRecoverPanicked,
+				Code:    corerecover.CodeRecoverPanicked,
 				Reason:  "RECOVER_PANICKED",
 				Public:  "Wrapped sink panicked",
 				Private: "service/observe/logger/middleware/recover.Close caught panic: " + safeString(rv),

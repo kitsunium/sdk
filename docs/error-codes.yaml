@@ -1137,27 +1137,27 @@ codes:
   - code: "0.3.1.1"
     const: CodeWriterNil
     hex: "0x00_03_01_01"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.1.2"
     const: CodeHandlerNil
     hex: "0x00_03_01_02"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.1.3"
     const: CodeEncoderNil
     hex: "0x00_03_01_03"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.1.4"
     const: CodeSinkRequired
     hex: "0x00_03_01_04"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.1.10"
     const: CodeCtxCancelled
     hex: "0x00_03_01_0A"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.1.20"
     const: CodeWriteFailed
     hex: "0x00_03_01_14"
-    package: internal/service/observe/logger
+    package: internal/core/observe/logger
   - code: "0.3.2.1"
     const: CodeJSONMarshalFailed
     hex: "0x00_03_02_01"
@@ -1289,107 +1289,107 @@ codes:
   - code: "0.3.13.1"
     const: CodeWriterNil
     hex: "0x00_03_0D_01"
-    package: internal/service/observe/logger/sink/console
+    package: internal/core/observe/logger/sink/console
   - code: "0.3.13.10"
     const: CodeCtxCancelled
     hex: "0x00_03_0D_0A"
-    package: internal/service/observe/logger/sink/console
+    package: internal/core/observe/logger/sink/console
   - code: "0.3.13.20"
     const: CodeWriteFailed
     hex: "0x00_03_0D_14"
-    package: internal/service/observe/logger/sink/console
+    package: internal/core/observe/logger/sink/console
   - code: "0.3.14.1"
     const: CodePathEmpty
     hex: "0x00_03_0E_01"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.14.2"
     const: CodeOpenFailed
     hex: "0x00_03_0E_02"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.14.10"
     const: CodeCtxCancelled
     hex: "0x00_03_0E_0A"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.14.20"
     const: CodeWriteFailed
     hex: "0x00_03_0E_14"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.14.30"
     const: CodeSyncFailed
     hex: "0x00_03_0E_1E"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.14.40"
     const: CodeCloseFailed
     hex: "0x00_03_0E_28"
-    package: internal/service/observe/logger/sink/file
+    package: internal/core/observe/logger/sink/file
   - code: "0.3.15.1"
     const: CodeSyslogAddrEmpty
     hex: "0x00_03_0F_01"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.15.2"
     const: CodeSyslogDialFailed
     hex: "0x00_03_0F_02"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.15.3"
     const: CodeSyslogWriteFailed
     hex: "0x00_03_0F_03"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.15.4"
     const: CodeSyslogCloseFailed
     hex: "0x00_03_0F_04"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.15.5"
     const: CodeSyslogProtoInvalid
     hex: "0x00_03_0F_05"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.15.6"
     const: CodeSyslogCtxCancelled
     hex: "0x00_03_0F_06"
-    package: internal/service/observe/logger/sink/syslog
+    package: internal/core/observe/logger/sink/syslog
   - code: "0.3.16.1"
     const: CodeFanoutWriteFailed
     hex: "0x00_03_10_01"
-    package: internal/service/observe/logger/middleware/multi
+    package: internal/core/observe/logger/middleware/multi
   - code: "0.3.17.1"
     const: CodeAsyncStopped
     hex: "0x00_03_11_01"
-    package: internal/service/observe/logger/middleware/async
+    package: internal/core/observe/logger/middleware/async
   - code: "0.3.17.2"
     const: CodeAsyncBufferFull
     hex: "0x00_03_11_02"
-    package: internal/service/observe/logger/middleware/async
+    package: internal/core/observe/logger/middleware/async
   - code: "0.3.17.3"
     const: CodeAsyncCtxCancelled
     hex: "0x00_03_11_03"
-    package: internal/service/observe/logger/middleware/async
+    package: internal/core/observe/logger/middleware/async
   - code: "0.3.18.1"
     const: CodeRouteNoMatch
     hex: "0x00_03_12_01"
-    package: internal/service/observe/logger/middleware/route
+    package: internal/core/observe/logger/middleware/route
   - code: "0.3.19.1"
     const: CodeFailoverExhausted
     hex: "0x00_03_13_01"
-    package: internal/service/observe/logger/middleware/failover
+    package: internal/core/observe/logger/middleware/failover
   - code: "0.3.19.2"
     const: CodeFailoverEmpty
     hex: "0x00_03_13_02"
-    package: internal/service/observe/logger/middleware/failover
+    package: internal/core/observe/logger/middleware/failover
   - code: "0.3.20.1"
     const: CodeSampleRateInvalid
     hex: "0x00_03_14_01"
-    package: internal/service/observe/logger/middleware/sample
+    package: internal/core/observe/logger/middleware/sample
   - code: "0.3.20.2"
     const: CodeSampleDownstreamNil
     hex: "0x00_03_14_02"
-    package: internal/service/observe/logger/middleware/sample
+    package: internal/core/observe/logger/middleware/sample
   - code: "0.3.21.1"
     const: CodeRecoverPanicked
     hex: "0x00_03_15_01"
-    package: internal/service/observe/logger/middleware/recover
+    package: internal/core/observe/logger/middleware/recover
   - code: "0.3.21.2"
     const: CodeRecoverDownstreamNil
     hex: "0x00_03_15_02"
-    package: internal/service/observe/logger/middleware/recover
+    package: internal/core/observe/logger/middleware/recover
   - code: "0.3.22.1"
     const: CodeTLVMarshalFailed
     hex: "0x00_03_16_01"
@@ -1469,51 +1469,51 @@ codes:
   - code: "0.3.27.1"
     const: CodeRotFileOpenFailed
     hex: "0x00_03_1B_01"
-    package: internal/service/observe/logger/writer/rotfile
+    package: internal/core/observe/logger/writer/rotfile
   - code: "0.3.27.2"
     const: CodeRotFileRotateFailed
     hex: "0x00_03_1B_02"
-    package: internal/service/observe/logger/writer/rotfile
+    package: internal/core/observe/logger/writer/rotfile
   - code: "0.3.27.3"
     const: CodeRotFileWriteFailed
     hex: "0x00_03_1B_03"
-    package: internal/service/observe/logger/writer/rotfile
+    package: internal/core/observe/logger/writer/rotfile
   - code: "0.3.27.4"
     const: CodeRotFileDecodeFailed
     hex: "0x00_03_1B_04"
-    package: internal/service/observe/logger/writer/rotfile
+    package: internal/core/observe/logger/writer/rotfile
   - code: "0.3.28.1"
     const: CodeEncWriteSealFailed
     hex: "0x00_03_1C_01"
-    package: internal/service/observe/logger/middleware/encwrite
+    package: internal/core/observe/logger/middleware/encwrite
   - code: "0.3.28.2"
     const: CodeFramingFailed
     hex: "0x00_03_1C_02"
-    package: internal/service/observe/logger/middleware/encwrite
+    package: internal/core/observe/logger/middleware/encwrite
   - code: "0.3.29.1"
     const: CodeTeeAllBranchesFailed
     hex: "0x00_03_1D_01"
-    package: internal/service/observe/logger/middleware/tee
+    package: internal/core/observe/logger/middleware/tee
   - code: "0.3.29.2"
     const: CodeSpillFailed
     hex: "0x00_03_1D_02"
-    package: internal/service/observe/logger/middleware/tee
+    package: internal/core/observe/logger/middleware/tee
   - code: "0.3.30.1"
     const: CodeNetTransportDialFailed
     hex: "0x00_03_1E_01"
-    package: internal/service/observe/logger/writer/nettransport
+    package: internal/core/observe/logger/writer/nettransport
   - code: "0.3.30.2"
     const: CodeNetTransportWriteFailed
     hex: "0x00_03_1E_02"
-    package: internal/service/observe/logger/writer/nettransport
+    package: internal/core/observe/logger/writer/nettransport
   - code: "0.3.31.1"
     const: CodeJournaldOpenFailed
     hex: "0x00_03_1F_01"
-    package: internal/service/observe/logger/writer/journald
+    package: internal/core/observe/logger/writer/journald
   - code: "0.3.31.2"
     const: CodeJournaldWriteFailed
     hex: "0x00_03_1F_02"
-    package: internal/service/observe/logger/writer/journald
+    package: internal/core/observe/logger/writer/journald
   - code: "0.3.32.1"
     const: CodeMySQLClientInitFailed
     hex: "0x00_03_20_01"

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -75,7 +76,7 @@ func Test_netSink_Write(t *testing.T) {
 			n, err := s.Write(ctx, corelogger.RecordEvent{}, []byte("hello"))
 			//: every error arm must carry the write sentinel + zero count.
 			if tc.wantErr {
-				if !errs.HasCode(err, CodeNetTransportWriteFailed) || n != 0 {
+				if !errs.HasCode(err, corenettransport.CodeNetTransportWriteFailed) || n != 0 {
 					t.Errorf("%s: n=%d err=%v want 0+write-failed", tc.name, n, err)
 				}
 				return
@@ -111,7 +112,7 @@ func Test_netSink_Flush(t *testing.T) {
 			err := s.Flush(ctx)
 			//: the cancelled arm must carry the write sentinel, not just any error.
 			if tc.wantErr {
-				if !errs.HasCode(err, CodeNetTransportWriteFailed) {
+				if !errs.HasCode(err, corenettransport.CodeNetTransportWriteFailed) {
 					t.Errorf("%s: Flush err = %v want write-failed", tc.name, err)
 				}
 				return
@@ -141,7 +142,7 @@ func Test_netSink_Close(t *testing.T) {
 			err := s.Close()
 			//: a closer failure must surface the write sentinel.
 			if tc.wantErr {
-				if !errs.HasCode(err, CodeNetTransportWriteFailed) {
+				if !errs.HasCode(err, corenettransport.CodeNetTransportWriteFailed) {
 					t.Errorf("%s: Close err = %v want write-failed", tc.name, err)
 				}
 				return
@@ -183,7 +184,7 @@ func Test_netSink_Write_Close_concurrent(t *testing.T) {
 				go func() {
 					defer wg.Done()
 					//: each Write must complete or fail with the write sentinel only.
-					if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); werr != nil && !errs.HasCode(werr, CodeNetTransportWriteFailed) {
+					if _, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("x")); werr != nil && !errs.HasCode(werr, corenettransport.CodeNetTransportWriteFailed) {
 						t.Errorf("Write err = %v want nil or write-failed", werr)
 					}
 				}()
@@ -197,7 +198,7 @@ func Test_netSink_Write_Close_concurrent(t *testing.T) {
 			}()
 			wg.Wait()
 			//: Close must report nil or the write sentinel — never anything else.
-			if cerr := <-closeErr; cerr != nil && !errs.HasCode(cerr, CodeNetTransportWriteFailed) {
+			if cerr := <-closeErr; cerr != nil && !errs.HasCode(cerr, corenettransport.CodeNetTransportWriteFailed) {
 				t.Errorf("%s: Close err = %v want nil or write-failed", tc.name, cerr)
 			}
 		})

@@ -15,6 +15,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreconsole "github.com/kitsunium/sdk/internal/core/observe/logger/sink/console"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -32,7 +33,7 @@ func New(w io.Writer) (sink corelogger.Sink, err error) {
 	//: reject nil writers early rather than panic at first Write.
 	if w == nil {
 		//: caller supplied no destination — return the documented sentinel.
-		return nil, WriterNil
+		return nil, coreconsole.WriterNil
 	}
 	//: hand back the sink behind the public Sink interface.
 	return &consoleSink{w: w}, nil
@@ -56,7 +57,7 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
 		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeCtxCancelled,
+			Code:    coreconsole.CodeCtxCancelled,
 			Reason:  "CTX_CANCELLED",
 			Public:  "Logging aborted due to cancellation",
 			Private: "service/observe/logger/sink/console.Write saw a cancelled context",
@@ -71,7 +72,7 @@ func (s *consoleSink) Write(ctx context.Context, r corelogger.RecordEvent, p []b
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return written, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeWriteFailed,
+			Code:    coreconsole.CodeWriteFailed,
 			Reason:  "WRITE_FAILED",
 			Public:  "Console write failed",
 			Private: "service/observe/logger/sink/console.Write underlying writer returned an error",

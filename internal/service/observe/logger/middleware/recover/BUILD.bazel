@@ -5,9 +5,7 @@ package(default_visibility = ["//internal/service:service_consumers"])
 go_library(
     name = "recover",
     srcs = [
-        "codes.go",
         "config.go",
-        "errors.go",
         "panic_value.go",
         "recover_sink.go",
     ],
@@ -18,6 +16,7 @@ go_library(
     ],
     deps = [
         "//internal/core/observe/logger",
+        "//internal/core/observe/logger/middleware/recover",
         "//internal/kernel/errs",
     ],
 )
@@ -42,13 +41,8 @@ go_test(
     deps = [
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
+        "//internal/core/observe/logger/middleware/recover",
         "//internal/kernel/errs",
         "//internal/service/observe/logger/sink/file",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

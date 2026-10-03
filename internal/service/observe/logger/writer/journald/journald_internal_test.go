@@ -6,6 +6,7 @@ import (
 	"path/filepath"
 	"testing"
 
+	corejournald "github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald"
 	coreproc "github.com/kitsunium/sdk/internal/core/proc"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -94,7 +95,7 @@ func Test_journaldFactory_Open(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"wrong config type rejected", "nope", false, true, 0},
-		{"dial failure surfaces open code", Config{Dialer: failingDialer}, true, true, CodeJournaldOpenFailed},
+		{"dial failure surfaces open code", Config{Dialer: failingDialer}, true, true, corejournald.CodeJournaldOpenFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

@@ -12,8 +12,9 @@ Packages are grouped by FAMILY, the same families in every layer (ADR 0155
 domains, its directory holds no Go code — it is a prefix, not a package — and
 carries a `CLAUDE.md` naming its members and the rule that put them together:
 `security/` (`authz`, `secret`, `session`, `token`), `observe/` (`logger`
-with `logger/level` and `logger/writer` beneath it, `metrics`, `otel`,
-`trace`), `data/` (`cache`, `codec` with `codec/scratch` beneath it,
+with `logger/level` and `logger/writer` beneath it, and beneath those the
+code mirrors of the logger engine's `middleware/*`, `sink/*` and
+`writer/{journald, nettransport, rotfile}`, `metrics`, `otel`, `trace`), `data/` (`cache`, `codec` with `codec/scratch` beneath it,
 `queue`, `sql`, `transform`, `vfs`) and `app/` (`cli`, `config`, `events`,
 `health`, `i18n`, `id`, `lifecycle`, `lock`, `mail`, `resilience`,
 `scheduler`, `statemachine`, `validation`, `view`). Where the family's core is
@@ -28,7 +29,8 @@ one package, that package sits at the family's path (`crypto/`, `net/`,
 | `observe/logger/writer/` | `Factory` / `Name` / `Config` + process-wide registry mapping a writer name to a `Sink`-producing factory (ADR 0012); beneath `observe/logger/` because what it produces is the logger's `Sink` | `0.2.3.*` |
 | `crypto/` | eight registries on one `Algorithm` keyspace: `AEAD` + redacting `Key` (`Seal`/`Open`), the non-authenticated `Hasher` (`Sum`/`SumHex`/`NewHash`), the `Signer` (`Sign`/`Verify`/`GenerateKey`), the key-separation `Deriver` (`Subkey`), the password-storage `PasswordHasher` (`HashPassword`/`VerifyPassword`/`NeedsRehash`), the detached `MAC` (`MACTag`/`MACVerify`), the `Agreement` DH port, and the chunked `StreamSealer` (ADR 0013 + ADR 0014) | `0.2.4.*` |
 | `data/transform/` | `Compressor` port + process-wide registry mapping an `Algorithm` to a `Compressor` (`Compress`/`Decompress`); a parallel registry, never a codec `Format` (ADR 0014) | `0.2.5.*` |
-| `observe/logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent` (incl. `TraceContext`), `AttrValue`, `Value`, `Kind`, `TraceContextValue` + the `TraceContextSource` FUNC port (ADR 0062 — stdlib-only: the trace domain is NOT imported here) | `0.2.1.*` (reserved) |
+| `observe/logger/` | `Logger` / `Handler` / `Sink` / `Encoder` interfaces, `RecordEvent` (incl. `TraceContext`), `AttrValue`, `Value`, `Kind`, `TraceContextValue` + the `TraceContextSource` FUNC port (ADR 0062 — stdlib-only: the trace domain is NOT imported here); since ADR 0160 also the logger engine's codes and sentinels (`WriterNil` … `WriteFailed`) | `0.2.1.*` (reserved, empty) + `0.3.1.*` (the engine's) |
+| `observe/logger/{middleware/{async, encwrite, failover, multi, recover, route, sample, tee}, sink/{console, file, syslog}, writer/{journald, nettransport, rotfile}}/` | the codes and sentinels of the logger engine's decorators, terminals and writers — one core package per engine package that declares a code, and nothing else in it (ADR 0160 §2) | `0.3.13.*`–`0.3.21.*`, `0.3.27.*`–`0.3.31.*` (the engines') |
 | `app/mail/` | electronic-mail port: `Transport` frozen at one method, `BatchSender`/`Outbox` siblings, the message as a value (`MessageValue`/`AddressValue`/`AttachmentValue`/`HeaderFieldValue`), `EnvelopeValue` where Bcc becomes RCPT TO and no header, and the injection gate every writer runs — CR/LF/NUL in a header is a typed refusal, never a repair; **no registry** (ADR 0064) | `0.2.31.*` |
 | `observe/logger/level/` | `Level int8` + `Debug`/`Info`/`Warn`/`Error` constants + `String()` | `0.2.17.*` |
 | `proc/` | OS process-supervision foundation: `Process` / `Reaper` / `Group` / `Listener` ports + `Spec` / `ExitValue` / `LimitValue` / `NotificationValue` / `Signal` / `Resource` value types; no registry (build-tag selection) (ADR 0016) | `0.2.6.*` |
@@ -63,7 +65,7 @@ The distribution domains — `entitlement`, `selfupdate`, `gate` and `vcs` (now
 `framework/internal/core/<domain>`, and their ranges `0.2.33.*`–`0.2.36.*` kept
 their values there (ADR 0160).
 
-`Major=0` (internal), `Layer=2` (core). Each package owns the slot in the last column of the table; `docs/error-codes.yaml` lists every code they declare. `observe/logger/` is the one package whose slot is reserved and holds no code.
+`Major=0` (internal), `Layer=2` (core). Each package owns the slot in the last column of the table; `docs/error-codes.yaml` lists every code they declare. `observe/logger/` is the one package whose own slot is reserved and holds no code. A `0.3.*` range in that column was allocated to a service package and is declared here since ADR 0160 §2, at the service package's path: `LL` records the layer that allocated a range, not the one that declares it, so the value never changed.
 
 ## Module
 

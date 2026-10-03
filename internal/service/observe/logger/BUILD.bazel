@@ -6,8 +6,6 @@ go_library(
     name = "logger",
     srcs = [
         "builder.go",
-        "codes.go",
-        "errors.go",
         "handler.go",
         "logger.go",
         "owning.go",
@@ -76,10 +74,4 @@ go_test(
         "//internal/service/observe/logger/sink/memory",
         "//internal/service/observe/logger/sink/syslog",
     ],
-)
-
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
 )

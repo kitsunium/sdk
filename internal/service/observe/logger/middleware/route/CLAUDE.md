@@ -18,7 +18,7 @@ Use case: send `Error+` records to a remote alerting drain while keeping
 |---|---|
 | `router_sink.go`        | `routerSink` + `New` + `Write` / `Flush` / `Close` |
 | `router_sink_params.go` | `Params{When, Sink}` + `Predicate` type + `LevelAtLeast` helper |
-| `match.go` | sentinels — range 0.3.18.\* |
+| `internal/core/observe/logger/middleware/route` | its sentinels — range 0.3.18.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -34,6 +34,8 @@ Use case: send `Error+` records to a remote alerting drain while keeping
   the fallback, is flushed and closed once.
 
 ## Error catalogue — range 0.3.18.\*
+
+Declared in `internal/core/observe/logger/middleware/route` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coreroute.X`.
 
 | Code      | Sentinel  | Trigger |
 |---|---|---|

@@ -9,6 +9,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -16,7 +17,7 @@ import (
 func closeQuiet(t *testing.T, s *rotatingSink) {
 	t.Helper()
 	//: a cleanup close should succeed; an already-closed sink is tolerated.
-	if cerr := s.Close(); cerr != nil && !errs.HasCode(cerr, CodeRotFileWriteFailed) {
+	if cerr := s.Close(); cerr != nil && !errs.HasCode(cerr, corerotfile.CodeRotFileWriteFailed) {
 		t.Errorf("close: %v", cerr)
 	}
 }

@@ -5,7 +5,9 @@
 
 Interface layer of the SDK's structured logger. Defines the four ports between the caller-facing `Logger`, the formatting `Handler`, the format-side `Encoder` and the transport-side `Sink`, plus the immutable value types they carry. No runtime behaviour lives here — concrete implementations sit under `internal/service/observe/logger/{encoder,sink,middleware,writer}/`. This directory carries no `README.md`: the human-readable surface doc is the public facade's generated `pkg/v1/observe/logger/README.md`, and this file captures the engineering rules.
 
-Code range: `0.2.1.*` reserved (ADR 0005 §Registry); `codeRangeOwners` carries no entry for it. No codes emitted today — service-layer wiring owns the slot.
+Code ranges: `0.2.1.*` reserved (ADR 0005 §Registry) and still empty — `codeRangeOwners` carries no entry for it; and `0.3.1.*`, the range ADR 0005 allocated to the logger ENGINE, declared here since ADR 0160 §2 (`codes.go`, `errors.go`). A code keeps its value when its declaration moves: `LL = 3` records the layer that allocated the range, and `codeRangeOwners` maps `0x00_03_01_00` to this directory.
+
+The engine's sinks, middlewares and writers mirror the same way: each one's codes live in the core package at its own path beneath this one — `middleware/{async, encwrite, failover, multi, recover, route, sample, tee}`, `sink/{console, file, syslog}` and `writer/{journald, nettransport, rotfile}` — packages that hold codes and sentinels and nothing else.
 
 ## Contents
 
@@ -19,11 +21,14 @@ Code range: `0.2.1.*` reserved (ADR 0005 §Registry); `codeRangeOwners` carries 
 | `trace_context.go` | `TraceContextValue{TraceID [16]byte; SpanID [8]byte}` + `IsValid()` + `AppendTraceIDHex` / `AppendSpanIDHex`; the `TraceContextSource func(ctx) TraceContextValue` port; `TraceIDKey`/`SpanIDKey` (`"trace_id"`/`"span_id"`) and the four length constants (ADR 0062) |
 | `value.go` | `Value` discriminated union + typed constructors (`StringValue` / `Int64Value` / `IntValue` / `Uint64Value` / `Float64Value` / `BoolValue` / `DurationValue` / `TimeValue` / `GroupValue` / `AnyValue`, and `NewValue`, an alias of `AnyValue`) and accessors |
 | `kind.go` | `Kind int8` + `KindAny`/`KindBool`/`KindDuration`/`KindFloat64`/`KindInt64`/`KindString`/`KindTime`/`KindUint64`/`KindGroup` + `String()` |
+| `codes.go` | `Code*` constants — range `0.3.1.*`, the engine's (`CodeWriterNil`, `CodeHandlerNil`, `CodeEncoderNil`, `CodeSinkRequired`, `CodeCtxCancelled`, `CodeWriteFailed`) |
+| `errors.go` | the sentinels `internal/service/observe/logger` returns — `WriterNil`, `HandlerNil`, `EncoderNil`, `SinkRequired`, `CtxCancelled`, `WriteFailed` (exit 74, EX_IOERR) |
 
 Sub-packages, beneath this one because they are the logger's own (ADR 0155):
 
 - `level/` — severity constants (`Debug`/`Info`/`Warn`/`Error`); see `level/CLAUDE.md`.
 - `writer/` — the registry of named, config-driven factories that yield this package's `Sink` (ADR 0012); see `writer/CLAUDE.md`. It imports this package and `level/`; this package imports `level/` and never `writer/`.
+- `middleware/*`, `sink/*` and `writer/{journald, nettransport, rotfile}` — the codes and sentinels of the engine's decorators, terminals and writers, one core package per engine package (ADR 0160 §2); each has its own `CLAUDE.md`. They import only `kernel/errs`.
 
 ## Conventions
 
@@ -42,6 +47,7 @@ Sub-packages, beneath this one because they are the logger's own (ADR 0155):
 ## Do NOT
 
 - Add concrete types with runtime behaviour here. Even a default `nopHandler` belongs in `internal/service/observe/logger`.
+- Declare a logger code in `internal/service/observe/logger` again, or renumber `0.3.1.*` to `0.2.1.*` because it moved: the value is a wire contract a consumer branches on (ADR 0160 §3).
 - Add a `Builder` chainable here. The chainable record builder is a `pkg/v1/observe/logger` ergonomic helper — keeping it out of core lets handlers stay generic.
 - Grow `RecordEvent` with sink-specific metadata (CloudWatch tags, syslog facility); sinks read what they need from the record + ctx directly. `TraceContext` is NOT an exception being carved out: it is not sink-specific, every formatter needs it, and the `Encoder` port has no other way to receive it (ADR 0062).
 - Import `internal/core/observe/trace` from here. The trace domain's model — and the shared `core/observe/otel` model behind it — would then sit in front of every consumer who wants a line on stderr. The bridge is `pkg/v1/observe/logger/tracecontext.go`, and it is the only place the two domains meet.

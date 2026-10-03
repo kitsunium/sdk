@@ -2,18 +2,11 @@ load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//internal/service:service_consumers"])
 
-filegroup(
-    name = "audit_srcs",
-    srcs = glob(["*.go"]),
-    visibility = ["//:__pkg__"],
-)
-
 go_library(
     name = "tee",
     srcs = [
         "config.go",
         "doc.go",
-        "failed.go",
         "tee.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee",
@@ -23,6 +16,7 @@ go_library(
     ],
     deps = [
         "//internal/core/observe/logger",
+        "//internal/core/observe/logger/middleware/tee",
         "//internal/kernel/errs",
     ],
 )
@@ -45,6 +39,7 @@ go_test(
     embed = [":tee"],
     deps = [
         "//internal/core/observe/logger",
+        "//internal/core/observe/logger/middleware/tee",
         "//internal/kernel/errs",
     ],
 )

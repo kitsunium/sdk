@@ -18,6 +18,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreasync "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/kernel/collections/ring"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
@@ -196,7 +197,7 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved
 		//: and consumers can HasCode / errors.Is against the cancellation.
 		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeAsyncCtxCancelled,
+			Code:    coreasync.CodeAsyncCtxCancelled,
 			Reason:  "ASYNC_CTX_CANCELLED",
 			Public:  "Async sink write aborted due to cancellation",
 			Private: "service/observe/logger/middleware/async.Write saw a cancelled context",
@@ -211,7 +212,7 @@ func (s *asyncSink) Write(ctx context.Context, rec corelogger.RecordEvent, paylo
 	//: mutex so Close cannot transition between the check and TryWrite.
 	if isClosed(s.stop) {
 		//: documented sentinel — caller knows Close has happened.
-		return 0, Stopped
+		return 0, coreasync.Stopped
 	}
 	//: borrow an entry from the pool and copy the payload in.
 	ent := s.pool.Get()
@@ -247,7 +248,7 @@ func (s *asyncSink) handleFull(ent *recordEntry) (n int, err error) {
 	s.onDrop(1)
 	s.pool.Put(ent)
 	//: documented sentinel — caller decides whether to retry or escalate.
-	return 0, BufferFull
+	return 0, coreasync.BufferFull
 }
 
 // Flush blocks until the queue has drained or ctx is cancelled. Supports
@@ -277,7 +278,7 @@ func (s *asyncSink) Flush(ctx context.Context) error {
 		if ctx != nil && ctx.Err() != nil {
 			//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
 			return errs.Wrap(ctx.Err(), errs.WrapParams{
-				Code:    CodeAsyncCtxCancelled,
+				Code:    coreasync.CodeAsyncCtxCancelled,
 				Reason:  "ASYNC_CTX_CANCELLED",
 				Public:  "Async sink flush aborted due to cancellation",
 				Private: "service/observe/logger/middleware/async.Flush saw a cancelled context",
@@ -291,7 +292,7 @@ func (s *asyncSink) Flush(ctx context.Context) error {
 			//: typed Stopped sentinel. ctx may be nil (legacy wait-forever
 			//: semantics) so we never dereference it here; this branch is
 			//: not a ctx-cancellation event.
-			return Stopped
+			return coreasync.Stopped
 		}
 	}
 }

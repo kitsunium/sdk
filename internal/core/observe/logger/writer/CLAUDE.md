@@ -22,6 +22,14 @@ same way, to `internal/service/observe/logger/writer/*`.
 
 Code range: `0.2.3.*` (ADR 0012).
 
+Three writers' own codes sit in packages beneath this one, at the paths of
+their engines (ADR 0160 §2): `journald/` (`0.3.31.*`), `nettransport/`
+(`0.3.30.*`) and `rotfile/` (`0.3.27.*`) hold the codes and sentinels
+`internal/service/observe/logger/writer/{journald,nettransport,rotfile}`
+return, and nothing else. They import `kernel/errs` only — not this package,
+and this package imports none of them. `console`, `file`, `dbsink` and
+`levelgate` declare no code, so they have no mirror.
+
 ## Contents
 
 | File | Surface |

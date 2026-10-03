@@ -10,6 +10,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coresyslog "github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -69,8 +70,8 @@ func Test_syslogSink_Write(t *testing.T) {
 	}{
 		{"happy path returns bytes accepted", false, false, false, false, true, 0},
 		{"nil ctx is treated as live and writes", true, false, false, false, true, 0},
-		{"cancelled ctx surfaces ctx.Err", false, true, false, true, false, CodeSyslogCtxCancelled},
-		{"closed conn surfaces WriteFailed", false, false, true, true, false, CodeSyslogWriteFailed},
+		{"cancelled ctx surfaces ctx.Err", false, true, false, true, false, coresyslog.CodeSyslogCtxCancelled},
+		{"closed conn surfaces WriteFailed", false, false, true, true, false, coresyslog.CodeSyslogWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -118,7 +119,7 @@ func Test_syslogSink_Flush(t *testing.T) {
 	}{
 		{"Flush with live ctx returns nil", false, false, false, 0},
 		{"Flush with nil ctx returns nil", true, false, false, 0},
-		{"Flush with cancelled ctx surfaces ctx.Err", false, true, true, CodeSyslogCtxCancelled},
+		{"Flush with cancelled ctx surfaces ctx.Err", false, true, true, coresyslog.CodeSyslogCtxCancelled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -156,7 +157,7 @@ func Test_syslogSink_Close(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"Close releases the net.Conn without error", false, false, 0},
-		{"Close on already-closed conn surfaces CloseFailed", true, true, CodeSyslogCloseFailed},
+		{"Close on already-closed conn surfaces CloseFailed", true, true, coresyslog.CodeSyslogCloseFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -272,24 +273,6 @@ func Test_swallowDialClose(t *testing.T) {
 			}()
 			if panicked {
 				t.Errorf("swallowDialClose panicked, want silent drop")
-			}
-		})
-	}
-}
-
-func Test_exitIOErr(t *testing.T) {
-	t.Parallel()
-	tests := []struct {
-		name string
-		want int
-	}{
-		{"sysexits EX_IOERR is 74", 74},
-	}
-	for _, tc := range tests {
-		t.Run(tc.name, func(t *testing.T) {
-			t.Parallel()
-			if exitIOErr != tc.want {
-				t.Errorf("exitIOErr = %d, want %d", exitIOErr, tc.want)
 			}
 		})
 	}

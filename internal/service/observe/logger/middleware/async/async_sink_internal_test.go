@@ -7,6 +7,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreasync "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/kernel/concur/recycler"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
@@ -215,14 +216,14 @@ func Test_asyncSink_Flush(t *testing.T) {
 			if err == nil {
 				t.Fatal("Flush err = nil, want CodeAsyncCtxCancelled")
 			}
-			if !errs.HasCode(err, CodeAsyncCtxCancelled) {
+			if !errs.HasCode(err, coreasync.CodeAsyncCtxCancelled) {
 				t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
 			}
 			if !errors.Is(err, context.Canceled) {
 				t.Errorf("Flush err = %v, want errors.Is(context.Canceled)", err)
 			}
 		case outcomeStopped:
-			if !errs.HasCode(err, CodeAsyncStopped) {
+			if !errs.HasCode(err, coreasync.CodeAsyncStopped) {
 				t.Errorf("Flush err = %v, want Stopped", err)
 			}
 		}

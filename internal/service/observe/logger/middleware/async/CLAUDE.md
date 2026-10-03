@@ -21,7 +21,7 @@ S3) so a backed-up drain never stalls the application.
 | `runtime.go`           | helpers — `yieldOnce`, `isClosed`, `asyncCtx`, `forwardDownstreamError`, `swallowRingError` |
 | `entry.go`             | `recordEntry` recycled through `recycler.Pool` |
 | `config.go`            | `Config{BufferSize, Policy, OnDrop, OnError}` |
-| `codes.go`, `errors.go`| sentinels — range 0.3.17.\* |
+| `internal/core/observe/logger/middleware/async` | its sentinels — range 0.3.17.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -53,6 +53,8 @@ S3) so a backed-up drain never stalls the application.
   pathologically large buffers (CWE-400 / CWE-789).
 
 ## Error catalogue — range 0.3.17.\*
+
+Declared in `internal/core/observe/logger/middleware/async` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coreasync.X`.
 
 | Code      | Sentinel       | Trigger |
 |---|---|---|

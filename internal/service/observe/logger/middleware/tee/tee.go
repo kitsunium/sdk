@@ -8,6 +8,7 @@ import (
 	"slices"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coretee "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -91,7 +92,7 @@ func (t *TeeSink) handleAllFailed(ctx context.Context, r corelogger.RecordEvent,
 func wrapAllBranchesFailed(cause error) error {
 	//: stamp the typed code while preserving the wrapped cause chain.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeTeeAllBranchesFailed,
+		Code:    coretee.CodeTeeAllBranchesFailed,
 		Reason:  "ALL_BRANCHES_FAILED",
 		Public:  "every primary sink rejected the record",
 		Private: "service/observe/logger/middleware/tee: all primary sinks failed to write the record",
@@ -103,7 +104,7 @@ func wrapAllBranchesFailed(cause error) error {
 func wrapSpillFailed(cause error) error {
 	//: stamp the typed code while preserving the wrapped cause chain.
 	return errs.Wrap(cause, errs.WrapParams{
-		Code:    CodeSpillFailed,
+		Code:    coretee.CodeSpillFailed,
 		Reason:  "SPILL_FAILED",
 		Public:  "failed to spill record to the dead-letter sink",
 		Private: "service/observe/logger/middleware/tee: the dead-letter spill sink rejected the record",

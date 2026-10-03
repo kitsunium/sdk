@@ -6,6 +6,7 @@ import (
 
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -34,7 +35,7 @@ func Test_rotFileFactory_Decode(t *testing.T) {
 		//: failure arm — redacted decode sentinel + nil config.
 		if c.wantErr {
 			//: a malformed shape must surface the decode sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) || cfg != nil {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) || cfg != nil {
 				t.Fatalf("%s: err=%v cfg=%v want decode-failed+nil", c.name, err, cfg)
 			}
 			return
@@ -80,7 +81,7 @@ func Test_decodeRotScalars(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a malformed scalar must surface the decode sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -119,7 +120,7 @@ func Test_decodeReqString(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a malformed mandatory string must surface the sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -158,7 +159,7 @@ func Test_decodeInt64(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a non-numeric value must surface the sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -196,7 +197,7 @@ func Test_decodeInt(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a non-numeric value must surface the sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -234,7 +235,7 @@ func Test_decodeBool(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a non-bool value must surface the sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -273,7 +274,7 @@ func Test_decodeRotMinLevel(t *testing.T) {
 		//: failure arm — redacted decode sentinel.
 		if c.wantErr {
 			//: a malformed level must surface the sentinel.
-			if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 				t.Errorf("%s: err=%v want decode-failed", c.name, err)
 			}
 			return
@@ -364,7 +365,7 @@ func Test_decodeInvalid(t *testing.T) {
 		t.Helper()
 		err := decodeInvalid()
 		//: the helper must surface the redacted decode sentinel.
-		if !errs.HasCode(err, CodeRotFileDecodeFailed) {
+		if !errs.HasCode(err, corerotfile.CodeRotFileDecodeFailed) {
 			t.Errorf("decodeInvalid()=%v want RotFileDecodeFailed code", err)
 		}
 	}

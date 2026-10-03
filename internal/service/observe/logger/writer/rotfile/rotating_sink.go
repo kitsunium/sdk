@@ -9,6 +9,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/clock"
 	"github.com/kitsunium/sdk/internal/kernel/concur/worker"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
@@ -28,13 +29,13 @@ const defaultFilePerm os.FileMode = 0o600
 // them — told apart by the "kind" field the shared open adds.
 var openRefusals = logfile.RefusalSpec{
 	Symlink: errs.WrapParams{
-		Code:    CodeRotFileOpenFailed,
+		Code:    corerotfile.CodeRotFileOpenFailed,
 		Reason:  "ROT_FILE_OPEN_FAILED",
 		Public:  "Rotating file sink refuses to open a symlink",
 		Private: "service/observe/logger/writer/rotfile.refuseSymlink: path is a symlink; refusing per hardening policy",
 	},
 	Open: errs.WrapParams{
-		Code:    CodeRotFileOpenFailed,
+		Code:    corerotfile.CodeRotFileOpenFailed,
 		Reason:  "ROT_FILE_OPEN_FAILED",
 		Public:  "Rotating file sink could not open the destination file",
 		Private: "service/observe/logger/writer/rotfile.openHardened: os.OpenFile returned an error",
@@ -88,7 +89,7 @@ func newRotatingSink(cfg *Config) (sink corelogger.Sink, err error) {
 	if cfg.Path == "" {
 		//: surface the open sentinel with an explicit private cause.
 		return nil, errs.Wrap(nil, errs.WrapParams{
-			Code:    CodeRotFileOpenFailed,
+			Code:    corerotfile.CodeRotFileOpenFailed,
 			Reason:  "ROT_FILE_OPEN_FAILED",
 			Public:  "Rotating file sink requires a non-empty path",
 			Private: "service/observe/logger/writer/rotfile.newRotatingSink: empty path",
@@ -136,7 +137,7 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so consumers get both our reason and stdlib Is().
 		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeRotFileWriteFailed,
+			Code:    corerotfile.CodeRotFileWriteFailed,
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file write failed",
 			Private: "service/observe/logger/writer/rotfile.Write saw a cancelled context",
@@ -176,7 +177,7 @@ func (s *rotatingSink) Write(ctx context.Context, r corelogger.RecordEvent, p []
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return written, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeRotFileWriteFailed,
+			Code:    corerotfile.CodeRotFileWriteFailed,
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file write failed",
 			Private: "service/observe/logger/writer/rotfile.Write underlying *os.File returned an error",
@@ -195,7 +196,7 @@ func (s *rotatingSink) Flush(ctx context.Context) error {
 		//: cancelled Flush carries the dotted-quad code (errs.HasCode works) and
 		//: errors.Is still catches the stdlib cancellation cause.
 		return errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeRotFileWriteFailed,
+			Code:    corerotfile.CodeRotFileWriteFailed,
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file flush failed",
 			Private: "service/observe/logger/writer/rotfile.Flush saw a cancelled context",
@@ -209,7 +210,7 @@ func (s *rotatingSink) Flush(ctx context.Context) error {
 	if serr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return errs.Wrap(serr, errs.WrapParams{
-			Code:    CodeRotFileWriteFailed,
+			Code:    corerotfile.CodeRotFileWriteFailed,
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file flush failed",
 			Private: "service/observe/logger/writer/rotfile.Flush underlying *os.File.Sync returned an error",
@@ -238,7 +239,7 @@ func (s *rotatingSink) Close() error {
 	if cerr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeRotFileWriteFailed,
+			Code:    corerotfile.CodeRotFileWriteFailed,
 			Reason:  "ROT_FILE_WRITE_FAILED",
 			Public:  "Rotating file close failed",
 			Private: "service/observe/logger/writer/rotfile.Close underlying *os.File.Close returned an error",

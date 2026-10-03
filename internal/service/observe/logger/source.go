@@ -39,7 +39,7 @@ func newSourceHandler(next corelogger.Handler, skip int) (h corelogger.Handler, 
 	//: reject a nil inner handler so Handle never panics on the hot path.
 	if next == nil {
 		//: reuse the package's documented nil-handler sentinel.
-		return nil, HandlerNil
+		return nil, corelogger.HandlerNil
 	}
 	//: clamp a negative skip so a wrapper miscount never underflows the offset.
 	if skip < 0 {

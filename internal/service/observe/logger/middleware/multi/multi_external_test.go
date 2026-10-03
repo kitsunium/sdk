@@ -13,6 +13,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coremulti "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
@@ -116,7 +117,7 @@ func TestFanout_Write(t *testing.T) {
 			s := multi.New(branches...)
 			_, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
 			if tc.wantErr {
-				if !errs.HasCode(err, multi.CodeFanoutWriteFailed) {
+				if !errs.HasCode(err, coremulti.CodeFanoutWriteFailed) {
 					t.Errorf("err = %v, want FanoutWriteFailed", err)
 				}
 				return
@@ -176,7 +177,7 @@ func TestFanoutWriteFailedSentinel(t *testing.T) {
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			if !errs.HasCode(multi.FanoutWriteFailed, multi.CodeFanoutWriteFailed) {
+			if !errs.HasCode(coremulti.FanoutWriteFailed, coremulti.CodeFanoutWriteFailed) {
 				t.Errorf("HasCode failed for FanoutWriteFailed")
 			}
 		})
@@ -198,7 +199,7 @@ func TestFanout_Write_AllBranchesFail(t *testing.T) {
 			s := multi.New(a, b)
 			n, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
 			//: every branch failed, so the wrapped FanoutWriteFailed sentinel surfaces.
-			if !errs.HasCode(err, multi.CodeFanoutWriteFailed) {
+			if !errs.HasCode(err, coremulti.CodeFanoutWriteFailed) {
 				t.Errorf("err = %v, want FanoutWriteFailed", err)
 			}
 			//: no branch accepted the payload, so the reported byte count stays zero.
@@ -291,7 +292,7 @@ func TestFanout_Write_ByteCountLastSuccess(t *testing.T) {
 			s := multi.New(a, b)
 			n, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("abc"))
 			//: one branch failed, so the aggregate error must still surface.
-			if !errs.HasCode(err, multi.CodeFanoutWriteFailed) {
+			if !errs.HasCode(err, coremulti.CodeFanoutWriteFailed) {
 				t.Errorf("err = %v, want FanoutWriteFailed", err)
 			}
 			//: n is the accepting branch's count (3), never a cross-branch sum.

@@ -17,7 +17,7 @@ per-branch policies).
 | File | Role |
 |---|---|
 | `sample_sink.go` | `sampleSink` + `New` + `Write` / `Flush` / `Close` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.20.\* |
+| `internal/core/observe/logger/middleware/sample` | its sentinels — range 0.3.20.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -32,6 +32,8 @@ per-branch policies).
   flush).
 
 ## Error catalogue — range 0.3.20.\*
+
+Declared in `internal/core/observe/logger/middleware/sample` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coresample.X`.
 
 | Code      | Sentinel        | Trigger |
 |---|---|---|

@@ -12,6 +12,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	coreasync "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/sink/console"
@@ -238,7 +239,7 @@ func TestAsync_WriteAfterCloseReturnsStopped(t *testing.T) {
 			s := async.New(down, async.Config{BufferSize: 4})
 			swallowAsyncClose(s.Close())
 			_, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("x"))
-			if !errs.HasCode(err, async.CodeAsyncStopped) {
+			if !errs.HasCode(err, coreasync.CodeAsyncStopped) {
 				t.Errorf("err = %v, want Stopped", err)
 			}
 		})
@@ -490,7 +491,7 @@ func TestAsync_FlushCancelledContextReturnsCtxCancelled(t *testing.T) {
 			//: non-empty iteration.
 			cancel()
 			err := s.Flush(ctx)
-			if !errs.HasCode(err, async.CodeAsyncCtxCancelled) {
+			if !errs.HasCode(err, coreasync.CodeAsyncCtxCancelled) {
 				t.Errorf("Flush err = %v, want CodeAsyncCtxCancelled", err)
 			}
 			//: the typed wrap must preserve the stdlib chain for errors.Is.
@@ -615,9 +616,9 @@ func TestAsyncSentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"Stopped carries 0.3.17.1", async.Stopped, async.CodeAsyncStopped},
-		{"BufferFull carries 0.3.17.2", async.BufferFull, async.CodeAsyncBufferFull},
-		{"CtxCancelled carries 0.3.17.3", async.CtxCancelled, async.CodeAsyncCtxCancelled},
+		{"Stopped carries 0.3.17.1", coreasync.Stopped, coreasync.CodeAsyncStopped},
+		{"BufferFull carries 0.3.17.2", coreasync.BufferFull, coreasync.CodeAsyncBufferFull},
+		{"CtxCancelled carries 0.3.17.3", coreasync.CtxCancelled, coreasync.CodeAsyncCtxCancelled},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

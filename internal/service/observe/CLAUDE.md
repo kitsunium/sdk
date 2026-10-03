@@ -31,8 +31,8 @@ for the two file sinks.
 
 | Package | What it is | Built on | Code range | Facade |
 |---|---|---|---|---|
-| `logger/` | the one-allocation-per-emit logger: the handlers, the `encoder/` text and JSON formats, the `middleware/*` decorators (`multi`, `async`, `route`, `failover`, `sample`, `recover`, `encwrite`, `tee`) and the `sink/*` terminals (`console`, `file`, `syslog`, `memory`); trace correlation is injected through `NewWithTraceContext` and never imported (ADR 0062) | `core/observe/logger` | `0.3.1.*`, and one slot per sink and middleware (`logger/CLAUDE.md`) | `pkg/v1/observe/logger` |
-| `logger/writer/` | the log-transport writers behind the `core/observe/logger/writer` registry: `console`, `file`, `rotfile`, `journald` and `nettransport` register a factory, `dbsink` is the driver-agnostic database sink shell, `levelgate` the floor a writer's sink is wrapped in (ADR 0012, ADR 0015, ADR 0132) | `core/observe/logger/writer`, `logger/sink/*`, `logger/middleware/async` | `rotfile` `0.3.27.*`, `nettransport` `0.3.30.*`, `journald` `0.3.31.*` | `pkg/v1/observe/logger/writer` (`console`, `file`, `rotfile`), `pkg/v1/observe/logger` (`LevelGate`); `dbsink` through `third-party/db/writer/*` |
+| `logger/` | the one-allocation-per-emit logger: the handlers, the `encoder/` text and JSON formats, the `middleware/*` decorators (`multi`, `async`, `route`, `failover`, `sample`, `recover`, `encwrite`, `tee`) and the `sink/*` terminals (`console`, `file`, `syslog`, `memory`); trace correlation is injected through `NewWithTraceContext` and never imported (ADR 0062) | `core/observe/logger` | `0.3.1.*`, and one slot per sink and middleware (`logger/CLAUDE.md`) — declared in `core/observe/logger` and its mirrors (ADR 0160) | `pkg/v1/observe/logger` |
+| `logger/writer/` | the log-transport writers behind the `core/observe/logger/writer` registry: `console`, `file`, `rotfile`, `journald` and `nettransport` register a factory, `dbsink` is the driver-agnostic database sink shell, `levelgate` the floor a writer's sink is wrapped in (ADR 0012, ADR 0015, ADR 0132) | `core/observe/logger/writer`, `logger/sink/*`, `logger/middleware/async` | `rotfile` `0.3.27.*`, `nettransport` `0.3.30.*`, `journald` `0.3.31.*` — declared in `core/observe/logger/writer/*` (ADR 0160) | `pkg/v1/observe/logger/writer` (`console`, `file`, `rotfile`), `pkg/v1/observe/logger` (`LevelGate`); `dbsink` through `third-party/db/writer/*` |
 | `metrics/` | the in-memory `Meter` and its lock-free instruments, the `text` exporter, the lossy `prometheus` connector, and OTLP/JSON with the OTLP/HTTP emitter (ADR 0027, ADR 0044, ADR 0048) | `core/observe/metrics`, `core/observe/otel`, `internal/otlp` | `0.3.45.*` (+ core `0.2.9.*`) | `pkg/v1/observe/metrics` |
 | `trace/` | the `Tracer`, four samplers, the in-memory `Recorder`, `RecordError`, OTLP/JSON with the OTLP/HTTP emitter, and the server and client HTTP middlewares (ADR 0051) | `core/observe/trace`, `core/observe/otel`, `internal/otlp` | `0.3.50.*` (+ core `0.2.20.*`) | `pkg/v1/observe/trace` |
 | `profiling/` | a bounded CPU window and the live heap on `runtime/pprof`, the pprof format decoded with the standard library, `Fold` onto owners the caller names, goroutine dumps read and grouped; no core yet (ADR 0121 §D1, ADR 0160 §1) | none | `0.3.89.*` | `pkg/v1/observe/profiling` |
@@ -47,8 +47,10 @@ middleware type. Inside it, `logger` keeps zero edges to `trace` and `metrics`
 and `logger/writer/levelgate`, and `profiling` imports nothing of the family.
 
 Every range above kept its value when its package moved here from the root of
-`internal/service` (ADR 0160): `codeRangeOwners` names the new directories
-under the same keys, and `//:audit_sources` lists them by their new labels.
+`internal/service` (ADR 0160), and kept it again when its DECLARATION moved to
+the core package at the same path (ADR 0160 §2): an engine here returns its
+sentinels and declares none, so `codeRangeOwners` and `//:audit_sources` name
+the `internal/core/observe/...` directories.
 
 ## Do NOT
 

@@ -19,7 +19,7 @@ func TestNew(t *testing.T) {
 		wantErrIs  error
 	}{
 		{"real handler produces logger", false, nil},
-		{"nil handler returns HandlerNil", true, svclogger.HandlerNil},
+		{"nil handler returns HandlerNil", true, corelogger.HandlerNil},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -41,8 +41,8 @@ func TestNew(t *testing.T) {
 			if !errors.Is(err, tc.wantErrIs) {
 				t.Errorf("errors.Is(%v, HandlerNil) = false", err)
 			}
-			if code, _ := errs.CodeOf(err); code != svclogger.CodeHandlerNil {
-				t.Errorf("CodeOf err = %v, want %v", code, svclogger.CodeHandlerNil)
+			if code, _ := errs.CodeOf(err); code != corelogger.CodeHandlerNil {
+				t.Errorf("CodeOf err = %v, want %v", code, corelogger.CodeHandlerNil)
 			}
 		})
 	}

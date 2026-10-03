@@ -22,8 +22,8 @@ func TestNewHandler(t *testing.T) {
 		wantErr error
 	}{
 		{"happy path", false, false, nil},
-		{"nil encoder is rejected", true, false, svclogger.EncoderNil},
-		{"nil sink is rejected", false, true, svclogger.SinkRequired},
+		{"nil encoder is rejected", true, false, corelogger.EncoderNil},
+		{"nil sink is rejected", false, true, corelogger.SinkRequired},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

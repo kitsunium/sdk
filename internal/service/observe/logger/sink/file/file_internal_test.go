@@ -10,6 +10,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corefile "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile"
 )
@@ -66,8 +67,8 @@ func Test_fileSink_Write(t *testing.T) {
 	}{
 		{"happy path writes bytes", false, false, false, 5, false, 0},
 		{"nil ctx is treated as live and writes", true, false, false, 5, false, 0},
-		{"cancelled context returns 0 bytes", false, true, false, 0, true, CodeCtxCancelled},
-		{"closed file surfaces WriteFailed", false, false, true, 0, true, CodeWriteFailed},
+		{"cancelled context returns 0 bytes", false, true, false, 0, true, corefile.CodeCtxCancelled},
+		{"closed file surfaces WriteFailed", false, false, true, 0, true, corefile.CodeWriteFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -121,7 +122,7 @@ func Test_fileSink_Flush(t *testing.T) {
 		{"flush with live ctx is nil", false, false, false, false, 0},
 		{"flush with nil ctx is nil", true, false, false, false, 0},
 		{"flush with cancelled ctx surfaces error", false, true, false, true, 0},
-		{"flush on closed file surfaces SyncFailed", false, false, true, true, CodeSyncFailed},
+		{"flush on closed file surfaces SyncFailed", false, false, true, true, corefile.CodeSyncFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -168,7 +169,7 @@ func Test_fileSink_Close(t *testing.T) {
 		wantCode    errs.Code
 	}{
 		{"Close releases the descriptor without error", false, 0},
-		{"double close returns CloseFailed", true, CodeCloseFailed},
+		{"double close returns CloseFailed", true, corefile.CodeCloseFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -204,7 +205,7 @@ func Test_fileSink_WriteAfterClose(t *testing.T) {
 			//: kernel "file already closed" error must surface as WriteFailed.
 			swallowSinkClose(s.Close())
 			_, err := s.Write(t.Context(), corelogger.RecordEvent{Level: level.Info}, []byte("after"))
-			if !errs.HasCode(err, CodeWriteFailed) {
+			if !errs.HasCode(err, corefile.CodeWriteFailed) {
 				t.Errorf("HasCode(%v, CodeWriteFailed) = false", err)
 			}
 		})
@@ -336,7 +337,7 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 		t.Helper()
 		err := c.refuse(c.path)
 		//: every arm is the same sentinel — only the fields separate them.
-		if !errs.HasCode(err, CodeOpenFailed) {
+		if !errs.HasCode(err, corefile.CodeOpenFailed) {
 			t.Fatalf("%s: err=%v want open-failed", c.name, err)
 		}
 		//: the path is always named, so an operator can find the file.

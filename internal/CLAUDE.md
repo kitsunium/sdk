@@ -111,7 +111,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 - **Tests.** `*_internal_test.go` for white-box, `*_external_test.go` for black-box; table-driven with a `runCase` **closure declared inside the test function** — `runCase := func(t *testing.T, c tc) { … }` — so the linter's static analyser sees direct calls. NOT a shared helper: measured, **0 of 927** test files under `internal/` define one, while **437** declare the closure. This line said "helper" until three separate reviews in one day asked for a package-level function that has never existed here, and one rejection of that request cited `grep 'func runCase'` — a pattern the convention cannot produce.
 - **Interface assertions live in `*_compliance.go`**: a compile-time `var _ Port = (*impl)(nil)` sits in a `<name>_compliance.go` file (or a test file), never beside the implementation — `KTN-IFACE-ASSERT-PLACEMENT` (17 occurrences).
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
-  group and may share a file — `failed.go`, `match.go`, `unknown.go` — or stay
+  group and may share a file — `core/observe/logger/level`'s `unknown.go` — or stay
   split as `codes.go` / `errors.go` where the package is large enough for the
   separation to earn itself. What is enforced is the CODE, not the filename. The AST audit enforces uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (the namespaced style — ADR 0006/0020). Every emitter package must ship an `audit_srcs` filegroup and appear in `//:audit_sources`, else it is unaudited under Bazel.
 

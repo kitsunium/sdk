@@ -20,7 +20,7 @@ seam, not a retry queue. Compose retry behind the spill sink.
 |---|---|
 | `tee.go` | `TeeSink` + `NewTeeSink` (returns `*TeeSink`) + `Write` / `Flush` / `Close` + wrap helpers |
 | `config.go` | `Config` value type (`Primaries`, `Spill`) |
-| `failed.go` | sentinels — range 0.3.29.\* |
+| `internal/core/observe/logger/middleware/tee` | its sentinels — range 0.3.29.\* — declared in the core mirror since ADR 0160; this package declares none |
 | `doc.go` | package doc — scope, non-goals, concurrency |
 
 ## Spill semantics
@@ -37,6 +37,8 @@ seam, not a retry queue. Compose retry behind the spill sink.
   per-branch errors via `errors.Join`.
 
 ## Error catalogue — range 0.3.29.\*
+
+Declared in `internal/core/observe/logger/middleware/tee` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coretee.X`.
 
 | Code | Sentinel | Trigger |
 |---|---|---|

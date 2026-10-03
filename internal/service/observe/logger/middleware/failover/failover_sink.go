@@ -12,6 +12,7 @@ import (
 	"errors"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	corefailover "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -37,7 +38,7 @@ func New(branches ...corelogger.Sink) (sink corelogger.Sink, err error) {
 	//: reject empty chains — failover with no targets cannot accept any write.
 	if len(cp) == 0 {
 		//: documented sentinel — caller must supply at least one branch.
-		return nil, Empty
+		return nil, corefailover.Empty
 	}
 	//: hand back the failover Sink behind the public interface.
 	return &failoverSink{chain: cp}, nil
@@ -70,7 +71,7 @@ func (s *failoverSink) Write(ctx context.Context, rec corelogger.RecordEvent, p 
 	}
 	//: every branch failed — wrap the joined chain in the documented sentinel.
 	return 0, errs.Wrap(errors.Join(collected...), errs.WrapParams{
-		Code:    CodeFailoverExhausted,
+		Code:    corefailover.CodeFailoverExhausted,
 		Reason:  "FAILOVER_EXHAUSTED",
 		Public:  "All failover sinks returned an error",
 		Private: "service/observe/logger/middleware/failover.Write exhausted the chain",

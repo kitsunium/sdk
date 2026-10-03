@@ -16,7 +16,7 @@ logs survive a network outage.
 | File | Role |
 |---|---|
 | `failover_sink.go` | `failoverSink` + `New` + `Write` / `Flush` / `Close` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.19.\* |
+| `internal/core/observe/logger/middleware/failover` | its sentinels — range 0.3.19.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -31,6 +31,8 @@ logs survive a network outage.
   `errors.Join`. Callers see every cause via `errors.Is`.
 
 ## Error catalogue — range 0.3.19.\*
+
+Declared in `internal/core/observe/logger/middleware/failover` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corefailover.X`.
 
 | Code      | Sentinel    | Trigger |
 |---|---|---|

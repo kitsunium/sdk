@@ -5,9 +5,9 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/observe/logger/level"
+	corefile "github.com/kitsunium/sdk/internal/core/observe/logger/sink/file"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
-	filesink "github.com/kitsunium/sdk/internal/service/observe/logger/sink/file"
 )
 
 // : compile-time proof the factory satisfies the registry port AND the optional
@@ -149,7 +149,7 @@ func Test_fileFactory_Open_ErrorCodes(t *testing.T) {
 	}
 	tests := []tc{
 		//: empty path defers to the sink, so its PathEmpty code wins (origin).
-		{"empty path carries CodePathEmpty", writer.FileConfig{Path: ""}, filesink.CodePathEmpty},
+		{"empty path carries CodePathEmpty", writer.FileConfig{Path: ""}, corefile.CodePathEmpty},
 		//: a wrong concrete type is rejected before delegation with the shared code.
 		{"wrong config type carries CodeWriterConfigInvalid", writer.ConsoleConfig{}, writer.CodeWriterConfigInvalid},
 	}

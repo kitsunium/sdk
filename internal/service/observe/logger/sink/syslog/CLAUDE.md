@@ -23,7 +23,7 @@ allocation-friendly.
 | `syslog_sink.go`        | `syslogSink` + `New` + `NewWithConfig` + `makeFrame` |
 | `priority.go`           | `severityFor` / `priorityFor` + RFC5424 severity constants |
 | `config.go`             | `Config{Dialer}` — pluggable allowlist-aware `net.Dial` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.15.\* |
+| `internal/core/observe/logger/sink/syslog` | its sentinels — range 0.3.15.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Constructors
 
@@ -59,6 +59,8 @@ allocation-friendly.
   connection" wrapped as `WriteFailed`.
 
 ## Error catalogue — range 0.3.15.\*
+
+Declared in `internal/core/observe/logger/sink/syslog` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coresyslog.X`.
 
 | Code      | Sentinel        | Trigger |
 |---|---|---|

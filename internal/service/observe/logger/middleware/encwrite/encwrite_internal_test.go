@@ -11,6 +11,7 @@ import (
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 
+	coreencwrite "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite"
 	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
@@ -129,13 +130,13 @@ func Test_NewEncWriter_subkeyDerivationFailed(t *testing.T) {
 			}
 			//: wrap exactly as NewEncWriter does so the seal-failed mapping is asserted.
 			wrapped := errs.Wrap(derr, errs.WrapParams{
-				Code:    CodeEncWriteSealFailed,
+				Code:    coreencwrite.CodeEncWriteSealFailed,
 				Reason:  "ENC_WRITE_SEAL_FAILED",
 				Public:  "Encrypting middleware could not seal the record",
 				Private: "service/observe/logger/middleware/encwrite: Subkey derivation failed at construction",
 			})
 			//: the construction-time derivation fault must surface as the seal sentinel.
-			if !errs.HasCode(wrapped, CodeEncWriteSealFailed) {
+			if !errs.HasCode(wrapped, coreencwrite.CodeEncWriteSealFailed) {
 				t.Fatalf("wrapped err=%v want CodeEncWriteSealFailed", wrapped)
 			}
 		})
@@ -164,13 +165,13 @@ func Test_NewEncWriter_sealFailed(t *testing.T) {
 			}
 			//: wrap exactly as Write does so the seal-failed mapping is asserted.
 			wrapped := errs.Wrap(serr, errs.WrapParams{
-				Code:    CodeEncWriteSealFailed,
+				Code:    coreencwrite.CodeEncWriteSealFailed,
 				Reason:  "ENC_WRITE_SEAL_FAILED",
 				Public:  "Encrypting middleware could not seal the record",
 				Private: "service/observe/logger/middleware/encwrite: Seal returned an error",
 			})
 			//: a Seal fault on the hot path must surface as the seal sentinel.
-			if !errs.HasCode(wrapped, CodeEncWriteSealFailed) {
+			if !errs.HasCode(wrapped, coreencwrite.CodeEncWriteSealFailed) {
 				t.Fatalf("wrapped err=%v want CodeEncWriteSealFailed", wrapped)
 			}
 		})

@@ -14,7 +14,7 @@ emit atomic lines. It backs `pkg/v1/observe/logger`'s `ConsoleStderr` /
 | File | Role |
 |---|---|
 | `console.go`            | `consoleSink` + `New` / `NewStderr` / `NewStdout` |
-| `codes.go`, `errors.go` | sentinels — range 0.3.13.\* |
+| `internal/core/observe/logger/sink/console` | its sentinels — range 0.3.13.\* — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Behaviour
 
@@ -33,6 +33,8 @@ emit atomic lines. It backs `pkg/v1/observe/logger`'s `ConsoleStderr` /
   is responsible for closing custom `io.Writer`s.
 
 ## Error catalogue — range 0.3.13.\*
+
+Declared in `internal/core/observe/logger/sink/console` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `coreconsole.X`.
 
 | Code      | Sentinel        | Trigger |
 |---|---|---|

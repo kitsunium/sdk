@@ -12,6 +12,7 @@ import (
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite"
 
+	coreencwrite "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite"
 	_ "github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm"
 	_ "github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256"
 )
@@ -309,8 +310,8 @@ func Test_Sentinels(t *testing.T) {
 		err  error
 		code errs.Code
 	}{
-		{"framing sentinel", encwrite.FramingFailed, encwrite.CodeFramingFailed},
-		{"seal sentinel", encwrite.EncWriteSealFailed, encwrite.CodeEncWriteSealFailed},
+		{"framing sentinel", coreencwrite.FramingFailed, coreencwrite.CodeFramingFailed},
+		{"seal sentinel", coreencwrite.EncWriteSealFailed, coreencwrite.CodeEncWriteSealFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {

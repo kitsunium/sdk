@@ -19,6 +19,7 @@ import (
 	"sync"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coresyslog "github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -75,12 +76,12 @@ func NewWithConfig(network, addr string, cfg Config) (sink corelogger.Sink, err 
 	//: refuse an empty address early — net.Dial would surface a confusing error.
 	if addr == "" {
 		//: documented sentinel — caller must supply an address.
-		return nil, AddrEmpty
+		return nil, coresyslog.AddrEmpty
 	}
 	//: refuse unsupported networks — only udp / tcp are wire-tested today.
 	if network != netUDP && network != netTCP {
 		//: documented sentinel — caller must supply udp or tcp.
-		return nil, ProtoInvalid
+		return nil, coresyslog.ProtoInvalid
 	}
 	//: nil dialer falls back to stdlib net.Dial (legacy behaviour of New).
 	dial := cfg.Dialer
@@ -95,7 +96,7 @@ func NewWithConfig(network, addr string, cfg Config) (sink corelogger.Sink, err 
 	if derr != nil {
 		//: wrap with the documented sentinel for HasCode introspection.
 		return nil, errs.Wrap(derr, errs.WrapParams{
-			Code:    CodeSyslogDialFailed,
+			Code:    coresyslog.CodeSyslogDialFailed,
 			Reason:  "SYSLOG_DIAL_FAILED",
 			Public:  "Syslog sink could not dial the destination",
 			Private: "service/observe/logger/sink/syslog.New: net.Dial returned an error",
@@ -134,7 +135,7 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved
 		//: and consumers can HasCode / errors.Is against the cancellation.
 		return 0, errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeSyslogCtxCancelled,
+			Code:    coresyslog.CodeSyslogCtxCancelled,
 			Reason:  "SYSLOG_CTX_CANCELLED",
 			Public:  "Syslog sink write aborted due to cancellation",
 			Private: "service/observe/logger/sink/syslog.Write saw a cancelled context",
@@ -150,7 +151,7 @@ func (s *syslogSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 	if werr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return written, errs.Wrap(werr, errs.WrapParams{
-			Code:    CodeSyslogWriteFailed,
+			Code:    coresyslog.CodeSyslogWriteFailed,
 			Reason:  "SYSLOG_WRITE_FAILED",
 			Public:  "Syslog write failed",
 			Private: "service/observe/logger/sink/syslog.Write underlying net.Conn returned an error",
@@ -167,7 +168,7 @@ func (s *syslogSink) Flush(ctx context.Context) error {
 	if ctx != nil && ctx.Err() != nil {
 		//: wrap ctx.Err() so the typed-errors-only SDK rule is preserved.
 		return errs.Wrap(ctx.Err(), errs.WrapParams{
-			Code:    CodeSyslogCtxCancelled,
+			Code:    coresyslog.CodeSyslogCtxCancelled,
 			Reason:  "SYSLOG_CTX_CANCELLED",
 			Public:  "Syslog sink flush aborted due to cancellation",
 			Private: "service/observe/logger/sink/syslog.Flush saw a cancelled context",
@@ -189,7 +190,7 @@ func (s *syslogSink) Close() error {
 	if cerr != nil {
 		//: propagate through errs.Wrap so errors.Is still catches the cause.
 		return errs.Wrap(cerr, errs.WrapParams{
-			Code:    CodeSyslogCloseFailed,
+			Code:    coresyslog.CodeSyslogCloseFailed,
 			Reason:  "SYSLOG_CLOSE_FAILED",
 			Public:  "Syslog close failed",
 			Private: "service/observe/logger/sink/syslog.Close underlying net.Conn.Close returned an error",

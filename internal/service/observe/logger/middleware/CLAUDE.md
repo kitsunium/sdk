@@ -81,8 +81,10 @@ Three findings a caller should know before wiring a chain:
 ## Conventions
 
 - **One package per concern**, each owning one code range and sentinels
-  named after their drop / fail mode — in `codes.go` + `errors.go`, or in one
-  shared file (`multi/failed.go`, `route/match.go`, `tee/failed.go`).
+  named after their drop / fail mode. Since ADR 0160 they are declared in the
+  core mirror at the same path, `internal/core/observe/logger/middleware/<name>`
+  (`codes.go` + `errors.go`); a middleware here declares none and imports its
+  mirror as `core<name>`.
 - **OnError / OnDrop / OnPanic hooks.** Middlewares that can silently lose
   records expose a `Config` callback so operators wire metrics or fallback
   logs. `async` exposes `OnDrop` and `OnError`, `recover` exposes `OnPanic`;

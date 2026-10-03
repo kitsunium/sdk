@@ -44,9 +44,11 @@ below, when the reorganisation series reaches it.
 
 | Package | What it declares | Code range | Engine |
 |---|---|---|---|
-| `logger/` | the four ports — `Logger`, `Handler`, `Encoder`, `Sink` — the immutable `RecordEvent`, `AttrValue`, `Value` and `Kind`, and `TraceContextValue` with the `TraceContextSource` FUNC port; stdlib-only, the trace domain is NOT imported (ADR 0062) | `0.2.1.*`, reserved and empty | `internal/service/observe/logger` |
+| `logger/` | the four ports — `Logger`, `Handler`, `Encoder`, `Sink` — the immutable `RecordEvent`, `AttrValue`, `Value` and `Kind`, and `TraceContextValue` with the `TraceContextSource` FUNC port; stdlib-only, the trace domain is NOT imported (ADR 0062); and the engine's codes and sentinels (ADR 0160) | `0.2.1.*`, reserved and empty; `0.3.1.*`, the engine's | `internal/service/observe/logger` |
+| `logger/middleware/*`, `logger/sink/*` | the codes and sentinels of the engine's eight decorators (`async`, `encwrite`, `failover`, `multi`, `recover`, `route`, `sample`, `tee`) and three terminals (`console`, `file`, `syslog`) — one package per engine package, codes only (ADR 0160 §2) | `0.3.13.*`–`0.3.21.*`, `0.3.28.*`, `0.3.29.*` | `internal/service/observe/logger/{middleware,sink}/*` |
 | `logger/level/` | `Level` and `Debug` / `Info` / `Warn` / `Error` | `0.2.17.*` | none — a vocabulary every logger package reads |
 | `logger/writer/` | `Factory` / `Name` / `Config` and the process-wide registry mapping a writer name to a `Sink`-producing factory, each SDK writer's configuration value and the network writers' credential port (ADR 0012) | `0.2.3.*` | `internal/service/observe/logger/writer/*` |
+| `logger/writer/{journald, nettransport, rotfile}/` | the codes and sentinels of the three writers that declare any — codes only (ADR 0160 §2) | `0.3.31.*`, `0.3.30.*`, `0.3.27.*` | `internal/service/observe/logger/writer/{journald,nettransport,rotfile}` |
 | `metrics/` | the OpenTelemetry metrics data model: the instruments, the frozen `Meter` and its siblings, `Temporality`, the `Exporter` registry and `SnapshotValue` (ADR 0027, ADR 0044) | `0.2.9.*` | `internal/service/observe/metrics` |
 | `otel/` | the types every signal shares — `AttrValue`, `ResourceValue`, `ScopeValue` — and no code: its guards panic with the sentinel their caller passes (ADR 0051 §Decision 2) | none | none — `metrics/` and `trace/` build on it |
 | `trace/` | the frozen `Tracer` and `Span` ports, `SpanContextValue`, the W3C Trace Context format, the span model, the `Sampler` and `SpanSink` FUNC ports, `Carrier` and the `SpanExporter` registry (ADR 0051) | `0.2.20.*` | `internal/service/observe/trace` |
@@ -57,9 +59,12 @@ both import `otel` and neither imports the other; `logger/writer` imports
 its bridge to `trace` is `pkg/v1/observe/logger`'s, the one place the two
 domains meet (ADR 0062).
 
-A code keeps its value when its package moves (ADR 0160): the four ranges
-above are the ones these packages declared before the family existed, and
-`codeRangeOwners` names the new directories under the same keys.
+A code keeps its value when its package moves (ADR 0160): the `0.2.*` ranges
+above are the ones these packages declared before the family existed, the
+`0.3.*` ones are the engines', declared here since ADR 0160 §2 at each
+engine's path, and `codeRangeOwners` names the new directories under the same
+keys. The code mirrors beneath `logger/` import `kernel/errs` and nothing of
+the family.
 
 ## Do NOT
 

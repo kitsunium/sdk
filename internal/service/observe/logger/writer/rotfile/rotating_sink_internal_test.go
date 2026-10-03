@@ -10,6 +10,7 @@ import (
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corerotfile "github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 	"github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile"
 )
@@ -69,7 +70,7 @@ func Test_openHardened(t *testing.T) {
 		}
 		//: failure arm — typed open error + nil descriptor.
 		if c.wantErr {
-			if !errs.HasCode(err, CodeRotFileOpenFailed) || f != nil {
+			if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) || f != nil {
 				t.Errorf("%s: err=%v f=%v want open-failed+nil", c.name, err, f)
 			}
 			return
@@ -117,7 +118,7 @@ func Test_openRefusalsSymlink(t *testing.T) {
 		err := logfile.RefuseSymlink(c.path, &openRefusals.Symlink)
 		//: the symlink arm must carry the open code.
 		if c.wantErr {
-			if !errs.HasCode(err, CodeRotFileOpenFailed) {
+			if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) {
 				t.Errorf("%s: err=%v want open-failed", c.name, err)
 			}
 			return
@@ -159,7 +160,7 @@ func Test_newRotatingSink(t *testing.T) {
 		base, err := newRotatingSink(&c.cfg)
 		//: failure arm — typed open error + nil sink.
 		if c.wantErr {
-			if !errs.HasCode(err, CodeRotFileOpenFailed) || base != nil {
+			if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) || base != nil {
 				t.Errorf("%s: err=%v sink=%v want open-failed+nil", c.name, err, base)
 			}
 			return
@@ -213,7 +214,7 @@ func Test_rotatingSink_Write(t *testing.T) {
 		n, err := s.Write(ctx, corelogger.RecordEvent{}, []byte("hello"))
 		//: failure arm — typed write error + zero count.
 		if c.wantErr {
-			if !errs.HasCode(err, CodeRotFileWriteFailed) || n != 0 {
+			if !errs.HasCode(err, corerotfile.CodeRotFileWriteFailed) || n != 0 {
 				t.Errorf("%s: n=%d err=%v want 0+write-failed", c.name, n, err)
 			}
 			return
@@ -273,7 +274,7 @@ func Test_rotatingSink_Close(t *testing.T) {
 			t.Errorf("first close: %v", cerr)
 		}
 		//: a second close hits the kernel's already-closed error, wrapped typed.
-		if cerr := s.Close(); !errs.HasCode(cerr, CodeRotFileWriteFailed) {
+		if cerr := s.Close(); !errs.HasCode(cerr, corerotfile.CodeRotFileWriteFailed) {
 			t.Errorf("second close err=%v want write-failed", cerr)
 		}
 	}
@@ -322,7 +323,7 @@ func Test_rotatingSink_reopenReappliesHardening(t *testing.T) {
 			t.Fatalf("openHardened followed a symlink on reopen")
 		}
 		//: the refusal must carry the documented open code.
-		if !errs.HasCode(oerr, CodeRotFileOpenFailed) {
+		if !errs.HasCode(oerr, corerotfile.CodeRotFileOpenFailed) {
 			t.Errorf("reopen err=%v want open-failed", oerr)
 		}
 	}
@@ -386,7 +387,7 @@ func Test_rotatingSink_Write_tickErr(t *testing.T) {
 		defer closeQuiet(t, s)
 		//: stash a typed rotate failure exactly as a failing tick would.
 		s.mu.Lock()
-		s.tickErr = RotFileRotateFailed
+		s.tickErr = corerotfile.RotFileRotateFailed
 		s.mu.Unlock()
 		//: the first Write surfaces the stash via OnError, NOT its return value —
 		//: the triggering record is still written (F6-tickdrop: no dropped line).
@@ -394,7 +395,7 @@ func Test_rotatingSink_Write_tickErr(t *testing.T) {
 			t.Fatalf("first Write err=%v want nil (record must still be written)", werr)
 		}
 		//: the failure reached the operator hook exactly once with the right code.
-		if !errs.HasCode(seen, CodeRotFileRotateFailed) {
+		if !errs.HasCode(seen, corerotfile.CodeRotFileRotateFailed) {
 			t.Fatalf("OnError saw %v want rotate-failed", seen)
 		}
 		//: the second Write proceeds normally — the error is not latched.
@@ -427,7 +428,7 @@ func Test_openHardened_openFails(t *testing.T) {
 		path := filepath.Join(t.TempDir(), "nosuchdir", "x.log")
 		f, err := openHardened(path)
 		//: the failed open must hand back the typed sentinel and no descriptor.
-		if !errs.HasCode(err, CodeRotFileOpenFailed) || f != nil {
+		if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) || f != nil {
 			//: release a surprise descriptor so the test never leaks one.
 			if f != nil {
 				closeFile(t, f)
@@ -468,7 +469,7 @@ func Test_rotatingSink_Write_rotationFails(t *testing.T) {
 		//: the next write trips maybeRotate, whose rotate() close fails → rotate-failed.
 		_, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("67"))
 		//: a failing rotation is fatal to this write under the rotate sentinel.
-		if !errs.HasCode(werr, CodeRotFileRotateFailed) {
+		if !errs.HasCode(werr, corerotfile.CodeRotFileRotateFailed) {
 			t.Errorf("Write err=%v want rotate-failed", werr)
 		}
 	}
@@ -502,7 +503,7 @@ func Test_rotatingSink_Write_underlyingWriteFails(t *testing.T) {
 		}
 		n, werr := s.Write(t.Context(), corelogger.RecordEvent{}, []byte("data"))
 		//: a closed fd surfaces the write sentinel; the count may be zero.
-		if !errs.HasCode(werr, CodeRotFileWriteFailed) || n != 0 {
+		if !errs.HasCode(werr, corerotfile.CodeRotFileWriteFailed) || n != 0 {
 			t.Errorf("Write n=%d err=%v want 0+write-failed", n, werr)
 		}
 	}
@@ -532,7 +533,7 @@ func Test_rotatingSink_Flush_cancelledContext(t *testing.T) {
 		//: V46: the guard must surface a typed error carrying the dotted-quad code,
 		//: not the raw stdlib context.Canceled (which has no errs.Code) — mirroring
 		//: Write and the journald/net sinks. Before the fix HasCode was false.
-		if !errs.HasCode(ferr, CodeRotFileWriteFailed) {
+		if !errs.HasCode(ferr, corerotfile.CodeRotFileWriteFailed) {
 			t.Errorf("Flush err=%v want write-failed code", ferr)
 		}
 		//: errs.Wrap preserves the cause so errors.Is still catches cancellation.
@@ -566,7 +567,7 @@ func Test_rotatingSink_Flush_syncFails(t *testing.T) {
 			t.Fatalf("sabotage close: %v", closeErr)
 		}
 		//: a failing fsync surfaces the write sentinel (Sync shares it with Write).
-		if ferr := s.Flush(t.Context()); !errs.HasCode(ferr, CodeRotFileWriteFailed) {
+		if ferr := s.Flush(t.Context()); !errs.HasCode(ferr, corerotfile.CodeRotFileWriteFailed) {
 			t.Errorf("Flush err=%v want write-failed", ferr)
 		}
 	}
@@ -644,7 +645,7 @@ func TestBothSymlinkRefusalsNameTheIndirection(t *testing.T) {
 		t.Helper()
 		err := c.refuse(c.path)
 		//: every arm is the same sentinel — only the fields separate them.
-		if !errs.HasCode(err, CodeRotFileOpenFailed) {
+		if !errs.HasCode(err, corerotfile.CodeRotFileOpenFailed) {
 			t.Fatalf("%s: err=%v want open-failed", c.name, err)
 		}
 		//: the path is always named, so an operator can find the file.

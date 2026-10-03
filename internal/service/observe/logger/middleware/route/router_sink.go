@@ -12,6 +12,7 @@ import (
 	"errors"
 
 	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
+	coreroute "github.com/kitsunium/sdk/internal/core/observe/logger/middleware/route"
 )
 
 // routerSink dispatches each Write to the first matching route entry.
@@ -57,7 +58,7 @@ func (s *routerSink) Write(ctx context.Context, rec corelogger.RecordEvent, p []
 		return s.fallback.Write(ctx, rec, p)
 	}
 	//: documented sentinel — caller knows no entry was wired for this record.
-	return 0, NoMatch
+	return 0, coreroute.NoMatch
 }
 
 // Flush forwards to every distinct entry sink + fallback and aggregates

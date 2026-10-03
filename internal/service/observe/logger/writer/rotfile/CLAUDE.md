@@ -27,7 +27,8 @@ sink is reproduced here and, critically, **re-run on every reopen**.
 | `rotate_manual.go` | `Rotate` — the on-demand rotation (SIGHUP / logrotate), under the same mutex as `Write` |
 | `backups.go` | backup-name arithmetic + per-slot move/gzip helpers |
 | `prune.go` | `pruneByAge` calendar pruning (MaxAgeDays) |
-| `codes.go`, `errors.go` | sentinels — range 0.3.27.\* (service slot 0x1b) |
+| `wrap.go` | `wrapRotate` — the single wrap points that put a cause under the mirror's codes; never a value parsed from a config or a record |
+| `internal/core/observe/logger/writer/rotfile` | its sentinels — range 0.3.27.\* (service slot 0x1b) — declared in the core mirror since ADR 0160; this package declares none |
 
 ## Security hardening
 
@@ -151,6 +152,8 @@ any other key returns `RotFileDecodeFailed`. **Secret gate:** the error names
 only the writer, never the offending value.
 
 ## Error catalogue — range 0.3.27.\*
+
+Declared in `internal/core/observe/logger/writer/rotfile` since ADR 0160 §2: this engine returns the sentinels below and declares none, so a test or a caller names them `corerotfile.X`.
 
 | Code | Sentinel | Trigger |
 |---|---|---|

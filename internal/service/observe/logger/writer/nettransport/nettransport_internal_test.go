@@ -5,6 +5,7 @@ import (
 	"testing"
 
 	"github.com/kitsunium/sdk/internal/core/observe/logger/writer"
+	corenettransport "github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport"
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -44,9 +45,9 @@ func Test_netFactory_Open(t *testing.T) {
 		wantCode errs.Code
 	}{
 		{"wrong config type rejected", protoTCP, "not a NetConfig", true, writer.CodeWriterConfigInvalid},
-		{"empty address rejected", protoTCP, NetConfig{}, true, CodeNetTransportDialFailed},
+		{"empty address rejected", protoTCP, NetConfig{}, true, corenettransport.CodeNetTransportDialFailed},
 		{"http builds without dialing", protoHTTP, NetConfig{Address: "http://collector.local/ingest"}, false, 0},
-		{"tcp dialer failure surfaces dial code", protoTCP, NetConfig{Address: "x:1", Dialer: failingDialer}, true, CodeNetTransportDialFailed},
+		{"tcp dialer failure surfaces dial code", protoTCP, NetConfig{Address: "x:1", Dialer: failingDialer}, true, corenettransport.CodeNetTransportDialFailed},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
@@ -89,7 +90,7 @@ func Test_netFactory_build(t *testing.T) {
 			sink, err := (&netFactory{proto: tc.proto}).build(tc.cfg)
 			//: error arm — dial failure surfaces, nil sink.
 			if tc.wantErr {
-				if sink != nil || !errs.HasCode(err, CodeNetTransportDialFailed) {
+				if sink != nil || !errs.HasCode(err, corenettransport.CodeNetTransportDialFailed) {
 					t.Errorf("%s: sink=%v err=%v want nil+dial-failed", tc.name, sink, err)
 				}
 				return
