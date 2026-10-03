@@ -1,7 +1,9 @@
 #!/usr/bin/env bats
 # BATS tests for scripts/ci/: the module census every module-looping lane reads
 # (go-modules.sh, ADR 0137) and the govulncheck gate built on it (vuln-check.sh,
-# ADR 0136). Run by `make ci-scripts-check` in the shell-gates job.
+# ADR 0136) — and for the guard half of scripts/ci-gates-check.sh, the manifest
+# that keeps every `make lint` guard a step of the bazel job. Run by
+# `make ci-scripts-check` in the shell-gates job.
 #
 # The census is tested in throwaway repositories — each test copies the script
 # into one, because the script answers for the repository it lives in. The
@@ -267,4 +269,65 @@ scans() {
 @test "vuln: the scan is a step of the required bazel job" {
   body="$(job_body "$REPO_ROOT/.github/workflows/bazel-ci.yml" bazel)"
   [[ "$body" == *"make vuln-check"* ]]
+}
+
+# ── ci-gates-check.sh: the guards ───────────────────────────────────────────
+
+# gates_fixture — a repository holding this repository's Makefile, workflow and
+# ci-gates-check.sh, with every listed guard present as a file, so each test
+# below changes ONE thing and the script answers for that change alone.
+gates_fixture() {
+  cd "$WORK"
+  mkdir -p scripts/pre-commit .github/workflows
+  cp "$REPO_ROOT/scripts/ci-gates-check.sh" scripts/
+  cp "$REPO_ROOT/Makefile" Makefile
+  cp "$REPO_ROOT/.github/workflows/bazel-ci.yml" .github/workflows/
+  for guard in "$REPO_ROOT"/scripts/pre-commit/check-*.sh "$REPO_ROOT"/scripts/check-layer-deps.sh; do
+    cp "$guard" "${guard#"$REPO_ROOT"/}"
+  done
+}
+
+# drop_line <file> <fixed string> — remove every line holding the string.
+drop_line() {
+  grep -vF -- "$2" "$1" >"$1.tmp" || true
+  mv "$1.tmp" "$1"
+}
+
+@test "gates: this repository's gates and guards are all enforced" {
+  run bash "$REPO_ROOT/scripts/ci-gates-check.sh"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"guards are enforced"* ]]
+}
+
+# The shape the header calls silent: the step goes, the guard survives in
+# `make lint`, and CI stops running it. Its name in the step's comment and
+# title must not count.
+@test "gates: a guard whose CI step was deleted is UNGATED" {
+  gates_fixture
+  drop_line .github/workflows/bazel-ci.yml "run: bash scripts/pre-commit/check-core-symmetry.sh"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"UNGATED: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+@test "gates: a guard make lint no longer runs is NOT LINTED" {
+  gates_fixture
+  drop_line Makefile "	bash scripts/pre-commit/check-core-symmetry.sh"
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"NOT LINTED: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
+}
+
+@test "gates: a listed guard that does not exist is MISSING" {
+  gates_fixture
+  rm scripts/pre-commit/check-core-symmetry.sh
+
+  run bash scripts/ci-gates-check.sh
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"MISSING GUARD: 'scripts/pre-commit/check-core-symmetry.sh'"* ]]
 }

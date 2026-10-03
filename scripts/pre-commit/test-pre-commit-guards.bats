@@ -1,7 +1,8 @@
 #!/usr/bin/env bats
-# BATS tests for the guards in scripts/pre-commit/, in three groups: the two
+# BATS tests for the guards in scripts/pre-commit/, in four groups: the two
 # guards that piped into an early-exiting reader, check-domain-docs.sh reading a
-# core grouped by family, and the portability of every guard. Each group says
+# core grouped by family, check-core-symmetry.sh holding the core to the
+# service (ADR 0160), and the portability of every guard. Each group says
 # below what it pins and why.
 #
 # The early-exit cases were found by finishing the sweep ADR 0088 opened and
@@ -268,6 +269,259 @@ internal/
 
   [ "$status" -eq 1 ]
   [[ "$output" == *"found 2 'core/' blocks"* ]]
+}
+
+# --- check-core-symmetry.sh -------------------------------------------------
+
+# ADR 0160: every service domain has a core, and every error code is declared
+# in the core, at the service's path. mksymroot builds a tree the guard passes,
+# and each case below plants ONE violation in it; every such case was seen red
+# for the reason its comment gives. The tree holds what the guard must NOT
+# refuse as well: a family's Go-internal helpers (observe/internal), a root
+# family whose core is one package serving a directory of engines (net), a
+# sub-contract beneath a domain owning only a range the core allocated
+# (app/widget/level), a core member with no engine and no code (observe/otel),
+# a re-export of a core code in a service, a Define in a service test, and a
+# comment naming errs.Define in a service file.
+mksymroot() {
+  mkdir -p internal/kernel/errs \
+    internal/service/app/widget internal/service/net/client \
+    internal/service/observe/internal/otlp internal/service/observe/metrics \
+    internal/core/app/widget/level internal/core/net \
+    internal/core/observe/otel internal/core/observe/metrics
+  cat >internal/kernel/errs/registry_ownership_external_test.go <<'EOF'
+package errs_test
+
+var codeRangeOwners = map[uint64]string{
+	0x00_02_01_00: "internal/core/app/widget",
+	0x00_03_01_00: "internal/core/app/widget",
+	0x00_02_02_00: "internal/core/app/widget/level",
+	0x00_02_03_00: "internal/core/net",
+	0x00_02_04_00: "internal/core/observe/metrics",
+}
+EOF
+  cat >internal/core/app/widget/codes.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeWidgetBroken errs.Code = 0x00_03_01_01
+EOF
+  cat >internal/core/app/widget/errors.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var WidgetBroken = errs.Define(CodeWidgetBroken, "WIDGET_BROKEN", "broken", "service/app/widget: broken")
+EOF
+  cat >internal/core/app/widget/level/level.go <<'EOF'
+package level
+
+import kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeLevelUnknown kerrs.Code = 0x00_02_02_01
+
+var LevelUnknown = kerrs.Define(CodeLevelUnknown, "LEVEL_UNKNOWN", "unknown", "level: unknown")
+EOF
+  cat >internal/core/net/net.go <<'EOF'
+package net
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Refused = errs.Define(0x00_02_03_01, "REFUSED", "refused", "net: refused")
+EOF
+  printf 'package otel\n\ntype AttrValue struct{}\n' >internal/core/observe/otel/otel.go
+  printf 'package metrics\n\ntype Meter interface{}\n' >internal/core/observe/metrics/metrics.go
+  cat >internal/service/app/widget/widget.go <<'EOF'
+package widget
+
+import (
+	corewidget "github.com/kitsunium/sdk/internal/core/app/widget"
+	kerrs "github.com/kitsunium/sdk/internal/kernel/errs"
+)
+
+// The sentinel is declared with errs.Define(...) in the core, never here.
+const CodeWidgetBroken kerrs.Code = corewidget.CodeWidgetBroken
+
+func Fail(err error) error { return kerrs.Wrap(err, kerrs.WrapParams{Code: CodeWidgetBroken}) }
+EOF
+  cat >internal/service/app/widget/widget_test.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var fixture = errs.Define(0x00_03_01_99, "FIXTURE", "fixture", "fixture")
+EOF
+  printf 'package client\n' >internal/service/net/client/client.go
+  printf 'package otlp\n' >internal/service/observe/internal/otlp/otlp.go
+  printf 'package metrics\n' >internal/service/observe/metrics/meter.go
+}
+
+# add_owner appends one codeRangeOwners entry, as a range is allocated: $1 the
+# key, $2 the owning directory. awk rather than sed, whose newline in a
+# replacement is not one on every BSD.
+add_owner() {
+  owners=internal/kernel/errs/registry_ownership_external_test.go
+  awk -v entry="	$1: \"$2\"," '/^}$/ { print entry } { print }' "$owners" >owners.tmp
+  mv owners.tmp "$owners"
+}
+
+@test "core-symmetry: a symmetric tree passes, with everything it must not refuse" {
+  mksymroot
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 0 ]
+}
+
+# (a), the plain spelling.
+@test "core-symmetry: a service file calling errs.Define is refused" {
+  mksymroot
+  cat >internal/service/app/widget/errors.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Stalled = errs.Define(0x00_03_01_02, "STALLED", "stalled", "stalled")
+EOF
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/app/widget/errors.go declares an error code"* ]]
+}
+
+# (a) through an import name: `errs\.Define` alone would match kerrs.Define by
+# accident and miss any other name, so the guard reads the import.
+@test "core-symmetry: a Define under another import name is refused" {
+  mksymroot
+  cat >internal/service/app/widget/errors.go <<'EOF'
+package widget
+
+import e "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Stalled = e.Define(0x00_03_01_02, "STALLED", "stalled", "stalled")
+EOF
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/app/widget/errors.go declares an error code"* ]]
+}
+
+# (a) for a code with no Define: a constant allocates a value as surely, while
+# the re-export the fixture already holds allocates nothing and passes.
+@test "core-symmetry: a Code constant declared in a service is refused" {
+  mksymroot
+  cat >internal/service/app/widget/codes.go <<'EOF'
+package widget
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+const CodeWidgetStalled errs.Code = 0x00_03_01_02
+EOF
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/app/widget/codes.go declares an error code"* ]]
+}
+
+# (b): an engine with no contract under internal/core.
+@test "core-symmetry: a service domain with no core is refused" {
+  mksymroot
+  mkdir -p internal/service/app/gadget
+  printf 'package gadget\n' >internal/service/app/gadget/gadget.go
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/app/gadget is a domain with no core"* ]]
+}
+
+# (b) for a root family: the domain is the family itself.
+@test "core-symmetry: a root family whose core is missing is refused" {
+  mksymroot
+  rm -r internal/core/net
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/net is a domain with no core"* ]]
+}
+
+# (c), the mirror left behind: its engine went away, its layer-3 range stayed.
+@test "core-symmetry: a codes-only mirror with no engine is refused" {
+  mksymroot
+  mkdir -p internal/core/app/widget/gone
+  cat >internal/core/app/widget/gone/codes.go <<'EOF'
+package gone
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Gone = errs.Define(0x00_03_09_01, "GONE", "gone", "service/app/widget/gone: gone")
+EOF
+  add_owner 0x00_03_09_00 internal/core/app/widget/gone
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/core/app/widget/gone declares error codes but mirrors no service path"* ]]
+}
+
+# (c), the carve-out's edge: the sub-contract the fixture passes with a layer-2
+# range is refused the moment it owns a range an engine allocated.
+@test "core-symmetry: a sub-contract owning a layer-3 range is refused" {
+  mksymroot
+  add_owner 0x00_03_02_00 internal/core/app/widget/level
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/core/app/widget/level declares error codes but mirrors no service path"* ]]
+}
+
+# (c) at a domain: a core-allocated range does not exempt a domain's core, or a
+# domain with no engine would pass (ADR 0160 §1).
+@test "core-symmetry: a domain's core declaring codes with no engine is refused" {
+  mksymroot
+  mkdir -p internal/core/app/lonely
+  cat >internal/core/app/lonely/codes.go <<'EOF'
+package lonely
+
+import "github.com/kitsunium/sdk/internal/kernel/errs"
+
+var Alone = errs.Define(0x00_02_05_01, "ALONE", "alone", "lonely: alone")
+EOF
+  add_owner 0x00_02_05_00 internal/core/app/lonely
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/core/app/lonely declares error codes, and internal/service/app/lonely holds no engine"* ]]
+}
+
+# A family the guard does not know is checked by nothing, so it is refused.
+@test "core-symmetry: a top-level directory that is no family is refused" {
+  mksymroot
+  mkdir -p internal/service/misc/thing
+  printf 'package thing\n' >internal/service/misc/thing/thing.go
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"internal/service/misc holds Go code but is no family this guard knows"* ]]
+}
+
+# Fails closed: without codeRangeOwners, (c) has nothing to judge against.
+@test "core-symmetry: a tree without codeRangeOwners is refused, not passed" {
+  mksymroot
+  rm internal/kernel/errs/registry_ownership_external_test.go
+
+  run "$SCRIPTS/check-core-symmetry.sh" "$WORK"
+
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"cannot read codeRangeOwners"* ]]
 }
 
 # --- portability (#260) -----------------------------------------------------

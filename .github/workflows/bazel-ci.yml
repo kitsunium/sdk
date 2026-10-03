@@ -139,6 +139,16 @@ jobs:
       - name: domain-doc invariant — the root CLAUDE.md still describes the tree
         run: bash scripts/pre-commit/check-domain-docs.sh
 
+      # Guards ADR 0160's symmetry, which nine tracks applied by hand and which
+      # reopens silently: a service package declaring its own error code still
+      # compiles and is still audited (the audits ask that a package be listed,
+      # not where it sits), and a codes-only core mirror whose engine moved
+      # still compiles too. Fails when internal/service declares a code, when a
+      # service domain has no core, or when a core package declares a code no
+      # engine at its path owns.
+      - name: core-symmetry invariant — every service domain has a core, and only the core declares codes
+        run: bash scripts/pre-commit/check-core-symmetry.sh
+
       # Three guards the in-repo pre-commit hook used to be the only runner of
       # (ADR 0153): every Go package carries its CLAUDE.md / README.md, every
       # package with a *_bench_test.go commits a BENCH.md, and

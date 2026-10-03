@@ -111,6 +111,10 @@ lint:
 	# merges silently left it describing a tree that no longer existed. Both
 	# invariants key on what is ON DISK, never on a maintained number.
 	bash scripts/pre-commit/check-domain-docs.sh
+	# ADR 0160, mechanically: no service package declares an error code, every
+	# service domain has a core at the same path, and every code the core
+	# declares belongs to an engine at that path or is the core's own range.
+	bash scripts/pre-commit/check-core-symmetry.sh
 	# Package documentation, BENCH.md presence and the error-code YAML mirror.
 	# Only the in-repo pre-commit hook ran these until it was removed (ADR 0153);
 	# CI runs them now, as the same three direct steps.

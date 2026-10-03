@@ -16,7 +16,7 @@ here is a Go package.
 | `release/` | `compute-bumps.sh` (WHETHER to release), `cut-tags.sh` (HOW BIG, from `release:*` labels — ADR 0135), `check-pr-size.sh`, their BATS suites (`test-*.bats` over `test-helpers.bash`, run by `release-scripts-test.sh`) and `lib/` (`tag-format.sh`, `release-scope.sh`, `release-size.sh`); also `test-sync-versions.mjs.test.js`, a Node test of `docs/site/scripts/lib/tag-format.mjs` that no lane runs — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
 | `ci/` | `go-modules.sh`, the module census every module-looping lane reads (ADR 0137), and `vuln-check.sh`, the govulncheck gate over it (ADR 0136) |
 | `check-layer-deps.sh` | the layer firewall on the build graph: seven `bazel query` expressions that must be empty (ADR 0068; the last three are the framework's, ADR 0147) |
-| `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml` (ADR 0088) |
+| `ci-gates-check.sh` | a listed gate must have a `make` target, be `.PHONY`, and be invoked by `bazel-ci.yml`; a listed guard (`GUARDS`: the `bash` checks `make lint` runs) must exist, be a `run:` step of the `bazel` job and a line of the `lint` recipe (ADR 0088); its BATS cases are in `ci/test-ci-scripts.bats` |
 | `ci-scripts-test.sh`, `pre-commit-test.sh` | run the BATS suites of `ci/` and `pre-commit/` |
 | `cross-platform-audit.sh` | the local twin of `bazel-ci.yml`'s `cross-build`: every module of the census built and vetted (tests included) for every GOOS/GOARCH cell, printed as a matrix; needs bash 4 |
 | `gen-error-codes.sh` | regenerates `docs/error-codes.yaml` (`make error-codes`) |
@@ -49,7 +49,8 @@ Superseded by ADR 0154 (the charter); ADR 0088 stays as the incident's record, a
   `release/release-scripts-test.sh` runs every `release/*.bats` by glob, never a
   list; a new runner needs a `make` target, `.PHONY`, invoked by `bazel-ci.yml`.
   `ci-gates-check.sh` holds that manifest, matches the workflow's executable
-  `run:` commands rather than its text, and lists itself.
+  `run:` commands rather than its text, and lists itself; a guard `make lint`
+  runs is listed in its `GUARDS` the same way, in the commit that wires it.
 - **`bats` is a prerequisite on `PATH`, never fetched** (exit 127 naming the
   install routes); gates needing neither Bazel nor Go run in `shell-gates`.
 - **A fixture's git commands disable hooks at command-line precedence**, so a

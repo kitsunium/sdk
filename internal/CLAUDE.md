@@ -113,7 +113,7 @@ Each sublayer is its own Go module (release independence + clean `go.sum` per la
 - **Dotted-quad code ranges.** Each emitter package owns a 256-slot `PP` octet (ADR 0005 + ADR 0006). The `Code` constants and the `errs.Define` sentinels that name them are one
   group and may share a file — `core/observe/logger/level`'s `unknown.go` — or stay
   split as `codes.go` / `errors.go` where the package is large enough for the
-  separation to earn itself. What is enforced is the CODE, not the filename. The AST audit enforces uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (the namespaced style — ADR 0006/0020). Every emitter package must ship an `audit_srcs` filegroup and appear in `//:audit_sources`, else it is unaudited under Bazel.
+  separation to earn itself. What is enforced is the CODE, not the filename. The AST audit enforces uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (the namespaced style — ADR 0006/0020). Every emitter package must ship an `audit_srcs` filegroup and appear in `//:audit_sources`, else it is unaudited under Bazel. Since ADR 0160 every one of them is a core package: an engine under `service/` declares nothing, its range is declared by the core package at its path, and `scripts/pre-commit/check-core-symmetry.sh` holds the two layers to that.
 
 ## Subtree
 
