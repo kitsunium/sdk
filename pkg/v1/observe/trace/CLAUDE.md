@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T20:02:20Z -->
+<!-- updated: 2026-10-03T19:30:00Z -->
 # pkg/v1/observe/trace/
 
 ## Purpose
@@ -106,3 +106,4 @@ still hands it to the port, from the `_test` package alone.
 | `TestPublicAttributeIsTheMetricsAttribute` | `trace.Attr` and `metrics.Attr` are one type |
 | `TestFacadeRefusesTheAmbiguousRatio` | the ADR 0031 answer, at the public edge |
 | `TestAConsumerCanNameTheTracerNewTracerReturns` | what `NewTracer` returns has a public name, and is still the port |
+| `cd pkg && GOWORK=off go test -run='^$' -bench=Facade -count=10 ./v1/observe/trace` | the four attribute constructors, one call each (`facade_bench_test.go`, BENCH.md) |

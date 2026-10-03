@@ -24,6 +24,7 @@ alias(
 go_test(
     name = "trace_test",
     srcs = [
+        "facade_bench_test.go",
         "trace_bench_test.go",
         "trace_external_test.go",
     ],
