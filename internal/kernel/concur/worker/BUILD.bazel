@@ -29,6 +29,7 @@ go_test(
     name = "worker_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "every_external_test.go",
         "worker_bench_test.go",
         "worker_external_test.go",

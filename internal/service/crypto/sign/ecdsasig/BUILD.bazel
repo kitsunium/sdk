@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "ecdsasig_test",
     srcs = [
+        "api_gen_test.go",
         "ecdsasig_external_test.go",
         "ecdsasig_internal_test.go",
     ],

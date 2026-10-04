@@ -22,9 +22,14 @@ alias(
 go_test(
     name = "spool_test",
     size = "small",
-    srcs = ["spool_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "spool_external_test.go",
+    ],
     deps = [
         ":spool",
+        "//internal/core/app/mail/spool",
+        "//internal/service/app/mail/spool",
         "//pkg/v1/app/id",
         "//pkg/v1/app/mail",
     ],

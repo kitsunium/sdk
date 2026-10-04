@@ -29,11 +29,15 @@ modes:
   regenerates `docs/api` in memory and fails on any byte that differs, naming
   each record added, changed or removed. `-markers` adds, per cell, the code's
   (id, kind, canonical signature) set against the `// go:<id> <kind>
-  <canonical>` markers of `api_gen*_test.go` pin files; `-digests` adds every
-  generated file's header digests against the design files' bytes. Both are
-  tested on fixtures and not yet passed by `make api-check`: they are armed in
-  the change that commits `design/` and the pins kit writes, so no commit in
-  between is red;
+  <canonical>` markers of the `api_gen*_test.go` pin files kit writes from
+  `design/`; `-digests` adds every generated file's header digests (a pin, a
+  `design_gen.go` port) against its design file's bytes and its own body.
+  `make api-check` passes both, armed with the design and the pins in one
+  change (ADR 0163): a symbol added in the code alone, a function turned
+  variable, a constraint widened, a struct tag or a receiver fails the
+  markers; a design edit without `kit gen`, or a generated file edited by
+  hand, fails the digests. This program never reads the design's YAML: it
+  parses Go and hashes bytes;
 - **`-write-error-codes`** (`make error-codes`, which `make api` runs) and
   **`-check-error-codes`** (`scripts/pre-commit/check-error-codes-drift.sh`)
   — `docs/error-codes.yaml` written from the committed `docs/api`, or compared
@@ -177,6 +181,10 @@ fixture repository. The `tools/` conventions are in `tools/CLAUDE.md`.
   run downloads the vendor modules' dependencies. It costs about 11 s warm on
   an M1 Pro (`make lint-check` 4 s before, 15 s after; peak 1.3 GB, the vendor
   dependencies' per-platform files dropped once no cell left needs them).
+  `-markers` and `-digests` add nothing measurable: they read the symbols the
+  `docs/api` check already holds per cell, and parse and hash the 338
+  generated files (61 CPU s with them and without them, three runs each side
+  by side on a loaded machine; `make lint-check` 17 s on a quiet one).
 - The docs site reads `docs/api` — the API section of every package page and
   the ⌘K index, with the members of `pkg/v1`'s aliases this program's index
   could not see (1,967 entries from go/doc, 2,777 from `docs/api` at

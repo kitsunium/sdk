@@ -1,0 +1,276 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/resilience
+packages:
+  - constants:
+      - name: CodeRetryExhausted
+        type: errs.Code
+        value: "0x00_02_08_01"
+      - name: CodeCircuitOpen
+        type: errs.Code
+        value: "0x00_02_08_02"
+      - name: CodeRateLimited
+        type: errs.Code
+        value: "0x00_02_08_03"
+      - name: CodeBulkheadFull
+        type: errs.Code
+        value: "0x00_02_08_04"
+      - name: CodeTimeoutExceeded
+        type: errs.Code
+        value: "0x00_02_08_05"
+      - name: CodePolicyMisconfigured
+        type: errs.Code
+        value: "0x00_02_08_06"
+      - name: CodeFallbackFailed
+        type: errs.Code
+        value: "0x00_02_08_07"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/resilience
+    types:
+      - name: Operation
+        underlying: func(ctx context.Context) error
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: op
+                  type: Operation
+              name: Run
+              out:
+                - type: error
+        name: Runner
+    variables:
+      - name: RetryExhausted
+        type: "*errs.Error"
+      - name: CircuitOpen
+        type: "*errs.Error"
+      - name: RateLimited
+        type: "*errs.Error"
+      - name: BulkheadFull
+        type: "*errs.Error"
+      - name: PolicyMisconfigured
+        type: "*errs.Error"
+      - name: TimeoutExceeded
+        type: "*errs.Error"
+      - name: FallbackFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: BackoffValue
+        target: kbackoff.Value
+    functions:
+      - in:
+          - name: cfg
+            type: BreakerConfig
+        name: NewCircuitBreaker
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: maxConcurrent
+            type: int
+        name: NewBulkhead
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: cfg
+            type: FallbackConfig
+        name: NewFallback
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: cfg
+            type: HedgeConfig
+        name: NewHedge
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: cfg
+            type: KeyedRateLimiterConfig
+        name: NewKeyedRateLimiter
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: cfg
+            type: RateLimiterConfig
+        name: NewRateLimiter
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: cfg
+            type: RetryConfig
+        name: NewRetry
+        out:
+          - type: coreres.Runner
+      - in:
+          - name: d
+            type: time.Duration
+        name: NewTimeout
+        out:
+          - type: coreres.Runner
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coreres: github.com/kitsunium/sdk/internal/core/app/resilience
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+    path: github.com/kitsunium/sdk/internal/service/app/resilience
+    types:
+      - name: BreakerConfig
+        struct:
+          fields:
+            - name: FailureThreshold
+              type: int
+            - name: OpenDuration
+              type: time.Duration
+            - name: Clock
+              type: clock.Clock
+            - name: Retryable
+              type: func(error) bool
+      - name: FallbackConfig
+        struct:
+          fields:
+            - name: Fallback
+              type: coreres.Operation
+            - name: Retryable
+              type: func(error) bool
+      - name: HedgeConfig
+        struct:
+          fields:
+            - name: Idempotent
+              type: bool
+            - name: Delay
+              type: time.Duration
+            - name: MaxHedges
+              type: int
+            - name: MaxInFlight
+              type: int
+            - name: Clock
+              type: clock.Timed
+      - name: KeyedRateLimiterConfig
+        struct:
+          fields:
+            - name: Key
+              type: func(ctx context.Context) string
+            - name: Clock
+              type: clock.Clock
+            - name: Rate
+              type: float64
+            - name: Burst
+              type: int
+            - name: MaxKeys
+              type: int
+            - name: IdleTimeout
+              type: time.Duration
+      - name: RateLimiterConfig
+        struct:
+          fields:
+            - name: Rate
+              type: float64
+            - name: Burst
+              type: int
+            - name: Clock
+              type: clock.Clock
+      - name: RetryConfig
+        struct:
+          fields:
+            - name: MaxAttempts
+              type: int
+            - name: BaseDelay
+              type: time.Duration
+            - name: MaxDelay
+              type: time.Duration
+            - name: Multiplier
+              type: float64
+            - name: Retryable
+              type: func(error) bool
+            - name: Jitter
+              type: float64
+            - name: Clock
+              type: clock.Timed
+  - aliases:
+      - name: Operation
+        target: coreres.Operation
+      - name: Runner
+        target: coreres.Runner
+      - name: RetryConfig
+        target: svcres.RetryConfig
+      - name: BreakerConfig
+        target: svcres.BreakerConfig
+      - name: RateLimiterConfig
+        target: svcres.RateLimiterConfig
+      - name: FallbackConfig
+        target: svcres.FallbackConfig
+      - name: HedgeConfig
+        target: svcres.HedgeConfig
+      - name: KeyedRateLimiterConfig
+        target: svcres.KeyedRateLimiterConfig
+      - name: Backoff
+        target: kbackoff.Value
+    functions:
+      - in:
+          - name: cfg
+            type: RetryConfig
+        name: NewRetry
+        out:
+          - type: Runner
+      - in:
+          - name: cfg
+            type: BreakerConfig
+        name: NewCircuitBreaker
+        out:
+          - type: Runner
+      - in:
+          - name: cfg
+            type: RateLimiterConfig
+        name: NewRateLimiter
+        out:
+          - type: Runner
+      - in:
+          - name: cfg
+            type: KeyedRateLimiterConfig
+        name: NewKeyedRateLimiter
+        out:
+          - type: Runner
+      - in:
+          - name: maxConcurrent
+            type: int
+        name: NewBulkhead
+        out:
+          - type: Runner
+      - in:
+          - name: d
+            type: time.Duration
+        name: NewTimeout
+        out:
+          - type: Runner
+      - in:
+          - name: cfg
+            type: FallbackConfig
+        name: NewFallback
+        out:
+          - type: Runner
+      - in:
+          - name: cfg
+            type: HedgeConfig
+        name: NewHedge
+        out:
+          - type: Runner
+    imports:
+      coreres: github.com/kitsunium/sdk/internal/core/app/resilience
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+      svcres: github.com/kitsunium/sdk/internal/service/app/resilience
+    path: github.com/kitsunium/sdk/pkg/v1/app/resilience
+    variables:
+      - name: RetryExhausted
+        type: "*errs.Error"
+      - name: CircuitOpen
+        type: "*errs.Error"
+      - name: RateLimited
+        type: "*errs.Error"
+      - name: BulkheadFull
+        type: "*errs.Error"
+      - name: TimeoutExceeded
+        type: "*errs.Error"
+      - name: FallbackFailed
+        type: "*errs.Error"
+      - name: PolicyMisconfigured
+        type: "*errs.Error"

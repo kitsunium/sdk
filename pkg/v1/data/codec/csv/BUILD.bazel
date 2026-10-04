@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "csv_test",
-    srcs = ["csv_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "csv_external_test.go",
+    ],
     deps = [
         ":csv",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

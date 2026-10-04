@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -26,4 +26,14 @@ filegroup(
     name = "audit_srcs",
     srcs = glob(["*.go"]),
     visibility = ["//:__pkg__"],
+)
+
+go_test(
+    name = "storetest_test",
+    srcs = ["api_gen_test.go"],
+    deps = [
+        ":storetest",
+        "//framework/kit",
+        "//pkg/v1/errs",
+    ],
 )

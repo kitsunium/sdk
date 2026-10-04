@@ -81,6 +81,7 @@ alias(
 go_test(
     name = "kit_test",
     srcs = [
+        "api_gen_test.go",
         "facade_external_test.go",
         "facade_generics_external_test.go",
         "facade_sync_external_test.go",
@@ -88,5 +89,14 @@ go_test(
     ],
     # facade_sync_external_test.go reads the facade's and the implementation's sources.
     data = glob(["*.go"]) + ["//framework/internal/kit:audit_srcs"],  # keep
-    deps = [":kit"],
+    deps = [
+        ":kit",
+        "//framework/internal/kit",
+        "//framework/model",
+        "//pkg/v1/clock",
+        "//pkg/v1/data/sql",
+        "//pkg/v1/errs",
+        "//pkg/v1/observe/logger",
+        "//pkg/v1/security/secret",
+    ],
 )

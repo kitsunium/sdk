@@ -1,0 +1,333 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/lock
+packages:
+  - constants:
+      - name: CodeLockMisconfigured
+        type: errs.Code
+        value: "0x00_02_15_01"
+      - name: CodeLockNotHeld
+        type: errs.Code
+        value: "0x00_02_15_02"
+      - name: CodeLockBackendFailed
+        type: errs.Code
+        value: "0x00_02_15_03"
+      - name: CodeLockNameRejected
+        type: errs.Code
+        value: "0x00_02_15_04"
+      - name: CodeLockFenceCorrupt
+        type: errs.Code
+        value: "0x00_03_33_01"
+      - name: CodeLockDirectoryUnsafe
+        type: errs.Code
+        value: "0x00_03_33_02"
+      - name: CodeLockKeepaliveLost
+        type: errs.Code
+        value: "0x00_03_33_03"
+      - name: CodeLockPathRedirected
+        type: errs.Code
+        value: "0x00_03_33_04"
+      - name: CodeLockFileReplaced
+        type: errs.Code
+        value: "0x00_03_33_05"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/lock
+    ports:
+      - doc: |-
+          Lease is a held lock. It is what [Locker.Acquire] returns and the ONLY
+          handle through which the lock can be renewed or released.
+
+          The method set is FROZEN at three under ADR 0039, for the same reason
+          [Locker] is: pkg/v1 aliases it, Go interfaces are structural, and a fourth
+          method would break every downstream double at compile time. [Deadliner] is
+          the sibling that ships.
+
+          A Lease is safe for concurrent use, but it is not a value to pass around
+          casually: it carries the holder's identity, and whoever holds it can release
+          the lock.
+        methods:
+          - doc: |-
+              Fence returns this acquisition's fencing token: a uint64 that strictly
+              increases with every successful acquisition of the same name, whoever
+              acquires it.
+
+              It is the only mechanism in this domain that survives a stalled holder,
+              and it only works if the PROTECTED RESOURCE compares it and refuses the
+              lower one. Handing it to a resource that ignores it buys nothing; see
+              the package comment for what is and is not guaranteed as a result.
+
+              Fence never returns 0 for a live lease. Zero is the "no acquisition"
+              value, so a caller that forgets to plumb the token through cannot have
+              it silently compare equal to a legitimate one.
+            name: Fence
+            out:
+              - type: uint64
+          - doc: |-
+              Extend renews the lease for another full lifetime, starting now.
+
+              It returns [LockNotHeld] when this holder no longer owns the lock —
+              which is not a warning to log and continue past. It means another holder
+              is, or soon will be, inside the section this caller believes it owns.
+              The only correct response is to stop the protected work.
+
+              On an implementation whose leases cannot expire, Extend re-asserts
+              ownership and succeeds; it is never a silent no-op that hides a lost
+              lock, because there is no way for such a lock to be lost while held.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Extend
+            out:
+              - type: error
+          - doc: |-
+              Release gives the lock up. It releases ONLY a lock this holder still
+              holds: a lease that was taken over after expiring releases nothing and
+              reports [LockNotHeld], because unlocking a section another holder is
+              inside would be worse than leaking the lock.
+
+              Releasing a lease this holder already released is not an error — the
+              caller's intent is satisfied — so `defer lease.Release(ctx)` next to an
+              explicit release is safe.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Release
+            out:
+              - type: error
+        name: Lease
+      - doc: |-
+          Deadliner is the sibling interface (ADR 0039) implemented by a [Lease] that
+          CAN expire. Reach it by type assertion:
+
+          	if d, ok := lease.(lock.Deadliner); ok {
+          	    // this lease has a deadline, and can be taken from us at it
+          	}
+
+          The assertion is the answer to the only question that changes how a caller
+          must be written. A lease that implements Deadliner can be taken away from a
+          live holder, so its work must either finish before the deadline, renew, or
+          carry the fence through to the resource. A lease that does NOT implement it
+          cannot be taken away at all, so none of that is needed — and a caller can
+          tell which world it is in without naming an implementation.
+
+          This is deliberately not a Deadline method on [Lease] returning a zero time
+          for "never". A zero time.Time is a value someone will compare against
+          time.Now and lose to; an absent interface is not.
+        methods:
+          - doc: |-
+              Deadline returns the instant at which this lease stops being held
+              unless it is renewed first. It moves forward on every successful
+              [Lease.Extend].
+            name: Deadline
+            out:
+              - type: time.Time
+        name: Deadliner
+      - doc: |-
+          Locker hands out named, exclusive leases. Implementations MUST be safe for
+          concurrent use by multiple goroutines.
+
+          The method set is deliberately two operations wide and is FROZEN: pkg/v1
+          aliases this interface, so under ADR 0039 a third method would break every
+          downstream implementer at compile time with no deprecation window. New
+          capabilities arrive as SIBLING interfaces discovered by type assertion —
+          [Deadliner] on the lease is the one that ships, and the model is codec's
+          Appender (ADR 0037).
+
+          There is no TTL parameter on either method, and its absence is the design.
+          A lease lifetime belongs to the WORK being protected, which is known where a
+          Locker is wired, not at the call site — and a per-call duration would create
+          exactly one place where a zero can be typed by accident, in a hot path,
+          under time pressure, and be read as a lock that has already expired. The TTL
+          lives in the implementation's configuration and is refused there if it is
+          not positive (ADR 0031, ADR 0052).
+
+          IFACE-PLUGIN: the concrete lockers stay unexported behind their constructors
+          in internal/service/app/lock.
+        methods:
+          - doc: |-
+              Acquire blocks until the named lock is held by this caller or ctx ends.
+              On success it returns a [Lease] that MUST eventually be released.
+
+              A cancelled or expired ctx returns the context's own error, not an SDK
+              sentinel: the caller supplied the deadline and already knows what it
+              means. An empty name is refused with [LockNameRejected].
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: Acquire
+            out:
+              - type: Lease
+              - type: error
+          - doc: |-
+              TryAcquire attempts the acquisition once and never waits for another
+              holder. It reports (lease, true, nil) on success and (nil, false, nil)
+              when the lock is held elsewhere.
+
+              "Held elsewhere" is NOT an error: a caller that offered to give up
+              immediately has had its offer accepted, and nothing went wrong. An error
+              return means the backend could not answer the question at all.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+            name: TryAcquire
+            out:
+              - type: Lease
+              - type: bool
+              - type: error
+        name: Locker
+    variables:
+      - name: LockMisconfigured
+        type: "*errs.Error"
+      - name: LockNotHeld
+        type: "*errs.Error"
+      - name: LockBackendFailed
+        type: "*errs.Error"
+      - name: LockNameRejected
+        type: "*errs.Error"
+      - name: LockFenceCorrupt
+        type: "*errs.Error"
+      - name: LockDirectoryUnsafe
+        type: "*errs.Error"
+      - name: LockKeepaliveLost
+        type: "*errs.Error"
+      - name: LockPathRedirected
+        type: "*errs.Error"
+      - name: LockFileReplaced
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFileLocker
+        out:
+          - name: locker
+            type: corelock.Locker
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lease
+            type: corelock.Lease
+          - name: cfg
+            type: KeepaliveConfig
+        name: Keepalive
+        out:
+          - name: guarded
+            type: context.Context
+          - name: stop
+            type: context.CancelFunc
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: locker
+            type: corelock.Locker
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelock: github.com/kitsunium/sdk/internal/core/app/lock
+    path: github.com/kitsunium/sdk/internal/service/app/lock
+    types:
+      - name: MemoryConfig
+        struct:
+          fields:
+            - name: TTL
+              type: time.Duration
+            - name: Clock
+              type: clock.Timed
+      - name: FileConfig
+        struct:
+          fields:
+            - name: Dir
+              type: string
+            - name: Poll
+              type: time.Duration
+            - name: Clock
+              type: clock.Timed
+      - name: KeepaliveConfig
+        struct:
+          fields:
+            - name: Every
+              type: time.Duration
+            - name: Clock
+              type: clock.Timed
+  - aliases:
+      - name: Locker
+        target: corelock.Locker
+      - name: Lease
+        target: corelock.Lease
+      - name: Deadliner
+        target: corelock.Deadliner
+      - name: MemoryConfig
+        target: svclock.MemoryConfig
+      - name: FileConfig
+        target: svclock.FileConfig
+      - name: KeepaliveConfig
+        target: svclock.KeepaliveConfig
+    functions:
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: locker
+            type: Locker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFileLocker
+        out:
+          - name: locker
+            type: Locker
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lease
+            type: Lease
+          - name: cfg
+            type: KeepaliveConfig
+        name: Keepalive
+        out:
+          - name: guarded
+            type: context.Context
+          - name: stop
+            type: context.CancelFunc
+          - name: err
+            type: error
+    imports:
+      corelock: github.com/kitsunium/sdk/internal/core/app/lock
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svclock: github.com/kitsunium/sdk/internal/service/app/lock
+    path: github.com/kitsunium/sdk/pkg/v1/app/lock
+    variables:
+      - name: LockMisconfigured
+        type: "*errs.Error"
+      - name: LockNotHeld
+        type: "*errs.Error"
+      - name: LockBackendFailed
+        type: "*errs.Error"
+      - name: LockNameRejected
+        type: "*errs.Error"
+      - name: LockFenceCorrupt
+        type: "*errs.Error"
+      - name: LockDirectoryUnsafe
+        type: "*errs.Error"
+      - name: LockKeepaliveLost
+        type: "*errs.Error"
+      - name: LockPathRedirected
+        type: "*errs.Error"
+      - name: LockFileReplaced
+        type: "*errs.Error"

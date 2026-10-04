@@ -23,6 +23,7 @@ alias(
 go_test(
     name = "xchacha_test",
     srcs = [
+        "api_gen_test.go",
         "xchacha_bench_test.go",
         "xchacha_external_test.go",
         "xchacha_internal_test.go",

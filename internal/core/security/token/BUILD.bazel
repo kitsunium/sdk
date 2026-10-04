@@ -30,7 +30,10 @@ alias(
 
 go_test(
     name = "token_test",
-    srcs = ["token_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "token_external_test.go",
+    ],
     deps = [
         ":token",
         "//internal/kernel/errs",

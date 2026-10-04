@@ -23,12 +23,16 @@ alias(
 go_test(
     name = "metrics_test",
     srcs = [
+        "api_gen_test.go",
         "attrs_external_test.go",
         "describer_external_test.go",
         "metrics_external_test.go",
     ],
     deps = [
         ":metrics",
+        "//internal/core/observe/metrics",
+        "//internal/core/observe/otel",
+        "//internal/service/observe/metrics",
         "//pkg/v1/clock",
     ],
 )

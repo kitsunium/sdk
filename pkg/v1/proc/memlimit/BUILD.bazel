@@ -21,6 +21,12 @@ alias(
 
 go_test(
     name = "memlimit_test",
-    srcs = ["memlimit_external_test.go"],
-    deps = [":memlimit"],
+    srcs = [
+        "api_gen_test.go",
+        "memlimit_external_test.go",
+    ],
+    deps = [
+        ":memlimit",
+        "//internal/core/proc",
+    ],
 )

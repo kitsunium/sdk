@@ -24,12 +24,17 @@ alias(
 go_test(
     name = "trace_test",
     srcs = [
+        "api_gen_test.go",
         "facade_bench_test.go",
         "trace_bench_test.go",
         "trace_external_test.go",
     ],
     deps = [
         ":trace",
+        "//internal/core/net",
+        "//internal/core/observe/otel",
+        "//internal/core/observe/trace",
+        "//internal/service/observe/trace",
         "//pkg/v1/observe/metrics",
     ],
 )

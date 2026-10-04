@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "msgpack_test",
-    srcs = ["msgpack_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "msgpack_external_test.go",
+    ],
     deps = [
         ":msgpack",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

@@ -36,6 +36,7 @@ alias(
 go_test(
     name = "transform_test",
     srcs = [
+        "api_gen_test.go",
         "bomb_external_test.go",
         "transform_bench_test.go",
         "transform_external_test.go",

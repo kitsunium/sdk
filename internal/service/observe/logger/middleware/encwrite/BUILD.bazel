@@ -22,6 +22,7 @@ go_library(
 go_test(
     name = "encwrite_test",
     srcs = [
+        "api_gen_test.go",
         "encwrite_external_test.go",
         "encwrite_internal_test.go",
         "frame_overflow_internal_test.go",

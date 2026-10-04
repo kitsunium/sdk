@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T06:30:00Z -->
+<!-- updated: 2026-10-04T10:00:00Z -->
 # internal/core/
 
 ## Purpose
@@ -85,6 +85,7 @@ A directory of the one SDK module, `github.com/kitsunium/sdk` (ADR 0162), whose 
 ## Conventions
 
 - **Interface-first.** Core packages expose interfaces + immutable value structs. Any method with a non-trivial body belongs in `internal/service/*`.
+- **A port may be generated.** An interface a design file declares under `ports:` is written by `kit gen` into its package's `design_gen.go`, with its doc comment, and is edited in the design, never in Go (ADR 0163). `app/lock`'s three are the first; every other interface here is hand-written and held to the design by the pins (`api_gen*_test.go`), like every exported symbol of this layer.
 - **Role-suffix on exported structs** (ktn-linter `KTN-STRUCT-ROLE`): `AttrValue`, `RecordEvent`, `Value`. Short aliases (`Attr = AttrValue`) re-exported at `pkg/v1/observe/logger`.
 - **Imports allowed**: stdlib + `internal/kernel/*` + **other `internal/core/*` packages**. Never `internal/service/*`, never `pkg/*`, never `third-party/`. A lateral import is not a violation: `scripts/check-layer-deps.sh`'s core query names what is above core and says nothing about siblings, and `core/observe/metrics` and `core/observe/trace` both build on `core/observe/otel`'s shared model by decision (ADR 0051 §2). This line used to omit the sibling case, the gap `internal/CLAUDE.md` records for the service row.
 - **Plug-in registries** (codec, writer, crypto, transform, id, view, and the metrics and trace exporters): constructors carry `// IFACE-PLUGIN:` markers — concrete types stay unexported; the registry hands instances back behind the domain interface (`Codec`, `Factory`, …). Each is an instance of `kernel/plugin.Registry` (ADR 0159) and keeps only its domain's refusal — its code, its reason, the fields naming the key.

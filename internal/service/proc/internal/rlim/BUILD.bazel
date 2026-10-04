@@ -28,6 +28,8 @@ alias(
 go_test(
     name = "rlim_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
         "value_default_external_test.go",
         "value_signed_external_test.go",
     ],

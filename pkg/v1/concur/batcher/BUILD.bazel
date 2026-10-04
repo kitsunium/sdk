@@ -18,9 +18,13 @@ alias(
 
 go_test(
     name = "batcher_test",
-    srcs = ["batcher_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "batcher_external_test.go",
+    ],
     deps = [
         ":batcher",
+        "//internal/kernel/concur/batcher",
         "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],

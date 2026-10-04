@@ -1,0 +1,169 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/clock
+packages:
+  - functions:
+      - in:
+          - name: start
+            type: time.Time
+        name: NewManualClock
+        out:
+          - type: "*ManualClock"
+    path: github.com/kitsunium/sdk/internal/kernel/clock
+    types:
+      - interface:
+          methods:
+            - name: Now
+              out:
+                - type: time.Time
+            - in:
+                - name: t
+                  type: time.Time
+              name: Since
+              out:
+                - type: time.Duration
+        name: Clock
+      - interface:
+          embeds:
+            - Clock
+            - Waiter
+        name: Timed
+      - methods:
+          - name: Now
+            out:
+              - type: time.Time
+            recv: pointer
+          - in:
+              - name: t
+                type: time.Time
+            name: Since
+            out:
+              - type: time.Duration
+            recv: pointer
+          - in:
+              - name: d
+                type: time.Duration
+            name: After
+            out:
+              - type: <-chan time.Time
+            recv: pointer
+          - in:
+              - name: d
+                type: time.Duration
+            name: NewTimer
+            out:
+              - type: Timer
+            recv: pointer
+          - in:
+              - name: d
+                type: time.Duration
+            name: NewTicker
+            out:
+              - type: Ticker
+            recv: pointer
+          - in:
+              - name: d
+                type: time.Duration
+            name: Sleep
+            recv: pointer
+          - in:
+              - name: d
+                type: time.Duration
+            name: Advance
+            recv: pointer
+          - in:
+              - name: t
+                type: time.Time
+            name: Set
+            recv: pointer
+          - name: Pending
+            out:
+              - type: int
+            recv: pointer
+          - in:
+              - name: "n"
+                type: int
+            name: BlockUntil
+            recv: pointer
+        name: ManualClock
+        struct:
+          unexported: true
+      - interface:
+          methods:
+            - name: C
+              out:
+                - type: <-chan time.Time
+            - name: Stop
+            - in:
+                - name: d
+                  type: time.Duration
+              name: Reset
+        name: Ticker
+      - interface:
+          methods:
+            - name: C
+              out:
+                - type: <-chan time.Time
+            - name: Stop
+              out:
+                - type: bool
+            - in:
+                - name: d
+                  type: time.Duration
+              name: Reset
+              out:
+                - type: bool
+        name: Timer
+      - interface:
+          methods:
+            - in:
+                - name: d
+                  type: time.Duration
+              name: After
+              out:
+                - type: <-chan time.Time
+            - in:
+                - name: d
+                  type: time.Duration
+              name: NewTimer
+              out:
+                - type: Timer
+            - in:
+                - name: d
+                  type: time.Duration
+              name: NewTicker
+              out:
+                - type: Ticker
+            - in:
+                - name: d
+                  type: time.Duration
+              name: Sleep
+        name: Waiter
+    variables:
+      - name: System
+        type: Timed
+  - aliases:
+      - name: Clock
+        target: kclock.Clock
+      - name: Waiter
+        target: kclock.Waiter
+      - name: Timed
+        target: kclock.Timed
+      - name: Timer
+        target: kclock.Timer
+      - name: Ticker
+        target: kclock.Ticker
+      - name: ManualClock
+        target: kclock.ManualClock
+    functions:
+      - in:
+          - name: start
+            type: time.Time
+        name: NewManualClock
+        out:
+          - type: "*ManualClock"
+    imports:
+      kclock: github.com/kitsunium/sdk/internal/kernel/clock
+    path: github.com/kitsunium/sdk/pkg/v1/clock
+    variables:
+      - name: System
+        type: Timed

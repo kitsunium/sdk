@@ -42,6 +42,7 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
+        "api_gen_test.go",
         "exit_external_test.go",
         "limit_external_test.go",
         "notification_external_test.go",

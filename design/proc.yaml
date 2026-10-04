@@ -1,0 +1,1402 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc
+packages:
+  - constants:
+      - name: CodeUnsupportedPlatform
+        type: errs.Code
+        value: "0x00_02_06_01"
+      - name: CodeInvalidSpec
+        type: errs.Code
+        value: "0x00_02_06_02"
+      - name: CodeUnknownUser
+        type: errs.Code
+        value: "0x00_02_06_03"
+      - name: CodeUnknownGroup
+        type: errs.Code
+        value: "0x00_02_06_04"
+      - name: CodeSpawnFailed
+        type: errs.Code
+        value: "0x00_02_06_05"
+      - name: CodeWaitFailed
+        type: errs.Code
+        value: "0x00_02_06_06"
+      - name: CodeSignalFailed
+        type: errs.Code
+        value: "0x00_02_06_07"
+      - name: CodeStopFailed
+        type: errs.Code
+        value: "0x00_02_06_08"
+      - name: CodeUnknownSignal
+        type: errs.Code
+        value: "0x00_02_06_09"
+      - name: CodeRelayFailed
+        type: errs.Code
+        value: "0x00_02_06_0A"
+      - name: CodeSubreaperFailed
+        type: errs.Code
+        value: "0x00_02_06_0B"
+      - name: CodeReapFailed
+        type: errs.Code
+        value: "0x00_02_06_0C"
+      - name: CodeUnknownResource
+        type: errs.Code
+        value: "0x00_02_06_0D"
+      - name: CodeRlimitFailed
+        type: errs.Code
+        value: "0x00_02_06_0E"
+      - name: CodeCgroupUnavailable
+        type: errs.Code
+        value: "0x00_02_06_0F"
+      - name: CodeCgroupCreateFailed
+        type: errs.Code
+        value: "0x00_02_06_10"
+      - name: CodeCgroupWriteFailed
+        type: errs.Code
+        value: "0x00_02_06_11"
+      - name: CodeCgroupDeleteFailed
+        type: errs.Code
+        value: "0x00_02_06_12"
+      - name: CodeNotifyFailed
+        type: errs.Code
+        value: "0x00_02_06_13"
+      - name: CodeListenFailed
+        type: errs.Code
+        value: "0x00_02_06_14"
+      - name: CodeInvalidNotification
+        type: errs.Code
+        value: "0x00_02_06_15"
+      - name: CodeCredentialMismatch
+        type: errs.Code
+        value: "0x00_02_06_16"
+      - name: CodeStdioCaptureFailed
+        type: errs.Code
+        value: "0x00_02_06_17"
+      - name: LimitInfinity
+        type: uint64
+        value: "18446744073709551615"
+      - name: MemorySourceOperator
+        type: MemorySource
+        value: "1"
+      - name: MemorySourceUnconstrained
+        type: MemorySource
+        value: "2"
+      - name: MemorySourceBelowFloor
+        type: MemorySource
+        value: "3"
+      - name: MemorySourceCgroup
+        type: MemorySource
+        value: "4"
+      - name: ResourceUnknown
+        type: Resource
+        value: "0"
+      - name: ResourceNoFile
+        type: Resource
+        value: "1"
+      - name: ResourceNProc
+        type: Resource
+        value: "2"
+      - name: ResourceCore
+        type: Resource
+        value: "3"
+      - name: ResourceAS
+        type: Resource
+        value: "4"
+      - name: ResourceCPU
+        type: Resource
+        value: "5"
+      - name: ResourceFSize
+        type: Resource
+        value: "6"
+      - name: ResourceData
+        type: Resource
+        value: "7"
+      - name: ResourceStack
+        type: Resource
+        value: "8"
+      - name: ResourceMemLock
+        type: Resource
+        value: "9"
+      - name: StdioInherit
+        type: StdioMode
+        value: "0"
+      - name: StdioNull
+        type: StdioMode
+        value: "1"
+      - name: StdioCapture
+        type: StdioMode
+        value: "2"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: Parse
+        out:
+          - name: sig
+            type: Signal
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/proc
+    types:
+      - methods:
+          - name: Success
+            out:
+              - type: bool
+            recv: value
+        name: ExitValue
+        struct:
+          fields:
+            - name: Code
+              type: int
+            - name: Signal
+              type: Signal
+            - name: Signaled
+              type: bool
+            - name: UserTime
+              type: time.Duration
+            - name: SystemTime
+              type: time.Duration
+            - name: MaxRSS
+              type: int64
+      - interface:
+          methods:
+            - in:
+                - name: bytes
+                  type: int64
+              name: SetMemoryMax
+              out:
+                - type: error
+            - in:
+                - name: quota
+                - name: period
+                  type: int64
+              name: SetCPUMax
+              out:
+                - type: error
+            - in:
+                - name: "n"
+                  type: int64
+              name: SetPidsMax
+              out:
+                - type: error
+            - in:
+                - name: spec
+                  type: string
+              name: SetIOMax
+              out:
+                - type: error
+            - in:
+                - name: pid
+                  type: int
+              name: Add
+              out:
+                - type: error
+            - name: Kill
+              out:
+                - type: error
+            - name: Freeze
+              out:
+                - type: error
+            - name: Thaw
+              out:
+                - type: error
+            - name: Delete
+              out:
+                - type: error
+        name: Group
+      - name: LimitValue
+        struct:
+          fields:
+            - name: Soft
+              type: uint64
+            - name: Hard
+              type: uint64
+      - interface:
+          methods:
+            - name: Recv
+              out:
+                - type: NotificationValue
+                - type: error
+            - name: Close
+              out:
+                - type: error
+        name: Listener
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: MemorySource
+        underlying: uint8
+      - methods:
+          - name: Applied
+            out:
+              - type: bool
+            recv: value
+        name: MemoryLimitValue
+        struct:
+          fields:
+            - name: Allowance
+              type: int64
+            - name: Limit
+              type: int64
+            - name: Source
+              type: MemorySource
+      - methods:
+          - name: Ready
+            out:
+              - type: bool
+            recv: value
+          - name: Reloading
+            out:
+              - type: bool
+            recv: value
+          - name: Stopping
+            out:
+              - type: bool
+            recv: value
+          - name: Watchdog
+            out:
+              - type: bool
+            recv: value
+        name: NotificationValue
+        struct:
+          fields:
+            - name: State
+              type: map[string]string
+            - name: Status
+              type: string
+            - name: MainPID
+              type: int
+            - name: SenderPID
+              type: int
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Resource
+        underlying: int
+      - interface:
+          methods:
+            - name: PID
+              out:
+                - type: int
+            - name: Wait
+              out:
+                - type: ExitValue
+                - type: error
+            - in:
+                - name: sig
+                  type: Signal
+              name: Signal
+              out:
+                - type: error
+            - in:
+                - name: sig
+                  type: Signal
+              name: SignalGroup
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: grace
+                  type: time.Duration
+                - name: sig
+                  type: Signal
+              name: Stop
+              out:
+                - type: error
+        name: Process
+      - interface:
+          methods:
+            - name: Start
+            - name: Stop
+            - name: ReapOnce
+              out:
+                - type: int
+                - type: error
+        name: Reaper
+      - methods:
+          - name: OS
+            out:
+              - type: os.Signal
+            recv: value
+          - name: Int
+            out:
+              - type: int
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Signal
+        underlying: int
+      - name: Spec
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: Args
+              type: "[]string"
+            - name: Dir
+              type: string
+            - name: Env
+              type: "[]string"
+            - name: User
+              type: string
+            - name: Group
+              type: string
+            - name: Groups
+              type: "[]string"
+            - name: Setpgid
+              type: bool
+            - name: Setsid
+              type: bool
+            - name: Umask
+              type: "*int"
+            - name: Nice
+              type: "*int"
+            - name: OOMScoreAdj
+              type: "*int"
+            - name: Rlimits
+              type: map[Resource]LimitValue
+            - name: CgroupPath
+              type: string
+            - name: Stdio
+              type: StdioMode
+            - name: Stdout
+              type: io.Writer
+            - name: Stderr
+              type: io.Writer
+            - name: Stdin
+              type: io.Reader
+            - name: ExtraFiles
+              type: "[]*os.File"
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: StdioMode
+        underlying: uint8
+    variables:
+      - name: UnsupportedPlatform
+        type: "*errs.Error"
+      - name: InvalidSpec
+        type: "*errs.Error"
+      - name: UnknownUser
+        type: "*errs.Error"
+      - name: UnknownGroup
+        type: "*errs.Error"
+      - name: SpawnFailed
+        type: "*errs.Error"
+      - name: WaitFailed
+        type: "*errs.Error"
+      - name: SignalFailed
+        type: "*errs.Error"
+      - name: StopFailed
+        type: "*errs.Error"
+      - name: UnknownSignal
+        type: "*errs.Error"
+      - name: RelayFailed
+        type: "*errs.Error"
+      - name: SubreaperFailed
+        type: "*errs.Error"
+      - name: ReapFailed
+        type: "*errs.Error"
+      - name: UnknownResource
+        type: "*errs.Error"
+      - name: RlimitFailed
+        type: "*errs.Error"
+      - name: CgroupUnavailable
+        type: "*errs.Error"
+      - name: CgroupCreateFailed
+        type: "*errs.Error"
+      - name: CgroupWriteFailed
+        type: "*errs.Error"
+      - name: CgroupDeleteFailed
+        type: "*errs.Error"
+      - name: NotifyFailed
+        type: "*errs.Error"
+      - name: ListenFailed
+        type: "*errs.Error"
+      - name: InvalidNotification
+        type: "*errs.Error"
+      - name: CredentialMismatch
+        type: "*errs.Error"
+      - name: StdioCaptureFailed
+        type: "*errs.Error"
+  - functions:
+      - name: Available
+        out:
+          - type: bool
+      - in:
+          - name: name
+            type: string
+          - name: opts
+            type: Option
+        name: Create
+        out:
+          - name: g
+            type: coreproc.Group
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: root
+            type: string
+        name: WithRoot
+        out:
+          - type: Option
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/cgroup
+    types:
+      - name: Option
+        underlying: func(*groupConfig)
+  - functions:
+      - in:
+          - name: start
+            type: func() (*os.Process, error)
+        name: Spawn
+        out:
+          - name: proc
+            type: "*os.Process"
+          - name: claim
+            type: "*Claim"
+          - name: err
+            type: error
+      - build: unix
+        name: ReapAny
+        out:
+          - name: pid
+            type: int
+          - name: err
+            type: error
+    path: github.com/kitsunium/sdk/internal/service/proc/childwait
+    types:
+      - methods:
+          - name: Collected
+            out:
+              - name: status
+                type: StatusValue
+              - name: ok
+                type: bool
+            recv: pointer
+          - name: Reclaim
+            out:
+              - name: status
+                type: StatusValue
+              - name: ok
+                type: bool
+            recv: pointer
+          - name: Release
+            recv: pointer
+        name: Claim
+        struct:
+          unexported: true
+      - build: "!unix"
+        name: StatusValue
+        struct: {}
+      - build: unix
+        name: StatusValue
+        struct:
+          fields:
+            - name: WaitStatus
+              type: syscall.WaitStatus
+            - name: Rusage
+              type: syscall.Rusage
+  - functions:
+      - build: unix
+        in:
+          - name: ctx
+            type: context.Context
+          - name: spec
+            type: coreproc.Spec
+        name: Start
+        out:
+          - name: proc
+            type: coreproc.Process
+          - name: err
+            type: error
+      - build: windows
+        in:
+          - name: ctx
+            type: context.Context
+          - name: spec
+            type: coreproc.Spec
+        name: Start
+        out:
+          - name: proc
+            type: coreproc.Process
+          - name: err
+            type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/exec
+  - functions:
+      - build: unix && !freebsd && !dragonfly
+        in:
+          - name: soft
+          - name: hard
+            type: uint64
+        name: Make
+        out:
+          - type: syscall.Rlimit
+      - build: freebsd || dragonfly
+        in:
+          - name: soft
+          - name: hard
+            type: uint64
+        name: Make
+        out:
+          - type: syscall.Rlimit
+    path: github.com/kitsunium/sdk/internal/service/proc/internal/rlim
+  - functions:
+      - name: Apply
+        out:
+          - type: coreproc.MemoryLimitValue
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/memlimit
+  - functions:
+      - in:
+          - name: fn
+            type: func(int)
+        name: WithOnReap
+        out:
+          - type: Option
+      - build: "!unix"
+        in:
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - type: coreproc.Reaper
+        variadic: true
+      - build: "!unix"
+        name: SetChildSubreaper
+        out:
+          - type: error
+      - build: "!unix"
+        name: IsPID1
+        out:
+          - type: bool
+      - build: unix
+        in:
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - type: coreproc.Reaper
+        variadic: true
+      - build: unix
+        name: IsPID1
+        out:
+          - type: bool
+      - build: freebsd || dragonfly
+        name: SetChildSubreaper
+        out:
+          - type: error
+      - build: linux
+        name: SetChildSubreaper
+        out:
+          - type: error
+      - build: unix && !linux && !freebsd && !dragonfly
+        name: SetChildSubreaper
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/reaper
+    types:
+      - name: Option
+        underlying: func(*config)
+  - functions:
+      - in:
+          - name: pid
+            type: int
+          - name: limits
+            type: map[coreproc.Resource]coreproc.LimitValue
+        name: Apply
+        out:
+          - type: error
+      - in:
+          - name: limits
+            type: map[coreproc.Resource]coreproc.LimitValue
+        name: PrepareSysProcAttr
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/rlimit
+  - functions:
+      - name: ReadBuild
+        out:
+          - name: build
+            type: BuildValue
+          - name: ok
+            type: bool
+      - in:
+          - name: info
+            type: "*debug.BuildInfo"
+        name: ParseBuild
+        out:
+          - type: BuildValue
+      - name: ReadStats
+        out:
+          - type: StatsValue
+    imports:
+      debug: runtime/debug
+    path: github.com/kitsunium/sdk/internal/service/proc/self
+    types:
+      - methods:
+          - in:
+              - name: path
+                type: string
+            name: Module
+            out:
+              - name: found
+                type: ModuleValue
+              - name: ok
+                type: bool
+            recv: pointer
+        name: BuildValue
+        struct:
+          fields:
+            - name: GoVersion
+              type: string
+            - name: Path
+              type: string
+            - name: Main
+              type: ModuleValue
+            - name: Deps
+              type: "[]ModuleValue"
+      - name: ModuleValue
+        struct:
+          fields:
+            - name: Time
+              type: time.Time
+            - name: Path
+              type: string
+            - name: Version
+              type: string
+            - name: Revision
+              type: string
+            - name: Dir
+              type: string
+            - name: Replacement
+              type: string
+            - name: Local
+              type: bool
+            - name: Modified
+              type: bool
+      - name: StatsValue
+        struct:
+          fields:
+            - name: At
+              type: time.Time
+            - name: Started
+              type: time.Time
+            - name: LastGC
+              type: time.Time
+            - name: GCPauses
+              type: DistributionValue
+            - name: SchedLatencies
+              type: DistributionValue
+            - name: PID
+              type: int
+            - name: MaxProcs
+              type: int
+            - name: CPUs
+              type: int
+            - name: Goroutines
+              type: int
+            - name: HeapBytes
+              type: uint64
+            - name: HeapObjects
+              type: uint64
+            - name: HeapGoalBytes
+              type: uint64
+            - name: MemoryBytes
+              type: uint64
+            - name: TotalAllocBytes
+              type: uint64
+            - name: GCCycles
+              type: uint64
+            - name: CPUTime
+              type: time.Duration
+            - name: Uptime
+              type: time.Duration
+            - name: CPUEstimated
+              type: bool
+      - methods:
+          - name: Count
+            out:
+              - type: uint64
+            recv: value
+          - in:
+              - name: q
+                type: float64
+            name: Quantile
+            out:
+              - type: time.Duration
+            recv: value
+        name: DistributionValue
+        struct:
+          fields:
+            - name: Counts
+              type: "[]uint64"
+            - name: Buckets
+              type: "[]float64"
+  - functions:
+      - build: unix
+        in:
+          - name: src
+            type: <-chan coreproc.Signal
+          - name: target
+            type: Target
+        name: Relay
+        out:
+          - type: error
+      - build: windows
+        in:
+          - name: src
+            type: <-chan coreproc.Signal
+          - name: target
+            type: Target
+        name: Relay
+        out:
+          - type: error
+      - in:
+          - name: sigs
+            type: coreproc.Signal
+        name: Notify
+        out:
+          - type: <-chan coreproc.Signal
+          - type: func()
+        variadic: true
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/signal
+    types:
+      - name: Target
+        underlying: int
+  - functions:
+      - build: "!unix"
+        in:
+          - name: _
+            type: bool
+        name: Files
+        out:
+          - type: "[]*os.File"
+          - type: error
+      - build: "!unix"
+        in:
+          - name: _
+            type: bool
+        name: Listeners
+        out:
+          - type: "[]net.Listener"
+          - type: error
+      - build: "!unix"
+        in:
+          - name: _
+            type: bool
+        name: WithNames
+        out:
+          - type: map[string][]*os.File
+          - type: error
+      - build: "!unix"
+        in:
+          - name: _
+            type: "*coreproc.Spec"
+          - name: _
+            type: map[string]net.Listener
+        name: Prepare
+        out:
+          - type: error
+      - build: unix
+        in:
+          - name: unsetEnv
+            type: bool
+        name: Files
+        out:
+          - name: files
+            type: "[]*os.File"
+          - name: err
+            type: error
+      - build: unix
+        in:
+          - name: unsetEnv
+            type: bool
+        name: Listeners
+        out:
+          - name: lns
+            type: "[]net.Listener"
+          - name: err
+            type: error
+      - build: unix
+        in:
+          - name: unsetEnv
+            type: bool
+        name: WithNames
+        out:
+          - name: byName
+            type: map[string][]*os.File
+          - name: err
+            type: error
+      - build: unix
+        in:
+          - name: child
+            type: "*coreproc.Spec"
+          - name: named
+            type: map[string]net.Listener
+        name: Prepare
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/systemd/listen
+  - functions:
+      - build: linux
+        name: Listen
+        out:
+          - name: l
+            type: coreproc.Listener
+          - name: socketPath
+            type: string
+          - name: err
+            type: error
+      - build: "!linux"
+        name: Listen
+        out:
+          - name: l
+            type: coreproc.Listener
+          - name: socketPath
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: state
+            type: map[string]string
+        name: Notify
+        out:
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: state
+            type: map[string]string
+        name: NotifyContext
+        out:
+          - name: err
+            type: error
+      - name: Ready
+        out:
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+        name: ReadyContext
+        out:
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: msg
+            type: string
+        name: StatusContext
+        out:
+          - type: error
+      - name: Reloading
+        out:
+          - type: error
+      - name: Stopping
+        out:
+          - type: error
+      - in:
+          - name: msg
+            type: string
+        name: Status
+        out:
+          - type: error
+      - name: Watchdog
+        out:
+          - type: error
+      - in:
+          - name: pid
+            type: int
+        name: MainPID
+        out:
+          - type: error
+      - name: WatchdogInterval
+        out:
+          - name: d
+            type: time.Duration
+          - name: ok
+            type: bool
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/internal/service/proc/systemd/notify
+  - constants:
+      - name: CapProcessSpawn
+        type: Capability
+        value: "0"
+      - name: CapRlimit
+        type: Capability
+        value: "1"
+      - name: CapUmaskNiceOOM
+        type: Capability
+        value: "2"
+      - name: CapCgroup
+        type: Capability
+        value: "3"
+      - name: CapReaper
+        type: Capability
+        value: "4"
+      - name: CapSignalRelay
+        type: Capability
+        value: "5"
+      - name: CapSdNotify
+        type: Capability
+        value: "6"
+      - name: CapSocketActivation
+        type: Capability
+        value: "7"
+    functions:
+      - in:
+          - name: c
+            type: Capability
+        name: Supported
+        out:
+          - type: bool
+      - in:
+          - name: caps
+            type: Capability
+        name: MissingCapabilities
+        out:
+          - type: "[]Capability"
+        variadic: true
+      - in:
+          - name: caps
+            type: Capability
+        name: MustSupport
+        variadic: true
+    imports:
+      kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/proc
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Capability
+        underlying: int
+    variables:
+      - name: UnsupportedPlatform
+        type: "*kernelerrs.Error"
+  - aliases:
+      - name: Group
+        target: coreproc.Group
+      - name: Option
+        target: svccgroup.Option
+    functions:
+      - in:
+          - name: root
+            type: string
+        name: WithRoot
+        out:
+          - type: Option
+      - name: Available
+        out:
+          - type: bool
+      - in:
+          - name: name
+            type: string
+          - name: opts
+            type: Option
+        name: Create
+        out:
+          - name: g
+            type: Group
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: opts
+            type: Option
+        name: MustCreate
+        out:
+          - type: Group
+        variadic: true
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svccgroup: github.com/kitsunium/sdk/internal/service/proc/cgroup
+    path: github.com/kitsunium/sdk/pkg/v1/proc/cgroup
+  - aliases:
+      - name: Source
+        target: coreproc.MemorySource
+      - name: Limit
+        target: coreproc.MemoryLimitValue
+    constants:
+      - name: MemorySourceOperator
+        type: Source
+        value: "1"
+      - name: MemorySourceUnconstrained
+        type: Source
+        value: "2"
+      - name: MemorySourceBelowFloor
+        type: Source
+        value: "3"
+      - name: MemorySourceCgroup
+        type: Source
+        value: "4"
+    functions:
+      - name: Apply
+        out:
+          - type: Limit
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/memlimit
+  - aliases:
+      - name: Spec
+        target: coreproc.Spec
+      - name: Process
+        target: coreproc.Process
+      - name: ExitResult
+        target: coreproc.ExitValue
+      - name: Signal
+        target: coreproc.Signal
+      - name: Resource
+        target: coreproc.Resource
+      - name: Limit
+        target: coreproc.LimitValue
+      - name: Stats
+        target: svcself.StatsValue
+      - name: Distribution
+        target: svcself.DistributionValue
+      - name: BuildInfo
+        target: svcself.BuildValue
+      - name: Module
+        target: svcself.ModuleValue
+      - name: StdioMode
+        target: coreproc.StdioMode
+    constants:
+      - name: SIGTERM
+        type: Signal
+        value: "15"
+      - name: SIGKILL
+        type: Signal
+        value: "9"
+      - name: SIGINT
+        type: Signal
+        value: "2"
+      - name: SIGHUP
+        type: Signal
+        value: "1"
+      - name: SIGQUIT
+        type: Signal
+        value: "3"
+      - name: ResourceNoFile
+        type: Resource
+        value: "1"
+      - name: ResourceCore
+        type: Resource
+        value: "3"
+      - name: ResourceCPU
+        type: Resource
+        value: "5"
+      - name: ResourceAS
+        type: Resource
+        value: "4"
+      - name: StdioInherit
+        type: StdioMode
+        value: "0"
+      - name: StdioNull
+        type: StdioMode
+        value: "1"
+      - name: StdioCapture
+        type: StdioMode
+        value: "2"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: spec
+            type: Spec
+        name: Start
+        out:
+          - name: proc
+            type: Process
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: spec
+            type: Spec
+        name: MustStart
+        out:
+          - type: Process
+      - name: Self
+        out:
+          - type: Stats
+      - name: Build
+        out:
+          - name: info
+            type: BuildInfo
+          - name: ok
+            type: bool
+      - in:
+          - name: info
+            type: "*debug.BuildInfo"
+        name: ParseBuild
+        out:
+          - type: BuildInfo
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      debug: runtime/debug
+      svcself: github.com/kitsunium/sdk/internal/service/proc/self
+    path: github.com/kitsunium/sdk/pkg/v1/proc/process
+  - aliases:
+      - name: Reaper
+        target: coreproc.Reaper
+      - name: Option
+        target: svc.Option
+    functions:
+      - in:
+          - name: fn
+            type: func(int)
+        name: WithOnReap
+        out:
+          - type: Option
+      - in:
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - type: Reaper
+        variadic: true
+      - name: SetChildSubreaper
+        out:
+          - type: error
+      - name: IsPID1
+        out:
+          - type: bool
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svc: github.com/kitsunium/sdk/internal/service/proc/reaper
+    path: github.com/kitsunium/sdk/pkg/v1/proc/reaper
+    variables:
+      - name: ReapFailed
+        type: "*errs.Error"
+      - name: SubreaperFailed
+        type: "*errs.Error"
+      - name: UnsupportedPlatform
+        type: "*errs.Error"
+  - aliases:
+      - name: Resource
+        target: coreproc.Resource
+      - name: Limit
+        target: coreproc.LimitValue
+    constants:
+      - name: LimitInfinity
+        type: uint64
+        value: "18446744073709551615"
+      - name: ResourceNoFile
+        type: Resource
+        value: "1"
+      - name: ResourceNProc
+        type: Resource
+        value: "2"
+      - name: ResourceCore
+        type: Resource
+        value: "3"
+      - name: ResourceAS
+        type: Resource
+        value: "4"
+      - name: ResourceCPU
+        type: Resource
+        value: "5"
+      - name: ResourceFSize
+        type: Resource
+        value: "6"
+      - name: ResourceData
+        type: Resource
+        value: "7"
+      - name: ResourceStack
+        type: Resource
+        value: "8"
+      - name: ResourceMemLock
+        type: Resource
+        value: "9"
+    functions:
+      - in:
+          - name: pid
+            type: int
+          - name: limits
+            type: map[Resource]Limit
+        name: Apply
+        out:
+          - type: error
+      - in:
+          - name: limits
+            type: map[Resource]Limit
+        name: PrepareSysProcAttr
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/rlimit
+  - aliases:
+      - name: Signal
+        target: coreproc.Signal
+      - name: Target
+        target: svcsignal.Target
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: Parse
+        out:
+          - name: sig
+            type: Signal
+          - name: err
+            type: error
+      - in:
+          - name: sigs
+            type: Signal
+        name: Notify
+        out:
+          - name: ch
+            type: <-chan Signal
+          - name: stop
+            type: func()
+        variadic: true
+      - in:
+          - name: src
+            type: <-chan Signal
+          - name: target
+            type: Target
+        name: Relay
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      svcsignal: github.com/kitsunium/sdk/internal/service/proc/signal
+    path: github.com/kitsunium/sdk/pkg/v1/proc/signal
+  - aliases:
+      - name: Spec
+        target: coreproc.Spec
+    functions:
+      - in:
+          - name: unsetEnv
+            type: bool
+        name: Files
+        out:
+          - name: files
+            type: "[]*os.File"
+          - name: err
+            type: error
+      - in:
+          - name: unsetEnv
+            type: bool
+        name: Listeners
+        out:
+          - name: listeners
+            type: "[]net.Listener"
+          - name: err
+            type: error
+      - in:
+          - name: unsetEnv
+            type: bool
+        name: WithNames
+        out:
+          - name: named
+            type: map[string][]*os.File
+          - name: err
+            type: error
+      - in:
+          - name: child
+            type: "*Spec"
+          - name: named
+            type: map[string]net.Listener
+        name: Prepare
+        out:
+          - type: error
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/systemd/listen
+  - aliases:
+      - name: Listener
+        target: coreproc.Listener
+      - name: Notification
+        target: coreproc.NotificationValue
+    functions:
+      - in:
+          - name: state
+            type: map[string]string
+        name: Notify
+        out:
+          - type: error
+      - name: Ready
+        out:
+          - type: error
+      - name: Reloading
+        out:
+          - type: error
+      - name: Stopping
+        out:
+          - type: error
+      - in:
+          - name: msg
+            type: string
+        name: Status
+        out:
+          - type: error
+      - name: Watchdog
+        out:
+          - type: error
+      - in:
+          - name: pid
+            type: int
+        name: MainPID
+        out:
+          - type: error
+      - name: Listen
+        out:
+          - name: l
+            type: Listener
+          - name: socketPath
+            type: string
+          - name: err
+            type: error
+      - name: WatchdogInterval
+        out:
+          - name: d
+            type: time.Duration
+          - name: ok
+            type: bool
+    imports:
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/systemd/notify

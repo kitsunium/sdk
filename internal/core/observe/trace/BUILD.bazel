@@ -58,6 +58,7 @@ filegroup(
 go_test(
     name = "trace_test",
     srcs = [
+        "api_gen_test.go",
         "carrier_external_test.go",
         "model_external_test.go",
         "registry_guard_external_test.go",
@@ -69,5 +70,6 @@ go_test(
         ":trace",
         "//internal/core/observe/metrics",
         "//internal/core/observe/otel",
+        "//internal/kernel/errs",
     ],
 )

@@ -70,6 +70,9 @@ alias(
 go_test(
     name = "signal_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
+        "api_gen_test.go",
         "relay_other_test.go",
         "relay_unix_external_test.go",
         "relay_windows_test.go",

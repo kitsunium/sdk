@@ -36,6 +36,7 @@ go_test(
     name = "cli_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "cli_bench_test.go",
         "execute_external_test.go",
         "flagsource_external_test.go",

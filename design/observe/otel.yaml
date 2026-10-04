@@ -1,0 +1,158 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/otel
+packages:
+  - constants:
+      - name: AttrKindInvalid
+        type: AttrKind
+        value: "0"
+      - name: AttrKindString
+        type: AttrKind
+        value: "1"
+      - name: AttrKindBool
+        type: AttrKind
+        value: "2"
+      - name: AttrKindInt64
+        type: AttrKind
+        value: "3"
+      - name: AttrKindFloat64
+        type: AttrKind
+        value: "4"
+      - name: ServiceNameKey
+        type: string
+        value: "\"service.name\""
+      - name: UnknownService
+        type: string
+        value: "\"unknown_service\""
+    functions:
+      - in:
+          - name: key
+          - name: value
+            type: string
+        name: String
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: bool
+        name: Bool
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: int64
+        name: Int64
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: float64
+        name: Float64
+        out:
+          - type: AttrValue
+      - in:
+          - name: a
+          - name: b
+            type: AttrValue
+        name: CompareAttrKey
+        out:
+          - type: int
+      - in:
+          - name: a
+          - name: b
+            type: AttrValue
+        name: CompareAttrValue
+        out:
+          - type: int
+      - in:
+          - name: sorted
+            type: "[]AttrValue"
+          - name: refusal
+            type: error
+        name: ValidateAttrs
+      - in:
+          - name: attrs
+            type: "[]AttrValue"
+          - name: refusal
+            type: error
+        name: SortAttrs
+        out:
+          - type: "[]AttrValue"
+      - in:
+          - name: resource
+            type: ResourceValue
+          - name: refusal
+            type: error
+        name: NormalizeResource
+        out:
+          - type: ResourceValue
+      - in:
+          - name: scope
+            type: ScopeValue
+          - name: defaultName
+            type: string
+        name: NormalizeScope
+        out:
+          - type: ScopeValue
+    path: github.com/kitsunium/sdk/internal/core/observe/otel
+    types:
+      - name: AttrKind
+        underlying: uint8
+      - methods:
+          - name: Kind
+            out:
+              - type: AttrKind
+            recv: value
+          - name: Str
+            out:
+              - type: string
+            recv: value
+          - name: Bool
+            out:
+              - type: bool
+            recv: value
+          - name: Int64
+            out:
+              - type: int64
+            recv: value
+          - name: Float64
+            out:
+              - type: float64
+            recv: value
+          - in:
+              - name: dst
+                type: "[]byte"
+            name: AppendIdentity
+            out:
+              - type: "[]byte"
+            recv: value
+          - in:
+              - name: dst
+                type: "[]byte"
+            name: AppendText
+            out:
+              - type: "[]byte"
+            recv: value
+        name: AttrValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+          unexported: true
+      - name: ResourceValue
+        struct:
+          fields:
+            - name: Attrs
+              type: "[]AttrValue"
+      - name: ScopeValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Version
+              type: string

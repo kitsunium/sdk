@@ -1,0 +1,523 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/queue
+packages:
+  - constants:
+      - name: CodeQueueMisconfigured
+        type: errs.Code
+        value: "0x00_02_17_01"
+      - name: CodeMessageTooLarge
+        type: errs.Code
+        value: "0x00_02_17_02"
+      - name: CodeUnknownReceipt
+        type: errs.Code
+        value: "0x00_02_17_03"
+      - name: CodeLeaseExpired
+        type: errs.Code
+        value: "0x00_02_17_04"
+      - name: CodeInvalidBatchSize
+        type: errs.Code
+        value: "0x00_02_17_05"
+      - name: CodeNotRetryable
+        type: errs.Code
+        value: "0x00_02_17_06"
+      - name: CodeDeadLetterNotFound
+        type: errs.Code
+        value: "0x00_02_17_07"
+      - name: CodeQueueBackendFailed
+        type: errs.Code
+        value: "0x00_03_35_01"
+      - name: CodeQueueDirectoryUnusable
+        type: errs.Code
+        value: "0x00_03_35_02"
+      - name: CodeConsumerMisconfigured
+        type: errs.Code
+        value: "0x00_03_35_03"
+      - name: CodeHandlerPanicked
+        type: errs.Code
+        value: "0x00_03_35_04"
+      - name: CodeSQLQueueMisconfigured
+        type: errs.Code
+        value: "0x00_03_35_05"
+      - name: DefaultMaxMessageBytes
+        type: int
+        value: 1 << 20
+      - name: MaxDeadlineOffset
+        type: time.Duration
+        value: "3153600000000000000"
+    functions:
+      - in:
+          - name: cause
+            type: error
+        name: DoNotRetry
+        out:
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/queue
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: max
+                  type: int
+              name: DeadLetters
+              out:
+                - type: "[]DeadLetterValue"
+                - type: error
+        name: DeadLetterReader
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: receipt
+                  type: ReceiptValue
+                - name: by
+                  type: time.Duration
+              name: Extend
+              out:
+                - type: LeaseValue
+                - type: error
+        name: LeaseExtender
+      - name: DeadLetterValue
+        struct:
+          fields:
+            - name: FailedAt
+              type: time.Time
+            - name: Reason
+              type: string
+            - name: Cause
+              type: string
+            - name: Message
+              type: MessageValue
+            - name: Code
+              type: uint32
+            - name: Deliveries
+              type: int
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: receipt
+                  type: ReceiptValue
+                - name: cause
+                  type: error
+              name: Reject
+              out:
+                - type: error
+        name: Rejecter
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: ReplayDeadLetter
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: string
+              name: DeleteDeadLetter
+              out:
+                - type: error
+        name: DeadLetterManager
+      - name: MessageValue
+        struct:
+          fields:
+            - name: EnqueuedAt
+              type: time.Time
+            - name: ID
+              type: string
+            - name: Payload
+              type: "[]byte"
+      - name: ReceiptValue
+        underlying: string
+      - name: LeaseValue
+        struct:
+          fields:
+            - name: ExpiresAt
+              type: time.Time
+            - name: Receipt
+              type: ReceiptValue
+      - name: DeliveryValue
+        struct:
+          fields:
+            - name: Lease
+              type: LeaseValue
+            - name: Message
+              type: MessageValue
+            - name: Deliveries
+              type: int
+      - methods:
+          - name: Validate
+            out:
+              - type: error
+            recv: value
+          - name: Normalized
+            out:
+              - type: PolicyValue
+            recv: value
+        name: PolicyValue
+        struct:
+          fields:
+            - name: VisibilityTimeout
+              type: time.Duration
+            - name: RetryDelay
+              type: time.Duration
+            - name: MaxRetryDelay
+              type: time.Duration
+            - name: MaxDeliveries
+              type: int
+            - name: MaxMessageBytes
+              type: int
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: payload
+                  type: "[]byte"
+              name: Publish
+              out:
+                - type: MessageValue
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: max
+                  type: int
+              name: Receive
+              out:
+                - type: "[]DeliveryValue"
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: receipt
+                  type: ReceiptValue
+              name: Ack
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: receipt
+                  type: ReceiptValue
+                - name: cause
+                  type: error
+              name: Nack
+              out:
+                - type: NackValue
+                - type: error
+        name: Broker
+      - name: Handler
+        underlying: func(ctx context.Context, delivery DeliveryValue) error
+      - name: NackValue
+        struct:
+          fields:
+            - name: Deliveries
+              type: int
+            - name: VisibleAt
+              type: time.Time
+            - name: DeadLettered
+              type: bool
+      - interface:
+          methods:
+            - name: Wake
+              out:
+                - type: WakeValue
+        name: Waker
+      - name: WakeValue
+        struct:
+          fields:
+            - name: Signal
+              type: <-chan struct{}
+            - name: In
+              type: time.Duration
+            - name: Scheduled
+              type: bool
+    variables:
+      - name: QueueMisconfigured
+        type: "*errs.Error"
+      - name: MessageTooLarge
+        type: "*errs.Error"
+      - name: UnknownReceipt
+        type: "*errs.Error"
+      - name: LeaseExpired
+        type: "*errs.Error"
+      - name: InvalidBatchSize
+        type: "*errs.Error"
+      - name: NotRetryable
+        type: "*errs.Error"
+      - name: DeadLetterNotFound
+        type: "*errs.Error"
+      - name: QueueBackendFailed
+        type: "*errs.Error"
+      - name: SQLQueueMisconfigured
+        type: "*errs.Error"
+      - name: QueueDirectoryUnusable
+        type: "*errs.Error"
+      - name: ConsumerMisconfigured
+        type: "*errs.Error"
+      - name: HandlerPanicked
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultPollInterval
+        type: time.Duration
+        value: "100000000"
+      - name: MaxSQLTableLen
+        type: int
+        value: "63"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: broker
+            type: corequeue.Broker
+          - name: cfg
+            type: ConsumerConfig
+        name: Consume
+        out:
+          - type: error
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFile
+        out:
+          - name: broker
+            type: corequeue.Broker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: broker
+            type: corequeue.Broker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: SQLConfig
+        name: NewSQL
+        out:
+          - name: broker
+            type: corequeue.Broker
+          - name: err
+            type: error
+      - in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+    path: github.com/kitsunium/sdk/internal/service/data/queue
+    types:
+      - name: ConsumerConfig
+        struct:
+          fields:
+            - name: Handler
+              type: corequeue.Handler
+            - name: Clock
+              type: clock.Timed
+            - name: PollInterval
+              type: time.Duration
+            - name: Parallelism
+              type: int
+            - name: BatchSize
+              type: int
+            - name: HandlerIsIdempotent
+              type: bool
+      - name: FileConfig
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Clock
+            - name: Dir
+              type: string
+            - name: Policy
+              type: corequeue.PolicyValue
+      - name: MemoryConfig
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Clock
+            - name: Policy
+              type: corequeue.PolicyValue
+      - name: SQLConfig
+        struct:
+          fields:
+            - name: Transactor
+              type: coresql.Transactor
+            - name: Clock
+              type: clock.Clock
+            - name: Table
+              type: string
+            - name: Policy
+              type: corequeue.PolicyValue
+            - name: Dialect
+              type: coresql.Dialect
+  - aliases:
+      - name: Broker
+        target: corequeue.Broker
+      - name: Handler
+        target: corequeue.Handler
+      - name: Message
+        target: corequeue.MessageValue
+      - name: Delivery
+        target: corequeue.DeliveryValue
+      - name: Lease
+        target: corequeue.LeaseValue
+      - name: Receipt
+        target: corequeue.ReceiptValue
+      - name: Nack
+        target: corequeue.NackValue
+      - name: Policy
+        target: corequeue.PolicyValue
+      - name: DeadLetter
+        target: corequeue.DeadLetterValue
+      - name: DeadLetterReader
+        target: corequeue.DeadLetterReader
+      - name: LeaseExtender
+        target: corequeue.LeaseExtender
+      - name: Waker
+        target: corequeue.Waker
+      - name: Wake
+        target: corequeue.WakeValue
+      - name: Rejecter
+        target: corequeue.Rejecter
+      - name: DeadLetterManager
+        target: corequeue.DeadLetterManager
+      - name: SQLConfig
+        target: svcqueue.SQLConfig
+      - name: FileConfig
+        target: svcqueue.FileConfig
+      - name: MemoryConfig
+        target: svcqueue.MemoryConfig
+      - name: ConsumerConfig
+        target: svcqueue.ConsumerConfig
+    constants:
+      - name: DefaultMaxMessageBytes
+        type: int
+        value: 1 << 20
+      - name: MaxDeadlineOffset
+        type: time.Duration
+        value: "3153600000000000000"
+      - name: DefaultPollInterval
+        type: time.Duration
+        value: "100000000"
+      - name: MaxSQLTableLen
+        type: int
+        value: "63"
+      - name: CodeNotRetryable
+        type: errs.Code
+        value: "0x00_02_17_06"
+      - name: CodeDeadLetterNotFound
+        type: errs.Code
+        value: "0x00_02_17_07"
+      - name: CodeSQLQueueMisconfigured
+        type: errs.Code
+        value: "0x00_03_35_05"
+    functions:
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFile
+        out:
+          - name: broker
+            type: Broker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: SQLConfig
+        name: NewSQL
+        out:
+          - name: broker
+            type: Broker
+          - name: err
+            type: error
+      - in:
+          - name: dialect
+            type: sql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLMigration
+        out:
+          - type: sql.Migration
+          - type: error
+      - in:
+          - name: cause
+            type: error
+        name: DoNotRetry
+        out:
+          - type: error
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: broker
+            type: Broker
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: broker
+            type: Broker
+          - name: cfg
+            type: ConsumerConfig
+        name: Consume
+        out:
+          - type: error
+    imports:
+      corequeue: github.com/kitsunium/sdk/internal/core/data/queue
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+      svcqueue: github.com/kitsunium/sdk/internal/service/data/queue
+    path: github.com/kitsunium/sdk/pkg/v1/data/queue
+    variables:
+      - name: QueueMisconfigured
+        type: "*errs.Error"
+      - name: MessageTooLarge
+        type: "*errs.Error"
+      - name: UnknownReceipt
+        type: "*errs.Error"
+      - name: LeaseExpired
+        type: "*errs.Error"
+      - name: InvalidBatchSize
+        type: "*errs.Error"
+      - name: NotRetryable
+        type: "*errs.Error"
+      - name: DeadLetterNotFound
+        type: "*errs.Error"
+      - name: SQLQueueMisconfigured
+        type: "*errs.Error"
+      - name: QueueBackendFailed
+        type: "*errs.Error"
+      - name: QueueDirectoryUnusable
+        type: "*errs.Error"
+      - name: ConsumerMisconfigured
+        type: "*errs.Error"
+      - name: HandlerPanicked
+        type: "*errs.Error"

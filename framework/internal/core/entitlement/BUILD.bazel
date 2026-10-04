@@ -32,6 +32,7 @@ alias(
 go_test(
     name = "entitlement_test",
     srcs = [
+        "api_gen_test.go",
         "grant_internal_test.go",
         "port_internal_test.go",
         "roster_internal_test.go",

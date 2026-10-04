@@ -27,7 +27,10 @@ alias(
 
 go_test(
     name = "asn1_test",
-    srcs = ["codes_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "codes_external_test.go",
+    ],
     deps = [
         ":asn1",
         "//internal/kernel/errs",

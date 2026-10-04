@@ -21,6 +21,13 @@ alias(
 
 go_test(
     name = "static_test",
-    srcs = ["static_external_test.go"],
-    deps = [":static"],
+    srcs = [
+        "api_gen_test.go",
+        "static_external_test.go",
+    ],
+    deps = [
+        ":static",
+        "//internal/core/net",
+        "//internal/service/net/static",
+    ],
 )

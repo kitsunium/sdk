@@ -33,6 +33,9 @@ alias(
 go_test(
     name = "notify_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
+        "api_gen_test.go",
         "listen_linux_external_test.go",
         "listen_linux_internal_test.go",
         "notify_bounded_linux_external_test.go",

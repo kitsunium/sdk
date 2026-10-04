@@ -1,0 +1,198 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/vfs
+packages:
+  - aliases:
+      - name: FS
+        target: fs.FS
+    constants:
+      - name: CodeInvalidPath
+        type: errs.Code
+        value: "0x00_02_19_01"
+      - name: CodeInvalidPermission
+        type: errs.Code
+        value: "0x00_02_19_02"
+      - name: CodePathEscaped
+        type: errs.Code
+        value: "0x00_02_19_03"
+      - name: CodeReadFailed
+        type: errs.Code
+        value: "0x00_02_19_04"
+      - name: CodeWriteFailed
+        type: errs.Code
+        value: "0x00_02_19_05"
+      - name: CodePublishFailed
+        type: errs.Code
+        value: "0x00_02_19_06"
+      - name: CodeNotRegularFile
+        type: errs.Code
+        value: "0x00_02_19_07"
+      - name: CodeDirectoryNotEmpty
+        type: errs.Code
+        value: "0x00_02_19_08"
+      - name: CodeRootUnavailable
+        type: errs.Code
+        value: "0x00_03_37_01"
+      - name: CodeDirectorySyncFailed
+        type: errs.Code
+        value: "0x00_03_37_02"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: ValidatePath
+        out:
+          - type: error
+      - in:
+          - name: name
+            type: string
+        name: ValidateWritePath
+        out:
+          - type: error
+      - in:
+          - name: perm
+            type: fs.FileMode
+        name: ValidatePerm
+        out:
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      fs: io/fs
+    path: github.com/kitsunium/sdk/internal/core/data/vfs
+    types:
+      - interface:
+          embeds:
+            - FS
+          methods:
+            - in:
+                - name: name
+                  type: string
+                - name: data
+                  type: "[]byte"
+                - name: perm
+                  type: fs.FileMode
+              name: WriteFile
+              out:
+                - type: error
+            - in:
+                - name: name
+                  type: string
+                - name: perm
+                  type: fs.FileMode
+              name: MkdirAll
+              out:
+                - type: error
+            - in:
+                - name: name
+                  type: string
+              name: Remove
+              out:
+                - type: error
+            - in:
+                - name: name
+                  type: string
+              name: RemoveAll
+              out:
+                - type: error
+        name: WritableFS
+      - interface:
+          methods:
+            - in:
+                - name: name
+                  type: string
+                - name: data
+                  type: "[]byte"
+                - name: perm
+                  type: fs.FileMode
+              name: WriteAtomic
+              out:
+                - type: error
+        name: AtomicWriter
+      - interface:
+          embeds:
+            - WritableFS
+            - AtomicWriter
+        name: FullFS
+    variables:
+      - name: InvalidPath
+        type: "*errs.Error"
+      - name: InvalidPermission
+        type: "*errs.Error"
+      - name: PathEscaped
+        type: "*errs.Error"
+      - name: ReadFailed
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+      - name: PublishFailed
+        type: "*errs.Error"
+      - name: NotRegularFile
+        type: "*errs.Error"
+      - name: DirectoryNotEmpty
+        type: "*errs.Error"
+      - name: RootUnavailable
+        type: "*errs.Error"
+      - name: DirectorySyncFailed
+        type: "*errs.Error"
+  - functions:
+      - name: NewMem
+        out:
+          - type: corevfs.FullFS
+      - in:
+          - name: root
+            type: string
+        name: NewOS
+        out:
+          - name: filesystem
+            type: corevfs.FullFS
+          - name: err
+            type: error
+    imports:
+      corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+    path: github.com/kitsunium/sdk/internal/service/data/vfs
+  - aliases:
+      - name: FS
+        target: corevfs.FS
+      - name: WritableFS
+        target: corevfs.WritableFS
+      - name: AtomicWriter
+        target: corevfs.AtomicWriter
+      - name: FullFS
+        target: corevfs.FullFS
+    functions:
+      - in:
+          - name: root
+            type: string
+        name: NewOS
+        out:
+          - name: filesystem
+            type: FullFS
+          - name: err
+            type: error
+      - name: NewMem
+        out:
+          - type: FullFS
+    imports:
+      corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/vfs
+    variables:
+      - name: InvalidPath
+        type: "*errs.Error"
+      - name: InvalidPermission
+        type: "*errs.Error"
+      - name: PathEscaped
+        type: "*errs.Error"
+      - name: ReadFailed
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+      - name: PublishFailed
+        type: "*errs.Error"
+      - name: NotRegularFile
+        type: "*errs.Error"
+      - name: DirectoryNotEmpty
+        type: "*errs.Error"
+      - name: RootUnavailable
+        type: "*errs.Error"
+      - name: DirectorySyncFailed
+        type: "*errs.Error"

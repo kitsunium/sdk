@@ -22,10 +22,15 @@ alias(
 
 go_test(
     name = "multipart_test",
-    srcs = ["multipart_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "multipart_external_test.go",
+    ],
     deps = [
         ":multipart",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/multipart",
         "//pkg/v1/errs",
     ],
 )

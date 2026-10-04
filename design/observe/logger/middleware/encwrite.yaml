@@ -1,0 +1,71 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/middleware/encwrite
+packages:
+  - constants:
+      - name: CodeEncWriteSealFailed
+        type: errs.Code
+        value: "0x00_03_1C_01"
+      - name: CodeFramingFailed
+        type: errs.Code
+        value: "0x00_03_1C_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/encwrite
+    variables:
+      - name: EncWriteSealFailed
+        type: "*errs.Error"
+      - name: FramingFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: NewEncWriter
+        out:
+          - name: writer
+            type: "*EncWriter"
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/encwrite
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Sink
+              type: corelogger.Sink
+            - name: Key
+              type: corecrypto.Key
+            - name: Info
+              type: string
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: EncWriter
+        struct:
+          unexported: true

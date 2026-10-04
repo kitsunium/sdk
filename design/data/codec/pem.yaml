@@ -1,0 +1,59 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/pem
+packages:
+  - constants:
+      - name: CodePEMMarshalFailed
+        type: errs.Code
+        value: "0x00_03_0A_01"
+      - name: CodePEMUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_0A_02"
+      - name: CodePEMValueInvalid
+        type: errs.Code
+        value: "0x00_03_0A_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/pem
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+  - aliases:
+      - name: Block
+        target: stdpem.Block
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      stdpem: encoding/pem
+    path: github.com/kitsunium/sdk/internal/service/data/codec/pem
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"pem\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_0A_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_0A_02"
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_03_0A_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/pem
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"

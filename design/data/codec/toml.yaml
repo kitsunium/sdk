@@ -1,0 +1,148 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/toml
+packages:
+  - constants:
+      - name: CodeTOMLMarshalFailed
+        type: errs.Code
+        value: "0x00_03_05_01"
+      - name: CodeTOMLUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_05_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/toml
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/toml
+    types:
+      - methods:
+          - in:
+              - name: zone
+                type: "*time.Location"
+            name: AsTime
+            out:
+              - type: time.Time
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: text
+                type: "[]byte"
+            name: UnmarshalText
+            out:
+              - type: error
+            recv: pointer
+        name: LocalDate
+        struct:
+          fields:
+            - name: Year
+              type: int
+            - name: Month
+              type: int
+            - name: Day
+              type: int
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: text
+                type: "[]byte"
+            name: UnmarshalText
+            out:
+              - type: error
+            recv: pointer
+        name: LocalTime
+        struct:
+          fields:
+            - name: Hour
+              type: int
+            - name: Minute
+              type: int
+            - name: Second
+              type: int
+            - name: Nanosecond
+              type: int
+            - name: Precision
+              type: int
+      - methods:
+          - in:
+              - name: zone
+                type: "*time.Location"
+            name: AsTime
+            out:
+              - type: time.Time
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: text
+                type: "[]byte"
+            name: UnmarshalText
+            out:
+              - type: error
+            recv: pointer
+        name: LocalDateTime
+        struct:
+          fields:
+            - embedded: true
+              type: LocalDate
+            - embedded: true
+              type: LocalTime
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - aliases:
+      - name: LocalDate
+        target: toml.LocalDate
+      - name: LocalTime
+        target: toml.LocalTime
+      - name: LocalDateTime
+        target: toml.LocalDateTime
+    constants:
+      - name: Format
+        value: "\"toml\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_05_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_05_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      toml: github.com/kitsunium/sdk/internal/service/data/codec/toml
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/toml
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"

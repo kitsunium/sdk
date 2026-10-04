@@ -32,12 +32,17 @@ alias(
 go_test(
     name = "token_test",
     srcs = [
+        "api_gen_test.go",
         "token_bench_test.go",
         "token_external_test.go",
         "wiring_external_test.go",
     ],
     deps = [
         ":token",
+        "//internal/core/crypto",
+        "//internal/core/security/token",
+        "//internal/service/crypto/key/jwk",
+        "//internal/service/security/token",
         "//pkg/v1/crypto",
         "//pkg/v1/errs",
     ],

@@ -54,6 +54,7 @@ go_test(
         "agreement_registry_external_test.go",
         "agreement_registry_internal_test.go",
         "algorithm_external_test.go",
+        "api_gen_test.go",
         "deriver_registry_external_test.go",
         "deriver_registry_internal_test.go",
         "hash_registry_external_test.go",

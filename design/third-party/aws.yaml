@@ -1,0 +1,44 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/aws
+packages:
+  - constants:
+      - name: CodeCWClientInitFailed
+        type: errs.Code
+        value: "0x00_03_19_02"
+      - name: CodeCWPutFailed
+        type: errs.Code
+        value: "0x00_03_19_14"
+      - name: CodeCWEventRejected
+        type: errs.Code
+        value: "0x00_03_19_15"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/third-party/aws/writer/cloudwatch
+    variables:
+      - name: Writer
+        type: writer.Factory
+      - name: ClientInitFailed
+        type: "*errs.Error"
+      - name: PutFailed
+        type: "*errs.Error"
+      - name: EventRejected
+        type: "*errs.Error"
+  - constants:
+      - name: CodeS3ClientInitFailed
+        type: errs.Code
+        value: "0x00_03_23_02"
+      - name: CodeS3PutFailed
+        type: errs.Code
+        value: "0x00_03_23_14"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/third-party/aws/writer/s3
+    variables:
+      - name: ClientInitFailed
+        type: "*errs.Error"
+      - name: PutFailed
+        type: "*errs.Error"
+      - name: Writer
+        type: writer.Factory

@@ -36,6 +36,7 @@ alias(
 go_test(
     name = "transform_test",
     srcs = [
+        "api_gen_test.go",
         "bounded_internal_test.go",
         "flate_external_test.go",
         "flate_internal_test.go",

@@ -22,10 +22,16 @@ alias(
 
 go_test(
     name = "cache_test",
-    srcs = ["cache_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "cache_external_test.go",
+    ],
     deps = [
         ":cache",
+        "//internal/core/data/cache",
+        "//internal/kernel/collections/cache",
         "//internal/kernel/errs",
+        "//internal/service/data/cache",
     ],
 )
 

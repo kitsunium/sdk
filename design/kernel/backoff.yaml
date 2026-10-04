@@ -1,0 +1,56 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/backoff
+packages:
+  - functions:
+      - in:
+          - name: base
+          - name: ceiling
+            type: time.Duration
+          - name: multiplier
+            type: float64
+          - name: attempt
+            type: int
+        name: Grow
+        out:
+          - type: time.Duration
+      - in:
+          - name: delay
+            type: time.Duration
+          - name: jitter
+            type: float64
+        name: Widen
+        out:
+          - type: time.Duration
+      - in:
+          - name: multiplier
+            type: float64
+        name: NormalMultiplier
+        out:
+          - type: float64
+      - in:
+          - name: jitter
+            type: float64
+        name: NormalJitter
+        out:
+          - type: float64
+    path: github.com/kitsunium/sdk/internal/kernel/backoff
+    types:
+      - methods:
+          - in:
+              - name: attempt
+                type: int
+            name: Delay
+            out:
+              - type: time.Duration
+            recv: value
+        name: Value
+        struct:
+          fields:
+            - name: BaseDelay
+              type: time.Duration
+            - name: MaxDelay
+              type: time.Duration
+            - name: Multiplier
+              type: float64
+            - name: Jitter
+              type: float64

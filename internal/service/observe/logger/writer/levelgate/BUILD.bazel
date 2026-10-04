@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "levelgate_test",
     srcs = [
+        "api_gen_test.go",
         "gate_alloc_internal_test.go",
         "gate_bench_test.go",
         "gate_external_test.go",

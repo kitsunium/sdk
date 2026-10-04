@@ -18,6 +18,14 @@ alias(
 
 go_test(
     name = "group_test",
-    srcs = ["group_external_test.go"],
-    deps = [":group"],
+    srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
+        "api_gen_test.go",
+        "group_external_test.go",
+    ],
+    deps = [
+        ":group",
+        "//internal/kernel/concur/group",
+    ],
 )

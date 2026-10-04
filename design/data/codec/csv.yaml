@@ -1,0 +1,61 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/csv
+packages:
+  - constants:
+      - name: CodeCSVMarshalFailed
+        type: errs.Code
+        value: "0x00_03_08_01"
+      - name: CodeCSVUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_08_02"
+      - name: CodeCSVValueInvalid
+        type: errs.Code
+        value: "0x00_03_08_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/csv
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+      - in:
+          - name: escape
+            type: bool
+        name: NewWithEscape
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/csv
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"csv\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_08_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_08_02"
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_03_08_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/csv
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"

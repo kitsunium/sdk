@@ -34,8 +34,14 @@ alias(
 
 go_test(
     name = "health_test",
-    srcs = ["health_external_test.go"],
-    deps = [":health"],
+    srcs = [
+        "api_gen_test.go",
+        "health_external_test.go",
+    ],
+    deps = [
+        ":health",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

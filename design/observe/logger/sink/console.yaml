@@ -1,0 +1,42 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/sink/console
+packages:
+  - constants:
+      - name: CodeWriterNil
+        type: errs.Code
+        value: "0x00_03_0D_01"
+      - name: CodeCtxCancelled
+        type: errs.Code
+        value: "0x00_03_0D_0A"
+      - name: CodeWriteFailed
+        type: errs.Code
+        value: "0x00_03_0D_14"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/console
+    variables:
+      - name: WriterNil
+        type: "*errs.Error"
+      - name: CtxCancelled
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: w
+            type: io.Writer
+        name: New
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+      - name: NewStderr
+        out:
+          - type: corelogger.Sink
+      - name: NewStdout
+        out:
+          - type: corelogger.Sink
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/console

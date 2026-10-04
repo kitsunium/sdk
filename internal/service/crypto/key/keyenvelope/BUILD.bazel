@@ -17,6 +17,7 @@ go_library(
 go_test(
     name = "keyenvelope_test",
     srcs = [
+        "api_gen_test.go",
         "keyenvelope_external_test.go",
         "keyenvelope_internal_test.go",
     ],

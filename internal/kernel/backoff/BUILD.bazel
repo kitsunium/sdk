@@ -25,6 +25,7 @@ go_test(
     name = "backoff_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "backoff_external_test.go",
         "backoff_internal_test.go",
     ],

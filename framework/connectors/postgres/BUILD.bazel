@@ -33,6 +33,7 @@ alias(
 go_test(
     name = "postgres_test",
     srcs = [
+        "api_gen_test.go",
         "app_test.go",
         "database_test.go",
         "postgres_test.go",

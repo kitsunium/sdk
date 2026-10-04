@@ -32,6 +32,7 @@ alias(
 go_test(
     name = "route_test",
     srcs = [
+        "api_gen_test.go",
         "router_sink_external_test.go",
         "router_sink_internal_test.go",
         "router_sink_params_external_test.go",

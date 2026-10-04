@@ -33,6 +33,7 @@ go_test(
     name = "vfs_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "path_bench_test.go",
         "service_range_external_test.go",
         "vfs_external_test.go",

@@ -30,6 +30,7 @@ go_test(
     srcs = [
         "aesgcm_external_test.go",
         "aesgcm_internal_test.go",
+        "api_gen_test.go",
     ],
     embed = [":aesgcm"],
     deps = [

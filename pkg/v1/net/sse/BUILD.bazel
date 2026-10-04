@@ -21,9 +21,14 @@ alias(
 
 go_test(
     name = "sse_test",
-    srcs = ["sse_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "sse_external_test.go",
+    ],
     deps = [
         ":sse",
+        "//internal/core/net",
+        "//internal/service/net/sse",
         "//pkg/v1/net/server",
     ],
 )

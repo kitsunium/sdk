@@ -1,0 +1,747 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/metrics
+packages:
+  - constants:
+      - name: OverflowAttrKey
+        type: string
+        value: "\"sdk_metric_overflow\""
+      - name: CodeUnknownExporter
+        type: errs.Code
+        value: "0x00_02_09_01"
+      - name: CodeExportFailed
+        type: errs.Code
+        value: "0x00_02_09_02"
+      - name: CodeInstrumentKindConflict
+        type: errs.Code
+        value: "0x00_02_09_03"
+      - name: CodeInvalidAttribute
+        type: errs.Code
+        value: "0x00_02_09_04"
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_09_05"
+      - name: CodeInvalidTemporality
+        type: errs.Code
+        value: "0x00_02_09_06"
+      - name: CodeInvalidDescription
+        type: errs.Code
+        value: "0x00_02_09_07"
+      - name: CodeDescriptionConflict
+        type: errs.Code
+        value: "0x00_02_09_08"
+      - name: CodeInvalidMetricName
+        type: errs.Code
+        value: "0x00_03_2D_01"
+      - name: CodeInvalidLabelName
+        type: errs.Code
+        value: "0x00_03_2D_02"
+      - name: CodeReservedLabelName
+        type: errs.Code
+        value: "0x00_03_2D_03"
+      - name: CodeUnsupportedTemporality
+        type: errs.Code
+        value: "0x00_03_2D_04"
+      - name: CodeOTLPUnresolvedTemporality
+        type: errs.Code
+        value: "0x00_03_2D_05"
+      - name: CodeOTLPInvalidBucketLayout
+        type: errs.Code
+        value: "0x00_03_2D_06"
+      - name: CodeOTLPEndpointInvalid
+        type: errs.Code
+        value: "0x00_03_2D_07"
+      - name: CodeOTLPExportRejected
+        type: errs.Code
+        value: "0x00_03_2D_08"
+      - name: CodeOTLPExportUnavailable
+        type: errs.Code
+        value: "0x00_03_2D_09"
+      - name: CodeOTLPPartialSuccess
+        type: errs.Code
+        value: "0x00_03_2D_0A"
+      - name: DefaultScopeName
+        type: string
+        value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
+      - name: TemporalityUnspecified
+        type: Temporality
+        value: "0"
+      - name: TemporalityDelta
+        type: Temporality
+        value: "1"
+      - name: TemporalityCumulative
+        type: Temporality
+        value: "2"
+    functions:
+      - in:
+          - name: sorted
+            type: "[]coreotel.AttrValue"
+        name: ValidateAttrs
+      - in:
+          - name: resource
+            type: coreotel.ResourceValue
+        name: NormalizeResource
+        out:
+          - type: coreotel.ResourceValue
+      - in:
+          - name: e
+            type: Exporter
+        name: RegisterExporter
+        out:
+          - type: Exporter
+      - in:
+          - name: name
+            type: ExporterName
+        name: LookupExporter
+        out:
+          - name: e
+            type: Exporter
+          - name: ok
+            type: bool
+      - name: AvailableExporters
+        out:
+          - type: "[]ExporterName"
+      - in:
+          - name: name
+            type: ExporterName
+          - name: snap
+            type: SnapshotValue
+        name: Export
+        out:
+          - type: error
+      - in:
+          - name: scope
+            type: coreotel.ScopeValue
+        name: NormalizeScope
+        out:
+          - type: coreotel.ScopeValue
+    imports:
+      coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/metrics
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: name
+                  type: string
+                - name: observe
+                  type: Int64Callback
+              name: ObservableCounter
+            - in:
+                - name: name
+                  type: string
+                - name: observe
+                  type: Int64Callback
+              name: ObservableUpDownCounter
+            - in:
+                - name: name
+                  type: string
+                - name: observe
+                  type: Float64Callback
+              name: ObservableGauge
+        name: AsyncMeter
+      - interface:
+          methods:
+            - in:
+                - name: delta
+                  type: int64
+              name: Add
+            - name: Inc
+        name: Counter
+      - interface:
+          methods:
+            - in:
+                - name: name
+                - name: description
+                  type: string
+              name: Describe
+        name: Describer
+      - interface:
+          methods:
+            - in:
+                - name: name
+                  type: string
+                - name: attrs
+                  type: coreotel.AttrValue
+              name: UpDownCounter
+              out:
+                - type: UpDownCounter
+              variadic: true
+        name: UpDownMeter
+      - interface:
+          methods:
+            - in:
+                - name: delta
+                  type: int64
+              name: Add
+            - name: Inc
+            - name: Dec
+        name: UpDownCounter
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: ExporterName
+        underlying: string
+      - interface:
+          methods:
+            - name: Name
+              out:
+                - type: ExporterName
+            - in:
+                - name: snap
+                  type: SnapshotValue
+              name: Export
+              out:
+                - type: error
+        name: Exporter
+      - interface:
+          methods:
+            - in:
+                - name: value
+                  type: float64
+              name: Set
+            - in:
+                - name: delta
+                  type: float64
+              name: Add
+        name: Gauge
+      - name: GaugeValue
+        struct:
+          fields:
+            - name: Attrs
+              type: "[]coreotel.AttrValue"
+            - name: Value
+              type: float64
+      - interface:
+          methods:
+            - in:
+                - name: value
+                  type: float64
+              name: Record
+            - in:
+                - name: d
+                  type: time.Duration
+              name: RecordDuration
+        name: Histogram
+      - name: HistogramValue
+        struct:
+          fields:
+            - name: Attrs
+              type: "[]coreotel.AttrValue"
+            - name: Bounds
+              type: "[]float64"
+            - name: Counts
+              type: "[]uint64"
+            - name: Sum
+              type: float64
+            - name: Count
+              type: uint64
+      - interface:
+          methods:
+            - in:
+                - name: name
+                  type: string
+                - name: attrs
+                  type: coreotel.AttrValue
+              name: Counter
+              out:
+                - type: Counter
+              variadic: true
+            - in:
+                - name: name
+                  type: string
+                - name: attrs
+                  type: coreotel.AttrValue
+              name: Gauge
+              out:
+                - type: Gauge
+              variadic: true
+            - in:
+                - name: name
+                  type: string
+                - name: buckets
+                  type: "[]float64"
+                - name: attrs
+                  type: coreotel.AttrValue
+              name: Histogram
+              out:
+                - type: Histogram
+              variadic: true
+            - name: Collect
+              out:
+                - type: SnapshotValue
+        name: Meter
+      - interface:
+          embeds:
+            - Meter
+            - UpDownMeter
+            - AsyncMeter
+        name: FullMeter
+      - name: ObserveInt64
+        underlying: func(value int64, attrs ...coreotel.AttrValue)
+      - name: ObserveFloat64
+        underlying: func(value float64, attrs ...coreotel.AttrValue)
+      - name: Int64Callback
+        underlying: func(observe ObserveInt64)
+      - name: Float64Callback
+        underlying: func(observe ObserveFloat64)
+      - name: SumMetricValue
+        struct:
+          fields:
+            - name: Temporality
+              type: Temporality
+            - name: Monotonic
+              type: bool
+            - name: Description
+              type: string
+            - name: Points
+              type: "[]SumValue"
+      - name: GaugeMetricValue
+        struct:
+          fields:
+            - name: Description
+              type: string
+            - name: Points
+              type: "[]GaugeValue"
+      - name: HistogramMetricValue
+        struct:
+          fields:
+            - name: Temporality
+              type: Temporality
+            - name: Description
+              type: string
+            - name: Points
+              type: "[]HistogramValue"
+      - name: SnapshotValue
+        struct:
+          fields:
+            - name: Resource
+              type: coreotel.ResourceValue
+            - name: Scope
+              type: coreotel.ScopeValue
+            - name: StartTime
+              type: time.Time
+            - name: Time
+              type: time.Time
+            - name: Sums
+              type: map[string]SumMetricValue
+            - name: Gauges
+              type: map[string]GaugeMetricValue
+            - name: Histograms
+              type: map[string]HistogramMetricValue
+      - name: SumValue
+        struct:
+          fields:
+            - name: Attrs
+              type: "[]coreotel.AttrValue"
+            - name: Value
+              type: int64
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Resolved
+            out:
+              - type: Temporality
+            recv: value
+        name: Temporality
+        underlying: uint8
+    variables:
+      - name: UnknownExporter
+        type: "*errs.Error"
+      - name: ExportFailed
+        type: "*errs.Error"
+      - name: InstrumentKindConflict
+        type: "*errs.Error"
+      - name: InvalidAttribute
+        type: "*errs.Error"
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+      - name: InvalidTemporality
+        type: "*errs.Error"
+      - name: InvalidDescription
+        type: "*errs.Error"
+      - name: DescriptionConflict
+        type: "*errs.Error"
+      - name: InvalidMetricName
+        type: "*errs.Error"
+      - name: InvalidLabelName
+        type: "*errs.Error"
+      - name: ReservedLabelName
+        type: "*errs.Error"
+      - name: UnsupportedTemporality
+        type: "*errs.Error"
+      - name: OTLPUnresolvedTemporality
+        type: "*errs.Error"
+      - name: OTLPInvalidBucketLayout
+        type: "*errs.Error"
+      - name: OTLPEndpointInvalid
+        type: "*errs.Error"
+      - name: OTLPExportRejected
+        type: "*errs.Error"
+      - name: OTLPExportUnavailable
+        type: "*errs.Error"
+      - name: OTLPPartialSuccess
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultMaxSeriesPerInstrument
+        type: int
+        value: "2000"
+      - name: OTLPMetricsPath
+        type: string
+        value: "\"/v1/metrics\""
+      - name: DefaultOTLPTimeout
+        type: time.Duration
+        value: "10000000000"
+      - name: DefaultOTLPMaxResponseBytes
+        type: int64
+        value: 1 << 20
+    functions:
+      - in:
+          - name: name
+            type: coremetrics.ExporterName
+          - name: cfg
+            type: OTLPHTTPConfig
+        name: NewOTLPHTTPExporter
+        out:
+          - name: exporter
+            type: coremetrics.Exporter
+          - name: err
+            type: error
+      - in:
+          - name: err
+            type: error
+        name: OTLPRetryable
+        out:
+          - type: bool
+      - in:
+          - name: snap
+            type: coremetrics.SnapshotValue
+        name: EncodeOTLPJSON
+        out:
+          - name: doc
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: coremetrics.ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewOTLPJSONExporter
+        out:
+          - type: coremetrics.Exporter
+      - in:
+          - name: name
+            type: coremetrics.ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewPrometheusExporter
+        out:
+          - type: coremetrics.Exporter
+      - in:
+          - name: name
+            type: coremetrics.ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewTextExporter
+        out:
+          - type: coremetrics.Exporter
+      - name: NewMeter
+        out:
+          - type: coremetrics.FullMeter
+      - in:
+          - name: cfg
+            type: MeterConfig
+        name: NewMeterWithConfig
+        out:
+          - type: coremetrics.FullMeter
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+      coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      otlp: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+    path: github.com/kitsunium/sdk/internal/service/observe/metrics
+    types:
+      - name: MeterConfig
+        struct:
+          fields:
+            - name: MaxSeriesPerInstrument
+              type: int
+            - name: Temporality
+              type: coremetrics.Temporality
+            - name: Resource
+              type: coreotel.ResourceValue
+            - name: Scope
+              type: coreotel.ScopeValue
+            - name: Clock
+              type: clock.Clock
+      - name: OTLPHTTPConfig
+        underlying: otlp.HTTPConfig
+    variables:
+      - name: OTLPJSON
+        type: coremetrics.Exporter
+      - name: Prometheus
+        type: coremetrics.Exporter
+      - name: Text
+        type: coremetrics.Exporter
+  - aliases:
+      - name: OTLPHTTPConfig
+        target: svcmetrics.OTLPHTTPConfig
+      - name: Meter
+        target: coremetrics.Meter
+      - name: UpDownMeter
+        target: coremetrics.UpDownMeter
+      - name: AsyncMeter
+        target: coremetrics.AsyncMeter
+      - name: Describer
+        target: coremetrics.Describer
+      - name: FullMeter
+        target: coremetrics.FullMeter
+      - name: Counter
+        target: coremetrics.Counter
+      - name: UpDownCounter
+        target: coremetrics.UpDownCounter
+      - name: Gauge
+        target: coremetrics.Gauge
+      - name: Histogram
+        target: coremetrics.Histogram
+      - name: Attr
+        target: coreotel.AttrValue
+      - name: AttrKind
+        target: coreotel.AttrKind
+      - name: Temporality
+        target: coremetrics.Temporality
+      - name: Resource
+        target: coreotel.ResourceValue
+      - name: Scope
+        target: coreotel.ScopeValue
+      - name: Snapshot
+        target: coremetrics.SnapshotValue
+      - name: SumMetric
+        target: coremetrics.SumMetricValue
+      - name: SumPoint
+        target: coremetrics.SumValue
+      - name: GaugeMetric
+        target: coremetrics.GaugeMetricValue
+      - name: GaugePoint
+        target: coremetrics.GaugeValue
+      - name: HistogramMetric
+        target: coremetrics.HistogramMetricValue
+      - name: HistogramPoint
+        target: coremetrics.HistogramValue
+      - name: ObserveInt64
+        target: coremetrics.ObserveInt64
+      - name: ObserveFloat64
+        target: coremetrics.ObserveFloat64
+      - name: Int64Callback
+        target: coremetrics.Int64Callback
+      - name: Float64Callback
+        target: coremetrics.Float64Callback
+      - name: MeterConfig
+        target: svcmetrics.MeterConfig
+      - name: Exporter
+        target: coremetrics.Exporter
+      - name: ExporterName
+        target: coremetrics.ExporterName
+    constants:
+      - name: DefaultMaxSeriesPerInstrument
+        type: int
+        value: "2000"
+      - name: OverflowAttrKey
+        type: string
+        value: "\"sdk_metric_overflow\""
+      - name: ServiceNameKey
+        type: string
+        value: "\"service.name\""
+      - name: UnknownService
+        type: string
+        value: "\"unknown_service\""
+      - name: DefaultScopeName
+        type: string
+        value: "\"github.com/kitsunium/sdk/pkg/v1/observe/metrics\""
+      - name: OTLPMetricsPath
+        type: string
+        value: "\"/v1/metrics\""
+      - name: DefaultOTLPTimeout
+        type: time.Duration
+        value: "10000000000"
+      - name: DefaultOTLPMaxResponseBytes
+        type: int64
+        value: 1 << 20
+      - name: AttrKindInvalid
+        type: AttrKind
+        value: "0"
+      - name: AttrKindString
+        type: AttrKind
+        value: "1"
+      - name: AttrKindBool
+        type: AttrKind
+        value: "2"
+      - name: AttrKindInt64
+        type: AttrKind
+        value: "3"
+      - name: AttrKindFloat64
+        type: AttrKind
+        value: "4"
+      - name: TemporalityUnspecified
+        type: Temporality
+        value: "0"
+      - name: TemporalityDelta
+        type: Temporality
+        value: "1"
+      - name: TemporalityCumulative
+        type: Temporality
+        value: "2"
+    functions:
+      - in:
+          - name: key
+          - name: value
+            type: string
+        name: String
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: bool
+        name: Bool
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: int64
+        name: Int64
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: float64
+        name: Float64
+        out:
+          - type: Attr
+      - name: NewMeter
+        out:
+          - type: FullMeter
+      - in:
+          - name: cfg
+            type: MeterConfig
+        name: NewMeterWithConfig
+        out:
+          - type: FullMeter
+      - in:
+          - name: name
+            type: ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewTextExporter
+        out:
+          - type: Exporter
+      - in:
+          - name: name
+            type: ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewPrometheusExporter
+        out:
+          - type: Exporter
+      - in:
+          - name: snap
+            type: Snapshot
+        name: EncodeOTLPJSON
+        out:
+          - name: doc
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: ExporterName
+          - name: dst
+            type: io.Writer
+        name: NewOTLPJSONExporter
+        out:
+          - type: Exporter
+      - in:
+          - name: name
+            type: ExporterName
+          - name: cfg
+            type: OTLPHTTPConfig
+        name: NewOTLPHTTPExporter
+        out:
+          - name: exporter
+            type: Exporter
+          - name: err
+            type: error
+      - in:
+          - name: err
+            type: error
+        name: OTLPRetryable
+        out:
+          - type: bool
+      - in:
+          - name: e
+            type: Exporter
+        name: RegisterExporter
+        out:
+          - type: Exporter
+      - in:
+          - name: name
+            type: ExporterName
+          - name: snap
+            type: Snapshot
+        name: Export
+        out:
+          - type: error
+      - name: AvailableExporters
+        out:
+          - type: "[]ExporterName"
+    imports:
+      coremetrics: github.com/kitsunium/sdk/internal/core/observe/metrics
+      coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcmetrics: github.com/kitsunium/sdk/internal/service/observe/metrics
+    path: github.com/kitsunium/sdk/pkg/v1/observe/metrics
+    variables:
+      - name: UnknownExporter
+        type: "*errs.Error"
+      - name: ExportFailed
+        type: "*errs.Error"
+      - name: InstrumentKindConflict
+        type: "*errs.Error"
+      - name: InvalidAttribute
+        type: "*errs.Error"
+      - name: InvalidTemporality
+        type: "*errs.Error"
+      - name: InvalidDescription
+        type: "*errs.Error"
+      - name: DescriptionConflict
+        type: "*errs.Error"
+      - name: InvalidMetricName
+        type: "*errs.Error"
+      - name: InvalidLabelName
+        type: "*errs.Error"
+      - name: ReservedLabelName
+        type: "*errs.Error"
+      - name: UnsupportedTemporality
+        type: "*errs.Error"
+      - name: OTLPUnresolvedTemporality
+        type: "*errs.Error"
+      - name: OTLPInvalidBucketLayout
+        type: "*errs.Error"
+      - name: OTLPEndpointInvalid
+        type: "*errs.Error"
+      - name: OTLPExportRejected
+        type: "*errs.Error"
+      - name: OTLPExportUnavailable
+        type: "*errs.Error"
+      - name: OTLPPartialSuccess
+        type: "*errs.Error"

@@ -27,11 +27,15 @@ go_test(
     name = "level_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "level_external_test.go",
         "parse_external_test.go",
         "var_external_test.go",
     ],
-    deps = [":level"],
+    deps = [
+        ":level",
+        "//internal/kernel/errs",
+    ],
 )
 
 filegroup(

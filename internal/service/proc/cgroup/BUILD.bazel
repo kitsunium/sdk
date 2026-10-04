@@ -48,6 +48,7 @@ alias(
 go_test(
     name = "cgroup_test",
     srcs = [
+        "api_gen_test.go",
         "cgroup_external_test.go",
         "cgroup_linux_bench_test.go",
         "cgroup_linux_internal_test.go",

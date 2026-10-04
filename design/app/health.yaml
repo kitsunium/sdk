@@ -1,0 +1,474 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/health
+packages:
+  - constants:
+      - name: CodeInvalidCheck
+        type: errs.Code
+        value: "0x00_02_1D_01"
+      - name: CodeDuplicateCheck
+        type: errs.Code
+        value: "0x00_02_1D_02"
+      - name: CodeUnknownProbe
+        type: errs.Code
+        value: "0x00_02_1D_03"
+      - name: CodeCheckPanicked
+        type: errs.Code
+        value: "0x00_02_1D_04"
+      - name: CodeCheckFailed
+        type: errs.Code
+        value: "0x00_03_3B_01"
+      - name: CodeCheckTimeout
+        type: errs.Code
+        value: "0x00_03_3B_02"
+      - name: CodeStaleCacheWindow
+        type: errs.Code
+        value: "0x00_03_3B_03"
+      - name: CodeStartupPending
+        type: errs.Code
+        value: "0x00_03_3B_04"
+      - name: CodeDraining
+        type: errs.Code
+        value: "0x00_03_3B_05"
+      - name: CodeNotifyFailed
+        type: errs.Code
+        value: "0x00_03_3B_06"
+      - name: CodeAskMisconfigured
+        type: errs.Code
+        value: "0x00_03_3B_07"
+      - name: CodeAskUnreachable
+        type: errs.Code
+        value: "0x00_03_3B_08"
+      - name: CodeAskTimeout
+        type: errs.Code
+        value: "0x00_03_3B_09"
+      - name: CodeAskNotReady
+        type: errs.Code
+        value: "0x00_03_3B_0A"
+      - name: ProbeStartup
+        type: Probe
+        value: "1"
+      - name: ProbeReadiness
+        type: Probe
+        value: "2"
+      - name: ProbeLiveness
+        type: Probe
+        value: "3"
+      - name: StatusUnhealthy
+        type: Status
+        value: "0"
+      - name: StatusDegraded
+        type: Status
+        value: "1"
+      - name: StatusHealthy
+        type: Status
+        value: "2"
+    functions:
+      - in:
+          - name: a
+          - name: b
+            type: Status
+        name: Worst
+        out:
+          - type: Status
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/health
+    types:
+      - name: Check
+        underlying: func(ctx context.Context) error
+      - name: SelfCheck
+        underlying: func() error
+      - interface:
+          methods:
+            - in:
+                - name: check
+                  type: StartupCheckValue
+              name: AddStartup
+              out:
+                - type: error
+            - in:
+                - name: check
+                  type: ReadinessCheckValue
+              name: AddReadiness
+              out:
+                - type: error
+            - in:
+                - name: check
+                  type: LivenessCheckValue
+              name: AddLiveness
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: probe
+                  type: Probe
+              name: Probe
+              out:
+                - type: ReportValue
+            - name: Drain
+        name: Health
+      - name: StartupCheckValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Check
+              type: Check
+            - name: Timeout
+              type: time.Duration
+      - name: LivenessCheckValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Check
+              type: SelfCheck
+            - name: Timeout
+              type: time.Duration
+      - name: ReadinessCheckValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Check
+              type: Check
+            - name: Timeout
+              type: time.Duration
+            - name: NonCritical
+              type: bool
+            - name: MaxAge
+              type: time.Duration
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Probe
+        underlying: uint8
+      - methods:
+          - in:
+              - name: now
+                type: time.Time
+            name: Age
+            out:
+              - type: time.Duration
+            recv: value
+        name: ResultValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Status
+              type: Status
+            - name: TimedOut
+              type: bool
+            - name: Cached
+              type: bool
+            - name: At
+              type: time.Time
+            - name: Took
+              type: time.Duration
+            - name: Err
+              type: error
+      - name: ReportValue
+        struct:
+          fields:
+            - name: Probe
+              type: Probe
+            - name: Status
+              type: Status
+            - name: At
+              type: time.Time
+            - name: Results
+              type: "[]ResultValue"
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Serving
+            out:
+              - type: bool
+            recv: value
+        name: Status
+        underlying: uint8
+    variables:
+      - name: InvalidCheck
+        type: "*errs.Error"
+      - name: DuplicateCheck
+        type: "*errs.Error"
+      - name: UnknownProbe
+        type: "*errs.Error"
+      - name: CheckPanicked
+        type: "*errs.Error"
+      - name: CheckFailed
+        type: "*errs.Error"
+      - name: CheckTimeout
+        type: "*errs.Error"
+      - name: StaleCacheWindow
+        type: "*errs.Error"
+      - name: StartupPending
+        type: "*errs.Error"
+      - name: Draining
+        type: "*errs.Error"
+      - name: NotifyFailed
+        type: "*errs.Error"
+      - name: AskMisconfigured
+        type: "*errs.Error"
+      - name: AskUnreachable
+        type: "*errs.Error"
+      - name: AskTimeout
+        type: "*errs.Error"
+      - name: AskNotReady
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultAskTimeout
+        type: time.Duration
+        value: "3000000000"
+      - name: MaxAskDrainBytes
+        type: int64
+        value: 64 << 10
+      - name: DefaultCheckTimeout
+        type: time.Duration
+        value: "1000000000"
+      - name: MaxCacheAge
+        type: time.Duration
+        value: "30000000000"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: AskConfig
+        name: Ask
+        out:
+          - name: status
+            type: int
+          - name: err
+            type: error
+      - in:
+          - name: registry
+            type: corehealth.Health
+          - name: name
+            type: string
+        name: Component
+        out:
+          - type: corelc.ComponentValue
+      - in:
+          - name: registry
+            type: corehealth.Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewStartupHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: registry
+            type: corehealth.Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewReadinessHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: registry
+            type: corehealth.Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewLivenessHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: corehealth.Health
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corehealth: github.com/kitsunium/sdk/internal/core/app/health
+      corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/app/health
+    types:
+      - name: AskConfig
+        struct:
+          fields:
+            - name: Addr
+              type: string
+            - name: Path
+              type: string
+            - name: Timeout
+              type: time.Duration
+            - name: Clock
+              type: clock.Timed
+      - name: Config
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Timed
+            - name: DefaultTimeout
+              type: time.Duration
+            - name: OnReport
+              type: func(corehealth.ReportValue)
+            - name: Notify
+              type: bool
+            - name: OnNotifyError
+              type: func(error)
+      - name: HandlerConfig
+        struct:
+          fields:
+            - name: Detail
+              type: bool
+  - aliases:
+      - name: Check
+        target: corehealth.Check
+      - name: SelfCheck
+        target: corehealth.SelfCheck
+      - name: Health
+        target: corehealth.Health
+      - name: Status
+        target: corehealth.Status
+      - name: Probe
+        target: corehealth.Probe
+      - name: StartupCheck
+        target: corehealth.StartupCheckValue
+      - name: ReadinessCheck
+        target: corehealth.ReadinessCheckValue
+      - name: LivenessCheck
+        target: corehealth.LivenessCheckValue
+      - name: Result
+        target: corehealth.ResultValue
+      - name: Report
+        target: corehealth.ReportValue
+      - name: Config
+        target: svchealth.Config
+      - name: HandlerConfig
+        target: svchealth.HandlerConfig
+      - name: AskConfig
+        target: svchealth.AskConfig
+    constants:
+      - name: StatusUnhealthy
+        type: Status
+        value: "0"
+      - name: StatusDegraded
+        type: Status
+        value: "1"
+      - name: StatusHealthy
+        type: Status
+        value: "2"
+      - name: ProbeStartup
+        type: Probe
+        value: "1"
+      - name: ProbeReadiness
+        type: Probe
+        value: "2"
+      - name: ProbeLiveness
+        type: Probe
+        value: "3"
+      - name: DefaultCheckTimeout
+        type: time.Duration
+        value: "1000000000"
+      - name: MaxCacheAge
+        type: time.Duration
+        value: "30000000000"
+      - name: DefaultAskTimeout
+        type: time.Duration
+        value: "3000000000"
+      - name: MaxAskDrainBytes
+        type: int64
+        value: 64 << 10
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: Health
+      - in:
+          - name: a
+          - name: b
+            type: Status
+        name: Worst
+        out:
+          - type: Status
+      - in:
+          - name: registry
+            type: Health
+          - name: name
+            type: string
+        name: Component
+        out:
+          - type: corelc.ComponentValue
+      - in:
+          - name: registry
+            type: Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewStartupHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: registry
+            type: Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewReadinessHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: registry
+            type: Health
+          - name: cfg
+            type: HandlerConfig
+        name: NewLivenessHandler
+        out:
+          - type: http.Handler
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: AskConfig
+        name: Ask
+        out:
+          - name: status
+            type: int
+          - name: err
+            type: error
+    imports:
+      corehealth: github.com/kitsunium/sdk/internal/core/app/health
+      corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+      svchealth: github.com/kitsunium/sdk/internal/service/app/health
+    path: github.com/kitsunium/sdk/pkg/v1/app/health
+    variables:
+      - name: InvalidCheck
+        type: "*errs.Error"
+      - name: DuplicateCheck
+        type: "*errs.Error"
+      - name: UnknownProbe
+        type: "*errs.Error"
+      - name: CheckPanicked
+        type: "*errs.Error"
+      - name: CheckFailed
+        type: "*errs.Error"
+      - name: CheckTimeout
+        type: "*errs.Error"
+      - name: StaleCacheWindow
+        type: "*errs.Error"
+      - name: StartupPending
+        type: "*errs.Error"
+      - name: Draining
+        type: "*errs.Error"
+      - name: NotifyFailed
+        type: "*errs.Error"
+      - name: AskMisconfigured
+        type: "*errs.Error"
+      - name: AskUnreachable
+        type: "*errs.Error"
+      - name: AskTimeout
+        type: "*errs.Error"
+      - name: AskNotReady
+        type: "*errs.Error"

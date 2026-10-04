@@ -30,6 +30,7 @@ go_test(
     name = "codec_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "appender_external_test.go",
         "format_external_test.go",
         "registry_external_test.go",

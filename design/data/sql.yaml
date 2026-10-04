@@ -1,0 +1,619 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/sql
+packages:
+  - constants:
+      - name: CodeUnknownDialect
+        type: errs.Code
+        value: "0x00_02_18_01"
+      - name: CodeDialectRefused
+        type: errs.Code
+        value: "0x00_02_18_02"
+      - name: CodeNestedIsolation
+        type: errs.Code
+        value: "0x00_02_18_03"
+      - name: CodeInvalidMigration
+        type: errs.Code
+        value: "0x00_02_18_04"
+      - name: CodeMigrationIrreversible
+        type: errs.Code
+        value: "0x00_02_18_05"
+      - name: CodeConfigInvalid
+        type: errs.Code
+        value: "0x00_03_36_01"
+      - name: CodePoolMisconfigured
+        type: errs.Code
+        value: "0x00_03_36_02"
+      - name: CodeBeginFailed
+        type: errs.Code
+        value: "0x00_03_36_03"
+      - name: CodeCommitFailed
+        type: errs.Code
+        value: "0x00_03_36_04"
+      - name: CodeRollbackFailed
+        type: errs.Code
+        value: "0x00_03_36_05"
+      - name: CodeSavepointFailed
+        type: errs.Code
+        value: "0x00_03_36_06"
+      - name: CodeTxPoisoned
+        type: errs.Code
+        value: "0x00_03_36_07"
+      - name: CodeTxClosed
+        type: errs.Code
+        value: "0x00_03_36_08"
+      - name: CodeHealthCheckFailed
+        type: errs.Code
+        value: "0x00_03_36_09"
+      - name: CodeHealthCheckTimeout
+        type: errs.Code
+        value: "0x00_03_36_0A"
+      - name: CodeMigrationFailed
+        type: errs.Code
+        value: "0x00_03_36_0B"
+      - name: CodeMigrationOutOfOrder
+        type: errs.Code
+        value: "0x00_03_36_0C"
+      - name: CodeMigrationLockUnsupported
+        type: errs.Code
+        value: "0x00_03_36_0D"
+      - name: CodeMigrationLockTimeout
+        type: errs.Code
+        value: "0x00_03_36_0E"
+      - name: CodeMigrationUnknownVersion
+        type: errs.Code
+        value: "0x00_03_36_0F"
+      - name: CodeVersionTableInvalid
+        type: errs.Code
+        value: "0x00_03_36_10"
+      - name: CodeDuplicateMigration
+        type: errs.Code
+        value: "0x00_03_36_11"
+      - name: DialectUnknown
+        type: Dialect
+        value: "0"
+      - name: DialectPostgres
+        type: Dialect
+        value: "1"
+      - name: DialectMySQL
+        type: Dialect
+        value: "2"
+      - name: DialectSQLite
+        type: Dialect
+        value: "3"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: ParseDialect
+        out:
+          - name: dialect
+            type: Dialect
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: ex
+            type: Executor
+        name: Irreversible
+        out:
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      stdsql: database/sql
+    path: github.com/kitsunium/sdk/internal/core/data/sql
+    types:
+      - name: TxFunc
+        underlying: func(ctx context.Context, ex Executor) error
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Valid
+            out:
+              - type: bool
+            recv: value
+          - name: SupportsAdvisoryLock
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: "n"
+                type: int
+            name: Placeholder
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: name
+                type: string
+            name: QuoteIdent
+            out:
+              - type: string
+            recv: value
+          - name: ForUpdate
+            out:
+              - type: string
+            recv: value
+          - name: ForUpdateSkipLocked
+            out:
+              - type: string
+            recv: value
+        name: Dialect
+        underlying: uint8
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: ExecContext
+              out:
+                - type: stdsql.Result
+                - type: error
+              variadic: true
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryContext
+              out:
+                - type: "*stdsql.Rows"
+                - type: error
+              variadic: true
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+                - name: args
+                  type: any
+              name: QueryRowContext
+              out:
+                - type: "*stdsql.Row"
+              variadic: true
+        name: Executor
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: query
+                  type: string
+              name: PrepareContext
+              out:
+                - type: "*stdsql.Stmt"
+                - type: error
+        name: Preparer
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: opts
+                  type: TxOptionsValue
+                - name: fn
+                  type: TxFunc
+              name: Transact
+              out:
+                - type: error
+        name: Transactor
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Join
+              out:
+                - name: ex
+                  type: Executor
+                - name: inTx
+                  type: bool
+        name: Joiner
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: fn
+                  type: func()
+              name: Defer
+              out:
+                - name: held
+                  type: bool
+        name: Deferrer
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Check
+              out:
+                - type: error
+        name: Checker
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Plan
+              out:
+                - type: "[]MigrationValue"
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Up
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: target
+                  type: uint64
+              name: Down
+              out:
+                - type: error
+        name: Migrator
+      - name: Step
+        underlying: func(ctx context.Context, ex Executor) error
+      - methods:
+          - name: Validate
+            out:
+              - type: error
+            recv: value
+        name: MigrationValue
+        struct:
+          fields:
+            - name: Version
+              type: uint64
+            - name: Name
+              type: string
+            - name: Up
+              type: Step
+            - name: Down
+              type: Step
+      - methods:
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: StdOptions
+            out:
+              - type: "*stdsql.TxOptions"
+            recv: value
+        name: TxOptionsValue
+        struct:
+          fields:
+            - name: Isolation
+              type: stdsql.IsolationLevel
+            - name: ReadOnly
+              type: bool
+    variables:
+      - name: UnknownDialect
+        type: "*errs.Error"
+      - name: DialectRefused
+        type: "*errs.Error"
+      - name: NestedIsolation
+        type: "*errs.Error"
+      - name: InvalidMigration
+        type: "*errs.Error"
+      - name: MigrationIrreversible
+        type: "*errs.Error"
+      - name: ConfigInvalid
+        type: "*errs.Error"
+      - name: PoolMisconfigured
+        type: "*errs.Error"
+      - name: BeginFailed
+        type: "*errs.Error"
+      - name: CommitFailed
+        type: "*errs.Error"
+      - name: RollbackFailed
+        type: "*errs.Error"
+      - name: SavepointFailed
+        type: "*errs.Error"
+      - name: TxPoisoned
+        type: "*errs.Error"
+      - name: TxClosed
+        type: "*errs.Error"
+      - name: HealthCheckFailed
+        type: "*errs.Error"
+      - name: HealthCheckTimeout
+        type: "*errs.Error"
+      - name: MigrationFailed
+        type: "*errs.Error"
+      - name: MigrationOutOfOrder
+        type: "*errs.Error"
+      - name: MigrationLockUnsupported
+        type: "*errs.Error"
+      - name: MigrationLockTimeout
+        type: "*errs.Error"
+      - name: MigrationUnknownVersion
+        type: "*errs.Error"
+      - name: VersionTableInvalid
+        type: "*errs.Error"
+      - name: DuplicateMigration
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultMaxLifetime
+        type: time.Duration
+        value: "1800000000000"
+      - name: DefaultMaxIdle
+        type: int
+        value: "2"
+      - name: DefaultCheckTimeout
+        type: time.Duration
+        value: "5000000000"
+      - name: DefaultVersionTable
+        type: string
+        value: "\"schema_migrations\""
+      - name: DefaultLockTimeout
+        type: time.Duration
+        value: "120000000000"
+      - name: DefaultLockRetryInterval
+        type: time.Duration
+        value: "250000000"
+    functions:
+      - in:
+          - name: table
+            type: string
+        name: FileLockSQL
+        out:
+          - type: string
+      - in:
+          - name: cfg
+            type: Config
+        name: NewChecker
+        out:
+          - name: probe
+            type: coresql.Checker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+          - name: mig
+            type: MigrateConfig
+        name: NewMigrator
+        out:
+          - name: runner
+            type: coresql.Migrator
+          - name: err
+            type: error
+      - in:
+          - name: stmts
+            type: string
+        name: Statements
+        out:
+          - type: coresql.Step
+        variadic: true
+      - in:
+          - name: cfg
+            type: Config
+        name: NewTransactor
+        out:
+          - name: manager
+            type: coresql.Transactor
+          - name: err
+            type: error
+      - in:
+          - name: cause
+            type: error
+        name: NewWithheld
+        out:
+          - type: Withheld
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      stdsql: database/sql
+    path: github.com/kitsunium/sdk/internal/service/data/sql
+    types:
+      - name: PoolConfig
+        struct:
+          fields:
+            - name: MaxOpen
+              type: int
+            - name: MaxIdle
+              type: int
+            - name: MaxLifetime
+              type: time.Duration
+            - name: MaxIdleTime
+              type: time.Duration
+      - name: Config
+        struct:
+          fields:
+            - name: DB
+              type: "*stdsql.DB"
+            - name: Dialect
+              type: coresql.Dialect
+            - name: Pool
+              type: PoolConfig
+            - name: Clock
+              type: clock.Timed
+            - name: CheckTimeout
+              type: time.Duration
+      - name: MigrateConfig
+        struct:
+          fields:
+            - name: Migrations
+              type: "[]coresql.MigrationValue"
+            - name: VersionTable
+              type: string
+            - name: LockTimeout
+              type: time.Duration
+            - name: LockRetryInterval
+              type: time.Duration
+      - methods:
+          - name: Error
+            out:
+              - type: string
+            recv: value
+          - name: Unwrap
+            out:
+              - type: error
+            recv: value
+        name: Withheld
+        struct:
+          unexported: true
+  - aliases:
+      - name: Executor
+        target: coresql.Executor
+      - name: Preparer
+        target: coresql.Preparer
+      - name: TxFunc
+        target: coresql.TxFunc
+      - name: Transactor
+        target: coresql.Transactor
+      - name: Joiner
+        target: coresql.Joiner
+      - name: Deferrer
+        target: coresql.Deferrer
+      - name: TxOptions
+        target: coresql.TxOptionsValue
+      - name: Checker
+        target: coresql.Checker
+      - name: Migrator
+        target: coresql.Migrator
+      - name: Migration
+        target: coresql.MigrationValue
+      - name: Step
+        target: coresql.Step
+      - name: Dialect
+        target: coresql.Dialect
+      - name: Config
+        target: svcsql.Config
+      - name: PoolConfig
+        target: svcsql.PoolConfig
+      - name: MigrateConfig
+        target: svcsql.MigrateConfig
+    constants:
+      - name: DialectPostgres
+        type: Dialect
+        value: "1"
+      - name: DialectMySQL
+        type: Dialect
+        value: "2"
+      - name: DialectSQLite
+        type: Dialect
+        value: "3"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: ParseDialect
+        out:
+          - name: dialect
+            type: Dialect
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: ex
+            type: Executor
+        name: Irreversible
+        out:
+          - type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: NewTransactor
+        out:
+          - name: manager
+            type: Transactor
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: NewChecker
+        out:
+          - name: probe
+            type: Checker
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+          - name: mig
+            type: MigrateConfig
+        name: NewMigrator
+        out:
+          - name: runner
+            type: Migrator
+          - name: err
+            type: error
+      - in:
+          - name: stmts
+            type: string
+        name: Statements
+        out:
+          - type: Step
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: tm
+            type: Transactor
+          - name: fn
+            type: TxFunc
+        name: Transact
+        out:
+          - type: error
+    imports:
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcsql: github.com/kitsunium/sdk/internal/service/data/sql
+    path: github.com/kitsunium/sdk/pkg/v1/data/sql
+    variables:
+      - name: UnknownDialect
+        type: "*errs.Error"
+      - name: DialectRefused
+        type: "*errs.Error"
+      - name: NestedIsolation
+        type: "*errs.Error"
+      - name: InvalidMigration
+        type: "*errs.Error"
+      - name: MigrationIrreversible
+        type: "*errs.Error"
+      - name: ConfigInvalid
+        type: "*errs.Error"
+      - name: PoolMisconfigured
+        type: "*errs.Error"
+      - name: BeginFailed
+        type: "*errs.Error"
+      - name: CommitFailed
+        type: "*errs.Error"
+      - name: RollbackFailed
+        type: "*errs.Error"
+      - name: SavepointFailed
+        type: "*errs.Error"
+      - name: TxPoisoned
+        type: "*errs.Error"
+      - name: TxClosed
+        type: "*errs.Error"
+      - name: HealthCheckFailed
+        type: "*errs.Error"
+      - name: HealthCheckTimeout
+        type: "*errs.Error"
+      - name: MigrationFailed
+        type: "*errs.Error"
+      - name: MigrationOutOfOrder
+        type: "*errs.Error"
+      - name: MigrationLockUnsupported
+        type: "*errs.Error"
+      - name: MigrationLockTimeout
+        type: "*errs.Error"
+      - name: MigrationUnknownVersion
+        type: "*errs.Error"
+      - name: VersionTableInvalid
+        type: "*errs.Error"
+      - name: DuplicateMigration
+        type: "*errs.Error"

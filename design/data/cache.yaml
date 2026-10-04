@@ -1,0 +1,297 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/cache
+packages:
+  - constants:
+      - name: CodeCacheMisconfigured
+        type: errs.Code
+        value: "0x00_02_12_01"
+      - name: CodeCacheBackendFailed
+        type: errs.Code
+        value: "0x00_02_12_02"
+      - name: CodeCacheFillFailed
+        type: errs.Code
+        value: "0x00_02_12_03"
+      - name: CodeCacheEntryRejected
+        type: errs.Code
+        value: "0x00_02_12_04"
+      - name: CodeCacheChainMisconfigured
+        type: errs.Code
+        value: "0x00_03_30_01"
+      - name: CodeCacheTierFailed
+        type: errs.Code
+        value: "0x00_03_30_02"
+      - name: NoExpiry
+        type: time.Duration
+        value: "-1"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/cache
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Fetch
+              out:
+                - type: V
+                - type: bool
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+                - name: entry
+                  type: EntryValue[V]
+              name: Set
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Delete
+              out:
+                - type: error
+        name: Store
+        typeParams:
+          - constraint: any
+            name: V
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: FetchEntry
+              out:
+                - type: EntryValue[V]
+                - type: bool
+                - type: error
+        name: EntryFetcher
+        typeParams:
+          - constraint: any
+            name: V
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: tag
+                  type: string
+              name: InvalidateTag
+              out:
+                - name: removed
+                  type: int
+                - name: err
+                  type: error
+        name: Tagger
+      - name: Fill
+        typeParams:
+          - constraint: any
+            name: V
+        underlying: func(ctx context.Context) (EntryValue[V], error)
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+                - name: fill
+                  type: Fill[V]
+              name: Load
+              out:
+                - type: V
+                - type: error
+        name: Loader
+        typeParams:
+          - constraint: any
+            name: V
+      - name: EntryValue
+        struct:
+          fields:
+            - name: Value
+              type: V
+            - name: TTL
+              type: time.Duration
+            - name: Tags
+              type: "[]string"
+        typeParams:
+          - constraint: any
+            name: V
+    variables:
+      - name: CacheMisconfigured
+        type: "*errs.Error"
+      - name: CacheBackendFailed
+        type: "*errs.Error"
+      - name: CacheFillFailed
+        type: "*errs.Error"
+      - name: CacheEntryRejected
+        type: "*errs.Error"
+      - name: CacheChainMisconfigured
+        type: "*errs.Error"
+      - name: CacheTierFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: ChainConfig
+          - name: stores
+            type: corecache.Store[V]
+        name: NewChain
+        out:
+          - name: chain
+            type: corecache.Store[V]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: V
+        variadic: true
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: store
+            type: corecache.Store[V]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: V
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corecache: github.com/kitsunium/sdk/internal/core/data/cache
+    path: github.com/kitsunium/sdk/internal/service/data/cache
+    types:
+      - name: ChainConfig
+        struct:
+          fields:
+            - name: OnPromoteError
+              type: func(key string, err error)
+      - name: MemoryConfig
+        struct:
+          fields:
+            - name: MaxEntries
+              type: int
+            - name: DefaultTTL
+              type: time.Duration
+            - name: Clock
+              type: clock.Clock
+  - aliases:
+      - name: Cache
+        target: kcache.Cache[K, V]
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - name: Config
+        target: kcache.Config[K, V]
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - name: Stats
+        target: kcache.StatsValue
+      - name: Entry
+        target: corecache.EntryValue[V]
+        typeParams:
+          - constraint: any
+            name: V
+      - name: Store
+        target: corecache.Store[V]
+        typeParams:
+          - constraint: any
+            name: V
+      - name: EntryFetcher
+        target: corecache.EntryFetcher[V]
+        typeParams:
+          - constraint: any
+            name: V
+      - name: Tagger
+        target: corecache.Tagger
+      - name: Fill
+        target: corecache.Fill[V]
+        typeParams:
+          - constraint: any
+            name: V
+      - name: Loader
+        target: corecache.Loader[V]
+        typeParams:
+          - constraint: any
+            name: V
+      - name: MemoryConfig
+        target: svccache.MemoryConfig
+      - name: ChainConfig
+        target: svccache.ChainConfig
+    constants:
+      - name: NoExpiry
+        type: time.Duration
+        value: "-1"
+    functions:
+      - in:
+          - name: cfg
+            type: Config[K, V]
+        name: New
+        out:
+          - type: "*Cache[K, V]"
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - in:
+          - name: cfg
+            type: MemoryConfig
+        name: NewMemory
+        out:
+          - name: store
+            type: Store[V]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: V
+      - in:
+          - name: cfg
+            type: ChainConfig
+          - name: tiers
+            type: Store[V]
+        name: NewChain
+        out:
+          - name: store
+            type: Store[V]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: V
+        variadic: true
+    imports:
+      corecache: github.com/kitsunium/sdk/internal/core/data/cache
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kcache: github.com/kitsunium/sdk/internal/kernel/collections/cache
+      svccache: github.com/kitsunium/sdk/internal/service/data/cache
+    path: github.com/kitsunium/sdk/pkg/v1/data/cache
+    variables:
+      - name: Misconfigured
+        type: "*errs.Error"
+      - name: BackendFailed
+        type: "*errs.Error"
+      - name: FillFailed
+        type: "*errs.Error"
+      - name: EntryRejected
+        type: "*errs.Error"
+      - name: ChainMisconfigured
+        type: "*errs.Error"
+      - name: TierFailed
+        type: "*errs.Error"

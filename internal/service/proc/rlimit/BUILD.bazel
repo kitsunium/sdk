@@ -80,6 +80,7 @@ alias(
 go_test(
     name = "rlimit_test",
     srcs = [
+        "api_gen_test.go",
         "rlimit_bench_test.go",
         "rlimit_external_test.go",
         "rlimit_linux_bench_test.go",

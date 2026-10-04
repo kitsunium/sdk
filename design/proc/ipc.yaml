@@ -1,0 +1,255 @@
+apiVersion: kit.kitsunium/design/v2
+domain: proc/ipc
+packages:
+  - constants:
+      - name: CodeMisconfigured
+        type: errs.Code
+        value: "0x00_03_5B_01"
+      - name: CodeDirectoryUnsafe
+        type: errs.Code
+        value: "0x00_03_5B_02"
+      - name: CodeInUse
+        type: errs.Code
+        value: "0x00_03_5B_03"
+      - name: CodeListenFailed
+        type: errs.Code
+        value: "0x00_03_5B_04"
+      - name: CodePeerRefused
+        type: errs.Code
+        value: "0x00_03_5B_05"
+      - name: CodeDialFailed
+        type: errs.Code
+        value: "0x00_03_5B_06"
+      - name: CodeEndpointForeign
+        type: errs.Code
+        value: "0x00_03_5B_07"
+      - name: CodeClosed
+        type: errs.Code
+        value: "0x00_03_5B_08"
+      - name: CodePathUnsafe
+        type: errs.Code
+        value: "0x00_03_5B_09"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/proc/ipc
+    types:
+      - name: PeerValue
+        struct:
+          fields:
+            - name: UID
+            - name: GID
+              type: int
+            - name: PID
+              type: int
+            - name: SID
+              type: string
+            - name: Verified
+              type: bool
+      - name: Conn
+        struct:
+          fields:
+            - embedded: true
+              type: net.Conn
+            - name: Peer
+              type: PeerValue
+      - interface:
+          methods:
+            - name: Accept
+              out:
+                - type: "*Conn"
+                - type: error
+            - name: Addr
+              out:
+                - type: net.Addr
+            - name: Close
+              out:
+                - type: error
+            - name: Path
+              out:
+                - type: string
+            - name: Refused
+              out:
+                - type: int64
+        name: Listener
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Dial
+              out:
+                - type: "*Conn"
+                - type: error
+        name: Dialer
+    variables:
+      - name: Misconfigured
+        type: "*errs.Error"
+      - name: DirectoryUnsafe
+        type: "*errs.Error"
+      - name: InUse
+        type: "*errs.Error"
+      - name: ListenFailed
+        type: "*errs.Error"
+      - name: PeerRefused
+        type: "*errs.Error"
+      - name: DialFailed
+        type: "*errs.Error"
+      - name: EndpointForeign
+        type: "*errs.Error"
+      - name: Closed
+        type: "*errs.Error"
+      - name: PathUnsafe
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: "*Config"
+        name: NewListener
+        out:
+          - type: "*Listener"
+          - type: error
+      - in:
+          - name: cfg
+            type: "*Config"
+        name: NewDialer
+        out:
+          - type: "*Dialer"
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: "*Config"
+        name: Dial
+        out:
+          - type: "*coreipc.Conn"
+          - type: error
+      - in:
+          - name: app
+            type: string
+        name: RuntimeDir
+        out:
+          - type: string
+    imports:
+      coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+    path: github.com/kitsunium/sdk/internal/service/proc/ipc
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: AllowUIDs
+            - name: AllowGIDs
+              type: "[]int"
+      - methods:
+          - name: Accept
+            out:
+              - type: "*coreipc.Conn"
+              - type: error
+            recv: pointer
+          - name: Refused
+            out:
+              - type: int64
+            recv: pointer
+          - name: Addr
+            out:
+              - type: net.Addr
+            recv: pointer
+          - name: Path
+            out:
+              - type: string
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Listener
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Dial
+            out:
+              - type: "*coreipc.Conn"
+              - type: error
+            recv: pointer
+        name: Dialer
+        struct:
+          unexported: true
+  - aliases:
+      - name: Config
+        target: svcipc.Config
+      - name: Peer
+        target: coreipc.PeerValue
+      - name: Conn
+        target: coreipc.Conn
+      - name: Listener
+        target: coreipc.Listener
+      - name: Dialer
+        target: coreipc.Dialer
+    constants:
+      - name: CodeMisconfigured
+        type: errs.Code
+        value: "0x00_03_5B_01"
+      - name: CodeDirectoryUnsafe
+        type: errs.Code
+        value: "0x00_03_5B_02"
+      - name: CodeInUse
+        type: errs.Code
+        value: "0x00_03_5B_03"
+      - name: CodeListenFailed
+        type: errs.Code
+        value: "0x00_03_5B_04"
+      - name: CodePeerRefused
+        type: errs.Code
+        value: "0x00_03_5B_05"
+      - name: CodeDialFailed
+        type: errs.Code
+        value: "0x00_03_5B_06"
+      - name: CodeEndpointForeign
+        type: errs.Code
+        value: "0x00_03_5B_07"
+      - name: CodeClosed
+        type: errs.Code
+        value: "0x00_03_5B_08"
+      - name: CodePathUnsafe
+        type: errs.Code
+        value: "0x00_03_5B_09"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: Listen
+        out:
+          - type: Listener
+          - type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: NewDialer
+        out:
+          - type: Dialer
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: Config
+        name: Dial
+        out:
+          - type: "*Conn"
+          - type: error
+      - in:
+          - name: app
+            type: string
+        name: RuntimeDir
+        out:
+          - type: string
+    imports:
+      coreipc: github.com/kitsunium/sdk/internal/core/proc/ipc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcipc: github.com/kitsunium/sdk/internal/service/proc/ipc
+    path: github.com/kitsunium/sdk/pkg/v1/proc/ipc

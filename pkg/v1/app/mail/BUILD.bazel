@@ -22,9 +22,14 @@ alias(
 go_test(
     name = "mail_test",
     size = "small",
-    srcs = ["mail_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "mail_external_test.go",
+    ],
     deps = [
         ":mail",
+        "//internal/core/app/mail",
+        "//internal/service/app/mail",
         "//pkg/v1/errs",
     ],
 )

@@ -1,0 +1,45 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/cbor
+packages:
+  - constants:
+      - name: CodeCBORMarshalFailed
+        type: errs.Code
+        value: "0x00_03_06_01"
+      - name: CodeCBORUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_06_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/cbor
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/cbor
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"cbor\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_06_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_06_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/cbor
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"

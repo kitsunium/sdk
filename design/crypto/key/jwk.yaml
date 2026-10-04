@@ -1,0 +1,379 @@
+apiVersion: kit.kitsunium/design/v2
+domain: crypto/key/jwk
+packages:
+  - constants:
+      - name: CodeJWKMalformed
+        type: errs.Code
+        value: "0x00_03_2A_01"
+      - name: CodeJWKMissingMember
+        type: errs.Code
+        value: "0x00_03_2A_02"
+      - name: CodeJWKUnsupportedKeyType
+        type: errs.Code
+        value: "0x00_03_2A_03"
+      - name: CodeJWKUnsupportedCurve
+        type: errs.Code
+        value: "0x00_03_2A_04"
+      - name: CodeJWKInvalidEncoding
+        type: errs.Code
+        value: "0x00_03_2A_05"
+      - name: CodeJWKKeyMismatch
+        type: errs.Code
+        value: "0x00_03_2A_06"
+      - name: CodeJWKNoPublicForm
+        type: errs.Code
+        value: "0x00_03_2A_07"
+      - name: CodeJWKNoPrivateMaterial
+        type: errs.Code
+        value: "0x00_03_2A_08"
+      - name: CodeJWKTypeMismatch
+        type: errs.Code
+        value: "0x00_03_2A_09"
+      - name: CodeJWKKeyNotFound
+        type: errs.Code
+        value: "0x00_03_2A_0A"
+      - name: CodeJWKAmbiguousKid
+        type: errs.Code
+        value: "0x00_03_2A_0B"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/crypto/key/jwk
+    variables:
+      - name: Malformed
+        type: "*errs.Error"
+      - name: MissingMember
+        type: "*errs.Error"
+      - name: UnsupportedKeyType
+        type: "*errs.Error"
+      - name: UnsupportedCurve
+        type: "*errs.Error"
+      - name: InvalidEncoding
+        type: "*errs.Error"
+      - name: KeyMismatch
+        type: "*errs.Error"
+      - name: NoPublicForm
+        type: "*errs.Error"
+      - name: NoPrivateMaterial
+        type: "*errs.Error"
+      - name: TypeMismatch
+        type: "*errs.Error"
+      - name: KeyNotFound
+        type: "*errs.Error"
+      - name: AmbiguousKid
+        type: "*errs.Error"
+  - constants:
+      - name: TypeEC
+        type: Type
+        value: "\"EC\""
+      - name: TypeOKP
+        type: Type
+        value: "\"OKP\""
+      - name: TypeOct
+        type: Type
+        value: "\"oct\""
+      - name: CurveP256
+        type: Curve
+        value: "\"P-256\""
+      - name: CurveP384
+        type: Curve
+        value: "\"P-384\""
+      - name: CurveP521
+        type: Curve
+        value: "\"P-521\""
+      - name: CurveEd25519
+        type: Curve
+        value: "\"Ed25519\""
+    functions:
+      - in:
+          - name: der
+            type: "[]byte"
+        name: FromECDSAPublic
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: der
+            type: "[]byte"
+        name: FromECDSAPrivate
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: "[]byte"
+        name: FromEd25519Public
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: "[]byte"
+        name: FromEd25519Private
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: secret
+            type: corecrypto.Key
+        name: FromSecret
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: document
+            type: "[]byte"
+        name: Parse
+        out:
+          - name: key
+            type: KeyValue
+          - name: err
+            type: error
+      - in:
+          - name: keys
+            type: KeyValue
+        name: NewSet
+        out:
+          - type: Set
+        variadic: true
+      - in:
+          - name: document
+            type: "[]byte"
+        name: ParseSet
+        out:
+          - name: set
+            type: Set
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
+    types:
+      - name: Type
+        underlying: string
+      - name: Curve
+        underlying: string
+      - methods:
+          - name: ECDSAPublic
+            out:
+              - name: der
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: ECDSAPrivate
+            out:
+              - name: der
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: Ed25519Public
+            out:
+              - name: pub
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: Ed25519Private
+            out:
+              - name: priv
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: Secret
+            out:
+              - name: secret
+                type: corecrypto.Key
+              - name: err
+                type: error
+            recv: value
+          - name: Kty
+            out:
+              - type: Type
+            recv: value
+          - name: Crv
+            out:
+              - type: Curve
+            recv: value
+          - name: Kid
+            out:
+              - type: string
+            recv: value
+          - name: Use
+            out:
+              - type: string
+            recv: value
+          - name: Alg
+            out:
+              - type: string
+            recv: value
+          - name: KeyOps
+            out:
+              - type: "[]string"
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: IsPrivate
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: kid
+                type: string
+            name: WithKid
+            out:
+              - type: KeyValue
+            recv: value
+          - in:
+              - name: use
+                type: string
+            name: WithUse
+            out:
+              - type: KeyValue
+            recv: value
+          - in:
+              - name: alg
+                type: string
+            name: WithAlg
+            out:
+              - type: KeyValue
+            recv: value
+          - in:
+              - name: ops
+                type: string
+            name: WithKeyOps
+            out:
+              - type: KeyValue
+            recv: value
+            variadic: true
+          - name: Public
+            out:
+              - name: pub
+                type: KeyValue
+              - name: err
+                type: error
+            recv: value
+          - in:
+              - name: other
+                type: KeyValue
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+          - name: MarshalPublic
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: MarshalPrivate
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: MarshalJSON
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: Thumbprint
+            out:
+              - name: thumb
+                type: string
+              - name: err
+                type: error
+            recv: value
+          - name: WithThumbprintKid
+            out:
+              - name: identified
+                type: KeyValue
+              - name: err
+                type: error
+            recv: value
+        name: KeyValue
+        struct:
+          unexported: true
+      - methods:
+          - name: Len
+            out:
+              - type: int
+            recv: value
+          - name: Keys
+            out:
+              - type: "[]KeyValue"
+            recv: value
+          - in:
+              - name: kid
+                type: string
+            name: AllByKid
+            out:
+              - type: "[]KeyValue"
+            recv: value
+          - in:
+              - name: kid
+                type: string
+            name: ByKid
+            out:
+              - name: key
+                type: KeyValue
+              - name: err
+                type: error
+            recv: value
+          - name: MarshalPublic
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: MarshalPrivate
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: MarshalJSON
+            out:
+              - name: document
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+        name: Set
+        struct:
+          unexported: true

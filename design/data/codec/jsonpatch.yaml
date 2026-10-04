@@ -1,0 +1,87 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/jsonpatch
+packages:
+  - constants:
+      - name: CodeNotJSON
+        type: errs.Code
+        value: "0x00_03_5A_01"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/jsonpatch
+    variables:
+      - name: NotJSON
+        type: "*errs.Error"
+  - constants:
+      - name: Add
+        type: Op
+        value: "\"add\""
+      - name: Remove
+        type: Op
+        value: "\"remove\""
+      - name: Replace
+        type: Op
+        value: "\"replace\""
+    functions:
+      - in:
+          - name: from
+          - name: to
+            type: "[]byte"
+        name: Diff
+        out:
+          - type: "[]EditValue"
+          - type: error
+    imports:
+      json: encoding/json
+    path: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
+    types:
+      - name: Op
+        underlying: string
+      - name: EditValue
+        struct:
+          fields:
+            - name: Op
+              tag: json:"op"
+              type: Op
+            - name: Path
+              tag: json:"path"
+              type: string
+            - name: Value
+              tag: json:"value,omitempty"
+              type: json.RawMessage
+            - name: Old
+              tag: json:"old,omitempty"
+              type: json.RawMessage
+  - aliases:
+      - name: Op
+        target: svcjsonpatch.Op
+      - name: Edit
+        target: svcjsonpatch.EditValue
+    constants:
+      - name: Add
+        type: Op
+        value: "\"add\""
+      - name: Remove
+        type: Op
+        value: "\"remove\""
+      - name: Replace
+        type: Op
+        value: "\"replace\""
+      - name: CodeNotJSON
+        type: errs.Code
+        value: "0x00_03_5A_01"
+    functions:
+      - in:
+          - name: from
+          - name: to
+            type: "[]byte"
+        name: Diff
+        out:
+          - type: "[]Edit"
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcjsonpatch: github.com/kitsunium/sdk/internal/service/data/codec/jsonpatch
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonpatch
+    variables:
+      - name: NotJSON
+        type: "*errs.Error"

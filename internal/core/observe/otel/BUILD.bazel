@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "otel_test",
     srcs = [
+        "api_gen_test.go",
         "attr_bench_test.go",
         "model_external_test.go",
     ],

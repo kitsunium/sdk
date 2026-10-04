@@ -74,6 +74,7 @@ alias(
 go_test(
     name = "sqlite_test",
     srcs = [
+        "api_gen_test.go",
         "filestore_test.go",
         "keys_test.go",
         "revisions_test.go",
@@ -88,6 +89,7 @@ go_test(
         "//framework/kit/storetest",
         "//framework/model",
         "//pkg/v1/data/sql",
+        "//pkg/v1/errs",
         "//pkg/v1/security/secret",
     ],
 )

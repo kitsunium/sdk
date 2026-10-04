@@ -1,0 +1,28 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/codec/yaml
+packages:
+  - constants:
+      - name: Format
+        type: string
+        value: "\"yaml-full\""
+      - name: CodeYAMLFullMarshalFailed
+        type: errs.Code
+        value: "0x00_03_4D_01"
+      - name: CodeYAMLFullUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_4D_02"
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/third-party/codec/yaml
+    variables:
+      - name: Codec
+        type: codec.Codec
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"

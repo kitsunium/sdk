@@ -22,11 +22,13 @@ alias(
 go_test(
     name = "hash_test",
     srcs = [
+        "api_gen_test.go",
         "hash_bench_test.go",
         "hash_external_test.go",
     ],
     deps = [
         ":hash",
+        "//internal/service/crypto/hash/stdhash",
         "//pkg/v1/errs",
     ],
 )

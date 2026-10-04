@@ -35,8 +35,14 @@ alias(
 go_test(
     name = "mail_test",
     size = "small",
-    srcs = ["port_external_test.go"],
-    deps = [":mail"],
+    srcs = [
+        "api_gen_test.go",
+        "port_external_test.go",
+    ],
+    deps = [
+        ":mail",
+        "//internal/kernel/errs",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

@@ -1,0 +1,85 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/semver
+packages:
+  - functions:
+      - in:
+          - name: v
+            type: string
+        name: IsPseudoVersion
+        out:
+          - type: bool
+      - in:
+          - name: v
+            type: string
+        name: PseudoVersionRev
+        out:
+          - type: string
+          - type: bool
+      - in:
+          - name: v
+            type: string
+        name: PseudoVersionTime
+        out:
+          - type: time.Time
+          - type: bool
+      - in:
+          - name: v
+            type: string
+        name: IsValid
+        out:
+          - type: bool
+      - in:
+          - name: v
+          - name: w
+            type: string
+        name: Compare
+        out:
+          - type: int
+      - in:
+          - name: v
+            type: string
+        name: Prerelease
+        out:
+          - type: string
+    path: github.com/kitsunium/sdk/internal/kernel/semver
+  - functions:
+      - in:
+          - name: v
+            type: string
+        name: IsValid
+        out:
+          - type: bool
+      - in:
+          - name: v
+          - name: w
+            type: string
+        name: Compare
+        out:
+          - type: int
+      - in:
+          - name: v
+            type: string
+        name: Prerelease
+        out:
+          - type: string
+      - in:
+          - name: v
+            type: string
+        name: IsPseudoVersion
+        out:
+          - type: bool
+      - in:
+          - name: v
+            type: string
+        name: PseudoVersionRev
+        out:
+          - type: string
+          - type: bool
+      - in:
+          - name: v
+            type: string
+        name: PseudoVersionTime
+        out:
+          - type: time.Time
+          - type: bool
+    path: github.com/kitsunium/sdk/pkg/v1/data/semver

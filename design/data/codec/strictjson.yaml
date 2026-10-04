@@ -1,0 +1,205 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/strictjson
+packages:
+  - constants:
+      - name: CodeDocumentTooLarge
+        type: errs.Code
+        value: "0x00_03_48_01"
+      - name: CodeDocumentEmpty
+        type: errs.Code
+        value: "0x00_03_48_02"
+      - name: CodeDocumentMalformed
+        type: errs.Code
+        value: "0x00_03_48_03"
+      - name: CodeMemberUnknown
+        type: errs.Code
+        value: "0x00_03_48_04"
+      - name: CodeValueMismatched
+        type: errs.Code
+        value: "0x00_03_48_05"
+      - name: CodeMediaTypeUnsupported
+        type: errs.Code
+        value: "0x00_03_48_06"
+      - name: CodeDocumentUnreadable
+        type: errs.Code
+        value: "0x00_03_48_07"
+      - name: CodeDecodeMisconfigured
+        type: errs.Code
+        value: "0x00_03_48_08"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/strictjson
+    variables:
+      - name: DocumentTooLarge
+        type: "*errs.Error"
+      - name: DocumentEmpty
+        type: "*errs.Error"
+      - name: DocumentMalformed
+        type: "*errs.Error"
+      - name: MemberUnknown
+        type: "*errs.Error"
+      - name: ValueMismatched
+        type: "*errs.Error"
+      - name: MediaTypeUnsupported
+        type: "*errs.Error"
+      - name: DocumentUnreadable
+        type: "*errs.Error"
+      - name: DecodeMisconfigured
+        type: "*errs.Error"
+  - constants:
+      - name: MaxPointerBytes
+        type: int
+        value: "256"
+    functions:
+      - in:
+          - name: failure
+            type: error
+        name: Unreadable
+        out:
+          - type: error
+      - in:
+          - name: r
+            type: io.Reader
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+        name: Decode
+        out:
+          - type: error
+      - in:
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+        name: CheckArguments
+        out:
+          - type: error
+      - in:
+          - name: r
+            type: io.Reader
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+          - name: oversize
+            type: func(error) bool
+        name: DecodeChecked
+        out:
+          - type: error
+      - in:
+          - name: err
+            type: error
+        name: PointerOf
+        out:
+          - name: pointer
+            type: string
+          - name: ok
+            type: bool
+      - in:
+          - name: argument
+            type: string
+        name: Misconfigured
+        out:
+          - type: error
+    path: github.com/kitsunium/sdk/internal/service/data/codec/strictjson
+  - functions:
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: req
+            type: "*http.Request"
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+        name: DecodeRequest
+        out:
+          - type: error
+    imports:
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/data/codec/strictjson/httpbody
+  - constants:
+      - name: MaxPointerBytes
+        type: int
+        value: "256"
+      - name: CodeDocumentTooLarge
+        type: errs.Code
+        value: "0x00_03_48_01"
+      - name: CodeDocumentEmpty
+        type: errs.Code
+        value: "0x00_03_48_02"
+      - name: CodeDocumentMalformed
+        type: errs.Code
+        value: "0x00_03_48_03"
+      - name: CodeMemberUnknown
+        type: errs.Code
+        value: "0x00_03_48_04"
+      - name: CodeValueMismatched
+        type: errs.Code
+        value: "0x00_03_48_05"
+      - name: CodeMediaTypeUnsupported
+        type: errs.Code
+        value: "0x00_03_48_06"
+      - name: CodeDocumentUnreadable
+        type: errs.Code
+        value: "0x00_03_48_07"
+      - name: CodeDecodeMisconfigured
+        type: errs.Code
+        value: "0x00_03_48_08"
+    functions:
+      - in:
+          - name: r
+            type: io.Reader
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+        name: Decode
+        out:
+          - type: error
+      - in:
+          - name: err
+            type: error
+        name: PointerOf
+        out:
+          - name: pointer
+            type: string
+          - name: ok
+            type: bool
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson
+    variables:
+      - name: DocumentTooLarge
+        type: "*errs.Error"
+      - name: DocumentEmpty
+        type: "*errs.Error"
+      - name: DocumentMalformed
+        type: "*errs.Error"
+      - name: MemberUnknown
+        type: "*errs.Error"
+      - name: ValueMismatched
+        type: "*errs.Error"
+      - name: MediaTypeUnsupported
+        type: "*errs.Error"
+      - name: DocumentUnreadable
+        type: "*errs.Error"
+      - name: DecodeMisconfigured
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: req
+            type: "*http.Request"
+          - name: v
+            type: any
+          - name: maxBytes
+            type: int64
+        name: DecodeRequest
+        out:
+          - type: error
+    imports:
+      http: net/http
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/strictjson/httpbody

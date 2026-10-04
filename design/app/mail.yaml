@@ -1,0 +1,598 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/mail
+packages:
+  - constants:
+      - name: DefaultAttachmentType
+        type: string
+        value: "\"application/octet-stream\""
+      - name: CodeHeaderInjection
+        type: errs.Code
+        value: "0x00_02_1F_01"
+      - name: CodeInvalidAddress
+        type: errs.Code
+        value: "0x00_02_1F_02"
+      - name: CodeMissingSender
+        type: errs.Code
+        value: "0x00_02_1F_03"
+      - name: CodeNoRecipients
+        type: errs.Code
+        value: "0x00_02_1F_04"
+      - name: CodeEmptyBody
+        type: errs.Code
+        value: "0x00_02_1F_05"
+      - name: CodeReservedHeader
+        type: errs.Code
+        value: "0x00_02_1F_06"
+      - name: CodeInvalidAttachment
+        type: errs.Code
+        value: "0x00_02_1F_07"
+      - name: CodeHeaderTooLong
+        type: errs.Code
+        value: "0x00_02_1F_08"
+      - name: CodeUnsupportedAddress
+        type: errs.Code
+        value: "0x00_02_1F_09"
+      - name: CodeComposeFailed
+        type: errs.Code
+        value: "0x00_03_3D_01"
+      - name: CodeInvalidConfig
+        type: errs.Code
+        value: "0x00_03_3D_02"
+      - name: CodeDialFailed
+        type: errs.Code
+        value: "0x00_03_3D_03"
+      - name: CodeGreetingFailed
+        type: errs.Code
+        value: "0x00_03_3D_04"
+      - name: CodeTLSRequired
+        type: errs.Code
+        value: "0x00_03_3D_05"
+      - name: CodeTLSFailed
+        type: errs.Code
+        value: "0x00_03_3D_06"
+      - name: CodeAuthInsecure
+        type: errs.Code
+        value: "0x00_03_3D_07"
+      - name: CodeAuthFailed
+        type: errs.Code
+        value: "0x00_03_3D_08"
+      - name: CodeSendRefused
+        type: errs.Code
+        value: "0x00_03_3D_09"
+      - name: CodeInvalidURL
+        type: errs.Code
+        value: "0x00_03_3D_0A"
+      - name: HeaderFrom
+        type: string
+        value: "\"From\""
+      - name: HeaderTo
+        type: string
+        value: "\"To\""
+      - name: HeaderCc
+        type: string
+        value: "\"Cc\""
+      - name: HeaderBcc
+        type: string
+        value: "\"Bcc\""
+      - name: HeaderReplyTo
+        type: string
+        value: "\"Reply-To\""
+      - name: HeaderSubject
+        type: string
+        value: "\"Subject\""
+      - name: HeaderDate
+        type: string
+        value: "\"Date\""
+      - name: HeaderMessageID
+        type: string
+        value: "\"Message-ID\""
+      - name: HeaderMIMEVersion
+        type: string
+        value: "\"MIME-Version\""
+      - name: HeaderContentType
+        type: string
+        value: "\"Content-Type\""
+      - name: HeaderContentTransferEncoding
+        type: string
+        value: "\"Content-Transfer-Encoding\""
+      - name: HeaderContentDisposition
+        type: string
+        value: "\"Content-Disposition\""
+      - name: HeaderContentID
+        type: string
+        value: "\"Content-ID\""
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/mail
+    types:
+      - methods:
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+        name: AddressValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Addr
+              type: string
+      - methods:
+          - name: Inline
+            out:
+              - type: bool
+            recv: pointer
+        name: AttachmentValue
+        struct:
+          fields:
+            - name: Filename
+              type: string
+            - name: ContentType
+              type: string
+            - name: ContentID
+              type: string
+            - name: Content
+              type: "[]byte"
+      - name: HeaderFieldValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Value
+              type: string
+      - name: MessageValue
+        struct:
+          fields:
+            - name: Date
+              type: time.Time
+            - name: From
+              type: AddressValue
+            - name: Subject
+              type: string
+            - name: MessageID
+              type: string
+            - name: ReplyTo
+              type: "[]AddressValue"
+            - name: To
+              type: "[]AddressValue"
+            - name: Cc
+              type: "[]AddressValue"
+            - name: Bcc
+              type: "[]AddressValue"
+            - name: Headers
+              type: "[]HeaderFieldValue"
+            - name: Text
+              type: string
+            - name: HTML
+              type: string
+            - name: Attachments
+              type: "[]AttachmentValue"
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: msg
+                  type: MessageValue
+              name: Send
+              out:
+                - type: error
+        name: Transport
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: msgs
+                  type: "[]MessageValue"
+              name: SendBatch
+              out:
+                - type: error
+        name: BatchSender
+      - interface:
+          methods:
+            - name: Sent
+              out:
+                - type: "[]DeliveryValue"
+            - name: Reset
+        name: Outbox
+      - interface:
+          embeds:
+            - Transport
+            - BatchSender
+            - Outbox
+        name: FullTransport
+      - name: DeliveryValue
+        struct:
+          fields:
+            - name: Envelope
+              type: EnvelopeValue
+            - name: Raw
+              type: "[]byte"
+      - name: EnvelopeValue
+        struct:
+          fields:
+            - name: From
+              type: string
+            - name: To
+              type: "[]string"
+    variables:
+      - name: HeaderInjection
+        type: "*errs.Error"
+      - name: InvalidAddress
+        type: "*errs.Error"
+      - name: MissingSender
+        type: "*errs.Error"
+      - name: NoRecipients
+        type: "*errs.Error"
+      - name: EmptyBody
+        type: "*errs.Error"
+      - name: ReservedHeader
+        type: "*errs.Error"
+      - name: InvalidAttachment
+        type: "*errs.Error"
+      - name: HeaderTooLong
+        type: "*errs.Error"
+      - name: UnsupportedAddress
+        type: "*errs.Error"
+      - name: ComposeFailed
+        type: "*errs.Error"
+      - name: InvalidConfig
+        type: "*errs.Error"
+      - name: DialFailed
+        type: "*errs.Error"
+      - name: GreetingFailed
+        type: "*errs.Error"
+      - name: TLSRequired
+        type: "*errs.Error"
+      - name: TLSFailed
+        type: "*errs.Error"
+      - name: AuthInsecure
+        type: "*errs.Error"
+      - name: AuthFailed
+        type: "*errs.Error"
+      - name: SendRefused
+        type: "*errs.Error"
+      - name: InvalidURL
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultCaptureKeep
+        type: int
+        value: "200"
+      - name: TLSUnset
+        type: TLSMode
+        value: "0"
+      - name: TLSStartTLS
+        type: TLSMode
+        value: "1"
+      - name: TLSImplicit
+        type: TLSMode
+        value: "2"
+      - name: TLSDisabled
+        type: TLSMode
+        value: "3"
+    functions:
+      - in:
+          - name: field
+            type: string
+          - name: a
+            type: coremail.AddressValue
+        name: ValidateAddress
+        out:
+          - type: error
+      - in:
+          - name: s
+            type: string
+        name: IsDotAtom
+        out:
+          - type: bool
+      - in:
+          - name: name
+            type: string
+        name: NeedsQuotedDisplayName
+        out:
+          - type: bool
+      - in:
+          - name: field
+            type: string
+          - name: a
+            type: "*coremail.AttachmentValue"
+        name: ValidateAttachment
+        out:
+          - type: error
+      - in:
+          - name: cfg
+            type: ComposerConfig
+        name: NewComposer
+        out:
+          - type: "*Composer"
+      - in:
+          - name: m
+            type: coremail.MessageValue
+        name: Envelope
+        out:
+          - name: envelope
+            type: coremail.EnvelopeValue
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: string
+        name: IsReservedHeader
+        out:
+          - type: bool
+      - in:
+          - name: name
+            type: string
+        name: ValidateHeaderName
+        out:
+          - type: error
+      - in:
+          - name: name
+          - name: value
+            type: string
+        name: ValidateHeaderValue
+        out:
+          - type: error
+      - in:
+          - name: field
+            type: coremail.HeaderFieldValue
+        name: ValidateHeader
+        out:
+          - type: error
+      - name: NewMemory
+        out:
+          - type: coremail.FullTransport
+      - in:
+          - name: keep
+            type: int
+        name: NewCapture
+        out:
+          - type: coremail.FullTransport
+      - in:
+          - name: cfg
+            type: SMTPConfig
+        name: NewSMTP
+        out:
+          - name: transport
+            type: coremail.Transport
+          - name: err
+            type: error
+      - in:
+          - name: raw
+            type: string
+        name: ParseURL
+        out:
+          - name: cfg
+            type: SMTPConfig
+          - name: err
+            type: error
+      - in:
+          - name: m
+            type: coremail.MessageValue
+        name: Validate
+        out:
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coremail: github.com/kitsunium/sdk/internal/core/app/mail
+      corenet: github.com/kitsunium/sdk/internal/core/net
+    path: github.com/kitsunium/sdk/internal/service/app/mail
+    types:
+      - methods:
+          - in:
+              - name: msg
+                type: coremail.MessageValue
+            name: Compose
+            out:
+              - name: raw
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+        name: Composer
+        struct:
+          unexported: true
+      - name: ComposerConfig
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Clock
+            - name: Rand
+              type: io.Reader
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: TLSMode
+        underlying: uint8
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: state
+                type: fmt.State
+              - name: verb
+                type: rune
+            name: Format
+            recv: value
+          - name: MarshalJSON
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+        name: SMTPConfig
+        struct:
+          fields:
+            - name: Host
+              type: string
+            - name: Port
+              type: int
+            - name: TLS
+              type: TLSMode
+            - name: Identity
+              type: corenet.IdentityValue
+            - name: Username
+              type: string
+            - name: Password
+              type: string
+            - name: LocalName
+              type: string
+            - name: DialTimeout
+              type: time.Duration
+  - aliases:
+      - name: Message
+        target: coremail.MessageValue
+      - name: Address
+        target: coremail.AddressValue
+      - name: Attachment
+        target: coremail.AttachmentValue
+      - name: HeaderField
+        target: coremail.HeaderFieldValue
+      - name: Envelope
+        target: coremail.EnvelopeValue
+      - name: Delivery
+        target: coremail.DeliveryValue
+      - name: Transport
+        target: coremail.Transport
+      - name: BatchSender
+        target: coremail.BatchSender
+      - name: Outbox
+        target: coremail.Outbox
+      - name: FullTransport
+        target: coremail.FullTransport
+      - name: SMTPConfig
+        target: svcmail.SMTPConfig
+      - name: TLSMode
+        target: svcmail.TLSMode
+      - name: ComposerConfig
+        target: svcmail.ComposerConfig
+      - name: Composer
+        target: svcmail.Composer
+    constants:
+      - name: TLSUnset
+        type: TLSMode
+        value: "0"
+      - name: TLSStartTLS
+        type: TLSMode
+        value: "1"
+      - name: TLSImplicit
+        type: TLSMode
+        value: "2"
+      - name: TLSDisabled
+        type: TLSMode
+        value: "3"
+      - name: DefaultCaptureKeep
+        type: int
+        value: "200"
+    functions:
+      - in:
+          - name: keep
+            type: int
+        name: NewCapture
+        out:
+          - type: FullTransport
+      - in:
+          - name: raw
+            type: string
+        name: ParseURL
+        out:
+          - name: cfg
+            type: SMTPConfig
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: SMTPConfig
+        name: NewSMTP
+        out:
+          - name: transport
+            type: Transport
+          - name: err
+            type: error
+      - name: NewMemory
+        out:
+          - type: FullTransport
+      - in:
+          - name: cfg
+            type: ComposerConfig
+        name: NewComposer
+        out:
+          - type: "*Composer"
+      - in:
+          - name: msg
+            type: Message
+        name: Compose
+        out:
+          - name: raw
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: msg
+            type: Message
+        name: Validate
+        out:
+          - type: error
+      - in:
+          - name: msg
+            type: Message
+        name: EnvelopeOf
+        out:
+          - name: envelope
+            type: Envelope
+          - name: err
+            type: error
+    imports:
+      coremail: github.com/kitsunium/sdk/internal/core/app/mail
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcmail: github.com/kitsunium/sdk/internal/service/app/mail
+    path: github.com/kitsunium/sdk/pkg/v1/app/mail
+    variables:
+      - name: HeaderInjection
+        type: "*errs.Error"
+      - name: InvalidAddress
+        type: "*errs.Error"
+      - name: UnsupportedAddress
+        type: "*errs.Error"
+      - name: MissingSender
+        type: "*errs.Error"
+      - name: NoRecipients
+        type: "*errs.Error"
+      - name: EmptyBody
+        type: "*errs.Error"
+      - name: ReservedHeader
+        type: "*errs.Error"
+      - name: InvalidAttachment
+        type: "*errs.Error"
+      - name: HeaderTooLong
+        type: "*errs.Error"
+      - name: ComposeFailed
+        type: "*errs.Error"
+      - name: InvalidConfig
+        type: "*errs.Error"
+      - name: DialFailed
+        type: "*errs.Error"
+      - name: GreetingFailed
+        type: "*errs.Error"
+      - name: TLSRequired
+        type: "*errs.Error"
+      - name: TLSFailed
+        type: "*errs.Error"
+      - name: AuthInsecure
+        type: "*errs.Error"
+      - name: AuthFailed
+        type: "*errs.Error"
+      - name: SendRefused
+        type: "*errs.Error"
+      - name: InvalidURL
+        type: "*errs.Error"

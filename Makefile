@@ -35,7 +35,7 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
-	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes and gazelle$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -177,7 +177,9 @@ lint-check:
 	$(MAKE) --no-print-directory guard
 	# Every same-package doc link resolves (ADR 0138).
 	$(MAKE) --no-print-directory doclinks
-	# docs/api is what the code exports, byte for byte, on every cell.
+	# docs/api is what the code exports, byte for byte, on every cell; the
+	# code's surface is the pins' markers, and every generated file still the
+	# bytes of its design file (ADR 0163).
 	$(MAKE) --no-print-directory api-check
 
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
@@ -205,25 +207,37 @@ doclinks:
 # each cell of scripts/ci/platforms.sh, go/types checks every package from
 # source with function bodies ignored, and the records that differ between
 # cells say on which they hold. Run it after a doc edit — a doc edit needs
-# nothing else — and after any change to the exported surface. Deterministic:
-# the same tree writes the same bytes on every machine. It needs the
-# workspace's modules in the module cache, so its first run may download them.
-# It then writes docs/error-codes.yaml from the documents it wrote
-# (`error-codes`).
+# nothing else — and after any change to the exported surface, which starts in
+# design/ and `kit gen` (ADR 0163): the flow is the design, kit gen, the code,
+# then `make api`. Deterministic: the same tree writes the same bytes on every
+# machine. It needs the workspace's modules in the module cache, so its first
+# run may download them. It then writes docs/error-codes.yaml from the
+# documents it wrote (`error-codes`), and runs gazelle, which gives the pin
+# files kit gen writes — api_gen*_test.go, external tests — their test
+# targets.
 api:
 	cd tools/genindex && GOWORK=off go run . -write-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
 	$(MAKE) --no-print-directory error-codes
+	bazel run //:gazelle
 
-# `api-check` regenerates docs/api in memory and fails on any byte that
-# differs from what is committed, naming each record added, changed or
-# removed — a doc edit without `make api` included. It runs in `lint-check`,
-# so CI's required job runs it. genindex can also compare every cell's
-# symbols with the pin markers of api_gen*_test.go files (-markers) and every
-# generated file's digests with the design files' bytes (-digests); both are
-# tested on fixtures and are armed here in the change that commits the design
-# and the pins, so no commit in between is red.
+# `api-check` holds the code to docs/api and to its design (ADR 0163), with no
+# kit and no YAML read: it writes nothing and fails on
+#   - any byte docs/api regenerated in memory differs from what is committed,
+#     naming each record added, changed or removed — a doc edit without
+#     `make api` included;
+#   - -markers: on every cell, the code's exported (id, kind, canonical
+#     signature) set differs from the `// go:<id> <kind> <canonical>` markers
+#     of the api_gen*_test.go pins kit gen writes from design/ — a symbol
+#     added in the code alone, a function turned variable, a constraint
+#     widened, a struct tag, a receiver;
+#   - -digests: a generated file (a pin, or a design_gen.go port) whose header
+#     sha256 is no longer the bytes of the design file it names, or whose body
+#     was edited by hand — a design edit without `kit gen`.
+# What the pins hold themselves — a signature, a value, a type — the compiler
+# catches: `go vet` on every cell (cross-build) and the Bazel test targets. It
+# runs in `lint-check`, so CI's required job runs it.
 api-check:
-	cd tools/genindex && GOWORK=off go run . -check-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
+	cd tools/genindex && GOWORK=off go run . -check-api -markers -digests -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #

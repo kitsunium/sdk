@@ -25,6 +25,7 @@ alias(
 go_test(
     name = "scratch_test",
     srcs = [
+        "api_gen_test.go",
         "scratch_external_test.go",
         "scratch_internal_test.go",
     ],

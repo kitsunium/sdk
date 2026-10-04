@@ -49,6 +49,7 @@ alias(
 go_test(
     name = "config_test",
     srcs = [
+        "api_gen_test.go",
         "env_source_external_test.go",
         "env_source_internal_test.go",
         "file_source_external_test.go",

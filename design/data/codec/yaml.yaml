@@ -1,0 +1,135 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/yaml
+packages:
+  - constants:
+      - name: CodeYAMLMarshalFailed
+        type: errs.Code
+        value: "0x00_03_04_01"
+      - name: CodeYAMLUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_04_02"
+      - name: CodeYAMLAnchorRefused
+        type: errs.Code
+        value: "0x00_03_04_03"
+      - name: CodeYAMLAliasRefused
+        type: errs.Code
+        value: "0x00_03_04_04"
+      - name: CodeYAMLTagRefused
+        type: errs.Code
+        value: "0x00_03_04_05"
+      - name: CodeYAMLMergeKeyRefused
+        type: errs.Code
+        value: "0x00_03_04_06"
+      - name: CodeYAMLMultiDocRefused
+        type: errs.Code
+        value: "0x00_03_04_07"
+      - name: CodeYAMLComplexKeyRefused
+        type: errs.Code
+        value: "0x00_03_04_08"
+      - name: CodeYAMLDirectiveRefused
+        type: errs.Code
+        value: "0x00_03_04_09"
+      - name: CodeYAMLDuplicateKey
+        type: errs.Code
+        value: "0x00_03_04_0A"
+      - name: CodeYAMLLeadingZeroRefused
+        type: errs.Code
+        value: "0x00_03_04_0B"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/yaml
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: AnchorRefused
+        type: "*errs.Error"
+      - name: AliasRefused
+        type: "*errs.Error"
+      - name: TagRefused
+        type: "*errs.Error"
+      - name: MergeKeyRefused
+        type: "*errs.Error"
+      - name: MultipleDocumentsRefused
+        type: "*errs.Error"
+      - name: ComplexKeyRefused
+        type: "*errs.Error"
+      - name: DirectiveRefused
+        type: "*errs.Error"
+      - name: DuplicateKey
+        type: "*errs.Error"
+      - name: LeadingZeroRefused
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/yaml
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"yaml\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_04_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_04_02"
+      - name: CodeAnchorRefused
+        type: errs.Code
+        value: "0x00_03_04_03"
+      - name: CodeAliasRefused
+        type: errs.Code
+        value: "0x00_03_04_04"
+      - name: CodeTagRefused
+        type: errs.Code
+        value: "0x00_03_04_05"
+      - name: CodeMergeKeyRefused
+        type: errs.Code
+        value: "0x00_03_04_06"
+      - name: CodeMultiDocRefused
+        type: errs.Code
+        value: "0x00_03_04_07"
+      - name: CodeComplexKeyRefused
+        type: errs.Code
+        value: "0x00_03_04_08"
+      - name: CodeDirectiveRefused
+        type: errs.Code
+        value: "0x00_03_04_09"
+      - name: CodeDuplicateKey
+        type: errs.Code
+        value: "0x00_03_04_0A"
+      - name: CodeLeadingZeroRefused
+        type: errs.Code
+        value: "0x00_03_04_0B"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/yaml
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: AnchorRefused
+        type: "*errs.Error"
+      - name: AliasRefused
+        type: "*errs.Error"
+      - name: TagRefused
+        type: "*errs.Error"
+      - name: MergeKeyRefused
+        type: "*errs.Error"
+      - name: MultipleDocumentsRefused
+        type: "*errs.Error"
+      - name: ComplexKeyRefused
+        type: "*errs.Error"
+      - name: DirectiveRefused
+        type: "*errs.Error"
+      - name: DuplicateKey
+        type: "*errs.Error"
+      - name: LeadingZeroRefused
+        type: "*errs.Error"

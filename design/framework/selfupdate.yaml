@@ -1,0 +1,591 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/selfupdate
+packages:
+  - constants:
+      - name: CodeNoVendorKey
+        type: errs.Code
+        value: "0x00_02_22_01"
+      - name: CodeSignatureMissing
+        type: errs.Code
+        value: "0x00_02_22_02"
+      - name: CodeSignatureInvalid
+        type: errs.Code
+        value: "0x00_02_22_03"
+      - name: CodeChecksumMissing
+        type: errs.Code
+        value: "0x00_02_22_04"
+      - name: CodeChecksumMismatch
+        type: errs.Code
+        value: "0x00_02_22_05"
+      - name: CodeArchiveTooLarge
+        type: errs.Code
+        value: "0x00_02_22_06"
+      - name: CodeAPIBodyTooLarge
+        type: errs.Code
+        value: "0x00_02_22_07"
+      - name: CodeInsecureRedirect
+        type: errs.Code
+        value: "0x00_02_22_08"
+      - name: CodeUnexpectedStatus
+        type: errs.Code
+        value: "0x00_02_22_09"
+      - name: CodeDownloadFailed
+        type: errs.Code
+        value: "0x00_02_22_0A"
+      - name: CodeDevBuild
+        type: errs.Code
+        value: "0x00_02_22_0B"
+      - name: CodeCandidateNotFound
+        type: errs.Code
+        value: "0x00_02_22_0C"
+      - name: CodeNotPrerelease
+        type: errs.Code
+        value: "0x00_02_22_0D"
+      - name: CodeDraftRelease
+        type: errs.Code
+        value: "0x00_02_22_0E"
+      - name: CodeInvalidTag
+        type: errs.Code
+        value: "0x00_02_22_0F"
+      - name: CodeBinaryNotInArchive
+        type: errs.Code
+        value: "0x00_02_22_10"
+      - name: CodeUnknownArchive
+        type: errs.Code
+        value: "0x00_02_22_11"
+      - name: CodeElevationNotAuthorised
+        type: errs.Code
+        value: "0x00_02_22_12"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+    path: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: url
+                  type: string
+              name: Get
+              out:
+                - name: resp
+                  type: "*http.Response"
+                - name: err
+                  type: error
+        name: Getter
+      - interface:
+          methods:
+            - name: Executable
+              out:
+                - name: path
+                  type: string
+                - name: err
+                  type: error
+            - in:
+                - name: path
+                  type: string
+              name: EvalSymlinks
+              out:
+                - name: resolved
+                  type: string
+                - name: err
+                  type: error
+            - in:
+                - name: dir
+                - name: pattern
+                  type: string
+              name: CreateTemp
+              out:
+                - name: file
+                  type: "*os.File"
+                - name: err
+                  type: error
+            - in:
+                - name: name
+                  type: string
+                - name: mode
+                  type: os.FileMode
+              name: Chmod
+              out:
+                - type: error
+            - in:
+                - name: oldpath
+                - name: newpath
+                  type: string
+              name: Rename
+              out:
+                - type: error
+            - in:
+                - name: name
+                  type: string
+              name: Remove
+              out:
+                - type: error
+        name: FileSystem
+      - interface:
+          methods:
+            - in:
+                - name: dst
+                  type: io.Writer
+                - name: src
+                  type: io.Reader
+              name: Copy
+              out:
+                - name: written
+                  type: int64
+                - name: err
+                  type: error
+        name: Copier
+      - name: UpdateValue
+        struct:
+          fields:
+            - name: CurrentVersion
+              type: string
+            - name: LatestVersion
+              type: string
+            - name: Available
+              type: bool
+      - name: CandidateValue
+        struct:
+          fields:
+            - name: Tag
+              type: string
+            - name: Name
+              type: string
+            - name: CreatedAt
+              type: string
+    variables:
+      - name: NoVendorKey
+        type: "*errs.Error"
+      - name: SignatureMissing
+        type: "*errs.Error"
+      - name: SignatureInvalid
+        type: "*errs.Error"
+      - name: ChecksumMissing
+        type: "*errs.Error"
+      - name: ChecksumMismatch
+        type: "*errs.Error"
+      - name: ArchiveTooLarge
+        type: "*errs.Error"
+      - name: APIBodyTooLarge
+        type: "*errs.Error"
+      - name: InsecureRedirect
+        type: "*errs.Error"
+      - name: UnexpectedStatus
+        type: "*errs.Error"
+      - name: DownloadFailed
+        type: "*errs.Error"
+      - name: DevBuild
+        type: "*errs.Error"
+      - name: CandidateNotFound
+        type: "*errs.Error"
+      - name: NotPrerelease
+        type: "*errs.Error"
+      - name: DraftRelease
+        type: "*errs.Error"
+      - name: InvalidTag
+        type: "*errs.Error"
+      - name: BinaryNotInArchive
+        type: "*errs.Error"
+      - name: UnknownArchive
+        type: "*errs.Error"
+      - name: ElevationNotAuthorised
+        type: "*errs.Error"
+  - aliases:
+      - name: CandidateValue
+        target: coreupd.CandidateValue
+      - name: Getter
+        target: coreupd.Getter
+      - name: FileSystem
+        target: coreupd.FileSystem
+      - name: Copier
+        target: coreupd.Copier
+      - name: UpdateValue
+        target: coreupd.UpdateValue
+    constants:
+      - name: CodeCandidateTagRequired
+        type: errs.Code
+        value: "0x00_03_42_01"
+      - name: CodeReleaseMetadataUnreadable
+        type: errs.Code
+        value: "0x00_03_42_02"
+      - name: CodeArchiveUnreadable
+        type: errs.Code
+        value: "0x00_03_42_03"
+      - name: CodeExecutablePathUnresolved
+        type: errs.Code
+        value: "0x00_03_42_04"
+      - name: CodeStagingFailed
+        type: errs.Code
+        value: "0x00_03_42_05"
+      - name: CodeReplacementFailed
+        type: errs.Code
+        value: "0x00_03_42_06"
+      - name: CodeElevationFailed
+        type: errs.Code
+        value: "0x00_03_42_07"
+      - name: CodeProbeFailed
+        type: errs.Code
+        value: "0x00_03_42_08"
+      - name: CandidateListSentinel
+        type: string
+        value: "\"__list__\""
+    functions:
+      - name: StdinIsTerminal
+        out:
+          - type: bool
+      - in:
+          - name: version
+            type: string
+          - name: src
+            type: SourceValue
+        name: NewService
+        out:
+          - type: "*Service"
+      - in:
+          - name: version
+            type: string
+          - name: src
+            type: SourceValue
+          - name: client
+            type: Getter
+          - name: fs
+            type: FileSystem
+          - name: copier
+            type: Copier
+        name: NewUpdaterWithDeps
+        out:
+          - type: "*Service"
+    imports:
+      coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/internal/service/selfupdate
+    types:
+      - methods:
+          - in:
+              - name: out
+                type: io.Writer
+              - name: in
+                type: io.Reader
+              - name: interactive
+                type: bool
+            name: AuthoriseUnattendedUpgrade
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: out
+                type: io.Writer
+            name: ExplainUpgradeRefusal
+            recv: value
+          - in:
+              - name: out
+                type: io.Writer
+              - name: action
+                type: string
+              - name: err
+                type: error
+            name: ExplainUpgradeFailure
+            recv: value
+          - name: AutoUpgradeEnv
+            out:
+              - type: string
+            recv: value
+          - name: SudoOptInEnv
+            out:
+              - type: string
+            recv: value
+        name: SourceValue
+        struct:
+          fields:
+            - name: Owner
+              type: string
+            - name: StableRepo
+              type: string
+            - name: DevRepo
+              type: string
+            - name: Product
+              type: string
+      - methods:
+          - name: ListCandidates
+            out:
+              - name: candidates
+                type: "[]CandidateValue"
+              - name: listErr
+                type: error
+            recv: pointer
+          - in:
+              - name: tag
+                type: string
+            name: DownloadCandidate
+            out:
+              - name: info
+                type: UpdateValue
+              - name: downloadErr
+                type: error
+            recv: pointer
+          - name: WithAutomaticConsent
+            out:
+              - type: "*Service"
+            recv: pointer
+          - name: WithoutElevation
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: out
+                type: io.Writer
+              - name: in
+                type: io.Reader
+              - name: interactive
+                type: bool
+            name: AuthoriseUnattendedUpgrade
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: keys
+                type: "[]byte"
+            name: WithVendorKeys
+            out:
+              - type: "*Service"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: domain
+                type: string
+            name: WithSignatureDomain
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: args
+                type: "[]string"
+              - name: timeout
+                type: time.Duration
+            name: WithProbe
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: key
+                type: "[]byte"
+            name: WithVendorKey
+            out:
+              - type: "*Service"
+            recv: pointer
+          - name: CheckForUpdate
+            out:
+              - name: info
+                type: UpdateValue
+              - name: checkErr
+                type: error
+            recv: pointer
+          - name: Upgrade
+            out:
+              - name: info
+                type: UpdateValue
+              - name: upgradeErr
+                type: error
+            recv: pointer
+        name: Service
+        struct:
+          unexported: true
+    variables:
+      - name: CandidateTagRequired
+        type: "*errs.Error"
+      - name: ReleaseMetadataUnreadable
+        type: "*errs.Error"
+      - name: ArchiveUnreadable
+        type: "*errs.Error"
+      - name: ExecutablePathUnresolved
+        type: "*errs.Error"
+      - name: StagingFailed
+        type: "*errs.Error"
+      - name: ReplacementFailed
+        type: "*errs.Error"
+      - name: ElevationFailed
+        type: "*errs.Error"
+      - name: ProbeFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: Getter
+        target: coreupd.Getter
+      - name: FileSystem
+        target: coreupd.FileSystem
+      - name: Copier
+        target: coreupd.Copier
+      - name: Update
+        target: svcupd.UpdateValue
+      - name: Candidate
+        target: svcupd.CandidateValue
+      - name: Source
+        target: svcupd.SourceValue
+      - name: Service
+        target: svcupd.Service
+    constants:
+      - name: CodeNoVendorKey
+        type: errs.Code
+        value: "0x00_02_22_01"
+      - name: CodeSignatureMissing
+        type: errs.Code
+        value: "0x00_02_22_02"
+      - name: CodeSignatureInvalid
+        type: errs.Code
+        value: "0x00_02_22_03"
+      - name: CodeChecksumMissing
+        type: errs.Code
+        value: "0x00_02_22_04"
+      - name: CodeChecksumMismatch
+        type: errs.Code
+        value: "0x00_02_22_05"
+      - name: CodeArchiveTooLarge
+        type: errs.Code
+        value: "0x00_02_22_06"
+      - name: CodeAPIBodyTooLarge
+        type: errs.Code
+        value: "0x00_02_22_07"
+      - name: CodeInsecureRedirect
+        type: errs.Code
+        value: "0x00_02_22_08"
+      - name: CodeUnexpectedStatus
+        type: errs.Code
+        value: "0x00_02_22_09"
+      - name: CodeDownloadFailed
+        type: errs.Code
+        value: "0x00_02_22_0A"
+      - name: CodeDevBuild
+        type: errs.Code
+        value: "0x00_02_22_0B"
+      - name: CodeCandidateNotFound
+        type: errs.Code
+        value: "0x00_02_22_0C"
+      - name: CodeNotPrerelease
+        type: errs.Code
+        value: "0x00_02_22_0D"
+      - name: CodeDraftRelease
+        type: errs.Code
+        value: "0x00_02_22_0E"
+      - name: CodeInvalidTag
+        type: errs.Code
+        value: "0x00_02_22_0F"
+      - name: CodeBinaryNotInArchive
+        type: errs.Code
+        value: "0x00_02_22_10"
+      - name: CodeUnknownArchive
+        type: errs.Code
+        value: "0x00_02_22_11"
+      - name: CodeElevationNotAuthorised
+        type: errs.Code
+        value: "0x00_02_22_12"
+      - name: CodeCandidateTagRequired
+        type: errs.Code
+        value: "0x00_03_42_01"
+      - name: CodeReleaseMetadataUnreadable
+        type: errs.Code
+        value: "0x00_03_42_02"
+      - name: CodeArchiveUnreadable
+        type: errs.Code
+        value: "0x00_03_42_03"
+      - name: CodeExecutablePathUnresolved
+        type: errs.Code
+        value: "0x00_03_42_04"
+      - name: CodeStagingFailed
+        type: errs.Code
+        value: "0x00_03_42_05"
+      - name: CodeReplacementFailed
+        type: errs.Code
+        value: "0x00_03_42_06"
+      - name: CodeElevationFailed
+        type: errs.Code
+        value: "0x00_03_42_07"
+      - name: CodeProbeFailed
+        type: errs.Code
+        value: "0x00_03_42_08"
+      - name: CandidateListSentinel
+        type: string
+        value: "\"__list__\""
+    functions:
+      - in:
+          - name: version
+            type: string
+          - name: src
+            type: Source
+        name: New
+        out:
+          - type: "*Service"
+      - in:
+          - name: version
+            type: string
+          - name: src
+            type: Source
+          - name: client
+            type: Getter
+          - name: fs
+            type: FileSystem
+          - name: copier
+            type: Copier
+        name: NewWithDeps
+        out:
+          - type: "*Service"
+      - name: StdinIsTerminal
+        out:
+          - type: bool
+    imports:
+      coreupd: github.com/kitsunium/sdk/framework/internal/core/selfupdate
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcupd: github.com/kitsunium/sdk/framework/internal/service/selfupdate
+    path: github.com/kitsunium/sdk/framework/selfupdate
+    variables:
+      - name: NoVendorKey
+        type: "*errs.Error"
+      - name: SignatureMissing
+        type: "*errs.Error"
+      - name: SignatureInvalid
+        type: "*errs.Error"
+      - name: ChecksumMissing
+        type: "*errs.Error"
+      - name: ChecksumMismatch
+        type: "*errs.Error"
+      - name: ArchiveTooLarge
+        type: "*errs.Error"
+      - name: APIBodyTooLarge
+        type: "*errs.Error"
+      - name: InsecureRedirect
+        type: "*errs.Error"
+      - name: UnexpectedStatus
+        type: "*errs.Error"
+      - name: DownloadFailed
+        type: "*errs.Error"
+      - name: DevBuild
+        type: "*errs.Error"
+      - name: CandidateNotFound
+        type: "*errs.Error"
+      - name: NotPrerelease
+        type: "*errs.Error"
+      - name: DraftRelease
+        type: "*errs.Error"
+      - name: InvalidTag
+        type: "*errs.Error"
+      - name: BinaryNotInArchive
+        type: "*errs.Error"
+      - name: UnknownArchive
+        type: "*errs.Error"
+      - name: ElevationNotAuthorised
+        type: "*errs.Error"
+      - name: CandidateTagRequired
+        type: "*errs.Error"
+      - name: ReleaseMetadataUnreadable
+        type: "*errs.Error"
+      - name: ArchiveUnreadable
+        type: "*errs.Error"
+      - name: ExecutablePathUnresolved
+        type: "*errs.Error"
+      - name: StagingFailed
+        type: "*errs.Error"
+      - name: ReplacementFailed
+        type: "*errs.Error"
+      - name: ElevationFailed
+        type: "*errs.Error"
+      - name: ProbeFailed
+        type: "*errs.Error"

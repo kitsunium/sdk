@@ -18,9 +18,13 @@ alias(
 
 go_test(
     name = "clock_test",
-    srcs = ["clock_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "clock_external_test.go",
+    ],
     deps = [
         ":clock",
+        "//internal/kernel/clock",
         "//pkg/v1/app/health",
         "//pkg/v1/app/lifecycle",
         "//pkg/v1/app/lock",

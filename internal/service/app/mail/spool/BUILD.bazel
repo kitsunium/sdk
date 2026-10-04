@@ -43,6 +43,7 @@ go_test(
     name = "spool_test",
     srcs = [
         "announce_internal_test.go",
+        "api_gen_test.go",
         "disk_external_test.go",
         "harness_external_test.go",
         "identifier_external_test.go",

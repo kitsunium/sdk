@@ -57,6 +57,7 @@ alias(
 go_test(
     name = "selfupdate_test",
     srcs = [
+        "api_gen_test.go",
         "candidate_external_test.go",
         "candidate_internal_test.go",
         "checksum_external_test.go",

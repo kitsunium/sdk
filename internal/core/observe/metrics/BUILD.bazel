@@ -55,6 +55,7 @@ filegroup(
 go_test(
     name = "metrics_test",
     srcs = [
+        "api_gen_test.go",
         "describer_external_test.go",
         "exporter_external_test.go",
         "model_external_test.go",

@@ -34,6 +34,7 @@ go_test(
     name = "transform_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "codes_external_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",

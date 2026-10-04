@@ -23,12 +23,16 @@ alias(
 go_test(
     name = "health_test",
     srcs = [
+        "api_gen_test.go",
         "ask_external_test.go",
         "health_bench_test.go",
         "health_external_test.go",
     ],
     deps = [
         ":health",
+        "//internal/core/app/health",
+        "//internal/core/app/lifecycle",
+        "//internal/service/app/health",
         "//pkg/v1/app/lifecycle",
         "//pkg/v1/errs",
     ],

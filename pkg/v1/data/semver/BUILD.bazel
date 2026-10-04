@@ -18,6 +18,9 @@ alias(
 
 go_test(
     name = "semver_test",
-    srcs = ["semver_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "semver_external_test.go",
+    ],
     deps = [":semver"],
 )

@@ -55,6 +55,7 @@ go_test(
     name = "net_test",
     srcs = [
         "address_external_test.go",
+        "api_gen_test.go",
         "conn_handler_external_test.go",
         "drain_external_test.go",
         "duration_external_test.go",

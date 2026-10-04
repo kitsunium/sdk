@@ -22,8 +22,14 @@ alias(
 go_test(
     name = "view_test",
     size = "small",
-    srcs = ["view_external_test.go"],
-    deps = [":view"],
+    srcs = [
+        "api_gen_test.go",
+        "view_external_test.go",
+    ],
+    deps = [
+        ":view",
+        "//internal/core/app/view",
+    ],
 )
 
 # audit_srcs ships this package's .go files to the //internal/kernel/errs AST audit.

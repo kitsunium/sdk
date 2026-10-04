@@ -6,8 +6,8 @@ go_library(
     name = "lock",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
-        "lease.go",
         "lock.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/lock",
@@ -30,7 +30,10 @@ alias(
 go_test(
     name = "lock_test",
     size = "small",
-    srcs = ["lock_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "lock_external_test.go",
+    ],
     deps = [
         ":lock",
         "//internal/kernel/errs",

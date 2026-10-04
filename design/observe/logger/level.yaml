@@ -1,0 +1,68 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/level
+packages:
+  - constants:
+      - name: Debug
+        type: Level
+        value: "-4"
+      - name: Info
+        type: Level
+        value: "0"
+      - name: Warn
+        type: Level
+        value: "4"
+      - name: Error
+        type: Level
+        value: "8"
+      - name: CodeLevelUnknown
+        type: errs.Code
+        value: "0x00_02_11_01"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: ParseLevel
+        out:
+          - name: lvl
+            type: Level
+          - name: err
+            type: error
+      - in:
+          - name: initial
+            type: Level
+        name: NewVar
+        out:
+          - type: "*Var"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Level
+        underlying: int8
+      - interface:
+          methods:
+            - name: Level
+              out:
+                - type: Level
+        name: Leveler
+      - methods:
+          - in:
+              - name: lvl
+                type: Level
+            name: Set
+            recv: pointer
+          - name: Level
+            out:
+              - type: Level
+            recv: pointer
+        name: Var
+        struct:
+          unexported: true
+    variables:
+      - name: LevelUnknown
+        type: "*errs.Error"

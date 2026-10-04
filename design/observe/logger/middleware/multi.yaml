@@ -1,0 +1,24 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/middleware/multi
+packages:
+  - constants:
+      - name: CodeFanoutWriteFailed
+        type: errs.Code
+        value: "0x00_03_10_01"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/multi
+    variables:
+      - name: FanoutWriteFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: branches
+            type: corelogger.Sink
+        name: New
+        out:
+          - type: corelogger.Sink
+        variadic: true
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/multi

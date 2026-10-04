@@ -1,0 +1,30 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/codec/protobuf
+packages:
+  - constants:
+      - name: CodeProtobufMarshalFailed
+        type: errs.Code
+        value: "0x00_03_26_01"
+      - name: CodeProtobufUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_26_02"
+      - name: CodeProtobufSizeExceeded
+        type: errs.Code
+        value: "0x00_03_26_03"
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/third-party/codec/protobuf
+    variables:
+      - name: Codec
+        type: codec.Codec
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"

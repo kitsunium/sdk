@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "x25519_test",
     srcs = [
+        "api_gen_test.go",
         "x25519_external_test.go",
         "x25519_internal_test.go",
     ],

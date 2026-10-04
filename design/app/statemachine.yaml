@@ -1,0 +1,903 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/statemachine
+packages:
+  - constants:
+      - name: CodeTriggerUnknown
+        type: errs.Code
+        value: "0x00_02_38_01"
+      - name: CodeTransitionRefused
+        type: errs.Code
+        value: "0x00_03_58_01"
+      - name: CodeEntityMissing
+        type: errs.Code
+        value: "0x00_03_58_02"
+      - name: CodeEntityExists
+        type: errs.Code
+        value: "0x00_03_58_03"
+      - name: CodeKeyEmpty
+        type: errs.Code
+        value: "0x00_03_58_04"
+      - name: CodeHookFailed
+        type: errs.Code
+        value: "0x00_03_58_05"
+      - name: CodeHookPanicked
+        type: errs.Code
+        value: "0x00_03_58_06"
+      - name: CodeHookChangedState
+        type: errs.Code
+        value: "0x00_03_58_07"
+      - name: CodeHookChangedKey
+        type: errs.Code
+        value: "0x00_03_58_08"
+      - name: CodeReentrant
+        type: errs.Code
+        value: "0x00_03_58_09"
+      - name: CodeStoreFailed
+        type: errs.Code
+        value: "0x00_03_58_0A"
+      - name: CodeJournalFailed
+        type: errs.Code
+        value: "0x00_03_58_0B"
+      - name: CodeLoopRunning
+        type: errs.Code
+        value: "0x00_03_58_0C"
+      - name: CodeFunctionPanicked
+        type: errs.Code
+        value: "0x00_03_58_0D"
+      - name: CodeInitialMissing
+        type: errs.Code
+        value: "0x00_03_58_0E"
+      - name: CodeEventInvalid
+        type: errs.Code
+        value: "0x00_03_58_0F"
+      - name: CodeTransitionDuplicate
+        type: errs.Code
+        value: "0x00_03_58_10"
+      - name: CodeDelayInvalid
+        type: errs.Code
+        value: "0x00_03_58_11"
+      - name: CodeFunctionMissing
+        type: errs.Code
+        value: "0x00_03_58_12"
+      - name: CodeStoreMissing
+        type: errs.Code
+        value: "0x00_03_58_13"
+      - name: CodeWaitAbandoned
+        type: errs.Code
+        value: "0x00_03_58_14"
+      - name: CodeLoopPanicked
+        type: errs.Code
+        value: "0x00_03_58_15"
+      - name: CreateEvent
+        type: string
+        value: "\"create\""
+      - name: TriggerStart
+        type: Trigger
+        value: "1"
+      - name: TriggerEvent
+        type: Trigger
+        value: "2"
+      - name: TriggerDelay
+        type: Trigger
+        value: "3"
+      - name: TriggerDeadline
+        type: Trigger
+        value: "4"
+      - name: TriggerGuard
+        type: Trigger
+        value: "5"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: ParseTrigger
+        out:
+          - type: Trigger
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/statemachine
+    types:
+      - name: RecordValue
+        struct:
+          fields:
+            - name: Key
+              tag: json:"key"
+              type: string
+            - name: State
+              tag: json:"state"
+              type: S
+            - name: Entered
+              tag: json:"entered"
+              type: time.Time
+            - name: History
+              tag: json:"history,omitempty"
+              type: "[]StepValue[S]"
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: StepValue
+        struct:
+          fields:
+            - name: Event
+              tag: json:"event"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: S
+            - name: To
+              tag: json:"to"
+              type: S
+            - name: Trigger
+              tag: json:"trigger"
+              type: Trigger
+            - name: Actor
+              tag: json:"actor,omitempty"
+              type: string
+            - name: At
+              tag: json:"at"
+              type: time.Time
+        typeParams:
+          - constraint: comparable
+            name: S
+      - interface:
+          methods:
+            - in:
+                - name: entity
+                  type: E
+              name: Key
+              out:
+                - name: key
+                  type: string
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: key
+                  type: string
+              name: Get
+              out:
+                - name: entity
+                  type: E
+                - name: found
+                  type: bool
+                - name: err
+                  type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: entity
+                  type: E
+              name: Insert
+              out:
+                - name: inserted
+                  type: bool
+                - name: err
+                  type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: entity
+                  type: E
+              name: Replace
+              out:
+                - name: replaced
+                  type: bool
+                - name: err
+                  type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: All
+              out:
+                - type: iter.Seq2[E, error]
+        name: Store
+        typeParams:
+          - constraint: any
+            name: E
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Load
+              out:
+                - name: records
+                  type: "[]RecordValue[S]"
+                - name: err
+                  type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: records
+                  type: RecordValue[S]
+              name: Save
+              out:
+                - type: error
+              variadic: true
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: keys
+                  type: string
+              name: Delete
+              out:
+                - type: error
+              variadic: true
+        name: Journal
+        typeParams:
+          - constraint: comparable
+            name: S
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Trigger
+        underlying: uint8
+    variables:
+      - name: TriggerUnknown
+        type: "*errs.Error"
+      - name: TransitionRefused
+        type: "*errs.Error"
+      - name: EntityMissing
+        type: "*errs.Error"
+      - name: EntityExists
+        type: "*errs.Error"
+      - name: KeyEmpty
+        type: "*errs.Error"
+      - name: HookFailed
+        type: "*errs.Error"
+      - name: HookPanicked
+        type: "*errs.Error"
+      - name: HookChangedState
+        type: "*errs.Error"
+      - name: HookChangedKey
+        type: "*errs.Error"
+      - name: Reentrant
+        type: "*errs.Error"
+      - name: StoreFailed
+        type: "*errs.Error"
+      - name: JournalFailed
+        type: "*errs.Error"
+      - name: LoopRunning
+        type: "*errs.Error"
+      - name: FunctionPanicked
+        type: "*errs.Error"
+      - name: InitialMissing
+        type: "*errs.Error"
+      - name: EventInvalid
+        type: "*errs.Error"
+      - name: TransitionDuplicate
+        type: "*errs.Error"
+      - name: DelayInvalid
+        type: "*errs.Error"
+      - name: FunctionMissing
+        type: "*errs.Error"
+      - name: StoreMissing
+        type: "*errs.Error"
+      - name: LoopPanicked
+        type: "*errs.Error"
+      - name: WaitAbandoned
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultMinGap
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultMaxHistory
+        type: int
+        value: "20"
+      - name: WakeStart
+        type: Wake
+        value: "1"
+      - name: WakeDue
+        type: Wake
+        value: "2"
+      - name: WakeChange
+        type: Wake
+        value: "3"
+      - name: LoopRunStarted
+        type: LoopEventKind
+        value: "1"
+      - name: LoopRunEnded
+        type: LoopEventKind
+        value: "2"
+      - name: LoopWaiting
+        type: LoopEventKind
+        value: "3"
+    functions:
+      - in:
+          - name: state
+            type: func(*E) *S
+        name: NewMachineSpec
+        out:
+          - type: "*MachineSpec[E, S]"
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: def
+            type: "*MachineSpec[E, S]"
+          - name: cfg
+            type: "*Config[E, S]"
+        name: NewStateMachine
+        out:
+          - type: "*StateMachine[E, S]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corestm: github.com/kitsunium/sdk/internal/core/app/statemachine
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+    path: github.com/kitsunium/sdk/internal/service/app/statemachine
+    types:
+      - name: FiringValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Event
+              type: string
+            - name: From
+              type: S
+            - name: To
+              type: S
+            - name: Trigger
+              type: corestm.Trigger
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Config
+        struct:
+          fields:
+            - name: Store
+              type: corestm.Store[E]
+            - name: Journal
+              type: corestm.Journal[S]
+            - name: Clock
+              type: clock.Timed
+            - name: Actor
+              type: func(ctx context.Context) string
+            - name: Observe
+              type: func(ctx context.Context, firing FiringValue[S]) (context.Context, func(err error))
+            - name: Report
+              type: func(ctx context.Context, err error)
+            - name: OnLoop
+              type: func(event LoopEvent)
+            - name: MinGap
+              type: time.Duration
+            - name: Backoff
+              type: kbackoff.Value
+            - name: MaxHistory
+              type: int
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - methods:
+          - in:
+              - name: state
+                type: S
+            name: Initial
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+            name: "On"
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: delay
+                type: time.Duration
+              - name: from
+              - name: to
+                type: S
+            name: After
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+              - name: instant
+                type: func(E) (time.Time, bool)
+            name: At
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+              - name: guard
+                type: func(E) bool
+            name: When
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: state
+                type: S
+              - name: hook
+                type: func(context.Context, *E) error
+            name: OnEnter
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - in:
+              - name: hook
+                type: func(context.Context, ChangeValue[E, S]) error
+            name: OnTransition
+            out:
+              - type: "*MachineSpec[E, S]"
+            recv: pointer
+          - name: Problems
+            out:
+              - type: "[]error"
+            recv: pointer
+          - name: States
+            out:
+              - type: "[]S"
+            recv: pointer
+          - name: Transitions
+            out:
+              - type: "[]TransitionValue[S]"
+            recv: pointer
+          - name: InitialState
+            out:
+              - name: state
+                type: S
+              - name: set
+                type: bool
+            recv: pointer
+          - in:
+              - name: entity
+                type: E
+              - name: event
+                type: string
+            name: Can
+            out:
+              - type: bool
+            recv: pointer
+        name: MachineSpec
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: TransitionValue
+        struct:
+          fields:
+            - name: Event
+              type: string
+            - name: From
+              type: S
+            - name: To
+              type: S
+            - name: Trigger
+              type: corestm.Trigger
+            - name: Delay
+              type: time.Duration
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: ChangeValue
+        struct:
+          fields:
+            - name: Entity
+              type: E
+            - name: At
+              type: time.Time
+            - name: Key
+              type: string
+            - name: Event
+              type: string
+            - name: Actor
+              type: string
+            - name: From
+              type: S
+            - name: To
+              type: S
+            - name: Trigger
+              type: corestm.Trigger
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Wake
+        underlying: uint8
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: LoopEventKind
+        underlying: uint8
+      - name: LoopEvent
+        struct:
+          fields:
+            - name: Err
+              type: error
+            - name: Started
+              type: time.Time
+            - name: Ended
+              type: time.Time
+            - name: Next
+              type: time.Time
+            - name: Fired
+              type: int
+            - name: Failed
+              type: int
+            - name: Kind
+              type: LoopEventKind
+            - name: Wake
+              type: Wake
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Run
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Step
+            out:
+              - type: time.Time
+              - type: error
+            recv: pointer
+          - name: Census
+            out:
+              - type: map[S]int
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+            name: Record
+            out:
+              - type: corestm.RecordValue[S]
+              - type: bool
+            recv: pointer
+          - name: Records
+            out:
+              - type: "[]corestm.RecordValue[S]"
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Changed
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Deleted
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: entity
+                type: E
+            name: Start
+            out:
+              - type: E
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: event
+                type: string
+            name: Fire
+            out:
+              - type: E
+              - type: error
+            recv: pointer
+        name: StateMachine
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+  - aliases:
+      - name: Store
+        target: corestm.Store[E]
+        typeParams:
+          - constraint: any
+            name: E
+      - name: Journal
+        target: corestm.Journal[S]
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Record
+        target: corestm.RecordValue[S]
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Step
+        target: corestm.StepValue[S]
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Trigger
+        target: corestm.Trigger
+      - name: Definition
+        target: svcstm.MachineSpec[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: Transition
+        target: svcstm.TransitionValue[S]
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Change
+        target: svcstm.ChangeValue[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: Config
+        target: svcstm.Config[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: Firing
+        target: svcstm.FiringValue[S]
+        typeParams:
+          - constraint: comparable
+            name: S
+      - name: Machine
+        target: svcstm.StateMachine[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: Wake
+        target: svcstm.Wake
+      - name: LoopEvent
+        target: svcstm.LoopEvent
+      - name: LoopEventKind
+        target: svcstm.LoopEventKind
+    constants:
+      - name: CreateEvent
+        type: string
+        value: "\"create\""
+      - name: DefaultMinGap
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultMaxHistory
+        type: int
+        value: "20"
+      - name: TriggerStart
+        type: Trigger
+        value: "1"
+      - name: TriggerEvent
+        type: Trigger
+        value: "2"
+      - name: TriggerDelay
+        type: Trigger
+        value: "3"
+      - name: TriggerDeadline
+        type: Trigger
+        value: "4"
+      - name: TriggerGuard
+        type: Trigger
+        value: "5"
+      - name: WakeStart
+        type: Wake
+        value: "1"
+      - name: WakeDue
+        type: Wake
+        value: "2"
+      - name: WakeChange
+        type: Wake
+        value: "3"
+      - name: LoopRunStarted
+        type: LoopEventKind
+        value: "1"
+      - name: LoopRunEnded
+        type: LoopEventKind
+        value: "2"
+      - name: LoopWaiting
+        type: LoopEventKind
+        value: "3"
+      - name: CodeTriggerUnknown
+        type: errs.Code
+        value: "0x00_02_38_01"
+      - name: CodeTransitionRefused
+        type: errs.Code
+        value: "0x00_03_58_01"
+      - name: CodeEntityMissing
+        type: errs.Code
+        value: "0x00_03_58_02"
+      - name: CodeEntityExists
+        type: errs.Code
+        value: "0x00_03_58_03"
+      - name: CodeKeyEmpty
+        type: errs.Code
+        value: "0x00_03_58_04"
+      - name: CodeHookFailed
+        type: errs.Code
+        value: "0x00_03_58_05"
+      - name: CodeHookPanicked
+        type: errs.Code
+        value: "0x00_03_58_06"
+      - name: CodeHookChangedState
+        type: errs.Code
+        value: "0x00_03_58_07"
+      - name: CodeHookChangedKey
+        type: errs.Code
+        value: "0x00_03_58_08"
+      - name: CodeReentrant
+        type: errs.Code
+        value: "0x00_03_58_09"
+      - name: CodeStoreFailed
+        type: errs.Code
+        value: "0x00_03_58_0A"
+      - name: CodeJournalFailed
+        type: errs.Code
+        value: "0x00_03_58_0B"
+      - name: CodeLoopRunning
+        type: errs.Code
+        value: "0x00_03_58_0C"
+      - name: CodeFunctionPanicked
+        type: errs.Code
+        value: "0x00_03_58_0D"
+      - name: CodeInitialMissing
+        type: errs.Code
+        value: "0x00_03_58_0E"
+      - name: CodeEventInvalid
+        type: errs.Code
+        value: "0x00_03_58_0F"
+      - name: CodeTransitionDuplicate
+        type: errs.Code
+        value: "0x00_03_58_10"
+      - name: CodeDelayInvalid
+        type: errs.Code
+        value: "0x00_03_58_11"
+      - name: CodeFunctionMissing
+        type: errs.Code
+        value: "0x00_03_58_12"
+      - name: CodeStoreMissing
+        type: errs.Code
+        value: "0x00_03_58_13"
+      - name: CodeWaitAbandoned
+        type: errs.Code
+        value: "0x00_03_58_14"
+      - name: CodeLoopPanicked
+        type: errs.Code
+        value: "0x00_03_58_15"
+    functions:
+      - in:
+          - name: state
+            type: func(*E) *S
+        name: Define
+        out:
+          - type: "*Definition[E, S]"
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: def
+            type: "*Definition[E, S]"
+          - name: cfg
+            type: "*Config[E, S]"
+        name: New
+        out:
+          - type: "*Machine[E, S]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - in:
+          - name: name
+            type: string
+        name: ParseTrigger
+        out:
+          - type: Trigger
+          - type: error
+    imports:
+      corestm: github.com/kitsunium/sdk/internal/core/app/statemachine
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcstm: github.com/kitsunium/sdk/internal/service/app/statemachine
+    path: github.com/kitsunium/sdk/pkg/v1/app/statemachine
+    variables:
+      - name: TriggerUnknown
+        type: "*errs.Error"
+      - name: TransitionRefused
+        type: "*errs.Error"
+      - name: EntityMissing
+        type: "*errs.Error"
+      - name: EntityExists
+        type: "*errs.Error"
+      - name: KeyEmpty
+        type: "*errs.Error"
+      - name: HookFailed
+        type: "*errs.Error"
+      - name: HookPanicked
+        type: "*errs.Error"
+      - name: HookChangedState
+        type: "*errs.Error"
+      - name: HookChangedKey
+        type: "*errs.Error"
+      - name: Reentrant
+        type: "*errs.Error"
+      - name: StoreFailed
+        type: "*errs.Error"
+      - name: JournalFailed
+        type: "*errs.Error"
+      - name: LoopRunning
+        type: "*errs.Error"
+      - name: FunctionPanicked
+        type: "*errs.Error"
+      - name: InitialMissing
+        type: "*errs.Error"
+      - name: EventInvalid
+        type: "*errs.Error"
+      - name: TransitionDuplicate
+        type: "*errs.Error"
+      - name: DelayInvalid
+        type: "*errs.Error"
+      - name: FunctionMissing
+        type: "*errs.Error"
+      - name: StoreMissing
+        type: "*errs.Error"
+      - name: WaitAbandoned
+        type: "*errs.Error"
+      - name: LoopPanicked
+        type: "*errs.Error"

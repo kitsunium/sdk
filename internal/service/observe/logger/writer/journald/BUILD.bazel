@@ -42,6 +42,7 @@ alias(
 go_test(
     name = "journald_test",
     srcs = [
+        "api_gen_test.go",
         "decode_internal_test.go",
         "journald_config_external_test.go",
         "journald_external_test.go",

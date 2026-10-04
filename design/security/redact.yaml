@@ -1,0 +1,212 @@
+apiVersion: kit.kitsunium/design/v2
+domain: security/redact
+packages:
+  - constants:
+      - name: CodeDocumentInvalid
+        type: errs.Code
+        value: "0x00_03_49_01"
+      - name: CodeValueUnencodable
+        type: errs.Code
+        value: "0x00_03_49_02"
+      - name: Placeholder
+        type: string
+        value: "\"[redacted]\""
+      - name: Ellipsis
+        type: string
+        value: "\"…\""
+      - name: MinBytes
+        type: int
+        value: "16"
+      - name: Unencodable
+        type: string
+        value: "\"[unencodable]\""
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      json: encoding/json
+    path: github.com/kitsunium/sdk/internal/core/security/redact
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: name
+                  type: string
+              name: Name
+              out:
+                - type: bool
+            - in:
+                - name: s
+                  type: string
+                - name: maxBytes
+                  type: int
+              name: Text
+              out:
+                - type: string
+            - in:
+                - name: document
+                  type: "[]byte"
+                - name: maxBytes
+                  type: int
+              name: JSON
+              out:
+                - name: redacted
+                  type: DocumentValue
+                - name: err
+                  type: error
+            - in:
+                - name: v
+                  type: any
+                - name: maxBytes
+                  type: int
+              name: Value
+              out:
+                - name: redacted
+                  type: DocumentValue
+                - name: err
+                  type: error
+            - in:
+                - name: attrs
+                  type: "[]corelogger.AttrValue"
+                - name: maxBytes
+                  type: int
+              name: Attrs
+              out:
+                - type: iter.Seq2[string, string]
+        name: Redactor
+      - name: DocumentValue
+        struct:
+          fields:
+            - name: JSON
+              type: json.RawMessage
+            - name: Truncated
+              type: bool
+    variables:
+      - name: DocumentInvalid
+        type: "*errs.Error"
+      - name: ValueUnencodable
+        type: "*errs.Error"
+  - functions:
+      - name: DefaultWords
+        out:
+          - type: "[]string"
+      - in:
+          - name: cfg
+            type: Config
+        name: NewRedactor
+        out:
+          - type: "*Redactor"
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      coreredact: github.com/kitsunium/sdk/internal/core/security/redact
+    path: github.com/kitsunium/sdk/internal/service/security/redact
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Field
+              type: func(field reflect.StructField) bool
+            - name: Error
+              type: func(err error) string
+            - name: Tag
+              type: string
+            - name: Words
+              type: "[]string"
+      - methods:
+          - in:
+              - name: attrs
+                type: "[]corelogger.AttrValue"
+              - name: maxBytes
+                type: int
+            name: Attrs
+            out:
+              - type: iter.Seq2[string, string]
+            recv: pointer
+          - in:
+              - name: document
+                type: "[]byte"
+              - name: maxBytes
+                type: int
+            name: JSON
+            out:
+              - name: redacted
+                type: coreredact.DocumentValue
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: any
+              - name: maxBytes
+                type: int
+            name: Value
+            out:
+              - name: redacted
+                type: coreredact.DocumentValue
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+            name: Name
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: s
+                type: string
+              - name: maxBytes
+                type: int
+            name: Text
+            out:
+              - type: string
+            recv: pointer
+        name: Redactor
+        struct:
+          unexported: true
+  - aliases:
+      - name: Config
+        target: svcredact.Config
+      - name: Redactor
+        target: coreredact.Redactor
+      - name: Document
+        target: coreredact.DocumentValue
+    constants:
+      - name: Placeholder
+        type: string
+        value: "\"[redacted]\""
+      - name: Ellipsis
+        type: string
+        value: "\"…\""
+      - name: MinBytes
+        type: int
+        value: "16"
+      - name: Unencodable
+        type: string
+        value: "\"[unencodable]\""
+      - name: CodeDocumentInvalid
+        type: errs.Code
+        value: "0x00_03_49_01"
+      - name: CodeValueUnencodable
+        type: errs.Code
+        value: "0x00_03_49_02"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: Redactor
+      - name: DefaultWords
+        out:
+          - type: "[]string"
+    imports:
+      coreredact: github.com/kitsunium/sdk/internal/core/security/redact
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcredact: github.com/kitsunium/sdk/internal/service/security/redact
+    path: github.com/kitsunium/sdk/pkg/v1/security/redact
+    variables:
+      - name: DocumentInvalid
+        type: "*errs.Error"
+      - name: ValueUnencodable
+        type: "*errs.Error"

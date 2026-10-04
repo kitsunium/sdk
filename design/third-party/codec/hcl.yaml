@@ -1,0 +1,30 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/codec/hcl
+packages:
+  - constants:
+      - name: CodeHCLMarshalFailed
+        type: errs.Code
+        value: "0x00_03_25_01"
+      - name: CodeHCLUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_25_02"
+      - name: CodeHCLSizeExceeded
+        type: errs.Code
+        value: "0x00_03_25_03"
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/third-party/codec/hcl
+    variables:
+      - name: Codec
+        type: codec.Codec
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"

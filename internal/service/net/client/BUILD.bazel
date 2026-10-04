@@ -40,6 +40,7 @@ alias(
 go_test(
     name = "client_test",
     srcs = [
+        "api_gen_test.go",
         "capped_body_internal_test.go",
         "client_alloc_internal_test.go",
         "client_bench_test.go",

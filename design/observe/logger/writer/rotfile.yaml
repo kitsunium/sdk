@@ -1,0 +1,37 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/writer/rotfile
+packages:
+  - constants:
+      - name: CodeRotFileOpenFailed
+        type: errs.Code
+        value: "0x00_03_1B_01"
+      - name: CodeRotFileRotateFailed
+        type: errs.Code
+        value: "0x00_03_1B_02"
+      - name: CodeRotFileWriteFailed
+        type: errs.Code
+        value: "0x00_03_1B_03"
+      - name: CodeRotFileDecodeFailed
+        type: errs.Code
+        value: "0x00_03_1B_04"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/rotfile
+    variables:
+      - name: RotFileOpenFailed
+        type: "*errs.Error"
+      - name: RotFileRotateFailed
+        type: "*errs.Error"
+      - name: RotFileWriteFailed
+        type: "*errs.Error"
+      - name: RotFileDecodeFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: Config
+        target: writer.RotFileConfig
+    imports:
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/rotfile
+    variables:
+      - name: Writer
+        type: writer.Factory

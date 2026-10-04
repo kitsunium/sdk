@@ -22,10 +22,15 @@ alias(
 
 go_test(
     name = "gate_test",
-    srcs = ["gate_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "gate_external_test.go",
+    ],
     deps = [
         ":gate",
         "//framework/entitlement",
+        "//framework/internal/core/gate",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

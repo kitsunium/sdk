@@ -1,0 +1,232 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/internal/otlp
+packages:
+  - constants:
+      - name: DefaultTimeout
+        type: time.Duration
+        value: "10000000000"
+      - name: DefaultMaxResponseBytes
+        type: int64
+        value: 1 << 20
+      - name: DocumentTerminator
+        type: byte
+        value: "'\\n'"
+    functions:
+      - in:
+          - name: attrs
+            type: "[]coreotel.AttrValue"
+        name: Attrs
+        out:
+          - type: "[]KeyValue"
+      - in:
+          - name: attr
+            type: coreotel.AttrValue
+        name: KeyValueOf
+        out:
+          - type: KeyValue
+      - in:
+          - name: request
+            type: R
+          - name: failure
+            type: "*errs.WrapParams"
+        name: Marshal
+        out:
+          - name: doc
+            type: "[]byte"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: R
+      - in:
+          - name: instant
+            type: time.Time
+        name: UnixNano
+        out:
+          - type: Uint64
+      - in:
+          - name: resource
+            type: coreotel.ResourceValue
+        name: ResourceOf
+        out:
+          - type: ResourceMessage
+      - in:
+          - name: payload
+            type: "[]byte"
+          - name: into
+            type: RejectedCounter
+        name: DecodeRejected
+        out:
+          - type: int64
+      - in:
+          - name: scope
+            type: coreotel.ScopeValue
+        name: ScopeOf
+        out:
+          - type: ScopeMessage
+      - in:
+          - name: cfg
+            type: "*HTTPConfig"
+          - name: signal
+            type: "*SignalSpec"
+        name: NewSender
+        out:
+          - name: sender
+            type: "*Sender"
+          - name: err
+            type: error
+      - in:
+          - name: dst
+            type: io.Writer
+          - name: failure
+            type: "*errs.WrapParams"
+        name: NewStream
+        out:
+          - type: "*Stream"
+    imports:
+      coreotel: github.com/kitsunium/sdk/internal/core/observe/otel
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/observe/internal/otlp
+    types:
+      - name: AnyValue
+        struct:
+          fields:
+            - name: StringValue
+              tag: json:"stringValue,omitempty"
+              type: "*string"
+            - name: BoolValue
+              tag: json:"boolValue,omitempty"
+              type: "*bool"
+            - name: IntValue
+              tag: json:"intValue,omitempty"
+              type: "*Int64"
+            - name: DoubleValue
+              tag: json:"doubleValue,omitempty"
+              type: "*Double"
+      - name: HTTPConfig
+        struct:
+          fields:
+            - name: Endpoint
+              type: string
+            - name: Client
+              type: "*http.Client"
+            - name: Headers
+              type: map[string]string
+            - name: Timeout
+              type: time.Duration
+            - name: MaxResponseBytes
+              type: int64
+      - name: KeyValue
+        struct:
+          fields:
+            - name: Key
+              tag: json:"key"
+              type: string
+            - name: Value
+              tag: json:"value"
+              type: AnyValue
+      - name: ResourceMessage
+        struct:
+          fields:
+            - name: Attributes
+              tag: json:"attributes,omitempty"
+              type: "[]KeyValue"
+      - interface:
+          methods:
+            - name: RejectedCount
+              out:
+                - type: int64
+        name: RejectedCounter
+      - methods:
+          - in:
+              - name: data
+                type: "[]byte"
+            name: UnmarshalJSON
+            out:
+              - type: error
+            recv: pointer
+        name: LenientInt64
+        underlying: int64
+      - methods:
+          - name: MarshalJSON
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+        name: Int64
+        underlying: int64
+      - methods:
+          - name: MarshalJSON
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+        name: Uint64
+        underlying: uint64
+      - methods:
+          - name: MarshalJSON
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+        name: Double
+        underlying: float64
+      - name: ScopeMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name,omitempty"
+              type: string
+            - name: Version
+              tag: json:"version,omitempty"
+              type: string
+      - methods:
+          - in:
+              - name: body
+                type: "[]byte"
+            name: Post
+            out:
+              - type: error
+            recv: pointer
+        name: Sender
+        struct:
+          unexported: true
+      - name: SignalSpec
+        struct:
+          fields:
+            - name: EndpointInvalid
+              type: "*errs.Error"
+            - name: EndpointUnparsable
+              type: errs.WrapParams
+            - name: RequestUnbuildable
+              type: errs.WrapParams
+            - name: TransportFault
+              type: errs.WrapParams
+            - name: Rejected
+              type: "*errs.Error"
+            - name: Unavailable
+              type: "*errs.Error"
+            - name: PartialSuccess
+              type: "*errs.Error"
+            - name: RejectedField
+              type: string
+            - name: DecodeRejected
+              type: func(payload []byte) int64
+      - methods:
+          - in:
+              - name: doc
+                type: "[]byte"
+            name: Emit
+            out:
+              - type: error
+            recv: pointer
+        name: Stream
+        struct:
+          unexported: true

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T04:30:00Z -->
+<!-- updated: 2026-10-04T10:00:00Z -->
 # docs/site/
 
 ## Purpose
@@ -68,6 +68,11 @@ with go/types on the twelve platforms (`make api`, held byte for byte by
 - **A release whose tree has no `docs/api`** — every tag cut before it existed —
   keeps its README pages as they were, gomarkdoc's reference included, and has
   no symbol index: Pagefind's full text finds its pages.
+
+ADR 0163 §12 records this reading of `docs/api`, the old releases' pages and
+the two checks; `docs/api` itself is held to the code and to `design/` by
+`make api-check`, so what the portal shows is what the code declares and the
+design says.
 
 At `79e3ba7d`, the go/doc index held 1,967 entries for `pkg/v1`; the index from
 `docs/api` holds 2,777: the same 1,967 symbols, and the 810 methods the 480

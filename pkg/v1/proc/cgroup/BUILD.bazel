@@ -22,6 +22,7 @@ alias(
 go_test(
     name = "cgroup_test",
     srcs = [
+        "api_gen_test.go",
         "cgroup_external_test.go",
         "cgroup_other_test.go",
         "cgroup_windows_test.go",
@@ -30,5 +31,6 @@ go_test(
         ":cgroup",
         "//internal/core/proc",
         "//internal/kernel/errs",
+        "//internal/service/proc/cgroup",
     ],
 )

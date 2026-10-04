@@ -1,0 +1,1193 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger
+packages:
+  - constants:
+      - name: CodeWriterNil
+        type: errs.Code
+        value: "0x00_03_01_01"
+      - name: CodeHandlerNil
+        type: errs.Code
+        value: "0x00_03_01_02"
+      - name: CodeEncoderNil
+        type: errs.Code
+        value: "0x00_03_01_03"
+      - name: CodeSinkRequired
+        type: errs.Code
+        value: "0x00_03_01_04"
+      - name: CodeCtxCancelled
+        type: errs.Code
+        value: "0x00_03_01_0A"
+      - name: CodeWriteFailed
+        type: errs.Code
+        value: "0x00_03_01_14"
+      - name: KindAny
+        type: Kind
+        value: "0"
+      - name: KindBool
+        type: Kind
+        value: "1"
+      - name: KindDuration
+        type: Kind
+        value: "2"
+      - name: KindFloat64
+        type: Kind
+        value: "3"
+      - name: KindInt64
+        type: Kind
+        value: "4"
+      - name: KindString
+        type: Kind
+        value: "5"
+      - name: KindTime
+        type: Kind
+        value: "6"
+      - name: KindUint64
+        type: Kind
+        value: "7"
+      - name: KindGroup
+        type: Kind
+        value: "8"
+      - name: TraceIDLen
+        type: int
+        value: "16"
+      - name: SpanIDLen
+        type: int
+        value: "8"
+      - name: TraceIDHexLen
+        type: int
+        value: "32"
+      - name: SpanIDHexLen
+        type: int
+        value: "16"
+      - name: TraceIDKey
+        type: string
+        value: "\"trace_id\""
+      - name: SpanIDKey
+        type: string
+        value: "\"span_id\""
+    functions:
+      - in:
+          - name: v
+            type: any
+        name: NewValue
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: string
+        name: StringValue
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: int64
+        name: Int64Value
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: int
+        name: IntValue
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: uint64
+        name: Uint64Value
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: float64
+        name: Float64Value
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: bool
+        name: BoolValue
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: time.Duration
+        name: DurationValue
+        out:
+          - type: Value
+      - in:
+          - name: v
+            type: time.Time
+        name: TimeValue
+        out:
+          - type: Value
+      - in:
+          - name: attrs
+            type: AttrValue
+        name: GroupValue
+        out:
+          - type: Value
+        variadic: true
+      - in:
+          - name: v
+            type: any
+        name: AnyValue
+        out:
+          - type: Value
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    path: github.com/kitsunium/sdk/internal/core/observe/logger
+    types:
+      - interface:
+          methods:
+            - name: Name
+              out:
+                - name: name
+                  type: string
+            - in:
+                - name: dst
+                  type: "[]byte"
+                - name: groups
+                  type: "[]string"
+                - name: r
+                  type: RecordEvent
+              name: Append
+              out:
+                - name: out
+                  type: "[]byte"
+        name: Encoder
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: r
+                  type: RecordEvent
+              name: Enabled
+              out:
+                - name: enabled
+                  type: bool
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: r
+                  type: RecordEvent
+              name: Handle
+              out:
+                - name: err
+                  type: error
+            - in:
+                - name: attrs
+                  type: "[]AttrValue"
+              name: WithAttrs
+              out:
+                - name: child
+                  type: Handler
+            - in:
+                - name: name
+                  type: string
+              name: WithGroup
+              out:
+                - name: child
+                  type: Handler
+        name: Handler
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Kind
+        underlying: int8
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: lv
+                  type: level.Level
+                - name: msg
+                  type: string
+                - name: attrs
+                  type: AttrValue
+              name: Log
+              variadic: true
+            - in:
+                - name: attrs
+                  type: AttrValue
+              name: With
+              out:
+                - name: child
+                  type: Logger
+              variadic: true
+            - in:
+                - name: name
+                  type: string
+              name: WithGroup
+              out:
+                - name: child
+                  type: Logger
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: lv
+                  type: level.Level
+              name: Enabled
+              out:
+                - name: enabled
+                  type: bool
+        name: Logger
+      - name: RecordEvent
+        struct:
+          fields:
+            - name: Time
+              type: time.Time
+            - name: Level
+              type: level.Level
+            - name: Message
+              type: string
+            - name: PC
+              type: uintptr
+            - name: Attrs
+              type: "[]AttrValue"
+            - name: TraceContext
+              type: TraceContextValue
+      - name: AttrValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Value
+              type: Value
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: r
+                  type: RecordEvent
+                - name: p
+                  type: "[]byte"
+              name: Write
+              out:
+                - name: "n"
+                  type: int
+                - name: err
+                  type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Flush
+              out:
+                - name: err
+                  type: error
+            - name: Close
+              out:
+                - name: err
+                  type: error
+        name: Sink
+      - methods:
+          - name: IsValid
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: dst
+                type: "[]byte"
+            name: AppendTraceIDHex
+            out:
+              - type: "[]byte"
+            recv: value
+          - in:
+              - name: dst
+                type: "[]byte"
+            name: AppendSpanIDHex
+            out:
+              - type: "[]byte"
+            recv: value
+        name: TraceContextValue
+        struct:
+          fields:
+            - name: TraceID
+              type: "[TraceIDLen]byte"
+            - name: SpanID
+              type: "[SpanIDLen]byte"
+      - name: TraceContextSource
+        underlying: func(ctx context.Context) (trace TraceContextValue)
+      - methods:
+          - name: Kind
+            out:
+              - type: Kind
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Int64
+            out:
+              - type: int64
+            recv: value
+          - name: Bits
+            out:
+              - type: packedBits
+            recv: value
+          - name: Uint64
+            out:
+              - type: uint64
+            recv: value
+          - name: Float64
+            out:
+              - type: float64
+            recv: value
+          - name: Bool
+            out:
+              - type: bool
+            recv: value
+          - name: Duration
+            out:
+              - type: time.Duration
+            recv: value
+          - name: Time
+            out:
+              - type: time.Time
+            recv: value
+          - name: Group
+            out:
+              - type: "[]AttrValue"
+            recv: value
+          - name: Any
+            out:
+              - type: any
+            recv: value
+        name: Value
+        struct:
+          unexported: true
+    variables:
+      - name: WriterNil
+        type: "*errs.Error"
+      - name: HandlerNil
+        type: "*errs.Error"
+      - name: EncoderNil
+        type: "*errs.Error"
+      - name: SinkRequired
+        type: "*errs.Error"
+      - name: CtxCancelled
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+  - constants:
+      - name: SourceFieldKey
+        type: string
+        value: "\"source\""
+    functions:
+      - in:
+          - name: enc
+            type: encoder.Encoder
+          - name: sink
+            type: corelogger.Sink
+          - name: min
+            type: level.Level
+        name: NewHandler
+        out:
+          - name: h
+            type: corelogger.Handler
+          - name: err
+            type: error
+      - in:
+          - name: h
+            type: corelogger.Handler
+        name: New
+        out:
+          - name: lg
+            type: corelogger.Logger
+          - name: err
+            type: error
+      - in:
+          - name: h
+            type: corelogger.Handler
+          - name: src
+            type: corelogger.TraceContextSource
+        name: NewWithTraceContext
+        out:
+          - name: lg
+            type: corelogger.Logger
+          - name: err
+            type: error
+      - in:
+          - name: lg
+            type: corelogger.Logger
+          - name: lv
+            type: level.Level
+        name: Build
+        out:
+          - type: Builder
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: corelogger.Logger
+          - name: lv
+            type: level.Level
+          - name: msg
+            type: string
+          - name: attrs
+            type: "[]corelogger.AttrValue"
+        name: LogAttrs
+      - in:
+          - name: lg
+            type: corelogger.Logger
+          - name: owned
+            type: io.Closer
+        name: Owning
+        out:
+          - type: corelogger.Logger
+      - in:
+          - name: lg
+            type: corelogger.Logger
+          - name: skip
+            type: int
+        name: WithCaller
+        out:
+          - type: corelogger.Logger
+      - in:
+          - name: w
+            type: io.Writer
+          - name: min
+            type: level.Level
+        name: NewTextHandler
+        out:
+          - name: h
+            type: "*TextHandler"
+          - name: err
+            type: error
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    path: github.com/kitsunium/sdk/internal/service/observe/logger
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: key
+                - name: val
+                  type: string
+              name: Str
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: int
+              name: Int
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: int64
+              name: Int64
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: uint64
+              name: Uint64
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: bool
+              name: Bool
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: float64
+              name: Float64
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: time.Duration
+              name: Duration
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: time.Time
+              name: Time
+              out:
+                - type: Builder
+            - in:
+                - name: key
+                  type: string
+                - name: val
+                  type: any
+              name: Any
+              out:
+                - type: Builder
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: msg
+                  type: string
+              name: Send
+        name: Builder
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+            name: Enabled
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: attrs
+                type: "[]corelogger.AttrValue"
+            name: WithAttrs
+            out:
+              - type: corelogger.Handler
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+            name: WithGroup
+            out:
+              - type: corelogger.Handler
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+            name: Handle
+            out:
+              - type: error
+            recv: pointer
+        name: TextHandler
+        struct:
+          unexported: true
+  - aliases:
+      - name: Encoder
+        target: corelogger.Encoder
+    constants:
+      - name: ReservedPrefix
+        type: string
+        value: "\"attr.\""
+    functions:
+      - in:
+          - name: key
+            type: string
+        name: ReservesKey
+        out:
+          - type: bool
+      - in:
+          - name: clk
+            type: clock.Clock
+        name: NewJSON
+        out:
+          - type: Encoder
+      - in:
+          - name: clk
+            type: clock.Clock
+        name: NewText
+        out:
+          - type: Encoder
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: text
+            type: string
+        name: AppendSanitized
+        out:
+          - type: "[]byte"
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+  - constants:
+      - name: KindSymlink
+        type: string
+        value: "\"symlink\""
+    functions:
+      - in:
+          - name: path
+            type: string
+          - name: perm
+            type: os.FileMode
+          - name: refusals
+            type: "*RefusalSpec"
+        name: Open
+        out:
+          - name: file
+            type: "*os.File"
+          - name: err
+            type: error
+      - in:
+          - name: path
+            type: string
+          - name: refusal
+            type: "*errs.WrapParams"
+        name: RefuseSymlink
+        out:
+          - type: error
+      - in:
+          - name: path
+            type: string
+          - name: openErr
+            type: error
+          - name: refusal
+            type: "*errs.WrapParams"
+        name: ExplainOpenFailure
+        out:
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/internal/logfile
+    types:
+      - name: RefusalSpec
+        struct:
+          fields:
+            - name: Symlink
+              type: errs.WrapParams
+            - name: Open
+              type: errs.WrapParams
+  - functions:
+      - name: NewMemory
+        out:
+          - type: "*Memory"
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
+    types:
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+          - name: Records
+            out:
+              - type: "[]corelogger.RecordEvent"
+            recv: pointer
+          - name: Len
+            out:
+              - type: int
+            recv: pointer
+          - name: Reset
+            recv: pointer
+        name: Memory
+        struct:
+          unexported: true
+  - aliases:
+      - name: Builder
+        target: svclogger.Builder
+      - name: Format
+        target: corecodec.Format
+      - name: Kind
+        target: corelogger.Kind
+      - name: Leveler
+        target: level.Leveler
+      - name: LevelVar
+        target: level.Var
+      - name: Logger
+        target: corelogger.Logger
+      - name: Attr
+        target: corelogger.AttrValue
+      - name: Level
+        target: level.Level
+      - name: RecordSnapshot
+        target: corelogger.RecordEvent
+      - name: MemorySink
+        target: memory.Memory
+      - name: Sink
+        target: corelogger.Sink
+      - name: Record
+        target: corelogger.RecordEvent
+      - name: Encoder
+        target: encoder.Encoder
+      - name: TraceContext
+        target: corelogger.TraceContextValue
+      - name: TraceContextSource
+        target: corelogger.TraceContextSource
+      - name: WriterName
+        target: corewriter.Name
+      - name: ConsoleConfig
+        target: corewriter.ConsoleConfig
+      - name: FileConfig
+        target: corewriter.FileConfig
+      - name: S3Config
+        target: corewriter.S3Config
+      - name: CloudWatchConfig
+        target: corewriter.CloudWatchConfig
+      - name: RotFileConfig
+        target: corewriter.RotFileConfig
+      - name: ConsoleStream
+        target: corewriter.ConsoleStream
+      - name: CredentialProvider
+        target: corewriter.CredentialProvider
+      - name: CredentialValue
+        target: corewriter.CredentialValue
+      - name: WriterSpec
+        target: corewriter.Spec
+    constants:
+      - name: CodeWriterRequired
+        type: errs.Code
+        value: "0x01_01_00_01"
+      - name: CodeSinkConfigRequired
+        type: errs.Code
+        value: "0x01_01_00_02"
+      - name: CodeWriterSpecInvalid
+        type: errs.Code
+        value: "0x01_01_00_03"
+      - name: CodeTopologyInvalid
+        type: errs.Code
+        value: "0x01_01_00_04"
+      - name: KindAny
+        type: Kind
+        value: "0"
+      - name: KindBool
+        type: Kind
+        value: "1"
+      - name: KindDuration
+        type: Kind
+        value: "2"
+      - name: KindFloat64
+        type: Kind
+        value: "3"
+      - name: KindInt64
+        type: Kind
+        value: "4"
+      - name: KindString
+        type: Kind
+        value: "5"
+      - name: KindTime
+        type: Kind
+        value: "6"
+      - name: KindUint64
+        type: Kind
+        value: "7"
+      - name: KindGroup
+        type: Kind
+        value: "8"
+      - name: LevelDebug
+        type: Level
+        value: "-4"
+      - name: LevelInfo
+        type: Level
+        value: "0"
+      - name: LevelWarn
+        type: Level
+        value: "4"
+      - name: LevelError
+        type: Level
+        value: "8"
+      - name: StreamStderr
+        type: corewriter.ConsoleStream
+        value: "0"
+      - name: StreamStdout
+        type: corewriter.ConsoleStream
+        value: "1"
+    functions:
+      - in:
+          - name: lg
+            type: Logger
+          - name: lv
+            type: Level
+        name: Build
+        out:
+          - type: Builder
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: lv
+            type: Level
+          - name: msg
+            type: string
+          - name: attrs
+            type: "[]Attr"
+        name: LogAttrs
+      - in:
+          - name: lg
+            type: Logger
+          - name: skip
+            type: int
+        name: WithCaller
+        out:
+          - type: Logger
+      - name: NewTextEncoder
+        out:
+          - type: Encoder
+      - name: NewJSONEncoder
+        out:
+          - type: Encoder
+      - in:
+          - name: format
+            type: Format
+          - name: raw
+            type: "[]byte"
+        name: FromConfig
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - in:
+          - name: initial
+            type: Level
+        name: NewLevelVar
+        out:
+          - type: "*LevelVar"
+      - in:
+          - name: name
+            type: string
+        name: ParseLevel
+        out:
+          - name: lvl
+            type: Level
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: NewText
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - name: Default
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - in:
+          - name: path
+            type: string
+        name: DefaultMulti
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: msg
+            type: string
+          - name: attrs
+            type: Attr
+        name: Debug
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: msg
+            type: string
+          - name: attrs
+            type: Attr
+        name: Info
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: msg
+            type: string
+          - name: attrs
+            type: Attr
+        name: Warn
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lg
+            type: Logger
+          - name: msg
+            type: string
+          - name: attrs
+            type: Attr
+        name: Error
+        variadic: true
+      - in:
+          - name: key
+          - name: val
+            type: string
+        name: String
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int
+        name: Int
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: bool
+        name: Bool
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: float64
+        name: Float64
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int64
+        name: Int64
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: uint64
+        name: Uint64
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: time.Duration
+        name: Duration
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: time.Time
+        name: Time
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: any
+        name: Any
+        out:
+          - type: Attr
+      - name: NewMemorySink
+        out:
+          - type: "*MemorySink"
+      - in:
+          - name: cfg
+            type: SinkConfig
+        name: NewWithSink
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+      - in:
+          - name: branches
+            type: Sink
+        name: Multi
+        out:
+          - type: Sink
+        variadic: true
+      - in:
+          - name: sink
+            type: Sink
+          - name: min
+            type: Level
+        name: LevelGate
+        out:
+          - type: Sink
+      - in:
+          - name: w
+            type: io.Writer
+        name: NewWriterSink
+        out:
+          - name: sink
+            type: Sink
+          - name: err
+            type: error
+      - name: ConsoleStderr
+        out:
+          - type: Sink
+      - name: ConsoleStdout
+        out:
+          - type: Sink
+      - name: TextEncoder
+        out:
+          - type: Encoder
+      - in:
+          - name: ctx
+            type: context.Context
+        name: TraceContextFromContext
+        out:
+          - type: TraceContext
+      - name: FrameworkVersion
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: WithError
+        out:
+          - type: "[]Attr"
+      - in:
+          - name: accessKeyID
+          - name: secretAccessKey
+          - name: sessionToken
+            type: string
+        name: NewCredentialValue
+        out:
+          - type: CredentialValue
+      - in:
+          - name: min
+            type: Level
+          - name: specs
+            type: WriterSpec
+        name: NewMulti
+        out:
+          - name: lg
+            type: Logger
+          - name: err
+            type: error
+        variadic: true
+    imports:
+      corecodec: github.com/kitsunium/sdk/internal/core/data/codec
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      corewriter: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+      encoder: github.com/kitsunium/sdk/internal/service/observe/logger/encoder
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+      memory: github.com/kitsunium/sdk/internal/service/observe/logger/sink/memory
+      svclogger: github.com/kitsunium/sdk/internal/service/observe/logger
+    path: github.com/kitsunium/sdk/pkg/v1/observe/logger
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Writer
+              type: io.Writer
+            - name: Writers
+              type: "[]io.Writer"
+            - name: MinLevel
+              type: Level
+      - name: SinkConfig
+        struct:
+          fields:
+            - name: Sink
+              type: Sink
+            - name: Encoder
+              type: Encoder
+            - name: MinLevel
+              type: Level
+      - name: TopologyConfig
+        struct:
+          fields:
+            - name: Level
+              tag: json:"level" yaml:"level" toml:"level"
+              type: string
+            - name: Writers
+              tag: json:"writers" yaml:"writers" toml:"writers"
+              type: "[]WriterEntryConfig"
+      - name: WriterEntryConfig
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name" yaml:"name" toml:"name"
+              type: string
+            - name: Options
+              tag: json:"config" yaml:"config" toml:"config"
+              type: map[string]any
+    variables:
+      - name: WriterRequired
+        type: "*errs.Error"
+      - name: SinkConfigRequired
+        type: "*errs.Error"
+      - name: WriterSpecInvalid
+        type: "*errs.Error"
+      - name: TopologyInvalid
+        type: "*errs.Error"
+      - name: Version
+        type: string
+  - constants:
+      - name: CodeLoggerRequired
+        type: errs.Code
+        value: "0x01_01_01_01"
+    functions:
+      - in:
+          - name: lg
+            type: logger.Logger
+        name: NewHandler
+        out:
+          - name: h
+            type: slog.Handler
+          - name: err
+            type: error
+      - in:
+          - name: lg
+            type: logger.Logger
+        name: New
+        out:
+          - name: sl
+            type: "*slog.Logger"
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+      slog: log/slog
+    path: github.com/kitsunium/sdk/pkg/v1/observe/logger/slogbridge
+    variables:
+      - name: LoggerRequired
+        type: "*errs.Error"

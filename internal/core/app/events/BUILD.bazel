@@ -31,7 +31,10 @@ alias(
 go_test(
     name = "events_test",
     size = "small",
-    srcs = ["events_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "events_external_test.go",
+    ],
     deps = [
         ":events",
         "//internal/kernel/errs",

@@ -39,6 +39,7 @@ alias(
 go_test(
     name = "ssh_test",
     srcs = [
+        "api_gen_test.go",
         "cache_external_test.go",
         "enroll_external_test.go",
         "enroll_internal_test.go",
@@ -60,6 +61,7 @@ go_test(
     ],
     embed = [":ssh"],
     deps = [
+        "//framework/entitlement",
         "//framework/internal/core/entitlement",
         "//framework/internal/service/entitlement",
         "//internal/kernel/errs",

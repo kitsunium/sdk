@@ -74,6 +74,7 @@ go_test(
     name = "ipc_test",
     srcs = [
         "admit_internal_test.go",
+        "api_gen_test.go",
         "chain_external_test.go",
         "chain_internal_test.go",
         "ipc_external_test.go",

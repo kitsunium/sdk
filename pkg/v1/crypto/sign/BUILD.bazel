@@ -23,6 +23,7 @@ alias(
 go_test(
     name = "sign_test",
     srcs = [
+        "api_gen_test.go",
         "sign_bench_test.go",
         "sign_external_test.go",
     ],

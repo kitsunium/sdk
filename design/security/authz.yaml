@@ -1,0 +1,642 @@
+apiVersion: kit.kitsunium/design/v2
+domain: security/authz
+packages:
+  - constants:
+      - name: KindInvalid
+        type: AttrKind
+        value: "0"
+      - name: KindString
+        type: AttrKind
+        value: "1"
+      - name: KindInt64
+        type: AttrKind
+        value: "2"
+      - name: KindBool
+        type: AttrKind
+        value: "3"
+      - name: KindStrings
+        type: AttrKind
+        value: "4"
+      - name: CodePermissionDenied
+        type: errs.Code
+        value: "0x00_02_1A_01"
+      - name: CodeAttributeMissing
+        type: errs.Code
+        value: "0x00_02_1A_02"
+      - name: CodeAttributeKindMismatch
+        type: errs.Code
+        value: "0x00_02_1A_03"
+      - name: CodePolicyMisconfigured
+        type: errs.Code
+        value: "0x00_02_1A_04"
+      - name: CodeGrantInvalid
+        type: errs.Code
+        value: "0x00_03_38_01"
+      - name: CodeRuleInvalid
+        type: errs.Code
+        value: "0x00_03_38_02"
+      - name: CodeConditionInvalid
+        type: errs.Code
+        value: "0x00_03_38_03"
+      - name: Abstain
+        type: Decision
+        value: "0"
+      - name: Allow
+        type: Decision
+        value: "1"
+      - name: Deny
+        type: Decision
+        value: "2"
+    functions:
+      - in:
+          - name: key
+          - name: value
+            type: string
+        name: AttrString
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: int64
+        name: AttrInt64
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: bool
+        name: AttrBool
+        out:
+          - type: AttrValue
+      - in:
+          - name: key
+            type: string
+          - name: values
+            type: string
+        name: AttrStrings
+        out:
+          - type: AttrValue
+        variadic: true
+      - in:
+          - name: subject
+          - name: action
+          - name: resource
+            type: string
+          - name: attrs
+            type: AttrValue
+        name: NewRequestValue
+        out:
+          - type: RequestValue
+        variadic: true
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/security/authz
+    types:
+      - name: AttrKind
+        underlying: uint8
+      - methods:
+          - name: Key
+            out:
+              - type: string
+            recv: value
+          - name: Kind
+            out:
+              - type: AttrKind
+            recv: value
+          - name: StringValue
+            out:
+              - name: value
+                type: string
+              - name: ok
+                type: bool
+            recv: value
+          - name: Int64Value
+            out:
+              - name: value
+                type: int64
+              - name: ok
+                type: bool
+            recv: value
+          - name: BoolValue
+            out:
+              - name: value
+              - name: ok
+                type: bool
+            recv: value
+          - name: StringsValue
+            out:
+              - name: values
+                type: "[]string"
+              - name: ok
+                type: bool
+            recv: value
+          - in:
+              - name: want
+                type: string
+            name: Contains
+            out:
+              - name: found
+              - name: ok
+                type: bool
+            recv: value
+        name: AttrValue
+        struct:
+          unexported: true
+      - name: Policy
+        underlying: func(ctx context.Context, request RequestValue) (Decision, error)
+      - name: Condition
+        underlying: func(request RequestValue) (bool, error)
+      - methods:
+          - name: Granted
+            out:
+              - type: bool
+            recv: value
+          - name: Valid
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Decision
+        underlying: uint8
+      - methods:
+          - name: Subject
+            out:
+              - type: string
+            recv: value
+          - name: Action
+            out:
+              - type: string
+            recv: value
+          - name: Resource
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: key
+                type: string
+            name: Attr
+            out:
+              - name: attr
+                type: AttrValue
+              - name: ok
+                type: bool
+            recv: value
+          - name: AttrCount
+            out:
+              - type: int
+            recv: value
+        name: RequestValue
+        struct:
+          unexported: true
+    variables:
+      - name: PermissionDenied
+        type: "*errs.Error"
+      - name: AttributeMissing
+        type: "*errs.Error"
+      - name: AttributeKindMismatch
+        type: "*errs.Error"
+      - name: PolicyMisconfigured
+        type: "*errs.Error"
+      - name: GrantInvalid
+        type: "*errs.Error"
+      - name: RuleInvalid
+        type: "*errs.Error"
+      - name: ConditionInvalid
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: rules
+            type: RuleValue
+        name: NewABAC
+        out:
+          - name: policy
+            type: coreauthz.Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: policy
+            type: coreauthz.Policy
+          - name: request
+            type: coreauthz.RequestValue
+        name: Check
+        out:
+          - type: error
+      - in:
+          - name: policy
+            type: coreauthz.Policy
+          - name: err
+            type: error
+        name: Must
+        out:
+          - type: coreauthz.Policy
+      - in:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+        name: MustCondition
+        out:
+          - type: coreauthz.Condition
+      - in:
+          - name: inner
+            type: coreauthz.Condition
+        name: Not
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: conditions
+            type: coreauthz.Condition
+        name: AllOf
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: conditions
+            type: coreauthz.Condition
+        name: AnyOf
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: policies
+            type: coreauthz.Policy
+        name: DenyOverrides
+        out:
+          - type: coreauthz.Policy
+        variadic: true
+      - in:
+          - name: key
+          - name: want
+            type: string
+        name: AttrEquals
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+        name: AttrIsTrue
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+          - name: lo
+            type: int64
+        name: AttrAtLeast
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+          - name: want
+            type: string
+        name: AttrContains
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+        name: AttrMatchesSubject
+        out:
+          - name: condition
+            type: coreauthz.Condition
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: RBACConfig
+        name: NewRBAC
+        out:
+          - name: policy
+            type: coreauthz.Policy
+          - name: err
+            type: error
+    imports:
+      coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
+    path: github.com/kitsunium/sdk/internal/service/security/authz
+    types:
+      - name: RuleValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Action
+              type: string
+            - name: Resource
+              type: string
+            - name: Effect
+              type: coreauthz.Decision
+            - name: When
+              type: coreauthz.Condition
+      - name: GrantValue
+        struct:
+          fields:
+            - name: Role
+              type: string
+            - name: Permissions
+              type: "[]PermissionValue"
+      - name: PermissionValue
+        struct:
+          fields:
+            - name: Action
+              type: string
+            - name: Resource
+              type: string
+      - name: RBACConfig
+        struct:
+          fields:
+            - name: RolesAttr
+              type: string
+            - name: Grants
+              type: "[]GrantValue"
+  - aliases:
+      - name: Decision
+        target: coreauthz.Decision
+      - name: Policy
+        target: coreauthz.Policy
+      - name: Condition
+        target: coreauthz.Condition
+      - name: Request
+        target: coreauthz.RequestValue
+      - name: Attr
+        target: coreauthz.AttrValue
+      - name: AttrKind
+        target: coreauthz.AttrKind
+      - name: Permission
+        target: svcauthz.PermissionValue
+      - name: Grant
+        target: svcauthz.GrantValue
+      - name: RBACConfig
+        target: svcauthz.RBACConfig
+      - name: Rule
+        target: svcauthz.RuleValue
+    constants:
+      - name: Abstain
+        type: Decision
+        value: "0"
+      - name: Allow
+        type: Decision
+        value: "1"
+      - name: Deny
+        type: Decision
+        value: "2"
+      - name: KindInvalid
+        type: AttrKind
+        value: "0"
+      - name: KindString
+        type: AttrKind
+        value: "1"
+      - name: KindInt64
+        type: AttrKind
+        value: "2"
+      - name: KindBool
+        type: AttrKind
+        value: "3"
+      - name: KindStrings
+        type: AttrKind
+        value: "4"
+      - name: CodePermissionDenied
+        type: errs.Code
+        value: "0x00_02_1A_01"
+      - name: CodeAttributeMissing
+        type: errs.Code
+        value: "0x00_02_1A_02"
+      - name: CodeAttributeKindMismatch
+        type: errs.Code
+        value: "0x00_02_1A_03"
+      - name: CodePolicyMisconfigured
+        type: errs.Code
+        value: "0x00_02_1A_04"
+      - name: CodeGrantInvalid
+        type: errs.Code
+        value: "0x00_03_38_01"
+      - name: CodeRuleInvalid
+        type: errs.Code
+        value: "0x00_03_38_02"
+      - name: CodeConditionInvalid
+        type: errs.Code
+        value: "0x00_03_38_03"
+    functions:
+      - in:
+          - name: subject
+          - name: action
+          - name: resource
+            type: string
+          - name: attrs
+            type: Attr
+        name: NewRequest
+        out:
+          - type: Request
+        variadic: true
+      - in:
+          - name: key
+          - name: value
+            type: string
+        name: AttrString
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: int64
+        name: AttrInt64
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: value
+            type: bool
+        name: AttrBool
+        out:
+          - type: Attr
+      - in:
+          - name: key
+            type: string
+          - name: values
+            type: string
+        name: AttrStrings
+        out:
+          - type: Attr
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: policy
+            type: Policy
+          - name: request
+            type: Request
+        name: Check
+        out:
+          - type: error
+      - in:
+          - name: policies
+            type: Policy
+        name: DenyOverrides
+        out:
+          - type: Policy
+        variadic: true
+      - in:
+          - name: cfg
+            type: RBACConfig
+        name: NewRBAC
+        out:
+          - name: policy
+            type: Policy
+          - name: err
+            type: error
+      - in:
+          - name: rules
+            type: Rule
+        name: NewABAC
+        out:
+          - name: policy
+            type: Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: key
+          - name: want
+            type: string
+        name: AttrEquals
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+        name: AttrIsTrue
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+          - name: lo
+            type: int64
+        name: AttrAtLeast
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+          - name: want
+            type: string
+        name: AttrContains
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: string
+        name: AttrMatchesSubject
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: inner
+            type: Condition
+        name: Not
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+      - in:
+          - name: conditions
+            type: Condition
+        name: AllOf
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: conditions
+            type: Condition
+        name: AnyOf
+        out:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: policy
+            type: Policy
+          - name: err
+            type: error
+        name: Must
+        out:
+          - type: Policy
+      - in:
+          - name: condition
+            type: Condition
+          - name: err
+            type: error
+        name: MustCondition
+        out:
+          - type: Condition
+    imports:
+      coreauthz: github.com/kitsunium/sdk/internal/core/security/authz
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcauthz: github.com/kitsunium/sdk/internal/service/security/authz
+    path: github.com/kitsunium/sdk/pkg/v1/security/authz
+    variables:
+      - name: PermissionDenied
+        type: "*kernelerrs.Error"
+      - name: AttributeMissing
+        type: "*kernelerrs.Error"
+      - name: AttributeKindMismatch
+        type: "*kernelerrs.Error"
+      - name: PolicyMisconfigured
+        type: "*kernelerrs.Error"
+      - name: GrantInvalid
+        type: "*kernelerrs.Error"
+      - name: RuleInvalid
+        type: "*kernelerrs.Error"
+      - name: ConditionInvalid
+        type: "*kernelerrs.Error"

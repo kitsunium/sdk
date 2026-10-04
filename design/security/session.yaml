@@ -1,0 +1,499 @@
+apiVersion: kit.kitsunium/design/v2
+domain: security/session
+packages:
+  - constants:
+      - name: CodeNotFound
+        type: errs.Code
+        value: "0x00_02_0E_01"
+      - name: CodeExpired
+        type: errs.Code
+        value: "0x00_02_0E_02"
+      - name: CodeInvalidID
+        type: errs.Code
+        value: "0x00_02_0E_03"
+      - name: CodeInvalidConfig
+        type: errs.Code
+        value: "0x00_02_0E_04"
+      - name: CodeIdentifierCollision
+        type: errs.Code
+        value: "0x00_02_0E_05"
+      - name: CodeEntropyFailed
+        type: errs.Code
+        value: "0x00_02_0E_06"
+      - name: CodeStoreUnavailable
+        type: errs.Code
+        value: "0x00_02_0E_07"
+      - name: CodeSealInvalid
+        type: errs.Code
+        value: "0x00_02_0E_08"
+      - name: CodeFixationRefused
+        type: errs.Code
+        value: "0x00_02_0E_09"
+      - name: CodeRecordCorrupt
+        type: errs.Code
+        value: "0x00_03_2E_01"
+      - name: CodeDirectoryUnsafe
+        type: errs.Code
+        value: "0x00_03_2E_02"
+      - name: CodeLockFailed
+        type: errs.Code
+        value: "0x00_03_2E_03"
+      - name: CodePayloadTooLarge
+        type: errs.Code
+        value: "0x00_03_2E_04"
+      - name: CodeInvalidPurpose
+        type: errs.Code
+        value: "0x00_03_2E_05"
+      - name: CodePathRedirected
+        type: errs.Code
+        value: "0x00_03_2E_06"
+      - name: IDLen
+        type: int
+        value: "32"
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewID
+        out:
+          - name: id
+            type: ID
+          - name: err
+            type: error
+      - in:
+          - name: encoded
+            type: string
+        name: ParseID
+        out:
+          - name: id
+            type: ID
+          - name: err
+            type: error
+      - in:
+          - name: state
+            type: StateValue
+        name: NewSessionValue
+        out:
+          - name: session
+            type: SessionValue
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/security/session
+    types:
+      - methods:
+          - name: Reveal
+            out:
+              - type: string
+            recv: value
+          - name: Digest
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: other
+                type: ID
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+        name: ID
+        struct:
+          unexported: true
+      - interface:
+          methods:
+            - in:
+                - name: id
+                  type: ID
+              name: Seal
+              out:
+                - name: sealed
+                  type: string
+                - name: err
+                  type: error
+            - in:
+                - name: sealed
+                  type: string
+              name: Open
+              out:
+                - name: id
+                  type: ID
+                - name: err
+                  type: error
+        name: Sealer
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: New
+              out:
+                - type: SessionValue
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: ID
+              name: Load
+              out:
+                - type: SessionValue
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: session
+                  type: SessionValue
+              name: Save
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: current
+                  type: ID
+                - name: subject
+                  type: string
+              name: Regenerate
+              out:
+                - type: SessionValue
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: id
+                  type: ID
+              name: Destroy
+              out:
+                - type: error
+        name: Store
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Sweep
+              out:
+                - name: removed
+                  type: int
+                - name: err
+                  type: error
+        name: Sweeper
+      - methods:
+          - name: ID
+            out:
+              - type: ID
+            recv: value
+          - name: Subject
+            out:
+              - type: string
+            recv: value
+          - name: CreatedAt
+            out:
+              - type: time.Time
+            recv: value
+          - name: LastSeen
+            out:
+              - type: time.Time
+            recv: value
+          - name: ExpiresAt
+            out:
+              - type: time.Time
+            recv: value
+          - in:
+              - name: now
+                type: time.Time
+            name: LiveAt
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - name: value
+                type: string
+              - name: ok
+                type: bool
+            recv: value
+          - in:
+              - name: key
+              - name: value
+                type: string
+            name: Set
+            out:
+              - type: SessionValue
+            recv: value
+          - in:
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: SessionValue
+            recv: value
+          - name: Keys
+            out:
+              - type: "[]string"
+            recv: value
+          - name: Data
+            out:
+              - type: map[string]string
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+        name: SessionValue
+        struct:
+          unexported: true
+      - name: StateValue
+        struct:
+          fields:
+            - name: ID
+              type: ID
+            - name: Subject
+              type: string
+            - name: CreatedAt
+              type: time.Time
+            - name: LastSeen
+              type: time.Time
+            - name: AbsoluteExpiry
+              type: time.Time
+            - name: IdleExpiry
+              type: time.Time
+            - name: Data
+              type: map[string]string
+    variables:
+      - name: NotFound
+        type: "*errs.Error"
+      - name: Expired
+        type: "*errs.Error"
+      - name: InvalidID
+        type: "*errs.Error"
+      - name: InvalidConfig
+        type: "*errs.Error"
+      - name: IdentifierCollision
+        type: "*errs.Error"
+      - name: EntropyFailed
+        type: "*errs.Error"
+      - name: StoreUnavailable
+        type: "*errs.Error"
+      - name: SealInvalid
+        type: "*errs.Error"
+      - name: FixationRefused
+        type: "*errs.Error"
+      - name: RecordCorrupt
+        type: "*errs.Error"
+      - name: DirectoryUnsafe
+        type: "*errs.Error"
+      - name: LockFailed
+        type: "*errs.Error"
+      - name: PayloadTooLarge
+        type: "*errs.Error"
+      - name: InvalidPurpose
+        type: "*errs.Error"
+      - name: PathRedirected
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultPoll
+        type: time.Duration
+        value: "25000000"
+    functions:
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFileStore
+        out:
+          - name: store
+            type: coresession.Store
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: NewMemoryStore
+        out:
+          - name: store
+            type: coresession.Store
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: corecrypto.Key
+          - name: purpose
+            type: string
+        name: NewSealer
+        out:
+          - name: seal
+            type: coresession.Sealer
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      coresession: github.com/kitsunium/sdk/internal/core/security/session
+    path: github.com/kitsunium/sdk/internal/service/security/session
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: IdleTimeout
+              type: time.Duration
+            - name: AbsoluteTimeout
+              type: time.Duration
+            - name: Clock
+              type: clock.Clock
+      - name: FileConfig
+        struct:
+          fields:
+            - name: IdleTimeout
+              type: time.Duration
+            - name: AbsoluteTimeout
+              type: time.Duration
+            - name: Clock
+              type: clock.Timed
+            - name: Dir
+              type: string
+            - name: Poll
+              type: time.Duration
+            - name: Key
+              type: corecrypto.Key
+  - aliases:
+      - name: ID
+        target: coresession.ID
+      - name: Session
+        target: coresession.SessionValue
+      - name: State
+        target: coresession.StateValue
+      - name: Store
+        target: coresession.Store
+      - name: Sweeper
+        target: coresession.Sweeper
+      - name: Sealer
+        target: coresession.Sealer
+      - name: Config
+        target: svcsession.Config
+      - name: FileConfig
+        target: svcsession.FileConfig
+    constants:
+      - name: IDLen
+        type: int
+        value: "32"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: NewMemoryStore
+        out:
+          - name: store
+            type: Store
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: FileConfig
+        name: NewFileStore
+        out:
+          - name: store
+            type: Store
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: corecrypto.Key
+          - name: purpose
+            type: string
+        name: NewSealer
+        out:
+          - name: sealer
+            type: Sealer
+          - name: err
+            type: error
+      - in:
+          - name: encoded
+            type: string
+        name: ParseID
+        out:
+          - name: id
+            type: ID
+          - name: err
+            type: error
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewID
+        out:
+          - name: id
+            type: ID
+          - name: err
+            type: error
+      - in:
+          - name: state
+            type: State
+        name: NewSession
+        out:
+          - name: session
+            type: Session
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      coresession: github.com/kitsunium/sdk/internal/core/security/session
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcsession: github.com/kitsunium/sdk/internal/service/security/session
+    path: github.com/kitsunium/sdk/pkg/v1/security/session
+    variables:
+      - name: NotFound
+        type: "*errs.Error"
+      - name: Expired
+        type: "*errs.Error"
+      - name: InvalidID
+        type: "*errs.Error"
+      - name: InvalidConfig
+        type: "*errs.Error"
+      - name: IdentifierCollision
+        type: "*errs.Error"
+      - name: EntropyFailed
+        type: "*errs.Error"
+      - name: StoreUnavailable
+        type: "*errs.Error"
+      - name: SealInvalid
+        type: "*errs.Error"
+      - name: FixationRefused
+        type: "*errs.Error"
+      - name: RecordCorrupt
+        type: "*errs.Error"
+      - name: DirectoryUnsafe
+        type: "*errs.Error"
+      - name: LockFailed
+        type: "*errs.Error"
+      - name: PayloadTooLarge
+        type: "*errs.Error"
+      - name: InvalidPurpose
+        type: "*errs.Error"
+      - name: PathRedirected
+        type: "*errs.Error"
+      - name: UnsupportedPlatform
+        type: "*errs.Error"

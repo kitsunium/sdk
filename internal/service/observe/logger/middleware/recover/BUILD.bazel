@@ -33,6 +33,7 @@ alias(
 go_test(
     name = "recover_test",
     srcs = [
+        "api_gen_test.go",
         "panic_value_internal_test.go",
         "recover_sink_external_test.go",
         "recover_sink_internal_test.go",

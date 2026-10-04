@@ -32,7 +32,10 @@ alias(
 go_test(
     name = "authz_test",
     size = "small",
-    srcs = ["authz_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "authz_external_test.go",
+    ],
     deps = [
         ":authz",
         "//internal/kernel/errs",

@@ -27,6 +27,9 @@ alias(
 
 go_test(
     name = "pathchain_test",
-    srcs = ["pathchain_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "pathchain_external_test.go",
+    ],
     deps = [":pathchain"],
 )

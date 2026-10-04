@@ -28,5 +28,8 @@ unlocking a section another holder is inside is worse than leaking the lock.
 issue it.** Unless the protected resource compares it and refuses the lower
 one, mutual exclusion is not guaranteed against a stalled holder.
 
+The three interfaces are generated from `design/app/lock.yaml` into
+`design_gen.go` (ADR 0163): a port changes in the design, then `kit gen`.
+
 Concrete lockers: `internal/service/app/lock`. Public facade: `pkg/v1/app/lock`.
 ADR 0052. See `CLAUDE.md`.

@@ -1,0 +1,385 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/lifecycle
+packages:
+  - constants:
+      - name: CodeInvalidComponent
+        type: errs.Code
+        value: "0x00_02_13_01"
+      - name: CodeDuplicateComponent
+        type: errs.Code
+        value: "0x00_02_13_02"
+      - name: CodeLifecycleRunning
+        type: errs.Code
+        value: "0x00_02_13_03"
+      - name: CodeComponentPanicked
+        type: errs.Code
+        value: "0x00_02_13_04"
+      - name: CodeStartFailed
+        type: errs.Code
+        value: "0x00_03_31_01"
+      - name: CodeStopFailed
+        type: errs.Code
+        value: "0x00_03_31_02"
+      - name: CodeStopTimeout
+        type: errs.Code
+        value: "0x00_03_31_03"
+      - name: CodeUnwindFailed
+        type: errs.Code
+        value: "0x00_03_31_04"
+      - name: CodeReadinessFailed
+        type: errs.Code
+        value: "0x00_03_31_05"
+      - name: CodeRunPanicked
+        type: errs.Code
+        value: "0x00_03_31_06"
+      - name: CodeSupervisorMisconfigured
+        type: errs.Code
+        value: "0x00_03_31_07"
+      - name: CodeSupervisorRunning
+        type: errs.Code
+        value: "0x00_03_31_08"
+      - name: PhaseStart
+        type: Phase
+        value: "1"
+      - name: PhaseStop
+        type: Phase
+        value: "2"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/lifecycle
+    types:
+      - name: Start
+        underlying: func(ctx context.Context) error
+      - name: Stop
+        underlying: func(ctx context.Context) error
+      - interface:
+          methods:
+            - in:
+                - name: component
+                  type: ComponentValue
+              name: Add
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Start
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Stop
+              out:
+                - type: error
+        name: Lifecycle
+      - name: ComponentValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Start
+              type: Start
+            - name: Stop
+              type: Stop
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Phase
+        underlying: uint8
+      - name: TransitionValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Phase
+              type: Phase
+            - name: Begun
+              type: time.Time
+            - name: Ended
+              type: time.Time
+            - name: TimedOut
+              type: bool
+            - name: Err
+              type: error
+    variables:
+      - name: InvalidComponent
+        type: "*errs.Error"
+      - name: DuplicateComponent
+        type: "*errs.Error"
+      - name: LifecycleRunning
+        type: "*errs.Error"
+      - name: ComponentPanicked
+        type: "*errs.Error"
+      - name: StartFailed
+        type: "*errs.Error"
+      - name: StopFailed
+        type: "*errs.Error"
+      - name: StopTimeout
+        type: "*errs.Error"
+      - name: UnwindFailed
+        type: "*errs.Error"
+      - name: ReadinessFailed
+        type: "*errs.Error"
+      - name: RunPanicked
+        type: "*errs.Error"
+      - name: SupervisorMisconfigured
+        type: "*errs.Error"
+      - name: SupervisorRunning
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultStopTimeout
+        type: time.Duration
+        value: "30000000000"
+      - name: DefaultRestartBase
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultRestartMax
+        type: time.Duration
+        value: "60000000000"
+      - name: DefaultHealthyRun
+        type: time.Duration
+        value: "60000000000"
+      - name: SupervisionRunStarted
+        type: SupervisionPhase
+        value: "1"
+      - name: SupervisionRunEnded
+        type: SupervisionPhase
+        value: "2"
+      - name: SupervisionRestarting
+        type: SupervisionPhase
+        value: "3"
+      - name: SupervisionStopped
+        type: SupervisionPhase
+        value: "4"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: corelc.Lifecycle
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lc
+            type: corelc.Lifecycle
+          - name: cfg
+            type: RunConfig
+        name: Run
+        out:
+          - type: error
+      - in:
+          - name: name
+            type: string
+          - name: run
+            type: func(ctx context.Context) error
+          - name: cfg
+            type: SupervisorConfig
+        name: NewSupervisor
+        out:
+          - type: "*Supervisor"
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+    path: github.com/kitsunium/sdk/internal/service/app/lifecycle
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Timed
+            - name: StopTimeout
+              type: time.Duration
+            - name: OnTransition
+              type: func(corelc.TransitionValue)
+      - name: RunConfig
+        struct:
+          fields:
+            - name: Signals
+              type: "[]coreproc.Signal"
+            - name: Notify
+              type: bool
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Start
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Stop
+            out:
+              - type: error
+            recv: pointer
+          - name: Component
+            out:
+              - type: corelc.ComponentValue
+            recv: pointer
+        name: Supervisor
+        struct:
+          unexported: true
+      - name: SupervisorConfig
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Timed
+            - name: Observe
+              type: func(SupervisionEventValue)
+            - name: Backoff
+              type: kbackoff.Value
+            - name: HealthyAfter
+              type: time.Duration
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: SupervisionPhase
+        underlying: uint8
+      - name: SupervisionEventValue
+        struct:
+          fields:
+            - name: Err
+              type: error
+            - name: At
+              type: time.Time
+            - name: Name
+              type: string
+            - name: Duration
+              type: time.Duration
+            - name: Delay
+              type: time.Duration
+            - name: Run
+              type: int
+            - name: Failures
+              type: int
+            - name: Phase
+              type: SupervisionPhase
+            - name: Stopping
+              type: bool
+  - aliases:
+      - name: Start
+        target: corelc.Start
+      - name: Stop
+        target: corelc.Stop
+      - name: Lifecycle
+        target: corelc.Lifecycle
+      - name: Component
+        target: corelc.ComponentValue
+      - name: Transition
+        target: corelc.TransitionValue
+      - name: Phase
+        target: corelc.Phase
+      - name: Signal
+        target: coreproc.Signal
+      - name: Config
+        target: svclc.Config
+      - name: RunConfig
+        target: svclc.RunConfig
+      - name: Supervisor
+        target: svclc.Supervisor
+      - name: SupervisorConfig
+        target: svclc.SupervisorConfig
+      - name: SupervisionEvent
+        target: svclc.SupervisionEventValue
+      - name: SupervisionPhase
+        target: svclc.SupervisionPhase
+    constants:
+      - name: PhaseStart
+        type: Phase
+        value: "1"
+      - name: PhaseStop
+        type: Phase
+        value: "2"
+      - name: DefaultStopTimeout
+        type: time.Duration
+        value: "30000000000"
+      - name: DefaultRestartBase
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultRestartMax
+        type: time.Duration
+        value: "60000000000"
+      - name: DefaultHealthyRun
+        type: time.Duration
+        value: "60000000000"
+      - name: SupervisionRunStarted
+        type: SupervisionPhase
+        value: "1"
+      - name: SupervisionRunEnded
+        type: SupervisionPhase
+        value: "2"
+      - name: SupervisionRestarting
+        type: SupervisionPhase
+        value: "3"
+      - name: SupervisionStopped
+        type: SupervisionPhase
+        value: "4"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: Lifecycle
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: lc
+            type: Lifecycle
+          - name: cfg
+            type: RunConfig
+        name: Run
+        out:
+          - type: error
+      - in:
+          - name: name
+            type: string
+          - name: run
+            type: func(ctx context.Context) error
+          - name: cfg
+            type: SupervisorConfig
+        name: NewSupervisor
+        out:
+          - type: "*Supervisor"
+          - type: error
+    imports:
+      corelc: github.com/kitsunium/sdk/internal/core/app/lifecycle
+      coreproc: github.com/kitsunium/sdk/internal/core/proc
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svclc: github.com/kitsunium/sdk/internal/service/app/lifecycle
+    path: github.com/kitsunium/sdk/pkg/v1/app/lifecycle
+    variables:
+      - name: InvalidComponent
+        type: "*errs.Error"
+      - name: DuplicateComponent
+        type: "*errs.Error"
+      - name: LifecycleRunning
+        type: "*errs.Error"
+      - name: ComponentPanicked
+        type: "*errs.Error"
+      - name: StartFailed
+        type: "*errs.Error"
+      - name: StopFailed
+        type: "*errs.Error"
+      - name: StopTimeout
+        type: "*errs.Error"
+      - name: UnwindFailed
+        type: "*errs.Error"
+      - name: ReadinessFailed
+        type: "*errs.Error"
+      - name: RunPanicked
+        type: "*errs.Error"
+      - name: SupervisorMisconfigured
+        type: "*errs.Error"
+      - name: SupervisorRunning
+        type: "*errs.Error"

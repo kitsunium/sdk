@@ -1,0 +1,240 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/collections
+packages:
+  - functions:
+      - in:
+          - name: cfg
+            type: Config[K, V]
+        name: NewCache
+        out:
+          - type: "*Cache[K, V]"
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+    path: github.com/kitsunium/sdk/internal/kernel/collections/cache
+    types:
+      - methods:
+          - in:
+              - name: key
+                type: K
+            name: Fetch
+            out:
+              - name: value
+                type: V
+              - name: ok
+                type: bool
+            recv: pointer
+          - in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+            name: Set
+            recv: pointer
+          - in:
+              - name: key
+                type: K
+              - name: val
+                type: V
+              - name: ttl
+                type: time.Duration
+            name: SetTTL
+            recv: pointer
+          - in:
+              - name: key
+                type: K
+            name: Delete
+            recv: pointer
+          - name: Len
+            out:
+              - type: int
+            recv: pointer
+          - name: Purge
+            recv: pointer
+          - name: Stats
+            out:
+              - type: StatsValue
+            recv: pointer
+        name: Cache
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - name: Config
+        struct:
+          fields:
+            - name: MaxEntries
+              type: int
+            - name: DefaultTTL
+              type: time.Duration
+            - name: Clock
+              type: clock.Clock
+            - name: OnEvict
+              type: func(key K, val V)
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - name: StatsValue
+        struct:
+          fields:
+            - name: Hits
+              type: uint64
+            - name: Misses
+              type: uint64
+            - name: Evictions
+              type: uint64
+  - functions:
+      - in:
+          - name: cmp
+            type: func(a, b T) int
+        name: New
+        out:
+          - type: "*Heap[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    path: github.com/kitsunium/sdk/internal/kernel/collections/heap
+    types:
+      - methods:
+          - name: Len
+            out:
+              - type: int
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Push
+            recv: pointer
+          - name: Peek
+            out:
+              - type: T
+              - type: bool
+            recv: pointer
+          - name: Pop
+            out:
+              - type: T
+              - type: bool
+            recv: pointer
+        name: Heap
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+  - constants:
+      - name: CodeRingFull
+        type: errs.Code
+        value: "0x00_01_03_01"
+      - name: CodeRingEmpty
+        type: errs.Code
+        value: "0x00_01_03_02"
+      - name: CodeRingCapZero
+        type: errs.Code
+        value: "0x00_01_03_03"
+    functions:
+      - in:
+          - name: capacity
+            type: int
+        name: New
+        out:
+          - name: q
+            type: Queue[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/collections/ring
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: item
+                  type: T
+              name: TryWrite
+              out:
+                - name: err
+                  type: error
+            - name: TryRead
+              out:
+                - name: item
+                  type: T
+                - name: err
+                  type: error
+            - name: Capacity
+              out:
+                - name: "n"
+                  type: int
+            - name: Len
+              out:
+                - name: "n"
+                  type: int
+        name: Queue
+        typeParams:
+          - constraint: any
+            name: T
+    variables:
+      - name: Full
+        type: "*errs.Error"
+      - name: Empty
+        type: "*errs.Error"
+      - name: CapZero
+        type: "*errs.Error"
+  - aliases:
+      - name: Heap
+        target: kheap.Heap[T]
+        typeParams:
+          - constraint: any
+            name: T
+    functions:
+      - in:
+          - name: cmp
+            type: func(a, b T) int
+        name: New
+        out:
+          - type: "*Heap[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      kheap: github.com/kitsunium/sdk/internal/kernel/collections/heap
+    path: github.com/kitsunium/sdk/pkg/v1/collections/heap
+  - aliases:
+      - name: Queue
+        target: kring.Queue[T]
+        typeParams:
+          - constraint: any
+            name: T
+    functions:
+      - in:
+          - name: capacity
+            type: int
+        name: New
+        out:
+          - type: Queue[T]
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kring: github.com/kitsunium/sdk/internal/kernel/collections/ring
+    path: github.com/kitsunium/sdk/pkg/v1/collections/ring
+    variables:
+      - name: Full
+        type: "*errs.Error"
+      - name: Empty
+        type: "*errs.Error"
+      - name: CapZero
+        type: "*errs.Error"

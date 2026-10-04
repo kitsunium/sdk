@@ -32,7 +32,10 @@ alias(
 go_test(
     name = "docstore_test",
     size = "small",
-    srcs = ["docstore_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "docstore_external_test.go",
+    ],
     deps = [
         ":docstore",
         "//internal/kernel/errs",

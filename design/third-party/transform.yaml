@@ -1,0 +1,142 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/transform
+packages:
+  - constants:
+      - name: CodeZstdFailed
+        type: errs.Code
+        value: "0x00_03_3F_01"
+      - name: CodeS2Failed
+        type: errs.Code
+        value: "0x00_03_3F_02"
+      - name: CodeDecompressionLimitExceeded
+        type: errs.Code
+        value: "0x00_03_3F_03"
+      - name: CodeLimitMisconfigured
+        type: errs.Code
+        value: "0x00_03_3F_04"
+      - name: S2Algorithm
+        type: coretransform.Algorithm
+        value: "\"s2\""
+      - name: DefaultMaxDecompressedBytes
+        type: int64
+        value: 64 << 20
+      - name: ZstdAlgorithm
+        type: coretransform.Algorithm
+        value: "\"zstd\""
+      - name: ZstdFastest
+        type: ZstdLevel
+        value: "1"
+      - name: ZstdDefault
+        type: ZstdLevel
+        value: "3"
+      - name: ZstdBetter
+        type: ZstdLevel
+        value: "7"
+      - name: ZstdBest
+        type: ZstdLevel
+        value: "11"
+    functions:
+      - in:
+          - name: maxDecompressedBytes
+            type: int64
+        name: NewS2Compressor
+        out:
+          - name: compressor
+            type: "*S2Compressor"
+          - name: err
+            type: error
+      - in:
+          - name: level
+            type: ZstdLevel
+          - name: maxDecompressedBytes
+            type: int64
+        name: NewZstdCompressor
+        out:
+          - name: compressor
+            type: "*ZstdCompressor"
+          - name: err
+            type: error
+    imports:
+      coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/third-party/transform
+    types:
+      - methods:
+          - name: Algorithm
+            out:
+              - type: coretransform.Algorithm
+            recv: pointer
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Compress
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Decompress
+            out:
+              - name: decoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+        name: S2Compressor
+        struct:
+          unexported: true
+      - name: ZstdLevel
+        underlying: int
+      - methods:
+          - name: Algorithm
+            out:
+              - type: coretransform.Algorithm
+            recv: pointer
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Compress
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Decompress
+            out:
+              - name: decoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: ZstdCompressor
+        struct:
+          unexported: true
+    variables:
+      - name: ZstdFailed
+        type: "*errs.Error"
+      - name: S2Failed
+        type: "*errs.Error"
+      - name: DecompressionLimitExceeded
+        type: "*errs.Error"
+      - name: LimitMisconfigured
+        type: "*errs.Error"
+      - name: S2
+        type: coretransform.Compressor
+      - name: Zstd
+        type: coretransform.Compressor

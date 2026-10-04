@@ -187,7 +187,9 @@ jobs:
       # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
       # adds a class of analysis, it does not repeat one. `make lint-check`
       # also runs `make doclinks` (ADR 0138) and `make api-check`: docs/api
-      # regenerated from the code on every cell and compared byte for byte.
+      # regenerated from the code on every cell and compared byte for byte, the
+      # code's surface held to the pins' markers and every generated file to
+      # its design file's bytes (ADR 0163).
       #
       # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
       # are the only required checks on main (the legacy branch protection and

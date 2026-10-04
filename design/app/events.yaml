@@ -1,0 +1,225 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/events
+packages:
+  - aliases:
+      - name: EventType
+        target: reflect.Type
+    constants:
+      - name: CodeInvalidSubscription
+        type: errs.Code
+        value: "0x00_02_16_01"
+      - name: CodeDuplicateListener
+        type: errs.Code
+        value: "0x00_02_16_02"
+      - name: CodeUnknownListener
+        type: errs.Code
+        value: "0x00_02_16_03"
+      - name: CodeInvalidEventType
+        type: errs.Code
+        value: "0x00_02_16_04"
+      - name: CodeListenerPanicked
+        type: errs.Code
+        value: "0x00_02_16_05"
+      - name: CodeHalt
+        type: errs.Code
+        value: "0x00_02_16_06"
+      - name: CodeListenerFailed
+        type: errs.Code
+        value: "0x00_03_34_01"
+      - name: CodeHaltNotPermitted
+        type: errs.Code
+        value: "0x00_03_34_02"
+      - name: PriorityNormal
+        type: Priority
+        value: "0"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/events
+    types:
+      - name: Listener
+        underlying: func(ctx context.Context, event any) error
+      - interface:
+          methods:
+            - in:
+                - name: eventType
+                  type: EventType
+                - name: sub
+                  type: SubscriptionValue
+              name: Subscribe
+              out:
+                - type: error
+            - in:
+                - name: eventType
+                  type: EventType
+                - name: name
+                  type: string
+              name: Unsubscribe
+              out:
+                - type: error
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: event
+                  type: any
+              name: Publish
+              out:
+                - type: DispatchValue
+                - type: error
+        name: Bus
+      - name: DispatchValue
+        struct:
+          fields:
+            - name: Delivered
+              type: int
+            - name: Failed
+              type: int
+            - name: Halted
+              type: bool
+            - name: HaltedBy
+              type: string
+            - name: Skipped
+              type: int
+      - name: Priority
+        underlying: int
+      - name: SubscriptionValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Priority
+              type: Priority
+            - name: MayHalt
+              type: bool
+            - name: Listener
+              type: Listener
+    variables:
+      - name: InvalidSubscription
+        type: "*errs.Error"
+      - name: DuplicateListener
+        type: "*errs.Error"
+      - name: UnknownListener
+        type: "*errs.Error"
+      - name: InvalidEventType
+        type: "*errs.Error"
+      - name: ListenerPanicked
+        type: "*errs.Error"
+      - name: Halt
+        type: "*errs.Error"
+      - name: ListenerFailed
+        type: "*errs.Error"
+      - name: HaltNotPermitted
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: corev.Bus
+      - in:
+          - name: bus
+            type: corev.Bus
+          - name: handler
+            type: Handler[E]
+        name: "On"
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+      - in:
+          - name: bus
+            type: corev.Bus
+          - name: name
+            type: string
+        name: "Off"
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+    imports:
+      corev: github.com/kitsunium/sdk/internal/core/app/events
+    path: github.com/kitsunium/sdk/internal/service/app/events
+    types:
+      - name: Handler
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Priority
+              type: corev.Priority
+            - name: MayHalt
+              type: bool
+            - name: Handle
+              type: func(ctx context.Context, event E) error
+        typeParams:
+          - constraint: any
+            name: E
+  - aliases:
+      - name: Bus
+        target: corev.Bus
+      - name: Listener
+        target: corev.Listener
+      - name: EventType
+        target: corev.EventType
+      - name: Priority
+        target: corev.Priority
+      - name: Subscription
+        target: corev.SubscriptionValue
+      - name: Dispatch
+        target: corev.DispatchValue
+      - name: Handler
+        target: svcev.Handler[E]
+        typeParams:
+          - constraint: any
+            name: E
+    constants:
+      - name: PriorityNormal
+        type: Priority
+        value: "0"
+    functions:
+      - name: New
+        out:
+          - type: Bus
+      - in:
+          - name: bus
+            type: Bus
+          - name: handler
+            type: Handler[E]
+        name: "On"
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+      - in:
+          - name: bus
+            type: Bus
+          - name: name
+            type: string
+        name: "Off"
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: E
+    imports:
+      corev: github.com/kitsunium/sdk/internal/core/app/events
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcev: github.com/kitsunium/sdk/internal/service/app/events
+    path: github.com/kitsunium/sdk/pkg/v1/app/events
+    variables:
+      - name: Halt
+        type: "*errs.Error"
+      - name: InvalidSubscription
+        type: "*errs.Error"
+      - name: DuplicateListener
+        type: "*errs.Error"
+      - name: UnknownListener
+        type: "*errs.Error"
+      - name: InvalidEventType
+        type: "*errs.Error"
+      - name: ListenerPanicked
+        type: "*errs.Error"
+      - name: ListenerFailed
+        type: "*errs.Error"
+      - name: HaltNotPermitted
+        type: "*errs.Error"

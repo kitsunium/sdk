@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "pbkdf2pw_test",
     srcs = [
+        "api_gen_test.go",
         "pbkdf2pw_external_test.go",
         "pbkdf2pw_internal_test.go",
     ],

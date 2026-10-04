@@ -22,12 +22,15 @@ alias(
 go_test(
     name = "reaper_test",
     srcs = [
+        "api_gen_test.go",
         "reaper_external_nonunix_test.go",
         "reaper_external_test.go",
         "reaper_unix_external_test.go",
     ],
     deps = [
         ":reaper",
+        "//internal/core/proc",
+        "//internal/service/proc/reaper",
     ] + select({
         "@rules_go//go/platform:aix": [
             "//pkg/v1/errs",

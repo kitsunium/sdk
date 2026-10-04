@@ -23,11 +23,14 @@ alias(
 go_test(
     name = "client_test",
     srcs = [
+        "api_gen_test.go",
         "client_bench_test.go",
         "client_external_test.go",
     ],
     deps = [
         ":client",
+        "//internal/core/net",
+        "//internal/service/net/client",
         "//pkg/v1/net/tlsid",
     ],
 )

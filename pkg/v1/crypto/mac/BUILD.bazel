@@ -22,11 +22,13 @@ alias(
 go_test(
     name = "mac_test",
     srcs = [
+        "api_gen_test.go",
         "mac_bench_test.go",
         "mac_external_test.go",
     ],
     deps = [
         ":mac",
+        "//internal/core/crypto",
         "//pkg/v1/errs",
     ],
 )

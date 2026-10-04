@@ -78,6 +78,7 @@ go_test(
     srcs = [
         "accept_backoff_internal_test.go",
         "adopt_internal_test.go",
+        "api_gen_test.go",
         "batch_bench_test.go",
         "batch_internal_test.go",
         "batch_portable_internal_test.go",

@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "form_test",
-    srcs = ["form_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "form_external_test.go",
+    ],
     deps = [
         ":form",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

@@ -31,6 +31,7 @@ alias(
 go_test(
     name = "jsonpatch_test",
     srcs = [
+        "api_gen_test.go",
         "jsonpatch_external_test.go",
         "tree_internal_test.go",
     ],

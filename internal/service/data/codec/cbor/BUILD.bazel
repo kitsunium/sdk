@@ -48,6 +48,7 @@ go_test(
     name = "cbor_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "codec_bench_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",

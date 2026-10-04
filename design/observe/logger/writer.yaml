@@ -1,0 +1,376 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/writer
+packages:
+  - aliases:
+      - name: Config
+        target: any
+    constants:
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_03_01"
+      - name: CodeWriterUnknownName
+        type: errs.Code
+        value: "0x00_02_03_02"
+      - name: CodeWriterConfigInvalid
+        type: errs.Code
+        value: "0x00_02_03_03"
+      - name: CodeWriterNil
+        type: errs.Code
+        value: "0x00_02_03_04"
+      - name: CodeWriterNameEmpty
+        type: errs.Code
+        value: "0x00_02_03_05"
+      - name: ConsoleStderr
+        type: ConsoleStream
+        value: "0"
+      - name: ConsoleStdout
+        type: ConsoleStream
+        value: "1"
+    functions:
+      - in:
+          - name: accessKeyID
+          - name: secretAccessKey
+          - name: sessionToken
+            type: string
+        name: NewCredentialValue
+        out:
+          - type: CredentialValue
+      - in:
+          - name: f
+            type: Factory
+        name: Register
+        out:
+          - type: Factory
+      - in:
+          - name: "n"
+            type: Name
+        name: Lookup
+        out:
+          - name: f
+            type: Factory
+          - name: ok
+            type: bool
+      - in:
+          - name: "n"
+            type: Name
+          - name: cfg
+            type: Config
+        name: Open
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+      - name: Available
+        out:
+          - type: "[]Name"
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    types:
+      - name: ClickHouseConfig
+        struct:
+          fields:
+            - name: Address
+              type: string
+            - name: Database
+              type: string
+            - name: Table
+              type: string
+            - name: Credentials
+              type: CredentialProvider
+            - name: MaxRows
+              type: int
+            - name: FlushEvery
+              type: time.Duration
+            - name: BufferSize
+              type: int
+            - name: MinLevel
+              type: level.Level
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+      - name: CloudWatchConfig
+        struct:
+          fields:
+            - name: Group
+              type: string
+            - name: Stream
+              type: string
+            - name: Region
+              type: string
+            - name: Endpoint
+              type: string
+            - name: Credentials
+              type: CredentialProvider
+            - name: FlushEvery
+              type: time.Duration
+            - name: MinLevel
+              type: level.Level
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+      - name: ConsoleStream
+        underlying: uint8
+      - name: ConsoleConfig
+        struct:
+          fields:
+            - name: Stream
+              type: ConsoleStream
+            - name: MinLevel
+              type: level.Level
+      - interface:
+          methods:
+            - in:
+                - name: raw
+                  type: map[string]any
+              name: Decode
+              out:
+                - name: cfg
+                  type: Config
+                - name: err
+                  type: error
+        name: Decoder
+      - name: FileConfig
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: MinLevel
+              type: level.Level
+      - name: MySQLConfig
+        struct:
+          fields:
+            - name: SocketPath
+              type: string
+            - name: Database
+              type: string
+            - name: Table
+              type: string
+            - name: Credentials
+              type: CredentialProvider
+            - name: MaxRows
+              type: int
+            - name: FlushEvery
+              type: time.Duration
+            - name: BufferSize
+              type: int
+            - name: MinLevel
+              type: level.Level
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+      - name: RedisStreamConfig
+        struct:
+          fields:
+            - name: SocketPath
+              type: string
+            - name: Stream
+              type: string
+            - name: MaxLen
+              type: int
+            - name: Credentials
+              type: CredentialProvider
+            - name: MaxRows
+              type: int
+            - name: FlushEvery
+              type: time.Duration
+            - name: BufferSize
+              type: int
+            - name: MinLevel
+              type: level.Level
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+      - name: RotFileConfig
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: MaxBytes
+              type: int64
+            - name: MaxBackups
+              type: int
+            - name: Compress
+              type: bool
+            - name: MaxAgeDays
+              type: int
+            - name: Clock
+              type: clock.Clock
+            - name: RotateEvery
+              type: time.Duration
+            - name: OnError
+              type: func(err error)
+            - name: MinLevel
+              type: level.Level
+      - name: S3Config
+        struct:
+          fields:
+            - name: Bucket
+              type: string
+            - name: Region
+              type: string
+            - name: Prefix
+              type: string
+            - name: Endpoint
+              type: string
+            - name: Credentials
+              type: CredentialProvider
+            - name: FlushEvery
+              type: time.Duration
+            - name: MaxBatchBytes
+              type: int
+            - name: MinLevel
+              type: level.Level
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Credentials
+              out:
+                - name: creds
+                  type: CredentialValue
+                - name: err
+                  type: error
+        name: CredentialProvider
+      - methods:
+          - name: AccessKeyID
+            out:
+              - type: string
+            recv: value
+          - name: SecretAccessKey
+            out:
+              - type: string
+            recv: value
+          - name: SessionToken
+            out:
+              - type: string
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+        name: CredentialValue
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Name
+        underlying: string
+      - interface:
+          methods:
+            - name: Name
+              out:
+                - type: Name
+            - in:
+                - name: cfg
+                  type: Config
+              name: Open
+              out:
+                - name: sink
+                  type: corelogger.Sink
+                - name: err
+                  type: error
+        name: Factory
+      - name: Spec
+        struct:
+          fields:
+            - name: Name
+              type: Name
+            - name: Config
+              type: Config
+    variables:
+      - name: WriterUnknownName
+        type: "*errs.Error"
+      - name: WriterConfigInvalid
+        type: "*errs.Error"
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+  - imports:
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/console
+    variables:
+      - name: Writer
+        type: writer.Factory
+  - functions:
+      - in:
+          - name: exec
+            type: execBatch
+          - name: cfg
+            type: Config
+        name: Compose
+        out:
+          - type: corelogger.Sink
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/dbsink
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: MaxRows
+              type: int
+            - name: FlushEvery
+              type: time.Duration
+            - name: MinLevel
+              type: level.Level
+            - name: BufferSize
+              type: int
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+            - name: Clock
+              type: clock.Clock
+  - imports:
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/file
+    variables:
+      - name: Writer
+        type: writer.Factory
+  - functions:
+      - in:
+          - name: inner
+            type: corelogger.Sink
+          - name: min
+            type: level.Level
+        name: New
+        out:
+          - type: corelogger.Sink
+      - in:
+          - name: inner
+            type: corelogger.Sink
+          - name: min
+            type: level.Level
+        name: Floor
+        out:
+          - type: corelogger.Sink
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/levelgate

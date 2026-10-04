@@ -1,0 +1,2130 @@
+apiVersion: kit.kitsunium/design/v2
+domain: net
+packages:
+  - constants:
+      - name: CodeListenFailed
+        type: errs.Code
+        value: "0x00_02_0B_01"
+      - name: CodeInvalidAddress
+        type: errs.Code
+        value: "0x00_02_0B_02"
+      - name: CodeUnsupportedNetwork
+        type: errs.Code
+        value: "0x00_02_0B_03"
+      - name: CodeServerClosed
+        type: errs.Code
+        value: "0x00_02_0B_04"
+      - name: CodeAlreadyStarted
+        type: errs.Code
+        value: "0x00_02_0B_05"
+      - name: CodeNotStarted
+        type: errs.Code
+        value: "0x00_02_0B_06"
+      - name: CodeHandlerMissing
+        type: errs.Code
+        value: "0x00_02_0B_07"
+      - name: CodeHandlerPanic
+        type: errs.Code
+        value: "0x00_02_0B_08"
+      - name: CodeConnLimitReached
+        type: errs.Code
+        value: "0x00_02_0B_09"
+      - name: CodeDrainTimeout
+        type: errs.Code
+        value: "0x00_02_0B_0A"
+      - name: CodeGroupUnknown
+        type: errs.Code
+        value: "0x00_02_0B_0B"
+      - name: CodeGroupDuplicate
+        type: errs.Code
+        value: "0x00_02_0B_0C"
+      - name: CodeSocketAdoptFailed
+        type: errs.Code
+        value: "0x00_02_0B_0D"
+      - name: CodePacketTooLarge
+        type: errs.Code
+        value: "0x00_02_0B_0E"
+      - name: CodeTLSMaterialInvalid
+        type: errs.Code
+        value: "0x00_02_0B_0F"
+      - name: CodeTLSHandshakeFailed
+        type: errs.Code
+        value: "0x00_02_0B_10"
+      - name: CodeRequestDenied
+        type: errs.Code
+        value: "0x00_02_0B_11"
+      - name: CodeResponseTooLarge
+        type: errs.Code
+        value: "0x00_02_0B_12"
+      - name: CodeCallFailed
+        type: errs.Code
+        value: "0x00_02_0B_13"
+      - name: CodeTooManyRedirects
+        type: errs.Code
+        value: "0x00_02_0B_14"
+      - name: CodeInvalidDuration
+        type: errs.Code
+        value: "0x00_02_0B_15"
+      - name: CodeUnsafePath
+        type: errs.Code
+        value: "0x00_02_0B_16"
+      - name: CodeSSEFieldInvalid
+        type: errs.Code
+        value: "0x00_02_0B_17"
+      - name: CodeSSEFlushUnsupported
+        type: errs.Code
+        value: "0x00_02_0B_18"
+      - name: CodeSSEStreamClosed
+        type: errs.Code
+        value: "0x00_02_0B_19"
+      - name: CodeSSEStreamMisconfigured
+        type: errs.Code
+        value: "0x00_02_0B_1A"
+      - name: CodeWSHandshakeFailed
+        type: errs.Code
+        value: "0x00_02_0B_1B"
+      - name: CodeWSUpgradeUnsupported
+        type: errs.Code
+        value: "0x00_02_0B_1C"
+      - name: CodeWSProtocolViolation
+        type: errs.Code
+        value: "0x00_02_0B_1D"
+      - name: CodeWSMessageTooLarge
+        type: errs.Code
+        value: "0x00_02_0B_1E"
+      - name: CodeWSInvalidPayload
+        type: errs.Code
+        value: "0x00_02_0B_1F"
+      - name: CodeWSConnClosed
+        type: errs.Code
+        value: "0x00_02_0B_20"
+      - name: CodeWSConnMisconfigured
+        type: errs.Code
+        value: "0x00_02_0B_21"
+      - name: CodeStaticMisconfigured
+        type: errs.Code
+        value: "0x00_02_0B_22"
+      - name: PhaseNew
+        type: Phase
+        value: "0"
+      - name: PhaseStarting
+        type: Phase
+        value: "1"
+      - name: PhaseServing
+        type: Phase
+        value: "2"
+      - name: PhaseDraining
+        type: Phase
+        value: "3"
+      - name: PhaseStopped
+        type: Phase
+        value: "4"
+      - name: SSEContentType
+        type: string
+        value: "\"text/event-stream\""
+      - name: SSEMinRetry
+        type: time.Duration
+        value: "1000000"
+      - name: SSELastEventIDHeader
+        type: string
+        value: "\"Last-Event-ID\""
+      - name: WSGUID
+        type: string
+        value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
+      - name: WSVersion
+        type: string
+        value: "\"13\""
+      - name: WSKeyLen
+        type: int
+        value: "16"
+      - name: WSKeyHeader
+        type: string
+        value: "\"Sec-WebSocket-Key\""
+      - name: WSAcceptHeader
+        type: string
+        value: "\"Sec-WebSocket-Accept\""
+      - name: WSVersionHeader
+        type: string
+        value: "\"Sec-WebSocket-Version\""
+      - name: WSProtocolHeader
+        type: string
+        value: "\"Sec-WebSocket-Protocol\""
+      - name: WSExtensionsHeader
+        type: string
+        value: "\"Sec-WebSocket-Extensions\""
+      - name: WSUpgradeToken
+        type: string
+        value: "\"websocket\""
+      - name: WSMaxControlPayload
+        type: int
+        value: "125"
+      - name: WSCloseNormal
+        type: WSCloseCode
+        value: "1000"
+      - name: WSCloseGoingAway
+        type: WSCloseCode
+        value: "1001"
+      - name: WSCloseProtocolError
+        type: WSCloseCode
+        value: "1002"
+      - name: WSCloseUnsupportedData
+        type: WSCloseCode
+        value: "1003"
+      - name: WSCloseNoStatus
+        type: WSCloseCode
+        value: "1005"
+      - name: WSCloseAbnormal
+        type: WSCloseCode
+        value: "1006"
+      - name: WSCloseInvalidPayload
+        type: WSCloseCode
+        value: "1007"
+      - name: WSClosePolicyViolation
+        type: WSCloseCode
+        value: "1008"
+      - name: WSCloseTooLarge
+        type: WSCloseCode
+        value: "1009"
+      - name: WSCloseExtensionRequired
+        type: WSCloseCode
+        value: "1010"
+      - name: WSCloseInternalError
+        type: WSCloseCode
+        value: "1011"
+      - name: WSCloseTLSHandshake
+        type: WSCloseCode
+        value: "1015"
+      - name: WSContinuation
+        type: WSOpCode
+        value: "0x0"
+      - name: WSText
+        type: WSOpCode
+        value: "0x1"
+      - name: WSBinary
+        type: WSOpCode
+        value: "0x2"
+      - name: WSClose
+        type: WSOpCode
+        value: "0x8"
+      - name: WSPing
+        type: WSOpCode
+        value: "0x9"
+      - name: WSPong
+        type: WSOpCode
+        value: "0xA"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: draining
+            type: <-chan struct{}
+        name: WithDrainSignal
+        out:
+          - type: context.Context
+      - in:
+          - name: ctx
+            type: context.Context
+        name: DrainSignal
+        out:
+          - type: <-chan struct{}
+      - in:
+          - name: p
+            type: IdentityParams
+        name: NewIdentityValue
+        out:
+          - name: id
+            type: IdentityValue
+          - name: err
+            type: error
+      - in:
+          - name: h
+            type: H
+          - name: middlewares
+            type: Middleware[H]
+        name: Chain
+        out:
+          - type: H
+        typeParams:
+          - constraint: any
+            name: H
+        variadic: true
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+      stdnet: net
+      tls: crypto/tls
+    path: github.com/kitsunium/sdk/internal/core/net
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: AddressValue
+        struct:
+          fields:
+            - name: Network
+              tag: json:"network"
+              type: string
+            - name: Addr
+              tag: json:"addr"
+              type: string
+      - name: CallValue
+        struct:
+          fields:
+            - name: Method
+              type: string
+            - name: Host
+              type: string
+            - name: Path
+              type: string
+            - name: Status
+              type: int
+            - name: Bytes
+              type: int64
+            - name: Duration
+              type: time.Duration
+            - name: Err
+              type: error
+      - name: CallHook
+        underlying: func(call CallValue)
+      - name: ClientConfig
+        struct:
+          fields:
+            - name: BaseURL
+              tag: json:"base_url"
+              type: string
+            - name: DialTimeout
+              tag: json:"dial_timeout"
+              type: DurationValue
+            - name: HandshakeTimeout
+              tag: json:"handshake_timeout"
+              type: DurationValue
+            - name: ResponseTimeout
+              tag: json:"response_timeout"
+              type: DurationValue
+            - name: TotalTimeout
+              tag: json:"total_timeout"
+              type: DurationValue
+            - name: MaxResponseSize
+              tag: json:"max_response_size"
+              type: int64
+            - name: MaxRedirects
+              tag: json:"max_redirects"
+              type: int
+            - name: DefaultHeaders
+              tag: json:"default_headers"
+              type: map[string]string
+      - interface:
+          embeds:
+            - stdnet.Conn
+          methods:
+            - name: ID
+              out:
+                - type: uint64
+            - name: Group
+              out:
+                - type: string
+            - name: Buffer
+              out:
+                - type: "[]byte"
+        name: Conn
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: c
+                  type: Conn
+              name: ServeConn
+              out:
+                - type: error
+        name: ConnHandler
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: c
+                type: Conn
+            name: ServeConn
+            out:
+              - type: error
+            recv: value
+        name: ConnHandlerFunc
+        underlying: func(ctx context.Context, c Conn) error
+      - methods:
+          - name: Duration
+            out:
+              - type: time.Duration
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalJSON
+            out:
+              - name: encoded
+                type: "[]byte"
+              - name: err
+                type: error
+            recv: value
+          - in:
+              - name: data
+                type: "[]byte"
+            name: UnmarshalJSON
+            out:
+              - type: error
+            recv: pointer
+        name: DurationValue
+        underlying: time.Duration
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: ClientConfig
+            out:
+              - type: "*tls.Config"
+            recv: value
+          - name: ServerConfig
+            out:
+              - type: "*tls.Config"
+            recv: value
+        name: IdentityValue
+        struct:
+          unexported: true
+      - name: IdentityFileParams
+        struct:
+          fields:
+            - name: CertFile
+              tag: json:"cert_file"
+              type: string
+            - name: KeyFile
+              tag: json:"key_file"
+              type: string
+            - name: RootsFile
+              tag: json:"roots_file"
+              type: string
+            - name: ClientCAFile
+              tag: json:"client_ca_file"
+              type: string
+            - name: ServerName
+              tag: json:"server_name"
+              type: string
+            - name: MinVersion
+              tag: json:"min_version"
+              type: uint16
+            - name: NextProtos
+              tag: json:"next_protos"
+              type: "[]string"
+            - name: RequireClientCert
+              tag: json:"require_client_cert"
+              type: bool
+      - name: IdentityParams
+        struct:
+          fields:
+            - name: CertPEM
+              type: "[]byte"
+            - name: KeyPEM
+              type: "[]byte"
+            - name: RootsPEM
+              type: "[]byte"
+            - name: ClientCAPEM
+              type: "[]byte"
+            - name: ServerName
+              type: string
+            - name: MinVersion
+              type: uint16
+            - name: NextProtos
+              type: "[]string"
+            - name: RequireClientCert
+              type: bool
+      - name: LimitsValue
+        struct:
+          fields:
+            - name: MaxConns
+              tag: json:"max_conns"
+              type: int
+            - name: ReadBufferSize
+              tag: json:"read_buffer_size"
+              type: int
+            - name: MaxPacketSize
+              tag: json:"max_packet_size"
+              type: int
+            - name: Backlog
+              tag: json:"backlog"
+              type: int
+            - name: Shards
+              tag: json:"shards"
+              type: int
+            - name: BatchSize
+              tag: json:"batch_size"
+              type: int
+      - name: Middleware
+        typeParams:
+          - constraint: any
+            name: H
+        underlying: func(next H) H
+      - interface:
+          methods:
+            - name: Data
+              out:
+                - type: "[]byte"
+            - name: From
+              out:
+                - type: stdnet.Addr
+            - name: To
+              out:
+                - type: stdnet.Addr
+            - name: ID
+              out:
+                - type: uint64
+            - name: Group
+              out:
+                - type: string
+            - in:
+                - name: b
+                  type: "[]byte"
+              name: Reply
+              out:
+                - name: "n"
+                  type: int
+                - name: err
+                  type: error
+        name: Packet
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+                - name: p
+                  type: Packet
+              name: ServePacket
+              out:
+                - type: error
+        name: PacketHandler
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: p
+                type: Packet
+            name: ServePacket
+            out:
+              - type: error
+            recv: value
+        name: PacketHandlerFunc
+        underlying: func(ctx context.Context, p Packet) error
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Phase
+        underlying: uint8
+      - interface:
+          methods:
+            - in:
+                - name: req
+                  type: RequestValue
+              name: Allow
+              out:
+                - type: error
+        name: Policy
+      - methods:
+          - in:
+              - name: req
+                type: RequestValue
+            name: Allow
+            out:
+              - type: error
+            recv: value
+        name: PolicyFunc
+        underlying: func(req RequestValue) error
+      - name: ResponseValue
+        struct:
+          fields:
+            - name: Status
+              type: int
+            - name: Header
+              type: http.Header
+            - name: Body
+              type: "[]byte"
+      - name: RequestValue
+        struct:
+          fields:
+            - name: Method
+              type: string
+            - name: Scheme
+              type: string
+            - name: Host
+              type: string
+            - name: EscapedPath
+              type: string
+            - name: RawQuery
+              type: string
+      - methods:
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: Validate
+            out:
+              - type: error
+            recv: value
+        name: SSEEventValue
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Name
+              tag: json:"event"
+              type: string
+            - name: Data
+              tag: json:"data"
+              type: string
+            - name: Retry
+              tag: json:"retry"
+              type: DurationValue
+      - methods:
+          - name: Degraded
+            out:
+              - type: bool
+            recv: value
+        name: StateValue
+        struct:
+          fields:
+            - name: Phase
+              tag: json:"phase"
+              type: Phase
+            - name: Listeners
+              tag: json:"listeners"
+              type: "[]ListenerStateValue"
+            - name: ActiveConns
+              tag: json:"active_conns"
+              type: int64
+            - name: TotalConns
+              tag: json:"total_conns"
+              type: uint64
+            - name: RejectedConns
+              tag: json:"rejected_conns"
+              type: uint64
+            - name: OversizedPackets
+              tag: json:"oversized_packets"
+              type: uint64
+            - name: AcceptBackoffs
+              tag: json:"accept_backoffs"
+              type: uint64
+      - name: ListenerStateValue
+        struct:
+          fields:
+            - name: Group
+              tag: json:"group"
+              type: string
+            - name: Address
+              tag: json:"address"
+              type: string
+            - name: Network
+              tag: json:"network"
+              type: string
+            - name: Shards
+              tag: json:"shards"
+              type: int
+            - name: Degraded
+              tag: json:"degraded"
+              type: bool
+            - name: DegradedReason
+              tag: json:"degraded_reason,omitempty"
+              type: string
+            - name: Adopted
+              tag: json:"adopted"
+              type: bool
+      - name: TimeoutsValue
+        struct:
+          fields:
+            - name: Read
+              tag: json:"read"
+              type: DurationValue
+            - name: Write
+              tag: json:"write"
+              type: DurationValue
+            - name: Idle
+              tag: json:"idle"
+              type: DurationValue
+            - name: Handshake
+              tag: json:"handshake"
+              type: DurationValue
+      - methods:
+          - name: Sendable
+            out:
+              - type: bool
+            recv: value
+          - name: Echoable
+            out:
+              - type: WSCloseCode
+            recv: value
+        name: WSCloseCode
+        underlying: uint16
+      - methods:
+          - name: OpCode
+            out:
+              - type: WSOpCode
+            recv: value
+        name: WSMessageValue
+        struct:
+          fields:
+            - name: Binary
+              tag: json:"binary"
+              type: bool
+            - name: Data
+              tag: json:"data"
+              type: "[]byte"
+      - methods:
+          - name: IsControl
+            out:
+              - type: bool
+            recv: value
+          - name: Defined
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: WSOpCode
+        underlying: byte
+    variables:
+      - name: ListenFailed
+        type: "*errs.Error"
+      - name: InvalidAddress
+        type: "*errs.Error"
+      - name: UnsupportedNetwork
+        type: "*errs.Error"
+      - name: ServerClosed
+        type: "*errs.Error"
+      - name: AlreadyStarted
+        type: "*errs.Error"
+      - name: NotStarted
+        type: "*errs.Error"
+      - name: HandlerMissing
+        type: "*errs.Error"
+      - name: HandlerPanic
+        type: "*errs.Error"
+      - name: ConnLimitReached
+        type: "*errs.Error"
+      - name: DrainTimeout
+        type: "*errs.Error"
+      - name: GroupUnknown
+        type: "*errs.Error"
+      - name: GroupDuplicate
+        type: "*errs.Error"
+      - name: SocketAdoptFailed
+        type: "*errs.Error"
+      - name: PacketTooLarge
+        type: "*errs.Error"
+      - name: TLSMaterialInvalid
+        type: "*errs.Error"
+      - name: TLSHandshakeFailed
+        type: "*errs.Error"
+      - name: RequestDenied
+        type: "*errs.Error"
+      - name: ResponseTooLarge
+        type: "*errs.Error"
+      - name: CallFailed
+        type: "*errs.Error"
+      - name: TooManyRedirects
+        type: "*errs.Error"
+      - name: InvalidDuration
+        type: "*errs.Error"
+      - name: UnsafePath
+        type: "*errs.Error"
+      - name: SSEFieldInvalid
+        type: "*errs.Error"
+      - name: SSEFlushUnsupported
+        type: "*errs.Error"
+      - name: SSEStreamClosed
+        type: "*errs.Error"
+      - name: SSEStreamMisconfigured
+        type: "*errs.Error"
+      - name: WSHandshakeFailed
+        type: "*errs.Error"
+      - name: WSUpgradeUnsupported
+        type: "*errs.Error"
+      - name: WSProtocolViolation
+        type: "*errs.Error"
+      - name: WSMessageTooLarge
+        type: "*errs.Error"
+      - name: WSInvalidPayload
+        type: "*errs.Error"
+      - name: WSConnClosed
+        type: "*errs.Error"
+      - name: WSConnMisconfigured
+        type: "*errs.Error"
+      - name: StaticMisconfigured
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: corenet.ClientConfig
+          - name: id
+            type: corenet.IdentityValue
+          - name: policy
+            type: corenet.Policy
+          - name: hook
+            type: corenet.CallHook
+        name: New
+        out:
+          - name: c
+            type: "*Client"
+          - name: err
+            type: error
+      - in:
+          - name: methods
+            type: string
+        name: AllowMethods
+        out:
+          - type: corenet.Policy
+        variadic: true
+      - in:
+          - name: patterns
+            type: string
+        name: AllowPaths
+        out:
+          - name: policy
+            type: corenet.Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: patterns
+            type: string
+        name: DenyPaths
+        out:
+          - name: policy
+            type: corenet.Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: members
+            type: corenet.Policy
+        name: Policies
+        out:
+          - type: corenet.Policy
+        variadic: true
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http: net/http
+      url: net/url
+    path: github.com/kitsunium/sdk/internal/service/net/client
+    types:
+      - methods:
+          - name: HTTP
+            out:
+              - type: "*http.Client"
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: path
+                type: string
+              - name: query
+                type: url.Values
+            name: Get
+            out:
+              - name: resp
+                type: corenet.ResponseValue
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: req
+                type: "*http.Request"
+            name: Do
+            out:
+              - name: resp
+                type: corenet.ResponseValue
+              - name: err
+                type: error
+            recv: pointer
+        name: Client
+        struct:
+          unexported: true
+  - functions:
+      - in:
+          - name: d
+            type: time.Duration
+        name: WithDrainTimeout
+        out:
+          - type: Option
+      - in:
+          - name: network
+          - name: addr
+            type: string
+        name: Listen
+        out:
+          - type: GroupOption
+      - in:
+          - name: id
+            type: corenet.IdentityValue
+        name: TLS
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: ReadTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: IdleTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: ReadHeaderTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: MaxHeaderBytes
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: HandshakeTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: ReadBufferSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: MaxPacketSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: BatchSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: Shards
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: MaxConns
+        out:
+          - type: GroupOption
+      - in:
+          - name: names
+            type: string
+        name: Adopt
+        out:
+          - type: GroupOption
+        variadic: true
+      - in:
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - type: "*Server"
+        variadic: true
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/net/server
+    types:
+      - name: Option
+        underlying: func(*Server)
+      - name: GroupOption
+        underlying: func(*StreamGroup)
+      - methods:
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+          - in:
+              - name: h
+                type: corenet.PacketHandler
+            name: Handle
+            out:
+              - type: "*PacketGroup"
+            recv: pointer
+          - in:
+              - name: f
+                type: corenet.PacketHandlerFunc
+            name: HandleFunc
+            out:
+              - type: "*PacketGroup"
+            recv: pointer
+          - in:
+              - name: middlewares
+                type: corenet.Middleware[corenet.PacketHandler]
+            name: Use
+            out:
+              - type: "*PacketGroup"
+            recv: pointer
+            variadic: true
+        name: PacketGroup
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Start
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Serve
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Shutdown
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+              - name: opts
+                type: GroupOption
+            name: Group
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: opts
+                type: GroupOption
+            name: PacketGroup
+            out:
+              - type: "*PacketGroup"
+            recv: pointer
+            variadic: true
+          - name: State
+            out:
+              - type: corenet.StateValue
+            recv: pointer
+        name: Server
+        struct:
+          unexported: true
+      - methods:
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+          - in:
+              - name: h
+                type: corenet.ConnHandler
+            name: Handle
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+          - in:
+              - name: f
+                type: corenet.ConnHandlerFunc
+            name: HandleFunc
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+          - in:
+              - name: h
+                type: http.Handler
+            name: HandleHTTP
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+          - in:
+              - name: middlewares
+                type: corenet.Middleware[corenet.ConnHandler]
+            name: Use
+            out:
+              - type: "*StreamGroup"
+            recv: pointer
+            variadic: true
+        name: StreamGroup
+        struct:
+          unexported: true
+  - constants:
+      - name: DefaultKeepAlive
+        type: time.Duration
+        value: "15000000000"
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: "10000000000"
+    functions:
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: e
+            type: corenet.SSEEventValue
+        name: AppendEvent
+        out:
+          - name: wire
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: text
+            type: string
+        name: AppendComment
+        out:
+          - name: wire
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: d
+            type: time.Duration
+        name: KeepAlive
+        out:
+          - type: Option
+      - name: WithoutKeepAlive
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: Retry
+        out:
+          - type: Option
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: r
+            type: "*http.Request"
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - name: stream
+            type: "*Stream"
+          - name: err
+            type: error
+        variadic: true
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/net/sse
+    types:
+      - name: Option
+        underlying: func(*config)
+      - methods:
+          - name: LastEventID
+            out:
+              - type: string
+            recv: pointer
+          - name: Done
+            out:
+              - type: <-chan struct{}
+            recv: pointer
+          - in:
+              - name: event
+                type: corenet.SSEEventValue
+            name: Send
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: text
+                type: string
+            name: Comment
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Stream
+        struct:
+          unexported: true
+  - constants:
+      - name: DefaultContentSecurityPolicy
+        type: string
+        value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
+      - name: DefaultReferrerPolicy
+        type: string
+        value: "\"same-origin\""
+      - name: ImmutableCacheControl
+        type: string
+        value: "\"public, max-age=31536000, immutable\""
+      - name: RevalidateCacheControl
+        type: string
+        value: "\"no-cache\""
+    functions:
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: cfg
+            type: Config
+        name: NewHandler
+        out:
+          - type: "*Handler"
+          - type: error
+    imports:
+      fs: io/fs
+      http: net/http
+    path: github.com/kitsunium/sdk/internal/service/net/static
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: ContentSecurityPolicy
+              type: string
+            - name: ReferrerPolicy
+              type: string
+            - name: SinglePageApp
+              type: bool
+            - name: Immutable
+              type: func(name string) bool
+      - methods:
+          - in:
+              - name: w
+                type: http.ResponseWriter
+              - name: r
+                type: "*http.Request"
+            name: ServeHTTP
+            recv: pointer
+        name: Handler
+        struct:
+          unexported: true
+  - functions:
+      - in:
+          - name: p
+            type: corenet.IdentityFileParams
+        name: Load
+        out:
+          - name: id
+            type: corenet.IdentityValue
+          - name: err
+            type: error
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+    path: github.com/kitsunium/sdk/internal/service/net/tlsid
+  - constants:
+      - name: CloseCodeLen
+        type: int
+        value: "2"
+      - name: MaskLen
+        type: int
+        value: "4"
+      - name: MinHeaderLen
+        type: int
+        value: "2"
+      - name: MaxHeaderLen
+        type: int
+        value: "14"
+      - name: DefaultPingInterval
+        type: time.Duration
+        value: "30000000000"
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: "10000000000"
+      - name: DefaultMaxMessageSize
+        type: int64
+        value: 1 << 20
+      - name: DefaultMaxFrameSize
+        type: int64
+        value: 1 << 20
+    functions:
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: code
+            type: corenet.WSCloseCode
+          - name: reason
+            type: string
+        name: AppendClosePayload
+        out:
+          - name: wire
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: b
+            type: "[]byte"
+        name: ParseClosePayload
+        out:
+          - name: code
+            type: corenet.WSCloseCode
+          - name: reason
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: b
+            type: "[]byte"
+        name: FrameHeaderLen
+        out:
+          - type: int
+      - in:
+          - name: b
+            type: "[]byte"
+        name: ParseFrameHeader
+        out:
+          - name: header
+            type: FrameHeaderValue
+          - name: err
+            type: error
+      - in:
+          - name: payload
+            type: "[]byte"
+          - name: key
+            type: "[MaskLen]byte"
+        name: ApplyMask
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: op
+            type: corenet.WSOpCode
+          - name: final
+            type: bool
+          - name: payload
+            type: "[]byte"
+        name: AppendFrame
+        out:
+          - name: wire
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: r
+            type: "*http.Request"
+          - name: opts
+            type: Option
+        name: Upgrade
+        out:
+          - name: conn
+            type: "*Conn"
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: key
+            type: string
+        name: AcceptKey
+        out:
+          - type: string
+      - in:
+          - name: key
+            type: string
+        name: ValidateKey
+        out:
+          - type: error
+      - in:
+          - name: names
+            type: string
+        name: Subprotocols
+        out:
+          - type: Option
+        variadic: true
+      - in:
+          - name: "n"
+            type: int64
+        name: MaxMessageSize
+        out:
+          - type: Option
+      - in:
+          - name: "n"
+            type: int64
+        name: MaxFrameSize
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: PingInterval
+        out:
+          - type: Option
+      - name: WithoutPing
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: Option
+      - in:
+          - name: origins
+            type: string
+        name: AllowOrigins
+        out:
+          - type: Option
+        variadic: true
+      - name: AllowAnyOrigin
+        out:
+          - type: Option
+      - in:
+          - name: b
+            type: "[]byte"
+        name: ValidateText
+        out:
+          - type: error
+      - in:
+          - name: socket
+            type: stdnet.Conn
+          - name: buffered
+            type: "*bufio.Reader"
+          - name: subprotocol
+            type: string
+          - name: cfg
+            type: "*config"
+          - name: draining
+            type: <-chan struct{}
+        name: NewConn
+        out:
+          - type: "*Conn"
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      http: net/http
+      stdnet: net
+    path: github.com/kitsunium/sdk/internal/service/net/websocket
+    types:
+      - methods:
+          - name: ValidateFromClient
+            out:
+              - type: error
+            recv: value
+        name: FrameHeaderValue
+        struct:
+          fields:
+            - name: Final
+              tag: json:"final"
+              type: bool
+            - name: OpCode
+              tag: json:"opcode"
+              type: corenet.WSOpCode
+            - name: Masked
+              tag: json:"masked"
+              type: bool
+            - name: MaskKey
+              tag: json:"mask_key"
+              type: "[MaskLen]byte"
+            - name: Length
+              tag: json:"length"
+              type: uint64
+      - name: Option
+        underlying: func(*config)
+      - methods:
+          - name: Subprotocol
+            out:
+              - type: string
+            recv: pointer
+          - name: Done
+            out:
+              - type: <-chan struct{}
+            recv: pointer
+          - name: PeerCloseCode
+            out:
+              - type: corenet.WSCloseCode
+            recv: pointer
+          - name: Receive
+            out:
+              - name: message
+                type: corenet.WSMessageValue
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: message
+                type: corenet.WSMessageValue
+            name: Send
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: text
+                type: string
+            name: SendText
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: data
+                type: "[]byte"
+            name: SendBinary
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: payload
+                type: "[]byte"
+            name: Ping
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: code
+                type: corenet.WSCloseCode
+              - name: reason
+                type: string
+            name: CloseWith
+            out:
+              - type: error
+            recv: pointer
+        name: Conn
+        struct:
+          unexported: true
+  - aliases:
+      - name: Client
+        target: svcclient.Client
+      - name: Config
+        target: corenet.ClientConfig
+      - name: Response
+        target: corenet.ResponseValue
+      - name: Policy
+        target: corenet.Policy
+      - name: PolicyFunc
+        target: corenet.PolicyFunc
+      - name: RequestInfo
+        target: corenet.RequestValue
+      - name: CallInfo
+        target: corenet.CallValue
+      - name: CallHook
+        target: corenet.CallHook
+      - name: Duration
+        target: corenet.DurationValue
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+          - name: id
+            type: tlsid.Identity
+          - name: policy
+            type: Policy
+          - name: hook
+            type: CallHook
+        name: New
+        out:
+          - name: c
+            type: "*Client"
+          - name: err
+            type: error
+      - in:
+          - name: methods
+            type: string
+        name: AllowMethods
+        out:
+          - type: Policy
+        variadic: true
+      - in:
+          - name: patterns
+            type: string
+        name: AllowPaths
+        out:
+          - name: policy
+            type: Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: patterns
+            type: string
+        name: DenyPaths
+        out:
+          - name: policy
+            type: Policy
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: members
+            type: Policy
+        name: Policies
+        out:
+          - type: Policy
+        variadic: true
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcclient: github.com/kitsunium/sdk/internal/service/net/client
+      tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
+    path: github.com/kitsunium/sdk/pkg/v1/net/client
+    variables:
+      - name: RequestDenied
+        type: "*errs.Error"
+      - name: UnsafePath
+        type: "*errs.Error"
+      - name: ResponseTooLarge
+        type: "*errs.Error"
+      - name: CallFailed
+        type: "*errs.Error"
+      - name: TooManyRedirects
+        type: "*errs.Error"
+  - aliases:
+      - name: Server
+        target: svcserver.Server
+      - name: Group
+        target: svcserver.StreamGroup
+      - name: Conn
+        target: corenet.Conn
+      - name: Handler
+        target: corenet.ConnHandler
+      - name: HandlerFunc
+        target: corenet.ConnHandlerFunc
+      - name: Middleware
+        target: corenet.Middleware[corenet.ConnHandler]
+      - name: State
+        target: corenet.StateValue
+      - name: ListenerState
+        target: corenet.ListenerStateValue
+      - name: Phase
+        target: corenet.Phase
+      - name: Option
+        target: svcserver.Option
+      - name: GroupOption
+        target: svcserver.GroupOption
+      - name: PacketGroup
+        target: svcserver.PacketGroup
+      - name: Packet
+        target: corenet.Packet
+      - name: PacketHandler
+        target: corenet.PacketHandler
+      - name: PacketHandlerFunc
+        target: corenet.PacketHandlerFunc
+      - name: PacketMiddleware
+        target: corenet.Middleware[corenet.PacketHandler]
+    constants:
+      - name: PhaseNew
+        type: Phase
+        value: "0"
+      - name: PhaseStarting
+        type: Phase
+        value: "1"
+      - name: PhaseServing
+        type: Phase
+        value: "2"
+      - name: PhaseDraining
+        type: Phase
+        value: "3"
+      - name: PhaseStopped
+        type: Phase
+        value: "4"
+    functions:
+      - in:
+          - name: d
+            type: time.Duration
+        name: ReadHeaderTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: MaxHeaderBytes
+        out:
+          - type: GroupOption
+      - in:
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - type: "*Server"
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+        name: DrainSignal
+        out:
+          - type: <-chan struct{}
+      - in:
+          - name: h
+            type: Handler
+          - name: middlewares
+            type: Middleware
+        name: Chain
+        out:
+          - type: Handler
+        variadic: true
+      - in:
+          - name: network
+          - name: addr
+            type: string
+        name: Listen
+        out:
+          - type: GroupOption
+      - in:
+          - name: id
+            type: tlsid.Identity
+        name: TLS
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: ReadTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: IdleTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: HandshakeTimeout
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: ReadBufferSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: WithDrainTimeout
+        out:
+          - type: Option
+      - in:
+          - name: "n"
+            type: int
+        name: MaxPacketSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: BatchSize
+        out:
+          - type: GroupOption
+      - in:
+          - name: h
+            type: PacketHandler
+          - name: middlewares
+            type: PacketMiddleware
+        name: ChainPacket
+        out:
+          - type: PacketHandler
+        variadic: true
+      - in:
+          - name: "n"
+            type: int
+        name: MaxConns
+        out:
+          - type: GroupOption
+      - in:
+          - name: "n"
+            type: int
+        name: Shards
+        out:
+          - type: GroupOption
+      - in:
+          - name: names
+            type: string
+        name: Adopt
+        out:
+          - type: GroupOption
+        variadic: true
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcserver: github.com/kitsunium/sdk/internal/service/net/server
+      tlsid: github.com/kitsunium/sdk/pkg/v1/net/tlsid
+    path: github.com/kitsunium/sdk/pkg/v1/net/server
+    variables:
+      - name: ListenFailed
+        type: "*errs.Error"
+      - name: InvalidAddress
+        type: "*errs.Error"
+      - name: UnsupportedNetwork
+        type: "*errs.Error"
+      - name: AlreadyStarted
+        type: "*errs.Error"
+      - name: HandlerMissing
+        type: "*errs.Error"
+      - name: GroupDuplicate
+        type: "*errs.Error"
+      - name: DrainTimeout
+        type: "*errs.Error"
+      - name: ConnLimitReached
+        type: "*errs.Error"
+  - aliases:
+      - name: Stream
+        target: svcsse.Stream
+      - name: Event
+        target: corenet.SSEEventValue
+      - name: Option
+        target: svcsse.Option
+    constants:
+      - name: ContentType
+        type: string
+        value: "\"text/event-stream\""
+      - name: LastEventIDHeader
+        type: string
+        value: "\"Last-Event-ID\""
+      - name: MinRetry
+        type: time.Duration
+        value: "1000000"
+      - name: DefaultKeepAlive
+        type: time.Duration
+        value: "15000000000"
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: "10000000000"
+    functions:
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: r
+            type: "*http.Request"
+          - name: opts
+            type: Option
+        name: New
+        out:
+          - name: stream
+            type: "*Stream"
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: ev
+            type: Event
+        name: AppendEvent
+        out:
+          - name: wire
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: d
+            type: time.Duration
+        name: KeepAlive
+        out:
+          - type: Option
+      - name: WithoutKeepAlive
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: Retry
+        out:
+          - type: Option
+      - in:
+          - name: ctx
+            type: context.Context
+        name: DrainSignal
+        out:
+          - type: <-chan struct{}
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+      svcsse: github.com/kitsunium/sdk/internal/service/net/sse
+    path: github.com/kitsunium/sdk/pkg/v1/net/sse
+    variables:
+      - name: FieldInvalid
+        type: "*errs.Error"
+      - name: FlushUnsupported
+        type: "*errs.Error"
+      - name: StreamClosed
+        type: "*errs.Error"
+      - name: StreamMisconfigured
+        type: "*errs.Error"
+  - aliases:
+      - name: Config
+        target: svcstatic.Config
+      - name: Handler
+        target: svcstatic.Handler
+    constants:
+      - name: DefaultContentSecurityPolicy
+        type: string
+        value: "\"default-src 'self'; base-uri 'self'; form-action 'self'; frame-ancestors 'none'\""
+      - name: DefaultReferrerPolicy
+        type: string
+        value: "\"same-origin\""
+      - name: ImmutableCacheControl
+        type: string
+        value: "\"public, max-age=31536000, immutable\""
+      - name: RevalidateCacheControl
+        type: string
+        value: "\"no-cache\""
+    functions:
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: "*Handler"
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      fs: io/fs
+      svcstatic: github.com/kitsunium/sdk/internal/service/net/static
+    path: github.com/kitsunium/sdk/pkg/v1/net/static
+    variables:
+      - name: Misconfigured
+        type: "*errs.Error"
+  - aliases:
+      - name: Identity
+        target: corenet.IdentityValue
+      - name: Params
+        target: corenet.IdentityParams
+      - name: FileParams
+        target: corenet.IdentityFileParams
+    functions:
+      - in:
+          - name: p
+            type: Params
+        name: New
+        out:
+          - name: id
+            type: Identity
+          - name: err
+            type: error
+      - in:
+          - name: p
+            type: FileParams
+        name: Load
+        out:
+          - name: id
+            type: Identity
+          - name: err
+            type: error
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/net/tlsid
+    variables:
+      - name: MaterialInvalid
+        type: "*errs.Error"
+      - name: HandshakeFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: Conn
+        target: svcws.Conn
+      - name: Message
+        target: corenet.WSMessageValue
+      - name: CloseCode
+        target: corenet.WSCloseCode
+      - name: Option
+        target: svcws.Option
+    constants:
+      - name: GUID
+        type: string
+        value: "\"258EAFA5-E914-47DA-95CA-C5AB0DC85B11\""
+      - name: Version
+        type: string
+        value: "\"13\""
+      - name: MaxControlPayload
+        type: int
+        value: "125"
+      - name: DefaultPingInterval
+        type: time.Duration
+        value: "30000000000"
+      - name: DefaultWriteTimeout
+        type: time.Duration
+        value: "10000000000"
+      - name: DefaultMaxMessageSize
+        type: int64
+        value: 1 << 20
+      - name: DefaultMaxFrameSize
+        type: int64
+        value: 1 << 20
+      - name: CloseNormal
+        type: CloseCode
+        value: "1000"
+      - name: CloseGoingAway
+        type: CloseCode
+        value: "1001"
+      - name: CloseProtocolError
+        type: CloseCode
+        value: "1002"
+      - name: CloseUnsupportedData
+        type: CloseCode
+        value: "1003"
+      - name: CloseNoStatus
+        type: CloseCode
+        value: "1005"
+      - name: CloseAbnormal
+        type: CloseCode
+        value: "1006"
+      - name: CloseInvalidPayload
+        type: CloseCode
+        value: "1007"
+      - name: ClosePolicyViolation
+        type: CloseCode
+        value: "1008"
+      - name: CloseTooLarge
+        type: CloseCode
+        value: "1009"
+      - name: CloseExtensionRequired
+        type: CloseCode
+        value: "1010"
+      - name: CloseInternalError
+        type: CloseCode
+        value: "1011"
+      - name: CloseTLSHandshake
+        type: CloseCode
+        value: "1015"
+    functions:
+      - in:
+          - name: w
+            type: http.ResponseWriter
+          - name: r
+            type: "*http.Request"
+          - name: opts
+            type: Option
+        name: Upgrade
+        out:
+          - name: conn
+            type: "*Conn"
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: names
+            type: string
+        name: Subprotocols
+        out:
+          - type: Option
+        variadic: true
+      - in:
+          - name: "n"
+            type: int64
+        name: MaxMessageSize
+        out:
+          - type: Option
+      - in:
+          - name: "n"
+            type: int64
+        name: MaxFrameSize
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: PingInterval
+        out:
+          - type: Option
+      - name: WithoutPing
+        out:
+          - type: Option
+      - in:
+          - name: d
+            type: time.Duration
+        name: WriteTimeout
+        out:
+          - type: Option
+      - in:
+          - name: origins
+            type: string
+        name: AllowOrigins
+        out:
+          - type: Option
+        variadic: true
+      - name: AllowAnyOrigin
+        out:
+          - type: Option
+      - in:
+          - name: key
+            type: string
+        name: AcceptKey
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+        name: DrainSignal
+        out:
+          - type: <-chan struct{}
+    imports:
+      corenet: github.com/kitsunium/sdk/internal/core/net
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+      svcws: github.com/kitsunium/sdk/internal/service/net/websocket
+    path: github.com/kitsunium/sdk/pkg/v1/net/websocket
+    variables:
+      - name: HandshakeFailed
+        type: "*errs.Error"
+      - name: UpgradeUnsupported
+        type: "*errs.Error"
+      - name: ProtocolViolation
+        type: "*errs.Error"
+      - name: MessageTooLarge
+        type: "*errs.Error"
+      - name: InvalidPayload
+        type: "*errs.Error"
+      - name: ConnClosed
+        type: "*errs.Error"
+      - name: ConnMisconfigured
+        type: "*errs.Error"
