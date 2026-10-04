@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T00:30:00Z -->
+<!-- updated: 2026-10-04T00:32:31Z -->
 # tools/sdkguard/
 
 ## Purpose
@@ -87,10 +87,14 @@ module before ADR 0162 — is behind by a module rather than a version. Once the
 SDK module has a release on the proxy, the warning is the migration: the
 release, and the one `go get` that requires it and drops `…/pkg`,
 `…/framework` and the three `…/internal/*` modules together, without which the
-build fails on an ambiguous import (`migrateCommand` in `version.go`); a vendor
-or connector module is named at `@latest`, since a release tags one only when it
-changed. Until that release exists the old probe still answers for `…/pkg`. A
-`replace` of `…/pkg` silences it like any local checkout.
+build fails on an ambiguous import (`migrateCommand` in `version.go`). The drop
+is one argument, `…/internal/kernel@none` (`retiredRoot`, `dropMerged`): every
+version of the other four up to v0.17.0 requires it, so `go get` removes them
+with it — measured over the 240 the proxy holds, and against a file proxy
+(ADR 0162). A vendor or connector module is named at `@latest`, since a release
+tags one only when it changed. Until that release exists the old probe still
+answers for `…/pkg`. A `replace` of `…/pkg` silences it like any local
+checkout.
 
 **The SDK module's releases start at v0.18.0** (`firstSDKModuleRelease`). The
 proxy also lists `github.com/kitsunium/sdk` at `v0.0.0`, a tag of an earlier
@@ -101,10 +105,14 @@ floor is a candidate, in either notice.
 
 **A half-migrated go.mod is told from the go.mod alone.** One that requires the
 SDK module and still a module it merged — what the command without the three
-internal modules leaves, since `go mod tidy` lists them as `// indirect` — finds
-each package of that module twice and fails on an ambiguous import. The notice
-names the merged module and the removals (`halfMigrationNotice`), with no
-network call; a merged module the build `replace`s does not count.
+internal modules leaves, since `go mod tidy` lists them as `// indirect`, or
+an upgrade of `…/pkg` and `…/framework` to v0.18.0 — finds each package of that
+module twice and fails on an ambiguous import. The notice names the merged
+module and the removal (`halfMigrationNotice`), with no network call; a merged
+module the build `replace`s does not count, and neither does `…/pkg` or
+`…/framework` at its tombstone (`isTombstone`): v0.18.0 of each, cut once with
+the SDK module's first release, holds a go.mod and no package, so nothing of
+it is found twice.
 
 A consumer reading a changelog of exported symbols sees nothing and concludes
 there is nothing to take. That is the quiet cousin of the defects the rules
@@ -200,10 +208,10 @@ or the line above it, matching how `//nolint` is already written.
 | `file_ctx.go` | `fileCtx` — what every rule reads about one parsed file: its path, the local name of each import, the lines carrying an exemption |
 | `rules.go` | the rule table and the five checks |
 | `pipeline_call.go` | the `log/slog` entry points SDK001 watches, in reporting order |
-| `version.go` | the freshness probe: go.mod reading for the SDK module and, before it, `…/pkg` (ADR 0162), GOPROXY resolution, semver ordering, the floor of the SDK module's releases, the migration and half-migration notices |
+| `version.go` | the freshness probe: go.mod reading for the SDK module and, before it, `…/pkg` (ADR 0162), GOPROXY resolution, semver ordering, the floor of the SDK module's releases, the tombstones that are no half-migration, the migration and half-migration notices and their one removal |
 | `probe.go` | the module-proxy client behind the probe, its proxy and HTTP client fields so a test points it at `httptest` |
 | `errors.go` | `errProxyDisabled` — sdkguard cannot use `pkg/v1/errs`, since it must run without pulling the library it audits |
-| `main_test.go` | every test: one fire + one silence case per rule, alias, suppression, level and ordering, and the probe — semver ordering, go.mod shapes, GOPROXY resolution, the degrade-to-silence paths, the floor of the SDK module's releases and the two migration notices, served by `httptest` so no test touches the network |
+| `main_test.go` | every test: one fire + one silence case per rule, alias, suppression, level and ordering, and the probe — semver ordering, go.mod shapes, GOPROXY resolution, the degrade-to-silence paths, the floor of the SDK module's releases, the tombstones and the two migration notices, served by `httptest` so no test touches the network |
 
 Exit codes: `0` clean, `1` findings, `2` the tool itself failed — so CI can tell
 "rules broken" from "tool broke".

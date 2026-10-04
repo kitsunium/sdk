@@ -2,10 +2,11 @@
 # BATS tests for cut-tags.sh. Covers: the release ADR 0162 defines — one tag on
 # the SDK module, plus the tag of each vendor module that changed since its own
 # last tag, whose go.mod is rewritten to require the SDK at the release with no
-# replace —, the version that continues pkg's history, the bootstrap guard
-# (ADR 0009), how the size is read from the merged pull requests' labels across
-# the release range (ADR 0085, ADR 0135) — through a gh stub, see
-# test-helpers.bash — and the tag-format and release-size libraries.
+# replace, and, with the first root tag alone, the tombstones of …/pkg and
+# …/framework in the same push —, the version that continues pkg's history, the
+# bootstrap guard (ADR 0009), how the size is read from the merged pull
+# requests' labels across the release range (ADR 0085, ADR 0135) — through a gh
+# stub, see test-helpers.bash — and the tag-format and release-size libraries.
 #
 # Most cases stay in dry-run. The publish path itself — the release commit, the
 # tags on it, the atomic push — runs against a bare repository in the test's
@@ -167,6 +168,90 @@ publish_remote() {
   g remote add origin "$BATS_TEST_TMPDIR/origin.git"
 }
 
+# remote_tags — the tags on origin, sorted, on one line.
+remote_tags() {
+  g ls-remote --tags --refs origin | awk '{ sub(/^refs\/tags\//, "", $2); print $2 }' |
+    LC_ALL=C sort | paste -sd' ' -
+}
+
+# log_pushes — a `git` in front of the real one that appends every `git push`
+# it runs to $PUSHES, one line per invocation, so a case can count the pushes a
+# release made and read what each carried.
+log_pushes() {
+  local real
+  real="$(command -v git)"
+  PUSHES="$BATS_TEST_TMPDIR/pushes.log"
+  : >"$PUSHES"
+  mkdir -p "$BATS_TEST_TMPDIR/bin"
+  cat >"$BATS_TEST_TMPDIR/bin/git" <<SHIM
+#!/usr/bin/env bash
+for a in "\$@"; do
+  if [ "\$a" = push ]; then
+    printf '%s\n' "\$*" >>"$PUSHES"
+    break
+  fi
+done
+exec "$real" "\$@"
+SHIM
+  chmod +x "$BATS_TEST_TMPDIR/bin/git"
+  export PATH="$BATS_TEST_TMPDIR/bin:$PATH"
+}
+
+# The thirteen modules of the real tree that require a vendor, in the order
+# vendor_modules sorts them.
+ALL_VENDORS=(
+  framework/connectors/mysql framework/connectors/postgres
+  framework/connectors/sqlite framework/connectors/ssh
+  third-party/aws third-party/codec/hcl third-party/codec/protobuf
+  third-party/codec/yaml third-party/db/writer/clickhouse
+  third-party/db/writer/mysql third-party/db/writer/redis
+  third-party/transform third-party/x-crypto
+)
+
+# add_all_vendors — the tree the first root tag is cut from: the thirteen vendor
+# modules, each requiring the SDK through a local replace and used by go.work;
+# the framework's own packages, and a file of its own beside the connectors;
+# the public packages under pkg/.
+add_all_vendors() {
+  local d rel
+  for d in "${ALL_VENDORS[@]}"; do
+    mkdir -p "$d"
+    rel="$(sed -E 's#[^/]+#..#g' <<<"$d")"
+    printf 'module github.com/kitsunium/sdk/%s\n\ngo 1.27\n\nrequire github.com/kitsunium/sdk v0.0.0-00010101000000-000000000000\n\nreplace github.com/kitsunium/sdk => %s\n' \
+      "$d" "$rel" >"$d/go.mod"
+    echo "package p" >"$d/p.go"
+  done
+  mkdir -p framework/kit pkg/v1/data/codec
+  echo "package kit" >framework/kit/kit.go
+  echo "# framework/connectors" >framework/connectors/CLAUDE.md
+  echo "package codec" >pkg/v1/data/codec/codec.go
+  {
+    printf 'go 1.27\n\nuse (\n\t.\n'
+    for d in "${ALL_VENDORS[@]}"; do printf '\t./%s\n' "$d"; done
+    printf ')\n'
+  } >go.work
+  g add -A
+  g commit -q --no-verify -m "feat: the thirteen vendor modules"
+}
+
+# check_tombstone <dir> <version> — the tag <dir>/<version> names a child of the
+# release commit <version>, and of it alone; under <dir>, the connectors nested
+# in framework/ aside, its tree holds one file, <dir>/go.mod, which Go reads as
+# module github.com/kitsunium/sdk/<dir>, the SDK's go directive and one
+# requirement, the SDK at <version>; and nothing else differs from the release.
+check_tombstone() {
+  local dir="$1" v="$2" t="$1/$2" json
+  [ "$(g rev-list --parents -n1 "$t^{commit}")" = "$(g rev-parse "$t^{commit}") $(g rev-parse "$v^{commit}")" ]
+  [ "$(g ls-tree -r --name-only "$t^{commit}" -- "$dir/" | awk '!/^framework\/connectors\/[a-z]+\//')" = "$dir/go.mod" ]
+  [ -z "$(g diff --name-only "$v^{commit}" "$t^{commit}" | awk -v d="$dir/" 'index($0, d) != 1 || /^framework\/connectors\/[a-z]+\//')" ]
+  g show "$t:$dir/go.mod" >"$BATS_TEST_TMPDIR/tombstone.mod"
+  json="$(go mod edit -json "$BATS_TEST_TMPDIR/tombstone.mod")"
+  [ "$(jq -r '.Module.Path' <<<"$json")" = "github.com/kitsunium/sdk/$dir" ]
+  [ "$(jq -r '.Go' <<<"$json")" = "$(go mod edit -json go.mod | jq -r '.Go')" ]
+  [ "$(jq -c '[.Require[] | [.Path, .Version]]' <<<"$json")" = "[[\"github.com/kitsunium/sdk\",\"$v\"]]" ]
+  [ "$(jq '[.Replace, .Exclude, .Retract] | map((. // []) | length) | add' <<<"$json")" = "0" ]
+}
+
 # ── ADR 0162: one tag on the SDK module, and the vendor modules that changed ─
 
 @test "bootstrap dry-run with no vendor module tags the SDK alone" {
@@ -198,16 +283,21 @@ publish_remote() {
 }
 
 # The decision's first release: the root module has never been tagged, and the
-# chain before it was released as pkg/vX.Y.Z. The version continues pkg's.
-@test "the first root tag continues pkg's history: pkg/v0.17.0 and a minor make v0.18.0" {
+# chain before it was released as pkg/vX.Y.Z. The version continues pkg's, and
+# the two retired modules a consumer imported get their tombstone beside it.
+@test "the first root tag continues pkg's history: pkg/v0.17.0 and a minor make v0.18.0, with its tombstones" {
   need_toolchain
   tag_release pkg/v0.17.0 internal/core/v0.17.0 framework/v0.17.0
   commit_pkg 'refactor: the SDK is one module'
   label_pr 162 release:minor
   run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.18.0" ]
+  [ "$(would_tag)" = "v0.18.0 pkg/v0.18.0 framework/v0.18.0" ]
   [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0 (ADR 0162)"* ]]
+  # The dry run shows each tombstone's go.mod as it will be published.
+  [[ "$output" == *"--- pkg/go.mod (pkg/v0.18.0) ---"* ]]
+  [[ "$output" == *"module github.com/kitsunium/sdk/framework"* ]]
+  [[ "$output" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
 }
 
 # …and it is the first release of the SDK module's content, which the proxy and
@@ -267,10 +357,10 @@ publish_remote() {
   head="$(g rev-parse HEAD)"
   run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
   [ "$status" -eq 0 ]
-  [ "$output" = "v0.18.0" ]
+  [ "$output" = $'v0.18.0\npkg/v0.18.0\nframework/v0.18.0' ]
   # On origin, on a release commit whose first parent is the main commit it was
   # cut from — where the next range and every vendor measurement start.
-  [ "$(g ls-remote --tags --refs origin | awk '{print $2}')" = "refs/tags/v0.18.0" ]
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0" ]
   [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
   [ "$(g rev-parse HEAD)" = "$head" ]
 }
@@ -465,7 +555,7 @@ publish_remote() {
   commit_pkg 'fix(codec): one'
   run bash -c "echo sdk | $SCRIPT --dry-run --bump=minor"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.18.0" ]
+  [ "$(would_tag)" = "v0.18.0 pkg/v0.18.0 framework/v0.18.0" ]
   [[ "$output" == *"v0.18.0 is the SDK module's first tag; it continues pkg/v0.17.0"* ]]
 }
 
@@ -493,6 +583,182 @@ publish_remote() {
   [ "$status" -eq 0 ]
   [ "$(grep -c 'would tag' <<<"$output")" -eq 1 ]
   [ "$(would_tag)" = "v0.4.1" ]
+}
+
+# ── ADR 0162: the tombstones of …/pkg and …/framework, once ─────────────────
+#
+# Go resolves an import nothing in a go.mod provides to the longest module path
+# whose LATEST version provides the package. Without a last version of …/pkg
+# and …/framework that provides none, that is those modules at v0.17.0 for
+# good, and a new consumer's bare `go mod tidy` lands there. The first root tag
+# cuts that last version of each — a go.mod alone on a child of the release
+# commit —, in the push that publishes it, and no other release ever does.
+
+# The release v0.18.0 is: the SDK, the thirteen vendor modules whose go.mod the
+# merge rewrote, and the two tombstones — sixteen tags, one atomic push.
+@test "the first root tag cuts, in one push, the SDK, the thirteen vendor modules and the two tombstones" {
+  need_toolchain
+  add_all_vendors
+  publish_remote
+  # v0.17.0 put every module of the chain on one release commit…
+  olds=(pkg/v0.17.0 internal/core/v0.17.0 internal/kernel/v0.17.0 internal/service/v0.17.0 framework/v0.17.0)
+  for d in "${ALL_VENDORS[@]}"; do olds+=("$d/v0.17.0"); done
+  tag_release "${olds[@]}"
+  # …and the merge into one module rewrote every vendor go.mod since.
+  for d in "${ALL_VENDORS[@]}"; do echo "// requires the SDK module (ADR 0162)" >>"$d/go.mod"; done
+  commit_pkg 'refactor!: the SDK is one module'
+  head="$(g rev-parse HEAD)"
+  log_pushes
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  # stdout: the SDK's tag, the vendor modules', then the tombstones.
+  want="v0.18.0"
+  for d in "${ALL_VENDORS[@]}"; do want+=$'\n'"$d/v0.18.0"; done
+  want+=$'\npkg/v0.18.0\nframework/v0.18.0'
+  [ "$output" = "$want" ]
+  # One push, atomic, carrying the sixteen: no moment where v0.18.0 is
+  # published and a tombstone is not.
+  [ "$(awk 'END { print NR }' "$PUSHES")" -eq 1 ]
+  [[ "$(cat "$PUSHES")" == "push --atomic origin "* ]]
+  [ "$(awk '{ print NF - 3 }' "$PUSHES")" -eq 16 ]
+  [ "$(g ls-remote --tags --refs origin | awk 'END { print NR }')" -eq 16 ]
+  # The SDK and the vendor modules share the release commit, a child of main…
+  [ "$(g rev-parse 'v0.18.0^{commit}^1')" = "$head" ]
+  [ "$(g rev-parse 'third-party/x-crypto/v0.18.0^{commit}')" = "$(g rev-parse 'v0.18.0^{commit}')" ]
+  # …whose tree still holds the packages; each tombstone is a child of it.
+  [ -n "$(g ls-tree --name-only 'v0.18.0^{commit}' -- pkg/v1)" ]
+  check_tombstone pkg v0.18.0
+  check_tombstone framework v0.18.0
+  # The connectors nested in framework/ keep their files, pinned as released;
+  # a file of framework/ beside them goes with the rest of the framework.
+  [ "$(g rev-parse 'framework/v0.18.0^{commit}:framework/connectors/postgres')" = "$(g rev-parse 'v0.18.0^{commit}:framework/connectors/postgres')" ]
+  [[ "$(g show 'framework/v0.18.0:framework/connectors/postgres/go.mod')" == *"require github.com/kitsunium/sdk v0.18.0"* ]]
+  [ -z "$(g ls-tree --name-only 'framework/v0.18.0^{commit}' -- framework/connectors/CLAUDE.md framework/kit)" ]
+  # main is untouched.
+  [ "$(g rev-parse HEAD)" = "$head" ]
+}
+
+# Never again: the next release continues the root tag, and neither holds nor
+# cuts a tombstone — even though pkg/v0.18.0 now exists beside v0.18.0.
+@test "a later release cuts no tombstone, and a tombstone is never its base" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  commit_pkg 'fix(codec): one'
+  # An automatic run: no --allow-bootstrap, no label.
+  run bash -c "echo sdk | $SCRIPT"
+  [ "$status" -eq 0 ]
+  [[ "$output" != *"tombstone"* ]]
+  [[ "$output" != *"first tag"* ]]
+  [ "$(tail -n1 <<<"$output")" = "v0.18.1" ]
+  [ "$(remote_tags)" = "framework/v0.18.0 pkg/v0.18.0 v0.18.0 v0.18.1" ]
+}
+
+# A re-run of the release that published v0.18.0 — SDK Release dispatched
+# again, same commit, same inputs — finds nothing to release and moves nothing.
+@test "the bootstrap run again publishes nothing, and moves no tag" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap 2>/dev/null"
+  [ "$status" -eq 0 ]
+  before="$(g ls-remote --tags origin)"
+  [ -n "$before" ]
+  run bash -c "bash '$BATS_TEST_DIRNAME/compute-bumps.sh' --explain | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 0 ]
+  [[ "$output" == *"verdict: NO RELEASE"* ]]
+  [[ "$output" != *"tombstone"* ]]
+  [ "$(g ls-remote --tags origin)" = "$before" ]
+}
+
+# A tombstone tag that already exists names another commit: refused before
+# anything is tagged — by the held automatic run already — and nothing is
+# pushed.
+@test "a tombstone tag already present at another commit is refused, and nothing is pushed" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0 framework/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  g tag framework/v0.18.0 HEAD
+  g push -q origin framework/v0.18.0
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"framework/v0.18.0 already exists, at $(g rev-parse --short HEAD)"* ]]
+  [[ "$output" == *"nothing was published"* ]]
+  [ "$(remote_tags)" = "framework/v0.18.0" ]
+  [ -z "$(g tag -l v0.18.0 pkg/v0.18.0)" ]
+  # The automatic run, which holds the first root tag, says it as well.
+  run bash -c "echo sdk | $SCRIPT --bump=minor"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"framework/v0.18.0 already exists"* ]]
+}
+
+# A pkg/vX.Y.Z whose pkg/ holds a go.mod alone is a tombstone, not a release of
+# pkg's packages: one cut by hand must not become the history the first root
+# tag continues (v0.19.0 on top of it), but a tag that already exists.
+@test "a pkg tombstone cut by hand is no pkg release: refused, not continued" {
+  need_toolchain
+  publish_remote
+  tag_release pkg/v0.17.0
+  commit_pkg 'refactor!: the SDK is one module'
+  g checkout -q --detach
+  g rm -rq pkg
+  mkdir -p pkg
+  printf 'module github.com/kitsunium/sdk/pkg\n' >pkg/go.mod
+  g add pkg/go.mod
+  g commit -q --no-verify -m "a tombstone by hand"
+  g tag pkg/v0.18.0
+  g checkout -q main
+  run bash -c "echo sdk | $SCRIPT --bump=minor --allow-bootstrap"
+  [ "$status" -eq 1 ]
+  [[ "$output" == *"pkg/v0.18.0 already exists"* ]]
+  [[ "$output" != *"v0.19.0"* ]]
+  [ -z "$(remote_tags)" ]
+}
+
+@test "lib: is_valid_tombstone_tag accepts pkg and framework, and nothing else" {
+  source "$LIB"
+  for t in pkg/v0.18.0 framework/v0.18.0 framework/v1.0.0; do
+    run is_valid_tombstone_tag "$t"
+    [ "$status" -eq 0 ]
+  done
+  for t in v0.18.0 internal/core/v0.18.0 framework/connectors/postgres/v0.18.0 pkg/v0.18.0-rc.1 pkg/v2.0.0 third-party/aws/v0.18.0; do
+    run is_valid_tombstone_tag "$t"
+    [ "$status" -ne 0 ]
+  done
+}
+
+# Red against the lib before the tombstones: it read pkg/v0.18.0 as the newest
+# pkg release.
+@test "lib: latest_pkg_tag leaves a tombstone out" {
+  tag_release pkg/v0.17.0
+  g checkout -q --detach
+  g rm -rq pkg
+  mkdir -p pkg
+  printf 'module github.com/kitsunium/sdk/pkg\n' >pkg/go.mod
+  g add pkg/go.mod
+  g commit -q --no-verify -m "tombstone"
+  g tag pkg/v0.18.0
+  g checkout -q main
+  run bash -c ". '$LIB'; latest_pkg_tag"
+  [ "$output" = "pkg/v0.17.0" ]
+  run bash -c ". '$LIB'; is_pkg_tombstone pkg/v0.18.0 && ! is_pkg_tombstone pkg/v0.17.0"
+  [ "$status" -eq 0 ]
+}
+
+# At one version the root tag is the release, whatever the pkg tag beside it
+# holds and however a sort breaks the tie.
+@test "lib: latest_release_tag takes the root tag at a version a pkg tag shares" {
+  tag_release v0.18.0 pkg/v0.18.0
+  run bash -c ". '$LIB'; latest_release_tag"
+  [ "$output" = "v0.18.0" ]
+  g tag pkg/v0.18.1 "$(g rev-parse 'v0.18.0^{commit}')"
+  run bash -c ". '$LIB'; latest_release_tag"
+  [ "$output" = "pkg/v0.18.1" ]
 }
 
 # ── ADR 0135: a release is sized by a maintainer's label on the merged PR ────
@@ -753,7 +1019,8 @@ publish_remote() {
 # The #207 shape — trailer at column 0, then a folded branch commit with a prose
 # body — is what shipped pkg/v0.3.4 instead of pkg/v0.4.0. Labelled, it cuts the
 # minor it asked for: where the line sits no longer matters. Its base is the pkg
-# tag it was cut after, which is also the base the first root tag reads.
+# tag it was cut after, which is also the base the first root tag reads — so
+# the release it cuts now is that first root tag, tombstones included.
 @test "the shape that shipped pkg/v0.3.4 instead of pkg/v0.4.0 now cuts the minor" {
   need_toolchain
   tag_release pkg/v0.3.3
@@ -761,7 +1028,7 @@ publish_remote() {
   label_pr 207 release:minor
   run bash -c "echo sdk | $SCRIPT --dry-run"
   [ "$status" -eq 0 ]
-  [ "$(would_tag)" = "v0.4.0" ]
+  [ "$(would_tag)" = "v0.4.0 pkg/v0.4.0 framework/v0.4.0" ]
 }
 
 # The #248 shape: the squash message carried a branch commit's trailer mid-body,

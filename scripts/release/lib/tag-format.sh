@@ -18,8 +18,13 @@
 # The module paths are bare (no /vN suffix), so the semver major is held to
 # 0|1 in every shape: a breaking v2 needs a real `…/v2` module path (deferred —
 # ADR 0009). The shapes before ADR 0162 — `pkg/vX.Y.Z`, `internal/<mod>/vX.Y.Z`,
-# `framework/vX.Y.Z` — are history: nothing cuts them any more, and the newest
+# `framework/vX.Y.Z` — are history: no release cuts them, and the newest
 # `pkg/vX.Y.Z` is read once, as the version the first root tag continues.
+#
+# Once, with that first root tag, `pkg/vX.Y.Z` and `framework/vX.Y.Z` are cut
+# again at its version, as tombstones: the last version of each retired module,
+# a go.mod that requires the SDK module and holds no package (ADR 0162). A
+# tombstone is no release of pkg's packages, and the history reads it as none.
 
 set -euo pipefail
 
@@ -71,9 +76,31 @@ is_valid_vendor_tag() {
 }
 
 # is_valid_release_tag <tag> — any tag a release cuts: the SDK's or a vendor
-# module's.
+# module's. A tombstone is not one: only the first root tag cuts it.
 is_valid_release_tag() {
   is_valid_tag "$1" || is_valid_vendor_tag "$1"
+}
+
+# The tombstones' tags (ADR 0162): `pkg/vX.Y.Z` and `framework/vX.Y.Z`, the
+# last version of the two retired modules a consumer imported, cut at the first
+# root tag's version and never again. No pre-release: the first root tag is a
+# minor bumped from pkg's history, never one. Never `internal/<mod>/…`: no
+# consumer imports those modules, so no import resolves to them.
+TOMBSTONE_TAG_REGEX='^(pkg|framework)/v[01]\.[0-9]+\.[0-9]+$'
+
+# is_valid_tombstone_tag <tag> — a tombstone's shape. Exits 0 on match.
+is_valid_tombstone_tag() {
+  [[ "$1" =~ $TOMBSTONE_TAG_REGEX ]]
+}
+
+# is_pkg_tombstone <tag> — 0 when <tag> names a commit whose pkg/ holds a
+# go.mod and nothing else: the tombstone of …/pkg, which shares the first root
+# tag's version and is no release of pkg's packages. One level of one tree is
+# read. A tag naming no commit is no tombstone.
+is_pkg_tombstone() {
+  local entries=""
+  entries="$(git ls-tree --name-only "$1^{commit}" -- pkg/ 2>/dev/null)" || return 1
+  [ "$entries" = "pkg/go.mod" ]
 }
 
 # is_vendor_dir <dir> — a directory that may hold a module requiring a vendor:
@@ -221,10 +248,23 @@ latest_sdk_tag() {
   stable_tags 'v*' is_valid_tag | version_sort | tail -n1
 }
 
-# latest_pkg_tag — the highest stable `pkg/vX.Y.Z` from before ADR 0162; empty
-# if none.
+# latest_pkg_tag — the highest stable `pkg/vX.Y.Z` from before ADR 0162 that is
+# a release of pkg's packages; empty if none. A tombstone is left out
+# (is_pkg_tombstone): read as history, the one the first root tag cut would
+# tie with that root tag, and one tagged by hand before it would move the
+# version the first root tag continues. Read from the newest down, so the
+# history costs one tree lookup per tombstone above it, not one per tag.
 latest_pkg_tag() {
-  stable_tags 'pkg/v*' is_valid_pkg_tag | version_sort | tail -n1
+  local tags="" t=""
+  tags="$(stable_tags 'pkg/v*' is_valid_pkg_tag | version_sort |
+    awk '{ l[NR] = $0 } END { for (i = NR; i > 0; i--) print l[i] }')"
+  while IFS= read -r t; do
+    [ -z "$t" ] && continue
+    if ! is_pkg_tombstone "$t"; then
+      echo "$t"
+      return 0
+    fi
+  done <<<"$tags"
 }
 
 # latest_release_tag — the tag the last release was cut as: the higher of the
@@ -232,9 +272,24 @@ latest_pkg_tag() {
 # pkg's, whose release cut the chain the SDK module replaced; after it, the SDK
 # tag continues pkg's numbering, so it is always the higher. Comparing the two
 # rather than preferring one is what keeps a stray low root tag from restarting
-# the numbering below the history. Empty on a repository that never released.
+# the numbering below the history. At one version the root tag is the release,
+# said here rather than left to how a sort breaks a tie: from it a release is
+# an ordinary one, and from the pkg tag it would be the first root tag again,
+# held and given tombstones. Empty on a repository that never released.
 latest_release_tag() {
-  { latest_sdk_tag; latest_pkg_tag; } | awk 'NF' | version_sort | tail -n1
+  local sdk="" pkg=""
+  sdk="$(latest_sdk_tag)"
+  pkg="$(latest_pkg_tag)"
+  if [ -z "$sdk" ] || [ -z "$pkg" ]; then
+    if [ -n "$sdk$pkg" ]; then echo "$sdk$pkg"; fi
+    return 0
+  fi
+  if [ "$(version_from_tag "$pkg")" != "$(version_from_tag "$sdk")" ] &&
+    [ "$(printf '%s\n%s\n' "$sdk" "$pkg" | version_sort | tail -n1)" = "$pkg" ]; then
+    echo "$pkg"
+  else
+    echo "$sdk"
+  fi
 }
 
 # latest_vendor_tag <dir> — the highest stable tag of the module in <dir>

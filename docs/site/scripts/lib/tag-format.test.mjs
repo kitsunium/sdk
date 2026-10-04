@@ -178,3 +178,23 @@ test("the root tags continue the pkg history in one list, newest default", () =>
   assert.equal(rel(versions, "v1", "0.18.0").tag, "v0.18.0");
   assert.equal(rel(versions, "v1", "0.17.0").default, false);
 });
+
+test("a pkg/vX.Y.Z beside the root vX.Y.Z is its tombstone, not a release (ADR 0162)", () => {
+  //: the `git tag -l` fallback lists pkg/v0.18.0, the tombstone the first
+  //: root tag cut: a go.mod and no package, so no version of its own.
+  const realByMajor = buildVersionsJson([
+    ghRelease("pkg/v0.17.0", "2026-10-01T00:00:00Z"),
+    ghRelease("v0.18.0"),
+    ghRelease("pkg/v0.18.0"),
+  ]);
+  const v1 = realByMajor.find((v) => v.major === "v1");
+  assert.deepEqual(
+    v1.releases.map((r) => r.tag),
+    ["v0.18.0", "pkg/v0.17.0"],
+  );
+  //: a pkg tag with no root tag at its version is history, kept.
+  assert.deepEqual(
+    buildVersionsJson([ghRelease("pkg/v0.17.0")])[0].releases.map((r) => r.tag),
+    ["pkg/v0.17.0"],
+  );
+});

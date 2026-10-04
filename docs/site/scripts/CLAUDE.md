@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T00:32:31Z -->
 # docs/site/scripts/
 
 ## Purpose
@@ -41,7 +41,8 @@ table, the base path, the versioning — is `docs/site/CLAUDE.md`.
   it materialises — the checkout, or a release's worktree.
 - `sync-versions.mjs` lists the releases from `gh release list`, or from
   `git tag -l 'v*' 'pkg/v*'` without `gh`: the SDK module's root tags since ADR
-  0162 and the `pkg/vX.Y.Z` history before them, one list on the `v1` axis.
+  0162 and the `pkg/vX.Y.Z` history before them, one list on the `v1` axis;
+  a `pkg/vX.Y.Z` at a root tag's version is that release's tombstone, dropped.
 
 ## Verify
 

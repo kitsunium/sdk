@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T00:32:31Z -->
 # docs/site/
 
 ## Purpose
@@ -60,7 +60,8 @@ The version dropdown is driven by `versions.json`, built from the releases
 `gh release list` returns, or — without `gh` — from `git tag -l 'v*' 'pkg/v*'`:
 the SDK module's root `vX.Y.Z` tags (ADR 0162) and the `pkg/vX.Y.Z` tags of the
 releases before it (ADR 0017), one list on the `v1` axis; the vendor modules'
-tags are no release of their own. Each tagged release is snapshotted via
+tags are no release of their own, and neither is the tombstone `pkg/v0.18.0`
+beside `v0.18.0` (ADR 0162), which `dropTombstones` leaves out. Each tagged release is snapshotted via
 `git worktree`. `scripts/lib/tag-format.mjs` is the JS mirror of
 `scripts/release/lib/tag-format.sh` (same TAG_REGEX — edit together, ADR 0007
 §1). Tag-format + version-defaulting logic is unit-tested (`npm test`).

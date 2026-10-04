@@ -112,12 +112,34 @@ export function pickLatest(bucket) {
     .at(-1);
 }
 
+// dropTombstones removes a bare pkg/vX.Y.Z whose version a root vX.Y.Z also
+// carries: the tombstone the SDK module's first release cut for …/pkg (ADR
+// 0162), a go.mod and no package — no release of its own, and no pkg/v1 tree
+// to snapshot. `gh release list` never returns it, since it has no GitHub
+// release; the `git tag -l` fallback does. Mirrors latest_release_tag in
+// scripts/release/lib/tag-format.sh, where the root tag wins the same tie.
+export function dropTombstones(releases) {
+  const rootVersions = new Set(
+    releases
+      .filter((r) => isValidTag(r.tagName) && !r.tagName.includes("/"))
+      .map((r) => r.tagName.slice(1)),
+  );
+  return releases.filter((r) => {
+    const segs = typeof r.tagName === "string" ? r.tagName.split("/") : [];
+    return !(
+      segs.length === 2 &&
+      segs[0] === "pkg" &&
+      rootVersions.has(segs[1].slice(1))
+    );
+  });
+}
+
 // buildVersionsJson now emits the two-axis schema described above.
 // When a major has no real releases (bootstrap), it gets a single
 // "local" release flagged default. Otherwise all real releases land
 // in descending semver order, newest flagged default.
 export function buildVersionsJson(releases) {
-  const grouped = groupByMajor(releases);
+  const grouped = groupByMajor(dropTombstones(releases));
   const majors = Object.keys(grouped).sort(
     (a, b) => Number(a.slice(1)) - Number(b.slice(1)),
   );

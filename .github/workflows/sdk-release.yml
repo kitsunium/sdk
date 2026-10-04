@@ -12,6 +12,12 @@ name: SDK Release
 # framework/connectors/*, read from go.work) whose files changed since its own
 # last tag. One GitHub release is made, for the SDK's tag; its notes list the
 # vendor tags the release cut. compute-bumps.sh emits the one token "sdk".
+# The SDK module's first release — v0.18.0, after pkg/v0.17.0 — also cuts, in
+# the same atomic push and never again, the tombstones pkg/v0.18.0 and
+# framework/v0.18.0: the last version of each retired module, a go.mod that
+# requires the release and holds no package, so an import of …/pkg/v1/… or
+# …/framework/… resolves to the SDK module (ADR 0162). The notes list them
+# apart.
 #
 # Triggered AFTER bazel-ci.yml succeeds (no race, no double-build).
 # workflow_dispatch input force_bumps overrides the impact analysis when
@@ -333,14 +339,18 @@ jobs:
         # ONE release, for the SDK's tag (ADR 0162) — not one per module, which
         # made eighteen for a lockstep release. The vendor tags the release cut
         # are listed in its notes, ahead of the notes GitHub generates; a vendor
-        # module that did not change is said to keep its last tag.
+        # module that did not change is said to keep its last tag. The
+        # tombstones of the first release (pkg/vX.Y.Z, framework/vX.Y.Z — the
+        # only lines of the tag list that start with either and a `/v`) are
+        # listed apart: they are no vendor module, and no release of their own.
         if: steps.compute.outputs.majors != '' && steps.cut.outputs.held != 'true'
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         run: |
           set -euo pipefail
           sdk_tag="$(awk 'NF { print; exit }' /tmp/cut.log)"
-          vendor_tags="$(awk 'NF && NR > 1' /tmp/cut.log)"
+          vendor_tags="$(awk 'NF && NR > 1 && !/^(pkg|framework)\/v/' /tmp/cut.log)"
+          tombstone_tags="$(awk 'NF && NR > 1 && /^(pkg|framework)\/v/' /tmp/cut.log)"
           {
             echo "The SDK module \`github.com/kitsunium/sdk\` at \`$sdk_tag\`."
             echo
@@ -352,6 +362,14 @@ jobs:
               done <<<"$vendor_tags"
             else
               echo "No module that requires a vendor changed: each keeps its last tag."
+            fi
+            if [ -n "$tombstone_tags" ]; then
+              echo
+              echo "The modules the SDK module replaced get their last version, a go.mod that requires \`github.com/kitsunium/sdk\` \`$sdk_tag\` and holds no package, so an import of their paths resolves to the SDK module (ADR 0162):"
+              echo
+              while IFS= read -r t; do
+                [ -n "$t" ] && echo "- \`$t\` — \`github.com/kitsunium/sdk/${t%/v*}\`"
+              done <<<"$tombstone_tags"
             fi
           } > /tmp/release-notes.md
           # --notes, which gh documents as PREPENDED to the generated notes.

@@ -2579,6 +2579,10 @@ func Test_checkVersionMigration(t *testing.T) {
 	halfway := "module x\n\nrequire (\n\t" + sdkModule + " v0.18.0\n\t" +
 		sdkModule + "/internal/core v0.17.0 // indirect\n\t" +
 		sdkModule + "/internal/kernel v0.17.0 // indirect\n)\n"
+	// What upgrading …/pkg and …/framework to v0.18.0 leaves: their
+	// tombstones, the SDK module they require, and the internal modules.
+	onTombstones := "module x\n\nrequire (\n\t" + legacyModule + " v0.18.0\n\t" +
+		sdkModule + "/framework v0.18.0\n\t" + sdkModule + " v0.18.0 // indirect\n)\n"
 	tests := []tc{
 		{
 			"the SDK module released: migrate",
@@ -2588,13 +2592,40 @@ func Test_checkVersionMigration(t *testing.T) {
 			[]string{
 				"requires " + legacyModule + " v0.17.0",
 				"latest is v0.18.1",
-				"go get " + sdkModule + "@v0.18.1 " + legacyModule + "@none " + sdkModule + "/framework@none",
-				sdkModule + "/internal/service@none",
+				"Migrate: go get " + sdkModule + "@v0.18.1 " + sdkModule + "/internal/kernel@none\n",
+				"Removing " + sdkModule + "/internal/kernel removes all five",
 				"ambiguous import",
 				//: a vendor module is tagged only by a release that changes it,
 				//: so the SDK's newest version need not exist for it.
 				sdkModule + "/<vendor module>@latest",
 			},
+		},
+		{
+			//: the tombstones provide no package: beside the SDK module they
+			//: are no half-migration, and what is left is its freshness.
+			"the tombstones beside the SDK module: no half-migration",
+			onTombstones,
+			map[string][]string{sdkModule: {"v0.18.0"}},
+			false, nil,
+		},
+		{
+			//: the tombstones do not hide an internal module still required.
+			"the tombstones beside an internal module: the internal module is named",
+			onTombstones + "require " + sdkModule + "/internal/kernel v0.17.0 // indirect\n",
+			map[string][]string{sdkModule: {"v0.18.0"}},
+			true,
+			[]string{
+				sdkModule + "/internal/kernel v0.17.0, a module the SDK module replaced",
+				"Migrate: go get " + sdkModule + "/internal/kernel@none\n",
+			},
+		},
+		{
+			//: below the tombstone, …/pkg holds every package the SDK module does.
+			"…/pkg below its tombstone beside the SDK module: still told",
+			"module x\n\nrequire (\n\t" + sdkModule + " v0.18.0\n\t" + legacyModule + " v0.17.0\n)\n",
+			map[string][]string{sdkModule: {"v0.18.0"}},
+			true,
+			[]string{legacyModule + " v0.17.0, a module the SDK module replaced"},
 		},
 		{
 			"no SDK module release yet: the old probe answers",
@@ -2626,11 +2657,10 @@ func Test_checkVersionMigration(t *testing.T) {
 			true,
 			[]string{
 				"requires " + sdkModule + " v0.18.0 and still",
-				//: the first merged module in the command's order is the one named.
+				//: the first merged module in a reader's order is the one named.
 				sdkModule + "/internal/kernel v0.17.0, a module the SDK module replaced",
 				"ambiguous import",
-				"Migrate: go get " + legacyModule + "@none " + sdkModule + "/framework@none",
-				sdkModule + "/internal/kernel@none " + sdkModule + "/internal/core@none " + sdkModule + "/internal/service@none",
+				"Migrate: go get " + sdkModule + "/internal/kernel@none\n",
 				sdkModule + "/<vendor module>@latest",
 			},
 		},
@@ -2728,18 +2758,50 @@ func Test_sdkModuleReleases(t *testing.T) {
 	}
 }
 
-// The removals name every module ADR 0162 merged, each once, in the order a
-// reader checks them against a go.mod.
+// The removal is one argument, …/internal/kernel@none: every version up to
+// v0.17.0 of the four other modules ADR 0162 merged requires it, so `@none`
+// takes them out with it (measured against the proxy's 240 versions, ADR 0162).
 func Test_dropMerged(t *testing.T) {
 	t.Parallel()
-	want := legacyModule + "@none " + sdkModule + "/framework@none " +
-		sdkModule + "/internal/kernel@none " + sdkModule + "/internal/core@none " +
-		sdkModule + "/internal/service@none"
+	want := sdkModule + "/internal/kernel@none"
 	if got := dropMerged(); got != want {
 		t.Errorf("dropMerged() = %q, want %q", got, want)
 	}
 	if got := migrateCommand("v0.18.0"); got != "go get "+sdkModule+"@v0.18.0 "+want {
 		t.Errorf("migrateCommand = %q", got)
+	}
+}
+
+// …/pkg and …/framework at their tombstone or above are no half-migration; the
+// internal modules, a pseudo-version, and anything below the tombstone are.
+func Test_isTombstone(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		module  string
+		version string
+		want    bool
+	}
+	tests := []tc{
+		{legacyModule, firstSDKModuleRelease, true},
+		{sdkModule + "/framework", firstSDKModuleRelease, true},
+		{legacyModule, "v0.18.3", true},
+		{legacyModule, "v0.17.0", false},
+		{sdkModule + "/framework", "v0.16.1", false},
+		{legacyModule, "v0.18.1-0.20261004000000-0123456789ab", false},
+		{sdkModule + "/internal/kernel", firstSDKModuleRelease, false},
+		{sdkModule + "/internal/service", "v0.17.0", false},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		if got := isTombstone(moduleRef{module: c.module, Version: c.version}); got != c.want {
+			t.Errorf("isTombstone(%s %s) = %v, want %v", c.module, c.version, got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.module+"@"+c.version, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
 	}
 }
 

@@ -13,9 +13,11 @@
 // before it — is not behind by a version but by a module: once the SDK module
 // has a release, the notice is the one command that migrates. So is a build
 // that requires the SDK module AND one of the modules it merged, whose every
-// package the build then finds twice. The SDK module's releases start at
-// v0.18.0: the proxy also lists its path at v0.0.0, a tag of an earlier
-// history that holds no package, and that version is never advice.
+// package the build then finds twice — unless that is …/pkg or …/framework at
+// its tombstone, the last version the SDK module's first release cut of each,
+// which holds no package. The SDK module's releases start at v0.18.0: the
+// proxy also lists its path at v0.0.0, a tag of an earlier history that holds
+// no package, and that version is never advice.
 //
 // This is a WARNING and never an error by default. Being behind is not a
 // violation — it is a fact the maintainer may already know and may have
@@ -49,13 +51,28 @@ const legacyModule string = "github.com/kitsunium/sdk/pkg"
 const firstSDKModuleRelease string = "v0.18.0"
 
 // mergedModules lists the module paths ADR 0162 merged into the SDK module, in
-// the order the migration command drops them. A build that requires one of
-// them beside the SDK module finds each of its packages in two modules.
+// the order a reader checks them against a go.mod. A build that requires one
+// of them beside the SDK module finds each of its packages in two modules.
 const mergedModules string = legacyModule + " " +
 	sdkModule + "/framework " +
 	sdkModule + "/internal/kernel " +
 	sdkModule + "/internal/core " +
 	sdkModule + "/internal/service"
+
+// tombstoneModules lists the merged modules the SDK module's first release
+// gave a tombstone (ADR 0162): …/pkg and …/framework at firstSDKModuleRelease,
+// a go.mod that requires it and holds no package. Required at that version or
+// above, either is found beside the SDK module harmlessly — no package of it
+// is found twice — so it is no half-migration.
+const tombstoneModules string = legacyModule + " " + sdkModule + "/framework"
+
+// retiredRoot is the merged module whose removal removes them all: every
+// version of …/pkg, …/framework, …/internal/core and …/internal/service up to
+// v0.17.0 requires it, and `go get <module>@none` takes out every module whose
+// version requires the one it removes. Measured over the 240 versions the
+// proxy holds (ADR 0162); published versions never change. The tombstones do
+// not require it, and hold no package to remove.
+const retiredRoot string = sdkModule + "/internal/kernel"
 
 // defaultProxy is what the go command uses when GOPROXY is unset.
 const defaultProxy string = "https://proxy.golang.org"
@@ -202,21 +219,40 @@ func checkVersion(dir string, p probe) (string, bool) {
 // SDK module, read the way requirementOf reads the SDK's — the nearest go.mod,
 // then the modules go.work lists, whose requirements share one build list in
 // workspace mode — and reports whether there is one. A merged module the build
-// replaces locally is someone's checkout, and does not count.
+// replaces locally is someone's checkout, and does not count; neither does a
+// tombstone, which provides no package to find twice.
 func mergedRequirement(dir string) (moduleRef, bool) {
-	//: in the order the migration command drops them, so the notice names the
-	//: first one a reader finds in the command too.
+	//: in the order a reader checks them against a go.mod, so the notice
+	//: names the first one a reader finds there.
 	for module := range strings.FieldsSeq(mergedModules) {
 		ref, ok := requirementOf(dir, module)
-		//: required and not redirected to a directory: the build resolves it
-		//: from the proxy, beside the SDK module.
-		if ok && !ref.Replaced() {
+		//: required, not redirected to a directory and not a tombstone: the
+		//: build resolves it from the proxy, packages and all, beside the SDK
+		//: module.
+		if ok && !ref.Replaced() && !isTombstone(ref) {
 			//: one is enough to make the build ambiguous.
 			return ref, true
 		}
 	}
 	//: fully migrated, or never split.
 	return moduleRef{}, false
+}
+
+// isTombstone reports whether ref requires …/pkg or …/framework at its
+// tombstone or above: firstSDKModuleRelease, the version that holds a go.mod
+// and no package (ADR 0162). A pseudo-version is no tombstone — semverLess
+// sorts it first —, so a build on one is still told.
+func isTombstone(ref moduleRef) bool {
+	//: two modules have a tombstone; the internal ones never got one.
+	for module := range strings.FieldsSeq(tombstoneModules) {
+		//: the requirement is of a module that has one.
+		if ref.module == module {
+			//: at the tombstone or above, no package of it is in the build.
+			return !semverLess(ref.Version, firstSDKModuleRelease)
+		}
+	}
+	//: an internal module: every version of it holds packages.
+	return false
 }
 
 // sdkModuleReleases keeps the SDK module's releases among versions:
@@ -804,21 +840,14 @@ func versionNotice(module, cur string, newer []string) string {
 }
 
 // dropMerged is the half of the migration command that drops every module ADR
-// 0162 merged into the SDK module: `<module>@none` for each, space-separated,
-// so no package is provided by two modules of the build.
+// 0162 merged into the SDK module, so no package is provided by two modules of
+// the build: one argument, retiredRoot@none, which takes the other four out
+// with it. Upgrading …/pkg and …/framework to their tombstones instead leaves
+// the three internal modules in the build, measured: an ambiguous import.
 func dropMerged() string {
-	var b strings.Builder
-	//: the order go get reads them in does not matter; this is the order a
-	//: reader checks them against their go.mod.
-	for module := range strings.FieldsSeq(mergedModules) {
-		//: one separator between arguments, none before the first.
-		if b.Len() > 0 {
-			b.WriteString(" ")
-		}
-		b.WriteString(module + "@none")
-	}
-	//: the arguments, ready to follow a go get.
-	return b.String()
+	//: one removal is all five: every version of the other four up to
+	//: v0.17.0 requires it.
+	return retiredRoot + "@none"
 }
 
 // migrateCommand is the one command a go.mod still on the split modules
@@ -826,7 +855,7 @@ func dropMerged() string {
 // dropped. A vendor or connector module the go.mod requires is upgraded in the
 // same command (vendorHint).
 func migrateCommand(latest string) string {
-	//: the requirement and the removals, together or the build is ambiguous.
+	//: the requirement and the removal, together or the build is ambiguous.
 	return "go get " + sdkModule + "@" + latest + " " + dropMerged()
 }
 
@@ -848,6 +877,7 @@ func migrationNotice(cur, latest string) string {
 	b.WriteString("  since ADR 0162: " + sdkModule + ", latest is " + latest + ". Import paths do not change;\n")
 	b.WriteString("  the requirement does, and the old modules must leave go.mod with it, or every\n")
 	b.WriteString("  package is found in two modules and the build fails on an ambiguous import.\n")
+	b.WriteString("  Removing " + retiredRoot + " removes all five: the others, up to v0.17.0, require it.\n")
 	b.WriteString("  Migrate: " + migrateCommand(latest) + "\n")
 	b.WriteString(vendorHint())
 	b.WriteString("  Silence: -version-check=off")
@@ -857,14 +887,16 @@ func migrationNotice(cur, latest string) string {
 
 // halfMigrationNotice renders the warning for a build that requires the SDK
 // module and still merged, one of the modules it replaced — what a migration
-// that dropped `…/pkg` but not the `…/internal/*` modules leaves behind. The
-// SDK requirement stays as it is; only the removals are left to make.
+// that dropped `…/pkg` but not the `…/internal/*` modules leaves behind, or one
+// that upgraded `…/pkg` and `…/framework` to their tombstones. The SDK
+// requirement stays as it is; only the removal is left to make.
 func halfMigrationNotice(ref, merged moduleRef) string {
 	var b strings.Builder
 	b.WriteString("warning: the build requires " + sdkModule + " " + ref.Version + " and still\n")
 	b.WriteString("  " + merged.module + " " + merged.Version + ", a module the SDK module replaced (ADR 0162):\n")
 	b.WriteString("  each of its packages is found in two modules, and the build fails on an\n")
-	b.WriteString("  ambiguous import. Every replaced module leaves together:\n")
+	b.WriteString("  ambiguous import. Every replaced module leaves with " + retiredRoot + ",\n")
+	b.WriteString("  which the others, up to v0.17.0, require:\n")
 	b.WriteString("  Migrate: go get " + dropMerged() + "\n")
 	b.WriteString(vendorHint())
 	b.WriteString("  Silence: -version-check=off")

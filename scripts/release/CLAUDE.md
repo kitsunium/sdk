@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T00:30:00Z -->
+<!-- updated: 2026-10-04T00:32:31Z -->
 # scripts/release/
 
 ## Purpose
@@ -17,10 +17,10 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
 | File | What it does | Run by |
 |---|---|---|
 | `compute-bumps.sh` | prints the one token `sdk` when a release is due, from the paths changed since the last release tag: `pkg/**`, `framework/**` outside a connector, or the root `go.mod`, `LICENSE` or `README.md` (rule 1 — the SDK module); `third-party/**` or `framework/connectors/**` (rule 1c — a vendor module); `internal/**` only when its Bazel reverse dependencies reach `//pkg/...`, `//framework/...` or `//third-party/...` (rule 2). Maintainer-only files are filtered out first (`lib/release-scope.sh`). `--explain` writes the verdict and its reason to stderr; `--require-bazel` refuses to decide rule 2 without Bazel | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
-| `cut-tags.sh` | reads the token on stdin (`sdk`; `pkg`, `framework`, `third-party` and `vN` still mean it), sizes the release from the `release:*` labels of the merged pull requests in the range (or `--bump`), and computes the version from the newest `vX.Y.Z` — or, before the first, the newest `pkg/vX.Y.Z`. Tags the SDK module `vX.Y.Z` and, at the same version, each vendor module `go.work` names that changed since the first parent of its own last tag (or has none), its `go.mod` rewritten to require the SDK at the release with no `replace`, on a detached release commit — empty when nothing is rewritten; re-reads the latest tag before the push and aborts on drift. stdout: the SDK's tag, then the vendor tags | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
+| `cut-tags.sh` | reads the token on stdin (`sdk`; `pkg`, `framework`, `third-party` and `vN` still mean it), sizes the release from the `release:*` labels of the merged pull requests in the range (or `--bump`), and computes the version from the newest `vX.Y.Z` — or, before the first, the newest `pkg/vX.Y.Z`. Tags the SDK module `vX.Y.Z` and, at the same version, each vendor module `go.work` names that changed since the first parent of its own last tag (or has none), its `go.mod` rewritten to require the SDK at the release with no `replace`, on a detached release commit — empty when nothing is rewritten; when the base is a `pkg/` tag, also `pkg/vX.Y.Z` and `framework/vX.Y.Z`, the tombstones, each on a child of that commit; re-reads the latest tag before the push and aborts on drift, and pushes every tag in one `--atomic` push. stdout: the SDK's tag, then the vendor tags, then the tombstones | `sdk-release.yml`; `make release-dry-run` with `--dry-run` |
 | `check-pr-size.sh` | `--pr=<number>`: the size the squash of that pull request would publish, over every commit of the branch; exit 1 with the reason and the fix when no label decides it, 2 when GitHub cannot be read, 64 on bad usage | `release-size.yml`, on every push and label change of a pull request |
 | `lib/` | the shared rules — see `lib/CLAUDE.md` | sourced by the three scripts above |
-| `test-compute-bumps.bats`, `test-cut-tags.bats`, `test-check-pr-size.bats` | the regression suites: each builds a throwaway repository and asserts the tag the scripts compute — and the publish path pushes to a bare repository the test owns, so the release commit and the tags on it are asserted too; GitHub is a stub (`test-helpers.bash`) that runs the caller's own `jq` filter over fixtures and logs every call | `release-scripts-test.sh` |
+| `test-compute-bumps.bats`, `test-cut-tags.bats`, `test-check-pr-size.bats` | the regression suites: each builds a throwaway repository and asserts the tag the scripts compute — and the publish path pushes to a bare repository the test owns, so the release commit and the tags on it are asserted too, the tombstones' trees and go.mods among them, and a `git` shim (`log_pushes`) counts the pushes a release makes; GitHub is a stub (`test-helpers.bash`) that runs the caller's own `jq` filter over fixtures and logs every call | `release-scripts-test.sh` |
 | `test-helpers.bash` | `install_gh_stub` and the fixtures' helpers, loaded with `load test-helpers`; `.bash` so the runner's `*.bats` glob never runs it alone | — |
 | `release-scripts-test.sh` | runs every `*.bats` here by glob, never a list; refuses to run zero suites; exits 127 naming the install routes when `bats` is not on `PATH` (it is never fetched) | `make release-scripts-check`, in `bazel-ci.yml`'s `shell-gates` job |
 | `test-sync-versions.mjs.test.js` | a Node test of the docs site's `docs/site/scripts/lib/tag-format.mjs` (the tag regex, parsing, grouping, `versions.json`) | no lane — `docs/site`'s `npm test` globs `scripts/lib/*.test.mjs` only |
@@ -54,6 +54,22 @@ maintainer's label). The tree's general rules are in `scripts/CLAUDE.md`.
   a minor at least, and the proxy keeps a v0.17.1 for good. The refusal names
   `release:minor` and `bump=minor`, and comes before the hold, so an automatic
   run says it as soon as the merge lands.
+- **The tombstones, once** (ADR 0162). The first root tag after the pkg
+  history — and no other release — also cuts `pkg/vX.Y.Z` and
+  `framework/vX.Y.Z` at its version: on a child of the release commit, the
+  module directory reduced to a go.mod (its own module path, the SDK's `go`
+  directive, `require github.com/kitsunium/sdk vX.Y.Z`), the modules `go.work`
+  names beneath it kept whole. Without them Go resolves an import of
+  `…/pkg/v1/…` or `…/framework/…` to those modules at v0.17.0 for good, and a
+  new consumer's bare `go mod tidy` lands there (measured). They are built with
+  plumbing — no hook, no worktree change —, checked (`assert_tombstone`,
+  `assert_tombstone_tree`) before they are tagged, and pushed in the root
+  tag's atomic push. A tombstone tag that already exists is refused (exit 1)
+  before anything is tagged, before the hold too. A tombstone is no pkg
+  release: `latest_pkg_tag` skips a tag whose `pkg/` holds a go.mod alone, and
+  `latest_release_tag` takes the root tag at a shared version — otherwise the
+  next release would read `pkg/v0.18.0` as its base and be the first root tag
+  again. Never for `internal/*`: nothing imports them.
 - **A release commit always exists.** It is the tags' commit, a detached child
   of the main commit the release was cut from — `--allow-empty` when nothing is
   rewritten —, because the next range and every vendor module's next

@@ -15,7 +15,7 @@ The SDK is one Go module, `github.com/kitsunium/sdk` — `pkg/v1`, the framework
 go get github.com/kitsunium/sdk@latest
 ```
 
-Run it BEFORE `go mod tidy`. Up to v0.17.0 the public packages were the module `github.com/kitsunium/sdk/pkg`, and Go resolves an import nothing in your go.mod provides to the module with the LONGEST path that provides it at its latest version — so a bare `go mod tidy` would pick that retired module, at v0.17.0. Once `github.com/kitsunium/sdk` is in your go.mod, the imports below resolve to it. A go.mod that already requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162).
+Writing the imports below first and running `go mod tidy` works as well. Up to v0.17.0 the public packages were the modules `github.com/kitsunium/sdk/pkg` and `…/framework`, and Go resolves an import nothing in your go.mod provides to the module with the LONGEST path whose latest version provides it; v0.18.0 gave both a last version that holds no package, so the tidy resolves the imports to `github.com/kitsunium/sdk`. A go.mod that already requires `…/pkg` migrates with the one command in the root `README.md` (ADR 0162).
 
 ## Hello, codec
 

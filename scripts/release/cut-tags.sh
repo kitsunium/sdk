@@ -41,6 +41,16 @@
 # dispatch passes once the module zip and a clean-room `go get` are validated.
 # From that base a patch is refused outright (exit 65): the module change every
 # consumer makes is a minor at least.
+#
+# That release, and no other, also cuts two tombstones (ADR 0162): pkg/vX.Y.Z
+# and framework/vX.Y.Z at its version, each on a child of the release commit
+# whose module directory holds a go.mod alone — the module's own path, the
+# SDK's go directive, and a requirement of the SDK at vX.Y.Z. Go resolves an
+# import that nothing in a go.mod provides to the longest module path whose
+# LATEST version provides the package; with the tombstones that is the SDK
+# module, without them …/pkg and …/framework at v0.17.0, for good. They go out
+# in the same atomic push as the root tag, and a tombstone tag that already
+# exists is refused before anything is tagged.
 
 set -euo pipefail
 shopt -s nullglob
@@ -85,6 +95,9 @@ recovery path for a refused release: SDK Release's workflow_dispatch input
 --allow-bootstrap authorises the first release of the SDK module — the very
 first release, or the first root tag after the pkg/vX.Y.Z history. Without it
 that release is refused with exit 3 (held), never cut by an automatic run.
+The first root tag after the pkg history also cuts pkg/vX.Y.Z and
+framework/vX.Y.Z at its version: tombstones, a go.mod that requires it and no
+package, in the same push (ADR 0162).
 EOF
       exit 0
       ;;
@@ -473,6 +486,152 @@ vendor_changed() {
   release_scope_any <<<"$paths"
 }
 
+# TOMBSTONES are the module directories whose tombstone the first root tag cuts
+# (ADR 0162): the two retired modules a consumer imported. Not internal/*: Go's
+# internal/ rule kept every importer outside the repository out of them.
+TOMBSTONES=(pkg framework)
+
+# nested_modules <dir> — the vendor modules go.work names beneath <dir>, one per
+# line: modules of their own, released by their own tags, whose files a
+# tombstone of <dir> keeps.
+nested_modules() {
+  local dir="$1" v
+  for v in ${vendors[@]+"${vendors[@]}"}; do
+    case "$v" in "$dir"/*) echo "$v" ;; esac
+  done
+}
+
+# sdk_go_directive — the go directive of the SDK's go.mod, which a tombstone
+# carries too.
+sdk_go_directive() {
+  go mod edit -json go.mod | jq -r '.Go // empty'
+}
+
+# tombstone_gomod <dir> <sem> <out> — write to <out> the go.mod of the tombstone
+# of the module in <dir>: its own module path, the SDK's go directive and one
+# requirement, the SDK at <sem>; formatted by `go mod edit`, as Go writes it.
+tombstone_gomod() {
+  local dir="$1" sem="$2" out="$3" goline=""
+  goline="$(sdk_go_directive)" || return 1
+  if [ -z "$goline" ]; then
+    echo "cut-tags: the SDK's go.mod has no go directive for the tombstone of $dir to carry" >&2
+    return 1
+  fi
+  printf 'module %s\n' "$SDK_MODULE/$dir" >"$out" || return 1
+  go mod edit -go="$goline" -require="$SDK_MODULE@$sem" "$out"
+}
+
+# assert_tombstone <go.mod> <dir> <sem> — fail unless <go.mod> is the
+# tombstone's and nothing more: module $SDK_MODULE/<dir>, the SDK's go
+# directive, one requirement — the SDK at <sem> — and no other directive.
+assert_tombstone() {
+  local gomod="$1" dir="$2" sem="$3" json="" goline=""
+  goline="$(sdk_go_directive)" || return 1
+  json="$(go mod edit -json "$gomod")" || {
+    echo "cut-tags: the tombstone go.mod of $dir does not parse" >&2
+    return 1
+  }
+  if ! jq -e --arg m "$SDK_MODULE/$dir" --arg sdk "$SDK_MODULE" --arg v "$sem" --arg go "$goline" '
+      .Module.Path == $m and .Go == $go and .Toolchain == null
+      and ((.Require // []) | length == 1 and .[0].Path == $sdk and .[0].Version == $v)
+      and ([.Replace, .Exclude, .Retract, .Tool, .Ignore, .Godebug] | map((. // []) | length) | add == 0)' \
+    >/dev/null <<<"$json"; then
+    echo "cut-tags: the tombstone go.mod of $dir is not 'module $SDK_MODULE/$dir; go $goline; require $SDK_MODULE $sem' alone" >&2
+    return 1
+  fi
+}
+
+# tombstone_commit <release-commit> <dir> <sem> — create, and echo, the commit
+# the tag <dir>/<sem> names: a child of <release-commit> whose tree is the
+# release's with <dir> reduced to its tombstone go.mod. A module nested under
+# <dir> keeps its files (framework/connectors/*): it is a module of its own,
+# released by its own tags, and Go leaves it out of <dir>'s module anyway; a
+# file of <dir> beside it goes. Plumbing only — a temporary index, write-tree,
+# commit-tree —, so no hook runs and the worktree is not touched. It runs in a
+# command substitution, which errexit does not reach, so every step is checked.
+tombstone_commit() {
+  local relc="$1" dir="$2" sem="$3" tmp="" blob="" tree="" rec="" path="" n="" keep=0
+  local -a nested=()
+  tmp="$(mktemp -d)" || return 1
+  tombstone_gomod "$dir" "$sem" "$tmp/go.mod" || return 1
+  assert_tombstone "$tmp/go.mod" "$dir" "$sem" || return 1
+  blob="$(git hash-object -w "$tmp/go.mod")" || return 1
+  mapfile -t nested < <(nested_modules "$dir")
+  git ls-tree -r -z --full-tree "$relc" >"$tmp/tree" || return 1
+  while IFS= read -r -d '' rec; do
+    path="${rec#*$'\t'}"
+    case "$path" in
+      "$dir"/*)
+        keep=0
+        for n in ${nested[@]+"${nested[@]}"}; do
+          case "$path" in "$n"/*)
+            keep=1
+            break
+            ;;
+          esac
+        done
+        if [ "$keep" -eq 0 ]; then continue; fi
+        ;;
+    esac
+    printf '%s\0' "$rec"
+  done <"$tmp/tree" >"$tmp/entries" || return 1
+  GIT_INDEX_FILE="$tmp/index" git update-index -z --index-info <"$tmp/entries" || return 1
+  GIT_INDEX_FILE="$tmp/index" git update-index --add --cacheinfo "100644,$blob,$dir/go.mod" || return 1
+  tree="$(GIT_INDEX_FILE="$tmp/index" git write-tree)" || return 1
+  git commit-tree "$tree" -p "$relc" \
+    -m "release $dir/$sem — tombstone of $SDK_MODULE/$dir: a go.mod that requires $SDK_MODULE $sem, and no package (ADR 0162)" || return 1
+  rm -rf "${tmp:?}"
+}
+
+# assert_tombstone_tree <commit> <release-commit> <dir> — fail unless <commit>
+# is the tombstone it must be: one parent, <release-commit>; under <dir>, the
+# modules nested in it aside, one file, <dir>/go.mod; and no change outside
+# <dir> nor inside a nested module.
+assert_tombstone_tree() {
+  local tc="$1" relc="$2" dir="$3" parents="" own="" changed="" p="" n="" hit=0
+  local -a nested=()
+  mapfile -t nested < <(nested_modules "$dir")
+  parents="$(git rev-list --parents -n1 "$tc")"
+  if [ "$parents" != "$tc $relc" ]; then
+    echo "cut-tags: the tombstone of $dir is not a child of the release commit alone" >&2
+    return 1
+  fi
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    hit=0
+    for n in ${nested[@]+"${nested[@]}"}; do
+      case "$p" in "$n"/*)
+        hit=1
+        break
+        ;;
+      esac
+    done
+    if [ "$hit" -eq 0 ]; then own="${own:+$own }$p"; fi
+  done < <(git ls-tree -r --name-only "$tc" -- "$dir/")
+  if [ "$own" != "$dir/go.mod" ]; then
+    echo "cut-tags: the tombstone of $dir holds '$own' under $dir/, not its go.mod alone" >&2
+    return 1
+  fi
+  changed="$(git diff --name-only "$relc" "$tc")"
+  while IFS= read -r p; do
+    [ -z "$p" ] && continue
+    case "$p" in
+      "$dir"/*) ;;
+      *)
+        echo "cut-tags: the tombstone of $dir changed $p, outside $dir/" >&2
+        return 1
+        ;;
+    esac
+    for n in ${nested[@]+"${nested[@]}"}; do
+      case "$p" in "$n"/*)
+        echo "cut-tags: the tombstone of $dir changed $p, in the module $n nested in it" >&2
+        return 1
+        ;;
+      esac
+    done
+  done <<<"$changed"
+}
+
 # publish_release <sem> <tagged-dir…> — on a detached worktree, rewrite the
 # go.mod of every vendor module tagged at <sem> to the publishable form, check
 # the SDK's own, then either (DRY_RUN) print the form + planned tags, or commit
@@ -492,14 +651,24 @@ publish_release() {
   esac
 
   local d t
-  local -a tags=("$sem")
+  local -a tags=("$sem") tombs=()
   for d in "$@"; do tags+=("$d/$sem"); done
+  # The tombstones go last: on the first root tag after the pkg history alone.
+  if [ "$tombstone" -eq 1 ]; then
+    for d in "${TOMBSTONES[@]}"; do tombs+=("$d/$sem"); done
+  fi
 
   # Validate every tag before touching the repo, each against the shape of its
   # family: the SDK's, third-party/*, framework/connectors/* — lib/tag-format.sh.
   for t in "${tags[@]}"; do
     is_valid_release_tag "$t" || {
       echo "cut-tags: refusing to push malformed release tag '$t'" >&2
+      return 1
+    }
+  done
+  for t in ${tombs[@]+"${tombs[@]}"}; do
+    is_valid_tombstone_tag "$t" || {
+      echo "cut-tags: refusing to push malformed tombstone tag '$t'" >&2
       return 1
     }
   done
@@ -533,7 +702,25 @@ publish_release() {
         echo "  --- $d/go.mod ---"
         grep -nE 'replace|kitsunium/sdk' "$d/go.mod" | sed 's/^/    /' || true
       done
-      echo "DRY-RUN: would tag: ${tags[*]}"
+      if [ "$tombstone" -eq 1 ]; then
+        local dry
+        dry="$(mktemp -d)"
+        echo "DRY-RUN: tombstones of the retired modules for $sem (ADR 0162), each a go.mod alone on a child of the release commit:"
+        for d in "${TOMBSTONES[@]}"; do
+          tombstone_gomod "$d" "$sem" "$dry/$d.mod"
+          assert_tombstone "$dry/$d.mod" "$d" "$sem"
+          echo "  --- $d/go.mod ($d/$sem) ---"
+          sed '/./s/^/    /' "$dry/$d.mod"
+          kept="$(nested_modules "$d" | tr '\n' ' ')"
+          if [ -n "$kept" ]; then
+            echo "    (the modules nested in $d/ keep their files: ${kept% })"
+          fi
+        done
+        rm -rf "${dry:?}"
+      fi
+      would="${tags[*]}"
+      if [ "${#tombs[@]}" -gt 0 ]; then would="$would ${tombs[*]}"; fi
+      echo "DRY-RUN: would tag: $would"
     else
       # `core.hooksPath=` (empty) rather than any hooks the clone sets: this
       # commit is the ONE tree in the repository that the pre-commit gates
@@ -573,7 +760,18 @@ publish_release() {
         return 1
       fi
       for t in "${tags[@]}"; do git tag -a "$t" -m "release $t" "$relc"; done
-      git push --atomic origin "${tags[@]}"
+      # Each tombstone on its own child of the release commit, checked before
+      # it is tagged; then ONE atomic push, so no moment exists where the root
+      # tag is published and a tombstone is not (ADR 0162).
+      if [ "$tombstone" -eq 1 ]; then
+        local tc
+        for d in "${TOMBSTONES[@]}"; do
+          tc="$(tombstone_commit "$relc" "$d" "$sem")"
+          assert_tombstone_tree "$tc" "$relc" "$d"
+          git tag -a "$d/$sem" -m "release $d/$sem — tombstone of $SDK_MODULE/$d (ADR 0162)" "$tc"
+        done
+      fi
+      git push --atomic origin "${tags[@]}" ${tombs[@]+"${tombs[@]}"}
     fi
   )
   rc=$?
@@ -612,6 +810,15 @@ if ! is_valid_tag "$next"; then
   exit 1
 fi
 
+# The tombstones (ADR 0162) come with the first root tag after the pkg history,
+# and with no other release: from then on the base is a root tag, and
+# latest_pkg_tag never reads a tombstone as pkg's history. The very first
+# release of a repository with no pkg history has no retired module to bury.
+tombstone=0
+if [ -n "$last" ] && is_valid_pkg_tag "$last"; then
+  tombstone=1
+fi
+
 # The first root tag moves every consumer from …/pkg to the SDK module (ADR
 # 0162): a change a consumer must act on, which v0 says with a minor at least,
 # and the proxy keeps whatever version is cut for good. From a pkg/ base a patch
@@ -622,6 +829,23 @@ if [ "$first" -eq 1 ] && [ -n "$last" ] && [ "$size" = "patch" ]; then
   echo "cut-tags: refusing $next as the SDK module's first tag — after $last a patch would hide the module change every consumer makes (ADR 0162)" >&2
   echo "cut-tags:   label the pull request release:minor and re-run this job, or dispatch SDK Release with bump=minor." >&2
   exit 65
+fi
+
+# A tombstone tag that already exists names another commit than this release's:
+# the tombstone is cut as a new child of a new release commit. It is refused
+# before anything is tagged, rather than left to the atomic push, and before the
+# hold, so the automatic run that holds the first root tag reports it already.
+# A tag the module proxy has fetched is that version for good, so nothing here
+# moves or replaces one: a person decides what it is.
+if [ "$tombstone" -eq 1 ]; then
+  for d in "${TOMBSTONES[@]}"; do
+    if git rev-parse -q --verify "refs/tags/$d/$next" >/dev/null; then
+      at="$(git rev-parse --short "refs/tags/$d/$next^{}" 2>/dev/null || echo '?')"
+      echo "cut-tags: $d/$next already exists, at $at — the tombstone of $SDK_MODULE/$d is cut on this release's own commit, so that tag names another; refusing to publish $next (ADR 0162)" >&2
+      echo "cut-tags:   find out who cut it and whether the module proxy has fetched it before anything else is tagged; nothing was published." >&2
+      exit 1
+    fi
+  done
 fi
 
 # Bootstrap guard (ADR 0009): the first release of the SDK module publishes its
@@ -640,6 +864,9 @@ if [ "$first" -eq 1 ] && [ "$DRY_RUN" -eq 0 ] && [ "$ALLOW_BOOTSTRAP" -eq 0 ]; t
 fi
 if [ "$first" -eq 1 ] && [ -n "$last" ]; then
   echo "cut-tags: $next is the SDK module's first tag; it continues $last (ADR 0162)" >&2
+fi
+if [ "$tombstone" -eq 1 ]; then
+  echo "cut-tags: pkg/$next and framework/$next are tombstones: the last version of $SDK_MODULE/pkg and $SDK_MODULE/framework, which requires $next and provides no package, so an import of either path resolves to the SDK module (ADR 0162)" >&2
 fi
 
 # Semver of the release (e.g. "v0.18.0"): the SDK's tag, and every vendor tag's
@@ -686,10 +913,16 @@ publish_release "$sem" ${tagged[@]+"${tagged[@]}"}
 
 # stdout is the list of tags pushed: the SDK's first — the one the workflow
 # makes a GitHub release of and its verification step counts — then the vendor
-# modules', which that release's notes list.
+# modules', which that release's notes list, then the tombstones, which the
+# notes list apart.
 if [ "$DRY_RUN" -eq 0 ]; then
   echo "$sem"
   for d in ${tagged[@]+"${tagged[@]}"}; do
     echo "$d/$sem"
   done
+  if [ "$tombstone" -eq 1 ]; then
+    for d in "${TOMBSTONES[@]}"; do
+      echo "$d/$sem"
+    done
+  fi
 fi

@@ -109,12 +109,13 @@ go get github.com/kitsunium/sdk@latest
 ```
 
 then import the packages you use — `github.com/kitsunium/sdk/pkg/v1/data/codec`,
-`…/pkg/v1/errs`, `…/framework/kit`. Require the module BEFORE a `go mod tidy`:
-Go resolves an import nothing in go.mod provides to the module with the longest
-path that provides it, and until you require `github.com/kitsunium/sdk` that is
-the retired `…/pkg` at v0.17.0. An integration that needs a vendor library
-is a module of its own, required by name, so you take that vendor and no
-other: `go get github.com/kitsunium/sdk/third-party/aws@latest`, or
+`…/pkg/v1/errs`, `…/framework/kit`. Importing them first and running
+`go mod tidy` works as well: up to v0.17.0 they were the modules `…/pkg` and
+`…/framework`, and v0.18.0 gave each a last version that holds no package, so
+Go resolves the imports to `github.com/kitsunium/sdk` (ADR 0162). An
+integration that needs a vendor library is a module of its own, required by
+name, so you take that vendor and no other:
+`go get github.com/kitsunium/sdk/third-party/aws@latest`, or
 `…/framework/connectors/postgres`.
 
 ### Migrating from `…/pkg` and `…/framework` (v0.17.0 and before)
@@ -126,16 +127,16 @@ moves a go.mod over, and it must drop every old module, or each package is
 found in two modules of the build and it fails with an ambiguous import:
 
 ```bash
-go get github.com/kitsunium/sdk@v0.18.0 \
-  github.com/kitsunium/sdk/pkg@none \
-  github.com/kitsunium/sdk/framework@none \
-  github.com/kitsunium/sdk/internal/kernel@none \
-  github.com/kitsunium/sdk/internal/core@none \
-  github.com/kitsunium/sdk/internal/service@none
+go get github.com/kitsunium/sdk@v0.18.0 github.com/kitsunium/sdk/internal/kernel@none
 go mod tidy
 ```
 
-Add `github.com/kitsunium/sdk/<module>@v0.18.0` to the same `go get` for each
+The one removal is enough: every version of `…/pkg`, `…/framework`,
+`…/internal/core` and `…/internal/service` up to v0.17.0 requires
+`…/internal/kernel`, so `go get` takes all five out and names each
+(`go: removed …`). Upgrading `…/pkg` and `…/framework` to v0.18.0 instead is no
+migration: that version is empty, and the internal modules stay. Add
+`github.com/kitsunium/sdk/<module>@v0.18.0` to the same `go get` for each
 vendor or connector module your go.mod requires (`third-party/aws`,
 `framework/connectors/postgres`…).
 
@@ -152,7 +153,7 @@ go mod graph | grep -E 'kitsunium/sdk/(pkg|framework|internal/[a-z]+)@'
 ```
 
 prints nothing. `sdkguard` prints the command when it finds a go.mod still on
-`…/pkg`, and the removals when it finds one that requires the SDK module
+`…/pkg`, and the removal when it finds one that requires the SDK module
 beside an old one (ADR 0162).
 
 ## Quick example
@@ -189,7 +190,7 @@ func main() {
 
 ## Releases
 
-Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
+Versioning follows [semver](https://semver.org/) and Go's sub-directory tag convention. A release is ONE tag, `vX.Y.Z`, on the SDK module `github.com/kitsunium/sdk`, and one GitHub release; a vendor or connector module is tagged at the same version — `third-party/<path>/vX.Y.Z`, `framework/connectors/<engine>/vX.Y.Z` — only by a release that changes it, and the release's notes list the ones it cut (ADR 0162). The releases up to v0.17.0 were cut as `pkg/vX.Y.Z` with every other module in lockstep (ADR 0017, ADR 0147, ADR 0157); those tags stay, and v0.18.0 cut `pkg/v0.18.0` and `framework/v0.18.0` once more, as tombstones — a go.mod that requires the SDK module and holds no package. A release is sized by the `release:*` label a maintainer sets on the pull request (ADR 0135). The full release workflow lives in ADR 0007 and the records that amend it (`docs/adr/`).
 
 ## Documentation
 

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:06:22Z -->
+<!-- updated: 2026-10-04T00:32:31Z -->
 # docs/
 
 ## Purpose
@@ -145,7 +145,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0159-the-kernel-holds-what-the-domains-rewrote-and-is-published-by-nature.md` | Kernel: `topic` removed; `group` (join mode), `worker` and `batcher` (a clock), `ring` (multi-producer, not built yet) widened and adopted; the duplicates above the kernel folded where their vocabulary lives (one SQL `Withheld`, `FileLockSQL` exported); `backoff`, `semver`, `flock` and a generic registry added; published under `pkg/v1/concur`, `pkg/v1/collections`, `pkg/v1/data/semver` | Accepted (amends 0071 §Why not, 0103, 0045 §D5, 0140, 0151 §D6) |
 | `adr/0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md` | Every service has a core; every code declared in the core and never under `internal/service` (`check-core-symmetry.sh`); a code keeps its value when its declaration moves (`LL` = the allocating layer); wire formats are service mechanisms | Accepted (amends 0005, 0035, 0047, 0051, 0063, 0064, 0101 §D5, 0110 §D1, 0121 §D1, 0139 §D2, 0148) |
 | `adr/0161-an-untyped-error-fails-the-build.md` | `fmt.Errorf` / `errors.New` fail a build-time check over every production file — SDK002 run by `make guard`, no exemption — the audit rule 2 described never existed | Accepted (amends 0002, 0033) |
-| `adr/0162-the-sdk-is-one-module-and-a-release-is-one-tag.md` | The SDK is one module, `github.com/kitsunium/sdk`, holding `internal/`, `pkg/` and `framework/` with import paths unchanged; a release is ONE tag `vX.Y.Z` (v0.18.0 next, continuing `pkg`'s numbering) and ONE GitHub release; the thirteen vendor and connector modules are tagged `<dir>/vX.Y.Z` only when they change; old tags stay; consumers migrate with one `go get` dropping the five retired modules | Accepted (supersedes ADR 0001's module split; amends 0007, 0009, 0017, 0147, 0157) |
+| `adr/0162-the-sdk-is-one-module-and-a-release-is-one-tag.md` | The SDK is one module, `github.com/kitsunium/sdk`, holding `internal/`, `pkg/` and `framework/` with import paths unchanged; a release is ONE tag `vX.Y.Z` (v0.18.0 next, continuing `pkg`'s numbering) and ONE GitHub release; the thirteen vendor and connector modules are tagged `<dir>/vX.Y.Z` only when they change; old tags stay, and v0.18.0 cuts two tombstones once, `pkg/v0.18.0` and `framework/v0.18.0`, so a bare `go mod tidy` resolves to the SDK module; consumers migrate with one `go get` whose `…/internal/kernel@none` drops the five retired modules | Accepted (supersedes ADR 0001's module split; amends 0007, 0009, 0017, 0147, 0157) |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —
