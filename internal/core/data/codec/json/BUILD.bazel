@@ -27,7 +27,10 @@ alias(
 
 go_test(
     name = "json_test",
-    srcs = ["codes_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "codes_external_test.go",
+    ],
     deps = [
         ":json",
         "//internal/kernel/errs",

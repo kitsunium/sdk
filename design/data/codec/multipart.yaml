@@ -1,0 +1,202 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/multipart
+packages:
+  - constants:
+      - name: CodeMultipartMarshalFailed
+        type: errs.Code
+        value: "0x00_03_29_01"
+      - name: CodeMultipartUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_29_02"
+      - name: CodeMultipartValueInvalid
+        type: errs.Code
+        value: "0x00_03_29_03"
+      - name: CodeMultipartBoundaryInvalid
+        type: errs.Code
+        value: "0x00_03_29_04"
+      - name: CodeMultipartLimitExceeded
+        type: errs.Code
+        value: "0x00_03_29_05"
+      - name: CodeMultipartLimitsInvalid
+        type: errs.Code
+        value: "0x00_03_29_06"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/multipart
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+      - name: BoundaryInvalid
+        type: "*errs.Error"
+      - name: LimitExceeded
+        type: "*errs.Error"
+      - name: LimitsInvalid
+        type: "*errs.Error"
+  - constants:
+      - name: JSONPartName
+        type: string
+        value: "\"_json\""
+      - name: DefaultMaxPartBytes
+        type: int64
+        value: 32 << 20
+      - name: DefaultMaxParts
+        type: int
+        value: "1024"
+      - name: DefaultMaxTotalBytes
+        type: int64
+        value: 64 << 20
+    functions:
+      - in:
+          - name: data
+            type: "[]byte"
+        name: Boundary
+        out:
+          - name: boundary
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: data
+            type: "[]byte"
+        name: ContentType
+        out:
+          - name: value
+            type: string
+          - name: err
+            type: error
+      - name: New
+        out:
+          - type: codec.Codec
+      - in:
+          - name: l
+            type: LimitsConfig
+        name: NewWithLimits
+        out:
+          - name: c
+            type: codec.Codec
+          - name: err
+            type: error
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/multipart
+    types:
+      - interface:
+          embeds:
+            - codec.Codec
+          methods:
+            - in:
+                - name: w
+                  type: io.Writer
+                - name: boundary
+                  type: string
+              name: NewEncoderWithBoundary
+              out:
+                - name: enc
+                  type: codec.Encoder
+                - name: err
+                  type: error
+            - in:
+                - name: r
+                  type: io.Reader
+                - name: boundary
+                  type: string
+              name: NewDecoderWithBoundary
+              out:
+                - name: dec
+                  type: codec.Decoder
+                - name: err
+                  type: error
+        name: BoundaryCodec
+      - interface:
+          methods:
+            - name: Boundary
+              out:
+                - type: string
+        name: BoundaryProvider
+      - name: FormValue
+        struct:
+          fields:
+            - name: Boundary
+              type: string
+            - name: Parts
+              type: "[]PartValue"
+      - name: PartValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: FileName
+              type: string
+            - name: ContentType
+              type: string
+            - name: Data
+              type: "[]byte"
+      - name: LimitsConfig
+        struct:
+          fields:
+            - name: MaxPartBytes
+              type: int64
+            - name: MaxParts
+              type: int
+            - name: MaxTotalBytes
+              type: int64
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - aliases:
+      - name: Form
+        target: svcmultipart.FormValue
+      - name: Part
+        target: svcmultipart.PartValue
+    constants:
+      - name: Format
+        value: "\"multipart\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_29_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_29_02"
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_03_29_03"
+      - name: CodeBoundaryInvalid
+        type: errs.Code
+        value: "0x00_03_29_04"
+      - name: CodeLimitExceeded
+        type: errs.Code
+        value: "0x00_03_29_05"
+      - name: CodeLimitsInvalid
+        type: errs.Code
+        value: "0x00_03_29_06"
+    functions:
+      - in:
+          - name: body
+            type: "[]byte"
+        name: ContentType
+        out:
+          - name: value
+            type: string
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcmultipart: github.com/kitsunium/sdk/internal/service/data/codec/multipart
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/multipart
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+      - name: BoundaryInvalid
+        type: "*errs.Error"
+      - name: LimitExceeded
+        type: "*errs.Error"
+      - name: LimitsInvalid
+        type: "*errs.Error"

@@ -21,9 +21,14 @@ alias(
 
 go_test(
     name = "websocket_test",
-    srcs = ["websocket_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "websocket_external_test.go",
+    ],
     deps = [
         ":websocket",
+        "//internal/core/net",
+        "//internal/service/net/websocket",
         "//pkg/v1/net/server",
     ],
 )

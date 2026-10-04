@@ -1,6 +1,9 @@
 // Package queue — range 0.2.23.* (ADR 0054 core/data/queue block), and the
 // brokers' and the consumer engine's 0.3.53.* (ADR 0054 service/data/queue
 // block, declared here since ADR 0160).
+//
+// Package queue — the two ADR 0039 siblings that act on the dead-letter store:
+// sending a message there at once, and deciding what becomes of one there.
 package queue
 
 import "github.com/kitsunium/sdk/internal/kernel/errs"

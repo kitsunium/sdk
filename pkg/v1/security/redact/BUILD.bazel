@@ -22,9 +22,15 @@ alias(
 
 go_test(
     name = "redact_test",
-    srcs = ["redact_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "redact_external_test.go",
+    ],
     deps = [
         ":redact",
+        "//internal/core/security/redact",
+        "//internal/kernel/errs",
+        "//internal/service/security/redact",
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
     ],

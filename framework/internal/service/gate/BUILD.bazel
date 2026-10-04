@@ -27,7 +27,10 @@ alias(
 
 go_test(
     name = "gate_test",
-    srcs = ["gate_internal_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "gate_internal_test.go",
+    ],
     embed = [":gate"],
     deps = [
         "//framework/internal/core/entitlement",

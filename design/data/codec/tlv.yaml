@@ -1,0 +1,88 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/tlv
+packages:
+  - constants:
+      - name: CodeTLVMarshalFailed
+        type: errs.Code
+        value: "0x00_03_16_01"
+      - name: CodeTLVUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_16_02"
+      - name: CodeTLVUnsupportedType
+        type: errs.Code
+        value: "0x00_03_16_03"
+      - name: CodeTLVDepthExceeded
+        type: errs.Code
+        value: "0x00_03_16_04"
+      - name: CodeTLVSizeExceeded
+        type: errs.Code
+        value: "0x00_03_16_05"
+      - name: CodeTLVTruncated
+        type: errs.Code
+        value: "0x00_03_16_06"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/tlv
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: UnsupportedType
+        type: "*errs.Error"
+      - name: DepthExceeded
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"
+      - name: Truncated
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/tlv
+    types:
+      - name: Tag
+        underlying: uint8
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"tlv\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_16_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_16_02"
+      - name: CodeUnsupportedType
+        type: errs.Code
+        value: "0x00_03_16_03"
+      - name: CodeDepthExceeded
+        type: errs.Code
+        value: "0x00_03_16_04"
+      - name: CodeSizeExceeded
+        type: errs.Code
+        value: "0x00_03_16_05"
+      - name: CodeTruncated
+        type: errs.Code
+        value: "0x00_03_16_06"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/tlv
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: UnsupportedType
+        type: "*errs.Error"
+      - name: DepthExceeded
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"
+      - name: Truncated
+        type: "*errs.Error"

@@ -43,6 +43,7 @@ go_test(
     name = "lifecycle_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "harness_external_test.go",
         "nosleep_external_test.go",
         "run_external_test.go",

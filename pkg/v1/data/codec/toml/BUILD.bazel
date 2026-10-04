@@ -22,10 +22,15 @@ alias(
 
 go_test(
     name = "toml_test",
-    srcs = ["toml_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "toml_external_test.go",
+    ],
     deps = [
         ":toml",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/toml",
         "//pkg/v1/app/config",
         "//pkg/v1/errs",
     ],

@@ -35,6 +35,7 @@ go_test(
         "accessors_bench_test.go",
         "accessors_external_test.go",
         "accessors_internal_test.go",
+        "api_gen_test.go",
         "code_bench_test.go",
         "code_external_test.go",
         "code_internal_test.go",

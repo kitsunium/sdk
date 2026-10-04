@@ -1,0 +1,1424 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/docstore
+packages:
+  - constants:
+      - name: CodeDocumentNotFound
+        type: errs.Code
+        value: "0x00_03_50_01"
+      - name: CodeDocumentExists
+        type: errs.Code
+        value: "0x00_03_50_02"
+      - name: CodeUniqueKeyTaken
+        type: errs.Code
+        value: "0x00_03_50_03"
+      - name: CodeDocumentKeyEmpty
+        type: errs.Code
+        value: "0x00_03_50_04"
+      - name: CodeDocumentKeyChanged
+        type: errs.Code
+        value: "0x00_03_50_05"
+      - name: CodeIndexUnknown
+        type: errs.Code
+        value: "0x00_03_50_06"
+      - name: CodeIndexNotUnique
+        type: errs.Code
+        value: "0x00_03_50_07"
+      - name: CodeDocumentUndecodable
+        type: errs.Code
+        value: "0x00_03_50_08"
+      - name: CodeDocumentUnencodable
+        type: errs.Code
+        value: "0x00_03_50_09"
+      - name: CodePersistFailed
+        type: errs.Code
+        value: "0x00_03_50_0A"
+      - name: CodeLoadFailed
+        type: errs.Code
+        value: "0x00_03_50_0B"
+      - name: CodeIndexBroken
+        type: errs.Code
+        value: "0x00_03_50_0C"
+      - name: CodeStoreClosed
+        type: errs.Code
+        value: "0x00_03_50_0D"
+      - name: CodeStoreMisconfigured
+        type: errs.Code
+        value: "0x00_03_50_0E"
+      - name: CodeWriteUnconfirmed
+        type: errs.Code
+        value: "0x00_03_50_0F"
+      - name: CodeStatementFailed
+        type: errs.Code
+        value: "0x00_03_50_10"
+      - name: CodeKeyTooLong
+        type: errs.Code
+        value: "0x00_03_50_11"
+      - name: CodeVersionsNotKept
+        type: errs.Code
+        value: "0x00_03_50_12"
+      - name: CodeVersionNotFound
+        type: errs.Code
+        value: "0x00_03_50_13"
+      - name: CodeVersionsRewriteRefused
+        type: errs.Code
+        value: "0x00_03_50_14"
+    functions:
+      - in:
+          - name: name
+            type: string
+          - name: key
+            type: func(T) string
+        name: Unique
+        out:
+          - type: IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: keys
+            type: func(T) []string
+        name: Index
+        out:
+          - type: IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      json: encoding/json
+    path: github.com/kitsunium/sdk/internal/core/data/docstore
+    ports:
+      - doc: |-
+          Announcer is the pair of hooks a document store answers: both engines
+          implement it exactly as it is. A registered function is told the key of
+          every document a write stored or a deletion removed once that write stands —
+          durable for the file engine, committed for the SQL engine, and never for a
+          write rolled back — on the writer's goroutine and outside every lock of the
+          store.
+        methods:
+          - doc: |-
+              OnWrite registers fn to be told the key of every document Put, Insert,
+              Replace or Update stored, and returns the function that removes the
+              registration. A nil fn registers nothing. A panic in fn reaches the
+              writer after its write stood.
+            in:
+              - name: fn
+                type: func(key string)
+            name: OnWrite
+            out:
+              - name: remove
+                type: func()
+          - doc: |-
+              OnDelete registers fn to be told the key of every document Delete
+              removed, on the same terms as OnWrite.
+            in:
+              - name: fn
+                type: func(key string)
+            name: OnDelete
+            out:
+              - name: remove
+                type: func()
+        name: Announcer
+      - doc: |-
+          Collection is a typed, keyed collection of JSON documents with secondary
+          indexes whose calls take no context — the port the file engine,
+          internal/service/data/docstore.Store, implements. Every read returns a
+          copy and every write stores one: a document is kept as its JSON encoding,
+          so what a caller holds never aliases what the store holds. No refusal
+          quotes a key.
+
+          The versions of a document are [Versioned], its sibling; the file engine's
+          Stats, Fold and Close are the engine's own, because a double of the port has
+          no files to fold.
+        embeds:
+          - Announcer
+        methods:
+          - doc: Get returns the document stored under key, or DOCUMENT_NOT_FOUND.
+            in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: T
+              - type: error
+          - doc: List returns every document, in key order.
+            name: List
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: |-
+              Filter returns the documents keep accepts, in key order. It decodes
+              every document; an index is the way not to.
+            in:
+              - name: keep
+                type: func(T) bool
+            name: Filter
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: |-
+              Entries returns up to limit stored documents as JSON, in key order —
+              every one when limit is not positive — each a copy the caller owns.
+            in:
+              - name: limit
+                type: int
+            name: Entries
+            out:
+              - type: "[]EntryValue"
+              - type: error
+          - doc: |-
+              Lookup returns the document holding key in the unique index named
+              index: DOCUMENT_NOT_FOUND when none does, INDEX_UNKNOWN for an index the
+              store never declared, INDEX_NOT_UNIQUE for one that may file several.
+            in:
+              - name: index
+              - name: key
+                type: string
+            name: Lookup
+            out:
+              - type: T
+              - type: error
+          - doc: |-
+              Find returns the documents filed under key in the index named index, in
+              store-key order. It reads any index, unique or not, and no document is
+              an empty slice, not an error.
+            in:
+              - name: index
+              - name: key
+                type: string
+            name: Find
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: Put stores v under its key, creating it or replacing whatever was there.
+            in:
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+          - doc: |-
+              Insert stores v, which must be new: DOCUMENT_EXISTS when its key is
+              taken.
+            in:
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+          - doc: |-
+              Replace stores v over the document already under its key:
+              DOCUMENT_NOT_FOUND when there is none, so a document deleted meanwhile
+              is never brought back.
+            in:
+              - name: v
+                type: T
+            name: Replace
+            out:
+              - type: error
+          - doc: |-
+              Update applies fn to a copy of the document stored under key and stores
+              the result, atomically with respect to every other write, and returns
+              it. An error from fn is returned as it is and changes nothing, and so
+              does a result whose key is not key (DOCUMENT_KEY_CHANGED). fn may read
+              the store and must not write to it.
+            in:
+              - name: key
+                type: string
+              - name: fn
+                type: func(*T) error
+            name: Update
+            out:
+              - type: T
+              - type: error
+          - doc: |-
+              Delete removes the document stored under key, or returns
+              DOCUMENT_NOT_FOUND. Its versions go with it.
+            in:
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+        name: Collection
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          Versioned is a document's versions, on a store whose calls take no context:
+          the sibling of [Collection] the file engine implements beside it (ADR 0143).
+          A store that keeps no versions answers every call with VERSIONS_NOT_KEPT,
+          except the Stamped writes, which then store as their plain forms do.
+        methods:
+          - doc: PutStamped is Put, with what the write says about the version it makes.
+            in:
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: PutStamped
+            out:
+              - type: error
+          - doc: |-
+              InsertStamped is Insert, with what the write says about the version it
+              makes: version 1, whatever stamp.InPlace says.
+            in:
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: InsertStamped
+            out:
+              - type: error
+          - doc: |-
+              ReplaceStamped is Replace, with what the write says about the version it
+              makes.
+            in:
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: ReplaceStamped
+            out:
+              - type: error
+          - doc: |-
+              UpdateStamped is Update, with what the write says about the version it
+              makes.
+            in:
+              - name: key
+                type: string
+              - name: stamp
+                type: StampValue
+              - name: fn
+                type: func(*T) error
+            name: UpdateStamped
+            out:
+              - type: T
+              - type: error
+          - doc: |-
+              Versions returns the versions kept of the document stored under key,
+              newest first: the current one — the document as it is now — then the
+              former ones. DOCUMENT_NOT_FOUND when no document is stored under key.
+            in:
+              - name: key
+                type: string
+            name: Versions
+            out:
+              - type: "[]VersionValue"
+              - type: error
+          - doc: |-
+              Version returns the version numbered number of the document stored
+              under key: VERSION_NOT_FOUND when the document keeps none of that
+              number — never made, or pruned.
+            in:
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+            name: Version
+            out:
+              - type: VersionValue
+              - type: error
+          - doc: |-
+              RewriteVersions rewrites the former versions of the document stored
+              under key in one durable write: fn receives copies of them, newest
+              first, and returns those to keep, in the same order. It may drop a
+              version and change what one holds and what its writer said, and nothing
+              else — VERSIONS_REWRITE_REFUSED otherwise. An error from fn is returned
+              as it is and changes nothing. It calls no hook: the document did not
+              change.
+            in:
+              - name: key
+                type: string
+              - name: fn
+                type: func(former []VersionValue) ([]VersionValue, error)
+            name: RewriteVersions
+            out:
+              - type: error
+        name: Versioned
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          CollectionContext is [Collection] with a context on every call — the port
+          the SQL engine, internal/service/data/docstore.SQLStore, implements. A call
+          runs on the transaction its context carries for the store's database, and on
+          the pool otherwise; a write is atomic on its own either way, and its hooks
+          run once the transaction that holds it has committed (ADR 0139). Every
+          method answers as its Collection counterpart does, and may also fail as a
+          database fails.
+
+          The SQL engine's Count and Reindex are the engine's own: a double of the
+          port has no tables to count or to file again.
+        embeds:
+          - Announcer
+        methods:
+          - doc: Get is Collection.Get under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: T
+              - type: error
+          - doc: List is Collection.List under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+            name: List
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: Filter is Collection.Filter under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: keep
+                type: func(T) bool
+            name: Filter
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: Entries is Collection.Entries under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: limit
+                type: int
+            name: Entries
+            out:
+              - type: "[]EntryValue"
+              - type: error
+          - doc: Lookup is Collection.Lookup under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Lookup
+            out:
+              - type: T
+              - type: error
+          - doc: Find is Collection.Find under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Find
+            out:
+              - type: "[]T"
+              - type: error
+          - doc: Put is Collection.Put under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+          - doc: Insert is Collection.Insert under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+          - doc: Replace is Collection.Replace under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Replace
+            out:
+              - type: error
+          - doc: |-
+              Update is Collection.Update under ctx: fn runs inside the write's
+              transaction, and must not write the document it updates.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: fn
+                type: func(*T) error
+            name: Update
+            out:
+              - type: T
+              - type: error
+          - doc: Delete is Collection.Delete under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+        name: CollectionContext
+        typeParams:
+          - constraint: any
+            name: T
+      - doc: |-
+          VersionedContext is [Versioned] with a context on every call: the sibling of
+          [CollectionContext] the SQL engine implements beside it. A write's version
+          rows travel in that write's own transaction.
+        methods:
+          - doc: PutStamped is Versioned.PutStamped under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: PutStamped
+            out:
+              - type: error
+          - doc: InsertStamped is Versioned.InsertStamped under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: InsertStamped
+            out:
+              - type: error
+          - doc: ReplaceStamped is Versioned.ReplaceStamped under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: StampValue
+            name: ReplaceStamped
+            out:
+              - type: error
+          - doc: UpdateStamped is Versioned.UpdateStamped under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: stamp
+                type: StampValue
+              - name: fn
+                type: func(*T) error
+            name: UpdateStamped
+            out:
+              - type: T
+              - type: error
+          - doc: Versions is Versioned.Versions under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Versions
+            out:
+              - type: "[]VersionValue"
+              - type: error
+          - doc: Version is Versioned.Version under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+            name: Version
+            out:
+              - type: VersionValue
+              - type: error
+          - doc: RewriteVersions is Versioned.RewriteVersions under ctx.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: fn
+                type: func(former []VersionValue) ([]VersionValue, error)
+            name: RewriteVersions
+            out:
+              - type: error
+        name: VersionedContext
+        typeParams:
+          - constraint: any
+            name: T
+    types:
+      - name: IndexSpec
+        struct:
+          fields:
+            - name: Keys
+              type: func(T) []string
+            - name: Name
+              type: string
+            - name: Unique
+              type: bool
+        typeParams:
+          - constraint: any
+            name: T
+      - name: EntryValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: JSON
+              type: json.RawMessage
+      - name: VersionValue
+        struct:
+          fields:
+            - name: At
+              type: time.Time
+            - name: Meta
+              type: map[string]string
+            - name: JSON
+              type: json.RawMessage
+            - name: Number
+              type: uint64
+      - name: StampValue
+        struct:
+          fields:
+            - name: Meta
+              type: map[string]string
+            - name: InPlace
+              type: bool
+    variables:
+      - name: DocumentNotFound
+        type: "*errs.Error"
+      - name: DocumentExists
+        type: "*errs.Error"
+      - name: UniqueKeyTaken
+        type: "*errs.Error"
+      - name: DocumentKeyEmpty
+        type: "*errs.Error"
+      - name: DocumentKeyChanged
+        type: "*errs.Error"
+      - name: IndexUnknown
+        type: "*errs.Error"
+      - name: IndexNotUnique
+        type: "*errs.Error"
+      - name: DocumentUndecodable
+        type: "*errs.Error"
+      - name: DocumentUnencodable
+        type: "*errs.Error"
+      - name: PersistFailed
+        type: "*errs.Error"
+      - name: WriteUnconfirmed
+        type: "*errs.Error"
+      - name: LoadFailed
+        type: "*errs.Error"
+      - name: IndexBroken
+        type: "*errs.Error"
+      - name: StoreClosed
+        type: "*errs.Error"
+      - name: StoreMisconfigured
+        type: "*errs.Error"
+      - name: StatementFailed
+        type: "*errs.Error"
+      - name: KeyTooLong
+        type: "*errs.Error"
+      - name: VersionsNotKept
+        type: "*errs.Error"
+      - name: VersionNotFound
+        type: "*errs.Error"
+      - name: VersionsRewriteRefused
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultFoldAt
+        type: int
+        value: "1024"
+      - name: MaxSQLTableLen
+        type: int
+        value: "58"
+      - name: MaxSQLKeyLen
+        type: int
+        value: "1024"
+      - name: MaxSQLIndexNameLen
+        type: int
+        value: "64"
+    functions:
+      - in:
+          - name: cfg
+            type: Config[T]
+          - name: indexes
+            type: coredocstore.IndexSpec[T]
+        name: Open
+        out:
+          - type: "*Store[T]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+      - in:
+          - name: dialect
+            type: coresql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLVersionsMigration
+        out:
+          - type: coresql.MigrationValue
+          - type: error
+      - in:
+          - name: cfg
+            type: SQLConfig[T]
+          - name: indexes
+            type: coredocstore.IndexSpec[T]
+        name: OpenSQL
+        out:
+          - type: "*SQLStore[T]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
+      coresql: github.com/kitsunium/sdk/internal/core/data/sql
+      corevfs: github.com/kitsunium/sdk/internal/core/data/vfs
+    path: github.com/kitsunium/sdk/internal/service/data/docstore
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Key
+              type: func(T) string
+            - name: FS
+              type: corevfs.FullFS
+            - name: Clock
+              type: clock.Clock
+            - name: Held
+              type: func(key string) bool
+            - name: Path
+              type: string
+            - name: FoldAt
+              type: int
+            - name: Versions
+              type: int
+        typeParams:
+          - constraint: any
+            name: T
+      - methods:
+          - in:
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - name: List
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: keep
+                type: func(T) bool
+            name: Filter
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: limit
+                type: int
+            name: Entries
+            out:
+              - type: "[]coredocstore.EntryValue"
+              - type: error
+            recv: pointer
+          - in:
+              - name: index
+              - name: key
+                type: string
+            name: Lookup
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: index
+              - name: key
+                type: string
+            name: Find
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - name: Stats
+            out:
+              - type: StatsValue
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(key string)
+            name: OnWrite
+            out:
+              - name: remove
+                type: func()
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(key string)
+            name: OnDelete
+            out:
+              - name: remove
+                type: func()
+            recv: pointer
+          - name: Fold
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: PutStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: InsertStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: ReplaceStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+              - name: stamp
+                type: coredocstore.StampValue
+              - name: fn
+                type: func(*T) error
+            name: UpdateStamped
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+            name: Versions
+            out:
+              - type: "[]coredocstore.VersionValue"
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+            name: Version
+            out:
+              - type: coredocstore.VersionValue
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+              - name: fn
+                type: func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+            name: RewriteVersions
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Replace
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+              - name: fn
+                type: func(*T) error
+            name: Update
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+            recv: pointer
+        name: Store
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - name: StatsValue
+        struct:
+          fields:
+            - name: FoldError
+              type: error
+            - name: Documents
+              type: int
+            - name: Pending
+              type: int
+            - name: Folds
+              type: int
+      - name: SQLConfig
+        struct:
+          fields:
+            - name: Key
+              type: func(T) string
+            - name: Clock
+              type: clock.Clock
+            - name: Held
+              type: func(ctx context.Context, key string) bool
+            - name: Transactor
+              type: coresql.Transactor
+            - name: IndexKey
+              type: func(index, key string) []byte
+            - name: Table
+              type: string
+            - name: Dialect
+              type: coresql.Dialect
+            - name: Versions
+              type: int
+        typeParams:
+          - constraint: any
+            name: T
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Reindex
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: List
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: keep
+                type: func(T) bool
+            name: Filter
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: limit
+                type: int
+            name: Entries
+            out:
+              - name: entries
+                type: "[]coredocstore.EntryValue"
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Count
+            out:
+              - type: int
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Lookup
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Find
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(key string)
+            name: OnWrite
+            out:
+              - name: remove
+                type: func()
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(key string)
+            name: OnDelete
+            out:
+              - name: remove
+                type: func()
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: PutStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: InsertStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+              - name: stamp
+                type: coredocstore.StampValue
+            name: ReplaceStamped
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Versions
+            out:
+              - name: versions
+                type: "[]coredocstore.VersionValue"
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+            name: Version
+            out:
+              - type: coredocstore.VersionValue
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: fn
+                type: func(former []coredocstore.VersionValue) ([]coredocstore.VersionValue, error)
+            name: RewriteVersions
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Replace
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: fn
+                type: func(*T) error
+            name: Update
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: stamp
+                type: coredocstore.StampValue
+              - name: fn
+                type: func(*T) error
+            name: UpdateStamped
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+            recv: pointer
+        name: SQLStore
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+  - aliases:
+      - name: Store
+        target: svcdocstore.Store[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Config
+        target: svcdocstore.Config[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Version
+        target: coredocstore.VersionValue
+      - name: Stamp
+        target: coredocstore.StampValue
+      - name: IndexSpec
+        target: coredocstore.IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Entry
+        target: coredocstore.EntryValue
+      - name: Stats
+        target: svcdocstore.StatsValue
+      - name: SQLStore
+        target: svcdocstore.SQLStore[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: SQLConfig
+        target: svcdocstore.SQLConfig[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Collection
+        target: coredocstore.Collection[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Versioned
+        target: coredocstore.Versioned[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: CollectionContext
+        target: coredocstore.CollectionContext[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: VersionedContext
+        target: coredocstore.VersionedContext[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Announcer
+        target: coredocstore.Announcer
+    constants:
+      - name: DefaultFoldAt
+        type: int
+        value: "1024"
+      - name: MaxSQLTableLen
+        type: int
+        value: "58"
+      - name: MaxSQLKeyLen
+        type: int
+        value: "1024"
+      - name: MaxSQLIndexNameLen
+        type: int
+        value: "64"
+      - name: CodeDocumentNotFound
+        type: errs.Code
+        value: "0x00_03_50_01"
+      - name: CodeDocumentExists
+        type: errs.Code
+        value: "0x00_03_50_02"
+      - name: CodeUniqueKeyTaken
+        type: errs.Code
+        value: "0x00_03_50_03"
+      - name: CodeDocumentKeyEmpty
+        type: errs.Code
+        value: "0x00_03_50_04"
+      - name: CodeDocumentKeyChanged
+        type: errs.Code
+        value: "0x00_03_50_05"
+      - name: CodeIndexUnknown
+        type: errs.Code
+        value: "0x00_03_50_06"
+      - name: CodeIndexNotUnique
+        type: errs.Code
+        value: "0x00_03_50_07"
+      - name: CodeDocumentUndecodable
+        type: errs.Code
+        value: "0x00_03_50_08"
+      - name: CodeDocumentUnencodable
+        type: errs.Code
+        value: "0x00_03_50_09"
+      - name: CodePersistFailed
+        type: errs.Code
+        value: "0x00_03_50_0A"
+      - name: CodeLoadFailed
+        type: errs.Code
+        value: "0x00_03_50_0B"
+      - name: CodeIndexBroken
+        type: errs.Code
+        value: "0x00_03_50_0C"
+      - name: CodeStoreClosed
+        type: errs.Code
+        value: "0x00_03_50_0D"
+      - name: CodeStoreMisconfigured
+        type: errs.Code
+        value: "0x00_03_50_0E"
+      - name: CodeWriteUnconfirmed
+        type: errs.Code
+        value: "0x00_03_50_0F"
+      - name: CodeStatementFailed
+        type: errs.Code
+        value: "0x00_03_50_10"
+      - name: CodeKeyTooLong
+        type: errs.Code
+        value: "0x00_03_50_11"
+      - name: CodeVersionsNotKept
+        type: errs.Code
+        value: "0x00_03_50_12"
+      - name: CodeVersionNotFound
+        type: errs.Code
+        value: "0x00_03_50_13"
+      - name: CodeVersionsRewriteRefused
+        type: errs.Code
+        value: "0x00_03_50_14"
+    functions:
+      - in:
+          - name: cfg
+            type: Config[T]
+          - name: indexes
+            type: IndexSpec[T]
+        name: Open
+        out:
+          - type: "*Store[T]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: cfg
+            type: SQLConfig[T]
+          - name: indexes
+            type: IndexSpec[T]
+        name: OpenSQL
+        out:
+          - type: "*SQLStore[T]"
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: dialect
+            type: sql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLMigration
+        out:
+          - type: sql.Migration
+          - type: error
+      - in:
+          - name: dialect
+            type: sql.Dialect
+          - name: table
+            type: string
+          - name: version
+            type: uint64
+        name: SQLVersionsMigration
+        out:
+          - type: sql.Migration
+          - type: error
+      - in:
+          - name: name
+            type: string
+          - name: key
+            type: func(T) string
+        name: Unique
+        out:
+          - type: IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: keys
+            type: func(T) []string
+        name: Index
+        out:
+          - type: IndexSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      coredocstore: github.com/kitsunium/sdk/internal/core/data/docstore
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+      svcdocstore: github.com/kitsunium/sdk/internal/service/data/docstore
+    path: github.com/kitsunium/sdk/pkg/v1/data/docstore
+    variables:
+      - name: DocumentNotFound
+        type: "*errs.Error"
+      - name: DocumentExists
+        type: "*errs.Error"
+      - name: UniqueKeyTaken
+        type: "*errs.Error"
+      - name: DocumentKeyEmpty
+        type: "*errs.Error"
+      - name: DocumentKeyChanged
+        type: "*errs.Error"
+      - name: IndexUnknown
+        type: "*errs.Error"
+      - name: IndexNotUnique
+        type: "*errs.Error"
+      - name: DocumentUndecodable
+        type: "*errs.Error"
+      - name: DocumentUnencodable
+        type: "*errs.Error"
+      - name: PersistFailed
+        type: "*errs.Error"
+      - name: LoadFailed
+        type: "*errs.Error"
+      - name: IndexBroken
+        type: "*errs.Error"
+      - name: StoreClosed
+        type: "*errs.Error"
+      - name: StoreMisconfigured
+        type: "*errs.Error"
+      - name: WriteUnconfirmed
+        type: "*errs.Error"
+      - name: StatementFailed
+        type: "*errs.Error"
+      - name: KeyTooLong
+        type: "*errs.Error"
+      - name: VersionsNotKept
+        type: "*errs.Error"
+      - name: VersionNotFound
+        type: "*errs.Error"
+      - name: VersionsRewriteRefused
+        type: "*errs.Error"

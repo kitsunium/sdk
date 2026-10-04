@@ -6,6 +6,7 @@ go_library(
     name = "ipc",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "ipc.go",
     ],
@@ -28,7 +29,10 @@ alias(
 
 go_test(
     name = "ipc_test",
-    srcs = ["ipc_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "ipc_external_test.go",
+    ],
     deps = [
         ":ipc",
         "//internal/kernel/errs",

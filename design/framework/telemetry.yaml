@@ -1,0 +1,247 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/telemetry
+packages:
+  - constants:
+      - name: CodeMisconfigured
+        type: errs.Code
+        value: "0x00_04_03_01"
+      - name: CodeRunning
+        type: errs.Code
+        value: "0x00_04_03_02"
+      - name: KindSpan
+        type: Kind
+        value: "1"
+      - name: KindPhase
+        type: Kind
+        value: "2"
+      - name: OpNone
+        type: Op
+        value: "0"
+      - name: OpRequest
+        type: Op
+        value: "1"
+      - name: OpCall
+        type: Op
+        value: "2"
+      - name: OpRead
+        type: Op
+        value: "3"
+      - name: OpWrite
+        type: Op
+        value: "4"
+      - name: OpPublish
+        type: Op
+        value: "5"
+      - name: OpDeliver
+        type: Op
+        value: "6"
+      - name: OpTransition
+        type: Op
+        value: "7"
+      - name: OpRun
+        type: Op
+        value: "8"
+      - name: OpAuth
+        type: Op
+        value: "9"
+      - name: OpSend
+        type: Op
+        value: "10"
+      - name: OpDeliverMail
+        type: Op
+        value: "11"
+      - name: OpSecret
+        type: Op
+        value: "12"
+      - name: OpDispatch
+        type: Op
+        value: "13"
+      - name: OpAsk
+        type: Op
+        value: "14"
+      - name: OpHandle
+        type: Op
+        value: "15"
+      - name: OpConnect
+        type: Op
+        value: "16"
+      - name: OpCLI
+        type: Op
+        value: "17"
+      - name: OpStarting
+        type: Op
+        value: "18"
+      - name: OpServing
+        type: Op
+        value: "19"
+      - name: OpDraining
+        type: Op
+        value: "20"
+      - name: OpStopped
+        type: Op
+        value: "21"
+      - name: OpFailed
+        type: Op
+        value: "22"
+      - name: OutcomeOK
+        type: Outcome
+        value: "1"
+      - name: OutcomeError
+        type: Outcome
+        value: "2"
+      - name: RecordSize
+        type: int
+        value: "64"
+      - name: Protocol
+        type: string
+        value: "\"kit-telemetry/v1\""
+      - name: MinBuffer
+        type: int
+        value: "64"
+      - name: MaxBuffer
+        type: int
+        value: 1 << 20
+      - name: DefaultBuffer
+        type: int
+        value: "4096"
+    functions:
+      - in:
+          - name: cfg
+            type: "*ExporterConfig"
+        name: NewExporter
+        out:
+          - type: "*Exporter"
+          - type: error
+      - in:
+          - name: name
+            type: string
+        name: OpOf
+        out:
+          - type: Op
+      - in:
+          - name: b
+            type: "[]byte"
+        name: Decode
+        out:
+          - name: e
+            type: Event
+          - name: seq
+            type: uint64
+          - name: ok
+            type: bool
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/telemetry
+    types:
+      - name: Kind
+        underlying: uint8
+      - name: Op
+        underlying: uint8
+      - name: Outcome
+        underlying: uint8
+      - name: NodeRef
+        underlying: uint32
+      - name: Event
+        struct:
+          fields:
+            - name: Kind
+              type: Kind
+            - name: Op
+              type: Op
+            - name: Outcome
+              type: Outcome
+            - name: Node
+            - name: From
+              type: NodeRef
+            - name: Code
+              type: uint32
+            - name: Start
+            - name: Duration
+              type: int64
+            - name: TraceID
+              type: "[16]byte"
+            - name: SpanID
+              type: "[8]byte"
+      - name: HelloValue
+        struct:
+          fields:
+            - name: Product
+            - name: Binary
+            - name: Role
+              type: string
+            - name: Revision
+              type: string
+            - name: Digest
+              type: string
+            - name: Nodes
+              type: "[]string"
+      - name: ExporterConfig
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: AllowUIDs
+            - name: AllowGIDs
+              type: "[]int"
+            - name: Buffer
+              type: int
+            - name: Hello
+              type: HelloValue
+      - methods:
+          - in:
+              - name: id
+                type: string
+            name: Ref
+            out:
+              - type: NodeRef
+            recv: pointer
+          - name: Instance
+            out:
+              - type: string
+            recv: pointer
+          - name: Dropped
+            out:
+              - type: uint64
+            recv: pointer
+          - name: Sent
+            out:
+              - type: uint64
+            recv: pointer
+          - in:
+              - name: ev
+                type: "*Event"
+            name: Emit
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Start
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Stop
+            out:
+              - type: error
+            recv: pointer
+        name: Exporter
+        struct:
+          unexported: true
+      - interface:
+          methods:
+            - in:
+                - name: e
+                  type: "*Event"
+              name: Emit
+        name: Emitter
+    variables:
+      - name: Misconfigured
+        type: "*errs.Error"
+      - name: Running
+        type: "*errs.Error"
+      - name: OpNames
+        type: "[23]string"
+      - name: Nop
+        type: Emitter

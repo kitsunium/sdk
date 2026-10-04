@@ -35,51 +35,8 @@
 package secret
 
 import (
-	"context"
 	"time"
 )
-
-// Store keeps named secrets, each as a sequence of numbered versions.
-// Implementations MUST be safe for concurrent use.
-//
-// Versions are numbered from 1, strictly increasing, and a number is never
-// reused — not after a prune, not after a restart — because a version number
-// is how a sealed box or a signature names the key that made it, and a reused
-// number would hand an old box to a new key.
-//
-// The method set is five operations wide and is FROZEN: pkg/v1/security/secret aliases
-// this interface, so under ADR 0039 a sixth method would break every
-// downstream implementation at compile time. A new capability — deleting a
-// secret outright, a conditional put — arrives as a SIBLING interface reached
-// by type assertion, never as a widened Store.
-//
-// Every method validates its name through [ValidateName] first and refuses a
-// malformed one with [InvalidName] before touching the backend.
-//
-// IFACE-PLUGIN: the concrete stores stay unexported behind their constructors
-// in internal/service/security/secret.
-type Store interface {
-	// Get returns the CURRENT version of name — the highest number kept. It
-	// returns [NotFound] for a name that holds no version.
-	Get(ctx context.Context, name string) (current VersionValue, err error)
-	// Versions returns every kept version of name, NEWEST FIRST, so the head
-	// of the slice is what Get returns. It returns [NotFound] for a name that
-	// holds no version, rather than an empty slice a caller might iterate
-	// over as if it had found a secret with no history.
-	Versions(ctx context.Context, name string) (versions []VersionValue, err error)
-	// Put stores value as a new version of name — one past the highest ever
-	// kept, or 1 for a new name — and returns it. It refuses an empty value
-	// with [EmptyValue], and a store that only reads refuses every Put with
-	// [ReadOnly].
-	Put(ctx context.Context, name string, value Value) (created VersionValue, err error)
-	// Prune drops every version of name except the newest keep. keep below 1
-	// is refused with [InvalidKeep]: pruning never deletes a secret. Pruning a
-	// name that already holds no more than keep versions is not an error.
-	Prune(ctx context.Context, name string, keep int) error
-	// Names lists every name holding at least one version, sorted. It never
-	// returns a value: a caller that wants one asks for it by name.
-	Names(ctx context.Context) (names []string, err error)
-}
 
 // VersionValue is one version of one secret: which secret, which version, the
 // secret itself, and when the store recorded it.

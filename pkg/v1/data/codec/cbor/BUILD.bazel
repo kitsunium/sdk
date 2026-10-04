@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "cbor_test",
-    srcs = ["cbor_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "cbor_external_test.go",
+    ],
     deps = [
         ":cbor",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

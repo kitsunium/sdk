@@ -22,9 +22,15 @@ alias(
 
 go_test(
     name = "selfupdate_test",
-    srcs = ["selfupdate_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "selfupdate_external_test.go",
+    ],
     deps = [
         ":selfupdate",
+        "//framework/internal/core/selfupdate",
+        "//framework/internal/service/selfupdate",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

@@ -39,6 +39,7 @@ alias(
 go_test(
     name = "tlv_test",
     srcs = [
+        "api_gen_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",
         "codec_internal_test.go",

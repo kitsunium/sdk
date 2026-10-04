@@ -1,0 +1,21 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/db/writer/clickhouse
+packages:
+  - constants:
+      - name: CodeCHClientInitFailed
+        type: errs.Code
+        value: "0x00_03_21_01"
+      - name: CodeCHInsertFailed
+        type: errs.Code
+        value: "0x00_03_21_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/third-party/db/writer/clickhouse
+    variables:
+      - name: Writer
+        type: writer.Factory
+      - name: ClientInitFailed
+        type: "*errs.Error"
+      - name: InsertFailed
+        type: "*errs.Error"

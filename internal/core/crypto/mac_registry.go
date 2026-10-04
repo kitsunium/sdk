@@ -1,3 +1,5 @@
+// Package crypto — the MAC port: keyed, detached message authentication.
+//
 // Package crypto — the process-wide MAC registry + MACTag / MACVerify dispatch.
 package crypto
 

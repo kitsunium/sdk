@@ -40,6 +40,7 @@ go_test(
     size = "small",
     srcs = [
         "abac_external_test.go",
+        "api_gen_test.go",
         "authz_bench_test.go",
         "check_external_test.go",
         "combine_external_test.go",

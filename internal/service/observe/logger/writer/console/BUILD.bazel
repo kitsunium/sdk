@@ -32,6 +32,7 @@ alias(
 go_test(
     name = "console_test",
     srcs = [
+        "api_gen_test.go",
         "console_alloc_external_test.go",
         "console_bench_test.go",
         "console_external_test.go",

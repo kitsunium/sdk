@@ -8,6 +8,7 @@ go_library(
         "claims.go",
         "claims_with.go",
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "token.go",
     ],
@@ -30,7 +31,10 @@ alias(
 
 go_test(
     name = "token_test",
-    srcs = ["token_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "token_external_test.go",
+    ],
     deps = [
         ":token",
         "//internal/kernel/errs",

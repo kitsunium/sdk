@@ -1,0 +1,45 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/msgpack
+packages:
+  - constants:
+      - name: CodeMsgPackMarshalFailed
+        type: errs.Code
+        value: "0x00_03_07_01"
+      - name: CodeMsgPackUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_07_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/msgpack
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/msgpack
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"msgpack\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_07_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_07_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/msgpack
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"

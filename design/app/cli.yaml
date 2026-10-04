@@ -1,0 +1,239 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/cli
+packages:
+  - constants:
+      - name: CodeInvalidCommand
+        type: errs.Code
+        value: "0x00_02_20_01"
+      - name: CodeAmbiguousCommand
+        type: errs.Code
+        value: "0x00_02_20_02"
+      - name: CodeDuplicateCommand
+        type: errs.Code
+        value: "0x00_02_20_03"
+      - name: CodeReservedFlag
+        type: errs.Code
+        value: "0x00_02_20_04"
+      - name: CodeUnknownCommand
+        type: errs.Code
+        value: "0x00_03_3E_01"
+      - name: CodeMissingCommand
+        type: errs.Code
+        value: "0x00_03_3E_02"
+      - name: CodeInvalidFlags
+        type: errs.Code
+        value: "0x00_03_3E_03"
+      - name: CodeCommandPanicked
+        type: errs.Code
+        value: "0x00_03_3E_04"
+      - name: CodeHelpWriteFailed
+        type: errs.Code
+        value: "0x00_03_3E_05"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/cli
+    ports:
+      - doc: |-
+          Executor resolves an argument vector against a command tree and runs the
+          command it names.
+
+          IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
+          internal/service/app/cli.
+        methods:
+          - doc: |-
+              Execute resolves args against the tree and runs the command it names.
+              args is the vector WITHOUT the program name — os.Args[1:] at a call
+              site — because a library that reads os.Args itself cannot be tested and
+              cannot be embedded.
+
+              It returns nil when the command succeeded AND when help was requested,
+              because asking for help is not a failure. Every other outcome is an
+              *errs.Error whose exit status the caller reads with errs.ExitCodeOf.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: args
+                type: "[]string"
+            name: Execute
+            out:
+              - type: error
+        name: Executor
+    types:
+      - name: Action
+        underlying: func(ctx context.Context, invocation InvocationValue) error
+      - name: Binder
+        underlying: func(flags *flag.FlagSet)
+      - methods:
+          - name: IsGroup
+            out:
+              - type: bool
+            recv: value
+        name: CommandValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Summary
+              type: string
+            - name: Description
+              type: string
+            - name: Flags
+              type: Binder
+            - name: Run
+              type: Action
+            - name: Commands
+              type: "[]CommandValue"
+      - methods:
+          - name: Leaf
+            out:
+              - type: "*flag.FlagSet"
+            recv: value
+        name: InvocationValue
+        struct:
+          fields:
+            - name: Path
+              type: "[]string"
+            - name: Args
+              type: "[]string"
+            - name: Flags
+              type: "[]*flag.FlagSet"
+            - name: Output
+              type: io.Writer
+    variables:
+      - name: InvalidCommand
+        type: "*errs.Error"
+      - name: AmbiguousCommand
+        type: "*errs.Error"
+      - name: DuplicateCommand
+        type: "*errs.Error"
+      - name: ReservedFlag
+        type: "*errs.Error"
+      - name: UnknownCommand
+        type: "*errs.Error"
+      - name: MissingCommand
+        type: "*errs.Error"
+      - name: InvalidFlags
+        type: "*errs.Error"
+      - name: CommandPanicked
+        type: "*errs.Error"
+      - name: HelpWriteFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: Config
+          - name: root
+            type: corecli.CommandValue
+        name: New
+        out:
+          - name: runner
+            type: corecli.Executor
+          - name: err
+            type: error
+      - in:
+          - name: invocation
+            type: corecli.InvocationValue
+        name: FlagSource
+        out:
+          - type: "*FlagSourceValue"
+    imports:
+      corecli: github.com/kitsunium/sdk/internal/core/app/cli
+    path: github.com/kitsunium/sdk/internal/service/app/cli
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Output
+              type: io.Writer
+            - name: ErrOutput
+              type: io.Writer
+      - methods:
+          - name: Load
+            out:
+              - name: values
+                type: map[string]any
+              - name: err
+                type: error
+            recv: pointer
+        name: FlagSourceValue
+        struct:
+          unexported: true
+  - aliases:
+      - name: Action
+        target: corecli.Action
+      - name: Binder
+        target: corecli.Binder
+      - name: Executor
+        target: corecli.Executor
+      - name: Command
+        target: corecli.CommandValue
+      - name: Invocation
+        target: corecli.InvocationValue
+      - name: Config
+        target: svccli.Config
+      - name: FlagSourceValue
+        target: svccli.FlagSourceValue
+    constants:
+      - name: Success
+        type: int
+        value: "0"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+          - name: root
+            type: Command
+        name: New
+        out:
+          - name: runner
+            type: Executor
+          - name: err
+            type: error
+      - in:
+          - name: invocation
+            type: Invocation
+        name: FlagSource
+        out:
+          - type: "*FlagSourceValue"
+      - in:
+          - name: err
+            type: error
+        name: Status
+        out:
+          - type: int
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: Config
+          - name: root
+            type: Command
+          - name: args
+            type: "[]string"
+        name: Execute
+        out:
+          - type: error
+    imports:
+      corecli: github.com/kitsunium/sdk/internal/core/app/cli
+      kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+      svccli: github.com/kitsunium/sdk/internal/service/app/cli
+    path: github.com/kitsunium/sdk/pkg/v1/app/cli
+    variables:
+      - name: InvalidCommand
+        type: "*kerrs.Error"
+      - name: AmbiguousCommand
+        type: "*kerrs.Error"
+      - name: DuplicateCommand
+        type: "*kerrs.Error"
+      - name: ReservedFlag
+        type: "*kerrs.Error"
+      - name: UnknownCommand
+        type: "*kerrs.Error"
+      - name: MissingCommand
+        type: "*kerrs.Error"
+      - name: InvalidFlags
+        type: "*kerrs.Error"
+      - name: CommandPanicked
+        type: "*kerrs.Error"
+      - name: HelpWriteFailed
+        type: "*kerrs.Error"

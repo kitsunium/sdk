@@ -1,3 +1,8 @@
+// Package mail — the transport port and its ADR 0039 capability siblings.
+//
+// They live apart from the value types because a port and a value change for
+// different reasons: the port is FROZEN and the values are not.
+//
 // Package mail — one record of what a transport put on the wire.
 package mail
 

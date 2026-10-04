@@ -25,6 +25,7 @@ alias(
 go_test(
     name = "hkdfsha256_test",
     srcs = [
+        "api_gen_test.go",
         "hkdfsha256_external_test.go",
         "hkdfsha256_internal_test.go",
     ],

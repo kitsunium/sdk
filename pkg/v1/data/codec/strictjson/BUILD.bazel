@@ -22,9 +22,13 @@ alias(
 
 go_test(
     name = "strictjson_test",
-    srcs = ["strictjson_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "strictjson_external_test.go",
+    ],
     deps = [
         ":strictjson",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

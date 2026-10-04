@@ -35,6 +35,7 @@ alias(
 go_test(
     name = "s3_test",
     srcs = [
+        "api_gen_test.go",
         "client_internal_test.go",
         "codes_external_test.go",
         "cred_adapter_internal_test.go",

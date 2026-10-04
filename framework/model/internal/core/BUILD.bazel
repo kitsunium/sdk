@@ -43,6 +43,7 @@ alias(
 go_test(
     name = "core_test",
     srcs = [
+        "api_gen_test.go",
         "connector_test.go",
         "id_external_test.go",
         "id_grammar_external_test.go",
@@ -53,7 +54,10 @@ go_test(
         "watch_test.go",
     ],
     embed = [":core"],
-    deps = ["//pkg/v1/errs"],
+    deps = [
+        "//internal/kernel/errs",
+        "//pkg/v1/errs",
+    ],
 )
 
 filegroup(

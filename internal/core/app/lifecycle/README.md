@@ -18,3 +18,6 @@ teardown may assume its own construction succeeded.
 The engine, the per-component shutdown budget and the opt-in signal /
 `sd_notify` wiring live in `internal/service/app/lifecycle`; facade:
 `pkg/v1/app/lifecycle`. ADR 0050. See `CLAUDE.md`.
+
+The `Lifecycle` port is generated from `design/app/lifecycle.yaml` into
+`design_gen.go` (ADR 0163): it changes in the design, then `kit gen`.

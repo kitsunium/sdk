@@ -1,0 +1,15 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/x-crypto
+packages:
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/third-party/x-crypto/argon2id
+    variables:
+      - name: PasswordHasher
+        type: corecrypto.PasswordHasher
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/third-party/x-crypto/xchacha
+    variables:
+      - name: AEAD
+        type: corecrypto.AEAD

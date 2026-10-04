@@ -1,0 +1,431 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/config
+packages:
+  - constants:
+      - name: CodeConfigSourceFailed
+        type: errs.Code
+        value: "0x00_02_0A_01"
+      - name: CodeConfigDecodeFailed
+        type: errs.Code
+        value: "0x00_02_0A_02"
+      - name: CodeConfigValidationFailed
+        type: errs.Code
+        value: "0x00_02_0A_03"
+      - name: CodeConfigWatchFailed
+        type: errs.Code
+        value: "0x00_02_0A_04"
+      - name: CodeConfigSchemaInvalid
+        type: errs.Code
+        value: "0x00_02_0A_05"
+      - name: CodeConfigKeyMissing
+        type: errs.Code
+        value: "0x00_02_0A_06"
+      - name: CodeConfigUnknownKey
+        type: errs.Code
+        value: "0x00_02_0A_07"
+      - name: LayerDefault
+        type: string
+        value: "\"default\""
+      - name: LayerFile
+        type: string
+        value: "\"file\""
+      - name: LayerEnv
+        type: string
+        value: "\"env\""
+      - name: LayerSource
+        type: string
+        value: "\"source\""
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/config
+    ports:
+      - doc: |-
+          Describer is the optional sibling (ADR 0039) a [Source] implements to say
+          where its values come from. [Source] is frozen at one method, so the loader
+          discovers this capability by type assertion; a Source that does not
+          implement it is reported as [LayerSource] with its position.
+
+          Implementations MUST be safe for concurrent use and MUST NOT return a value
+          in detail — a variable NAME, a file PATH, an endpoint, never what it holds.
+        methods:
+          - doc: |-
+              Describe reports the kind of layer this source contributes and, for one
+              dotted key it supplied in its last Load, the detail an operator acts on.
+            in:
+              - name: key
+                type: string
+            name: Describe
+            out:
+              - name: layer
+              - name: detail
+                type: string
+        name: Describer
+      - doc: |-
+          Source yields a configuration layer as a flat map (later sources override
+          earlier ones in a Load). Implementations MUST be safe for concurrent Load.
+        methods:
+          - doc: Load reads the source and returns its key→value map (nil map = empty layer).
+            name: Load
+            out:
+              - name: values
+                type: map[string]any
+              - name: err
+                type: error
+        name: Source
+      - doc: |-
+          Validator is implemented by a decoded config struct that wants to self-check
+          after Load. A non-nil return aborts the Load with CONFIG_VALIDATION_FAILED.
+        methods:
+          - doc: Validate reports whether the decoded configuration is internally consistent.
+            name: Validate
+            out:
+              - type: error
+        name: Validator
+      - doc: |-
+          Watcher observes a Source for change and invokes onChange (cross-OS poll in
+          the default implementation). Watch blocks until ctx is cancelled.
+        methods:
+          - doc: Watch calls onChange whenever the underlying source changes, until ctx ends.
+            in:
+              - name: ctx
+                type: context.Context
+              - name: onChange
+                type: func()
+            name: Watch
+            out:
+              - type: error
+        name: Watcher
+    types:
+      - name: OriginValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Layer
+              type: string
+            - name: Detail
+              type: string
+            - name: Secret
+              type: bool
+      - name: DeclaredValue
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Value
+              type: any
+    variables:
+      - name: ConfigSourceFailed
+        type: "*errs.Error"
+      - name: ConfigDecodeFailed
+        type: "*errs.Error"
+      - name: ConfigValidationFailed
+        type: "*errs.Error"
+      - name: ConfigWatchFailed
+        type: "*errs.Error"
+      - name: ConfigSchemaInvalid
+        type: "*errs.Error"
+      - name: ConfigKeyMissing
+        type: "*errs.Error"
+      - name: ConfigUnknownKey
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: prefix
+            type: string
+        name: EnvSource
+        out:
+          - type: coreconfig.Source
+      - in:
+          - name: format
+            type: codec.Format
+          - name: path
+            type: string
+        name: FileSource
+        out:
+          - type: coreconfig.Source
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: format
+            type: codec.Format
+          - name: path
+            type: string
+        name: FSSource
+        out:
+          - type: coreconfig.Source
+      - in:
+          - name: target
+            type: "*T"
+          - name: sources
+            type: coreconfig.Source
+        name: Load
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: target
+            type: "*T"
+          - name: schema
+            type: "*SchemaValue[T]"
+          - name: sources
+            type: coreconfig.Source
+        name: LoadSchema
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: target
+            type: "*T"
+          - name: sources
+            type: coreconfig.Source
+        name: LoadWithOrigins
+        out:
+          - name: origins
+            type: "[]coreconfig.OriginValue"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: target
+            type: "*T"
+          - name: schema
+            type: "*SchemaValue[T]"
+          - name: sources
+            type: coreconfig.Source
+        name: LoadSchemaWithOrigins
+        out:
+          - name: origins
+            type: "[]coreconfig.OriginValue"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: path
+            type: string
+          - name: interval
+            type: time.Duration
+        name: PollWatcher
+        out:
+          - type: coreconfig.Watcher
+      - in:
+          - name: spec
+            type: SchemaSpec[T]
+        name: NewSchemaValue
+        out:
+          - name: schema
+            type: "*SchemaValue[T]"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      coreconfig: github.com/kitsunium/sdk/internal/core/app/config
+      corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
+      fs: io/fs
+    path: github.com/kitsunium/sdk/internal/service/app/config
+    types:
+      - methods:
+          - name: Source
+            out:
+              - type: coreconfig.Source
+            recv: pointer
+          - in:
+              - name: value
+                type: T
+            name: Check
+            out:
+              - type: corevalidation.ReportValue
+            recv: pointer
+        name: SchemaValue
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - name: SchemaSpec
+        struct:
+          fields:
+            - name: Required
+              type: "[]string"
+            - name: Defaults
+              type: "[]coreconfig.DeclaredValue"
+            - name: AllowUnknownKeys
+              type: bool
+            - name: Rule
+              type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+  - aliases:
+      - name: Source
+        target: coreconfig.Source
+      - name: Validator
+        target: coreconfig.Validator
+      - name: Watcher
+        target: coreconfig.Watcher
+      - name: Default
+        target: coreconfig.DeclaredValue
+      - name: Origin
+        target: coreconfig.OriginValue
+      - name: Describer
+        target: coreconfig.Describer
+      - name: Schema
+        target: svcconfig.SchemaValue[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: SchemaSpec
+        target: svcconfig.SchemaSpec[T]
+        typeParams:
+          - constraint: any
+            name: T
+    constants:
+      - name: LayerDefault
+        type: string
+        value: "\"default\""
+      - name: LayerFile
+        type: string
+        value: "\"file\""
+      - name: LayerEnv
+        type: string
+        value: "\"env\""
+      - name: LayerSource
+        type: string
+        value: "\"source\""
+    functions:
+      - in:
+          - name: target
+            type: "*T"
+          - name: sources
+            type: Source
+        name: Load
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: spec
+            type: SchemaSpec[T]
+        name: NewSchema
+        out:
+          - name: schema
+            type: "*Schema[T]"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: target
+            type: "*T"
+          - name: schema
+            type: "*Schema[T]"
+          - name: sources
+            type: Source
+        name: LoadSchema
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: target
+            type: "*T"
+          - name: sources
+            type: Source
+        name: LoadWithOrigins
+        out:
+          - name: origins
+            type: "[]Origin"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: target
+            type: "*T"
+          - name: schema
+            type: "*Schema[T]"
+          - name: sources
+            type: Source
+        name: LoadSchemaWithOrigins
+        out:
+          - name: origins
+            type: "[]Origin"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: prefix
+            type: string
+        name: EnvSource
+        out:
+          - type: Source
+      - in:
+          - name: format
+          - name: path
+            type: string
+        name: FileSource
+        out:
+          - type: Source
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: format
+          - name: path
+            type: string
+        name: FSSource
+        out:
+          - type: Source
+      - in:
+          - name: path
+            type: string
+          - name: interval
+            type: time.Duration
+        name: PollWatcher
+        out:
+          - type: Watcher
+    imports:
+      coreconfig: github.com/kitsunium/sdk/internal/core/app/config
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      fs: io/fs
+      svcconfig: github.com/kitsunium/sdk/internal/service/app/config
+    path: github.com/kitsunium/sdk/pkg/v1/app/config
+    variables:
+      - name: SourceFailed
+        type: "*errs.Error"
+      - name: DecodeFailed
+        type: "*errs.Error"
+      - name: ValidationFailed
+        type: "*errs.Error"
+      - name: WatchFailed
+        type: "*errs.Error"
+      - name: SchemaInvalid
+        type: "*errs.Error"
+      - name: KeyMissing
+        type: "*errs.Error"
+      - name: UnknownKey
+        type: "*errs.Error"

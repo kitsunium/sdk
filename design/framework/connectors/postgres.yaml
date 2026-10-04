@@ -1,0 +1,15 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/connectors/postgres
+packages:
+  - constants:
+      - name: CodeURLMalformed
+        type: errs.Code
+        value: "0x00_04_10_01"
+    functions:
+      - name: Engine
+        out:
+          - type: kit.Engine
+    imports:
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      kit: github.com/kitsunium/sdk/framework/kit
+    path: github.com/kitsunium/sdk/framework/connectors/postgres

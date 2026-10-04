@@ -29,6 +29,9 @@ go_test(
     name = "group_test",
     size = "small",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
+        "api_gen_test.go",
         "group_bench_test.go",
         "group_external_test.go",
         "group_internal_test.go",

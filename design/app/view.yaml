@@ -1,0 +1,322 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/view
+packages:
+  - aliases:
+      - name: TrustedHTML
+        target: template.HTML
+    constants:
+      - name: CodeViewMisconfigured
+        type: errs.Code
+        value: "0x00_02_1B_01"
+      - name: CodeTemplateNotFound
+        type: errs.Code
+        value: "0x00_02_1B_02"
+      - name: CodeRenderFailed
+        type: errs.Code
+        value: "0x00_02_1B_03"
+      - name: CodeRenderTooLarge
+        type: errs.Code
+        value: "0x00_02_1B_04"
+      - name: CodeUnsafeValue
+        type: errs.Code
+        value: "0x00_02_1B_05"
+      - name: CodeEngineUnknown
+        type: errs.Code
+        value: "0x00_02_1B_06"
+      - name: CodeEngineInvalid
+        type: errs.Code
+        value: "0x00_02_1B_07"
+      - name: CodeDuplicateEngine
+        type: errs.Code
+        value: "0x00_02_1B_08"
+      - name: CodeTemplateSourceFailed
+        type: errs.Code
+        value: "0x00_03_39_01"
+      - name: CodeTemplateParseFailed
+        type: errs.Code
+        value: "0x00_03_39_02"
+      - name: DefaultMaxBytes
+        type: int
+        value: 8 << 20
+      - name: MaxPooledBytes
+        type: int
+        value: 1 << 20
+      - name: HTML
+        type: Engine
+        value: "\"html\""
+      - name: ContentTypeHTML
+        type: string
+        value: "\"text/html; charset=utf-8\""
+    functions:
+      - in:
+          - name: f
+            type: Factory
+        name: Register
+        out:
+          - type: Factory
+      - in:
+          - name: name
+            type: Engine
+        name: Lookup
+        out:
+          - name: factory
+            type: Factory
+          - name: found
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Engine"
+      - in:
+          - name: name
+            type: Engine
+          - name: cfg
+            type: Config
+        name: Open
+        out:
+          - name: renderer
+            type: Renderer
+          - name: err
+            type: error
+      - in:
+          - name: s
+            type: string
+        name: TrustHTML
+        out:
+          - type: TrustedHTML
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      fs: io/fs
+      template: html/template
+    path: github.com/kitsunium/sdk/internal/core/app/view
+    ports:
+      - doc: |-
+          Factory builds a [Renderer] of one engine from a [Config].
+
+          Two methods, and the registry hands instances back to callers so each engine
+          keeps its concrete type unexported — the stable contract is this interface.
+
+          # What an engine undertakes by registering
+
+          Registration is not merely a name binding; it is a promise the security model
+          rests on. An engine in this registry MUST:
+
+            - Contextually escape every value it renders, for the media type its
+              [Renderer.ContentType] reports. An engine that does not escape may not
+              report an HTML content type.
+            - Render into its own buffer and return complete bytes or none.
+            - Honour [Config.MaxBytes], clamping a non-positive value to
+              [DefaultMaxBytes].
+            - Refuse at construction a [Config] it cannot honour, and refuse at render
+              time — by name, with [TemplateNotFound] — a template it does not hold.
+            - Name every template by its SLASH PATH within [Config.FS].
+
+          That last one looks cosmetic and is not. html/template's own ParseFS names
+          templates by filepath.Base, so a tree holding admin/page.html and
+          user/page.html ends up with ONE template called "page.html" — measured, the
+          second parse silently wins and every request for the admin page renders the
+          user page. Full-path naming is the SDK refusing to inherit that.
+        methods:
+          - doc: |-
+              Engine returns the registry key this factory claims. It must be stable
+              and non-empty.
+            name: Engine
+            out:
+              - type: Engine
+          - doc: |-
+              New builds a Renderer from cfg, parsing the whole template tree eagerly.
+
+              Eager parsing is the point: a template that cannot be parsed, or cannot
+              be contextually escaped, will fail identically forever, so the failure
+              belongs in the process's first second — a deploy that does not come up —
+              rather than in the first request that happens to reach that page.
+            in:
+              - name: cfg
+                type: Config
+            name: New
+            out:
+              - type: Renderer
+              - type: error
+        name: Factory
+      - doc: |-
+          Renderer turns a named template and a data value into a complete document.
+
+          The method set is FROZEN at two. This interface is aliased by pkg/v1/app/view,
+          Go interfaces are structural, and a third method would break every
+          downstream implementation at compile time with no deprecation window
+          (ADR 0039). New capabilities arrive as SIBLING interfaces reached by type
+          assertion — the model is codec's Appender (ADR 0037).
+        methods:
+          - doc: |-
+              Render executes the template registered under name against data and
+              returns the complete document.
+
+              It returns ([]byte, error) rather than writing to an io.Writer so that a
+              failure mid-execution cannot leave a half-written response behind — see
+              the package documentation. On any error the returned slice is nil.
+
+              ctx is checked before the work starts and is otherwise not consulted:
+              text/template's Execute takes no context and cannot be interrupted, so a
+              runaway template is bounded by BYTES, not by time. That is the reason
+              Config.MaxBytes exists and the reason it has no "unlimited" spelling.
+
+              name is looked up exactly. A name the engine does not hold is
+              [TemplateNotFound] — a Renderer built over an empty template set is a
+              legitimate Renderer that refuses everything by name, which is a loud
+              behaviour rather than an inert one (ADR 0031).
+            in:
+              - name: ctx
+                type: context.Context
+              - name: name
+                type: string
+              - name: data
+                type: any
+            name: Render
+            out:
+              - type: "[]byte"
+              - type: error
+          - doc: |-
+              ContentType returns the media type the bytes from Render carry, ready to
+              be written as a Content-Type header — [ContentTypeHTML] for every engine
+              registered today.
+
+              It is a method rather than a package constant because it is the promise
+              an engine makes about the escaping it performs. An engine that does not
+              contextually escape HTML may not report an HTML content type, so a
+              framework that writes this header verbatim (with X-Content-Type-Options:
+              nosniff, which is the framework's job and not the SDK's) never labels
+              unescaped output as a document the browser will parse as HTML.
+            name: ContentType
+            out:
+              - type: string
+        name: Renderer
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: FS
+              type: fs.FS
+            - name: Ext
+              type: "[]string"
+            - name: MaxBytes
+              type: int
+      - name: Engine
+        underlying: string
+    variables:
+      - name: ViewMisconfigured
+        type: "*errs.Error"
+      - name: TemplateNotFound
+        type: "*errs.Error"
+      - name: RenderFailed
+        type: "*errs.Error"
+      - name: RenderTooLarge
+        type: "*errs.Error"
+      - name: UnsafeValue
+        type: "*errs.Error"
+      - name: EngineUnknown
+        type: "*errs.Error"
+      - name: EngineInvalid
+        type: "*errs.Error"
+      - name: DuplicateEngine
+        type: "*errs.Error"
+      - name: TemplateSourceFailed
+        type: "*errs.Error"
+      - name: TemplateParseFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: coreview.Config
+        name: NewHTML
+        out:
+          - name: renderer
+            type: coreview.Renderer
+          - name: err
+            type: error
+    imports:
+      coreview: github.com/kitsunium/sdk/internal/core/app/view
+    path: github.com/kitsunium/sdk/internal/service/app/view
+    variables:
+      - name: HTML
+        type: coreview.Factory
+  - aliases:
+      - name: Renderer
+        target: coreview.Renderer
+      - name: Config
+        target: coreview.Config
+      - name: Factory
+        target: coreview.Factory
+      - name: Engine
+        target: coreview.Engine
+      - name: TrustedHTML
+        target: coreview.TrustedHTML
+    constants:
+      - name: HTML
+        type: Engine
+        value: "\"html\""
+      - name: ContentTypeHTML
+        type: string
+        value: "\"text/html; charset=utf-8\""
+      - name: DefaultMaxBytes
+        type: int
+        value: 8 << 20
+    functions:
+      - in:
+          - name: s
+            type: string
+        name: TrustHTML
+        out:
+          - type: TrustedHTML
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - name: renderer
+            type: Renderer
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Engine
+          - name: cfg
+            type: Config
+        name: Open
+        out:
+          - name: renderer
+            type: Renderer
+          - name: err
+            type: error
+      - in:
+          - name: f
+            type: Factory
+        name: Register
+        out:
+          - type: Factory
+      - name: Available
+        out:
+          - type: "[]Engine"
+    imports:
+      coreview: github.com/kitsunium/sdk/internal/core/app/view
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/app/view
+    variables:
+      - name: ViewMisconfigured
+        type: "*errs.Error"
+      - name: TemplateNotFound
+        type: "*errs.Error"
+      - name: RenderFailed
+        type: "*errs.Error"
+      - name: RenderTooLarge
+        type: "*errs.Error"
+      - name: UnsafeValue
+        type: "*errs.Error"
+      - name: EngineUnknown
+        type: "*errs.Error"
+      - name: EngineInvalid
+        type: "*errs.Error"
+      - name: DuplicateEngine
+        type: "*errs.Error"
+      - name: TemplateSourceFailed
+        type: "*errs.Error"
+      - name: TemplateParseFailed
+        type: "*errs.Error"

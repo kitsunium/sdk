@@ -18,7 +18,10 @@ alias(
 
 go_test(
     name = "httpbody_test",
-    srcs = ["httpbody_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "httpbody_external_test.go",
+    ],
     deps = [
         ":httpbody",
         "//pkg/v1/data/codec/strictjson",

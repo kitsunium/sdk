@@ -34,6 +34,7 @@ alias(
 go_test(
     name = "syslog_test",
     srcs = [
+        "api_gen_test.go",
         "priority_internal_test.go",
         "syslog_sink_external_test.go",
         "syslog_sink_internal_test.go",

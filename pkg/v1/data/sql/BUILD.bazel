@@ -22,9 +22,14 @@ alias(
 go_test(
     name = "sql_test",
     size = "small",
-    srcs = ["sql_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "sql_external_test.go",
+    ],
     deps = [
         ":sql",
+        "//internal/core/data/sql",
+        "//internal/service/data/sql",
         "//pkg/v1/errs",
     ],
 )

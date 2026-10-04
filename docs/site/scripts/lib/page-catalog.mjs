@@ -77,6 +77,18 @@ export const RESERVED = Object.freeze({
 });
 
 /**
+ * The path a collection id is served at: the id with a trailing `index`
+ * segment dropped — "local/v1/index" is "local/v1", "local/v1/adr/index" is
+ * "local/v1/adr" —, as the route's getStaticPaths serves it.
+ *
+ * @param {string} id
+ * @returns {string}
+ */
+export function pagePath(id) {
+  return id === "index" ? "" : id.replace(/\/index$/, "");
+}
+
+/**
  * Stable presentation order for the top-level buckets.
  * Empty buckets are dropped by buildCatalog().
  */
@@ -100,13 +112,18 @@ export function buildCatalog(entries, root, base) {
   };
 
   for (const entry of entries) {
-    if (entry.id !== root && !entry.id.startsWith(prefix)) continue;
+    //: the collection keeps a file's path as its id (content.config.ts), so
+    //: the landing page of the release is "<root>/index" and a section's
+    //: "<root>/adr/index": the route serves each at its directory, and so
+    //: does the catalog. Linking "<root>/index/" broke Home on every page.
+    const id = pagePath(entry.id);
+    if (id !== root && !id.startsWith(prefix)) continue;
     let key, href;
-    if (entry.id === root) {
+    if (id === root) {
       key = "index";
       href = `${base}/`;
     } else {
-      const rest = entry.id.slice(prefix.length);
+      const rest = id.slice(prefix.length);
       //: a reserved section's deeper pages (e.g. adr/0001-foo) are
       //: surfaced by that section's landing page — they stay out of the
       //: catalog. Any other nested id is a package under a family

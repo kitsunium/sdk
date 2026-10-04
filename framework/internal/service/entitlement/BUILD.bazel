@@ -55,6 +55,7 @@ go_test(
     name = "entitlement_test",
     srcs = [
         "anchors_internal_test.go",
+        "api_gen_test.go",
         "bundle_external_test.go",
         "bundle_internal_test.go",
         "cache_concurrency_internal_test.go",

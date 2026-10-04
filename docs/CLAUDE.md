@@ -1,9 +1,9 @@
-<!-- updated: 2026-10-04T01:25:00Z -->
+<!-- updated: 2026-10-04T11:15:00Z -->
 # docs/
 
 ## Purpose
 
-Long-form SDK documentation. ADRs here are the source of truth for cross-cutting decisions; package-level READMEs are the short-form mirror.
+Long-form SDK documentation. ADRs here are the source of truth for cross-cutting decisions; package-level READMEs are the short-form mirror; `api/` is the exported API itself, written from the code.
 
 ## Contents
 
@@ -146,6 +146,7 @@ Long-form SDK documentation. ADRs here are the source of truth for cross-cutting
 | `adr/0160-every-service-has-a-core-and-a-code-keeps-its-value-when-it-moves.md` | Every service has a core; every code declared in the core and never under `internal/service` (`check-core-symmetry.sh`); a code keeps its value when its declaration moves (`LL` = the allocating layer); wire formats are service mechanisms | Accepted (amends 0005, 0035, 0047, 0051, 0063, 0064, 0101 §D5, 0110 §D1, 0121 §D1, 0139 §D2, 0148) |
 | `adr/0161-an-untyped-error-fails-the-build.md` | `fmt.Errorf` / `errors.New` fail a build-time check over every production file — SDK002 run by `make guard`, no exemption — the audit rule 2 described never existed | Accepted (amends 0002, 0033) |
 | `adr/0162-the-sdk-is-one-module-and-a-release-is-one-tag.md` | The SDK is one module, `github.com/kitsunium/sdk`, holding `internal/`, `pkg/` and `framework/` with import paths unchanged; a release is ONE tag `vX.Y.Z` (v0.18.0 next, continuing `pkg`'s numbering) and ONE GitHub release; the thirteen vendor and connector modules are tagged `<dir>/vX.Y.Z` only when they change; old tags stay, and v0.18.0 cuts two tombstones once, `pkg/v0.18.0` and `framework/v0.18.0`, so a bare `go mod tidy` resolves to the SDK module and `go get` reports both modules deprecated, naming the migration; consumers migrate with one `go get` whose `…/internal/kernel@none` drops the five retired modules | Accepted (supersedes ADR 0001's module split; amends 0007, 0009, 0017, 0147, 0157) |
+| `adr/0163-the-sdk-is-designed-by-its-diagram-and-kit-writes-only-data-and-test-pins.md` | The SDK is designed by its diagram: `design/` declares every exported symbol with its inputs and outputs and is edited first; kit writes the pins (`api_gen*_test.go`, every designed symbol held by the compiler behind a marker) and the ports (`design_gen.go`: every `internal/core` interface, `internal/core/app/lock`'s first) and nothing else; `make api-check` holds the code to the pins' markers and every generated file to its design file's bytes, with no kit and no YAML read; an API change needs kit, a doc edit does not; `docs/api`'s format and writer, `docs/error-codes.yaml` written from it, the portal built from it | Accepted |
 
 This table is one of THREE indexes of the same ADRs — the others are
 `docs/adr/CLAUDE.md`'s Contents table and the root `CLAUDE.md` Reference list —
@@ -168,7 +169,7 @@ and had lost 23 entries, every ADR from 0061 on among them.
 
 The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-…` is the **documentary source of truth**; the hand-maintained `codeRangeOwners` table in `internal/kernel/errs/registry_ownership_external_test.go` is the **executable source of truth** (ADR 0035). Keep the two in sync manually on every change — the ownership audit fails on a range absent from that table, and `registry_external_test.go` catches drift on uniqueness and `reason = screamingSnake(varName)` OR `screamingSnake(CodeConst − "Code")` (ADR 0006/0020) over every package in `//:audit_sources`.
 
-`docs/error-codes.yaml` is the **generated human-readable mirror** of every `errs.Code` constant in the tree (one entry per code: dotted-quad, const name, hex, package). Regenerate with `make error-codes` (`scripts/gen-error-codes.sh`); the `scripts/pre-commit/check-error-codes-drift.sh` guard fails `make lint` and CI when it is stale. It is a convenience index, not authoritative — the AST audit remains the executable gate.
+`docs/error-codes.yaml` is the **generated human-readable list** of every error code a package of the workspace declares (one entry per code: dotted-quad, const name, hex, package). It is written from `api/` — the code's API, read with go/types and held to the code by `make api-check` — by `make error-codes` (`scripts/gen-error-codes.sh`, `tools/genindex -write-error-codes`), which `make api` runs after writing `api/`: every `errs.Code` constant whose name starts with `Code` and that re-exports no other constant, whatever spelling declares it — a hex literal, an `iota` row —, the errs package's six meta-codes `0.0.0.1`–`0.0.0.6` included and its four masks, of the code type and no code, left out. The `scripts/pre-commit/check-error-codes-drift.sh` guard (`tools/genindex -check-error-codes`) fails `make lint` and CI when the file is not what `api/` writes, naming each entry. It replaced a grep over the sources that listed what a regular expression matched: two codes a doc comment's example wrote, which no package declares, and none of the six meta-codes, which `iota` declares. It is a convenience index, not authoritative — the AST audit remains the executable gate; tools/genindex's `Test_errorCodesCensus` holds the file to the sources read with go/parser alone, and `Test_apiCodes` to `api/`.
 
 ## Do NOT
 
@@ -181,7 +182,8 @@ The dotted-quad allocation table in `adr/0005-…` + the extension in `adr/0006-
 
 - `adr/` — Architecture Decision Records (see the table above; it is the count, so no separate number goes stale here)
 - `site/` — the documentation website (Astro) — see `site/CLAUDE.md`
-- `error-codes.yaml` — generated mirror of every `errs.Code` (see §Registry coupling)
+- `error-codes.yaml` — every error code a package declares, written from `api/` by `make error-codes` (see §Registry coupling)
+- `api/` — the exported API of every module of `go.work`, one `<module>.json` each (`sdk.json`, `sdk/third-party/aws.json`, …): every exported symbol, internal packages included, with its go: id, kind, signature as its file spells it and canonically, owner, doc, cells, file, codes, layer and family, read from the code with go/types on the twelve cells of `scripts/ci/platforms.sh`. Written by `make api` (`tools/genindex -write-api`) and checked byte for byte by `make api-check`, in `make lint-check`, which also holds the code's surface to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes (ADR 0163): a doc edit is followed by `make api`, nothing else. `api/schema.json` is the format, with the id and canonical-signature vectors kit's side tests too. The docs portal renders it — the ⌘K index and the API section of every package page, an alias's members included (`site/CLAUDE.md`). Never edited by hand
 - `getting-started.md` — the consumer quickstart (logger, codec, errs)
 - `BENCHMARK-TEMPLATE.md` — the shape every kernel `*_bench_test.go` follows
 - `PROFILING.md` — driving the pprof + benchstat pipeline over the codec bench matrix

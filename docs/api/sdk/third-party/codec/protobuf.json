@@ -1,0 +1,145 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+  "dir": "third-party/codec/protobuf",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "protobuf",
+      "dir": ".",
+      "layer": "thirdparty",
+      "doc": "Package protobuf wraps google.golang.org/protobuf as a codec.Codec\nimplementation. It lives under third-party/codec/, in a module of its own\n(ADR 0157), and is OPT-IN: a consumer blank-imports it to register the\n\"protobuf\" Format — pkg/v1/data/codec does NOT pull it. The reason is the\nschema-bound contract, not dep weight: Protobuf only encodes proto.Message\nvalues, so it cannot honour the universal \"every registered codec\nround-trips any Go struct\" guarantee the default registry enforces. A\nnon-message value surfaces PROTOBUF_MARSHAL_FAILED /\nPROTOBUF_UNMARSHAL_FAILED. Non-streaming (the wire format is length-unframed;\nframing is a caller concern); implements Appender. ADR 0023.\n\nPackage protobuf — range 0.3.38.* (ADR 0023 third-party/codec/protobuf block).\n\nPackage protobuf — declares the sentinel *errs.Error values for Protobuf.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.CodeProtobufMarshalFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "CodeProtobufMarshalFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206337",
+      "code": {
+        "value": "0.3.38.1"
+      },
+      "doc": "CodeProtobufMarshalFailed identifies a Marshal failure — either the value is\nnot a proto.Message (Protobuf is schema-bound) or google.golang.org/protobuf\n/proto.Marshal returned an error.\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.CodeProtobufSizeExceeded",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "CodeProtobufSizeExceeded",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206339",
+      "code": {
+        "value": "0.3.38.3"
+      },
+      "doc": "CodeProtobufSizeExceeded identifies an Unmarshal input over the 10 MiB cap\n(CWE-400 defence before the decoder allocates).\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.CodeProtobufUnmarshalFailed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "CodeProtobufUnmarshalFailed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/internal/kernel/errs.Code",
+      "value": "206338",
+      "code": {
+        "value": "0.3.38.2"
+      },
+      "doc": "CodeProtobufUnmarshalFailed identifies an Unmarshal failure — the target is\nnot a proto.Message, or proto.Unmarshal rejected the wire bytes.\n",
+      "file": "codes.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.Codec",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "Codec",
+      "spelled": "codec.Codec",
+      "canonical": "github.com/kitsunium/sdk/internal/core/data/codec.Codec",
+      "doc": "Codec is the registered Protobuf singleton.\n",
+      "file": "codec.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.MarshalFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "MarshalFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.38.1",
+        "reason": "PROTOBUF_MARSHAL_FAILED",
+        "public": "Protobuf encoding failed"
+      },
+      "doc": "MarshalFailed wraps a non-proto.Message value or a proto.Marshal failure.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.New",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "New",
+      "spelled": "func() codec.Codec",
+      "canonical": "func() github.com/kitsunium/sdk/internal/core/data/codec.Codec",
+      "doc": "New returns the Protobuf codec singleton.\n",
+      "file": "codec.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.SizeExceeded",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "SizeExceeded",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.38.3",
+        "reason": "PROTOBUF_SIZE_EXCEEDED",
+        "public": "Protobuf input exceeds size limit"
+      },
+      "doc": "SizeExceeded marks an Unmarshal input over the 10 MiB hard cap.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/third-party/codec/protobuf.UnmarshalFailed",
+      "kind": "var",
+      "package": "github.com/kitsunium/sdk/third-party/codec/protobuf",
+      "name": "UnmarshalFailed",
+      "spelled": "*errs.Error",
+      "canonical": "*github.com/kitsunium/sdk/internal/kernel/errs.Error",
+      "code": {
+        "value": "0.3.38.2",
+        "reason": "PROTOBUF_UNMARSHAL_FAILED",
+        "public": "Protobuf decoding failed"
+      },
+      "doc": "UnmarshalFailed wraps a non-proto.Message target or a proto.Unmarshal failure.\n",
+      "file": "errors.go",
+      "layer": "thirdparty"
+    }
+  ]
+}

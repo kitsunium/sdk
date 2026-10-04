@@ -14,3 +14,8 @@ set is one series; a `SnapshotValue` maps each name to its metric and each
 metric to its series. The in-memory meter + the text, Prometheus and OTLP
 exporters live in `internal/service/observe/metrics`; facade: `pkg/v1/observe/metrics`.
 ADR 0027, ADR 0044, ADR 0067. See `CLAUDE.md`.
+
+The ports — `Counter`, `UpDownCounter`, `Gauge`, `Histogram`, `Meter`,
+`FullMeter`, `UpDownMeter`, `AsyncMeter`, `Describer` and `Exporter` — are
+generated from `design/observe/metrics.yaml` into `design_gen.go` (ADR 0163): a
+port changes in the design, then `kit gen`.

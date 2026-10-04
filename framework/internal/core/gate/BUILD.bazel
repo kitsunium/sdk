@@ -31,7 +31,10 @@ alias(
 
 go_test(
     name = "gate_test",
-    srcs = ["policy_internal_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "policy_internal_test.go",
+    ],
     embed = [":gate"],
     deps = ["//internal/kernel/errs"],
 )

@@ -1,0 +1,21 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/db/writer/redis
+packages:
+  - constants:
+      - name: CodeRedisClientInitFailed
+        type: errs.Code
+        value: "0x00_03_22_01"
+      - name: CodeRedisXAddFailed
+        type: errs.Code
+        value: "0x00_03_22_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/third-party/db/writer/redis
+    variables:
+      - name: ClientInitFailed
+        type: "*errs.Error"
+      - name: AddFailed
+        type: "*errs.Error"
+      - name: Writer
+        type: writer.Factory

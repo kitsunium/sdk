@@ -1,0 +1,601 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/errs
+packages:
+  - constants:
+      - name: MaskByMajor
+        type: Code
+        value: "0xFF_00_00_00"
+      - name: MaskByLayer
+        type: Code
+        value: "0xFF_FF_00_00"
+      - name: MaskByPackage
+        type: Code
+        value: "0xFF_FF_FF_00"
+      - name: MaskExact
+        type: Code
+        value: "0xFF_FF_FF_FF"
+      - name: CodeInvalidCode
+        type: Code
+        value: "1"
+      - name: CodeInvalidReason
+        type: Code
+        value: "2"
+      - name: CodeInvalidPublic
+        type: Code
+        value: "3"
+      - name: CodeInvalidPrivate
+        type: Code
+        value: "4"
+      - name: CodeInvalidCodeString
+        type: Code
+        value: "5"
+      - name: CodeInvalidWrapParams
+        type: Code
+        value: "6"
+    functions:
+      - in:
+          - name: err
+            type: error
+        name: CodeOf
+        out:
+          - name: c
+            type: Code
+          - name: ok
+            type: bool
+      - in:
+          - name: err
+            type: error
+        name: ReasonOf
+        out:
+          - name: reason
+            type: string
+          - name: ok
+            type: bool
+      - in:
+          - name: err
+            type: error
+        name: PublicOf
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: PrivateOf
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: FieldsOf
+        out:
+          - type: "[]FieldValue"
+      - in:
+          - name: err
+            type: error
+        name: HTTPStatusOf
+        out:
+          - type: int
+      - in:
+          - name: err
+            type: error
+        name: ExitCodeOf
+        out:
+          - type: int
+      - in:
+          - name: err
+            type: error
+          - name: reason
+            type: string
+        name: HasReason
+        out:
+          - type: bool
+      - in:
+          - name: mm
+            type: Major
+          - name: ll
+            type: Layer
+          - name: pp
+            type: PkgCode
+          - name: ss
+            type: Serial
+        name: Pack
+        out:
+          - type: Code
+      - in:
+          - name: status
+            type: int
+        name: WithHTTPStatus
+        out:
+          - type: DefineOption
+      - in:
+          - name: code
+            type: int
+        name: WithExitCode
+        out:
+          - type: DefineOption
+      - in:
+          - name: code
+            type: Code
+          - name: reason
+          - name: public
+          - name: private
+            type: string
+          - name: opts
+            type: DefineOption
+        name: NewError
+        out:
+          - type: "*Error"
+        variadic: true
+      - in:
+          - name: code
+            type: Code
+          - name: reason
+          - name: public
+          - name: private
+            type: string
+          - name: fields
+            type: FieldValue
+        name: NewRuntime
+        out:
+          - type: "*Error"
+        variadic: true
+      - in:
+          - name: code
+            type: Code
+          - name: reason
+          - name: public
+          - name: private
+            type: string
+          - name: opts
+            type: DefineOption
+        name: Define
+        out:
+          - type: "*Error"
+        variadic: true
+      - in:
+          - name: cause
+            type: error
+          - name: params
+            type: WrapParams
+          - name: fields
+            type: FieldValue
+        name: Wrap
+        out:
+          - type: "*Error"
+        variadic: true
+      - in:
+          - name: err
+            type: error
+          - name: c
+            type: Code
+        name: HasCode
+        out:
+          - type: bool
+      - in:
+          - name: key
+          - name: val
+            type: string
+        name: NewFieldValue
+        out:
+          - type: FieldValue
+      - in:
+          - name: key
+          - name: val
+            type: string
+        name: String
+        out:
+          - type: FieldValue
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int
+        name: Int
+        out:
+          - type: FieldValue
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int64
+        name: Int64
+        out:
+          - type: FieldValue
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: bool
+        name: Bool
+        out:
+          - type: FieldValue
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: float64
+        name: Float
+        out:
+          - type: FieldValue
+      - in:
+          - name: s
+            type: string
+        name: ParseCode
+        out:
+          - name: c
+            type: Code
+          - name: err
+            type: error
+      - in:
+          - name: prefix
+          - name: mask
+            type: Code
+        name: NewPrefixMatcher
+        out:
+          - type: "*PrefixMatcher"
+      - name: RegistryMarker
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: TrailOf
+        out:
+          - type: "[]Code"
+    path: github.com/kitsunium/sdk/internal/kernel/errs
+    types:
+      - methods:
+          - name: Major
+            out:
+              - type: Major
+            recv: value
+          - name: Layer
+            out:
+              - type: Layer
+            recv: value
+          - name: Package
+            out:
+              - type: PkgCode
+            recv: value
+          - name: Serial
+            out:
+              - type: Serial
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Padded
+            out:
+              - type: string
+            recv: value
+        name: Code
+        underlying: uint32
+      - name: Major
+        underlying: uint8
+      - name: Layer
+        underlying: uint8
+      - name: PkgCode
+        underlying: uint8
+      - name: Serial
+        underlying: uint8
+      - methods:
+          - name: Code
+            out:
+              - type: Code
+            recv: pointer
+          - name: Reason
+            out:
+              - type: string
+            recv: pointer
+          - name: Public
+            out:
+              - type: string
+            recv: pointer
+          - name: Private
+            out:
+              - type: string
+            recv: pointer
+          - name: Fields
+            out:
+              - type: "[]FieldValue"
+            recv: pointer
+          - name: Trail
+            out:
+              - type: "[]Code"
+            recv: pointer
+          - name: TrailTruncated
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: target
+                type: error
+            name: Is
+            out:
+              - type: bool
+            recv: pointer
+          - name: Error
+            out:
+              - type: string
+            recv: pointer
+          - name: Source
+            out:
+              - type: error
+            recv: pointer
+          - name: Unwrap
+            out:
+              - type: error
+            recv: pointer
+          - name: HTTPStatus
+            out:
+              - type: int
+            recv: pointer
+          - name: ExitCode
+            out:
+              - type: int
+            recv: pointer
+        name: Error
+        struct:
+          unexported: true
+      - name: DefineOption
+        underlying: func(e *Error)
+      - methods:
+          - name: Key
+            out:
+              - type: string
+            recv: value
+          - name: StringValue
+            out:
+              - type: string
+            recv: value
+        name: FieldValue
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: pointer
+          - name: Error
+            out:
+              - type: string
+            recv: pointer
+          - name: Prefix
+            out:
+              - type: Code
+            recv: pointer
+          - name: Mask
+            out:
+              - type: Code
+            recv: pointer
+        name: PrefixMatcher
+        struct:
+          unexported: true
+      - name: WrapParams
+        struct:
+          fields:
+            - name: Code
+              type: Code
+            - name: Reason
+              type: string
+            - name: Public
+              type: string
+            - name: Private
+              type: string
+            - name: ExitCode
+              type: int
+  - aliases:
+      - name: Code
+        target: kerrs.Code
+      - name: Major
+        target: kerrs.Major
+      - name: Layer
+        target: kerrs.Layer
+      - name: PkgCode
+        target: kerrs.PkgCode
+      - name: Serial
+        target: kerrs.Serial
+      - name: PrefixMatcher
+        target: kerrs.PrefixMatcher
+      - name: Field
+        target: kerrs.FieldValue
+      - name: WrapParams
+        target: kerrs.WrapParams
+    constants:
+      - name: MaskByMajor
+        type: Code
+        value: "0xFF_00_00_00"
+      - name: MaskByLayer
+        type: Code
+        value: "0xFF_FF_00_00"
+      - name: MaskByPackage
+        type: Code
+        value: "0xFF_FF_FF_00"
+      - name: MaskExact
+        type: Code
+        value: "0xFF_FF_FF_FF"
+      - name: MinAppMajor
+        type: Major
+        value: "0x40"
+      - name: MaxMajor
+        type: Major
+        value: "0x7F"
+    functions:
+      - in:
+          - name: err
+            type: error
+        name: CodeOf
+        out:
+          - name: code
+            type: Code
+          - name: ok
+            type: bool
+      - in:
+          - name: err
+            type: error
+        name: PublicOf
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: PrivateOf
+        out:
+          - type: string
+      - in:
+          - name: err
+            type: error
+        name: HTTPStatusOf
+        out:
+          - type: int
+      - in:
+          - name: err
+            type: error
+        name: ExitCodeOf
+        out:
+          - type: int
+      - in:
+          - name: err
+            type: error
+        name: FieldsOf
+        out:
+          - type: "[]Field"
+      - in:
+          - name: err
+            type: error
+          - name: code
+            type: Code
+        name: HasCode
+        out:
+          - type: bool
+      - in:
+          - name: err
+            type: error
+          - name: reason
+            type: string
+        name: HasReason
+        out:
+          - type: bool
+      - in:
+          - name: prefix
+          - name: mask
+            type: Code
+        name: NewPrefixMatcher
+        out:
+          - type: "*PrefixMatcher"
+      - in:
+          - name: major
+            type: Major
+          - name: layer
+            type: Layer
+          - name: pkg
+            type: PkgCode
+          - name: serial
+            type: Serial
+        name: Pack
+        out:
+          - type: Code
+      - in:
+          - name: text
+            type: string
+        name: ParseCode
+        out:
+          - name: code
+            type: Code
+          - name: err
+            type: error
+      - in:
+          - name: err
+            type: error
+          - name: codes
+            type: Code
+        name: HasAnyCode
+        out:
+          - type: bool
+        variadic: true
+      - in:
+          - name: err
+            type: error
+          - name: reasons
+            type: string
+        name: HasAnyReason
+        out:
+          - type: bool
+        variadic: true
+      - in:
+          - name: key
+          - name: val
+            type: string
+        name: String
+        out:
+          - type: Field
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int
+        name: Int
+        out:
+          - type: Field
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: int64
+        name: Int64
+        out:
+          - type: Field
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: bool
+        name: Bool
+        out:
+          - type: Field
+      - in:
+          - name: key
+            type: string
+          - name: val
+            type: float64
+        name: Float
+        out:
+          - type: Field
+      - in:
+          - name: key
+          - name: val
+            type: string
+        name: NewFieldValue
+        out:
+          - type: Field
+      - in:
+          - name: code
+            type: Code
+          - name: reason
+          - name: public
+          - name: private
+            type: string
+          - name: fields
+            type: Field
+        name: New
+        out:
+          - type: error
+        variadic: true
+      - in:
+          - name: cause
+            type: error
+          - name: params
+            type: WrapParams
+          - name: fields
+            type: Field
+        name: Wrap
+        out:
+          - type: error
+        variadic: true
+    imports:
+      kerrs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/errs
+    variables:
+      - name: ReasonOf
+        type: func(err error) (reason string, ok bool)

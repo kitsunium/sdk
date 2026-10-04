@@ -1,0 +1,1503 @@
+apiVersion: kit.kitsunium/design/v2
+domain: crypto
+packages:
+  - constants:
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_04_01"
+      - name: CodeUnknownAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_02"
+      - name: CodeInvalidKey
+        type: errs.Code
+        value: "0x00_02_04_03"
+      - name: CodeDecryptionFailed
+        type: errs.Code
+        value: "0x00_02_04_04"
+      - name: CodeEntropyFailed
+        type: errs.Code
+        value: "0x00_02_04_05"
+      - name: CodeUnknownHashAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_06"
+      - name: CodeUnknownSignatureAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_07"
+      - name: CodeSigningFailed
+        type: errs.Code
+        value: "0x00_02_04_08"
+      - name: CodeKeyGenerationFailed
+        type: errs.Code
+        value: "0x00_02_04_09"
+      - name: CodeUnknownKDFAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_0A"
+      - name: CodeDerivationFailed
+        type: errs.Code
+        value: "0x00_02_04_0B"
+      - name: CodeUnknownPasswordAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_0C"
+      - name: CodePasswordHashFailed
+        type: errs.Code
+        value: "0x00_02_04_0D"
+      - name: CodeInvalidPasswordHash
+        type: errs.Code
+        value: "0x00_02_04_0E"
+      - name: CodeUnknownMACAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_0F"
+      - name: CodeUnknownAgreementAlgorithm
+        type: errs.Code
+        value: "0x00_02_04_10"
+      - name: CodeAgreementFailed
+        type: errs.Code
+        value: "0x00_02_04_11"
+      - name: CodeStreamTruncated
+        type: errs.Code
+        value: "0x00_02_04_12"
+      - name: CodeInvalidKeyEnvelope
+        type: errs.Code
+        value: "0x00_02_04_13"
+      - name: CodeDigestMismatch
+        type: errs.Code
+        value: "0x00_02_04_14"
+      - name: KeyLen
+        type: int
+        value: "32"
+      - name: Version
+        type: byte
+        value: "0x01"
+    functions:
+      - in:
+          - name: a
+            type: Agreement
+        name: RegisterAgreement
+        out:
+          - type: Agreement
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupAgreement
+        out:
+          - name: a
+            type: Agreement
+          - name: ok
+            type: bool
+      - name: AvailableAgreements
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+        name: GenerateAgreementKey
+        out:
+          - name: pub
+          - name: priv
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: priv
+          - name: peerPub
+            type: "[]byte"
+        name: AgreementShared
+        out:
+          - name: secret
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: d
+            type: Deriver
+        name: RegisterDeriver
+        out:
+          - type: Deriver
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupDeriver
+        out:
+          - name: d
+            type: Deriver
+          - name: ok
+            type: bool
+      - name: AvailableDerivers
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: secret
+          - name: salt
+            type: "[]byte"
+          - name: info
+            type: string
+          - name: length
+            type: int
+        name: Subkey
+        out:
+          - name: subkey
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: h
+            type: Hasher
+        name: RegisterHasher
+        out:
+          - type: Hasher
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupHasher
+        out:
+          - name: h
+            type: Hasher
+          - name: ok
+            type: bool
+      - name: AvailableHashers
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: data
+            type: "[]byte"
+        name: Sum
+        out:
+          - name: digest
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+        name: NewHash
+        out:
+          - name: h
+            type: hash.Hash
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: data
+            type: "[]byte"
+        name: SumHex
+        out:
+          - name: digest
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+      - in:
+          - name: m
+            type: MAC
+        name: RegisterMAC
+        out:
+          - type: MAC
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupMAC
+        out:
+          - name: m
+            type: MAC
+          - name: ok
+            type: bool
+      - name: AvailableMACs
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: message
+            type: "[]byte"
+        name: MACTag
+        out:
+          - name: tag
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: message
+          - name: tag
+            type: "[]byte"
+        name: MACVerify
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+      - in:
+          - name: p
+            type: PasswordHasher
+        name: RegisterPasswordHasher
+        out:
+          - type: PasswordHasher
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupPasswordHasher
+        out:
+          - name: p
+            type: PasswordHasher
+          - name: ok
+            type: bool
+      - name: AvailablePasswordHashers
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: password
+            type: "[]byte"
+        name: HashPassword
+        out:
+          - name: phc
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: password
+            type: "[]byte"
+          - name: phc
+            type: string
+        name: VerifyPassword
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+      - in:
+          - name: phc
+            type: string
+        name: NeedsRehash
+        out:
+          - type: bool
+      - in:
+          - name: a
+            type: AEAD
+        name: Register
+        out:
+          - type: AEAD
+      - in:
+          - name: name
+            type: Algorithm
+        name: Lookup
+        out:
+          - name: a
+            type: AEAD
+          - name: ok
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: plaintext
+          - name: aad
+            type: "[]byte"
+        name: Seal
+        out:
+          - name: box
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: Key
+          - name: box
+          - name: aad
+            type: "[]byte"
+        name: Open
+        out:
+          - name: plaintext
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: s
+            type: Signer
+        name: RegisterSigner
+        out:
+          - type: Signer
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupSigner
+        out:
+          - name: s
+            type: Signer
+          - name: ok
+            type: bool
+      - name: AvailableSigners
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+        name: GenerateKey
+        out:
+          - name: pub
+          - name: priv
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: priv
+          - name: message
+            type: "[]byte"
+        name: Sign
+        out:
+          - name: sig
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: pub
+          - name: message
+          - name: sig
+            type: "[]byte"
+        name: Verify
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+      - in:
+          - name: s
+            type: StreamSealer
+        name: RegisterStreamSealer
+        out:
+          - type: StreamSealer
+      - in:
+          - name: name
+            type: Algorithm
+        name: LookupStreamSealer
+        out:
+          - name: s
+            type: StreamSealer
+          - name: ok
+            type: bool
+      - name: AvailableStreamSealers
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: dst
+            type: io.Writer
+          - name: aad
+            type: "[]byte"
+        name: SealStream
+        out:
+          - name: sealed
+            type: io.WriteCloser
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: src
+            type: io.Reader
+          - name: aad
+            type: "[]byte"
+        name: OpenStream
+        out:
+          - name: opened
+            type: io.Reader
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/crypto
+    ports:
+      - doc: |-
+          AEAD is an authenticated-encryption-with-associated-data scheme. Each
+          implementation owns its complete self-describing wire framing
+          ([Version][id][nonce][ciphertext||tag]) so the registry can dispatch Open by
+          reading the 1-byte id, and so the nonce — generated from crypto/rand inside
+          Seal — never reaches a caller. Implementations MUST be safe for concurrent
+          use and MUST return the shared non-oracle DecryptionFailed for every Open
+          failure (bad tag, bad header, wrong key) so they cannot become an oracle.
+
+          IFACE-PLUGIN: the registry hands plug-in AEAD instances back to callers behind
+          this interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              ID reports the 1-byte wire identifier embedded in the box header so Open
+              can resolve the scheme without the caller naming it.
+            name: ID
+            out:
+              - type: byte
+          - doc: |-
+              Seal encrypts plaintext, binding aad, and returns the self-framed box
+              (Version + id + random nonce + ciphertext||tag).
+            in:
+              - name: key
+                type: Key
+              - name: plaintext
+              - name: aad
+                type: "[]byte"
+            name: Seal
+            out:
+              - name: box
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Open reverses Seal: it validates the framing, decrypts, and verifies aad,
+              returning the plaintext or the non-oracle DecryptionFailed.
+            in:
+              - name: key
+                type: Key
+              - name: box
+              - name: aad
+                type: "[]byte"
+            name: Open
+            out:
+              - name: plaintext
+                type: "[]byte"
+              - name: err
+                type: error
+        name: AEAD
+      - doc: |-
+          Agreement is a key-agreement scheme (Diffie-Hellman style): it produces an
+          ephemeral keypair and derives a shared secret from a local private key and a
+          peer public key. The raw Shared output is low-level key material and MUST be
+          run through a KDF (a Deriver) before use as a key — the pkg/v1 facade never
+          hands the raw secret back to generic callers. Implementations self-register
+          via RegisterAgreement.
+
+          IFACE-PLUGIN: the registry hands plug-in Agreement instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              GenerateKey draws a fresh public/private keypair from the scheme's
+              entropy source.
+            name: GenerateKey
+            out:
+              - name: pub
+              - name: priv
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Shared derives the raw shared secret from priv and peerPub. The result
+              MUST be passed through a KDF before any use as a key.
+            in:
+              - name: priv
+              - name: peerPub
+                type: "[]byte"
+            name: Shared
+            out:
+              - name: secret
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Agreement
+      - doc: |-
+          Deriver is a key-derivation function for KEY SEPARATION: it expands one
+          high-entropy secret into independent, purpose-bound subkeys. It is NOT a
+          password hash — the input must already be a strong key (an AEAD Key, an HKDF
+          PRK, a Diffie-Hellman shared secret), never a human password. Password
+          stretching (argon2id) is a separate, deliberately slow port.
+
+          salt is optional domain randomness (nil is allowed); info is a context label
+          that binds each subkey to its purpose ("aead-key", "mac-key", …) so two
+          derivations from the same secret never collide. Implementations MUST be safe
+          for concurrent use.
+
+          IFACE-PLUGIN: the registry hands plug-in Deriver instances back to callers
+          behind this interface; concrete scheme types stay unexported in their own
+          packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Derive expands secret (with optional salt and the context label info) into
+              a length-byte subkey, or DerivationFailed when length exceeds the scheme's
+              maximum output.
+            in:
+              - name: secret
+              - name: salt
+                type: "[]byte"
+              - name: info
+                type: string
+              - name: length
+                type: int
+            name: Derive
+            out:
+              - name: subkey
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Deriver
+      - doc: |-
+          Hasher is a fingerprint / content-addressing hash scheme producing a
+          non-keyed digest of arbitrary bytes (content IDs, cache keys, dedup keys).
+
+          It is explicitly NOT authentication: no Hasher is a MAC, none takes a key,
+          and a digest is public — never branch on a secret-dependent comparison of
+          one. Keyed/authenticated integrity belongs to the AEAD and (future) signature
+          ports. Implementations self-register via RegisterHasher.
+
+          IFACE-PLUGIN: the registry hands plug-in Hasher instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this hasher registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: New returns a fresh hash.Hash for streaming (io.Copy) or one-shot use.
+            name: New
+            out:
+              - type: hash.Hash
+        name: Hasher
+      - doc: |-
+          MAC is a detached message-authentication-code scheme: it binds a secret Key
+          to a message and yields an authentication tag. Unlike a Hasher digest, a MAC
+          tag IS secret-comparison-sensitive — callers MUST route equality through
+          Verify (constant-time), never `==` or bytes.Equal, which is the exact inverse
+          of the Hasher rule. Implementations self-register via RegisterMAC.
+
+          IFACE-PLUGIN: the registry hands plug-in MAC instances back behind this
+          interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this MAC registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: Tag returns the authentication tag over message under key.
+            in:
+              - name: key
+                type: Key
+              - name: message
+                type: "[]byte"
+            name: Tag
+            out:
+              - type: "[]byte"
+          - doc: |-
+              Verify reports whether tag authenticates message under key, using a
+              constant-time comparison so it never becomes a timing oracle.
+            in:
+              - name: key
+                type: Key
+              - name: message
+              - name: tag
+                type: "[]byte"
+            name: Verify
+            out:
+              - type: bool
+          - doc: |-
+              New returns a fresh streaming hash.Hash keyed by key, paralleling
+              Hasher.New, for incremental tagging over large inputs.
+            in:
+              - name: key
+                type: Key
+            name: New
+            out:
+              - type: hash.Hash
+        name: MAC
+      - doc: |-
+          PasswordHasher stretches a human password into a slow, salted, self-describing
+          PHC-string hash for storage. UNLIKE the Deriver (key separation) and Hasher
+          (fingerprints) ports, this one is DELIBERATELY SLOW and salted: it is the only
+          crypto surface meant to consume a low-entropy human secret.
+
+          The returned hash is a PHC string (`$id$params$salt$digest`) that embeds the
+          scheme id and its cost parameters, so Verify needs no side-channel: the stored
+          string fully describes how to check it. Implementations MUST compare digests
+          in constant time and MUST be safe for concurrent use.
+
+          IFACE-PLUGIN: the registry hands plug-in PasswordHasher instances back to
+          callers behind this interface; concrete scheme types stay unexported.
+        methods:
+          - doc: |-
+              Algorithm reports the canonical key under which this scheme registers; it
+              is also the PHC id segment (the first `$`-delimited field).
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Hash returns a PHC-string hash of password with a fresh random salt and
+              the scheme's current cost parameters, or PasswordHashFailed on an entropy
+              fault.
+            in:
+              - name: password
+                type: "[]byte"
+            name: Hash
+            out:
+              - name: phc
+                type: string
+              - name: err
+                type: error
+          - doc: |-
+              Verify reports whether password matches the stored PHC hash, comparing in
+              constant time. A malformed phc returns InvalidPasswordHash; a genuine
+              mismatch is (false, nil) so Verify is not an oracle on WHY it failed.
+            in:
+              - name: password
+                type: "[]byte"
+              - name: phc
+                type: string
+            name: Verify
+            out:
+              - name: ok
+                type: bool
+              - name: err
+                type: error
+          - doc: |-
+              NeedsRehash reports whether phc was produced with cost parameters weaker
+              than this scheme's current policy, so callers can transparently re-hash on
+              a successful login. A malformed phc reports false (Verify surfaces the error).
+            in:
+              - name: phc
+                type: string
+            name: NeedsRehash
+            out:
+              - name: stale
+                type: bool
+        name: PasswordHasher
+      - doc: |-
+          Signer is a detached digital-signature scheme over a public/private keypair.
+          Keys and signatures are scheme-specific byte slices (their lengths are fixed
+          per scheme); the registry dispatches on the Algorithm name. Implementations
+          MUST be safe for concurrent use, MUST NOT panic on a malformed key (return
+          SigningFailed instead), and Verify MUST run in constant time with respect to
+          the signature so it cannot become a timing oracle.
+
+          Unlike the AEAD port, a signature scheme has no hidden nonce and no wire
+          framing: the caller holds the keypair and chooses what bytes to sign. The
+          private key is secret material — treat it like Key.Bytes(): never log it.
+
+          IFACE-PLUGIN: the registry hands plug-in Signer instances back to callers
+          behind this interface; concrete scheme types stay unexported in their own
+          packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              GenerateKey draws a fresh keypair from crypto/rand, returning the public
+              and private key bytes (or KeyGenerationFailed on a host entropy fault).
+            name: GenerateKey
+            out:
+              - name: pub
+              - name: priv
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Sign produces a detached signature over message using priv, or
+              SigningFailed when priv is not a well-formed private key for this scheme.
+            in:
+              - name: priv
+              - name: message
+                type: "[]byte"
+            name: Sign
+            out:
+              - name: sig
+                type: "[]byte"
+              - name: err
+                type: error
+          - doc: |-
+              Verify reports whether sig is a valid signature for message under pub. A
+              malformed key or signature is reported as false, never as a panic.
+            in:
+              - name: pub
+              - name: message
+              - name: sig
+                type: "[]byte"
+            name: Verify
+            out:
+              - name: ok
+                type: bool
+        name: Signer
+      - doc: |-
+          StreamSealer is a streaming authenticated-encryption scheme: it seals and
+          opens an io.Writer / io.Reader pair in fixed-size chunks under a Key and
+          associated data, extending the whole-buffer AEAD domain to arbitrarily large
+          payloads. The Reader honours the hold-back contract: it MUST NOT surface a
+          chunk's plaintext downstream before that chunk authenticates, and a stream cut
+          short surfaces as StreamTruncated rather than as accepted plaintext (the
+          final chunk carries a flag that a truncated stream never reaches).
+          Implementations self-register via RegisterStreamSealer.
+
+          IFACE-PLUGIN: the registry hands plug-in StreamSealer instances back behind
+          this interface; concrete scheme types stay unexported in their own packages.
+        methods:
+          - doc: Algorithm reports the canonical key under which this scheme registers.
+            name: Algorithm
+            out:
+              - type: Algorithm
+          - doc: |-
+              Writer wraps dst so writes are sealed under key with aad; Close writes
+              the final authenticated chunk.
+            in:
+              - name: key
+                type: Key
+              - name: dst
+                type: io.Writer
+              - name: aad
+                type: "[]byte"
+            name: Writer
+            out:
+              - type: io.WriteCloser
+              - type: error
+          - doc: |-
+              Reader wraps src so reads are opened under key with aad; a truncated
+              stream surfaces as StreamTruncated from the returned reader.
+            in:
+              - name: key
+                type: Key
+              - name: src
+                type: io.Reader
+              - name: aad
+                type: "[]byte"
+            name: Reader
+            out:
+              - type: io.Reader
+              - type: error
+        name: StreamSealer
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Algorithm
+        underlying: string
+      - methods:
+          - name: Bytes
+            out:
+              - type: "[]byte"
+            recv: value
+          - name: Zeroize
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+        name: Key
+        struct:
+          unexported: true
+    variables:
+      - name: UnknownAlgorithm
+        type: "*errs.Error"
+      - name: InvalidKey
+        type: "*errs.Error"
+      - name: DecryptionFailed
+        type: "*errs.Error"
+      - name: EntropyFailed
+        type: "*errs.Error"
+      - name: UnknownHashAlgorithm
+        type: "*errs.Error"
+      - name: UnknownSignatureAlgorithm
+        type: "*errs.Error"
+      - name: SigningFailed
+        type: "*errs.Error"
+      - name: KeyGenerationFailed
+        type: "*errs.Error"
+      - name: UnknownKDFAlgorithm
+        type: "*errs.Error"
+      - name: DerivationFailed
+        type: "*errs.Error"
+      - name: UnknownPasswordAlgorithm
+        type: "*errs.Error"
+      - name: PasswordHashFailed
+        type: "*errs.Error"
+      - name: InvalidPasswordHash
+        type: "*errs.Error"
+      - name: UnknownMACAlgorithm
+        type: "*errs.Error"
+      - name: UnknownAgreementAlgorithm
+        type: "*errs.Error"
+      - name: AgreementFailed
+        type: "*errs.Error"
+      - name: StreamTruncated
+        type: "*errs.Error"
+      - name: InvalidKeyEnvelope
+        type: "*errs.Error"
+      - name: DigestMismatch
+        type: "*errs.Error"
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/aead/aesgcm
+    variables:
+      - name: AEAD
+        type: corecrypto.AEAD
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/aead/streamaead
+    variables:
+      - name: StreamSealer
+        type: corecrypto.StreamSealer
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/agree/x25519
+    variables:
+      - name: Agreement
+        type: corecrypto.Agreement
+  - functions:
+      - in:
+          - name: a
+            type: corecrypto.Algorithm
+          - name: dst
+            type: io.Writer
+        name: NewDigestWriter
+        out:
+          - name: writer
+            type: "*DigestWriter"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: corecrypto.Algorithm
+          - name: src
+            type: io.Reader
+          - name: wantHex
+            type: string
+        name: NewVerifyingReader
+        out:
+          - name: reader
+            type: "*VerifyingReader"
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
+    types:
+      - methods:
+          - in:
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - name: Sum
+            out:
+              - type: "[]byte"
+            recv: pointer
+          - name: SumHex
+            out:
+              - type: string
+            recv: pointer
+        name: DigestWriter
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: p
+                type: "[]byte"
+            name: Read
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+        name: VerifyingReader
+        struct:
+          unexported: true
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/kdf/hkdfsha256
+    variables:
+      - name: Deriver
+        type: corecrypto.Deriver
+  - functions:
+      - in:
+          - name: algo
+            type: corecrypto.Algorithm
+          - name: master
+            type: corecrypto.Key
+        name: NewKeyTree
+        out:
+          - type: KeyTree
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
+    types:
+      - methods:
+          - in:
+              - name: segment
+                type: string
+            name: Child
+            out:
+              - type: KeyTree
+            recv: value
+          - name: DeriveKey
+            out:
+              - name: key
+                type: corecrypto.Key
+              - name: err
+                type: error
+            recv: value
+        name: KeyTree
+        struct:
+          unexported: true
+  - functions:
+      - in:
+          - name: passphrase
+            type: "[]byte"
+          - name: dek
+            type: corecrypto.Key
+        name: WrapKey
+        out:
+          - name: envelope
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: passphrase
+            type: "[]byte"
+          - name: envelope
+            type: string
+        name: UnwrapKey
+        out:
+          - name: dek
+            type: corecrypto.Key
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/key/keyenvelope
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/mac/hmacsha2
+    variables:
+      - name: MAC
+        type: corecrypto.MAC
+  - functions:
+      - in:
+          - name: password
+            type: "[]byte"
+        name: IsCommon
+        out:
+          - type: bool
+      - name: Len
+        out:
+          - type: int
+    path: github.com/kitsunium/sdk/internal/service/crypto/password/commonpw
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/password/pbkdf2pw
+    variables:
+      - name: PasswordHasher
+        type: corecrypto.PasswordHasher
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/sign/ecdsasig
+    variables:
+      - name: Signer
+        type: corecrypto.Signer
+  - imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/internal/service/crypto/sign/ed25519sig
+    variables:
+      - name: Signer
+        type: corecrypto.Signer
+  - aliases:
+      - name: Key
+        target: corecrypto.Key
+    constants:
+      - name: KeyLen
+        type: int
+        value: "32"
+      - name: AESGCM
+        type: Algorithm
+        value: "\"aes-256-gcm\""
+      - name: XChaCha20Poly1305
+        type: Algorithm
+        value: "\"xchacha20poly1305\""
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+      - in:
+          - name: k
+            type: Key
+          - name: plaintext
+          - name: aad
+            type: "[]byte"
+        name: Seal
+        out:
+          - name: box
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: k
+            type: Key
+          - name: plaintext
+          - name: aad
+            type: "[]byte"
+        name: SealAs
+        out:
+          - name: box
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: k
+            type: Key
+          - name: box
+          - name: aad
+            type: "[]byte"
+        name: Open
+        out:
+          - name: plaintext
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: dst
+            type: io.Writer
+          - name: k
+            type: Key
+          - name: aad
+            type: "[]byte"
+        name: SealStream
+        out:
+          - name: sealed
+            type: io.WriteCloser
+          - name: err
+            type: error
+      - in:
+          - name: src
+            type: io.Reader
+          - name: k
+            type: Key
+          - name: aad
+            type: "[]byte"
+        name: OpenStream
+        out:
+          - name: opened
+            type: io.Reader
+          - name: err
+            type: error
+      - in:
+          - name: passphrase
+            type: "[]byte"
+          - name: dek
+            type: Key
+        name: WrapKey
+        out:
+          - name: envelope
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: passphrase
+            type: "[]byte"
+          - name: envelope
+            type: string
+        name: UnwrapKey
+        out:
+          - name: dek
+            type: Key
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/pkg/v1/crypto
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - aliases:
+      - name: Key
+        target: corecrypto.Key
+    constants:
+      - name: KeyLen
+        type: int
+        value: "32"
+      - name: X25519
+        type: Algorithm
+        value: "\"x25519\""
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+        name: GenerateKey
+        out:
+          - name: pub
+          - name: priv
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: priv
+          - name: peerPub
+            type: "[]byte"
+          - name: info
+            type: string
+        name: SharedKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/agree
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - aliases:
+      - name: DigestWriter
+        target: stdhash.DigestWriter
+      - name: VerifyingReader
+        target: stdhash.VerifyingReader
+    constants:
+      - name: SHA256
+        type: Algorithm
+        value: "\"sha256\""
+      - name: SHA512
+        type: Algorithm
+        value: "\"sha512\""
+      - name: SHA3256
+        type: Algorithm
+        value: "\"sha3-256\""
+      - name: CRC32C
+        type: Algorithm
+        value: "\"crc32c\""
+      - name: FNV1a64
+        type: Algorithm
+        value: "\"fnv1a-64\""
+    functions:
+      - in:
+          - name: a
+            type: Algorithm
+          - name: data
+            type: "[]byte"
+        name: Sum
+        out:
+          - name: digest
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: data
+            type: "[]byte"
+        name: SumHex
+        out:
+          - name: digest
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+        name: New
+        out:
+          - name: h
+            type: hash.Hash
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: dst
+            type: io.Writer
+        name: NewDigestWriter
+        out:
+          - name: writer
+            type: "*DigestWriter"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: src
+            type: io.Reader
+          - name: wantHex
+            type: string
+        name: NewVerifyingReader
+        out:
+          - name: reader
+            type: "*VerifyingReader"
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      stdhash: github.com/kitsunium/sdk/internal/service/crypto/hash/stdhash
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/hash
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - aliases:
+      - name: Key
+        target: corecrypto.Key
+      - name: KeyTree
+        target: keytree.KeyTree
+    constants:
+      - name: KeyLen
+        type: int
+        value: "32"
+      - name: HKDFSHA256
+        type: Algorithm
+        value: "\"hkdf-sha256\""
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: secret
+          - name: salt
+            type: "[]byte"
+          - name: info
+            type: string
+          - name: length
+            type: int
+        name: Subkey
+        out:
+          - name: subkey
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: algo
+            type: Algorithm
+          - name: master
+            type: Key
+        name: NewKeyTree
+        out:
+          - type: KeyTree
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      keytree: github.com/kitsunium/sdk/internal/service/crypto/kdf/keytree
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/kdf
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - aliases:
+      - name: Key
+        target: corecrypto.Key
+    constants:
+      - name: KeyLen
+        type: int
+        value: "32"
+      - name: HMACSHA256
+        type: Algorithm
+        value: "\"hmac-sha256\""
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: NewKey
+        out:
+          - name: key
+            type: Key
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: message
+            type: "[]byte"
+        name: Tag
+        out:
+          - name: tag
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: key
+            type: Key
+          - name: message
+          - name: tag
+            type: "[]byte"
+        name: Verify
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/mac
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - constants:
+      - name: PBKDF2SHA256
+        type: Algorithm
+        value: "\"pbkdf2-sha256\""
+    functions:
+      - in:
+          - name: a
+            type: Algorithm
+          - name: password
+            type: "[]byte"
+        name: Hash
+        out:
+          - name: phc
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: password
+            type: "[]byte"
+          - name: phc
+            type: string
+        name: Verify
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+      - in:
+          - name: password
+            type: "[]byte"
+        name: IsCommon
+        out:
+          - type: bool
+      - in:
+          - name: phc
+            type: string
+        name: NeedsRehash
+        out:
+          - type: bool
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/password
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm
+  - constants:
+      - name: Ed25519
+        type: Algorithm
+        value: "\"ed25519\""
+      - name: ECDSAP256
+        type: Algorithm
+        value: "\"ecdsa-p256\""
+    functions:
+      - in:
+          - name: a
+            type: Algorithm
+        name: GenerateKey
+        out:
+          - name: pub
+          - name: priv
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: priv
+          - name: message
+            type: "[]byte"
+        name: Sign
+        out:
+          - name: sig
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: a
+            type: Algorithm
+          - name: pub
+          - name: message
+          - name: sig
+            type: "[]byte"
+        name: Verify
+        out:
+          - name: ok
+            type: bool
+          - name: err
+            type: error
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+    path: github.com/kitsunium/sdk/pkg/v1/crypto/sign
+    types:
+      - name: Algorithm
+        underlying: corecrypto.Algorithm

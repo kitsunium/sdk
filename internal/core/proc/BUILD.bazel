@@ -6,16 +6,13 @@ go_library(
     name = "proc",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "exit.go",
-        "group.go",
         "limit.go",
-        "listener.go",
         "memory.go",
         "notification.go",
         "proc.go",
-        "process.go",
-        "reaper.go",
         "signal.go",
         "signal_other.go",
         "signal_unix.go",
@@ -42,6 +39,7 @@ alias(
 go_test(
     name = "proc_test",
     srcs = [
+        "api_gen_test.go",
         "exit_external_test.go",
         "limit_external_test.go",
         "notification_external_test.go",

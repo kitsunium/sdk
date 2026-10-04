@@ -1,0 +1,4240 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/model
+packages:
+  - aliases:
+      - name: Architecture
+        target: core.ArchitectureMessage
+      - name: Person
+        target: core.PersonMessage
+      - name: System
+        target: core.SystemMessage
+      - name: Container
+        target: core.ContainerMessage
+      - name: Port
+        target: core.PortMessage
+      - name: Link
+        target: core.LinkMessage
+      - name: CodeInfo
+        target: core.CodeResult
+      - name: CodeFunc
+        target: core.CodeFuncMessage
+      - name: CodeStep
+        target: core.CodeStepMessage
+      - name: CodeBlock
+        target: core.CodeBlockMessage
+      - name: CodeEffect
+        target: core.CodeEffectMessage
+      - name: CodeUse
+        target: core.CodeUseMessage
+      - name: Connector
+        target: core.ConnectorMessage
+      - name: ConnectorKind
+        target: core.ConnectorKind
+      - name: ConnectorInfo
+        target: core.ConnectorSpec
+      - name: Adapter
+        target: core.AdapterMessage
+      - name: MailSummary
+        target: core.MailSummary
+      - name: MailMessage
+        target: core.MailMessage
+      - name: EdgeKind
+        target: core.EdgeKind
+      - name: EventType
+        target: core.EventType
+      - name: StoreHistory
+        target: core.StoreHistoryMessage
+      - name: PasswordPolicy
+        target: core.PasswordPolicyMessage
+      - name: Former
+        target: core.FormerMessage
+      - name: RecordHistory
+        target: core.RecordHistoryMessage
+      - name: RecordVersion
+        target: core.RecordVersionMessage
+      - name: Edit
+        target: core.EditMessage
+      - name: RecordVersions
+        target: core.RecordVersionsMessage
+      - name: ExportedVersions
+        target: core.ExportedVersionsMessage
+      - name: ID
+        target: core.IDValue
+      - name: Graph
+        target: core.GraphMessage
+      - name: App
+        target: core.AppMessage
+      - name: Build
+        target: core.BuildMessage
+      - name: ModuleVersion
+        target: core.ModuleVersionMessage
+      - name: Source
+        target: core.SourceMessage
+      - name: Edge
+        target: core.EdgeMessage
+      - name: Stats
+        target: core.StatsMessage
+      - name: Diagnostic
+        target: core.DiagnosticMessage
+      - name: Analysis
+        target: core.AnalysisResult
+      - name: Module
+        target: core.ModuleMessage
+      - name: File
+        target: core.FileMessage
+      - name: Node
+        target: core.NodeEntity
+      - name: EndpointInfo
+        target: core.EndpointSpec
+      - name: PortInfo
+        target: core.PortSpec
+      - name: CommandInfo
+        target: core.CommandSpec
+      - name: QueryInfo
+        target: core.QuerySpec
+      - name: Permission
+        target: core.PermissionMessage
+      - name: StoreInfo
+        target: core.StoreSpec
+      - name: StorePrivacy
+        target: core.StorePrivacyMessage
+      - name: Retention
+        target: core.RetentionSpec
+      - name: ProductRetention
+        target: core.ProductRetentionSpec
+      - name: HeldUntil
+        target: core.HeldUntilSpec
+      - name: IndexInfo
+        target: core.IndexSpec
+      - name: TopicInfo
+        target: core.TopicSpec
+      - name: SubscriptionInfo
+        target: core.SubscriptionSpec
+      - name: WorkflowInfo
+        target: core.WorkflowSpec
+      - name: StateInfo
+        target: core.StateSpec
+      - name: TransitionInfo
+        target: core.TransitionSpec
+      - name: JobInfo
+        target: core.JobSpec
+      - name: FrontendInfo
+        target: core.FrontendSpec
+      - name: AuthInfo
+        target: core.AuthSpec
+      - name: MailerInfo
+        target: core.MailerSpec
+      - name: SecretInfo
+        target: core.SecretSpec
+      - name: LoopInfo
+        target: core.LoopSpec
+      - name: WakeSource
+        target: core.WakeSourceMessage
+      - name: SelectCase
+        target: core.SelectCaseMessage
+      - name: Mechanic
+        target: core.MechanicMessage
+      - name: Schema
+        target: core.SchemaMessage
+      - name: Field
+        target: core.FieldMessage
+      - name: NodeKind
+        target: core.NodeKind
+      - name: BinaryInfo
+        target: core.BinarySpec
+      - name: RoleInfo
+        target: core.RoleSpec
+      - name: CLIInfo
+        target: core.CLISpec
+      - name: ListenerInfo
+        target: core.ListenerSpec
+      - name: LibraryInfo
+        target: core.LibrarySpec
+      - name: PresentationInfo
+        target: core.PresentationSpec
+      - name: PersonalData
+        target: core.PersonalDataMessage
+      - name: StoreData
+        target: core.StoreDataMessage
+      - name: Erasure
+        target: core.ErasureMessage
+      - name: StoreErasure
+        target: core.StoreErasureMessage
+      - name: Privacy
+        target: core.PrivacyMessage
+      - name: Register
+        target: core.RegisterMessage
+      - name: RegisterStore
+        target: core.RegisterStoreMessage
+      - name: Hold
+        target: core.HoldEvent
+      - name: JournalEntry
+        target: core.JournalEntryEvent
+      - name: JournalCheck
+        target: core.JournalCheckMessage
+      - name: RecordFormer
+        target: core.RecordFormerMessage
+      - name: Profile
+        target: core.ProfileResult
+      - name: NodeCost
+        target: core.NodeCostMessage
+      - name: FuncCost
+        target: core.FuncCostMessage
+      - name: FlameNode
+        target: core.FlameNodeMessage
+      - name: Goroutines
+        target: core.GoroutinesResult
+      - name: GoroutineGroup
+        target: core.GoroutineGroup
+      - name: Runtime
+        target: core.RuntimeMessage
+      - name: Database
+        target: core.DatabaseMessage
+      - name: Pool
+        target: core.Pool
+      - name: MigrationSet
+        target: core.MigrationSetMessage
+      - name: Migration
+        target: core.MigrationMessage
+      - name: Setting
+        target: core.SettingMessage
+      - name: BootStep
+        target: core.BootStepMessage
+      - name: DevBuild
+        target: core.DevBuildMessage
+      - name: PhaseChange
+        target: core.PhaseChangeEvent
+      - name: Process
+        target: core.ProcessSpec
+      - name: HTTPServer
+        target: core.HTTPServer
+      - name: Component
+        target: core.ComponentMessage
+      - name: Loop
+        target: core.LoopMessage
+      - name: Event
+        target: core.Event
+      - name: Span
+        target: core.SpanMessage
+      - name: Payload
+        target: core.Payload
+      - name: TransitionEvent
+        target: core.TransitionEvent
+      - name: Census
+        target: core.CensusMessage
+      - name: Trace
+        target: core.TraceMessage
+      - name: Snippet
+        target: core.SnippetMessage
+      - name: Instance
+        target: core.InstanceMessage
+      - name: Step
+        target: core.StepEvent
+      - name: LogRecord
+        target: core.LogRecordMessage
+      - name: Mock
+        target: core.MockMessage
+    constants:
+      - name: ContainerProcess
+        type: string
+        value: "\"process\""
+      - name: ContainerSPA
+        type: string
+        value: "\"spa\""
+      - name: ContainerVolume
+        type: string
+        value: "\"volume\""
+      - name: ContainerMemory
+        type: string
+        value: "\"memory\""
+      - name: ContainerDatabase
+        type: string
+        value: "\"database\""
+      - name: PortOwnerKit
+        type: string
+        value: "\"kit\""
+      - name: ServesHealth
+        type: string
+        value: "\"health\""
+      - name: ServesStudio
+        type: string
+        value: "\"studio\""
+      - name: ServesHTTP
+        type: string
+        value: "\"http\""
+      - name: BlockIf
+        type: string
+        value: "\"if\""
+      - name: BlockElseIf
+        type: string
+        value: "\"else-if\""
+      - name: BlockElse
+        type: string
+        value: "\"else\""
+      - name: BlockCase
+        type: string
+        value: "\"case\""
+      - name: BlockLoop
+        type: string
+        value: "\"loop\""
+      - name: BlockGo
+        type: string
+        value: "\"go\""
+      - name: BlockDefer
+        type: string
+        value: "\"defer\""
+      - name: BlockFunc
+        type: string
+        value: "\"func\""
+      - name: BlockTransaction
+        type: string
+        value: "\"transaction\""
+      - name: ConnectorTransport
+        type: ConnectorKind
+        value: "\"transport\""
+      - name: ConnectorMessaging
+        type: ConnectorKind
+        value: "\"messaging\""
+      - name: ConnectorData
+        type: ConnectorKind
+        value: "\"data\""
+      - name: RoleInbound
+        type: string
+        value: "\"inbound\""
+      - name: RoleOutbound
+        type: string
+        value: "\"outbound\""
+      - name: RoleStorage
+        type: string
+        value: "\"storage\""
+      - name: ConnectorHTTP
+        type: string
+        value: "\"http\""
+      - name: ConnectorMail
+        type: string
+        value: "\"mail\""
+      - name: ConnectorStore
+        type: string
+        value: "\"store\""
+      - name: ConnectorQueue
+        type: string
+        value: "\"queue\""
+      - name: ConnectorDatabase
+        type: string
+        value: "\"database\""
+      - name: EnginePostgres
+        type: string
+        value: "\"postgres\""
+      - name: EngineMySQL
+        type: string
+        value: "\"mysql\""
+      - name: EngineSQLite
+        type: string
+        value: "\"sqlite\""
+      - name: MailQueued
+        type: string
+        value: "\"queued\""
+      - name: MailSent
+        type: string
+        value: "\"sent\""
+      - name: MailRetrying
+        type: string
+        value: "\"retrying\""
+      - name: MailDead
+        type: string
+        value: "\"dead\""
+      - name: MockReplace
+        type: string
+        value: "\"replace\""
+      - name: EdgeCalls
+        type: EdgeKind
+        value: "\"calls\""
+      - name: EdgeReads
+        type: EdgeKind
+        value: "\"reads\""
+      - name: EdgeWrites
+        type: EdgeKind
+        value: "\"writes\""
+      - name: EdgePublishes
+        type: EdgeKind
+        value: "\"publishes\""
+      - name: EdgeDelivers
+        type: EdgeKind
+        value: "\"delivers\""
+      - name: EdgeTransitions
+        type: EdgeKind
+        value: "\"transitions\""
+      - name: EdgePersists
+        type: EdgeKind
+        value: "\"persists\""
+      - name: EdgeSends
+        type: EdgeKind
+        value: "\"sends\""
+      - name: EdgeWakes
+        type: EdgeKind
+        value: "\"wakes\""
+      - name: EdgeUses
+        type: EdgeKind
+        value: "\"uses\""
+      - name: EdgeDispatches
+        type: EdgeKind
+        value: "\"dispatches\""
+      - name: EdgeAsks
+        type: EdgeKind
+        value: "\"asks\""
+      - name: EdgeContracts
+        type: EdgeKind
+        value: "\"contracts\""
+      - name: EdgeRuns
+        type: EdgeKind
+        value: "\"runs\""
+      - name: EdgeImports
+        type: EdgeKind
+        value: "\"imports\""
+      - name: EdgeRenders
+        type: EdgeKind
+        value: "\"renders\""
+      - name: CodeInvalidID
+        type: errs.Code
+        value: "0x00_04_01_01"
+      - name: EventHello
+        type: EventType
+        value: "\"hello\""
+      - name: EventSpan
+        type: EventType
+        value: "\"span\""
+      - name: EventTransition
+        type: EventType
+        value: "\"transition\""
+      - name: EventLifecycle
+        type: EventType
+        value: "\"lifecycle\""
+      - name: EventLoop
+        type: EventType
+        value: "\"loop\""
+      - name: EventCensus
+        type: EventType
+        value: "\"census\""
+      - name: EventGraph
+        type: EventType
+        value: "\"graph\""
+      - name: EventLog
+        type: EventType
+        value: "\"log\""
+      - name: EventMail
+        type: EventType
+        value: "\"mail\""
+      - name: SegmentPattern
+        type: string
+        value: "`[a-z][a-z0-9-]{0,62}`"
+      - name: NamePattern
+        type: string
+        value: "`[A-Za-z][A-Za-z0-9_.-]{0,62}`"
+      - name: RoutePattern
+        type: string
+        value: "`[A-Z]+ /[^\\s]*`"
+      - name: ContractPattern
+        type: string
+        value: "`[a-z][a-z0-9-]{0,62}/v[1-9][0-9]{0,3}`"
+      - name: BinaryScope
+        type: string
+        value: "\"binary:\""
+      - name: LibraryScope
+        type: string
+        value: "\"library:\""
+      - name: Version
+        type: int
+        value: "5"
+      - name: ExternalID
+        type: string
+        value: "\"external\""
+      - name: ExposePublic
+        type: string
+        value: "\"public\""
+      - name: ExposePrivate
+        type: string
+        value: "\"private\""
+      - name: AccessAnyone
+        type: string
+        value: "\"anyone\""
+      - name: AccessAnyUser
+        type: string
+        value: "\"any-user\""
+      - name: AuthRequired
+        type: string
+        value: "\"required\""
+      - name: AuthOptional
+        type: string
+        value: "\"optional\""
+      - name: TriggerEvent
+        type: string
+        value: "\"event\""
+      - name: TriggerTimer
+        type: string
+        value: "\"timer\""
+      - name: TriggerGuard
+        type: string
+        value: "\"guard\""
+      - name: TriggerCreate
+        type: string
+        value: "\"create\""
+      - name: ViaBind
+        type: string
+        value: "\"bind\""
+      - name: ViaImplement
+        type: string
+        value: "\"implement\""
+      - name: ViaFallback
+        type: string
+        value: "\"fallback\""
+      - name: ViaReplace
+        type: string
+        value: "\"replace\""
+      - name: ModeSync
+        type: string
+        value: "\"sync\""
+      - name: ModeQueued
+        type: string
+        value: "\"queued\""
+      - name: TransportSMTP
+        type: string
+        value: "\"smtp\""
+      - name: TransportCapture
+        type: string
+        value: "\"capture\""
+      - name: SecretProvided
+        type: string
+        value: "\"provided\""
+      - name: SecretGenerated
+        type: string
+        value: "\"generated\""
+      - name: SecretFromEnv
+        type: string
+        value: "\"env\""
+      - name: SecretFromFile
+        type: string
+        value: "\"file\""
+      - name: SecretFromMemory
+        type: string
+        value: "\"memory\""
+      - name: SecretFromStore
+        type: string
+        value: "\"store\""
+      - name: LoopDeclared
+        type: string
+        value: "\"declared\""
+      - name: LoopGoroutine
+        type: string
+        value: "\"goroutine\""
+      - name: WakeInterval
+        type: string
+        value: "\"interval\""
+      - name: WakeDeadline
+        type: string
+        value: "\"deadline\""
+      - name: WakeTopic
+        type: string
+        value: "\"topic\""
+      - name: WakeStart
+        type: string
+        value: "\"start\""
+      - name: WakeManual
+        type: string
+        value: "\"manual\""
+      - name: WakeChange
+        type: string
+        value: "\"change\""
+      - name: SelectTimer
+        type: string
+        value: "\"timer\""
+      - name: SelectDone
+        type: string
+        value: "\"done\""
+      - name: SelectReceive
+        type: string
+        value: "\"receive\""
+      - name: SelectSend
+        type: string
+        value: "\"send\""
+      - name: SelectDefault
+        type: string
+        value: "\"default\""
+      - name: ClassPublic
+        type: string
+        value: "\"public\""
+      - name: ClassPersonal
+        type: string
+        value: "\"personal\""
+      - name: ClassSpecial
+        type: string
+        value: "\"special\""
+      - name: ClassSecret
+        type: string
+        value: "\"secret\""
+      - name: KindService
+        type: NodeKind
+        value: "\"service\""
+      - name: KindEndpoint
+        type: NodeKind
+        value: "\"endpoint\""
+      - name: KindStore
+        type: NodeKind
+        value: "\"store\""
+      - name: KindTopic
+        type: NodeKind
+        value: "\"topic\""
+      - name: KindSubscription
+        type: NodeKind
+        value: "\"subscription\""
+      - name: KindWorkflow
+        type: NodeKind
+        value: "\"workflow\""
+      - name: KindJob
+        type: NodeKind
+        value: "\"job\""
+      - name: KindFrontend
+        type: NodeKind
+        value: "\"frontend\""
+      - name: KindExternal
+        type: NodeKind
+        value: "\"external\""
+      - name: KindAuth
+        type: NodeKind
+        value: "\"auth\""
+      - name: KindMailer
+        type: NodeKind
+        value: "\"mailer\""
+      - name: KindLoop
+        type: NodeKind
+        value: "\"loop\""
+      - name: KindSecret
+        type: NodeKind
+        value: "\"secret\""
+      - name: KindPort
+        type: NodeKind
+        value: "\"port\""
+      - name: KindCommand
+        type: NodeKind
+        value: "\"command\""
+      - name: KindQuery
+        type: NodeKind
+        value: "\"query\""
+      - name: KindBinary
+        type: NodeKind
+        value: "\"binary\""
+      - name: KindRole
+        type: NodeKind
+        value: "\"role\""
+      - name: KindCLI
+        type: NodeKind
+        value: "\"cli\""
+      - name: KindListener
+        type: NodeKind
+        value: "\"listener\""
+      - name: KindLibrary
+        type: NodeKind
+        value: "\"library\""
+      - name: KindPresentation
+        type: NodeKind
+        value: "\"presentation\""
+      - name: ProfileServer
+        type: string
+        value: "\"server\""
+      - name: ProfileCLI
+        type: string
+        value: "\"cli\""
+      - name: ProfileDaemon
+        type: string
+        value: "\"daemon\""
+      - name: NetworkUnix
+        type: string
+        value: "\"unix\""
+      - name: NetworkPipe
+        type: string
+        value: "\"pipe\""
+      - name: NetworkLocal
+        type: string
+        value: "\"local\""
+      - name: RetentionOn
+        type: string
+        value: "\"on\""
+      - name: RetentionDryRun
+        type: string
+        value: "\"dry-run\""
+      - name: RetentionOff
+        type: string
+        value: "\"off\""
+      - name: GapPurpose
+        type: string
+        value: "\"purpose\""
+      - name: GapRetention
+        type: string
+        value: "\"retention\""
+      - name: GapSubject
+        type: string
+        value: "\"subject\""
+      - name: MeasureRedacted
+        type: string
+        value: "\"redacted\""
+      - name: MeasureHolds
+        type: string
+        value: "\"legal-holds\""
+      - name: MeasureJournal
+        type: string
+        value: "\"journal\""
+      - name: MeasureNotSealed
+        type: string
+        value: "\"not-sealed\""
+      - name: MeasureSealed
+        type: string
+        value: "\"sealed\""
+      - name: SealedPlaceholder
+        type: string
+        value: "\"[sealed]\""
+      - name: JournalExport
+        type: string
+        value: "\"export\""
+      - name: JournalRead
+        type: string
+        value: "\"read\""
+      - name: JournalErase
+        type: string
+        value: "\"erase\""
+      - name: JournalDelete
+        type: string
+        value: "\"delete\""
+      - name: JournalEraseFields
+        type: string
+        value: "\"erase-fields\""
+      - name: JournalHold
+        type: string
+        value: "\"hold\""
+      - name: JournalRelease
+        type: string
+        value: "\"release\""
+      - name: JournalShred
+        type: string
+        value: "\"shred\""
+      - name: ProfileCPU
+        type: string
+        value: "\"cpu\""
+      - name: ProfileHeap
+        type: string
+        value: "\"heap\""
+      - name: PhaseStarting
+        type: string
+        value: "\"starting\""
+      - name: PhaseServing
+        type: string
+        value: "\"serving\""
+      - name: PhaseDraining
+        type: string
+        value: "\"draining\""
+      - name: PhaseStopped
+        type: string
+        value: "\"stopped\""
+      - name: PhaseFailed
+        type: string
+        value: "\"failed\""
+      - name: DatabaseUnset
+        type: string
+        value: "\"unset\""
+      - name: DatabaseMemory
+        type: string
+        value: "\"memory\""
+      - name: DatabaseOpen
+        type: string
+        value: "\"open\""
+      - name: DatabaseFailed
+        type: string
+        value: "\"failed\""
+      - name: DatabaseClosed
+        type: string
+        value: "\"closed\""
+      - name: SettingEnv
+        type: string
+        value: "\"env\""
+      - name: SettingOption
+        type: string
+        value: "\"option\""
+      - name: SettingDefault
+        type: string
+        value: "\"default\""
+      - name: SettingStore
+        type: string
+        value: "\"store\""
+      - name: SettingKitDev
+        type: string
+        value: "\"kitdev\""
+      - name: SettingFile
+        type: string
+        value: "\"file\""
+      - name: VarEnv
+        type: string
+        value: "\"KIT_ENV\""
+      - name: VarAddr
+        type: string
+        value: "\"KIT_ADDR\""
+      - name: VarDataDir
+        type: string
+        value: "\"KIT_DATA_DIR\""
+      - name: VarStudio
+        type: string
+        value: "\"KIT_STUDIO\""
+      - name: VarStudioRemote
+        type: string
+        value: "\"KIT_STUDIO_REMOTE\""
+      - name: VarAnalyze
+        type: string
+        value: "\"KIT_ANALYZE\""
+      - name: VarTrustProxy
+        type: string
+        value: "\"KIT_TRUST_PROXY\""
+      - name: VarAllowedHosts
+        type: string
+        value: "\"KIT_ALLOWED_HOSTS\""
+      - name: VarLogLevel
+        type: string
+        value: "\"KIT_LOG_LEVEL\""
+      - name: VarSMTPURL
+        type: string
+        value: "\"KIT_SMTP_URL\""
+      - name: VarRetention
+        type: string
+        value: "\"KIT_RETENTION\""
+      - name: VarDevForced
+        type: string
+        value: "\"KIT_DEV_FORCED\""
+      - name: BootConfig
+        type: string
+        value: "\"config\""
+      - name: BootDeclarations
+        type: string
+        value: "\"declarations\""
+      - name: BootMount
+        type: string
+        value: "\"mount\""
+      - name: BootRoutes
+        type: string
+        value: "\"routes\""
+      - name: BootData
+        type: string
+        value: "\"data\""
+      - name: BootHandler
+        type: string
+        value: "\"handler\""
+      - name: BootComponents
+        type: string
+        value: "\"components\""
+      - name: BootServing
+        type: string
+        value: "\"serving\""
+      - name: ComponentPending
+        type: string
+        value: "\"pending\""
+      - name: ComponentStarting
+        type: string
+        value: "\"starting\""
+      - name: ComponentUp
+        type: string
+        value: "\"up\""
+      - name: ComponentStopping
+        type: string
+        value: "\"stopping\""
+      - name: ComponentDown
+        type: string
+        value: "\"down\""
+      - name: ComponentFailed
+        type: string
+        value: "\"failed\""
+      - name: LoopJob
+        type: string
+        value: "\"job\""
+      - name: LoopTimer
+        type: string
+        value: "\"timer\""
+      - name: LoopConsumer
+        type: string
+        value: "\"consumer\""
+      - name: LoopHTTP
+        type: string
+        value: "\"http\""
+      - name: LoopScheduler
+        type: string
+        value: "\"scheduler\""
+      - name: LoopWake
+        type: string
+        value: "\"wake\""
+      - name: LoopRoutine
+        type: string
+        value: "\"goroutine\""
+      - name: LoopRotation
+        type: string
+        value: "\"rotation\""
+      - name: LoopRetention
+        type: string
+        value: "\"retention\""
+      - name: ProvenanceLibrary
+        type: string
+        value: "\"library\""
+      - name: ProvenanceKit
+        type: string
+        value: "\"kit\""
+      - name: ProvenanceProduct
+        type: string
+        value: "\"product\""
+      - name: LoopWaiting
+        type: string
+        value: "\"waiting\""
+      - name: LoopRunning
+        type: string
+        value: "\"running\""
+      - name: LoopRestarting
+        type: string
+        value: "\"restarting\""
+      - name: LoopStopped
+        type: string
+        value: "\"stopped\""
+      - name: OpRequest
+        type: string
+        value: "\"request\""
+      - name: OpCall
+        type: string
+        value: "\"call\""
+      - name: OpRead
+        type: string
+        value: "\"read\""
+      - name: OpWrite
+        type: string
+        value: "\"write\""
+      - name: OpPublish
+        type: string
+        value: "\"publish\""
+      - name: OpDeliver
+        type: string
+        value: "\"deliver\""
+      - name: OpTransition
+        type: string
+        value: "\"transition\""
+      - name: OpRun
+        type: string
+        value: "\"run\""
+      - name: OpAuth
+        type: string
+        value: "\"auth\""
+      - name: OpSend
+        type: string
+        value: "\"send\""
+      - name: OpDeliverMail
+        type: string
+        value: "\"deliver-mail\""
+      - name: OpSecret
+        type: string
+        value: "\"secret\""
+      - name: OpDispatch
+        type: string
+        value: "\"dispatch\""
+      - name: OpAsk
+        type: string
+        value: "\"ask\""
+      - name: OpHandle
+        type: string
+        value: "\"handle\""
+      - name: OpConnect
+        type: string
+        value: "\"connect\""
+      - name: OpCLI
+        type: string
+        value: "\"cli\""
+      - name: OpTransaction
+        type: string
+        value: "\"transaction\""
+      - name: OutcomeCommit
+        type: string
+        value: "\"commit\""
+      - name: OutcomeRollback
+        type: string
+        value: "\"rollback\""
+      - name: StatusOK
+        type: string
+        value: "\"ok\""
+      - name: StatusError
+        type: string
+        value: "\"error\""
+      - name: MaxTableLen
+        type: int
+        value: "58"
+    functions:
+      - in:
+          - name: backend
+            type: string
+        name: IsEngine
+        out:
+          - type: bool
+      - name: ConnectorCatalog
+        out:
+          - type: "[]ConnectorInfo"
+      - in:
+          - name: nodes
+            type: "[]Node"
+        name: ConnectorsOf
+        out:
+          - type: "[]Connector"
+      - in:
+          - name: text
+            type: string
+        name: SplitDoc
+        out:
+          - type: string
+          - type: map[string]string
+      - in:
+          - name: service
+            type: string
+          - name: kind
+            type: NodeKind
+          - name: name
+            type: string
+        name: NodeID
+        out:
+          - type: string
+      - in:
+          - name: from
+            type: string
+          - name: kind
+            type: EdgeKind
+          - name: to
+          - name: label
+            type: string
+        name: EdgeID
+        out:
+          - type: string
+      - in:
+          - name: a
+          - name: b
+            type: Source
+        name: CompareSource
+        out:
+          - type: int
+      - in:
+          - name: base
+          - name: extra
+            type: "*Graph"
+        name: Merge
+        out:
+          - type: "*Graph"
+      - in:
+          - name: id
+            type: string
+        name: ServiceOf
+        out:
+          - type: string
+      - in:
+          - name: s
+            type: string
+        name: ValidSegment
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ValidName
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ValidContract
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ParseID
+        out:
+          - type: ID
+          - type: error
+      - in:
+          - name: binary
+            type: string
+        name: BinaryID
+        out:
+          - type: string
+      - in:
+          - name: binary
+          - name: role
+            type: string
+        name: RoleID
+        out:
+          - type: string
+      - in:
+          - name: library
+            type: string
+        name: LibraryID
+        out:
+          - type: string
+      - in:
+          - name: g
+            type: "*Graph"
+        name: Mermaid
+        out:
+          - type: string
+      - in:
+          - name: module
+          - name: service
+            type: string
+        name: QualifiedService
+        out:
+          - type: string
+      - in:
+          - name: name
+            type: string
+        name: ModulePrefix
+        out:
+          - type: string
+      - in:
+          - name: prefix
+          - name: path
+            type: string
+        name: UnderPrefix
+        out:
+          - type: string
+      - in:
+          - name: service
+          - name: node
+          - name: suffix
+            type: string
+        name: TableName
+        out:
+          - type: string
+    imports:
+      core: github.com/kitsunium/sdk/framework/model/internal/core
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/model
+    variables:
+      - name: InvalidID
+        type: "*errs.Error"
+      - name: IDPattern
+        type: string
+  - aliases:
+      - name: MailSummary
+        target: MailSummaryMessage
+    constants:
+      - name: ContainerProcess
+        value: "\"process\""
+      - name: ContainerSPA
+        value: "\"spa\""
+      - name: ContainerVolume
+        value: "\"volume\""
+      - name: ContainerMemory
+        value: "\"memory\""
+      - name: ContainerDatabase
+        value: "\"database\""
+      - name: PortOwnerKit
+        value: "\"kit\""
+      - name: ServesHealth
+        value: "\"health\""
+      - name: ServesStudio
+        value: "\"studio\""
+      - name: ServesHTTP
+        value: "\"http\""
+      - name: BlockIf
+        value: "\"if\""
+      - name: BlockElseIf
+        value: "\"else-if\""
+      - name: BlockElse
+        value: "\"else\""
+      - name: BlockCase
+        value: "\"case\""
+      - name: BlockLoop
+        value: "\"loop\""
+      - name: BlockGo
+        value: "\"go\""
+      - name: BlockDefer
+        value: "\"defer\""
+      - name: BlockFunc
+        value: "\"func\""
+      - name: BlockTransaction
+        value: "\"transaction\""
+      - name: ConnectorTransport
+        type: ConnectorKind
+        value: "\"transport\""
+      - name: ConnectorMessaging
+        type: ConnectorKind
+        value: "\"messaging\""
+      - name: ConnectorData
+        type: ConnectorKind
+        value: "\"data\""
+      - name: RoleInbound
+        value: "\"inbound\""
+      - name: RoleOutbound
+        value: "\"outbound\""
+      - name: RoleStorage
+        value: "\"storage\""
+      - name: ConnectorHTTP
+        value: "\"http\""
+      - name: ConnectorMail
+        value: "\"mail\""
+      - name: ConnectorStore
+        value: "\"store\""
+      - name: ConnectorQueue
+        value: "\"queue\""
+      - name: ConnectorDatabase
+        value: "\"database\""
+      - name: EnginePostgres
+        value: "\"postgres\""
+      - name: EngineMySQL
+        value: "\"mysql\""
+      - name: EngineSQLite
+        value: "\"sqlite\""
+      - name: MailQueued
+        value: "\"queued\""
+      - name: MailSent
+        value: "\"sent\""
+      - name: MailRetrying
+        value: "\"retrying\""
+      - name: MailDead
+        value: "\"dead\""
+      - name: MockReplace
+        value: "\"replace\""
+      - name: EdgeCalls
+        type: EdgeKind
+        value: "\"calls\""
+      - name: EdgeReads
+        type: EdgeKind
+        value: "\"reads\""
+      - name: EdgeWrites
+        type: EdgeKind
+        value: "\"writes\""
+      - name: EdgePublishes
+        type: EdgeKind
+        value: "\"publishes\""
+      - name: EdgeDelivers
+        type: EdgeKind
+        value: "\"delivers\""
+      - name: EdgeTransitions
+        type: EdgeKind
+        value: "\"transitions\""
+      - name: EdgePersists
+        type: EdgeKind
+        value: "\"persists\""
+      - name: EdgeSends
+        type: EdgeKind
+        value: "\"sends\""
+      - name: EdgeWakes
+        type: EdgeKind
+        value: "\"wakes\""
+      - name: EdgeUses
+        type: EdgeKind
+        value: "\"uses\""
+      - name: EdgeDispatches
+        type: EdgeKind
+        value: "\"dispatches\""
+      - name: EdgeAsks
+        type: EdgeKind
+        value: "\"asks\""
+      - name: EdgeContracts
+        type: EdgeKind
+        value: "\"contracts\""
+      - name: EdgeRuns
+        type: EdgeKind
+        value: "\"runs\""
+      - name: EdgeImports
+        type: EdgeKind
+        value: "\"imports\""
+      - name: EdgeRenders
+        type: EdgeKind
+        value: "\"renders\""
+      - name: CodeInvalidID
+        type: errs.Code
+        value: "0x00_04_01_01"
+      - name: EventHello
+        type: EventType
+        value: "\"hello\""
+      - name: EventSpan
+        type: EventType
+        value: "\"span\""
+      - name: EventTransition
+        type: EventType
+        value: "\"transition\""
+      - name: EventLifecycle
+        type: EventType
+        value: "\"lifecycle\""
+      - name: EventLoop
+        type: EventType
+        value: "\"loop\""
+      - name: EventCensus
+        type: EventType
+        value: "\"census\""
+      - name: EventGraph
+        type: EventType
+        value: "\"graph\""
+      - name: EventLog
+        type: EventType
+        value: "\"log\""
+      - name: EventMail
+        type: EventType
+        value: "\"mail\""
+      - name: SegmentPattern
+        value: "`[a-z][a-z0-9-]{0,62}`"
+      - name: NamePattern
+        value: "`[A-Za-z][A-Za-z0-9_.-]{0,62}`"
+      - name: RoutePattern
+        value: "`[A-Z]+ /[^\\s]*`"
+      - name: ContractPattern
+        value: "`[a-z][a-z0-9-]{0,62}/v[1-9][0-9]{0,3}`"
+      - name: BinaryScope
+        value: "\"binary:\""
+      - name: LibraryScope
+        value: "\"library:\""
+      - name: Version
+        type: int
+        value: "5"
+      - name: ExternalID
+        value: "\"external\""
+      - name: ExposePublic
+        value: "\"public\""
+      - name: ExposePrivate
+        value: "\"private\""
+      - name: AccessAnyone
+        value: "\"anyone\""
+      - name: AccessAnyUser
+        value: "\"any-user\""
+      - name: AuthRequired
+        value: "\"required\""
+      - name: AuthOptional
+        value: "\"optional\""
+      - name: TriggerEvent
+        value: "\"event\""
+      - name: TriggerTimer
+        value: "\"timer\""
+      - name: TriggerGuard
+        value: "\"guard\""
+      - name: TriggerCreate
+        value: "\"create\""
+      - name: ViaBind
+        value: "\"bind\""
+      - name: ViaImplement
+        value: "\"implement\""
+      - name: ViaFallback
+        value: "\"fallback\""
+      - name: ViaReplace
+        value: "\"replace\""
+      - name: ModeSync
+        value: "\"sync\""
+      - name: ModeQueued
+        value: "\"queued\""
+      - name: TransportSMTP
+        value: "\"smtp\""
+      - name: TransportCapture
+        value: "\"capture\""
+      - name: SecretProvided
+        value: "\"provided\""
+      - name: SecretGenerated
+        value: "\"generated\""
+      - name: SecretFromEnv
+        value: "\"env\""
+      - name: SecretFromFile
+        value: "\"file\""
+      - name: SecretFromMemory
+        value: "\"memory\""
+      - name: SecretFromStore
+        value: "\"store\""
+      - name: LoopDeclared
+        value: "\"declared\""
+      - name: LoopGoroutine
+        value: "\"goroutine\""
+      - name: WakeInterval
+        value: "\"interval\""
+      - name: WakeDeadline
+        value: "\"deadline\""
+      - name: WakeTopic
+        value: "\"topic\""
+      - name: WakeStart
+        value: "\"start\""
+      - name: WakeManual
+        value: "\"manual\""
+      - name: WakeChange
+        value: "\"change\""
+      - name: SelectTimer
+        value: "\"timer\""
+      - name: SelectDone
+        value: "\"done\""
+      - name: SelectReceive
+        value: "\"receive\""
+      - name: SelectSend
+        value: "\"send\""
+      - name: SelectDefault
+        value: "\"default\""
+      - name: ClassPublic
+        value: "\"public\""
+      - name: ClassPersonal
+        value: "\"personal\""
+      - name: ClassSpecial
+        value: "\"special\""
+      - name: ClassSecret
+        value: "\"secret\""
+      - name: KindService
+        type: NodeKind
+        value: "\"service\""
+      - name: KindEndpoint
+        type: NodeKind
+        value: "\"endpoint\""
+      - name: KindStore
+        type: NodeKind
+        value: "\"store\""
+      - name: KindTopic
+        type: NodeKind
+        value: "\"topic\""
+      - name: KindSubscription
+        type: NodeKind
+        value: "\"subscription\""
+      - name: KindWorkflow
+        type: NodeKind
+        value: "\"workflow\""
+      - name: KindJob
+        type: NodeKind
+        value: "\"job\""
+      - name: KindFrontend
+        type: NodeKind
+        value: "\"frontend\""
+      - name: KindExternal
+        type: NodeKind
+        value: "\"external\""
+      - name: KindAuth
+        type: NodeKind
+        value: "\"auth\""
+      - name: KindMailer
+        type: NodeKind
+        value: "\"mailer\""
+      - name: KindLoop
+        type: NodeKind
+        value: "\"loop\""
+      - name: KindSecret
+        type: NodeKind
+        value: "\"secret\""
+      - name: KindPort
+        type: NodeKind
+        value: "\"port\""
+      - name: KindCommand
+        type: NodeKind
+        value: "\"command\""
+      - name: KindQuery
+        type: NodeKind
+        value: "\"query\""
+      - name: KindBinary
+        type: NodeKind
+        value: "\"binary\""
+      - name: KindRole
+        type: NodeKind
+        value: "\"role\""
+      - name: KindCLI
+        type: NodeKind
+        value: "\"cli\""
+      - name: KindListener
+        type: NodeKind
+        value: "\"listener\""
+      - name: KindLibrary
+        type: NodeKind
+        value: "\"library\""
+      - name: KindPresentation
+        type: NodeKind
+        value: "\"presentation\""
+      - name: ProfileServer
+        value: "\"server\""
+      - name: ProfileCLI
+        value: "\"cli\""
+      - name: ProfileDaemon
+        value: "\"daemon\""
+      - name: NetworkUnix
+        value: "\"unix\""
+      - name: NetworkPipe
+        value: "\"pipe\""
+      - name: NetworkLocal
+        value: "\"local\""
+      - name: RetentionOn
+        value: "\"on\""
+      - name: RetentionDryRun
+        value: "\"dry-run\""
+      - name: RetentionOff
+        value: "\"off\""
+      - name: GapPurpose
+        value: "\"purpose\""
+      - name: GapRetention
+        value: "\"retention\""
+      - name: GapSubject
+        value: "\"subject\""
+      - name: MeasureRedacted
+        value: "\"redacted\""
+      - name: MeasureHolds
+        value: "\"legal-holds\""
+      - name: MeasureJournal
+        value: "\"journal\""
+      - name: MeasureNotSealed
+        value: "\"not-sealed\""
+      - name: MeasureSealed
+        value: "\"sealed\""
+      - name: SealedPlaceholder
+        value: "\"[sealed]\""
+      - name: JournalExport
+        value: "\"export\""
+      - name: JournalRead
+        value: "\"read\""
+      - name: JournalErase
+        value: "\"erase\""
+      - name: JournalDelete
+        value: "\"delete\""
+      - name: JournalEraseFields
+        value: "\"erase-fields\""
+      - name: JournalHold
+        value: "\"hold\""
+      - name: JournalRelease
+        value: "\"release\""
+      - name: JournalShred
+        value: "\"shred\""
+      - name: ProfileCPU
+        value: "\"cpu\""
+      - name: ProfileHeap
+        value: "\"heap\""
+      - name: PhaseStarting
+        value: "\"starting\""
+      - name: PhaseServing
+        value: "\"serving\""
+      - name: PhaseDraining
+        value: "\"draining\""
+      - name: PhaseStopped
+        value: "\"stopped\""
+      - name: PhaseFailed
+        value: "\"failed\""
+      - name: DatabaseUnset
+        value: "\"unset\""
+      - name: DatabaseMemory
+        value: "\"memory\""
+      - name: DatabaseOpen
+        value: "\"open\""
+      - name: DatabaseFailed
+        value: "\"failed\""
+      - name: DatabaseClosed
+        value: "\"closed\""
+      - name: SettingEnv
+        value: "\"env\""
+      - name: SettingOption
+        value: "\"option\""
+      - name: SettingDefault
+        value: "\"default\""
+      - name: SettingStore
+        value: "\"store\""
+      - name: SettingKitDev
+        value: "\"kitdev\""
+      - name: SettingFile
+        value: "\"file\""
+      - name: VarEnv
+        value: "\"KIT_ENV\""
+      - name: VarAddr
+        value: "\"KIT_ADDR\""
+      - name: VarDataDir
+        value: "\"KIT_DATA_DIR\""
+      - name: VarStudio
+        value: "\"KIT_STUDIO\""
+      - name: VarStudioRemote
+        value: "\"KIT_STUDIO_REMOTE\""
+      - name: VarAnalyze
+        value: "\"KIT_ANALYZE\""
+      - name: VarTrustProxy
+        value: "\"KIT_TRUST_PROXY\""
+      - name: VarAllowedHosts
+        value: "\"KIT_ALLOWED_HOSTS\""
+      - name: VarLogLevel
+        value: "\"KIT_LOG_LEVEL\""
+      - name: VarSMTPURL
+        value: "\"KIT_SMTP_URL\""
+      - name: VarRetention
+        value: "\"KIT_RETENTION\""
+      - name: VarDevForced
+        value: "\"KIT_DEV_FORCED\""
+      - name: BootConfig
+        value: "\"config\""
+      - name: BootDeclarations
+        value: "\"declarations\""
+      - name: BootMount
+        value: "\"mount\""
+      - name: BootRoutes
+        value: "\"routes\""
+      - name: BootData
+        value: "\"data\""
+      - name: BootHandler
+        value: "\"handler\""
+      - name: BootComponents
+        value: "\"components\""
+      - name: BootServing
+        value: "\"serving\""
+      - name: ComponentPending
+        value: "\"pending\""
+      - name: ComponentStarting
+        value: "\"starting\""
+      - name: ComponentUp
+        value: "\"up\""
+      - name: ComponentStopping
+        value: "\"stopping\""
+      - name: ComponentDown
+        value: "\"down\""
+      - name: ComponentFailed
+        value: "\"failed\""
+      - name: LoopJob
+        value: "\"job\""
+      - name: LoopTimer
+        value: "\"timer\""
+      - name: LoopConsumer
+        value: "\"consumer\""
+      - name: LoopHTTP
+        value: "\"http\""
+      - name: LoopScheduler
+        value: "\"scheduler\""
+      - name: LoopWake
+        value: "\"wake\""
+      - name: LoopRoutine
+        value: "\"goroutine\""
+      - name: LoopRotation
+        value: "\"rotation\""
+      - name: LoopRetention
+        value: "\"retention\""
+      - name: ProvenanceLibrary
+        value: "\"library\""
+      - name: ProvenanceKit
+        value: "\"kit\""
+      - name: ProvenanceProduct
+        value: "\"product\""
+      - name: LoopWaiting
+        value: "\"waiting\""
+      - name: LoopRunning
+        value: "\"running\""
+      - name: LoopRestarting
+        value: "\"restarting\""
+      - name: LoopStopped
+        value: "\"stopped\""
+      - name: OpRequest
+        value: "\"request\""
+      - name: OpCall
+        value: "\"call\""
+      - name: OpRead
+        value: "\"read\""
+      - name: OpWrite
+        value: "\"write\""
+      - name: OpPublish
+        value: "\"publish\""
+      - name: OpDeliver
+        value: "\"deliver\""
+      - name: OpTransition
+        value: "\"transition\""
+      - name: OpRun
+        value: "\"run\""
+      - name: OpAuth
+        value: "\"auth\""
+      - name: OpSend
+        value: "\"send\""
+      - name: OpDeliverMail
+        value: "\"deliver-mail\""
+      - name: OpSecret
+        value: "\"secret\""
+      - name: OpDispatch
+        value: "\"dispatch\""
+      - name: OpAsk
+        value: "\"ask\""
+      - name: OpHandle
+        value: "\"handle\""
+      - name: OpConnect
+        value: "\"connect\""
+      - name: OpCLI
+        value: "\"cli\""
+      - name: OpTransaction
+        value: "\"transaction\""
+      - name: OutcomeCommit
+        value: "\"commit\""
+      - name: OutcomeRollback
+        value: "\"rollback\""
+      - name: StatusOK
+        value: "\"ok\""
+      - name: StatusError
+        value: "\"error\""
+      - name: MaxTableLen
+        type: int
+        value: "58"
+    functions:
+      - in:
+          - name: backend
+            type: string
+        name: IsEngine
+        out:
+          - type: bool
+      - name: ConnectorCatalog
+        out:
+          - type: "[]ConnectorSpec"
+      - in:
+          - name: nodes
+            type: "[]NodeEntity"
+        name: ConnectorsOf
+        out:
+          - type: "[]ConnectorMessage"
+      - in:
+          - name: text
+            type: string
+        name: SplitDoc
+        out:
+          - type: string
+          - type: map[string]string
+      - in:
+          - name: service
+            type: string
+          - name: kind
+            type: NodeKind
+          - name: name
+            type: string
+        name: NodeID
+        out:
+          - type: string
+      - in:
+          - name: from
+            type: string
+          - name: kind
+            type: EdgeKind
+          - name: to
+          - name: label
+            type: string
+        name: EdgeID
+        out:
+          - type: string
+      - in:
+          - name: a
+          - name: b
+            type: SourceMessage
+        name: CompareSource
+        out:
+          - type: int
+      - in:
+          - name: base
+          - name: extra
+            type: "*GraphMessage"
+        name: Merge
+        out:
+          - type: "*GraphMessage"
+      - in:
+          - name: id
+            type: string
+        name: ServiceOf
+        out:
+          - type: string
+      - in:
+          - name: s
+            type: string
+        name: ValidSegment
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ValidName
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ValidContract
+        out:
+          - type: bool
+      - in:
+          - name: s
+            type: string
+        name: ParseID
+        out:
+          - type: IDValue
+          - type: error
+      - in:
+          - name: binary
+            type: string
+        name: BinaryID
+        out:
+          - type: string
+      - in:
+          - name: binary
+          - name: role
+            type: string
+        name: RoleID
+        out:
+          - type: string
+      - in:
+          - name: library
+            type: string
+        name: LibraryID
+        out:
+          - type: string
+      - in:
+          - name: g
+            type: "*GraphMessage"
+        name: Mermaid
+        out:
+          - type: string
+      - in:
+          - name: module
+          - name: service
+            type: string
+        name: QualifiedService
+        out:
+          - type: string
+      - in:
+          - name: name
+            type: string
+        name: ModulePrefix
+        out:
+          - type: string
+      - in:
+          - name: prefix
+          - name: path
+            type: string
+        name: UnderPrefix
+        out:
+          - type: string
+      - in:
+          - name: service
+          - name: node
+          - name: suffix
+            type: string
+        name: TableName
+        out:
+          - type: string
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      json: encoding/json
+    path: github.com/kitsunium/sdk/framework/model/internal/core
+    types:
+      - name: ArchitectureMessage
+        struct:
+          fields:
+            - name: People
+              tag: json:"people"
+              type: "[]PersonMessage"
+            - name: Systems
+              tag: json:"systems"
+              type: "[]SystemMessage"
+            - name: Containers
+              tag: json:"containers"
+              type: "[]ContainerMessage"
+            - name: Links
+              tag: json:"links"
+              type: "[]LinkMessage"
+      - name: PersonMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+      - name: SystemMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Technology
+              tag: json:"technology,omitempty"
+              type: string
+            - name: Location
+              tag: json:"location,omitempty"
+              type: string
+            - name: Nodes
+              tag: json:"nodes,omitempty"
+              type: "[]string"
+      - name: ContainerMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Technology
+              tag: json:"technology,omitempty"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Location
+              tag: json:"location,omitempty"
+              type: string
+            - name: Nodes
+              tag: json:"nodes,omitempty"
+              type: "[]string"
+            - name: Ports
+              tag: json:"ports,omitempty"
+              type: "[]PortMessage"
+            - name: Settings
+              tag: json:"settings,omitempty"
+              type: "[]string"
+            - name: Engine
+              tag: json:"engine,omitempty"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+      - name: PortMessage
+        struct:
+          fields:
+            - name: Address
+              tag: json:"address,omitempty"
+              type: string
+            - name: Owner
+              tag: json:"owner"
+              type: string
+            - name: Serves
+              tag: json:"serves"
+              type: "[]string"
+            - name: Settings
+              tag: json:"settings,omitempty"
+              type: "[]string"
+      - name: LinkMessage
+        struct:
+          fields:
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: string
+            - name: Label
+              tag: json:"label"
+              type: string
+            - name: Technology
+              tag: json:"technology,omitempty"
+              type: string
+            - name: Nodes
+              tag: json:"nodes,omitempty"
+              type: "[]string"
+            - name: Connectors
+              tag: json:"connectors,omitempty"
+              type: "[]string"
+      - name: CodeResult
+        struct:
+          fields:
+            - name: Entry
+              tag: json:"entry,omitempty"
+              type: string
+            - name: Funcs
+              tag: json:"funcs,omitempty"
+              type: "[]CodeFuncMessage"
+            - name: Uses
+              tag: json:"uses,omitempty"
+              type: "[]CodeUseMessage"
+            - name: Truncated
+              tag: json:"truncated,omitempty"
+              type: bool
+      - name: CodeFuncMessage
+        struct:
+          fields:
+            - name: Func
+              tag: json:"func"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+            - name: Calls
+              tag: json:"calls,omitempty"
+              type: "[]string"
+            - name: Effects
+              tag: json:"effects,omitempty"
+              type: "[]CodeEffectMessage"
+            - name: Steps
+              tag: json:"steps,omitempty"
+              type: "[]CodeStepMessage"
+            - name: Blocks
+              tag: json:"blocks,omitempty"
+              type: "[]CodeBlockMessage"
+      - name: CodeStepMessage
+        struct:
+          fields:
+            - name: Line
+              tag: json:"line"
+              type: int
+            - name: Call
+              tag: json:"call,omitempty"
+              type: string
+            - name: Effect
+              tag: json:"effect,omitempty"
+              type: int
+            - name: Use
+              tag: json:"use,omitempty"
+              type: string
+            - name: Block
+              tag: json:"block,omitempty"
+              type: int
+      - name: CodeBlockMessage
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Label
+              tag: json:"label,omitempty"
+              type: string
+            - name: Line
+              tag: json:"line"
+              type: int
+            - name: Group
+              tag: json:"group,omitempty"
+              type: int
+            - name: Parent
+              tag: json:"parent,omitempty"
+              type: int
+      - name: CodeEffectMessage
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: EdgeKind
+            - name: Target
+              tag: json:"target"
+              type: string
+            - name: Label
+              tag: json:"label,omitempty"
+              type: string
+            - name: Op
+              tag: json:"op"
+              type: string
+            - name: Line
+              tag: json:"line"
+              type: int
+      - name: CodeUseMessage
+        struct:
+          fields:
+            - name: Package
+              tag: json:"package"
+              type: string
+            - name: Func
+              tag: json:"func"
+              type: string
+            - name: Sites
+              tag: json:"sites,omitempty"
+              type: "[]SourceMessage"
+      - name: ConnectorMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: ConnectorKind
+            - name: Roles
+              tag: json:"roles,omitempty"
+              type: "[]string"
+            - name: Protocol
+              tag: json:"protocol,omitempty"
+              type: string
+            - name: Detail
+              tag: json:"detail,omitempty"
+              type: string
+            - name: Settings
+              tag: json:"settings,omitempty"
+              type: "[]string"
+            - name: Nodes
+              tag: json:"nodes"
+              type: "[]string"
+      - name: ConnectorKind
+        underlying: string
+      - name: ConnectorSpec
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: ConnectorKind
+            - name: Roles
+              tag: json:"roles"
+              type: "[]string"
+            - name: Protocol
+              tag: json:"protocol,omitempty"
+              type: string
+            - name: Settings
+              tag: json:"settings,omitempty"
+              type: "[]string"
+            - name: Declares
+              tag: json:"declares"
+              type: "[]NodeKind"
+            - name: Adapters
+              tag: json:"adapters,omitempty"
+              type: "[]AdapterMessage"
+          unexported: true
+      - name: AdapterMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Import
+              tag: json:"import"
+              type: string
+            - name: Driver
+              tag: json:"driver,omitempty"
+              type: string
+      - name: MailMessage
+        struct:
+          fields:
+            - embedded: true
+              type: MailSummary
+            - name: Text
+              tag: json:"text,omitempty"
+              type: string
+            - name: HTML
+              tag: json:"html,omitempty"
+              type: string
+            - name: Headers
+              tag: json:"headers,omitempty"
+              type: map[string]string
+            - name: Raw
+              tag: json:"raw,omitempty"
+              type: string
+      - name: EdgeKind
+        underlying: string
+      - name: EventType
+        underlying: string
+      - name: StoreHistoryMessage
+        struct:
+          fields:
+            - name: Revisions
+              tag: json:"revisions,omitempty"
+              type: int
+            - name: Fields
+              tag: json:"fields,omitempty"
+              type: "[]string"
+            - name: Passwords
+              tag: json:"passwords,omitempty"
+              type: "[]PasswordPolicyMessage"
+            - name: Kept
+              tag: json:"kept,omitempty"
+              type: "*int"
+            - name: Bytes
+              tag: json:"bytes,omitempty"
+              type: "*int64"
+      - name: PasswordPolicyMessage
+        struct:
+          fields:
+            - name: Field
+              tag: json:"field"
+              type: string
+            - name: MinLength
+              tag: json:"minLength"
+              type: int
+            - name: NotReused
+              tag: json:"notReused,omitempty"
+              type: int
+            - name: NotCommon
+              tag: json:"notCommon,omitempty"
+              type: bool
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+      - name: FormerMessage
+        struct:
+          fields:
+            - name: Value
+              tag: json:"value,omitempty" kit:"personal"
+              type: json.RawMessage
+            - name: Until
+              tag: json:"until"
+              type: time.Time
+            - name: By
+              tag: json:"by,omitempty"
+              type: string
+      - name: RecordHistoryMessage
+        struct:
+          fields:
+            - name: Fields
+              tag: json:"fields"
+              type: map[string][]FormerMessage
+      - name: RecordVersionMessage
+        struct:
+          fields:
+            - name: Number
+              tag: json:"number"
+              type: uint64
+            - name: At
+              tag: json:"at,omitzero"
+              type: time.Time
+            - name: By
+              tag: json:"by,omitempty"
+              type: string
+            - name: Command
+              tag: json:"command,omitempty"
+              type: string
+            - name: Value
+              tag: json:"value,omitempty" kit:"personal"
+              type: json.RawMessage
+      - name: EditMessage
+        struct:
+          fields:
+            - name: Op
+              tag: json:"op"
+              type: string
+            - name: Path
+              tag: json:"path"
+              type: string
+            - name: From
+              tag: json:"from,omitempty" kit:"personal"
+              type: json.RawMessage
+            - name: To
+              tag: json:"to,omitempty" kit:"personal"
+              type: json.RawMessage
+      - name: RecordVersionsMessage
+        struct:
+          fields:
+            - name: Versions
+              tag: json:"versions"
+              type: "[]RecordVersionMessage"
+            - name: From
+              tag: json:"from,omitempty"
+              type: uint64
+            - name: To
+              tag: json:"to,omitempty"
+              type: uint64
+            - name: Edits
+              tag: json:"edits,omitempty"
+              type: "[]EditMessage"
+      - methods:
+          - name: QualifiedServiceName
+            out:
+              - type: string
+            recv: pointer
+          - name: String
+            out:
+              - type: string
+            recv: pointer
+        name: IDValue
+        struct:
+          fields:
+            - name: Module
+              type: string
+            - name: Service
+              type: string
+            - name: Scope
+              type: string
+            - name: Kind
+              type: NodeKind
+            - name: Name
+              type: string
+      - methods:
+          - in:
+              - name: id
+                type: string
+            name: Node
+            out:
+              - type: "*NodeEntity"
+            recv: pointer
+          - in:
+              - name: id
+                type: string
+            name: Edge
+            out:
+              - type: "*EdgeMessage"
+            recv: pointer
+          - name: Files
+            out:
+              - type: "[]FileMessage"
+            recv: pointer
+          - name: Normalize
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+            name: ModuleOf
+            out:
+              - type: "*ModuleMessage"
+            recv: pointer
+        name: GraphMessage
+        struct:
+          fields:
+            - name: Version
+              tag: json:"version"
+              type: int
+            - name: Revision
+              tag: json:"revision"
+              type: string
+            - name: App
+              tag: json:"app"
+              type: AppMessage
+            - name: Nodes
+              tag: json:"nodes"
+              type: "[]NodeEntity"
+            - name: Edges
+              tag: json:"edges"
+              type: "[]EdgeMessage"
+            - name: Catalog
+              tag: json:"catalog,omitempty"
+              type: "[]MechanicMessage"
+            - name: Diagnostics
+              tag: json:"diagnostics,omitempty"
+              type: "[]DiagnosticMessage"
+            - name: Runtime
+              tag: json:"runtime,omitempty"
+              type: "*RuntimeMessage"
+            - name: Analysis
+              tag: json:"analysis,omitempty"
+              type: "*AnalysisResult"
+            - name: Architecture
+              tag: json:"architecture,omitempty"
+              type: "*ArchitectureMessage"
+            - name: Connectors
+              tag: json:"connectors,omitempty"
+              type: "[]ConnectorMessage"
+            - name: ConnectorCatalog
+              tag: json:"connectorCatalog,omitempty"
+              type: "[]ConnectorSpec"
+            - name: Modules
+              tag: json:"modules,omitempty"
+              type: "[]ModuleMessage"
+      - name: AppMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Module
+              tag: json:"module,omitempty"
+              type: string
+            - name: Root
+              tag: json:"root,omitempty"
+              type: string
+            - name: Env
+              tag: json:"env,omitempty"
+              type: string
+            - name: Kit
+              tag: json:"kit,omitempty"
+              type: string
+            - name: Go
+              tag: json:"go,omitempty"
+              type: string
+            - name: StartedAt
+              tag: json:"startedAt,omitempty"
+              type: "*time.Time"
+            - name: Build
+              tag: json:"build,omitempty"
+              type: "*BuildMessage"
+      - name: BuildMessage
+        struct:
+          fields:
+            - name: Product
+              tag: json:"product"
+              type: ModuleVersionMessage
+            - name: Kit
+              tag: json:"kit"
+              type: ModuleVersionMessage
+            - name: SDK
+              tag: json:"sdk"
+              type: ModuleVersionMessage
+      - name: ModuleVersionMessage
+        struct:
+          fields:
+            - name: Module
+              tag: json:"module"
+              type: string
+            - name: Version
+              tag: json:"version,omitempty"
+              type: string
+            - name: Revision
+              tag: json:"revision,omitempty"
+              type: string
+            - name: Time
+              tag: json:"time,omitempty"
+              type: "*time.Time"
+            - name: Modified
+              tag: json:"modified,omitempty"
+              type: bool
+            - name: Local
+              tag: json:"local,omitempty"
+              type: bool
+      - name: SourceMessage
+        struct:
+          fields:
+            - name: File
+              tag: json:"file"
+              type: string
+            - name: Line
+              tag: json:"line"
+              type: int
+            - name: EndLine
+              tag: json:"endLine,omitempty"
+              type: int
+            - name: Func
+              tag: json:"func,omitempty"
+              type: string
+            - name: GoModule
+              tag: json:"goModule,omitempty"
+              type: string
+      - name: EdgeMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: EdgeKind
+            - name: Label
+              tag: json:"label,omitempty"
+              type: string
+            - name: Contract
+              tag: json:"contract,omitempty"
+              type: string
+            - name: Declared
+              tag: json:"declared,omitempty"
+              type: bool
+            - name: Static
+              tag: json:"static,omitempty"
+              type: "[]SourceMessage"
+            - name: Observed
+              tag: json:"observed,omitempty"
+              type: "*StatsMessage"
+      - name: StatsMessage
+        struct:
+          fields:
+            - name: Count
+              tag: json:"count"
+              type: int64
+            - name: Errors
+              tag: json:"errors"
+              type: int64
+            - name: LastAt
+              tag: json:"lastAt,omitempty"
+              type: "*time.Time"
+            - name: AvgMs
+              tag: json:"avgMs"
+              type: float64
+            - name: MaxMs
+              tag: json:"maxMs"
+              type: float64
+      - name: DiagnosticMessage
+        struct:
+          fields:
+            - name: Severity
+              tag: json:"severity"
+              type: string
+            - name: Message
+              tag: json:"message"
+              type: string
+            - name: Texts
+              tag: json:"texts,omitempty"
+              type: map[string]string
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+      - name: AnalysisResult
+        struct:
+          fields:
+            - name: Status
+              tag: json:"status"
+              type: string
+            - name: Error
+              tag: json:"error,omitempty"
+              type: string
+            - name: At
+              tag: json:"at,omitempty"
+              type: "*time.Time"
+            - name: Packages
+              tag: json:"packages,omitempty"
+              type: int
+            - name: TookMs
+              tag: json:"tookMs,omitempty"
+              type: float64
+      - name: ModuleMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Docs
+              tag: json:"docs,omitempty"
+              type: map[string]string
+            - name: Package
+              tag: json:"package,omitempty"
+              type: string
+            - name: Build
+              tag: json:"build,omitempty"
+              type: "*ModuleVersionMessage"
+            - name: Services
+              tag: json:"services"
+              type: "[]string"
+            - name: Requires
+              tag: json:"requires,omitempty"
+              type: "[]string"
+            - name: RequiredBy
+              tag: json:"requiredBy,omitempty"
+              type: "[]string"
+            - name: Prefix
+              tag: json:"prefix"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+            - name: Mount
+              tag: json:"mount,omitempty"
+              type: "*SourceMessage"
+      - name: FileMessage
+        struct:
+          fields:
+            - name: GoModule
+              tag: json:"goModule,omitempty"
+              type: string
+            - name: File
+              tag: json:"file"
+              type: string
+      - name: NodeEntity
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: NodeKind
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Service
+              tag: json:"service,omitempty"
+              type: string
+            - name: Module
+              tag: json:"module,omitempty"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Docs
+              tag: json:"docs,omitempty"
+              type: map[string]string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+            - name: Handler
+              tag: json:"handler,omitempty"
+              type: "*SourceMessage"
+            - name: Endpoint
+              tag: json:"endpoint,omitempty"
+              type: "*EndpointSpec"
+            - name: Store
+              tag: json:"store,omitempty"
+              type: "*StoreSpec"
+            - name: Topic
+              tag: json:"topic,omitempty"
+              type: "*TopicSpec"
+            - name: Subscription
+              tag: json:"subscription,omitempty"
+              type: "*SubscriptionSpec"
+            - name: Workflow
+              tag: json:"workflow,omitempty"
+              type: "*WorkflowSpec"
+            - name: Job
+              tag: json:"job,omitempty"
+              type: "*JobSpec"
+            - name: Frontend
+              tag: json:"frontend,omitempty"
+              type: "*FrontendSpec"
+            - name: Auth
+              tag: json:"auth,omitempty"
+              type: "*AuthSpec"
+            - name: Mailer
+              tag: json:"mailer,omitempty"
+              type: "*MailerSpec"
+            - name: Loop
+              tag: json:"loop,omitempty"
+              type: "*LoopSpec"
+            - name: Secret
+              tag: json:"secret,omitempty"
+              type: "*SecretSpec"
+            - name: Port
+              tag: json:"port,omitempty"
+              type: "*PortSpec"
+            - name: Command
+              tag: json:"command,omitempty"
+              type: "*CommandSpec"
+            - name: Query
+              tag: json:"query,omitempty"
+              type: "*QuerySpec"
+            - name: Binary
+              tag: json:"binary,omitempty"
+              type: "*BinarySpec"
+            - name: Role
+              tag: json:"role,omitempty"
+              type: "*RoleSpec"
+            - name: CLI
+              tag: json:"cli,omitempty"
+              type: "*CLISpec"
+            - name: Listener
+              tag: json:"listener,omitempty"
+              type: "*ListenerSpec"
+            - name: Library
+              tag: json:"library,omitempty"
+              type: "*LibrarySpec"
+            - name: Presentation
+              tag: json:"presentation,omitempty"
+              type: "*PresentationSpec"
+            - name: Code
+              tag: json:"code,omitempty"
+              type: "*CodeResult"
+            - name: Stats
+              tag: json:"stats,omitempty"
+              type: "*StatsMessage"
+      - name: EndpointSpec
+        struct:
+          fields:
+            - name: Method
+              tag: json:"method"
+              type: string
+            - name: Path
+              tag: json:"path"
+              type: string
+            - name: Expose
+              tag: json:"expose"
+              type: string
+            - name: Auth
+              tag: json:"auth,omitempty"
+              type: string
+            - name: Request
+              tag: json:"request,omitempty"
+              type: "*SchemaMessage"
+            - name: Response
+              tag: json:"response,omitempty"
+              type: "*SchemaMessage"
+            - name: Pipeline
+              tag: json:"pipeline,omitempty"
+              type: "[]MechanicMessage"
+            - name: Implements
+              tag: json:"implements,omitempty"
+              type: string
+            - name: Exposes
+              tag: json:"exposes,omitempty"
+              type: string
+            - name: Access
+              tag: json:"access,omitempty"
+              type: string
+      - name: PortSpec
+        struct:
+          fields:
+            - name: Request
+              tag: json:"request,omitempty"
+              type: "*SchemaMessage"
+            - name: Response
+              tag: json:"response,omitempty"
+              type: "*SchemaMessage"
+            - name: Fallback
+              tag: json:"fallback,omitempty"
+              type: string
+            - name: Bound
+              tag: json:"bound,omitempty"
+              type: string
+            - name: Via
+              tag: json:"via,omitempty"
+              type: string
+      - name: CommandSpec
+        struct:
+          fields:
+            - name: Input
+              tag: json:"input,omitempty"
+              type: "*SchemaMessage"
+            - name: Result
+              tag: json:"result,omitempty"
+              type: "*SchemaMessage"
+            - name: Mode
+              tag: json:"mode"
+              type: string
+            - name: Auth
+              tag: json:"auth,omitempty"
+              type: string
+            - name: Pipeline
+              tag: json:"pipeline,omitempty"
+              type: "[]MechanicMessage"
+            - name: Permissions
+              tag: json:"permissions,omitempty"
+              type: "[]PermissionMessage"
+            - name: Authorize
+              tag: json:"authorize,omitempty"
+              type: "*SourceMessage"
+            - name: Key
+              tag: json:"key,omitempty"
+              type: bool
+            - name: MaxDeliveries
+              tag: json:"maxDeliveries,omitempty"
+              type: int
+            - name: Parallelism
+              tag: json:"parallelism,omitempty"
+              type: int
+            - name: Queue
+              tag: json:"queue,omitempty"
+              type: string
+            - name: DeadLetters
+              tag: json:"deadLetters,omitempty"
+              type: "*int"
+      - name: QuerySpec
+        struct:
+          fields:
+            - name: Input
+              tag: json:"input,omitempty"
+              type: "*SchemaMessage"
+            - name: Result
+              tag: json:"result,omitempty"
+              type: "*SchemaMessage"
+            - name: Auth
+              tag: json:"auth,omitempty"
+              type: string
+            - name: Pipeline
+              tag: json:"pipeline,omitempty"
+              type: "[]MechanicMessage"
+            - name: Permissions
+              tag: json:"permissions,omitempty"
+              type: "[]PermissionMessage"
+            - name: Authorize
+              tag: json:"authorize,omitempty"
+              type: "*SourceMessage"
+      - name: PermissionMessage
+        struct:
+          fields:
+            - name: Action
+              tag: json:"action"
+              type: string
+            - name: Resource
+              tag: json:"resource"
+              type: string
+      - name: StoreSpec
+        struct:
+          fields:
+            - name: Entity
+              tag: json:"entity,omitempty"
+              type: "*SchemaMessage"
+            - name: Backend
+              tag: json:"backend"
+              type: string
+            - name: Location
+              tag: json:"location,omitempty"
+              type: string
+            - name: Database
+              tag: json:"database,omitempty"
+              type: string
+            - name: Table
+              tag: json:"table,omitempty"
+              type: string
+            - name: Count
+              tag: json:"count,omitempty"
+              type: "*int"
+            - name: Indexes
+              tag: json:"indexes,omitempty"
+              type: "[]IndexSpec"
+            - name: Privacy
+              tag: json:"privacy,omitempty"
+              type: "*StorePrivacyMessage"
+            - name: History
+              tag: json:"history,omitempty"
+              type: "*StoreHistoryMessage"
+            - name: ReadModel
+              tag: json:"readModel,omitempty"
+              type: bool
+      - name: StorePrivacyMessage
+        struct:
+          fields:
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: string
+            - name: Purpose
+              tag: json:"purpose,omitempty"
+              type: string
+            - name: Erase
+              tag: json:"erase,omitempty"
+              type: "*RetentionSpec"
+            - name: Delete
+              tag: json:"delete,omitempty"
+              type: "*RetentionSpec"
+            - name: ByProduct
+              tag: json:"byProduct,omitempty"
+              type: "*ProductRetentionSpec"
+            - name: HeldUntil
+              tag: json:"heldUntil,omitempty"
+              type: "*HeldUntilSpec"
+            - name: Anonymise
+              tag: json:"anonymise,omitempty"
+              type: "*SourceMessage"
+            - name: DeleteOnErasure
+              tag: json:"deleteOnErasure,omitempty"
+              type: bool
+            - name: Held
+              tag: json:"held,omitempty"
+              type: "*int"
+            - name: Due
+              tag: json:"due,omitempty"
+              type: "*time.Time"
+            - name: Erased
+              tag: json:"erased,omitempty"
+              type: "*int"
+            - name: Deleted
+              tag: json:"deleted,omitempty"
+              type: "*int"
+      - name: ProductRetentionSpec
+        struct:
+          fields:
+            - name: Limits
+              tag: json:"limits,omitempty"
+              type: string
+      - name: RetentionSpec
+        struct:
+          fields:
+            - name: After
+              tag: json:"after,omitempty"
+              type: string
+            - name: Setting
+              tag: json:"setting,omitempty"
+              type: string
+            - name: Since
+              tag: json:"since,omitempty"
+              type: "*SourceMessage"
+            - name: At
+              tag: json:"at,omitempty"
+              type: "*SourceMessage"
+      - name: HeldUntilSpec
+        struct:
+          fields:
+            - name: At
+              tag: json:"at,omitempty"
+              type: "*SourceMessage"
+            - name: Reason
+              tag: json:"reason,omitempty"
+              type: string
+      - name: IndexSpec
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Unique
+              tag: json:"unique,omitempty"
+              type: bool
+      - name: TopicSpec
+        struct:
+          fields:
+            - name: Message
+              tag: json:"message,omitempty"
+              type: "*SchemaMessage"
+            - name: Delivery
+              tag: json:"delivery"
+              type: string
+            - name: Broker
+              tag: json:"broker,omitempty"
+              type: string
+      - name: SubscriptionSpec
+        struct:
+          fields:
+            - name: Topic
+              tag: json:"topic"
+              type: string
+            - name: Mark
+              tag: json:"mark,omitempty"
+              type: string
+            - name: OwnStores
+              tag: json:"ownStores,omitempty"
+              type: bool
+            - name: Stores
+              tag: json:"stores,omitempty"
+              type: "[]string"
+            - name: MaxDeliveries
+              tag: json:"maxDeliveries,omitempty"
+              type: int
+            - name: Parallelism
+              tag: json:"parallelism,omitempty"
+              type: int
+            - name: DeadLetters
+              tag: json:"deadLetters,omitempty"
+              type: "*int"
+      - name: WorkflowSpec
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Field
+              tag: json:"field,omitempty"
+              type: string
+            - name: Initial
+              tag: json:"initial"
+              type: string
+            - name: States
+              tag: json:"states"
+              type: "[]StateSpec"
+            - name: Transitions
+              tag: json:"transitions"
+              type: "[]TransitionSpec"
+      - name: StateSpec
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Terminal
+              tag: json:"terminal,omitempty"
+              type: bool
+            - name: Count
+              tag: json:"count,omitempty"
+              type: "*int"
+            - name: OnEnter
+              tag: json:"onEnter,omitempty"
+              type: "[]SourceMessage"
+      - name: TransitionSpec
+        struct:
+          fields:
+            - name: Event
+              tag: json:"event"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: string
+            - name: Trigger
+              tag: json:"trigger"
+              type: string
+            - name: After
+              tag: json:"after,omitempty"
+              type: string
+            - name: Setting
+              tag: json:"setting,omitempty"
+              type: string
+            - name: At
+              tag: json:"at,omitempty"
+              type: "*SourceMessage"
+            - name: Guard
+              tag: json:"guard,omitempty"
+              type: "*SourceMessage"
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+            - name: Callers
+              tag: json:"callers,omitempty"
+              type: "[]string"
+      - name: JobSpec
+        struct:
+          fields:
+            - name: Schedule
+              tag: json:"schedule"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: string
+      - name: FrontendSpec
+        struct:
+          fields:
+            - name: Prefix
+              tag: json:"prefix"
+              type: string
+            - name: Files
+              tag: json:"files,omitempty"
+              type: int
+      - name: AuthSpec
+        struct:
+          fields:
+            - name: Credentials
+              tag: json:"credentials,omitempty"
+              type: "*SchemaMessage"
+            - name: Data
+              tag: json:"data,omitempty"
+              type: "*SchemaMessage"
+            - name: Endpoints
+              tag: json:"endpoints"
+              type: int
+      - name: MailerSpec
+        struct:
+          fields:
+            - name: Transport
+              tag: json:"transport"
+              type: string
+            - name: Server
+              tag: json:"server,omitempty"
+              type: string
+            - name: TLS
+              tag: json:"tls,omitempty"
+              type: string
+            - name: From
+              tag: json:"from,omitempty"
+              type: string
+            - name: MaxAttempts
+              tag: json:"maxAttempts"
+              type: int
+            - name: Outbox
+              tag: json:"outbox,omitempty"
+              type: string
+            - name: Queued
+              tag: json:"queued,omitempty"
+              type: "*int"
+            - name: Sent
+              tag: json:"sent,omitempty"
+              type: "*int"
+            - name: DeadLetters
+              tag: json:"deadLetters,omitempty"
+              type: "*int"
+      - name: SecretSpec
+        struct:
+          fields:
+            - name: Origin
+              tag: json:"origin"
+              type: string
+            - name: Variable
+              tag: json:"variable"
+              type: string
+            - name: Bytes
+              tag: json:"bytes,omitempty"
+              type: int
+            - name: RotateEvery
+              tag: json:"rotateEvery,omitempty"
+              type: string
+            - name: Keep
+              tag: json:"keep,omitempty"
+              type: int
+            - name: Optional
+              tag: json:"optional,omitempty"
+              type: bool
+            - name: From
+              tag: json:"from,omitempty"
+              type: string
+            - name: Version
+              tag: json:"version,omitempty"
+              type: int
+            - name: Created
+              tag: json:"created,omitempty"
+              type: "*time.Time"
+            - name: Versions
+              tag: json:"versions,omitempty"
+              type: int
+            - name: NextRotation
+              tag: json:"nextRotation,omitempty"
+              type: "*time.Time"
+            - name: Pinned
+              tag: json:"pinned,omitempty"
+              type: bool
+            - name: Rotations
+              tag: json:"rotations,omitempty"
+              type: int
+            - name: Problem
+              tag: json:"problem,omitempty"
+              type: string
+      - name: LoopSpec
+        struct:
+          fields:
+            - name: Style
+              tag: json:"style"
+              type: string
+            - name: Wakes
+              tag: json:"wakes,omitempty"
+              type: "[]WakeSourceMessage"
+            - name: Selects
+              tag: json:"selects,omitempty"
+              type: "[]SelectCaseMessage"
+            - name: Restart
+              tag: json:"restart,omitempty"
+              type: string
+      - name: WakeSourceMessage
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Every
+              tag: json:"every,omitempty"
+              type: string
+            - name: Topic
+              tag: json:"topic,omitempty"
+              type: string
+            - name: Func
+              tag: json:"func,omitempty"
+              type: "*SourceMessage"
+      - name: SelectCaseMessage
+        struct:
+          fields:
+            - name: Text
+              tag: json:"text"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+      - name: MechanicMessage
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Label
+              tag: json:"label"
+              type: string
+            - name: Package
+              tag: json:"package,omitempty"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Snippet
+              tag: json:"snippet,omitempty"
+              type: string
+            - name: Config
+              tag: json:"config,omitempty"
+              type: map[string]string
+      - name: SchemaMessage
+        struct:
+          fields:
+            - name: Type
+              tag: json:"type"
+              type: string
+            - name: Name
+              tag: json:"name,omitempty"
+              type: string
+            - name: Format
+              tag: json:"format,omitempty"
+              type: string
+            - name: Fields
+              tag: json:"fields,omitempty"
+              type: "[]FieldMessage"
+            - name: Items
+              tag: json:"items,omitempty"
+              type: "*SchemaMessage"
+            - name: Values
+              tag: json:"values,omitempty"
+              type: "*SchemaMessage"
+            - name: Enum
+              tag: json:"enum,omitempty"
+              type: "[]string"
+            - name: Ref
+              tag: json:"ref,omitempty"
+              type: string
+            - name: Nullable
+              tag: json:"nullable,omitempty"
+              type: bool
+      - name: FieldMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: In
+              tag: json:"in,omitempty"
+              type: string
+            - name: Type
+              tag: json:"type"
+              type: "*SchemaMessage"
+            - name: Optional
+              tag: json:"optional,omitempty"
+              type: bool
+            - name: Rules
+              tag: json:"rules,omitempty"
+              type: string
+            - name: Doc
+              tag: json:"doc,omitempty"
+              type: string
+            - name: Class
+              tag: json:"class,omitempty"
+              type: string
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: bool
+            - name: Moderated
+              tag: json:"moderated,omitempty"
+              type: bool
+            - name: Sealed
+              tag: json:"sealed,omitempty"
+              type: bool
+            - name: Erased
+              tag: json:"erased,omitempty"
+              type: bool
+            - name: History
+              tag: json:"history,omitempty"
+              type: int
+      - name: NodeKind
+        underlying: string
+      - name: BinarySpec
+        struct:
+          fields:
+            - name: Package
+              tag: json:"package,omitempty"
+              type: string
+            - name: Roles
+              tag: json:"roles"
+              type: "[]string"
+      - name: RoleSpec
+        struct:
+          fields:
+            - name: Binary
+              tag: json:"binary"
+              type: string
+            - name: Profile
+              tag: json:"profile"
+              type: string
+            - name: Args
+              tag: json:"args,omitempty"
+              type: "[]string"
+            - name: Singleton
+              tag: json:"singleton,omitempty"
+              type: string
+            - name: IdleMs
+              tag: json:"idleMs,omitempty"
+              type: int64
+      - name: CLISpec
+        struct:
+          fields:
+            - name: Path
+              tag: json:"path"
+              type: "[]string"
+            - name: Role
+              tag: json:"role,omitempty"
+              type: string
+      - name: ListenerSpec
+        struct:
+          fields:
+            - name: Network
+              tag: json:"network"
+              type: string
+            - name: Contract
+              tag: json:"contract"
+              type: string
+            - name: Peer
+              tag: json:"peer"
+              type: string
+            - name: Role
+              tag: json:"role,omitempty"
+              type: string
+      - name: LibrarySpec
+        struct:
+          fields:
+            - name: Package
+              tag: json:"package"
+              type: string
+      - name: PresentationSpec
+        struct:
+          fields:
+            - name: Media
+              tag: json:"media"
+              type: string
+      - name: PersonalDataMessage
+        struct:
+          fields:
+            - name: Stores
+              tag: json:"stores"
+              type: "[]StoreDataMessage"
+      - name: StoreDataMessage
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Purpose
+              tag: json:"purpose,omitempty"
+              type: string
+            - name: Retention
+              tag: json:"retention,omitempty"
+              type: string
+            - name: Recipients
+              tag: json:"recipients,omitempty"
+              type: "[]string"
+            - name: Records
+              tag: json:"records" kit:"personal"
+              type: "[]json.RawMessage"
+            - name: Former
+              tag: json:"former,omitempty" kit:"personal"
+              type: "[]RecordFormerMessage"
+            - name: Versions
+              tag: json:"versions,omitempty" kit:"personal"
+              type: "[]ExportedVersionsMessage"
+      - name: ExportedVersionsMessage
+        struct:
+          fields:
+            - name: Record
+              tag: json:"record"
+              type: int
+            - name: Versions
+              tag: json:"versions"
+              type: "[]RecordVersionMessage"
+      - name: ErasureMessage
+        struct:
+          fields:
+            - name: Stores
+              tag: json:"stores"
+              type: "[]StoreErasureMessage"
+      - name: StoreErasureMessage
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Erased
+              tag: json:"erased,omitempty" kit:"personal"
+              type: "[]string"
+            - name: Deleted
+              tag: json:"deleted,omitempty" kit:"personal"
+              type: "[]string"
+            - name: Held
+              tag: json:"held,omitempty" kit:"personal"
+              type: "[]string"
+      - name: PrivacyMessage
+        struct:
+          fields:
+            - name: Retention
+              tag: json:"retention"
+              type: string
+            - name: Register
+              tag: json:"register"
+              type: RegisterMessage
+            - name: Holds
+              tag: json:"holds,omitempty"
+              type: "[]HoldEvent"
+            - name: Journal
+              tag: json:"journal,omitempty"
+              type: "[]JournalEntryEvent"
+            - name: Chain
+              tag: json:"chain"
+              type: JournalCheckMessage
+      - name: RegisterMessage
+        struct:
+          fields:
+            - name: App
+              tag: json:"app"
+              type: string
+            - name: ToComplete
+              tag: json:"toComplete,omitempty"
+              type: "[]string"
+            - name: Stores
+              tag: json:"stores,omitempty"
+              type: "[]RegisterStoreMessage"
+      - name: RegisterStoreMessage
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Purpose
+              tag: json:"purpose,omitempty"
+              type: string
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: string
+            - name: SubjectDoc
+              tag: json:"subjectDoc,omitempty"
+              type: string
+            - name: Personal
+              tag: json:"personal,omitempty"
+              type: "[]string"
+            - name: Special
+              tag: json:"special,omitempty"
+              type: "[]string"
+            - name: Secret
+              tag: json:"secret,omitempty"
+              type: "[]string"
+            - name: Recipients
+              tag: json:"recipients,omitempty"
+              type: "[]string"
+            - name: Erase
+              tag: json:"erase,omitempty"
+              type: string
+            - name: Delete
+              tag: json:"delete,omitempty"
+              type: string
+            - name: HeldUntil
+              tag: json:"heldUntil,omitempty"
+              type: string
+            - name: ByProduct
+              tag: json:"byProduct,omitempty"
+              type: "*ProductRetentionSpec"
+            - name: Security
+              tag: json:"security,omitempty"
+              type: "[]string"
+            - name: Gaps
+              tag: json:"gaps,omitempty"
+              type: "[]string"
+      - name: HoldEvent
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Record
+              tag: json:"record"
+              type: string
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: string
+            - name: By
+              tag: json:"by"
+              type: string
+            - name: At
+              tag: json:"at"
+              type: time.Time
+      - name: JournalEntryEvent
+        struct:
+          fields:
+            - name: Seq
+              tag: json:"seq"
+              type: int64
+            - name: At
+              tag: json:"at"
+              type: time.Time
+            - name: Op
+              tag: json:"op"
+              type: string
+            - name: DryRun
+              tag: json:"dryRun,omitempty"
+              type: bool
+            - name: Store
+              tag: json:"store,omitempty"
+              type: string
+            - name: Record
+              tag: json:"record,omitempty"
+              type: string
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: string
+            - name: By
+              tag: json:"by"
+              type: string
+            - name: Hash
+              tag: json:"hash"
+              type: string
+      - name: JournalCheckMessage
+        struct:
+          fields:
+            - name: Entries
+              tag: json:"entries"
+              type: int
+            - name: BrokenAt
+              tag: json:"brokenAt,omitempty"
+              type: int64
+      - name: RecordFormerMessage
+        struct:
+          fields:
+            - name: Record
+              tag: json:"record"
+              type: int
+            - name: Fields
+              tag: json:"fields"
+              type: map[string][]FormerMessage
+      - name: ProfileResult
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: At
+              tag: json:"at"
+              type: time.Time
+            - name: DurationMs
+              tag: json:"durationMs,omitempty"
+              type: float64
+            - name: Unit
+              tag: json:"unit"
+              type: string
+            - name: Total
+              tag: json:"total"
+              type: float64
+            - name: Nodes
+              tag: json:"nodes"
+              type: "[]NodeCostMessage"
+            - name: Unattributed
+              tag: json:"unattributed"
+              type: float64
+            - name: Top
+              tag: json:"top"
+              type: "[]FuncCostMessage"
+            - name: Flame
+              tag: json:"flame,omitempty"
+              type: "*FlameNodeMessage"
+      - name: NodeCostMessage
+        struct:
+          fields:
+            - name: Node
+              tag: json:"node"
+              type: string
+            - name: Value
+              tag: json:"value"
+              type: float64
+            - name: Share
+              tag: json:"share"
+              type: float64
+            - name: Top
+              tag: json:"top,omitempty"
+              type: "[]FuncCostMessage"
+      - name: FuncCostMessage
+        struct:
+          fields:
+            - name: Func
+              tag: json:"func"
+              type: string
+            - name: Source
+              tag: json:"source,omitempty"
+              type: "*SourceMessage"
+            - name: Flat
+              tag: json:"flat"
+              type: float64
+            - name: Cum
+              tag: json:"cum"
+              type: float64
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+      - name: FlameNodeMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Value
+              tag: json:"value"
+              type: float64
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: Children
+              tag: json:"children,omitempty"
+              type: "[]*FlameNodeMessage"
+      - name: GoroutinesResult
+        struct:
+          fields:
+            - name: At
+              tag: json:"at"
+              type: time.Time
+            - name: Total
+              tag: json:"total"
+              type: int
+            - name: Groups
+              tag: json:"groups"
+              type: "[]GoroutineGroup"
+      - name: GoroutineGroup
+        struct:
+          fields:
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: Loop
+              tag: json:"loop,omitempty"
+              type: string
+            - name: State
+              tag: json:"state"
+              type: string
+            - name: Count
+              tag: json:"count"
+              type: int
+            - name: Top
+              tag: json:"top"
+              type: string
+            - name: Stack
+              tag: json:"stack,omitempty"
+              type: "[]string"
+      - name: RuntimeMessage
+        struct:
+          fields:
+            - name: Phase
+              tag: json:"phase"
+              type: string
+            - name: StartedAt
+              tag: json:"startedAt"
+              type: time.Time
+            - name: Components
+              tag: json:"components"
+              type: "[]ComponentMessage"
+            - name: Loops
+              tag: json:"loops"
+              type: "[]LoopMessage"
+            - name: History
+              tag: json:"history,omitempty"
+              type: "[]PhaseChangeEvent"
+            - name: Process
+              tag: json:"process,omitempty"
+              type: "*ProcessSpec"
+            - name: HTTP
+              tag: json:"http,omitempty"
+              type: "*HTTPServer"
+            - name: Mocks
+              tag: json:"mocks,omitempty"
+              type: "[]MockMessage"
+            - name: Dev
+              tag: json:"dev,omitempty"
+              type: "*DevBuildMessage"
+            - name: Config
+              tag: json:"config,omitempty"
+              type: "[]SettingMessage"
+            - name: Boot
+              tag: json:"boot,omitempty"
+              type: "[]BootStepMessage"
+            - name: Databases
+              tag: json:"databases,omitempty"
+              type: "[]DatabaseMessage"
+      - name: DatabaseMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Engine
+              tag: json:"engine"
+              type: string
+            - name: State
+              tag: json:"state"
+              type: string
+            - name: Ready
+              tag: json:"ready"
+              type: bool
+            - name: CheckedAt
+              tag: json:"checkedAt,omitempty"
+              type: "*time.Time"
+            - name: Problem
+              tag: json:"problem,omitempty"
+              type: string
+            - name: URLFrom
+              tag: json:"urlFrom,omitempty"
+              type: string
+            - name: TLS
+              tag: json:"tls,omitempty"
+              type: string
+            - name: Pool
+              tag: json:"pool,omitempty"
+              type: "*Pool"
+            - name: Migrations
+              tag: json:"migrations,omitempty"
+              type: "[]MigrationSetMessage"
+      - name: Pool
+        struct:
+          fields:
+            - name: MaxOpen
+              tag: json:"maxOpen"
+              type: int
+            - name: Open
+              tag: json:"open"
+              type: int
+            - name: InUse
+              tag: json:"inUse"
+              type: int
+            - name: Idle
+              tag: json:"idle"
+              type: int
+            - name: Waits
+              tag: json:"waits"
+              type: int64
+            - name: WaitMs
+              tag: json:"waitMs"
+              type: float64
+            - name: Closed
+              tag: json:"closed,omitempty"
+              type: int64
+      - name: MigrationSetMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Table
+              tag: json:"table"
+              type: string
+            - name: Applied
+              tag: json:"applied,omitempty"
+              type: "[]MigrationMessage"
+            - name: Pending
+              tag: json:"pending,omitempty"
+              type: "[]MigrationMessage"
+            - name: Problem
+              tag: json:"problem,omitempty"
+              type: string
+      - name: MigrationMessage
+        struct:
+          fields:
+            - name: Version
+              tag: json:"version"
+              type: uint64
+            - name: Name
+              tag: json:"name,omitempty"
+              type: string
+      - name: SettingMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Value
+              tag: json:"value,omitempty"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: Service
+              tag: json:"service,omitempty"
+              type: string
+            - name: Key
+              tag: json:"key,omitempty"
+              type: string
+            - name: Type
+              tag: json:"type,omitempty"
+              type: string
+            - name: Detail
+              tag: json:"detail,omitempty"
+              type: string
+            - name: Secret
+              tag: json:"secret,omitempty"
+              type: bool
+            - name: Option
+              tag: json:"option,omitempty"
+              type: string
+            - name: Flag
+              tag: json:"flag,omitempty"
+              type: string
+            - name: Database
+              tag: json:"database,omitempty"
+              type: string
+      - name: BootStepMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Count
+              tag: json:"count,omitempty"
+              type: int
+            - name: Value
+              tag: json:"value,omitempty"
+              type: string
+            - name: Begun
+              tag: json:"begun"
+              type: time.Time
+            - name: TookMs
+              tag: json:"tookMs"
+              type: float64
+            - name: Error
+              tag: json:"error,omitempty"
+              type: string
+      - name: DevBuildMessage
+        struct:
+          fields:
+            - name: BuiltAt
+              tag: json:"builtAt,omitempty"
+              type: "*time.Time"
+            - name: BuildMs
+              tag: json:"buildMs,omitempty"
+              type: float64
+            - name: Rebuilds
+              tag: json:"rebuilds,omitempty"
+              type: int
+            - name: Changed
+              tag: json:"changed,omitempty"
+              type: "[]string"
+            - name: More
+              tag: json:"more,omitempty"
+              type: int
+      - name: PhaseChangeEvent
+        struct:
+          fields:
+            - name: Phase
+              tag: json:"phase"
+              type: string
+            - name: At
+              tag: json:"at"
+              type: time.Time
+            - name: Reason
+              tag: json:"reason,omitempty"
+              type: string
+      - name: ProcessSpec
+        struct:
+          fields:
+            - name: PID
+              tag: json:"pid"
+              type: int
+            - name: Go
+              tag: json:"go"
+              type: string
+            - name: OS
+              tag: json:"os"
+              type: string
+            - name: Arch
+              tag: json:"arch"
+              type: string
+            - name: MaxProcs
+              tag: json:"maxProcs"
+              type: int
+            - name: CPUs
+              tag: json:"cpus"
+              type: int
+            - name: Goroutines
+              tag: json:"goroutines"
+              type: int
+            - name: HeapBytes
+              tag: json:"heapBytes"
+              type: uint64
+            - name: HeapObjects
+              tag: json:"heapObjects"
+              type: uint64
+            - name: HeapGoalBytes
+              tag: json:"heapGoalBytes,omitempty"
+              type: uint64
+            - name: MemoryBytes
+              tag: json:"memoryBytes,omitempty"
+              type: uint64
+            - name: TotalAllocBytes
+              tag: json:"totalAllocBytes"
+              type: uint64
+            - name: GCCycles
+              tag: json:"gcCycles"
+              type: uint64
+            - name: LastGC
+              tag: json:"lastGC,omitempty"
+              type: "*time.Time"
+            - name: GCPauseP99Ms
+              tag: json:"gcPauseP99Ms"
+              type: float64
+            - name: SchedLatencyP99Ms
+              tag: json:"schedLatencyP99Ms"
+              type: float64
+            - name: CPUSeconds
+              tag: json:"cpuSeconds"
+              type: float64
+            - name: UptimeMs
+              tag: json:"uptimeMs"
+              type: float64
+            - name: At
+              tag: json:"at"
+              type: time.Time
+      - name: HTTPServer
+        struct:
+          fields:
+            - name: Library
+              tag: json:"library"
+              type: string
+            - name: Loop
+              tag: json:"loop"
+              type: string
+            - name: Addr
+              tag: json:"addr,omitempty"
+              type: string
+            - name: Middleware
+              tag: json:"middleware,omitempty"
+              type: "[]MechanicMessage"
+            - name: Timeouts
+              tag: json:"timeouts,omitempty"
+              type: map[string]string
+            - name: Conns
+              tag: json:"conns,omitempty"
+              type: map[string]int64
+            - name: InFlight
+              tag: json:"inFlight"
+              type: int64
+            - name: Served
+              tag: json:"served"
+              type: int64
+      - name: ComponentMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: State
+              tag: json:"state"
+              type: string
+            - name: Begun
+              tag: json:"begun,omitempty"
+              type: "*time.Time"
+            - name: TookMs
+              tag: json:"tookMs,omitempty"
+              type: float64
+            - name: Error
+              tag: json:"error,omitempty"
+              type: string
+      - name: LoopMessage
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: Kind
+              tag: json:"kind"
+              type: string
+            - name: Provenance
+              tag: json:"provenance,omitempty"
+              type: string
+            - name: Library
+              tag: json:"library,omitempty"
+              type: string
+            - name: State
+              tag: json:"state,omitempty"
+              type: string
+            - name: LastWake
+              tag: json:"lastWake,omitempty"
+              type: string
+            - name: Restarts
+              tag: json:"restarts,omitempty"
+              type: int64
+            - name: Schedule
+              tag: json:"schedule"
+              type: string
+            - name: Runs
+              tag: json:"runs"
+              type: int64
+            - name: Errors
+              tag: json:"errors"
+              type: int64
+            - name: Missed
+              tag: json:"missed"
+              type: int64
+            - name: Skipped
+              tag: json:"skipped"
+              type: int64
+            - name: LastRun
+              tag: json:"lastRun,omitempty"
+              type: "*time.Time"
+            - name: LastMs
+              tag: json:"lastMs,omitempty"
+              type: float64
+            - name: NextRun
+              tag: json:"nextRun,omitempty"
+              type: "*time.Time"
+            - name: LastError
+              tag: json:"lastError,omitempty"
+              type: string
+      - name: Event
+        struct:
+          fields:
+            - name: Seq
+              tag: json:"seq"
+              type: uint64
+            - name: Type
+              tag: json:"type"
+              type: EventType
+            - name: Time
+              tag: json:"time"
+              type: time.Time
+            - name: Revision
+              tag: json:"revision,omitempty"
+              type: string
+            - name: StartedAt
+              tag: json:"startedAt,omitempty"
+              type: "*time.Time"
+            - name: Phase
+              tag: json:"phase,omitempty"
+              type: string
+            - name: Span
+              tag: json:"span,omitempty"
+              type: "*SpanMessage"
+            - name: Transition
+              tag: json:"transition,omitempty"
+              type: "*TransitionEvent"
+            - name: Lifecycle
+              tag: json:"lifecycle,omitempty"
+              type: "*ComponentMessage"
+            - name: Loop
+              tag: json:"loop,omitempty"
+              type: "*LoopMessage"
+            - name: Census
+              tag: json:"census,omitempty"
+              type: "*CensusMessage"
+            - name: Log
+              tag: json:"log,omitempty"
+              type: "*LogRecordMessage"
+            - name: Mail
+              tag: json:"mail,omitempty"
+              type: "*MailSummaryMessage"
+      - name: SpanMessage
+        struct:
+          fields:
+            - name: TraceID
+              tag: json:"traceId"
+              type: string
+            - name: SpanID
+              tag: json:"spanId"
+              type: string
+            - name: ParentID
+              tag: json:"parentId,omitempty"
+              type: string
+            - name: Node
+              tag: json:"node"
+              type: string
+            - name: From
+              tag: json:"from,omitempty"
+              type: string
+            - name: Edge
+              tag: json:"edge,omitempty"
+              type: EdgeKind
+            - name: Label
+              tag: json:"label,omitempty"
+              type: string
+            - name: Op
+              tag: json:"op"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Start
+              tag: json:"start"
+              type: time.Time
+            - name: Ms
+              tag: json:"ms"
+              type: float64
+            - name: Status
+              tag: json:"status"
+              type: string
+            - name: Code
+              tag: json:"code,omitempty"
+              type: string
+            - name: Error
+              tag: json:"error,omitempty"
+              type: string
+            - name: Attrs
+              tag: json:"attrs,omitempty"
+              type: map[string]string
+            - name: User
+              tag: json:"user,omitempty"
+              type: string
+            - name: Payload
+              tag: json:"payload,omitempty"
+              type: "*Payload"
+      - name: Payload
+        struct:
+          fields:
+            - name: Request
+              tag: json:"request,omitempty"
+              type: json.RawMessage
+            - name: Response
+              tag: json:"response,omitempty"
+              type: json.RawMessage
+            - name: Truncated
+              tag: json:"truncated,omitempty"
+              type: bool
+      - name: TransitionEvent
+        struct:
+          fields:
+            - name: Workflow
+              tag: json:"workflow"
+              type: string
+            - name: Instance
+              tag: json:"instance"
+              type: string
+            - name: Event
+              tag: json:"event"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: string
+            - name: Trigger
+              tag: json:"trigger"
+              type: string
+            - name: Caller
+              tag: json:"caller,omitempty"
+              type: string
+      - name: CensusMessage
+        struct:
+          fields:
+            - name: Workflow
+              tag: json:"workflow"
+              type: string
+            - name: Counts
+              tag: json:"counts"
+              type: map[string]int
+      - name: TraceMessage
+        struct:
+          fields:
+            - name: TraceID
+              tag: json:"traceId"
+              type: string
+            - name: Root
+              tag: json:"root"
+              type: string
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Start
+              tag: json:"start"
+              type: time.Time
+            - name: Ms
+              tag: json:"ms"
+              type: float64
+            - name: Status
+              tag: json:"status"
+              type: string
+            - name: Spans
+              tag: json:"spans"
+              type: "[]SpanMessage"
+      - name: SnippetMessage
+        struct:
+          fields:
+            - name: File
+              tag: json:"file"
+              type: string
+            - name: StartLine
+              tag: json:"startLine"
+              type: int
+            - name: Focus
+              tag: json:"focus"
+              type: int
+            - name: FocusEnd
+              tag: json:"focusEnd,omitempty"
+              type: int
+            - name: Lines
+              tag: json:"lines"
+              type: "[]string"
+            - name: Language
+              tag: json:"language"
+              type: string
+      - name: InstanceMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: State
+              tag: json:"state"
+              type: string
+            - name: EnteredAt
+              tag: json:"enteredAt"
+              type: time.Time
+            - name: History
+              tag: json:"history,omitempty"
+              type: "[]StepEvent"
+      - name: StepEvent
+        struct:
+          fields:
+            - name: Event
+              tag: json:"event"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: string
+            - name: At
+              tag: json:"at"
+              type: time.Time
+            - name: Trigger
+              tag: json:"trigger"
+              type: string
+            - name: Caller
+              tag: json:"caller,omitempty"
+              type: string
+      - name: LogRecordMessage
+        struct:
+          fields:
+            - name: Seq
+              tag: json:"seq"
+              type: uint64
+            - name: Time
+              tag: json:"time"
+              type: time.Time
+            - name: Level
+              tag: json:"level"
+              type: string
+            - name: Message
+              tag: json:"message"
+              type: string
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+            - name: TraceID
+              tag: json:"traceId,omitempty"
+              type: string
+            - name: SpanID
+              tag: json:"spanId,omitempty"
+              type: string
+            - name: Attrs
+              tag: json:"attrs,omitempty"
+              type: map[string]string
+      - name: MockMessage
+        struct:
+          fields:
+            - name: Node
+              tag: json:"node"
+              type: string
+            - name: Mode
+              tag: json:"mode"
+              type: string
+            - name: Hits
+              tag: json:"hits"
+              type: int64
+      - name: MailSummaryMessage
+        struct:
+          fields:
+            - name: ID
+              tag: json:"id"
+              type: string
+            - name: Mailer
+              tag: json:"mailer"
+              type: string
+            - name: From
+              tag: json:"from"
+              type: string
+            - name: To
+              tag: json:"to"
+              type: "[]string"
+            - name: Subject
+              tag: json:"subject"
+              type: string
+            - name: Status
+              tag: json:"status"
+              type: string
+            - name: Attempts
+              tag: json:"attempts"
+              type: int
+            - name: Error
+              tag: json:"error,omitempty"
+              type: string
+            - name: QueuedAt
+              tag: json:"queuedAt"
+              type: time.Time
+            - name: SentAt
+              tag: json:"sentAt,omitempty"
+              type: "*time.Time"
+            - name: TraceID
+              tag: json:"traceId,omitempty"
+              type: string
+            - name: Node
+              tag: json:"node,omitempty"
+              type: string
+    variables:
+      - name: InvalidID
+        type: "*errs.Error"
+      - name: IDPattern
+        type: string

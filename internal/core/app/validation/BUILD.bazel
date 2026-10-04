@@ -32,7 +32,10 @@ alias(
 go_test(
     name = "validation_test",
     size = "small",
-    srcs = ["validation_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "validation_external_test.go",
+    ],
     deps = [
         ":validation",
         "//internal/kernel/errs",

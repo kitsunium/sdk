@@ -35,6 +35,7 @@ alias(
 go_test(
     name = "dbsink_test",
     srcs = [
+        "api_gen_test.go",
         "dbsink_bench_test.go",
         "dbsink_config_external_test.go",
         "dbsink_internal_test.go",
@@ -44,6 +45,7 @@ go_test(
         "//internal/core/observe/logger",
         "//internal/core/observe/logger/level",
         "//internal/core/observe/logger/middleware/async",
+        "//internal/kernel/clock",
         "//internal/kernel/concur/batcher",
         "//internal/kernel/errs",
         "//internal/service/observe/logger",

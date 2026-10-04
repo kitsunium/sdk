@@ -55,6 +55,7 @@ go_test(
     name = "session_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "dirsync_internal_test.go",
         "encode_internal_test.go",
         "entropy_internal_test.go",

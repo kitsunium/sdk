@@ -1,0 +1,48 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/writer/nettransport
+packages:
+  - constants:
+      - name: CodeNetTransportDialFailed
+        type: errs.Code
+        value: "0x00_03_1E_01"
+      - name: CodeNetTransportWriteFailed
+        type: errs.Code
+        value: "0x00_03_1E_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/nettransport
+    variables:
+      - name: NetTransportDialFailed
+        type: "*errs.Error"
+      - name: NetTransportWriteFailed
+        type: "*errs.Error"
+  - imports:
+      http: net/http
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/nettransport
+    types:
+      - name: NetConfig
+        struct:
+          fields:
+            - name: Address
+              type: string
+            - name: Dialer
+              type: func(network, addr string) (conn net.Conn, err error)
+            - name: HTTPClient
+              type: "*http.Client"
+            - name: MinLevel
+              type: level.Level
+            - name: BufferSize
+              type: int
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+    variables:
+      - name: WriterTCP
+        type: writer.Factory
+      - name: WriterUDP
+        type: writer.Factory
+      - name: WriterHTTP
+        type: writer.Factory

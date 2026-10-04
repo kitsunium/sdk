@@ -22,9 +22,14 @@ alias(
 
 go_test(
     name = "jsonpatch_test",
-    srcs = ["jsonpatch_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "jsonpatch_external_test.go",
+    ],
     deps = [
         ":jsonpatch",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/jsonpatch",
         "//pkg/v1/errs",
     ],
 )

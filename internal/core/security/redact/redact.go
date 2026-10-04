@@ -23,9 +23,6 @@ package redact
 
 import (
 	"encoding/json"
-	"iter"
-
-	corelogger "github.com/kitsunium/sdk/internal/core/observe/logger"
 )
 
 // Placeholder replaces every secret a [Redactor] recognises. A caller that
@@ -47,38 +44,6 @@ const MinBytes int = 16
 // Unencodable is the text a log attribute holding a value encoding/json
 // refuses is rendered as by [Redactor.Attrs]: the marker, never the value.
 const Unencodable string = "[unencodable]"
-
-// Redactor renders data for display with its secrets replaced. Every method
-// takes a byte bound, raised to [MinBytes], and never returns more than it;
-// none of them modifies what it is given. An implementation is safe for
-// concurrent use.
-//
-// The port is FROZEN at these five methods (ADR 0039): a published interface
-// that grew a sixth would break every implementation and every test double a
-// consumer wrote. A new capability is a sibling interface, type-asserted where
-// it is needed.
-type Redactor interface {
-	// Name reports whether a member, header or attribute name names a
-	// secret.
-	Name(name string) bool
-	// Text returns s with the credentials of every URL in it replaced by
-	// [Placeholder], then cut to the bound at a rune boundary, ending in
-	// [Ellipsis] when cut. The credentials are replaced BEFORE the cut, so a
-	// cut never lands between a password and the "@" that marks it as one.
-	Text(s string, maxBytes int) string
-	// JSON returns document with its secrets replaced, within the bound. A
-	// document that is not exactly one JSON value is refused with
-	// [DocumentInvalid], and nothing is returned for it.
-	JSON(document []byte, maxBytes int) (redacted DocumentValue, err error)
-	// Value returns v encoded as encoding/json would put it on the wire, with
-	// its secrets replaced, within the bound. A value encoding/json refuses is
-	// refused with [ValueUnencodable].
-	Value(v any, maxBytes int) (redacted DocumentValue, err error)
-	// Attrs renders log attributes as display text, one (key, text) pair at a
-	// time, in order, a group flattened into dotted keys; each text is cut to
-	// the bound. It is an iterator so the caller bounds the COUNT by breaking.
-	Attrs(attrs []corelogger.AttrValue, maxBytes int) iter.Seq2[string, string]
-}
 
 // DocumentValue is a JSON document with its secrets replaced, and whether it
 // had to be cut to fit its bound. It is what [Redactor.JSON] and

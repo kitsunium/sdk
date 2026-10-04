@@ -59,6 +59,7 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "backend_internal_test.go",
         "chain_posix_test.go",
         "chain_windows_test.go",

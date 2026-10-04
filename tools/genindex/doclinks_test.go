@@ -12,6 +12,11 @@ import (
 	"testing"
 )
 
+// sdkTable is the repository's platforms table, relative to this package: the
+// path make runs genindex from, and the one a Bazel test finds it at as a
+// data dependency.
+const sdkTable string = "../../scripts/ci/platforms.sh"
+
 // stagePackage writes the given files into a fresh directory and returns it.
 func stagePackage(t *testing.T, files map[string]string) string {
 	t.Helper()
@@ -184,7 +189,7 @@ package a
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		dead, err := checkDocLinks(root)
+		dead, err := checkDocLinks(root, sdkCells(t))
 		if err != nil {
 			t.Fatalf("checkDocLinks = %v, want nil", err)
 		}
@@ -223,7 +228,36 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 				"a.go":       "// Package a links [OnlyLinux].\npackage a\n",
 				"a_linux.go": linuxOnly,
 			},
-			want: []string{"[OnlyLinux] darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64"},
+			want: []string{"[OnlyLinux] darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64, illumos/amd64, solaris/amd64"},
+		},
+		{
+			//: the go command compiles a _solaris.go file for illumos too, so
+			//: the symbol resolves on both cells and on no other.
+			name: "a symbol a _solaris.go file declares resolves on illumos and solaris alone",
+			files: map[string]string{
+				"a.go":         "// Package a links [OnlySunOS].\npackage a\n",
+				"a_solaris.go": "package a\n\n// OnlySunOS exists where the solaris tag holds.\nconst OnlySunOS = 1\n",
+			},
+			want: []string{"[OnlySunOS] linux/amd64, linux/arm64, linux/386, linux/arm, darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64"},
+		},
+		{
+			//: an _illumos.go file is illumos's alone: Solaris is judged apart.
+			name: "a symbol an _illumos.go file declares is dead on solaris",
+			files: map[string]string{
+				"a.go":         "// Package a links [OnlyIllumos].\npackage a\n",
+				"a_illumos.go": "package a\n\n// OnlyIllumos exists on illumos.\nconst OnlyIllumos = 1\n",
+			},
+			want: []string{"[OnlyIllumos] linux/amd64, linux/arm64, linux/386, linux/arm, darwin/arm64, windows/amd64, freebsd/amd64, openbsd/amd64, netbsd/amd64, dragonfly/amd64, solaris/amd64"},
+		},
+		{
+			//: a file only the two cells compile was judged by no platform while
+			//: the table held ten: its dead link reached no report.
+			name: "a dead link in a file only illumos and solaris compile is reported",
+			files: map[string]string{
+				"a.go":         "// Package a is fine.\npackage a\n",
+				"a_solaris.go": "package a\n\n// S links [Missing], which no file declares.\nconst S = 1\n",
+			},
+			want: []string{"[Missing] "},
 		},
 		{
 			//: the file only builds where the symbol exists.
@@ -248,7 +282,7 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		dead, err := checkDocLinks(root)
+		dead, err := checkDocLinks(root, sdkCells(t))
 		if err != nil {
 			t.Fatalf("checkDocLinks = %v, want nil", err)
 		}
@@ -259,6 +293,61 @@ func Test_checkDocLinks_platforms(t *testing.T) {
 		}
 		if !slices.Equal(got, c.want) {
 			t.Fatalf("dead links = %q, want %q", got, c.want)
+		}
+	}
+	for _, c := range tests {
+		t.Run(c.name, func(t *testing.T) {
+			t.Parallel()
+			runCase(t, c)
+		})
+	}
+}
+
+// sdkCells reads the repository's platforms table, failing the test when it
+// cannot.
+func sdkCells(t *testing.T) []platform {
+	t.Helper()
+	cells, err := readPlatforms(filepath.FromSlash(sdkTable))
+	if err != nil {
+		t.Fatalf("reading the platforms table: %v", err)
+	}
+	return cells
+}
+
+// Test_platforms pins the table every judgement is made on: the twelve cells
+// of scripts/ci/platforms.sh, in its order, read from the here-document the
+// script prints — never from a copy. scripts/pre-commit/check-platforms.sh
+// holds that table to bazel-ci.yml's cross-build matrix; this holds genindex
+// to the table, and illumos and solaris to two cells (ADR 0144): they joined
+// the lane and stayed unjudged here until a test like this one existed.
+func Test_platforms(t *testing.T) {
+	t.Parallel()
+	type tc struct {
+		// name describes the case.
+		name string
+		// table is the table file, relative to this package.
+		table string
+		// want are the cells, in order.
+		want []string
+	}
+	tests := []tc{
+		{
+			name:  "the repository's table",
+			table: sdkTable,
+			want: []string{
+				"linux/amd64", "linux/arm64", "linux/386", "linux/arm", "darwin/arm64", "windows/amd64",
+				"freebsd/amd64", "openbsd/amd64", "netbsd/amd64", "dragonfly/amd64", "illumos/amd64", "solaris/amd64",
+			},
+		},
+	}
+	runCase := func(t *testing.T, c tc) {
+		t.Helper()
+		cells, err := readPlatforms(filepath.FromSlash(c.table))
+		if err != nil {
+			t.Fatalf("readPlatforms = %v, want nil", err)
+		}
+		if got := cellNames(cells); !slices.Equal(got, c.want) {
+			t.Fatalf("cells = %q, want %q", got, c.want)
 		}
 	}
 	for _, c := range tests {
@@ -286,7 +375,7 @@ func Test_checkDocLinks_errors(t *testing.T) {
 		t.Helper()
 		root := stagePackage(t, c.files)
 
-		if _, err := checkDocLinks(root); err == nil {
+		if _, err := checkDocLinks(root, sdkCells(t)); err == nil {
 			t.Fatal("checkDocLinks = nil, want an error")
 		}
 	}
@@ -347,7 +436,7 @@ func Test_runDocLinkCheck(t *testing.T) {
 		}
 		var out bytes.Buffer
 
-		status := runDocLinkCheck(roots, &out)
+		status := runDocLinkCheck(roots, sdkCells(t), &out)
 
 		if status != c.wantStatus {
 			t.Fatalf("runDocLinkCheck = %d, want %d; report:\n%s", status, c.wantStatus, out.String())

@@ -11,3 +11,6 @@ uid, err := id.New("uuidv7")   // dispatch by scheme
 ```
 
 See `CLAUDE.md` for the maintainer contract. ADR 0024.
+
+The `Generator` port is generated from `design/app/id.yaml` into
+`design_gen.go` (ADR 0163): it changes in the design, then `kit gen`.

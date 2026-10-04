@@ -1,0 +1,45 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/asn1
+packages:
+  - constants:
+      - name: CodeASN1MarshalFailed
+        type: errs.Code
+        value: "0x00_03_09_01"
+      - name: CodeASN1UnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_09_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/asn1
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/asn1
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"asn1-der\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_09_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_09_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/asn1
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"

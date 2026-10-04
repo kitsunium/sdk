@@ -23,9 +23,15 @@ alias(
 
 go_test(
     name = "docstore_test",
-    srcs = ["docstore_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "docstore_external_test.go",
+    ],
     deps = [
         ":docstore",
+        "//internal/core/data/docstore",
+        "//internal/kernel/errs",
+        "//internal/service/data/docstore",
         "//pkg/v1/clock",
         "//pkg/v1/data/sql",
         "//pkg/v1/data/vfs",

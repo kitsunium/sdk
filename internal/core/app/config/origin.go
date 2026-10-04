@@ -42,16 +42,3 @@ type OriginValue struct {
 	// rendering that the value, if it shows one, must be masked.
 	Secret bool
 }
-
-// Describer is the optional sibling (ADR 0039) a [Source] implements to say
-// where its values come from. [Source] is frozen at one method, so the loader
-// discovers this capability by type assertion; a Source that does not
-// implement it is reported as [LayerSource] with its position.
-//
-// Implementations MUST be safe for concurrent use and MUST NOT return a value
-// in detail — a variable NAME, a file PATH, an endpoint, never what it holds.
-type Describer interface {
-	// Describe reports the kind of layer this source contributes and, for one
-	// dotted key it supplied in its last Load, the detail an operator acts on.
-	Describe(key string) (layer, detail string)
-}

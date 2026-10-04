@@ -18,6 +18,12 @@ alias(
 
 go_test(
     name = "singleflight_test",
-    srcs = ["singleflight_external_test.go"],
-    deps = [":singleflight"],
+    srcs = [
+        "api_gen_test.go",
+        "singleflight_external_test.go",
+    ],
+    deps = [
+        ":singleflight",
+        "//internal/kernel/concur/singleflight",
+    ],
 )

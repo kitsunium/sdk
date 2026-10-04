@@ -1,4 +1,4 @@
-load("@rules_go//go:def.bzl", "go_library")
+load("@rules_go//go:def.bzl", "go_library", "go_test")
 
 package(default_visibility = ["//visibility:public"])
 
@@ -27,4 +27,10 @@ alias(
         "//framework:__subpackages__",
         "//visibility:public",
     ],
+)
+
+go_test(
+    name = "serverkit_test",
+    srcs = ["api_gen_test.go"],
+    deps = [":serverkit"],
 )

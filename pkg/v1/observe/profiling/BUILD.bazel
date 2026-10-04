@@ -23,9 +23,15 @@ alias(
 
 go_test(
     name = "profiling_test",
-    srcs = ["profiling_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "profiling_external_test.go",
+    ],
     deps = [
         ":profiling",
+        "//internal/core/observe/profiling",
+        "//internal/kernel/errs",
+        "//internal/service/observe/profiling",
         "//pkg/v1/errs",
     ],
 )

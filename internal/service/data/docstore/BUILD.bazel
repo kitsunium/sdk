@@ -50,6 +50,7 @@ alias(
 go_test(
     name = "docstore_test",
     srcs = [
+        "api_gen_test.go",
         "concurrency_external_test.go",
         "docstore_bench_test.go",
         "harness_external_test.go",

@@ -1,3 +1,7 @@
+// Package crypto — the AEAD port implemented by each concrete algorithm.
+//
+// Package crypto — the Agreement port: DH-style key agreement.
+//
 // Package crypto — the process-wide Agreement registry + GenerateAgreementKey / AgreementShared dispatch.
 package crypto
 

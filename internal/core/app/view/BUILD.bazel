@@ -7,6 +7,7 @@ go_library(
     srcs = [
         "codes.go",
         "config.go",
+        "design_gen.go",
         "errors.go",
         "factory.go",
         "registry.go",
@@ -37,6 +38,7 @@ go_test(
     name = "view_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",
         "view_external_test.go",

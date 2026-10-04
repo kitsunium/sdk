@@ -22,9 +22,15 @@ alias(
 
 go_test(
     name = "statemachine_test",
-    srcs = ["statemachine_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "statemachine_external_test.go",
+    ],
     deps = [
         ":statemachine",
+        "//internal/core/app/statemachine",
+        "//internal/kernel/errs",
+        "//internal/service/app/statemachine",
         "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],

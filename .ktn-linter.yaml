@@ -464,6 +464,16 @@ rules:
       # HAS, not a missing abstraction.
       - "**/internal/service/app/cli/**"
       - "internal/service/app/cli/**"
+      # kernel/collections/heap's benchmark measures the generic heap against
+      # the container/heap adapter it replaces, and that adapter's Push(x any)
+      # and Pop() any are container/heap.Interface's own signatures: the
+      # boxing IS what the benchmark prices. The rule's auto-exemption covered
+      # it until the package gained the pin file kit generates
+      # (api_gen_test.go, skipped as generated — ADR 0163): measured, the
+      # finding appears with that file in the package and goes with it. The
+      # file alone, the bench's two signatures, nothing else of the package.
+      - "**/internal/kernel/collections/heap/heap_bench_test.go"
+      - "internal/kernel/collections/heap/heap_bench_test.go"
 
   # KTN-API-MINIF (info) — "prefer the narrowest interface for this parameter".
   #

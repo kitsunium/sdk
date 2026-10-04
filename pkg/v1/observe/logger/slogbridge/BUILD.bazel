@@ -27,12 +27,14 @@ alias(
 go_test(
     name = "slogbridge_test",
     srcs = [
+        "api_gen_test.go",
         "convert_internal_test.go",
         "handler_internal_test.go",
         "slogbridge_external_test.go",
     ],
     embed = [":slogbridge"],
     deps = [
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
         "//pkg/v1/security/secret",

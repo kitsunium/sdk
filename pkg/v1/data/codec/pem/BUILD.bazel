@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "pem_test",
-    srcs = ["pem_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "pem_external_test.go",
+    ],
     deps = [
         ":pem",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

@@ -1,0 +1,506 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/bson
+packages:
+  - constants:
+      - name: CodeBSONMarshalFailed
+        type: errs.Code
+        value: "0x00_03_24_01"
+      - name: CodeBSONUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_24_02"
+      - name: CodeBSONSizeExceeded
+        type: errs.Code
+        value: "0x00_03_24_03"
+      - name: CodeBSONDepthExceeded
+        type: errs.Code
+        value: "0x00_03_24_04"
+      - name: CodeBSONValueInvalid
+        type: errs.Code
+        value: "0x00_03_24_05"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/bson
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"
+      - name: DepthExceeded
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+  - constants:
+      - name: BinaryGeneric
+        type: byte
+        value: "0x00"
+      - name: BinaryFunction
+        type: byte
+        value: "0x01"
+      - name: BinaryOld
+        type: byte
+        value: "0x02"
+      - name: BinaryUUIDOld
+        type: byte
+        value: "0x03"
+      - name: BinaryUUID
+        type: byte
+        value: "0x04"
+      - name: BinaryMD5
+        type: byte
+        value: "0x05"
+      - name: BinaryEncrypted
+        type: byte
+        value: "0x06"
+      - name: BinaryColumn
+        type: byte
+        value: "0x07"
+      - name: BinarySensitive
+        type: byte
+        value: "0x08"
+      - name: BinaryVector
+        type: byte
+        value: "0x09"
+      - name: BinaryUserDefined
+        type: byte
+        value: "0x80"
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+      - in:
+          - name: high
+          - name: low
+            type: uint64
+        name: NewDecimal128
+        out:
+          - type: Decimal128
+      - in:
+          - name: s
+            type: string
+        name: ParseDecimal128
+        out:
+          - type: Decimal128
+          - type: error
+      - in:
+          - name: s
+            type: string
+        name: ObjectIDFromHex
+        out:
+          - type: ObjectID
+          - type: error
+      - in:
+          - name: t
+            type: time.Time
+        name: NewDateTimeFromTime
+        out:
+          - type: DateTime
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/bson
+    types:
+      - methods:
+          - name: GetBytes
+            out:
+              - name: high
+              - name: low
+                type: uint64
+            recv: value
+          - name: IsNaN
+            out:
+              - type: bool
+            recv: value
+          - name: IsInf
+            out:
+              - type: int
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalJSON
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: data
+                type: "[]byte"
+            name: UnmarshalJSON
+            out:
+              - type: error
+            recv: pointer
+        name: Decimal128
+        struct:
+          unexported: true
+      - methods:
+          - name: Hex
+            out:
+              - type: string
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: Timestamp
+            out:
+              - type: time.Time
+            recv: value
+          - name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: text
+                type: "[]byte"
+            name: UnmarshalText
+            out:
+              - type: error
+            recv: pointer
+          - name: MarshalJSON
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: data
+                type: "[]byte"
+            name: UnmarshalJSON
+            out:
+              - type: error
+            recv: pointer
+        name: ObjectID
+        underlying: "[objectIDSize]byte"
+      - name: D
+        underlying: "[]E"
+      - name: E
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Value
+              type: any
+      - name: M
+        underlying: map[string]any
+      - name: A
+        underlying: "[]any"
+      - methods:
+          - in:
+              - name: other
+                type: Binary
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+        name: Binary
+        struct:
+          fields:
+            - name: Subtype
+              type: byte
+            - name: Data
+              type: "[]byte"
+      - name: Undefined
+        struct: {}
+      - name: "Null"
+        struct: {}
+      - name: MinKey
+        struct: {}
+      - name: MaxKey
+        struct: {}
+      - methods:
+          - name: Time
+            out:
+              - type: time.Time
+            recv: value
+          - name: MarshalJSON
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+          - in:
+              - name: data
+                type: "[]byte"
+            name: UnmarshalJSON
+            out:
+              - type: error
+            recv: pointer
+        name: DateTime
+        underlying: int64
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: other
+                type: Regex
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+        name: Regex
+        struct:
+          fields:
+            - name: Pattern
+              type: string
+            - name: Options
+              type: string
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: other
+                type: DBPointer
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+        name: DBPointer
+        struct:
+          fields:
+            - name: DB
+              type: string
+            - name: Pointer
+              type: ObjectID
+      - name: JavaScript
+        underlying: string
+      - name: Symbol
+        underlying: string
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: CodeWithScope
+        struct:
+          fields:
+            - name: Code
+              type: JavaScript
+            - name: Scope
+              type: any
+      - methods:
+          - in:
+              - name: other
+                type: Timestamp
+            name: After
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: other
+                type: Timestamp
+            name: Before
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: other
+                type: Timestamp
+            name: Equal
+            out:
+              - type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - in:
+              - name: other
+                type: Timestamp
+            name: Compare
+            out:
+              - type: int
+            recv: value
+        name: Timestamp
+        struct:
+          fields:
+            - name: T
+              type: uint32
+            - name: I
+              type: uint32
+    variables:
+      - name: Codec
+        type: codec.Codec
+      - name: NilObjectID
+        type: ObjectID
+  - aliases:
+      - name: D
+        target: svcbson.D
+      - name: E
+        target: svcbson.E
+      - name: M
+        target: svcbson.M
+      - name: A
+        target: svcbson.A
+      - name: ObjectID
+        target: svcbson.ObjectID
+      - name: DateTime
+        target: svcbson.DateTime
+      - name: Decimal128
+        target: svcbson.Decimal128
+      - name: Binary
+        target: svcbson.Binary
+      - name: Regex
+        target: svcbson.Regex
+      - name: Timestamp
+        target: svcbson.Timestamp
+      - name: DBPointer
+        target: svcbson.DBPointer
+      - name: JavaScript
+        target: svcbson.JavaScript
+      - name: Symbol
+        target: svcbson.Symbol
+      - name: CodeWithScope
+        target: svcbson.CodeWithScope
+      - name: MinKey
+        target: svcbson.MinKey
+      - name: MaxKey
+        target: svcbson.MaxKey
+      - name: Undefined
+        target: svcbson.Undefined
+      - name: "Null"
+        target: svcbson.Null
+    constants:
+      - name: Format
+        value: "\"bson\""
+      - name: BinaryGeneric
+        type: byte
+        value: "0x00"
+      - name: BinaryFunction
+        type: byte
+        value: "0x01"
+      - name: BinaryOld
+        type: byte
+        value: "0x02"
+      - name: BinaryUUIDOld
+        type: byte
+        value: "0x03"
+      - name: BinaryUUID
+        type: byte
+        value: "0x04"
+      - name: BinaryMD5
+        type: byte
+        value: "0x05"
+      - name: BinaryEncrypted
+        type: byte
+        value: "0x06"
+      - name: BinaryColumn
+        type: byte
+        value: "0x07"
+      - name: BinarySensitive
+        type: byte
+        value: "0x08"
+      - name: BinaryVector
+        type: byte
+        value: "0x09"
+      - name: BinaryUserDefined
+        type: byte
+        value: "0x80"
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_24_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_24_02"
+      - name: CodeSizeExceeded
+        type: errs.Code
+        value: "0x00_03_24_03"
+      - name: CodeDepthExceeded
+        type: errs.Code
+        value: "0x00_03_24_04"
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_03_24_05"
+    functions:
+      - in:
+          - name: v
+            type: any
+        name: Marshal
+        out:
+          - type: "[]byte"
+          - type: error
+      - in:
+          - name: dst
+            type: "[]byte"
+          - name: v
+            type: any
+        name: Append
+        out:
+          - type: "[]byte"
+          - type: error
+      - in:
+          - name: data
+            type: "[]byte"
+          - name: v
+            type: any
+        name: Unmarshal
+        out:
+          - type: error
+      - in:
+          - name: s
+            type: string
+        name: ObjectIDFromHex
+        out:
+          - type: ObjectID
+          - type: error
+      - in:
+          - name: t
+            type: time.Time
+        name: NewDateTimeFromTime
+        out:
+          - type: DateTime
+      - in:
+          - name: high
+          - name: low
+            type: uint64
+        name: NewDecimal128
+        out:
+          - type: Decimal128
+      - in:
+          - name: s
+            type: string
+        name: ParseDecimal128
+        out:
+          - type: Decimal128
+          - type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcbson: github.com/kitsunium/sdk/internal/service/data/codec/bson
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/bson
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"
+      - name: DepthExceeded
+        type: "*errs.Error"
+      - name: ValueInvalid
+        type: "*errs.Error"
+      - name: NilObjectID
+        type: ObjectID

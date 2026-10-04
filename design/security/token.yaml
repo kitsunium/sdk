@@ -1,0 +1,982 @@
+apiVersion: kit.kitsunium/design/v2
+domain: security/token
+packages:
+  - constants:
+      - name: ClaimIssuer
+        type: string
+        value: "\"iss\""
+      - name: ClaimSubject
+        type: string
+        value: "\"sub\""
+      - name: ClaimAudience
+        type: string
+        value: "\"aud\""
+      - name: ClaimExpiry
+        type: string
+        value: "\"exp\""
+      - name: ClaimNotBefore
+        type: string
+        value: "\"nbf\""
+      - name: ClaimIssuedAt
+        type: string
+        value: "\"iat\""
+      - name: ClaimID
+        type: string
+        value: "\"jti\""
+      - name: MaxPrivateClaims
+        type: int
+        value: "64"
+      - name: CodeMalformed
+        type: errs.Code
+        value: "0x00_02_0D_01"
+      - name: CodeAlgorithmNone
+        type: errs.Code
+        value: "0x00_02_0D_02"
+      - name: CodeAlgorithmMismatch
+        type: errs.Code
+        value: "0x00_02_0D_03"
+      - name: CodeSignatureInvalid
+        type: errs.Code
+        value: "0x00_02_0D_04"
+      - name: CodeExpired
+        type: errs.Code
+        value: "0x00_02_0D_05"
+      - name: CodeNotYetValid
+        type: errs.Code
+        value: "0x00_02_0D_06"
+      - name: CodeExpiryRequired
+        type: errs.Code
+        value: "0x00_02_0D_07"
+      - name: CodeAudienceMismatch
+        type: errs.Code
+        value: "0x00_02_0D_08"
+      - name: CodeIssuerMismatch
+        type: errs.Code
+        value: "0x00_02_0D_09"
+      - name: CodeTooLarge
+        type: errs.Code
+        value: "0x00_02_0D_0A"
+      - name: CodeTooDeep
+        type: errs.Code
+        value: "0x00_02_0D_0B"
+      - name: CodeKeyUnsuitable
+        type: errs.Code
+        value: "0x00_02_0D_0C"
+      - name: CodePolicyMisconfigured
+        type: errs.Code
+        value: "0x00_02_0D_0D"
+      - name: CodeIssueFailed
+        type: errs.Code
+        value: "0x00_02_0D_0E"
+      - name: CodeClaimNameInvalid
+        type: errs.Code
+        value: "0x00_02_0D_0F"
+      - name: CodeLifetimeTooLong
+        type: errs.Code
+        value: "0x00_02_0D_10"
+      - name: CodeHeaderUnsupported
+        type: errs.Code
+        value: "0x00_03_2C_01"
+      - name: CodeKeyNotFound
+        type: errs.Code
+        value: "0x00_03_2C_02"
+      - name: CodeKeyIDMissing
+        type: errs.Code
+        value: "0x00_03_2C_03"
+      - name: CodeKeyIDAmbiguous
+        type: errs.Code
+        value: "0x00_03_2C_04"
+      - name: CodeFooterMismatch
+        type: errs.Code
+        value: "0x00_03_2C_05"
+      - name: CodeSchemeUnsupported
+        type: errs.Code
+        value: "0x00_03_2C_06"
+      - name: CodeDuplicateMember
+        type: errs.Code
+        value: "0x00_03_2C_07"
+      - name: AlgorithmUnknown
+        type: Algorithm
+        value: "0"
+      - name: AlgorithmHS256
+        type: Algorithm
+        value: "1"
+      - name: AlgorithmES256
+        type: Algorithm
+        value: "2"
+      - name: AlgorithmEdDSA
+        type: Algorithm
+        value: "3"
+      - name: AlgorithmPasetoV4Public
+        type: Algorithm
+        value: "4"
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: IsRegisteredClaim
+        out:
+          - type: bool
+      - name: NewClaimsValue
+        out:
+          - type: ClaimsValue
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/security/token
+    ports:
+      - doc: |-
+          Issuer mints a signed token carrying claims. Implementations are bound to
+          exactly one [Algorithm] and one signing key at construction, MUST be safe for
+          concurrent use, and MUST NOT take an algorithm or a key from the claims.
+
+          IFACE-PLUGIN: constructors in internal/service/security/token hand instances back
+          behind this interface; the concrete types stay unexported.
+        methods:
+          - doc: |-
+              Issue renders claims as a token string, or returns a typed verdict
+              (IssueFailed / ExpiryRequired / KeyUnsuitable) when it cannot.
+            in:
+              - name: claims
+                type: ClaimsValue
+            name: Issue
+            out:
+              - type: string
+              - type: error
+        name: Issuer
+      - doc: |-
+          Verifier authenticates a token and returns its claims. Implementations are
+          bound to exactly one [Algorithm] and one verification key at construction and
+          MUST be safe for concurrent use.
+
+          The contract has three parts, and all three are security requirements:
+
+           1. The signature is checked BEFORE any claim is read, so a caller never
+              acts on — or logs — the contents of an unauthenticated token.
+           2. The token's own algorithm header is compared against the binding and is
+              never used to select a key, an algorithm, or a code path.
+           3. Failure returns exactly one typed verdict and a zero ClaimsValue. There
+              is no "invalid, but here are the claims anyway" path.
+
+          IFACE-PLUGIN: constructors in internal/service/security/token hand instances back
+          behind this interface; the concrete types stay unexported.
+        methods:
+          - doc: |-
+              Verify authenticates token and returns its claims, or one of the typed
+              verdicts declared in this package.
+            in:
+              - name: token
+                type: string
+            name: Verify
+            out:
+              - type: ClaimsValue
+              - type: error
+        name: Verifier
+    types:
+      - methods:
+          - name: Issuer
+            out:
+              - type: string
+            recv: value
+          - name: Subject
+            out:
+              - type: string
+            recv: value
+          - name: ID
+            out:
+              - type: string
+            recv: value
+          - name: Audience
+            out:
+              - type: "[]string"
+            recv: value
+          - name: Expiry
+            out:
+              - type: time.Time
+            recv: value
+          - name: NotBefore
+            out:
+              - type: time.Time
+            recv: value
+          - name: IssuedAt
+            out:
+              - type: time.Time
+            recv: value
+          - name: PrivateNames
+            out:
+              - type: "[]string"
+            recv: value
+          - in:
+              - name: name
+                type: string
+            name: PrivateRaw
+            out:
+              - name: raw
+                type: "[]byte"
+              - name: found
+                type: bool
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: GoString
+            out:
+              - type: string
+            recv: value
+          - in:
+              - name: iss
+                type: string
+            name: WithIssuer
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: sub
+                type: string
+            name: WithSubject
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: jti
+                type: string
+            name: WithID
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: aud
+                type: string
+            name: WithAudience
+            out:
+              - type: ClaimsValue
+            recv: value
+            variadic: true
+          - in:
+              - name: exp
+                type: time.Time
+            name: WithExpiry
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: nbf
+                type: time.Time
+            name: WithNotBefore
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: iat
+                type: time.Time
+            name: WithIssuedAt
+            out:
+              - type: ClaimsValue
+            recv: value
+          - in:
+              - name: name
+                type: string
+              - name: raw
+                type: "[]byte"
+            name: WithPrivateRaw
+            out:
+              - name: claims
+                type: ClaimsValue
+              - name: err
+                type: error
+            recv: value
+        name: ClaimsValue
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Algorithm
+        underlying: uint8
+    variables:
+      - name: Malformed
+        type: "*errs.Error"
+      - name: AlgorithmNone
+        type: "*errs.Error"
+      - name: AlgorithmMismatch
+        type: "*errs.Error"
+      - name: SignatureInvalid
+        type: "*errs.Error"
+      - name: Expired
+        type: "*errs.Error"
+      - name: NotYetValid
+        type: "*errs.Error"
+      - name: ExpiryRequired
+        type: "*errs.Error"
+      - name: AudienceMismatch
+        type: "*errs.Error"
+      - name: IssuerMismatch
+        type: "*errs.Error"
+      - name: TooLarge
+        type: "*errs.Error"
+      - name: TooDeep
+        type: "*errs.Error"
+      - name: KeyUnsuitable
+        type: "*errs.Error"
+      - name: PolicyMisconfigured
+        type: "*errs.Error"
+      - name: IssueFailed
+        type: "*errs.Error"
+      - name: ClaimNameInvalid
+        type: "*errs.Error"
+      - name: LifetimeTooLong
+        type: "*errs.Error"
+      - name: HeaderUnsupported
+        type: "*errs.Error"
+      - name: KeyNotFound
+        type: "*errs.Error"
+      - name: KeyIDMissing
+        type: "*errs.Error"
+      - name: KeyIDAmbiguous
+        type: "*errs.Error"
+      - name: FooterMismatch
+        type: "*errs.Error"
+      - name: SchemeUnsupported
+        type: "*errs.Error"
+      - name: DuplicateMember
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultMaxTokenLen
+        type: int
+        value: 8 << 10
+      - name: MinTokenLen
+        type: int
+        value: "64"
+      - name: MaxTokenLenCeiling
+        type: int
+        value: 1 << 20
+      - name: DefaultMaxClaimDepth
+        type: int
+        value: "16"
+      - name: MaxClaimDepthCeiling
+        type: int
+        value: "64"
+      - name: DefaultMaxKeyCandidates
+        type: int
+        value: "4"
+      - name: MaxKeyCandidatesCeiling
+        type: int
+        value: "16"
+      - name: MaxLeeway
+        type: time.Duration
+        value: "300000000000"
+    functions:
+      - in:
+          - name: key
+            type: jwk.KeyValue
+          - name: cfg
+            type: VerifierConfig
+        name: NewVerifierFromJWK
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+      - in:
+          - name: set
+            type: jwk.Set
+          - name: cfg
+            type: VerifierConfig
+        name: NewSetVerifier
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+      - in:
+          - name: secret
+            type: corecrypto.Key
+          - name: cfg
+            type: IssuerConfig
+        name: NewHS256Issuer
+        out:
+          - name: issuer
+            type: coretoken.Issuer
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: "*ecdsa.PrivateKey"
+          - name: cfg
+            type: IssuerConfig
+        name: NewES256Issuer
+        out:
+          - name: issuer
+            type: coretoken.Issuer
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: ed25519.PrivateKey
+          - name: cfg
+            type: IssuerConfig
+        name: NewEdDSAIssuer
+        out:
+          - name: issuer
+            type: coretoken.Issuer
+          - name: err
+            type: error
+      - in:
+          - name: secret
+            type: corecrypto.Key
+          - name: cfg
+            type: VerifierConfig
+        name: NewHS256Verifier
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: "*ecdsa.PublicKey"
+          - name: cfg
+            type: VerifierConfig
+        name: NewES256Verifier
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: ed25519.PublicKey
+          - name: cfg
+            type: VerifierConfig
+        name: NewEdDSAVerifier
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: ed25519.PrivateKey
+          - name: cfg
+            type: PasetoIssuerConfig
+        name: NewPasetoV4Issuer
+        out:
+          - name: issuer
+            type: coretoken.Issuer
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: ed25519.PublicKey
+          - name: cfg
+            type: PasetoVerifierConfig
+        name: NewPasetoV4Verifier
+        out:
+          - name: verifier
+            type: coretoken.Verifier
+          - name: err
+            type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      coretoken: github.com/kitsunium/sdk/internal/core/security/token
+      ecdsa: crypto/ecdsa
+      ed25519: crypto/ed25519
+      jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
+    path: github.com/kitsunium/sdk/internal/service/security/token
+    types:
+      - name: IssuerConfig
+        struct:
+          fields:
+            - name: Issuer
+              type: string
+            - name: Type
+              type: string
+            - name: KeyID
+              type: string
+            - name: Lifetime
+              type: time.Duration
+            - name: AllowMissingExpiry
+              type: bool
+            - name: Clock
+              type: clock.Clock
+      - name: PasetoIssuerConfig
+        struct:
+          fields:
+            - name: Issuer
+              type: string
+            - name: Footer
+              type: "[]byte"
+            - name: ImplicitAssertion
+              type: "[]byte"
+            - name: Lifetime
+              type: time.Duration
+            - name: AllowMissingExpiry
+              type: bool
+            - name: Clock
+              type: clock.Clock
+      - name: PasetoVerifierConfig
+        struct:
+          fields:
+            - name: Issuer
+              type: string
+            - name: Audience
+              type: string
+            - name: Footer
+              type: "[]byte"
+            - name: ImplicitAssertion
+              type: "[]byte"
+            - name: Leeway
+              type: time.Duration
+            - name: MaxLifetime
+              type: time.Duration
+            - name: MaxTokenLen
+              type: int
+            - name: MaxClaimDepth
+              type: int
+            - name: AllowMissingExpiry
+              type: bool
+            - name: Clock
+              type: clock.Clock
+      - name: VerifierConfig
+        struct:
+          fields:
+            - name: Issuer
+              type: string
+            - name: Audience
+              type: string
+            - name: RequireType
+              type: string
+            - name: Leeway
+              type: time.Duration
+            - name: MaxLifetime
+              type: time.Duration
+            - name: MaxTokenLen
+              type: int
+            - name: MaxClaimDepth
+              type: int
+            - name: MaxKeyCandidates
+              type: int
+            - name: AllowMissingExpiry
+              type: bool
+            - name: Clock
+              type: clock.Clock
+  - aliases:
+      - name: Key
+        target: corecrypto.Key
+      - name: JWK
+        target: jwk.KeyValue
+      - name: JWKSet
+        target: jwk.Set
+      - name: KeyType
+        target: jwk.Type
+      - name: Curve
+        target: jwk.Curve
+      - name: Algorithm
+        target: coretoken.Algorithm
+      - name: Claims
+        target: coretoken.ClaimsValue
+      - name: Issuer
+        target: coretoken.Issuer
+      - name: Verifier
+        target: coretoken.Verifier
+      - name: IssuerConfig
+        target: svctoken.IssuerConfig
+      - name: VerifierConfig
+        target: svctoken.VerifierConfig
+      - name: PasetoIssuerConfig
+        target: svctoken.PasetoIssuerConfig
+      - name: PasetoVerifierConfig
+        target: svctoken.PasetoVerifierConfig
+    constants:
+      - name: CodeMalformed
+        type: errs.Code
+        value: "0x00_02_0D_01"
+      - name: CodeAlgorithmNone
+        type: errs.Code
+        value: "0x00_02_0D_02"
+      - name: CodeAlgorithmMismatch
+        type: errs.Code
+        value: "0x00_02_0D_03"
+      - name: CodeSignatureInvalid
+        type: errs.Code
+        value: "0x00_02_0D_04"
+      - name: CodeExpired
+        type: errs.Code
+        value: "0x00_02_0D_05"
+      - name: CodeNotYetValid
+        type: errs.Code
+        value: "0x00_02_0D_06"
+      - name: CodeExpiryRequired
+        type: errs.Code
+        value: "0x00_02_0D_07"
+      - name: CodeAudienceMismatch
+        type: errs.Code
+        value: "0x00_02_0D_08"
+      - name: CodeIssuerMismatch
+        type: errs.Code
+        value: "0x00_02_0D_09"
+      - name: CodeTooLarge
+        type: errs.Code
+        value: "0x00_02_0D_0A"
+      - name: CodeTooDeep
+        type: errs.Code
+        value: "0x00_02_0D_0B"
+      - name: CodeKeyUnsuitable
+        type: errs.Code
+        value: "0x00_02_0D_0C"
+      - name: CodePolicyMisconfigured
+        type: errs.Code
+        value: "0x00_02_0D_0D"
+      - name: CodeIssueFailed
+        type: errs.Code
+        value: "0x00_02_0D_0E"
+      - name: CodeClaimNameInvalid
+        type: errs.Code
+        value: "0x00_02_0D_0F"
+      - name: CodeLifetimeTooLong
+        type: errs.Code
+        value: "0x00_02_0D_10"
+      - name: CodeHeaderUnsupported
+        type: errs.Code
+        value: "0x00_03_2C_01"
+      - name: CodeKeyNotFound
+        type: errs.Code
+        value: "0x00_03_2C_02"
+      - name: CodeKeyIDMissing
+        type: errs.Code
+        value: "0x00_03_2C_03"
+      - name: CodeKeyIDAmbiguous
+        type: errs.Code
+        value: "0x00_03_2C_04"
+      - name: CodeFooterMismatch
+        type: errs.Code
+        value: "0x00_03_2C_05"
+      - name: CodeSchemeUnsupported
+        type: errs.Code
+        value: "0x00_03_2C_06"
+      - name: CodeDuplicateMember
+        type: errs.Code
+        value: "0x00_03_2C_07"
+      - name: CodeJWKMalformed
+        type: errs.Code
+        value: "0x00_03_2A_01"
+      - name: CodeJWKMissingMember
+        type: errs.Code
+        value: "0x00_03_2A_02"
+      - name: CodeJWKUnsupportedKeyType
+        type: errs.Code
+        value: "0x00_03_2A_03"
+      - name: CodeJWKUnsupportedCurve
+        type: errs.Code
+        value: "0x00_03_2A_04"
+      - name: CodeJWKInvalidEncoding
+        type: errs.Code
+        value: "0x00_03_2A_05"
+      - name: CodeJWKKeyMismatch
+        type: errs.Code
+        value: "0x00_03_2A_06"
+      - name: AlgorithmHS256
+        type: Algorithm
+        value: "1"
+      - name: AlgorithmES256
+        type: Algorithm
+        value: "2"
+      - name: AlgorithmEdDSA
+        type: Algorithm
+        value: "3"
+      - name: AlgorithmPasetoV4Public
+        type: Algorithm
+        value: "4"
+      - name: ClaimIssuer
+        type: string
+        value: "\"iss\""
+      - name: ClaimSubject
+        type: string
+        value: "\"sub\""
+      - name: ClaimAudience
+        type: string
+        value: "\"aud\""
+      - name: ClaimExpiry
+        type: string
+        value: "\"exp\""
+      - name: ClaimNotBefore
+        type: string
+        value: "\"nbf\""
+      - name: ClaimIssuedAt
+        type: string
+        value: "\"iat\""
+      - name: ClaimID
+        type: string
+        value: "\"jti\""
+      - name: KeyTypeEC
+        type: KeyType
+        value: "\"EC\""
+      - name: KeyTypeOKP
+        type: KeyType
+        value: "\"OKP\""
+      - name: KeyTypeOct
+        type: KeyType
+        value: "\"oct\""
+      - name: CurveP256
+        type: Curve
+        value: "\"P-256\""
+      - name: CurveP384
+        type: Curve
+        value: "\"P-384\""
+      - name: CurveP521
+        type: Curve
+        value: "\"P-521\""
+      - name: CurveEd25519
+        type: Curve
+        value: "\"Ed25519\""
+    functions:
+      - in:
+          - name: secret
+            type: Key
+          - name: cfg
+            type: IssuerConfig
+        name: NewHS256Issuer
+        out:
+          - name: issuer
+            type: Issuer
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: "*ecdsa.PrivateKey"
+          - name: cfg
+            type: IssuerConfig
+        name: NewES256Issuer
+        out:
+          - name: issuer
+            type: Issuer
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: ed25519.PrivateKey
+          - name: cfg
+            type: IssuerConfig
+        name: NewEdDSAIssuer
+        out:
+          - name: issuer
+            type: Issuer
+          - name: err
+            type: error
+      - in:
+          - name: secret
+            type: Key
+          - name: cfg
+            type: VerifierConfig
+        name: NewHS256Verifier
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: "*ecdsa.PublicKey"
+          - name: cfg
+            type: VerifierConfig
+        name: NewES256Verifier
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: ed25519.PublicKey
+          - name: cfg
+            type: VerifierConfig
+        name: NewEdDSAVerifier
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - in:
+          - name: priv
+            type: ed25519.PrivateKey
+          - name: cfg
+            type: PasetoIssuerConfig
+        name: NewPasetoV4Issuer
+        out:
+          - name: issuer
+            type: Issuer
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: ed25519.PublicKey
+          - name: cfg
+            type: PasetoVerifierConfig
+        name: NewPasetoV4Verifier
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - in:
+          - name: document
+            type: "[]byte"
+        name: ParseJWK
+        out:
+          - name: key
+            type: JWK
+          - name: err
+            type: error
+      - in:
+          - name: document
+            type: "[]byte"
+        name: ParseJWKSet
+        out:
+          - name: set
+            type: JWKSet
+          - name: err
+            type: error
+      - in:
+          - name: keys
+            type: JWK
+        name: NewJWKSet
+        out:
+          - type: JWKSet
+        variadic: true
+      - in:
+          - name: key
+            type: JWK
+          - name: cfg
+            type: VerifierConfig
+        name: NewVerifierFromJWK
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - in:
+          - name: set
+            type: JWKSet
+          - name: cfg
+            type: VerifierConfig
+        name: NewSetVerifier
+        out:
+          - name: verifier
+            type: Verifier
+          - name: err
+            type: error
+      - name: NewClaims
+        out:
+          - type: Claims
+      - in:
+          - name: claims
+            type: Claims
+          - name: name
+            type: string
+        name: PrivateClaim
+        out:
+          - name: value
+            type: T
+          - name: found
+            type: bool
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: claims
+            type: Claims
+          - name: name
+            type: string
+          - name: value
+            type: T
+        name: SetPrivateClaim
+        out:
+          - name: updated
+            type: Claims
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      corecrypto: github.com/kitsunium/sdk/internal/core/crypto
+      coretoken: github.com/kitsunium/sdk/internal/core/security/token
+      ecdsa: crypto/ecdsa
+      ed25519: crypto/ed25519
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      jwk: github.com/kitsunium/sdk/internal/service/crypto/key/jwk
+      kernelerrs: github.com/kitsunium/sdk/internal/kernel/errs
+      svctoken: github.com/kitsunium/sdk/internal/service/security/token
+    path: github.com/kitsunium/sdk/pkg/v1/security/token
+    variables:
+      - name: Malformed
+        type: "*kernelerrs.Error"
+      - name: AlgorithmNone
+        type: "*kernelerrs.Error"
+      - name: AlgorithmMismatch
+        type: "*kernelerrs.Error"
+      - name: SignatureInvalid
+        type: "*kernelerrs.Error"
+      - name: Expired
+        type: "*kernelerrs.Error"
+      - name: NotYetValid
+        type: "*kernelerrs.Error"
+      - name: ExpiryRequired
+        type: "*kernelerrs.Error"
+      - name: AudienceMismatch
+        type: "*kernelerrs.Error"
+      - name: IssuerMismatch
+        type: "*kernelerrs.Error"
+      - name: TooLarge
+        type: "*kernelerrs.Error"
+      - name: TooDeep
+        type: "*kernelerrs.Error"
+      - name: KeyUnsuitable
+        type: "*kernelerrs.Error"
+      - name: PolicyMisconfigured
+        type: "*kernelerrs.Error"
+      - name: IssueFailed
+        type: "*kernelerrs.Error"
+      - name: ClaimNameInvalid
+        type: "*kernelerrs.Error"
+      - name: LifetimeTooLong
+        type: "*kernelerrs.Error"
+      - name: HeaderUnsupported
+        type: "*kernelerrs.Error"
+      - name: KeyNotFound
+        type: "*kernelerrs.Error"
+      - name: KeyIDMissing
+        type: "*kernelerrs.Error"
+      - name: KeyIDAmbiguous
+        type: "*kernelerrs.Error"
+      - name: FooterMismatch
+        type: "*kernelerrs.Error"
+      - name: SchemeUnsupported
+        type: "*kernelerrs.Error"
+      - name: DuplicateMember
+        type: "*kernelerrs.Error"
+      - name: JWKMalformed
+        type: "*kernelerrs.Error"
+      - name: JWKMissingMember
+        type: "*kernelerrs.Error"
+      - name: JWKUnsupportedKeyType
+        type: "*kernelerrs.Error"
+      - name: JWKUnsupportedCurve
+        type: "*kernelerrs.Error"
+      - name: JWKInvalidEncoding
+        type: "*kernelerrs.Error"
+      - name: JWKKeyMismatch
+        type: "*kernelerrs.Error"

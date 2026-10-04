@@ -1,0 +1,287 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/transform
+packages:
+  - constants:
+      - name: CodeUnknownCompressor
+        type: errs.Code
+        value: "0x00_02_05_01"
+      - name: CodeCompressionFailed
+        type: errs.Code
+        value: "0x00_02_05_02"
+      - name: CodeDecompressionFailed
+        type: errs.Code
+        value: "0x00_02_05_03"
+      - name: CodeCompressedFrameInvalid
+        type: errs.Code
+        value: "0x00_02_05_04"
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_05_05"
+      - name: CodeDecompressedTooLarge
+        type: errs.Code
+        value: "0x00_02_05_06"
+      - name: CodeGzipFailed
+        type: errs.Code
+        value: "0x00_03_1A_01"
+      - name: CodeFlateFailed
+        type: errs.Code
+        value: "0x00_03_1A_02"
+      - name: CodeZlibFailed
+        type: errs.Code
+        value: "0x00_03_1A_03"
+    functions:
+      - in:
+          - name: c
+            type: Compressor
+        name: Register
+        out:
+          - type: Compressor
+      - in:
+          - name: name
+            type: Algorithm
+        name: Lookup
+        out:
+          - name: c
+            type: Compressor
+          - name: ok
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Algorithm"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/transform
+    ports:
+      - doc: |-
+          Compressor is the contract every byte-transform scheme satisfies. Instances
+          MUST be safe for concurrent use; scheme-specific options are supplied via the
+          scheme's constructor, not via the Compressor interface. Compress and
+          Decompress follow the append-to-dst convention of the stdlib (dst may be nil)
+          so callers can reuse buffers on the hot path.
+
+          src must not overlap dst's spare capacity, dst[len(dst):cap(dst)]: every
+          scheme writes its output there while it is still reading src, so an aliased
+          src is overwritten mid-read and the output is corrupt. Reusing one buffer
+          means passing buf[:0] as dst and a DIFFERENT buffer as src — the same rule
+          as copy-free encoders across the stdlib, stated here because no scheme can
+          check it cheaply.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind this
+          interface — concrete scheme types stay unexported per package.
+        methods:
+          - name: Algorithm
+            out:
+              - type: Algorithm
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Compress
+            out:
+              - name: out
+                type: "[]byte"
+              - name: err
+                type: error
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+            name: Decompress
+            out:
+              - name: out
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Compressor
+      - doc: |-
+          BoundedDecompressor is the optional extension for schemes that can be told
+          how much plaintext they are allowed to materialise. Consumers detect support
+          with a type assertion, exactly as they do for the codec layer's Appender.
+
+          It exists because a caller that enforces a TIGHTER ceiling than the scheme's
+          own backstop otherwise has no way to say so, and must instead let the scheme
+          materialise everything and then judge the result. Judging afterwards is a
+          correct verdict reached by doing the attacker's work first: a frame layer
+          capping output at 64 MiB but calling plain Decompress still lets a few
+          hundred kilobytes of crafted input drive the scheme's full 256 MiB backstop
+          before the answer is known.
+
+          max is a ceiling, never a promise: a scheme MAY refuse a stream below it for
+          its own reasons, and MUST NOT return more than max bytes. A ceiling of zero
+          is a real ceiling — it admits an empty stream and nothing else — and a
+          negative one is clamped to zero rather than given a third meaning, so the
+          bound is monotone in max. A stream that would exceed max fails with
+          DecompressedTooLarge rather than being silently truncated: a short read that
+          looked like success would turn a bomb into a parsing bug further up.
+
+          DecompressedTooLarge and NOT the scheme's own sentinel, because the two
+          answer different questions, and because the implementation cannot honestly
+          give the scheme's: it stops reading at the ceiling, short of the trailer the
+          scheme would need to pronounce on the stream at all.
+        embeds:
+          - Compressor
+        methods:
+          - in:
+              - name: dst
+              - name: src
+                type: "[]byte"
+              - name: max
+                type: int64
+            name: DecompressBounded
+            out:
+              - name: out
+                type: "[]byte"
+              - name: err
+                type: error
+        name: BoundedDecompressor
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Algorithm
+        underlying: string
+    variables:
+      - name: UnknownCompressor
+        type: "*errs.Error"
+      - name: CompressionFailed
+        type: "*errs.Error"
+      - name: DecompressionFailed
+        type: "*errs.Error"
+      - name: CompressedFrameInvalid
+        type: "*errs.Error"
+      - name: DecompressedTooLarge
+        type: "*errs.Error"
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+      - name: GzipFailed
+        type: "*errs.Error"
+      - name: FlateFailed
+        type: "*errs.Error"
+      - name: ZlibFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: level
+            type: int
+        name: NewZlibCompressor
+        out:
+          - type: coretransform.Compressor
+    imports:
+      coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+    path: github.com/kitsunium/sdk/internal/service/data/transform
+    variables:
+      - name: FlateCompressor
+        type: coretransform.Compressor
+      - name: GzipCompressor
+        type: coretransform.Compressor
+      - name: ZlibCompressor
+        type: coretransform.Compressor
+  - aliases:
+      - name: Algorithm
+        target: coretransform.Algorithm
+      - name: Compressor
+        target: coretransform.Compressor
+      - name: BoundedDecompressor
+        target: coretransform.BoundedDecompressor
+    constants:
+      - name: Gzip
+        type: Algorithm
+        value: "\"gzip\""
+      - name: Flate
+        type: Algorithm
+        value: "\"flate\""
+      - name: Zlib
+        type: Algorithm
+        value: "\"zlib\""
+      - name: CodeUnknownCompressor
+        type: errs.Code
+        value: "0x00_02_05_01"
+      - name: CodeCompressedFrameInvalid
+        type: errs.Code
+        value: "0x00_02_05_04"
+      - name: CodeDecompressedTooLarge
+        type: errs.Code
+        value: "0x00_02_05_06"
+      - name: CodeGzipFailed
+        type: errs.Code
+        value: "0x00_03_1A_01"
+      - name: CodeFlateFailed
+        type: errs.Code
+        value: "0x00_03_1A_02"
+      - name: CodeZlibFailed
+        type: errs.Code
+        value: "0x00_03_1A_03"
+    functions:
+      - in:
+          - name: algo
+            type: Algorithm
+        name: Lookup
+        out:
+          - name: c
+            type: Compressor
+          - name: ok
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Algorithm"
+      - in:
+          - name: algo
+            type: Algorithm
+          - name: dst
+          - name: src
+            type: "[]byte"
+        name: Compress
+        out:
+          - name: encoded
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: algo
+            type: Algorithm
+          - name: dst
+          - name: src
+            type: "[]byte"
+        name: Decompress
+        out:
+          - name: decoded
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: algo
+            type: Algorithm
+          - name: dst
+          - name: src
+            type: "[]byte"
+          - name: limit
+            type: int64
+        name: DecompressBounded
+        out:
+          - name: decoded
+            type: "[]byte"
+          - name: err
+            type: error
+    imports:
+      coretransform: github.com/kitsunium/sdk/internal/core/data/transform
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/transform
+    variables:
+      - name: UnknownCompressor
+        type: "*errs.Error"
+      - name: CompressedFrameInvalid
+        type: "*errs.Error"
+      - name: DecompressedTooLarge
+        type: "*errs.Error"
+      - name: GzipFailed
+        type: "*errs.Error"
+      - name: FlateFailed
+        type: "*errs.Error"
+      - name: ZlibFailed
+        type: "*errs.Error"

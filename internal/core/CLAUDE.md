@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T06:30:00Z -->
+<!-- updated: 2026-10-04T11:15:00Z -->
 # internal/core/
 
 ## Purpose
@@ -85,6 +85,7 @@ A directory of the one SDK module, `github.com/kitsunium/sdk` (ADR 0162), whose 
 ## Conventions
 
 - **Interface-first.** Core packages expose interfaces + immutable value structs. Any method with a non-trivial body belongs in `internal/service/*`.
+- **Every port is generated.** Every exported interface of this layer — 106 in 33 packages, 269 methods — is declared under `ports:` in its domain's design file and written by `kit gen` into its package's `design_gen.go`, with its doc comment; it is edited in the design, never in Go, then `kit gen` and `make api` (ADR 0163). `app/lock`'s three were the first, every other one followed, content moved: a file the move left with nothing but its package comment is gone (rule 5), its comment joined to its neighbour's in file-name order — the order go/doc joins them in, so `go doc` reads every package comment as before —, and a file holding the package's own documentation (`lock.go`, `cache.go`, `counter.go`, …) stays. A new interface here is a port: declare it in the design first. Everything else exported here — values, func ports, codes, sentinels — stays hand-written, held to the design by the pins (`api_gen*_test.go`).
 - **Role-suffix on exported structs** (ktn-linter `KTN-STRUCT-ROLE`): `AttrValue`, `RecordEvent`, `Value`. Short aliases (`Attr = AttrValue`) re-exported at `pkg/v1/observe/logger`.
 - **Imports allowed**: stdlib + `internal/kernel/*` + **other `internal/core/*` packages**. Never `internal/service/*`, never `pkg/*`, never `third-party/`. A lateral import is not a violation: `scripts/check-layer-deps.sh`'s core query names what is above core and says nothing about siblings, and `core/observe/metrics` and `core/observe/trace` both build on `core/observe/otel`'s shared model by decision (ADR 0051 §2). This line used to omit the sibling case, the gap `internal/CLAUDE.md` records for the service row.
 - **Plug-in registries** (codec, writer, crypto, transform, id, view, and the metrics and trace exporters): constructors carry `// IFACE-PLUGIN:` markers — concrete types stay unexported; the registry hands instances back behind the domain interface (`Codec`, `Factory`, …). Each is an instance of `kernel/plugin.Registry` (ADR 0159) and keeps only its domain's refusal — its code, its reason, the fields naming the key.

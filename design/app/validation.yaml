@@ -1,0 +1,525 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/validation
+packages:
+  - constants:
+      - name: CodeValidationFailed
+        type: errs.Code
+        value: "0x00_02_0F_01"
+      - name: CodeConstraintMisconfigured
+        type: errs.Code
+        value: "0x00_02_0F_02"
+      - name: CodeRequired
+        type: errs.Code
+        value: "0x00_03_2F_01"
+      - name: CodeOutOfRange
+        type: errs.Code
+        value: "0x00_03_2F_02"
+      - name: CodeLengthOutOfRange
+        type: errs.Code
+        value: "0x00_03_2F_03"
+      - name: CodeNotInSet
+        type: errs.Code
+        value: "0x00_03_2F_04"
+      - name: CodePatternMismatch
+        type: errs.Code
+        value: "0x00_03_2F_05"
+      - name: CodeInvalidRule
+        type: errs.Code
+        value: "0x00_03_2F_06"
+      - name: CodeUnsupportedTarget
+        type: errs.Code
+        value: "0x00_03_2F_07"
+      - name: RootPath
+        type: string
+        value: "\"\""
+    functions:
+      - in:
+          - name: base
+          - name: name
+            type: string
+        name: JoinField
+        out:
+          - type: string
+      - in:
+          - name: base
+            type: string
+          - name: index
+            type: int
+        name: JoinIndex
+        out:
+          - type: string
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/validation
+    types:
+      - methods:
+          - name: OK
+            out:
+              - type: bool
+            recv: value
+          - name: First
+            out:
+              - name: violation
+                type: ViolationValue
+              - name: ok
+                type: bool
+            recv: value
+          - name: Paths
+            out:
+              - type: "[]string"
+            recv: value
+          - name: Err
+            out:
+              - type: error
+            recv: value
+        name: ReportValue
+        underlying: "[]ViolationValue"
+      - name: Constraint
+        typeParams:
+          - constraint: any
+            name: T
+        underlying: func(path string, value T) ReportValue
+      - name: ViolationValue
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: Rule
+              type: string
+            - name: Message
+              type: string
+            - name: Code
+              type: errs.Code
+    variables:
+      - name: ValidationFailed
+        type: "*errs.Error"
+      - name: ConstraintMisconfigured
+        type: "*errs.Error"
+      - name: InvalidRule
+        type: "*errs.Error"
+      - name: UnsupportedTarget
+        type: "*errs.Error"
+  - constants:
+      - name: Unbounded
+        type: int
+        value: "-1"
+    functions:
+      - in:
+          - name: lo
+            type: T
+        name: AtLeast
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: hi
+            type: T
+        name: AtMost
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: lo
+          - name: hi
+            type: T
+        name: Between
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: get
+            type: func(T) F
+          - name: constraints
+            type: corevalidation.Constraint[F]
+        name: Field
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - name: T
+          - constraint: any
+            name: F
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: get
+            type: func(T) []E
+          - name: constraints
+            type: corevalidation.Constraint[E]
+        name: Each
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - name: T
+          - constraint: any
+            name: E
+        variadic: true
+      - in:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        name: Must
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: pattern
+            type: string
+        name: Matches
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[string]
+          - name: err
+            type: error
+      - name: Required
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: comparable
+            name: T
+      - in:
+          - name: allowed
+            type: T
+        name: OneOf
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: comparable
+            name: T
+        variadic: true
+      - in:
+          - name: minRunes
+          - name: maxRunes
+            type: int
+        name: Length
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[string]
+          - name: err
+            type: error
+      - in:
+          - name: minLen
+          - name: maxLen
+            type: int
+        name: Count
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[[]E]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: E
+      - in:
+          - name: cfg
+            type: StructConfig
+        name: Struct
+        out:
+          - name: constraint
+            type: corevalidation.Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: constraints
+            type: corevalidation.Constraint[T]
+        name: All
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: constraints
+            type: corevalidation.Constraint[T]
+        name: First
+        out:
+          - type: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: value
+            type: T
+          - name: constraints
+            type: corevalidation.Constraint[T]
+        name: Check
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+    imports:
+      corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
+    path: github.com/kitsunium/sdk/internal/service/app/validation
+    types:
+      - name: StructConfig
+        struct:
+          fields:
+            - name: StopAtFirst
+              type: bool
+  - aliases:
+      - name: Constraint
+        target: corevalidation.Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Violation
+        target: corevalidation.ViolationValue
+      - name: Report
+        target: corevalidation.ReportValue
+      - name: StructConfig
+        target: svcvalidation.StructConfig
+    constants:
+      - name: RootPath
+        type: string
+        value: "\"\""
+      - name: Unbounded
+        type: int
+        value: "-1"
+      - name: CodeRequired
+        type: errs.Code
+        value: "0x00_03_2F_01"
+      - name: CodeOutOfRange
+        type: errs.Code
+        value: "0x00_03_2F_02"
+      - name: CodeLengthOutOfRange
+        type: errs.Code
+        value: "0x00_03_2F_03"
+      - name: CodeNotInSet
+        type: errs.Code
+        value: "0x00_03_2F_04"
+      - name: CodePatternMismatch
+        type: errs.Code
+        value: "0x00_03_2F_05"
+    functions:
+      - in:
+          - name: base
+          - name: name
+            type: string
+        name: JoinField
+        out:
+          - type: string
+      - in:
+          - name: base
+            type: string
+          - name: index
+            type: int
+        name: JoinIndex
+        out:
+          - type: string
+      - in:
+          - name: constraints
+            type: Constraint[T]
+        name: All
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: constraints
+            type: Constraint[T]
+        name: First
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: value
+            type: T
+          - name: constraints
+            type: Constraint[T]
+        name: Check
+        out:
+          - type: error
+        typeParams:
+          - constraint: any
+            name: T
+        variadic: true
+      - in:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        name: Must
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: get
+            type: func(T) F
+          - name: constraints
+            type: Constraint[F]
+        name: Field
+        out:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - name: T
+          - constraint: any
+            name: F
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: get
+            type: func(T) []E
+          - name: constraints
+            type: Constraint[E]
+        name: Each
+        out:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - name: T
+          - constraint: any
+            name: E
+        variadic: true
+      - name: Required
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: comparable
+            name: T
+      - in:
+          - name: lo
+            type: T
+        name: AtLeast
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: hi
+            type: T
+        name: AtMost
+        out:
+          - type: Constraint[T]
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: lo
+          - name: hi
+            type: T
+        name: Between
+        out:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: cmp.Ordered
+            name: T
+      - in:
+          - name: minRunes
+          - name: maxRunes
+            type: int
+        name: Length
+        out:
+          - name: constraint
+            type: Constraint[string]
+          - name: err
+            type: error
+      - in:
+          - name: minLen
+          - name: maxLen
+            type: int
+        name: Count
+        out:
+          - name: constraint
+            type: Constraint[[]E]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: E
+      - in:
+          - name: allowed
+            type: T
+        name: OneOf
+        out:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: comparable
+            name: T
+        variadic: true
+      - in:
+          - name: pattern
+            type: string
+        name: Matches
+        out:
+          - name: constraint
+            type: Constraint[string]
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: StructConfig
+        name: Struct
+        out:
+          - name: constraint
+            type: Constraint[T]
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      corevalidation: github.com/kitsunium/sdk/internal/core/app/validation
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcvalidation: github.com/kitsunium/sdk/internal/service/app/validation
+    path: github.com/kitsunium/sdk/pkg/v1/app/validation
+    variables:
+      - name: Failed
+        type: "*errs.Error"
+      - name: Misconfigured
+        type: "*errs.Error"
+      - name: InvalidRule
+        type: "*errs.Error"
+      - name: UnsupportedTarget
+        type: "*errs.Error"

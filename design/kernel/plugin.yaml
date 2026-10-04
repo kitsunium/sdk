@@ -1,0 +1,59 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/plugin
+packages:
+  - functions:
+      - in:
+          - name: v
+            type: T
+        name: Unusable
+        out:
+          - type: string
+        typeParams:
+          - constraint: any
+            name: T
+    path: github.com/kitsunium/sdk/internal/kernel/plugin
+    types:
+      - methods:
+          - in:
+              - name: name
+                type: K
+              - name: value
+                type: V
+            name: Publish
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: name
+                type: K
+              - name: value
+                type: V
+            name: Claim
+            out:
+              - name: holder
+                type: V
+              - name: taken
+                type: bool
+            recv: pointer
+          - in:
+              - name: name
+                type: K
+            name: Lookup
+            out:
+              - name: value
+                type: V
+              - name: found
+                type: bool
+            recv: pointer
+          - name: Names
+            out:
+              - type: "[]K"
+            recv: pointer
+        name: Registry
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: cmp.Ordered
+            name: K
+          - constraint: comparable
+            name: V

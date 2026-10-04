@@ -12,7 +12,6 @@
 package ipc
 
 import (
-	"context"
 	"net"
 )
 
@@ -41,37 +40,4 @@ type Conn struct {
 	net.Conn
 	// Peer is who connected (for a listener) or who listens (for a dialer).
 	Peer PeerValue
-}
-
-// Listener is the accepting end of a private socket: it hands out the
-// connections of admitted peers only, and closes and counts the others.
-//
-// It is frozen at these five methods (ADR 0039): a method added to a
-// published interface breaks every double a caller wrote, so a capability
-// that comes later is a sibling interface a Listener may also implement.
-type Listener interface {
-	// Accept returns the next connection of an admitted peer. A peer the
-	// kernel names and the configuration does not admit is closed at once,
-	// counted by Refused, and never returned. After Close it returns the
-	// CLOSED sentinel.
-	Accept() (*Conn, error)
-	// Addr is the endpoint's address.
-	Addr() net.Addr
-	// Close stops accepting and releases the endpoint.
-	Close() error
-	// Path is the endpoint's configured path — the socket file, or the path
-	// a Windows pipe's name is derived from.
-	Path() string
-	// Refused is how many connections Accept closed because their peer was
-	// not admitted.
-	Refused() int64
-}
-
-// Dialer is the connecting end of a private socket: it reaches the listener
-// its configuration names and refuses — before a byte is sent — an endpoint
-// it cannot trust. It is frozen at one method (ADR 0039).
-type Dialer interface {
-	// Dial connects within ctx. Peer names the listener where the kernel
-	// does; a listener of an account that is not admitted is refused.
-	Dial(ctx context.Context) (*Conn, error)
 }

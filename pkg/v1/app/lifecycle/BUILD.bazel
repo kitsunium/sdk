@@ -24,11 +24,15 @@ go_test(
     name = "lifecycle_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "lifecycle_bench_test.go",
         "lifecycle_external_test.go",
     ],
     deps = [
         ":lifecycle",
+        "//internal/core/app/lifecycle",
+        "//internal/core/proc",
+        "//internal/service/app/lifecycle",
         "//pkg/v1/clock",
         "//pkg/v1/errs",
     ],

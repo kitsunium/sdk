@@ -56,6 +56,7 @@ go_test(
     name = "codec_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "codec_external_test.go",
         "codec_internal_test.go",
         "compressed_bomb_alloc_internal_test.go",
@@ -90,6 +91,7 @@ go_test(
         "//pkg/v1/data/codec/toml",
         "//pkg/v1/data/codec/xml",
         "//pkg/v1/data/codec/yaml",
+        "//pkg/v1/data/transform",
         "//pkg/v1/errs",
     ],
 )

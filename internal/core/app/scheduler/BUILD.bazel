@@ -6,6 +6,7 @@ go_library(
     name = "scheduler",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "scheduler.go",
         "scheduler_entry.go",
@@ -31,7 +32,10 @@ alias(
 go_test(
     name = "scheduler_test",
     size = "small",
-    srcs = ["scheduler_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "scheduler_external_test.go",
+    ],
     deps = [
         ":scheduler",
         "//internal/kernel/errs",

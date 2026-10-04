@@ -33,6 +33,7 @@ alias(
 go_test(
     name = "encoder_test",
     srcs = [
+        "api_gen_test.go",
         "encoder_bench_test.go",
         "json_external_test.go",
         "json_internal_test.go",

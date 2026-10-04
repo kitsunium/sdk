@@ -23,9 +23,15 @@ alias(
 go_test(
     name = "i18n_test",
     size = "small",
-    srcs = ["i18n_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "i18n_external_test.go",
+    ],
     deps = [
         ":i18n",
+        "//internal/core/app/i18n",
+        "//internal/core/data/codec",
+        "//internal/service/app/i18n",
         "//pkg/v1/data/codec",
         "//pkg/v1/errs",
     ],

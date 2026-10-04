@@ -1,0 +1,141 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/gate
+packages:
+  - aliases:
+      - name: Policy
+        target: coregate.PolicyValue
+      - name: Decision
+        target: coregate.DecisionValue
+      - name: UpdateAction
+        target: coregate.UpdateAction
+      - name: Outcome
+        target: coregate.Outcome
+    constants:
+      - name: CodePolicyInvalid
+        type: errs.Code
+        value: "0x00_02_24_01"
+      - name: UpdateRefuse
+        type: UpdateAction
+        value: "1"
+      - name: UpdateApply
+        type: UpdateAction
+        value: "2"
+      - name: UpdateWarn
+        type: UpdateAction
+        value: "3"
+      - name: OutcomeAllow
+        type: Outcome
+        value: "1"
+      - name: OutcomeRefuse
+        type: Outcome
+        value: "2"
+      - name: OutcomeUpgrade
+        type: Outcome
+        value: "3"
+    functions:
+      - in:
+          - name: policy
+            type: "*Policy"
+          - name: path
+            type: "[]string"
+          - name: verify
+            type: func() error
+        name: Decide
+        out:
+          - type: Decision
+    imports:
+      coregate: github.com/kitsunium/sdk/framework/internal/core/gate
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/gate
+  - constants:
+      - name: CodePolicyInvalid
+        type: errs.Code
+        value: "0x00_02_24_01"
+      - name: OutcomeAllow
+        type: Outcome
+        value: "1"
+      - name: OutcomeRefuse
+        type: Outcome
+        value: "2"
+      - name: OutcomeUpgrade
+        type: Outcome
+        value: "3"
+      - name: UpdateRefuse
+        type: UpdateAction
+        value: "1"
+      - name: UpdateApply
+        type: UpdateAction
+        value: "2"
+      - name: UpdateWarn
+        type: UpdateAction
+        value: "3"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/internal/core/gate
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Outcome
+        underlying: uint8
+      - name: DecisionValue
+        struct:
+          fields:
+            - name: Outcome
+              type: Outcome
+            - name: Cause
+              type: error
+            - name: Exempt
+              type: bool
+            - name: FloorUnmet
+              type: bool
+      - methods:
+          - in:
+              - name: path
+                type: "[]string"
+            name: Exempt
+            out:
+              - type: bool
+            recv: pointer
+          - name: Validate
+            out:
+              - type: error
+            recv: pointer
+        name: PolicyValue
+        struct:
+          fields:
+            - name: ExemptExact
+              type: "[]string"
+            - name: ExemptSubtree
+              type: "[]string"
+            - name: RecoveryPaths
+              type: "[]string"
+            - name: OnUpdateRequired
+              type: UpdateAction
+      - methods:
+          - name: Valid
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: UpdateAction
+        underlying: uint8
+  - functions:
+      - in:
+          - name: policy
+            type: "*coregate.PolicyValue"
+          - name: path
+            type: "[]string"
+          - name: verify
+            type: func() error
+        name: Decide
+        out:
+          - type: coregate.DecisionValue
+    imports:
+      coregate: github.com/kitsunium/sdk/framework/internal/core/gate
+    path: github.com/kitsunium/sdk/framework/internal/service/gate

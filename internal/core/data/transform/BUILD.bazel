@@ -6,6 +6,7 @@ go_library(
     name = "transform",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "registry.go",
         "transform.go",
@@ -34,6 +35,7 @@ go_test(
     name = "transform_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "codes_external_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",

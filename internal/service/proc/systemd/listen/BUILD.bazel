@@ -89,6 +89,8 @@ alias(
 go_test(
     name = "listen_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
         "sdlisten_other_test.go",
         "sdlisten_unix_bench_test.go",
         "sdlisten_unix_external_test.go",

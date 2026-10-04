@@ -22,9 +22,13 @@ alias(
 go_test(
     name = "vfs_test",
     size = "small",
-    srcs = ["vfs_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "vfs_external_test.go",
+    ],
     deps = [
         ":vfs",
+        "//internal/core/data/vfs",
         "//pkg/v1/errs",
     ],
 )

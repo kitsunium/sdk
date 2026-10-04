@@ -1,0 +1,65 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/middleware/tee
+packages:
+  - constants:
+      - name: CodeTeeAllBranchesFailed
+        type: errs.Code
+        value: "0x00_03_1D_01"
+      - name: CodeSpillFailed
+        type: errs.Code
+        value: "0x00_03_1D_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/tee
+    variables:
+      - name: AllBranchesFailed
+        type: "*errs.Error"
+      - name: SpillFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: NewTeeSink
+        out:
+          - type: "*TeeSink"
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/tee
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Primaries
+              type: "[]corelogger.Sink"
+            - name: Spill
+              type: corelogger.Sink
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: r
+                type: corelogger.RecordEvent
+              - name: p
+                type: "[]byte"
+            name: Write
+            out:
+              - name: "n"
+                type: int
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: TeeSink
+        struct:
+          unexported: true

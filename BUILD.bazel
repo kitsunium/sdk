@@ -9,6 +9,15 @@ load("@gazelle//:def.bzl", "gazelle")
 
 gazelle(name = "gazelle")
 
+# The files tools/genindex's tests read as data dependencies: the platforms
+# table every judgement is made on (scripts/pre-commit/check-platforms.sh
+# holds it to bazel-ci.yml's cross-build matrix), and the docs/api schema whose
+# vectors the writer is held to.
+exports_files([
+    "docs/api/schema.json",
+    "scripts/ci/platforms.sh",
+])
+
 # audit_sources lists every file the internal/kernel/errs AST audit reads
 # at runtime. The audit walks internal/, pkg/, third-party/ and framework/
 # looking for errs.Define call sites + reads go.work for the workspace sentinel. Under Bazel the

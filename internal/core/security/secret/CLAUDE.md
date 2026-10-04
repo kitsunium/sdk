@@ -19,6 +19,14 @@ ADR 0142), allocated in the service layer and declared here since ADR 0160,
 with their values unchanged. Every code of the domain is in this package; the
 engines declare none.
 
+**The ports are generated from the design** (ADR 0163): `Store` and
+`SubjectKeyStore` are declared, with their doc comments, under `ports:` in
+`design/security/secret.yaml`, and `kit gen` writes them into `design_gen.go`.
+A port or its doc comment changes in the design, then `kit gen`, then `make
+api` — never in `design_gen.go`, whose header digests `make api-check`
+verifies. They moved there from `secret.go` and `subject.go`, content moved and
+never deleted.
+
 ## Why this shape
 
 **A secret must not be written down by accident.** `Value` is the mechanism, not

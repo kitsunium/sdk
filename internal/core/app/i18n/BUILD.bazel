@@ -7,10 +7,10 @@ go_library(
     srcs = [
         "codes.go",
         "count_value.go",
+        "design_gen.go",
         "errors.go",
         "form.go",
         "i18n.go",
-        "i18n_interface.go",
         "message_value.go",
         "pattern.go",
         "tag_value.go",
@@ -35,7 +35,10 @@ alias(
 go_test(
     name = "i18n_test",
     size = "small",
-    srcs = ["i18n_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "i18n_external_test.go",
+    ],
     deps = [
         ":i18n",
         "//internal/kernel/errs",

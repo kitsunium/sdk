@@ -1,0 +1,758 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/entitlement
+packages:
+  - aliases:
+      - name: Identity
+        target: coreent.Identity
+      - name: BoundProver
+        target: coreent.BoundProver
+      - name: Roster
+        target: coreent.RosterValue
+      - name: Subject
+        target: coreent.SubjectValue
+      - name: CIEntitlement
+        target: coreent.CIEntitlementValue
+      - name: Grant
+        target: coreent.GrantValue
+      - name: Origin
+        target: coreent.OriginValue
+      - name: Product
+        target: svcent.ProductValue
+      - name: Service
+        target: svcent.Service
+      - name: Bundle
+        target: svcent.BundleValue
+      - name: Getter
+        target: svcent.Getter
+      - name: BearerFetch
+        target: svcent.BearerFetch
+      - name: RoughtimeServer
+        target: svcent.RoughtimeServerValue
+      - name: UpdateRequiredError
+        target: svcent.UpdateRequiredError
+    constants:
+      - name: RosterLifetime
+        type: time.Duration
+        value: "86400000000000"
+      - name: CodeNoLicence
+        type: errs.Code
+        value: "0x00_02_23_01"
+      - name: CodeRosterUnsigned
+        type: errs.Code
+        value: "0x00_02_23_02"
+      - name: CodeRosterStale
+        type: errs.Code
+        value: "0x00_02_23_03"
+      - name: CodeRevoked
+        type: errs.Code
+        value: "0x00_02_23_04"
+      - name: CodeLicenceExpired
+        type: errs.Code
+        value: "0x00_02_23_05"
+      - name: CodeKeyMismatch
+        type: errs.Code
+        value: "0x00_02_23_06"
+      - name: CodeRosterUnreachable
+        type: errs.Code
+        value: "0x00_02_23_07"
+      - name: CodeAmbiguousLicence
+        type: errs.Code
+        value: "0x00_02_23_08"
+      - name: CodeCIUnverifiable
+        type: errs.Code
+        value: "0x00_02_23_09"
+      - name: CodeCIUnknownKey
+        type: errs.Code
+        value: "0x00_02_23_0A"
+      - name: CodeCINotEntitled
+        type: errs.Code
+        value: "0x00_02_23_0B"
+      - name: CodeNoPossession
+        type: errs.Code
+        value: "0x00_02_23_0C"
+      - name: CodeClockRegressed
+        type: errs.Code
+        value: "0x00_02_23_0D"
+      - name: CodeUpdateRequired
+        type: errs.Code
+        value: "0x00_02_23_0E"
+      - name: CodeProductInvalid
+        type: errs.Code
+        value: "0x00_02_23_0F"
+    functions:
+      - in:
+          - name: identity
+            type: Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*Product"
+        name: New
+        out:
+          - type: "*Service"
+      - in:
+          - name: identity
+            type: Identity
+          - name: anchors
+            type: "[][]byte"
+          - name: product
+            type: "*Product"
+        name: NewWithAnchors
+        out:
+          - type: "*Service"
+      - in:
+          - name: client
+            type: Getter
+          - name: identity
+            type: Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*Product"
+        name: NewWithGetter
+        out:
+          - type: "*Service"
+      - in:
+          - name: current
+          - name: floor
+            type: string
+        name: RequiresUpdate
+        out:
+          - type: bool
+      - in:
+          - name: current
+          - name: floor
+            type: string
+        name: UpdateRefusal
+        out:
+          - type: error
+    imports:
+      coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcent: github.com/kitsunium/sdk/framework/internal/service/entitlement
+    path: github.com/kitsunium/sdk/framework/entitlement
+    variables:
+      - name: ErrNoLicense
+        type: "*errs.Error"
+      - name: ErrRosterUnsigned
+        type: "*errs.Error"
+      - name: ErrRosterStale
+        type: "*errs.Error"
+      - name: ErrRevoked
+        type: "*errs.Error"
+      - name: ErrLicenseExpired
+        type: "*errs.Error"
+      - name: ErrKeyMismatch
+        type: "*errs.Error"
+      - name: ErrRosterUnreachable
+        type: "*errs.Error"
+      - name: ErrAmbiguousLicense
+        type: "*errs.Error"
+      - name: ErrCIUnverifiable
+        type: "*errs.Error"
+      - name: ErrCIUnknownKey
+        type: "*errs.Error"
+      - name: ErrCINotEntitled
+        type: "*errs.Error"
+      - name: ErrNoPossession
+        type: "*errs.Error"
+      - name: ErrClockRegressed
+        type: "*errs.Error"
+      - name: ErrUpdateRequired
+        type: "*errs.Error"
+  - constants:
+      - name: CodeNoLicence
+        type: errs.Code
+        value: "0x00_02_23_01"
+      - name: CodeRosterUnsigned
+        type: errs.Code
+        value: "0x00_02_23_02"
+      - name: CodeRosterStale
+        type: errs.Code
+        value: "0x00_02_23_03"
+      - name: CodeRevoked
+        type: errs.Code
+        value: "0x00_02_23_04"
+      - name: CodeLicenceExpired
+        type: errs.Code
+        value: "0x00_02_23_05"
+      - name: CodeKeyMismatch
+        type: errs.Code
+        value: "0x00_02_23_06"
+      - name: CodeRosterUnreachable
+        type: errs.Code
+        value: "0x00_02_23_07"
+      - name: CodeAmbiguousLicence
+        type: errs.Code
+        value: "0x00_02_23_08"
+      - name: CodeCIUnverifiable
+        type: errs.Code
+        value: "0x00_02_23_09"
+      - name: CodeCIUnknownKey
+        type: errs.Code
+        value: "0x00_02_23_0A"
+      - name: CodeCINotEntitled
+        type: errs.Code
+        value: "0x00_02_23_0B"
+      - name: CodeNoPossession
+        type: errs.Code
+        value: "0x00_02_23_0C"
+      - name: CodeClockRegressed
+        type: errs.Code
+        value: "0x00_02_23_0D"
+      - name: CodeUpdateRequired
+        type: errs.Code
+        value: "0x00_02_23_0E"
+      - name: CodeProductInvalid
+        type: errs.Code
+        value: "0x00_02_23_0F"
+      - name: RosterLifetime
+        type: time.Duration
+        value: "86400000000000"
+    functions:
+      - in:
+          - name: verifiedAt
+            type: time.Time
+          - name: bounds
+            type: time.Time
+        name: GrantDeadline
+        out:
+          - type: time.Time
+        variadic: true
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/internal/core/entitlement
+    types:
+      - interface:
+          methods:
+            - name: Discover
+              out:
+                - name: subject
+                  type: string
+                - name: err
+                  type: error
+            - in:
+                - name: subject
+                  type: string
+              name: Fingerprint
+              out:
+                - name: fingerprint
+                  type: string
+                - name: err
+                  type: error
+            - in:
+                - name: subject
+                  type: string
+              name: ProvePossession
+              out:
+                - type: error
+        name: Identity
+      - interface:
+          methods:
+            - in:
+                - name: subject
+                - name: authorised
+                  type: string
+              name: ProvePossessionFor
+              out:
+                - type: error
+        name: BoundProver
+      - methods:
+          - name: Deadline
+            out:
+              - type: time.Time
+            recv: pointer
+          - in:
+              - name: now
+                type: time.Time
+            name: Expired
+            out:
+              - type: bool
+            recv: pointer
+        name: GrantValue
+        struct:
+          fields:
+            - name: Subject
+              type: string
+            - name: VerifiedAt
+              type: time.Time
+            - name: NotAfter
+              type: time.Time
+            - name: Offline
+              type: bool
+      - name: OriginValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: BundleURL
+              type: string
+      - methods:
+          - in:
+              - name: accountID
+                type: string
+              - name: now
+                type: time.Time
+            name: CIEntitlementFor
+            out:
+              - name: entitlement
+                type: CIEntitlementValue
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: uuid
+                type: string
+            name: SubjectFor
+            out:
+              - name: subject
+                type: SubjectValue
+              - name: err
+                type: error
+            recv: pointer
+        name: RosterValue
+        struct:
+          fields:
+            - name: IssuedAt
+              tag: json:"iat"
+              type: time.Time
+            - name: ExpiresAt
+              tag: json:"exp"
+              type: time.Time
+            - name: Subjects
+              tag: json:"subjects"
+              type: map[string]SubjectValue
+            - name: RequiredVersion
+              tag: json:"minv,omitempty"
+              type: string
+            - name: CIAccounts
+              tag: json:"ci,omitempty"
+              type: map[string]CIEntitlementValue
+            - name: CIRelaxed
+              tag: json:"cilax,omitempty"
+              type: bool
+      - name: CIEntitlementValue
+        struct:
+          fields:
+            - name: ExpiresAt
+              tag: json:"exp"
+              type: time.Time
+      - name: SubjectValue
+        struct:
+          fields:
+            - name: Fingerprint
+              tag: json:"fp"
+              type: string
+            - name: ExpiresAt
+              tag: json:"exp"
+              type: time.Time
+    variables:
+      - name: ErrNoLicense
+        type: "*errs.Error"
+      - name: ErrRosterUnsigned
+        type: "*errs.Error"
+      - name: ErrRosterStale
+        type: "*errs.Error"
+      - name: ErrRevoked
+        type: "*errs.Error"
+      - name: ErrLicenseExpired
+        type: "*errs.Error"
+      - name: ErrKeyMismatch
+        type: "*errs.Error"
+      - name: ErrRosterUnreachable
+        type: "*errs.Error"
+      - name: ErrAmbiguousLicense
+        type: "*errs.Error"
+      - name: ErrCIUnverifiable
+        type: "*errs.Error"
+      - name: ErrCIUnknownKey
+        type: "*errs.Error"
+      - name: ErrCINotEntitled
+        type: "*errs.Error"
+      - name: ErrNoPossession
+        type: "*errs.Error"
+      - name: ErrClockRegressed
+        type: "*errs.Error"
+      - name: ErrUpdateRequired
+        type: "*errs.Error"
+  - constants:
+      - name: CodeCacheUnwritable
+        type: errs.Code
+        value: "0x00_03_43_01"
+      - name: ActionsJWKSURL
+        type: string
+        value: "\"https://token.actions.githubusercontent.com/.well-known/jwks\""
+      - name: ActionsIssuer
+        type: string
+        value: "\"https://token.actions.githubusercontent.com\""
+      - name: DefaultActionsAudience
+        type: string
+        value: "\"kitsunium-sdk-entitlement\""
+    functions:
+      - in:
+          - name: raw
+            type: "[]byte"
+          - name: vendor
+            type: ed25519.PublicKey
+          - name: now
+            type: time.Time
+        name: ParseBundle
+        out:
+          - name: roster
+            type: "*coreent.RosterValue"
+          - name: err
+            type: error
+      - name: InCI
+        out:
+          - type: bool
+      - in:
+          - name: get
+            type: BearerFetch
+          - name: audience
+            type: string
+        name: RequestActionsToken
+        out:
+          - name: token
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: url
+          - name: bearer
+            type: string
+        name: DefaultBearerFetch
+        out:
+          - name: resp
+            type: "*http.Response"
+          - name: err
+            type: error
+      - in:
+          - name: get
+            type: BearerFetch
+          - name: keys
+            type: map[string]*rsa.PublicKey
+          - name: roster
+            type: "*coreent.RosterValue"
+          - name: audience
+            type: string
+          - name: now
+            type: time.Time
+        name: VerifyCI
+        out:
+          - name: claims
+            type: "*ActionsClaimsValue"
+          - name: err
+            type: error
+      - in:
+          - name: raw
+            type: "[]byte"
+        name: ParseJWKS
+        out:
+          - name: keys
+            type: map[string]*rsa.PublicKey
+          - name: err
+            type: error
+      - in:
+          - name: raw
+            type: string
+          - name: keys
+            type: map[string]*rsa.PublicKey
+          - name: audience
+            type: string
+          - name: now
+            type: time.Time
+        name: VerifyActionsToken
+        out:
+          - name: claims
+            type: "*ActionsClaimsValue"
+          - name: err
+            type: error
+      - in:
+          - name: raw
+          - name: sig
+            type: "[]byte"
+          - name: vendor
+            type: ed25519.PublicKey
+          - name: now
+            type: time.Time
+        name: ParseRoster
+        out:
+          - name: roster
+            type: "*coreent.RosterValue"
+          - name: err
+            type: error
+      - in:
+          - name: server
+            type: RoughtimeServerValue
+        name: QueryRoughtime
+        out:
+          - name: midpoint
+            type: time.Time
+          - name: radius
+            type: time.Duration
+          - name: err
+            type: error
+      - in:
+          - name: identity
+            type: coreent.Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*ProductValue"
+        name: NewService
+        out:
+          - type: "*Service"
+      - in:
+          - name: identity
+            type: coreent.Identity
+          - name: anchors
+            type: "[][]byte"
+          - name: product
+            type: "*ProductValue"
+        name: NewServiceWithAnchors
+        out:
+          - type: "*Service"
+      - in:
+          - name: client
+            type: Getter
+          - name: identity
+            type: coreent.Identity
+          - name: vendor
+            type: "[]byte"
+          - name: product
+            type: "*ProductValue"
+        name: NewServiceWithGetter
+        out:
+          - type: "*Service"
+      - in:
+          - name: client
+            type: Getter
+          - name: identity
+            type: coreent.Identity
+          - name: vendor
+            type: "[]byte"
+          - name: origins
+            type: "[]coreent.OriginValue"
+        name: NewServiceWithOrigins
+        out:
+          - type: "*Service"
+      - in:
+          - name: current
+          - name: floor
+            type: string
+        name: RequiresUpdate
+        out:
+          - type: bool
+      - in:
+          - name: current
+          - name: floor
+            type: string
+        name: UpdateRefusal
+        out:
+          - type: error
+    imports:
+      coreent: github.com/kitsunium/sdk/framework/internal/core/entitlement
+      ed25519: crypto/ed25519
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      http: net/http
+      rsa: crypto/rsa
+    path: github.com/kitsunium/sdk/framework/internal/service/entitlement
+    types:
+      - name: BundleValue
+        struct:
+          fields:
+            - name: Payload
+              tag: json:"payload"
+              type: string
+            - name: Signature
+              tag: json:"sig"
+              type: string
+      - name: JWKValue
+        struct:
+          fields:
+            - name: KeyType
+              tag: json:"kty"
+              type: string
+            - name: KeyID
+              tag: json:"kid"
+              type: string
+            - name: Use
+              tag: json:"use"
+              type: string
+            - name: Algorithm
+              tag: json:"alg"
+              type: string
+            - name: Modulus
+              tag: json:"n"
+              type: string
+            - name: Exponent
+              tag: json:"e"
+              type: string
+      - name: JWKSValue
+        struct:
+          fields:
+            - name: Keys
+              tag: json:"keys"
+              type: "[]JWKValue"
+      - name: ActionsClaimsValue
+        struct:
+          fields:
+            - name: Issuer
+              tag: json:"iss"
+              type: string
+            - name: Subject
+              tag: json:"sub"
+              type: string
+            - name: Audience
+              tag: json:"aud"
+              type: audienceClaim
+            - name: RepositoryOwnerID
+              tag: json:"repository_owner_id"
+              type: string
+            - name: RepositoryOwner
+              tag: json:"repository_owner"
+              type: string
+            - name: Repository
+              tag: json:"repository"
+              type: string
+            - name: EventName
+              tag: json:"event_name"
+              type: string
+            - name: RunnerEnvironment
+              tag: json:"runner_environment"
+              type: string
+            - name: ExpiresAt
+              tag: json:"exp"
+              type: int64
+            - name: IssuedAt
+              tag: json:"iat"
+              type: int64
+            - name: NotBefore
+              tag: json:"nbf"
+              type: int64
+      - methods:
+          - name: DefaultCacheDir
+            out:
+              - type: string
+            recv: pointer
+          - name: Label
+            out:
+              - type: string
+            recv: pointer
+          - name: PublishedOrigins
+            out:
+              - type: "[]coreent.OriginValue"
+            recv: pointer
+          - name: Validate
+            out:
+              - type: error
+            recv: pointer
+        name: ProductValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Origins
+              type: "[]coreent.OriginValue"
+            - name: CIAudience
+              type: string
+            - name: EnrolURL
+              type: string
+      - name: RoughtimeServerValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Address
+              type: string
+            - name: PublicKey
+              type: ed25519.PublicKey
+      - interface:
+          methods:
+            - in:
+                - name: url
+                  type: string
+              name: Get
+              out:
+                - type: "*http.Response"
+                - type: error
+        name: Getter
+      - name: BearerFetch
+        underlying: func(url, bearer string) (resp *http.Response, err error)
+      - methods:
+          - in:
+              - name: dir
+                type: string
+            name: WithCache
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: servers
+                type: "[]RoughtimeServerValue"
+            name: WithTimeServers
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: fetch
+                type: BearerFetch
+            name: WithBearerFetch
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: origins
+                type: "[]coreent.OriginValue"
+            name: WithOrigins
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: version
+                type: string
+            name: WithVersion
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: anchors
+                type: "[][]byte"
+            name: WithAnchors
+            out:
+              - type: "*Service"
+            recv: pointer
+          - in:
+              - name: now
+                type: time.Time
+            name: Verify
+            out:
+              - name: grant
+                type: coreent.GrantValue
+              - name: err
+                type: error
+            recv: pointer
+        name: Service
+        struct:
+          unexported: true
+      - methods:
+          - name: Error
+            out:
+              - type: string
+            recv: pointer
+          - name: Unwrap
+            out:
+              - type: error
+            recv: pointer
+        name: UpdateRequiredError
+        struct:
+          fields:
+            - name: Current
+              type: string
+            - name: Required
+              type: string
+    variables:
+      - name: CacheUnwritable
+        type: "*errs.Error"
+      - name: RoughtimeServers
+        type: "[]RoughtimeServerValue"

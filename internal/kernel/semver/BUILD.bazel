@@ -29,6 +29,7 @@ go_test(
     name = "semver_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "oracle_external_test.go",
         "parse_internal_test.go",
         "pseudo_external_test.go",

@@ -1,0 +1,803 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/i18n
+packages:
+  - constants:
+      - name: CodeInvalidTag
+        type: errs.Code
+        value: "0x00_02_1E_01"
+      - name: CodeInvalidKey
+        type: errs.Code
+        value: "0x00_02_1E_02"
+      - name: CodeInvalidPattern
+        type: errs.Code
+        value: "0x00_02_1E_03"
+      - name: CodeArgumentMissing
+        type: errs.Code
+        value: "0x00_02_1E_04"
+      - name: CodeMessageNotFound
+        type: errs.Code
+        value: "0x00_02_1E_05"
+      - name: CodePluralFormMissing
+        type: errs.Code
+        value: "0x00_02_1E_06"
+      - name: CodeInvalidCount
+        type: errs.Code
+        value: "0x00_02_1E_07"
+      - name: CodeInvalidForm
+        type: errs.Code
+        value: "0x00_02_1E_08"
+      - name: CodeUnsupportedLanguage
+        type: errs.Code
+        value: "0x00_03_3C_01"
+      - name: CodeCatalogInvalid
+        type: errs.Code
+        value: "0x00_03_3C_02"
+      - name: CodeCatalogLoadFailed
+        type: errs.Code
+        value: "0x00_03_3C_03"
+      - name: CodeTranslationIncomplete
+        type: errs.Code
+        value: "0x00_03_3C_04"
+      - name: CodeNegotiationEmpty
+        type: errs.Code
+        value: "0x00_03_3C_05"
+      - name: FormOther
+        type: Form
+        value: "0"
+      - name: FormZero
+        type: Form
+        value: "1"
+      - name: FormOne
+        type: Form
+        value: "2"
+      - name: FormTwo
+        type: Form
+        value: "3"
+      - name: FormFew
+        type: Form
+        value: "4"
+      - name: FormMany
+        type: Form
+        value: "5"
+    functions:
+      - in:
+          - name: "n"
+            type: int64
+        name: Int
+        out:
+          - type: CountValue
+      - in:
+          - name: value
+            type: float64
+          - name: fractionDigits
+            type: int
+        name: Decimal
+        out:
+          - name: count
+            type: CountValue
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: string
+        name: ParseForm
+        out:
+          - name: form
+            type: Form
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: Key
+        name: ValidateKey
+        out:
+          - type: error
+      - in:
+          - name: other
+            type: PatternValue
+          - name: plural
+            type: "[]FormPatternValue"
+        name: NewCompiledMessage
+        out:
+          - name: message
+            type: MessageValue
+          - name: err
+            type: error
+      - in:
+          - name: parts
+            type: "[]PartValue"
+        name: NewPattern
+        out:
+          - name: body
+            type: PatternValue
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: string
+        name: ValidPlaceholder
+        out:
+          - type: bool
+      - in:
+          - name: language
+          - name: script
+          - name: region
+            type: string
+        name: NewTag
+        out:
+          - name: tag
+            type: TagValue
+          - name: err
+            type: error
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/i18n
+    ports:
+      - doc: |-
+          Catalog is a source of translated messages, FROZEN at two methods
+          (ADR 0039). pkg/v1/app/i18n aliases it, Go interfaces are structural, and adding
+          a third method would break every downstream two-method double at compile
+          time with no deprecation window.
+
+          # Lookup is EXACT and does nothing clever
+
+          It answers for the pair it was handed and performs no fallback, no parent
+          truncation ("fr-CA" does not become "fr") and no plural selection. Every one
+          of those is a policy: which language stands in for which, and whether a
+          missing translation is an error or a silent substitution. A Catalog that
+          decided them would decide them for every caller, and the decision would be
+          invisible at the call site.
+
+          The walk therefore lives in exactly one place — internal/service/app/i18n's
+          renderer — which knows which tag actually answered and can pick that
+          language's plural rules. See the package comment.
+
+          Implementations MUST be safe for concurrent use and MUST NOT mutate after
+          construction: one Catalog is shared by every goroutine serving a request.
+        methods:
+          - doc: |-
+              Lookup returns the message registered for exactly (tag, key), and
+              reports whether there was one.
+            in:
+              - name: tag
+                type: TagValue
+              - name: key
+                type: Key
+            name: Lookup
+            out:
+              - name: message
+                type: MessageValue
+              - name: ok
+                type: bool
+          - doc: |-
+              Tags reports every tag this catalog can answer for, sorted by their
+              canonical string so the order is stable across runs.
+            name: Tags
+            out:
+              - type: "[]TagValue"
+        name: Catalog
+      - doc: |-
+          KeyLister is an ADR 0039 sibling: a [Catalog] that can enumerate the keys it
+          holds for a tag. It is discovered by type assertion, exactly as codec's
+          Appender and cache's Tagger are, so [Catalog] stays frozen at two methods.
+
+          It exists for one job, and that job is a test rather than a request: a
+          caller compares the key set of its fallback language against the key set of
+          every other, and fails its own suite when a translation is missing. That
+          moves "this string was never translated" from a report a user writes to a
+          build that does not go out — which is the only place the SDK can help,
+          because at render time the string is already missing and something has to be
+          shown.
+        embeds:
+          - Catalog
+        methods:
+          - doc: |-
+              Keys reports the keys held for tag, sorted, or nil when the catalog
+              does not know the tag at all.
+            in:
+              - name: tag
+                type: TagValue
+            name: Keys
+            out:
+              - type: "[]Key"
+        name: KeyLister
+      - doc: |-
+          Fallbacker is an ADR 0039 sibling: a [Catalog] that names the language it
+          falls back to when a key is absent from the one requested.
+
+          It is a sibling and not a [Catalog] method because a catalog that has no
+          fallback is a legitimate, useful thing — a bundle for one language, or a
+          test double — and the absence of the method is how a renderer finds out,
+          rather than a zero [TagValue] it would have to interpret. That is ADR 0039's
+          shape and ADR 0052's lesson: the in-process lease implements Deadliner and
+          the file lease does not, and the absence IS the answer.
+        embeds:
+          - Catalog
+        methods:
+          - doc: |-
+              Fallback reports the tag this catalog falls back to. It is never the
+              zero TagValue: a catalog that has no fallback does not implement this
+              interface.
+            name: Fallback
+            out:
+              - type: TagValue
+        name: Fallbacker
+    types:
+      - methods:
+          - name: IntegerPart
+            out:
+              - type: uint64
+            recv: value
+          - name: FractionValue
+            out:
+              - type: uint64
+            recv: value
+          - name: VisibleFractionDigits
+            out:
+              - type: int
+            recv: value
+          - name: IsIntegerValued
+            out:
+              - type: bool
+            recv: value
+        name: CountValue
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Valid
+            out:
+              - type: bool
+            recv: value
+        name: Form
+        underlying: uint8
+      - name: PluralRule
+        underlying: func(count CountValue) Form
+      - name: Args
+        underlying: map[string]string
+      - name: Key
+        underlying: string
+      - methods:
+          - in:
+              - name: form
+                type: Form
+              - name: args
+                type: Args
+            name: Format
+            out:
+              - name: rendered
+                type: string
+              - name: err
+                type: error
+            recv: value
+          - in:
+              - name: form
+                type: Form
+            name: HasForm
+            out:
+              - type: bool
+            recv: value
+          - name: IsPlural
+            out:
+              - type: bool
+            recv: value
+        name: MessageValue
+        struct:
+          unexported: true
+      - name: FormPatternValue
+        struct:
+          fields:
+            - name: Form
+              type: Form
+            - name: Body
+              type: PatternValue
+      - name: PartValue
+        struct:
+          fields:
+            - name: Text
+              type: string
+            - name: Name
+              type: string
+      - name: PatternValue
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: IsZero
+            out:
+              - type: bool
+            recv: value
+          - name: Language
+            out:
+              - type: string
+            recv: value
+          - name: Script
+            out:
+              - type: string
+            recv: value
+          - name: Region
+            out:
+              - type: string
+            recv: value
+          - name: Parent
+            out:
+              - name: parent
+                type: TagValue
+              - name: ok
+                type: bool
+            recv: value
+        name: TagValue
+        struct:
+          unexported: true
+    variables:
+      - name: InvalidTag
+        type: "*errs.Error"
+      - name: InvalidKey
+        type: "*errs.Error"
+      - name: InvalidPattern
+        type: "*errs.Error"
+      - name: ArgumentMissing
+        type: "*errs.Error"
+      - name: MessageNotFound
+        type: "*errs.Error"
+      - name: PluralFormMissing
+        type: "*errs.Error"
+      - name: InvalidCount
+        type: "*errs.Error"
+      - name: InvalidForm
+        type: "*errs.Error"
+      - name: UnsupportedLanguage
+        type: "*errs.Error"
+      - name: CatalogInvalid
+        type: "*errs.Error"
+      - name: CatalogLoadFailed
+        type: "*errs.Error"
+      - name: TranslationIncomplete
+        type: "*errs.Error"
+      - name: NegotiationEmpty
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: text
+            type: string
+        name: Plain
+        out:
+          - type: EntryValue
+      - in:
+          - name: forms
+            type: map[string]string
+        name: PluralForms
+        out:
+          - type: EntryValue
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: dir
+            type: string
+          - name: format
+            type: codec.Format
+          - name: fallback
+            type: corei18n.TagValue
+        name: LoadFS
+        out:
+          - name: store
+            type: "*Store"
+          - name: err
+            type: error
+      - in:
+          - name: text
+            type: string
+        name: NewMessage
+        out:
+          - name: message
+            type: corei18n.MessageValue
+          - name: err
+            type: error
+      - in:
+          - name: forms
+            type: map[corei18n.Form]string
+        name: NewPluralMessage
+        out:
+          - name: message
+            type: corei18n.MessageValue
+          - name: err
+            type: error
+      - in:
+          - name: supported
+            type: "[]corei18n.TagValue"
+          - name: fallback
+            type: corei18n.TagValue
+        name: NewNegotiator
+        out:
+          - name: negotiator
+            type: "*Negotiator"
+          - name: err
+            type: error
+      - in:
+          - name: tag
+            type: corei18n.TagValue
+        name: Rules
+        out:
+          - name: plural
+            type: PluralValue
+          - name: ok
+            type: bool
+      - name: SupportedTags
+        out:
+          - type: "[]corei18n.TagValue"
+      - in:
+          - name: catalog
+            type: corei18n.Catalog
+          - name: tag
+            type: corei18n.TagValue
+        name: NewPrinter
+        out:
+          - name: printer
+            type: "*Printer"
+          - name: err
+            type: error
+      - in:
+          - name: fallback
+            type: corei18n.TagValue
+          - name: catalogues
+            type: map[corei18n.TagValue]Catalogue
+        name: NewStore
+        out:
+          - name: store
+            type: "*Store"
+          - name: err
+            type: error
+      - in:
+          - name: text
+            type: string
+        name: ParseTag
+        out:
+          - name: tag
+            type: corei18n.TagValue
+          - name: err
+            type: error
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      corei18n: github.com/kitsunium/sdk/internal/core/app/i18n
+      fs: io/fs
+    path: github.com/kitsunium/sdk/internal/service/app/i18n
+    types:
+      - name: EntryValue
+        struct:
+          fields:
+            - name: Pattern
+              type: string
+            - name: Forms
+              type: map[string]string
+      - name: Catalogue
+        underlying: map[corei18n.Key]EntryValue
+      - methods:
+          - name: Supported
+            out:
+              - type: "[]corei18n.TagValue"
+            recv: pointer
+          - in:
+              - name: header
+                type: string
+            name: Negotiate
+            out:
+              - type: corei18n.TagValue
+            recv: pointer
+        name: Negotiator
+        struct:
+          unexported: true
+      - methods:
+          - name: Forms
+            out:
+              - type: "[]corei18n.Form"
+            recv: value
+          - in:
+              - name: count
+                type: corei18n.CountValue
+            name: Select
+            out:
+              - type: corei18n.Form
+            recv: value
+          - name: Valid
+            out:
+              - type: bool
+            recv: value
+        name: PluralValue
+        struct:
+          unexported: true
+      - methods:
+          - name: Tag
+            out:
+              - type: corei18n.TagValue
+            recv: pointer
+          - in:
+              - name: key
+                type: corei18n.Key
+              - name: args
+                type: corei18n.Args
+            name: Render
+            out:
+              - name: rendered
+                type: string
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: corei18n.Key
+              - name: count
+                type: corei18n.CountValue
+              - name: args
+                type: corei18n.Args
+            name: RenderCount
+            out:
+              - name: rendered
+                type: string
+              - name: err
+                type: error
+            recv: pointer
+        name: Printer
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: tag
+                type: corei18n.TagValue
+              - name: key
+                type: corei18n.Key
+            name: Lookup
+            out:
+              - name: message
+                type: corei18n.MessageValue
+              - name: ok
+                type: bool
+            recv: pointer
+          - name: Tags
+            out:
+              - type: "[]corei18n.TagValue"
+            recv: pointer
+          - in:
+              - name: tag
+                type: corei18n.TagValue
+            name: Keys
+            out:
+              - type: "[]corei18n.Key"
+            recv: pointer
+          - name: Fallback
+            out:
+              - type: corei18n.TagValue
+            recv: pointer
+          - in:
+              - name: tag
+                type: corei18n.TagValue
+            name: Missing
+            out:
+              - type: "[]corei18n.Key"
+            recv: pointer
+        name: Store
+        struct:
+          unexported: true
+  - aliases:
+      - name: Tag
+        target: corei18n.TagValue
+      - name: Key
+        target: corei18n.Key
+      - name: Message
+        target: corei18n.MessageValue
+      - name: Form
+        target: corei18n.Form
+      - name: Count
+        target: corei18n.CountValue
+      - name: Args
+        target: corei18n.Args
+      - name: Catalog
+        target: corei18n.Catalog
+      - name: KeyLister
+        target: corei18n.KeyLister
+      - name: Fallbacker
+        target: corei18n.Fallbacker
+      - name: PluralRule
+        target: corei18n.PluralRule
+      - name: Entry
+        target: svci18n.EntryValue
+      - name: Catalogue
+        target: svci18n.Catalogue
+      - name: Store
+        target: svci18n.Store
+      - name: Printer
+        target: svci18n.Printer
+      - name: Negotiator
+        target: svci18n.Negotiator
+      - name: Plural
+        target: svci18n.PluralValue
+    constants:
+      - name: FormOther
+        type: Form
+        value: "0"
+      - name: FormZero
+        type: Form
+        value: "1"
+      - name: FormOne
+        type: Form
+        value: "2"
+      - name: FormTwo
+        type: Form
+        value: "3"
+      - name: FormFew
+        type: Form
+        value: "4"
+      - name: FormMany
+        type: Form
+        value: "5"
+    functions:
+      - in:
+          - name: text
+            type: string
+        name: ParseTag
+        out:
+          - name: tag
+            type: Tag
+          - name: err
+            type: error
+      - in:
+          - name: name
+            type: string
+        name: ParseForm
+        out:
+          - name: form
+            type: Form
+          - name: err
+            type: error
+      - in:
+          - name: "n"
+            type: int64
+        name: Int
+        out:
+          - type: Count
+      - in:
+          - name: value
+            type: float64
+          - name: fractionDigits
+            type: int
+        name: Decimal
+        out:
+          - name: count
+            type: Count
+          - name: err
+            type: error
+      - in:
+          - name: key
+            type: Key
+        name: ValidateKey
+        out:
+          - type: error
+      - in:
+          - name: text
+            type: string
+        name: NewMessage
+        out:
+          - name: message
+            type: Message
+          - name: err
+            type: error
+      - in:
+          - name: forms
+            type: map[Form]string
+        name: NewPluralMessage
+        out:
+          - name: message
+            type: Message
+          - name: err
+            type: error
+      - in:
+          - name: text
+            type: string
+        name: Plain
+        out:
+          - type: Entry
+      - in:
+          - name: forms
+            type: map[string]string
+        name: PluralForms
+        out:
+          - type: Entry
+      - in:
+          - name: fallback
+            type: Tag
+          - name: catalogues
+            type: map[Tag]Catalogue
+        name: NewStore
+        out:
+          - name: store
+            type: "*Store"
+          - name: err
+            type: error
+      - in:
+          - name: fsys
+            type: fs.FS
+          - name: dir
+            type: string
+          - name: format
+            type: codec.Format
+          - name: fallback
+            type: Tag
+        name: LoadFS
+        out:
+          - name: store
+            type: "*Store"
+          - name: err
+            type: error
+      - in:
+          - name: catalog
+            type: Catalog
+          - name: tag
+            type: Tag
+        name: NewPrinter
+        out:
+          - name: printer
+            type: "*Printer"
+          - name: err
+            type: error
+      - in:
+          - name: supported
+            type: "[]Tag"
+          - name: fallback
+            type: Tag
+        name: NewNegotiator
+        out:
+          - name: negotiator
+            type: "*Negotiator"
+          - name: err
+            type: error
+      - in:
+          - name: tag
+            type: Tag
+        name: Rules
+        out:
+          - name: plural
+            type: Plural
+          - name: ok
+            type: bool
+      - name: SupportedTags
+        out:
+          - type: "[]Tag"
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+      corei18n: github.com/kitsunium/sdk/internal/core/app/i18n
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      fs: io/fs
+      svci18n: github.com/kitsunium/sdk/internal/service/app/i18n
+    path: github.com/kitsunium/sdk/pkg/v1/app/i18n
+    variables:
+      - name: InvalidTag
+        type: "*errs.Error"
+      - name: InvalidKey
+        type: "*errs.Error"
+      - name: InvalidPattern
+        type: "*errs.Error"
+      - name: ArgumentMissing
+        type: "*errs.Error"
+      - name: MessageNotFound
+        type: "*errs.Error"
+      - name: PluralFormMissing
+        type: "*errs.Error"
+      - name: InvalidCount
+        type: "*errs.Error"
+      - name: InvalidForm
+        type: "*errs.Error"
+      - name: UnsupportedLanguage
+        type: "*errs.Error"
+      - name: CatalogInvalid
+        type: "*errs.Error"
+      - name: CatalogLoadFailed
+        type: "*errs.Error"
+      - name: TranslationIncomplete
+        type: "*errs.Error"
+      - name: NegotiationEmpty
+        type: "*errs.Error"

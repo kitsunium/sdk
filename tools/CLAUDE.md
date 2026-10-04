@@ -1,16 +1,16 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T10:00:00Z -->
 # tools/
 
 ## Purpose
 
-Single-purpose scripts, data files and small Go programs the build tooling calls into. Four entries live here today: `workspace_status.sh` (feeds `bazel build --stamp`), `genindex/` (emits the symbol search index for the docs site), `alloc-lane-targets.txt` (the shared target list for the race-off allocation lane), and `sdkguard/` (enforces the SDK's consumer-facing rules on downstream codebases — ADR 0033).
+Single-purpose scripts, data files and small Go programs the build tooling calls into. Four entries live here today: `workspace_status.sh` (feeds `bazel build --stamp`), `genindex/` (writes and checks `docs/api` — every exported symbol, read from the code, which the docs site renders —, checks doc links, and keeps the go/doc symbol index the site read before), `alloc-lane-targets.txt` (the shared target list for the race-off allocation lane), and `sdkguard/` (enforces the SDK's consumer-facing rules on downstream codebases — ADR 0033).
 
 ## Contents
 
 | Path | Called by | Emits |
 |---|---|---|
 | `workspace_status.sh` | `bazel build --stamp` (via `workspace_status_command` in `.bazelrc`) | `STABLE_VERSION <git-sha>` to stdout, falling back to `STABLE_VERSION dev` outside a git checkout |
-| `genindex/` (Go program, stdlib-only) | `docs/site/scripts/gen-symbols.mjs` during `npm run prebuild`; with `-check-doclinks`, `make doclinks` (run by `make lint-check`) | `public/_search/symbols-<major>.json` — flat list of every exported Go symbol (kind, signature, doc synopsis, URL, source URL) consumed by the docs-site search modal. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform that compiles the file — ten of the cross-build lane's twelve cells, illumos and solaris not among them (ADR 0138; see `genindex/CLAUDE.md`) |
+| `genindex/` (Go program, stdlib-only) | with `-check-doclinks`, `make doclinks`; with `-write-api`, `make api`; with `-check-api`, `make api-check` — `make lint-check` runs `doclinks` and `api-check`. Its default mode, the go/doc symbol index, no build step runs: the docs site builds its ⌘K index from `docs/api` | by default, a flat JSON list of every exported Go symbol of `-input` (kind, signature, doc synopsis, URL, source URL), as go/doc sees it — the docs-site search index until `docs/api`, which also reaches the members of an alias. With `-check-doclinks <dir>…` it emits no index and fails on every same-package doc link that names no declared symbol, at the line that writes it, judged on each platform that compiles the file (ADR 0138, ADR 0144). With `-write-api` it writes `docs/api/<module>.json` for every module of `go.work` — every exported symbol with its id, kind, signatures, owner, doc, cells, file, codes, layer and family, read with go/types on every cell (`docs/api/schema.json`); with `-check-api` it writes nothing and fails on any byte that differs — and, with `-markers -digests` as `make api-check` runs it, on a code surface that differs from the markers of the pins kit writes from `design/`, or a generated file whose digests no longer hold (ADR 0163). With `-write-error-codes` it writes `docs/error-codes.yaml` from `docs/api` (`make error-codes`), and `-check-error-codes` is the drift guard's. The cells are the platforms table, `scripts/ci/platforms.sh` — the cross-build lane's twelve, which `scripts/pre-commit/check-platforms.sh` holds equal to `bazel-ci.yml`'s matrix (see `genindex/CLAUDE.md`) |
 | `sdkguard/` (Go program, stdlib-only) | a consumer's CI / `make`, or `go run github.com/kitsunium/sdk/tools/sdkguard@latest` | diagnostics on stderr in `file:line:col` form; exit 1 on findings, 2 on tool error — see `tools/sdkguard/CLAUDE.md` |
 | `alloc-lane-targets.txt` (plain list, `#` comments) | `make test-alloc`, the `bazel-ci.yml` alloc step, and `scripts/pre-commit/check-alloc-lane-coverage.sh` | nothing — it IS the data: one Bazel test target per line for `bazel test --config=alloc` |
 
@@ -40,9 +40,9 @@ Why it is a CLI rather than an `init()` hook or a `go vet -vettool`: runtime det
 
 ### `genindex/`
 
-1. `docs/site/scripts/gen-symbols.mjs` (a Node prebuild step) reads `versions.json` + `build-info.json`, then spawns `go run github.com/kitsunium/sdk/tools/genindex` with `GOWORK=off` (keeping the workspace invariant from the root `CLAUDE.md` intact: `go.work` names the SDK module at the root and the modules a release may tag beside it, nothing else).
-2. `genindex` walks every package under `-input` (e.g. `pkg/v1`), uses `go/parser` + `go/doc` to extract exported symbols, and emits one JSON row per func / type / method / const / var. `-source-url-prefix` (set to the current commit's GitHub blob URL) is concatenated with the repo-relative file path + line number to produce the per-symbol `sourceUrl`.
-3. The docs site's `Search.astro` component lazy-loads the JSON on first ⌘K and feeds MiniSearch.
+1. `make api` runs it with `-write-api -repo-root $(CURDIR)`: one `go list -deps` per cell of `scripts/ci/platforms.sh` lists the workspace's universe, go/types checks every package of it from source with function bodies ignored, and `docs/api/<module>.json` is written for each module of `go.work`. `make api-check` — a line of `make lint-check`, so CI's required job runs it — does the same in memory and fails on any byte that differs from what is committed, then holds each cell's exported surface to the pins' markers and every generated file's header to its design file's bytes (ADR 0163). A doc edit needs `make api` and nothing else; an API change starts in `design/` and `kit gen`.
+2. The docs site reads what it wrote, with no go command: `docs/site/scripts/sync-versions.mjs` turns each release's `docs/api` into the API section of every package page, and `gen-symbols.mjs` into its ⌘K index (`docs/site/CLAUDE.md`); `make docs-check` holds both to `docs/api`.
+3. Its default mode walks every package under `-input` with `go/parser` + `go/doc` and emits one JSON row per func / type / method / const / var — the search index the docs site loaded until it read `docs/api`. No build step runs it now; it stays a mode of the tool, tested, until it is retired.
 
 ## Conventions
 
@@ -74,6 +74,9 @@ cat $(bazel info output_path)/volatile-status.txt $(bazel info output_path)/stab
 # genindex
 cd tools/genindex && GOWORK=off go vet ./...
 GOWORK=off go run . -check-doclinks "$(git rev-parse --show-toplevel)"   # = make doclinks
+GOWORK=off go run . -write-api       # = make api: docs/api under ../.. (-repo-root defaults to two levels up)
+GOWORK=off go run . -check-api -markers -digests   # = make api-check
+GOWORK=off go run . -write-error-codes             # = make error-codes
 GOWORK=off go run . -input ../../pkg/v1 -module github.com/kitsunium/sdk/pkg/v1 \
   -url-base /local/v1 -repo-root ../.. -source-url-prefix https://github.com/kitsunium/sdk/blob/main
 ```

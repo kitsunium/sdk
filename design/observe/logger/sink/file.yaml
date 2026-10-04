@@ -1,0 +1,51 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/sink/file
+packages:
+  - constants:
+      - name: CodePathEmpty
+        type: errs.Code
+        value: "0x00_03_0E_01"
+      - name: CodeOpenFailed
+        type: errs.Code
+        value: "0x00_03_0E_02"
+      - name: CodeCtxCancelled
+        type: errs.Code
+        value: "0x00_03_0E_0A"
+      - name: CodeWriteFailed
+        type: errs.Code
+        value: "0x00_03_0E_14"
+      - name: CodeSyncFailed
+        type: errs.Code
+        value: "0x00_03_0E_1E"
+      - name: CodeCloseFailed
+        type: errs.Code
+        value: "0x00_03_0E_28"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/file
+    variables:
+      - name: PathEmpty
+        type: "*errs.Error"
+      - name: OpenFailed
+        type: "*errs.Error"
+      - name: CtxCancelled
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+      - name: SyncFailed
+        type: "*errs.Error"
+      - name: CloseFailed
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: path
+            type: string
+        name: New
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/file

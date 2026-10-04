@@ -212,6 +212,7 @@ alias(
 go_test(
     name = "kit_test",
     srcs = [
+        "api_gen_test.go",
         "architecture_test.go",
         "auth_test.go",
         "bench_test.go",
@@ -340,52 +341,42 @@ go_test(
         "//pkg/v1/errs",
         "//pkg/v1/observe/logger",
         "//pkg/v1/observe/profiling",
+        "//pkg/v1/proc/ipc",
         "//pkg/v1/security/authz",
         "//pkg/v1/security/secret",
     ] + select({
         "@rules_go//go/platform:aix": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:android": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:darwin": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:dragonfly": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:freebsd": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:illumos": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:ios": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:linux": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:netbsd": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:openbsd": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "@rules_go//go/platform:solaris": [
             "//framework/telemetry",
-            "//pkg/v1/proc/ipc",
         ],
         "//conditions:default": [],
     }),

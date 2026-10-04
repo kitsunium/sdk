@@ -38,6 +38,7 @@ alias(
 go_test(
     name = "id_test",
     srcs = [
+        "api_gen_test.go",
         "common_internal_test.go",
         "ksuid_external_test.go",
         "ksuid_internal_test.go",

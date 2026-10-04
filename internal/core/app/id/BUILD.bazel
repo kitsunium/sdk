@@ -6,6 +6,7 @@ go_library(
     name = "id",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "id.go",
         "registry.go",
@@ -33,6 +34,7 @@ alias(
 go_test(
     name = "id_test",
     srcs = [
+        "api_gen_test.go",
         "id_external_test.go",
         "registry_external_test.go",
         "registry_guard_external_test.go",

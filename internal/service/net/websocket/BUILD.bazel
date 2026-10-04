@@ -38,6 +38,7 @@ alias(
 go_test(
     name = "websocket_test",
     srcs = [
+        "api_gen_test.go",
         "frame_bench_test.go",
         "frame_fuzz_external_test.go",
         "frame_mask_external_test.go",

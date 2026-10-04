@@ -30,6 +30,7 @@ go_test(
     name = "clock_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "clock_bench_test.go",
         "clock_external_test.go",
         "clock_internal_test.go",

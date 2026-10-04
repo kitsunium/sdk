@@ -47,6 +47,7 @@ go_test(
     name = "i18n_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "i18n_bench_test.go",
         "load_external_test.go",
         "message_external_test.go",
@@ -59,6 +60,7 @@ go_test(
     deps = [
         ":i18n",
         "//internal/core/app/i18n",
+        "//internal/core/data/codec",
         "//internal/kernel/errs",
         "//internal/service/data/codec/json",
     ],

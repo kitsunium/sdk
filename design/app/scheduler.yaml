@@ -1,0 +1,240 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/scheduler
+packages:
+  - constants:
+      - name: CodeInvalidEntry
+        type: errs.Code
+        value: "0x00_02_0C_01"
+      - name: CodeDuplicateJob
+        type: errs.Code
+        value: "0x00_02_0C_02"
+      - name: CodeSchedulerRunning
+        type: errs.Code
+        value: "0x00_02_0C_03"
+      - name: CodeJobPanicked
+        type: errs.Code
+        value: "0x00_02_0C_04"
+      - name: CodeInvalidExpression
+        type: errs.Code
+        value: "0x00_03_2B_01"
+      - name: CodeUnsupportedSyntax
+        type: errs.Code
+        value: "0x00_03_2B_02"
+      - name: CodeUnreachableSchedule
+        type: errs.Code
+        value: "0x00_03_2B_03"
+      - name: CodeInvalidLocation
+        type: errs.Code
+        value: "0x00_03_2B_04"
+      - name: CodeInvalidInterval
+        type: errs.Code
+        value: "0x00_03_2B_05"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/scheduler
+    ports:
+      - doc: |-
+          Scheduler owns a set of named [EntryValue] pairings and fires them.
+          Implementations MUST be safe for concurrent use.
+
+          IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
+          internal/service/app/scheduler.
+        methods:
+          - doc: |-
+              Add registers an entry. It is refused while Run is executing
+              ([SchedulerRunning]), on a name already registered ([DuplicateJob]), and
+              on an entry that is not runnable — empty name, nil Job, nil Schedule
+              ([InvalidEntry]).
+            in:
+              - name: entry
+                type: EntryValue
+            name: Add
+            out:
+              - type: error
+          - doc: |-
+              Run drives the registered entries until ctx is cancelled, then waits for
+              every in-flight job to return and reports nil. A Scheduler with no entry
+              is legitimate and simply waits for ctx: only an unrunnable ENTRY is
+              refused, never an empty entry set. Run is itself refused with
+              [SchedulerRunning] while already running; once it returns, the Scheduler
+              may be added to and run again.
+            in:
+              - name: ctx
+                type: context.Context
+            name: Run
+            out:
+              - type: error
+        name: Scheduler
+    types:
+      - name: Job
+        underlying: func(ctx context.Context) error
+      - name: Schedule
+        underlying: func(after time.Time) (next time.Time, ok bool)
+      - name: EntryValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Schedule
+              type: Schedule
+            - name: Job
+              type: Job
+            - name: AllowOverlap
+              type: bool
+      - name: ResultValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Scheduled
+              type: time.Time
+            - name: Started
+              type: time.Time
+            - name: Finished
+              type: time.Time
+            - name: Missed
+              type: int
+            - name: Skipped
+              type: bool
+            - name: Err
+              type: error
+    variables:
+      - name: InvalidEntry
+        type: "*errs.Error"
+      - name: DuplicateJob
+        type: "*errs.Error"
+      - name: SchedulerRunning
+        type: "*errs.Error"
+      - name: JobPanicked
+        type: "*errs.Error"
+      - name: InvalidExpression
+        type: "*errs.Error"
+      - name: UnsupportedSyntax
+        type: "*errs.Error"
+      - name: UnreachableSchedule
+        type: "*errs.Error"
+      - name: InvalidLocation
+        type: "*errs.Error"
+      - name: InvalidInterval
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: expr
+            type: string
+        name: Parse
+        out:
+          - name: schedule
+            type: coresched.Schedule
+          - name: err
+            type: error
+      - in:
+          - name: expr
+            type: string
+          - name: loc
+            type: "*time.Location"
+        name: ParseInLocation
+        out:
+          - name: parsed
+            type: coresched.Schedule
+          - name: err
+            type: error
+      - in:
+          - name: period
+            type: time.Duration
+        name: Every
+        out:
+          - name: schedule
+            type: coresched.Schedule
+          - name: err
+            type: error
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: coresched.Scheduler
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
+    path: github.com/kitsunium/sdk/internal/service/app/scheduler
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Clock
+              type: clock.Timed
+            - name: OnResult
+              type: func(coresched.ResultValue)
+  - aliases:
+      - name: Job
+        target: coresched.Job
+      - name: Schedule
+        target: coresched.Schedule
+      - name: Scheduler
+        target: coresched.Scheduler
+      - name: Entry
+        target: coresched.EntryValue
+      - name: Result
+        target: coresched.ResultValue
+      - name: Config
+        target: svcsched.Config
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: Scheduler
+      - in:
+          - name: expr
+            type: string
+        name: Parse
+        out:
+          - name: schedule
+            type: Schedule
+          - name: err
+            type: error
+      - in:
+          - name: expr
+            type: string
+          - name: loc
+            type: "*time.Location"
+        name: ParseInLocation
+        out:
+          - name: schedule
+            type: Schedule
+          - name: err
+            type: error
+      - in:
+          - name: period
+            type: time.Duration
+        name: Every
+        out:
+          - name: schedule
+            type: Schedule
+          - name: err
+            type: error
+    imports:
+      coresched: github.com/kitsunium/sdk/internal/core/app/scheduler
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcsched: github.com/kitsunium/sdk/internal/service/app/scheduler
+    path: github.com/kitsunium/sdk/pkg/v1/app/scheduler
+    variables:
+      - name: InvalidEntry
+        type: "*errs.Error"
+      - name: DuplicateJob
+        type: "*errs.Error"
+      - name: SchedulerRunning
+        type: "*errs.Error"
+      - name: JobPanicked
+        type: "*errs.Error"
+      - name: InvalidExpression
+        type: "*errs.Error"
+      - name: UnsupportedSyntax
+        type: "*errs.Error"
+      - name: UnreachableSchedule
+        type: "*errs.Error"
+      - name: InvalidLocation
+        type: "*errs.Error"
+      - name: InvalidInterval
+        type: "*errs.Error"

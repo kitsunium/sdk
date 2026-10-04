@@ -7,7 +7,7 @@ go_library(
     srcs = [
         "capability.go",
         "codes.go",
-        "deadletter.go",
+        "design_gen.go",
         "errors.go",
         "message.go",
         "policy.go",
@@ -36,6 +36,7 @@ go_test(
     name = "queue_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "queue_external_test.go",
         "retry_external_test.go",
         "service_range_external_test.go",

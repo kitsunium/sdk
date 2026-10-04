@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-02T23:06:22Z -->
+<!-- updated: 2026-10-04T10:00:00Z -->
 # internal/service/app/lock/
 
 ## Purpose
@@ -101,7 +101,7 @@ process pass the gate and then block on a `flock` its own process holds.
 | `nofollow_unix.go` / `nofollow_windows.go` / `nofollow_other.go` | the platform split of the open — `O_NOFOLLOW`, `FILE_FLAG_OPEN_REPARSE_POINT` + the handle check, and the plain open — each declaring `hardenedOpen`, on the kernel lock's exact tag sets (`TestTheLockAndItsHardeningShareAPlatform`) |
 | `dirsafety_posix.go` / `dirsafety_windows.go` | the lock directory's verdict: a mode-bit rule on Unix, a DACL rule on Windows, and `plantable` — "could anybody create an entry here?", the same question asked of a different directory. The Windows half asks the kernel's DACL reader, `internal/kernel/fs/winacl` (ADR 0084), the masks of its two questions, and decides what "could not look" means here: accept, and log |
 | `keepalive.go` | background renewal → context cancellation with `LOCK_KEEPALIVE_LOST` |
-| `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/app/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner` |
+| `lock_compliance.go` | the compile-time proof that both lockers and both leases satisfy `core/app/lock`, and that `memoryLease` is a `Deadliner`; the negative for `fileLease` is `TestFileLeaseIsNotADeadliner`. The ports it asserts are generated from `design/app/lock.yaml` (ADR 0163), so a port changed in the design and `kit gen` stop the build here until the engines follow |
 
 ## Platform matrix (ADR 0018)
 

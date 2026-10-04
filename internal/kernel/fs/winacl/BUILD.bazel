@@ -28,6 +28,8 @@ alias(
 go_test(
     name = "winacl_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_test.go",
         "noverdict_external_windows_test.go",
         "walk_internal_windows_test.go",
     ],

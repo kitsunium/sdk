@@ -27,9 +27,15 @@ alias(
 go_test(
     name = "cli_test",
     size = "small",
-    srcs = ["cli_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "cli_external_test.go",
+    ],
     deps = [
         ":cli",
+        "//internal/core/app/cli",
+        "//internal/kernel/errs",
+        "//internal/service/app/cli",
         "//pkg/v1/app/config",
         "//pkg/v1/errs",
     ],

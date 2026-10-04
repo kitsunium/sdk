@@ -1,0 +1,130 @@
+# design/sdk.yaml — the SDK's project file: its structure, and the rules kit
+# holds it to (ADR 0163). The other files of design/ are its surface: every
+# exported symbol of the SDK module and of the thirteen vendor modules, one
+# file per domain or package group, each with its inputs and outputs —
+# `surface: closed` makes an exported symbol no file declares a finding. An
+# API change starts here, then `kit gen` writes the pins and the ports; the
+# SDK's CI reads this directory as bytes only (ADR 0163 §3).
+apiVersion: kit.kitsunium/design/v2
+project:
+  name: sdk
+  type: library
+  module: github.com/kitsunium/sdk
+  workspace: go.work
+  surface: closed
+# The cells: bazel-ci.yml's cross-build matrix, one table, which
+# check-platforms.sh holds equal to the matrix and genindex writes docs/api on.
+platforms:
+  from: scripts/ci/platforms.sh
+# Outside go.work: outside the layers and the surface.
+auxiliary:
+  - e2e
+  - tools/genindex
+  - tools/sdkguard
+# The order is the direction (ADR 0068, ADR 0147, ADR 0157); the kernel is
+# rule 1, both halves; the service mirrors the core (ADR 0160); pkg/v1 is the
+# facade (ADR 0074).
+layers:
+  - name: kernel
+    paths: [internal/kernel]
+    deps: [std]
+    stdlibOnly: true
+    generic: true
+  - name: core
+    paths: [internal/core]
+    deps: [kernel]
+  - name: service
+    paths: [internal/service]
+    deps: [kernel, core]
+    mirrors: core
+  - name: public
+    paths: [pkg/v1]
+    deps: [kernel, core, service]
+    shape: facade
+  - name: thirdparty
+    paths: [third-party]
+    deps: [kernel, core, service, public]
+  - name: framework
+    paths: [framework]
+    deps: [public, kernel/errs]
+# ADR 0155 and ADR 0159 §4. A root entry is one domain, and its own package,
+# when it has one, is a root package — the family docs/api writes `root`; a
+# name is a family. The kernel's and pkg/v1's root packages belong to no
+# family. The core holds the seven families and no root package: its crypto,
+# net and proc are their families' root packages (ADR 0155 §1). In the
+# service, crypto, net and proc are one domain each — an engine beneath one
+# answers to the core at its family's root (ADR 0160 §1, the ROOTS of
+# check-core-symmetry.sh), which is what the mirrors rule reads; app, data,
+# observe and security hold one domain per directory (its FAMILIES).
+families:
+  - in: [kernel]
+    root: [backoff, clock, errs, plugin, semver]
+    names: [collections, concur, fs]
+  - in: [core]
+    names: [app, crypto, data, net, observe, proc, security]
+  - in: [service]
+    root: [crypto, net, proc]
+    names: [app, data, observe, security]
+  - in: [public]
+    root: [clock, errs]
+    names:
+      - app
+      - collections
+      - concur
+      - crypto
+      - data
+      - net
+      - observe
+      - proc
+      - security
+# A code is errs.Code's dotted quad (ADR 0005), declared by the core at the
+# engine's path (ADR 0160); codeRangeOwners owns the ranges (ADR 0035), and
+# //:audit_sources is what the errs audits read (check-audit-coverage.sh).
+codes:
+  placement: core-at-engine-path
+  type: go:github.com/kitsunium/sdk/internal/kernel/errs.Code
+  define: go:github.com/kitsunium/sdk/internal/kernel/errs.Define
+  owners: internal/kernel/errs/registry_ownership_external_test.go#codeRangeOwners
+  audit: BUILD.bazel#audit_sources
+# ADR 0156 §1: the SDK module requires no module outside the standard
+# library; the vendor modules are ADR 0157's, and the framework's connectors
+# ADR 0158's.
+stdlib:
+  vendors: [third-party, framework/connectors]
+# The race-off allocation lane (CLAUDE.md rule 12).
+allocLane: tools/alloc-lane-targets.txt
+budgets:
+  # Inline: each measured "can inline" (go build
+  # -gcflags=github.com/kitsunium/sdk/internal/kernel/errs=-m); HasCode does
+  # not inline (cost 190) and has no budget.
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.Pack
+    inline: true
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.CodeOf
+    inline: true
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.ReasonOf
+    inline: true
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.PublicOf
+    inline: true
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/errs.PrivateOf
+    inline: true
+  # Allocs: the allocation claims the lane holds — a version comparison
+  # allocates nothing (ADR 0156 §4), nor a recycler's Get (ADR 0010) or a
+  # snapshot's Load (ADR 0011).
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/semver.Compare
+    allocs: 0
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/recycler.(*Pool[...]).Get
+    allocs: 0
+  - fn: go:github.com/kitsunium/sdk/internal/kernel/concur/snapshot.(*Value[...]).Load
+    allocs: 0
+# A pkg/v1 function is a forwarder, never a variable a consumer could
+# reassign for the whole process — but one, measured (ADR 0163 §8).
+exceptions:
+  - id: go:github.com/kitsunium/sdk/pkg/v1/errs.ReasonOf
+    rule: facade
+    note: >-
+      A forwarder cannot inline (cost 88 against the budget of 80: it inlines
+      the kernel accessor, 75 on its own) and costs more than the 3 % the rule
+      allows: CPU time per call +1.88 %, +1.07 %, +3.88 % (p = 0.035) and
+      +5.13 % (p = 0.043) over four benchstat runs of ten samples, +2.91 %
+      pooled over the forty (p < 0.001). It stays var ReasonOf =
+      kerrs.ReasonOf until the kernel accessor returns from one place.

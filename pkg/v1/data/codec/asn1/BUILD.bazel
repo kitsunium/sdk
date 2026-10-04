@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "asn1_test",
-    srcs = ["asn1_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "asn1_external_test.go",
+    ],
     deps = [
         ":asn1",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

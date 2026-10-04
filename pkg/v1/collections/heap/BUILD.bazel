@@ -18,6 +18,12 @@ alias(
 
 go_test(
     name = "heap_test",
-    srcs = ["heap_external_test.go"],
-    deps = [":heap"],
+    srcs = [
+        "api_gen_test.go",
+        "heap_external_test.go",
+    ],
+    deps = [
+        ":heap",
+        "//internal/kernel/collections/heap",
+    ],
 )

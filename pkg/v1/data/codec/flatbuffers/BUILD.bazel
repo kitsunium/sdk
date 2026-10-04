@@ -22,10 +22,15 @@ alias(
 
 go_test(
     name = "flatbuffers_test",
-    srcs = ["flatbuffers_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "flatbuffers_external_test.go",
+    ],
     deps = [
         ":flatbuffers",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
+        "//internal/service/data/codec/flatbuffers",
         "//pkg/v1/errs",
     ],
 )

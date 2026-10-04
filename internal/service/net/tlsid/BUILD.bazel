@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "tlsid_test",
     srcs = [
+        "api_gen_test.go",
         "tlsid_external_test.go",
         "tlsid_internal_test.go",
     ],

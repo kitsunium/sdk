@@ -52,6 +52,7 @@ alias(
 go_test(
     name = "resilience_test",
     srcs = [
+        "api_gen_test.go",
         "backoff_external_test.go",
         "breaker_external_test.go",
         "breaker_internal_test.go",

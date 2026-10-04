@@ -6,6 +6,7 @@ go_library(
     name = "lifecycle",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "lifecycle.go",
         "lifecycle_component.go",
@@ -31,7 +32,10 @@ alias(
 go_test(
     name = "lifecycle_test",
     size = "small",
-    srcs = ["lifecycle_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "lifecycle_external_test.go",
+    ],
     deps = [
         ":lifecycle",
         "//internal/kernel/errs",

@@ -66,6 +66,7 @@ go_test(
     name = "queue_test",
     size = "medium",
     srcs = [
+        "api_gen_test.go",
         "conformance_external_test.go",
         "consume_external_test.go",
         "deadletter_external_test.go",

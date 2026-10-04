@@ -35,6 +35,7 @@ go_test(
     name = "multipart_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "boundary_internal_test.go",
         "codec_external_test.go",
         "decoder_internal_test.go",

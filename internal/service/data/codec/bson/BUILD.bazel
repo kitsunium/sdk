@@ -49,6 +49,7 @@ alias(
 go_test(
     name = "bson_test",
     srcs = [
+        "api_gen_test.go",
         "bson_bench_test.go",
         "codec_external_test.go",
         "codec_integration_test.go",

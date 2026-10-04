@@ -1,0 +1,79 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/flatbuffers
+packages:
+  - constants:
+      - name: CodeFlatbuffersBadType
+        type: errs.Code
+        value: "0x00_03_17_01"
+      - name: CodeFlatbuffersBadTarget
+        type: errs.Code
+        value: "0x00_03_17_02"
+      - name: CodeFlatbuffersTruncated
+        type: errs.Code
+        value: "0x00_03_17_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/flatbuffers
+    variables:
+      - name: FlatbuffersBadType
+        type: "*errs.Error"
+      - name: FlatbuffersBadTarget
+        type: "*errs.Error"
+      - name: FlatbuffersTruncated
+        type: "*errs.Error"
+  - constants:
+      - name: PromotionMagic
+        type: uint32
+        value: "0x80000001"
+    functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
+    types:
+      - interface:
+          methods:
+            - name: Bytes
+              out:
+                - type: "[]byte"
+        name: BytesProvider
+      - interface:
+          methods:
+            - in:
+                - name: data
+                  type: "[]byte"
+              name: SetBytes
+        name: BytesAcceptor
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - aliases:
+      - name: BytesProvider
+        target: svcflatbuffers.BytesProvider
+      - name: BytesAcceptor
+        target: svcflatbuffers.BytesAcceptor
+    constants:
+      - name: Format
+        value: "\"flatbuffers\""
+      - name: CodeBadType
+        type: errs.Code
+        value: "0x00_03_17_01"
+      - name: CodeBadTarget
+        type: errs.Code
+        value: "0x00_03_17_02"
+      - name: CodeTruncated
+        type: errs.Code
+        value: "0x00_03_17_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcflatbuffers: github.com/kitsunium/sdk/internal/service/data/codec/flatbuffers
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/flatbuffers
+    variables:
+      - name: BadType
+        type: "*errs.Error"
+      - name: BadTarget
+        type: "*errs.Error"
+      - name: Truncated
+        type: "*errs.Error"

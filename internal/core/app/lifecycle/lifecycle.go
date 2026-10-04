@@ -56,27 +56,3 @@ type Start func(ctx context.Context) error
 // therefore delays nothing except its own report — the components after it in
 // the reverse order each get their own full budget.
 type Stop func(ctx context.Context) error
-
-// Lifecycle owns an ordered set of [ComponentValue] and drives it up and down.
-// Implementations MUST be safe for concurrent use.
-//
-// IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
-// internal/service/app/lifecycle.
-type Lifecycle interface {
-	// Add registers a component at the end of the order. It is refused while
-	// the Lifecycle is started ([LifecycleRunning]), on a name already
-	// registered ([DuplicateComponent]), and on a component that could never
-	// run — empty name, nil Start, nil Stop ([InvalidComponent]).
-	Add(component ComponentValue) error
-	// Start runs every registered Start in registration order and returns nil
-	// once all of them have. On the first failure it stops the components
-	// already up, in reverse order, and reports the failure; the Lifecycle is
-	// then back in its not-started state, so a caller may fix the cause, Add,
-	// and Start again.
-	Start(ctx context.Context) error
-	// Stop runs the Stop of every component that started, in reverse of the
-	// order they started in, and reports what failed. It is idempotent: a
-	// Lifecycle that never started, or that has already stopped, returns nil
-	// without calling anything.
-	Stop(ctx context.Context) error
-}

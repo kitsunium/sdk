@@ -1,6 +1,10 @@
 // Package sql — hosts Dialect, the closed set of SQL engines this domain can
 // spell, the vocabulary each one spells statements with, and the two refusals
 // that keep the set closed.
+//
+// Package sql — hosts the four ports themselves. Kept apart from sql.go so
+// the package's contract is one file: what a caller may implement, and what
+// the SDK promises to accept.
 package sql
 
 import (

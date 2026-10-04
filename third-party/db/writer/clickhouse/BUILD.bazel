@@ -37,6 +37,7 @@ alias(
 go_test(
     name = "clickhouse_test",
     srcs = [
+        "api_gen_test.go",
         "clickhouse_external_test.go",
         "clickhouse_internal_test.go",
         "clickhousesink_internal_test.go",

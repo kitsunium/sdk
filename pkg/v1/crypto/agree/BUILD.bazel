@@ -25,9 +25,11 @@ go_test(
     srcs = [
         "agree_bench_test.go",
         "agree_external_test.go",
+        "api_gen_test.go",
     ],
     deps = [
         ":agree",
+        "//internal/core/crypto",
         "//pkg/v1/crypto",
         "//pkg/v1/errs",
     ],

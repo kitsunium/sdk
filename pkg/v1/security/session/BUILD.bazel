@@ -25,11 +25,15 @@ go_test(
     name = "session_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "session_bench_test.go",
         "session_external_test.go",
     ],
     deps = [
         ":session",
+        "//internal/core/crypto",
+        "//internal/core/security/session",
+        "//internal/service/security/session",
         "//pkg/v1/crypto",
         "//pkg/v1/errs",
     ],

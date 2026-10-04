@@ -21,3 +21,7 @@ process only**; it does not coordinate across replicas.
 
 Concrete stores: `internal/service/data/cache`. Public facade: `pkg/v1/data/cache`.
 ADR 0049 (amends ADR 0025). See `CLAUDE.md`.
+
+The ports — `Store`, `EntryFetcher`, `Tagger` and `Loader` — are generated from
+`design/data/cache.yaml` into `design_gen.go` (ADR 0163): a port changes in the
+design, then `kit gen`.

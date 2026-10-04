@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "rotfile_test",
     srcs = [
+        "api_gen_test.go",
         "errors_external_test.go",
         "errors_internal_test.go",
     ],

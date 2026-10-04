@@ -1,0 +1,32 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/middleware/failover
+packages:
+  - constants:
+      - name: CodeFailoverExhausted
+        type: errs.Code
+        value: "0x00_03_13_01"
+      - name: CodeFailoverEmpty
+        type: errs.Code
+        value: "0x00_03_13_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/failover
+    variables:
+      - name: Exhausted
+        type: "*errs.Error"
+      - name: Empty
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: branches
+            type: corelogger.Sink
+        name: New
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+        variadic: true
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/failover

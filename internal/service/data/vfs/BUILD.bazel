@@ -43,6 +43,7 @@ go_test(
     name = "vfs_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "conformance_external_test.go",
         "mem_external_test.go",
         "os_external_test.go",

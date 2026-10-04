@@ -36,6 +36,7 @@ alias(
 go_test(
     name = "cloudwatch_test",
     srcs = [
+        "api_gen_test.go",
         "client_internal_test.go",
         "cloudwatch_external_test.go",
         "cloudwatch_internal_test.go",

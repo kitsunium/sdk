@@ -1,0 +1,573 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/concur
+packages:
+  - constants:
+      - name: CodeBatcherClosed
+        type: errs.Code
+        value: "0x00_01_05_01"
+      - name: CodeBatcherDeliverFailed
+        type: errs.Code
+        value: "0x00_01_05_02"
+    functions:
+      - in:
+          - name: deliver
+            type: Sink[T]
+          - name: cfg
+            type: Config[T]
+        name: NewBatcher
+        out:
+          - type: "*Batcher[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/kernel/concur/batcher
+    types:
+      - name: Sink
+        typeParams:
+          - constraint: any
+            name: T
+        underlying: func(ctx context.Context, batch []T) error
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: item
+                type: T
+            name: Add
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Flush
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Batcher
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Config
+        struct:
+          fields:
+            - name: MaxItems
+              type: int
+            - name: MaxWeight
+              type: int64
+            - name: WeightOf
+              type: func(item T) int64
+            - name: FlushEvery
+              type: time.Duration
+            - name: Clock
+              type: clock.Waiter
+            - name: OnError
+              type: func(err error)
+        typeParams:
+          - constraint: any
+            name: T
+    variables:
+      - name: BatcherClosed
+        type: "*errs.Error"
+      - name: BatcherDeliverFailed
+        type: "*errs.Error"
+  - functions:
+      - name: Get
+        out:
+          - type: "*[]byte"
+      - in:
+          - name: b
+            type: "*[]byte"
+        name: Put
+    path: github.com/kitsunium/sdk/internal/kernel/concur/buffer
+  - constants:
+      - build: "!(386 || arm)"
+        name: Unlimited
+        type: int
+        value: "9223372036854775807"
+      - build: 386 || arm
+        name: Unlimited
+        type: int
+        value: "2147483647"
+    functions:
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+          - name: fns
+            type: "[]func(ctx context.Context) (value T, err error)"
+        name: Collect
+        out:
+          - name: results
+            type: "[]T"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+        name: New
+        out:
+          - type: "*Group"
+          - type: context.Context
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+        name: NewJoined
+        out:
+          - type: "*Group"
+          - type: context.Context
+    path: github.com/kitsunium/sdk/internal/kernel/concur/group
+    types:
+      - methods:
+          - in:
+              - name: fn
+                type: func(ctx context.Context) error
+            name: Go
+            recv: pointer
+          - name: Wait
+            out:
+              - type: error
+            recv: pointer
+        name: Group
+        struct:
+          unexported: true
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: PanicValue
+        struct:
+          fields:
+            - name: Raised
+              type: any
+            - name: Stack
+              type: "[]byte"
+  - functions:
+      - in:
+          - name: newFn
+            type: func() T
+          - name: resetFn
+            type: func(T)
+          - name: capOfFn
+            type: func(T) int
+          - name: maxCap
+            type: int
+        name: NewCappedPool
+        out:
+          - type: "*CappedPool[T]"
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: newFn
+            type: func() T
+        name: NewPool
+        out:
+          - type: "*Pool[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    path: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+    types:
+      - methods:
+          - name: Get
+            out:
+              - type: T
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Put
+            recv: pointer
+        name: CappedPool
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - methods:
+          - name: Get
+            out:
+              - type: T
+            recv: pointer
+          - in:
+              - name: v
+                type: T
+            name: Put
+            recv: pointer
+        name: Pool
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+  - path: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: PanicValue
+        struct:
+          fields:
+            - name: Raised
+              type: any
+            - name: Stack
+              type: "[]byte"
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: K
+              - name: fn
+                type: func(ctx context.Context) (V, error)
+            name: Do
+            out:
+              - name: value
+                type: V
+              - name: shared
+                type: bool
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: key
+                type: K
+            name: Forget
+            recv: pointer
+          - name: InFlight
+            out:
+              - type: int
+            recv: pointer
+        name: Group
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+  - functions:
+      - in:
+          - name: initial
+            type: "*T"
+        name: NewValue
+        out:
+          - type: "*Value[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    path: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
+    types:
+      - methods:
+          - name: Load
+            out:
+              - type: "*T"
+            recv: pointer
+          - in:
+              - name: next
+                type: "*T"
+            name: Store
+            recv: pointer
+          - in:
+              - name: next
+                type: "*T"
+            name: Swap
+            out:
+              - type: "*T"
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(current *T) (next *T)
+            name: Update
+            recv: pointer
+        name: Value
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+  - functions:
+      - in:
+          - name: w
+            type: clock.Waiter
+        name: WithClock
+        out:
+          - type: EveryOption
+      - in:
+          - name: done
+            type: <-chan struct{}
+        name: WithDone
+        out:
+          - type: EveryOption
+      - in:
+          - name: interval
+            type: time.Duration
+          - name: tick
+            type: func()
+          - name: opts
+            type: EveryOption
+        name: Every
+        out:
+          - type: "*LoopDaemon"
+        variadic: true
+      - in:
+          - name: loop
+            type: Loop
+        name: Start
+        out:
+          - type: "*LoopDaemon"
+      - in:
+          - name: loop
+            type: Loop
+        name: NewLoopDaemon
+        out:
+          - type: "*LoopDaemon"
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+    path: github.com/kitsunium/sdk/internal/kernel/concur/worker
+    types:
+      - name: EveryOption
+        underlying: func(everyConfig) everyConfig
+      - name: Loop
+        underlying: func(stop <-chan struct{})
+      - methods:
+          - name: Stop
+            recv: pointer
+          - name: Done
+            out:
+              - type: <-chan struct{}
+            recv: pointer
+        name: LoopDaemon
+        struct:
+          unexported: true
+  - aliases:
+      - name: Batcher
+        target: kbatcher.Batcher[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Config
+        target: kbatcher.Config[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Sink
+        target: kbatcher.Sink[T]
+        typeParams:
+          - constraint: any
+            name: T
+    functions:
+      - in:
+          - name: deliver
+            type: Sink[T]
+          - name: cfg
+            type: Config[T]
+        name: NewBatcher
+        out:
+          - type: "*Batcher[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      kbatcher: github.com/kitsunium/sdk/internal/kernel/concur/batcher
+    path: github.com/kitsunium/sdk/pkg/v1/concur/batcher
+    variables:
+      - name: BatcherClosed
+        type: "*errs.Error"
+      - name: BatcherDeliverFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: Group
+        target: kgroup.Group
+      - name: PanicValue
+        target: kgroup.PanicValue
+    constants:
+      - build: "!(386 || arm)"
+        name: Unlimited
+        type: int
+        value: "9223372036854775807"
+      - build: 386 || arm
+        name: Unlimited
+        type: int
+        value: "2147483647"
+    functions:
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+        name: New
+        out:
+          - type: "*Group"
+          - type: context.Context
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+        name: NewJoined
+        out:
+          - type: "*Group"
+          - type: context.Context
+      - in:
+          - name: parent
+            type: context.Context
+          - name: limit
+            type: int
+          - name: fns
+            type: "[]func(ctx context.Context) (value T, err error)"
+        name: Collect
+        out:
+          - name: results
+            type: "[]T"
+          - name: err
+            type: error
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      kgroup: github.com/kitsunium/sdk/internal/kernel/concur/group
+    path: github.com/kitsunium/sdk/pkg/v1/concur/group
+  - aliases:
+      - name: Pool
+        target: krecycler.Pool[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: CappedPool
+        target: krecycler.CappedPool[T]
+        typeParams:
+          - constraint: any
+            name: T
+    functions:
+      - in:
+          - name: newFn
+            type: func() T
+        name: NewPool
+        out:
+          - type: "*Pool[T]"
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: newFn
+            type: func() T
+          - name: resetFn
+            type: func(T)
+          - name: capOfFn
+            type: func(T) int
+          - name: maxCap
+            type: int
+        name: NewCappedPool
+        out:
+          - type: "*CappedPool[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      krecycler: github.com/kitsunium/sdk/internal/kernel/concur/recycler
+    path: github.com/kitsunium/sdk/pkg/v1/concur/recycler
+  - aliases:
+      - name: Group
+        target: ksingleflight.Group[K, V]
+        typeParams:
+          - constraint: comparable
+            name: K
+          - constraint: any
+            name: V
+      - name: PanicValue
+        target: ksingleflight.PanicValue
+    imports:
+      ksingleflight: github.com/kitsunium/sdk/internal/kernel/concur/singleflight
+    path: github.com/kitsunium/sdk/pkg/v1/concur/singleflight
+  - aliases:
+      - name: Value
+        target: ksnapshot.Value[T]
+        typeParams:
+          - constraint: any
+            name: T
+    functions:
+      - in:
+          - name: initial
+            type: "*T"
+        name: NewValue
+        out:
+          - type: "*Value[T]"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      ksnapshot: github.com/kitsunium/sdk/internal/kernel/concur/snapshot
+    path: github.com/kitsunium/sdk/pkg/v1/concur/snapshot
+  - aliases:
+      - name: Loop
+        target: kworker.Loop
+      - name: LoopDaemon
+        target: kworker.LoopDaemon
+      - name: EveryOption
+        target: kworker.EveryOption
+    functions:
+      - in:
+          - name: loop
+            type: Loop
+        name: Start
+        out:
+          - type: "*LoopDaemon"
+      - in:
+          - name: loop
+            type: Loop
+        name: NewLoopDaemon
+        out:
+          - type: "*LoopDaemon"
+      - in:
+          - name: interval
+            type: time.Duration
+          - name: tick
+            type: func()
+          - name: opts
+            type: EveryOption
+        name: Every
+        out:
+          - type: "*LoopDaemon"
+        variadic: true
+      - in:
+          - name: w
+            type: clock.Waiter
+        name: WithClock
+        out:
+          - type: EveryOption
+      - in:
+          - name: done
+            type: <-chan struct{}
+        name: WithDone
+        out:
+          - type: EveryOption
+    imports:
+      clock: github.com/kitsunium/sdk/pkg/v1/clock
+      kworker: github.com/kitsunium/sdk/internal/kernel/concur/worker
+    path: github.com/kitsunium/sdk/pkg/v1/concur/worker

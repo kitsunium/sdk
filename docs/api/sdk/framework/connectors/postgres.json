@@ -1,0 +1,56 @@
+{
+  "format": "sdk.api/v1",
+  "module": "github.com/kitsunium/sdk/framework/connectors/postgres",
+  "dir": "framework/connectors/postgres",
+  "cells": [
+    "linux/amd64",
+    "linux/arm64",
+    "linux/386",
+    "linux/arm",
+    "darwin/arm64",
+    "windows/amd64",
+    "freebsd/amd64",
+    "openbsd/amd64",
+    "netbsd/amd64",
+    "dragonfly/amd64",
+    "illumos/amd64",
+    "solaris/amd64"
+  ],
+  "packages": [
+    {
+      "path": "github.com/kitsunium/sdk/framework/connectors/postgres",
+      "name": "postgres",
+      "dir": ".",
+      "layer": "framework",
+      "doc": "Package postgres — the credentials a new connection is opened with, read\nagain from the URL each time.\n\nPackage postgres is kit's PostgreSQL engine (ADR 0004): the one module a\nkit product imports to keep a database on PostgreSQL, and the only code of\nthe product that imports a PostgreSQL driver — pgx, through database/sql.\nThe product's main declares the database with it:\n\n\timport \"github.com/kitsunium/sdk/framework/connectors/postgres\"\n\n\tvar App = kit.NewApp(\"vigie\", intake.Service, desk.Service).With(\n\t\tkit.Database(\"database\", postgres.Engine()),\n\t)\n\nThe database's URL is libpq's, as pgx reads it —\npostgres://user:password@host:5432/database?sslmode=verify-full, or\nhost=… user=… key=value pairs — in the variable <APP>_<NAME>_URL. Outside\ndev kit refuses one that does not write its sslmode: pgx's default,\nprefer, falls back to plaintext, and the weak modes let a network attacker\nimpersonate the server. sslmode=disable is accepted when written, for a\nprivate network. The engine reads the URL again before each new\nconnection, so a password rotated where it lives is used by the next one.\n"
+    }
+  ],
+  "symbols": [
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/postgres.CodeURLMalformed",
+      "kind": "const",
+      "package": "github.com/kitsunium/sdk/framework/connectors/postgres",
+      "name": "CodeURLMalformed",
+      "spelled": "errs.Code",
+      "canonical": "github.com/kitsunium/sdk/pkg/v1/errs.Code",
+      "value": "266241",
+      "code": {
+        "value": "0.4.16.1"
+      },
+      "doc": "CodeURLMalformed identifies a URL the driver cannot read (ADR 0147: layer 4,\none PP per connector).\n",
+      "file": "postgres.go",
+      "layer": "framework"
+    },
+    {
+      "id": "go:github.com/kitsunium/sdk/framework/connectors/postgres.Engine",
+      "kind": "func",
+      "package": "github.com/kitsunium/sdk/framework/connectors/postgres",
+      "name": "Engine",
+      "spelled": "func() kit.Engine",
+      "canonical": "func() github.com/kitsunium/sdk/framework/kit.Engine",
+      "doc": "Engine is the PostgreSQL engine, for kit.Database.\n",
+      "file": "postgres.go",
+      "layer": "framework"
+    }
+  ]
+}

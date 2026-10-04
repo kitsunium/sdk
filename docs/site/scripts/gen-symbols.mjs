@@ -1,139 +1,123 @@
 #!/usr/bin/env node
-// docs/site/scripts/gen-symbols.mjs — prebuild step that delegates to
-// the Go program at tools/genindex. Reads pkg/v1's AST (via go/doc)
-// and writes a per-major search index to src/data/symbols-<major>.json
-// for each major flagged in versions.json.
+// docs/site/scripts/gen-symbols.mjs — prebuild step that writes the ⌘K symbol
+// index of every release that has docs/api, from docs/api.
 //
-// Runs strictly stdlib-only on both sides: Node here just spawns Go.
-// GOWORK=off because tools/genindex lives outside go.work (it's a
-// build tool, not a library — keeps the workspace invariant of the root
-// CLAUDE.md intact: go.work names the SDK module and the modules a
-// release may tag beside it, nothing else).
+// docs/api is the SDK's exported API read from the CODE by tools/genindex
+// (`make api`, held byte for byte by `make api-check`). sync-versions.mjs has
+// just projected each release's docs/api into one page model per package page
+// (src/content/api/<release>/<major>/<path>.json — lib/api.mjs apiPages), and
+// flagged the release `api` in versions.json. This script turns those models
+// into public/_search/symbols-<release>-<major>.json (lib/api.mjs
+// symbolEntries): every exported symbol of every package of pkg/<major>/, and
+// every method an alias reaches at its owner — the members go/doc, and the
+// go/doc index this replaced, cannot see. Each entry links to the record the
+// package page renders, so the index and the pages are one projection.
+//
+// A release cut before docs/api existed has no flag, and no index: its pages
+// are its README pages, which Pagefind's full-text search covers.
+//
+// Node only: no go command, no network. scripts/check-api-counts.mjs holds the
+// index to docs/api, counted another way.
 
-import { spawnSync } from "node:child_process";
-import { existsSync, mkdirSync } from "node:fs";
-import { readFile, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, rm, writeFile } from "node:fs/promises";
+import { existsSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 
+import { blobBase, sourceRef, symbolEntries } from "./lib/api.mjs";
+
 const __dirname = dirname(fileURLToPath(import.meta.url));
 const SITE_ROOT = resolve(__dirname, "..");
-const REPO_ROOT = resolve(SITE_ROOT, "..", "..");
-const TOOL_DIR = join(REPO_ROOT, "tools", "genindex");
-// Astro copies public/ verbatim into dist/, so writing symbols here
-// makes them available at /_search/symbols-<major>.json at runtime
-// (the Search component fetches that URL on first ⌘K keystroke).
+// Astro copies public/ verbatim into dist/, so an index written here is served
+// at /_search/symbols-<release>-<major>.json, under the deploy base; the
+// search client fetches it on the first keystroke in ⌘K.
 const PUBLIC_SEARCH_DIR = join(SITE_ROOT, "public", "_search");
 const DATA_DIR = join(SITE_ROOT, "src", "data");
+const API_ROOT = join(SITE_ROOT, "src", "content", "api");
 
-async function loadVersions() {
+/** The shape version of an index; Search.astro refuses any other. */
+const INDEX_SCHEMA = 2;
+
+async function readJSON(file, fallback) {
   try {
-    const txt = await readFile(join(DATA_DIR, "versions.json"), "utf8");
-    return JSON.parse(txt);
+    return JSON.parse(await readFile(file, "utf8"));
   } catch {
-    return [];
+    return fallback;
   }
 }
 
-function runGenindex({
-  inputDir,
-  outputFile,
-  modulePath,
-  urlBase,
-  sourceURLPrefix,
-}) {
-  const args = [
-    "run",
-    ".",
-    "-input",
-    inputDir,
-    "-output",
-    outputFile,
-    "-module",
-    modulePath,
-    "-url-base",
-    urlBase,
-    "-repo-root",
-    REPO_ROOT,
-  ];
-  if (sourceURLPrefix) {
-    args.push("-source-url-prefix", sourceURLPrefix);
+/** Every page model under `dir`, sorted by path. */
+async function readModels(dir) {
+  const files = [];
+  async function walk(d) {
+    for (const e of await readdir(d, { withFileTypes: true })) {
+      const p = join(d, e.name);
+      if (e.isDirectory()) await walk(p);
+      else if (e.name.endsWith(".json")) files.push(p);
+    }
   }
-  const result = spawnSync("go", args, {
-    cwd: TOOL_DIR,
-    env: { ...process.env, GOWORK: "off" },
-    stdio: ["ignore", "inherit", "inherit"],
-  });
-  if (result.status !== 0) {
-    console.error(`[gen-symbols] genindex failed for ${modulePath}`);
-    process.exit(result.status ?? 1);
-  }
-}
-
-async function loadBuildInfo() {
-  try {
-    const txt = await readFile(join(DATA_DIR, "build-info.json"), "utf8");
-    return JSON.parse(txt);
-  } catch {
-    return {};
-  }
-}
-
-//: Build the "https://github.com/<org>/<repo>/blob/<ref>/" prefix the
-//: Go tool prepends to repo-relative source paths. Prefer the branch
-//: (lets readers follow follow-up commits) but fall back to the exact
-//: commit SHA so the deep link still resolves on stale builds.
-function deriveSourceURLPrefix(build) {
-  if (!build?.repoUrl) return "";
-  const ref =
-    build.branch && build.branch !== "HEAD"
-      ? build.branch
-      : (build.commitFull ?? "main");
-  return `${build.repoUrl.replace(/\/$/, "")}/blob/${ref}`;
+  if (existsSync(dir)) await walk(dir);
+  files.sort();
+  return Promise.all(
+    files.map(async (f) => JSON.parse(await readFile(f, "utf8"))),
+  );
 }
 
 async function main() {
-  if (!existsSync(TOOL_DIR)) {
-    console.warn(`[gen-symbols] ${TOOL_DIR} missing — skipping`);
-    return;
-  }
-  mkdirSync(PUBLIC_SEARCH_DIR, { recursive: true });
-  mkdirSync(DATA_DIR, { recursive: true });
+  //: the directory is this script's alone: a stale index of a release that
+  //: lost its API — or the go/doc symbols-<major>.json this replaced — would
+  //: be copied into dist and served.
+  await rm(PUBLIC_SEARCH_DIR, { recursive: true, force: true });
+  await mkdir(PUBLIC_SEARCH_DIR, { recursive: true });
 
-  const versions = await loadVersions();
+  const versions = await readJSON(join(DATA_DIR, "versions.json"), []);
+  const build = await readJSON(join(DATA_DIR, "build-info.json"), {});
   if (!Array.isArray(versions) || versions.length === 0) {
     console.warn("[gen-symbols] versions.json empty — skipping");
     return;
   }
-  const buildInfo = await loadBuildInfo();
-  const sourceURLPrefix = deriveSourceURLPrefix(buildInfo);
 
+  let written = 0;
   for (const v of versions) {
-    //: every major maps to pkg/<major>/ on disk. Releases share that
-    //: package tree until a per-tag worktree pipeline lands (today
-    //: only "local" exists per major).
-    const inputDir = join(REPO_ROOT, "pkg", v.major);
-    if (!existsSync(inputDir)) {
-      console.warn(`[gen-symbols] ${inputDir} missing — skipping ${v.major}`);
-      continue;
+    for (const r of v.releases ?? []) {
+      if (!r.api) continue;
+      const models = await readModels(join(API_ROOT, r.version, v.major));
+      //: a release flagged `api` with no model is a prebuild that wrote half
+      //: of what it promised: the index would look empty, not broken.
+      if (models.length === 0) {
+        throw new Error(
+          `${r.version}/${v.major} is flagged api but has no page model`,
+        );
+      }
+      const sourceBase = blobBase(build.repoUrl, sourceRef(build, r.tag));
+      const symbols = models.flatMap((m) =>
+        symbolEntries(m, { release: r.version, major: v.major, sourceBase }),
+      );
+      const file = join(
+        PUBLIC_SEARCH_DIR,
+        `symbols-${r.version}-${v.major}.json`,
+      );
+      await writeFile(
+        file,
+        JSON.stringify({
+          schema: INDEX_SCHEMA,
+          source: "docs/api",
+          release: r.version,
+          major: v.major,
+          module: models[0].module,
+          symbols,
+        }) + "\n",
+      );
+      written++;
+      console.log(
+        `[gen-symbols] wrote ${file} (${symbols.length} symbols: ` +
+          `${symbols.filter((s) => !s.via).length} declared, ` +
+          `${symbols.filter((s) => s.via).length} reached through an alias)`,
+      );
     }
-    const release =
-      v.releases?.find((r) => r.default)?.version ??
-      v.releases?.[0]?.version ??
-      "local";
-    //: URL base is /<release>/<major> — mirrors the route layout
-    //: (src/pages/[release]/[major]/...). Symbol anchors will link to
-    //: /local/v1/codec/#Marshal, not /v1/local/codec/#Marshal.
-    const urlBase = `/${release}/${v.major}`;
-    const modulePath = `github.com/kitsunium/sdk/pkg/${v.major}`;
-    const outputFile = join(PUBLIC_SEARCH_DIR, `symbols-${v.major}.json`);
-    runGenindex({
-      inputDir,
-      outputFile,
-      modulePath,
-      urlBase,
-      sourceURLPrefix,
-    });
+  }
+  if (written === 0) {
+    console.warn("[gen-symbols] no release has docs/api — no symbol index");
   }
 }
 

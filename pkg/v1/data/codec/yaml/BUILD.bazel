@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "yaml_test",
-    srcs = ["yaml_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "yaml_external_test.go",
+    ],
     deps = [
         ":yaml",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/app/config",
         "//pkg/v1/errs",
     ],

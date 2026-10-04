@@ -52,3 +52,7 @@ under the range their layer allocated:
 | `0.3.26.1` | `GzipFailed`  | `compress/gzip` returned an error (Compress or Decompress) |
 | `0.3.26.2` | `FlateFailed` | `compress/flate` returned an error (Compress or Decompress) |
 | `0.3.26.3` | `ZlibFailed`  | `compress/zlib` returned an error, including a failed Adler-32 check |
+
+The ports — `Compressor` and `BoundedDecompressor` — are generated from
+`design/data/transform.yaml` into `design_gen.go` (ADR 0163): a port changes in
+the design, then `kit gen`.

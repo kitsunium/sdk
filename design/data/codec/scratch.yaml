@@ -1,0 +1,32 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/scratch
+packages:
+  - constants:
+      - name: MaxRetainedBufBytes
+        type: int
+        value: 256 << 10
+    functions:
+      - name: AcquireBuffer
+        out:
+          - type: "*bytes.Buffer"
+      - in:
+          - name: buf
+            type: "*bytes.Buffer"
+        name: ReleaseBuffer
+      - in:
+          - name: buf
+            type: "*bytes.Buffer"
+        name: DetachBuffer
+        out:
+          - type: "[]byte"
+      - in:
+          - name: src
+            type: "[]byte"
+        name: AcquireReader
+        out:
+          - type: "*bytes.Reader"
+      - in:
+          - name: r
+            type: "*bytes.Reader"
+        name: ReleaseReader
+    path: github.com/kitsunium/sdk/internal/core/data/codec/scratch

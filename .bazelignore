@@ -3,6 +3,6 @@ bazel-out
 bazel-sdk
 bazel-testlogs
 .claude
-docs
+docs/site
 e2e
 node_modules

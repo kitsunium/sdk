@@ -1,0 +1,55 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/form
+packages:
+  - constants:
+      - name: CodeFormValueInvalid
+        type: errs.Code
+        value: "0x00_03_28_01"
+      - name: CodeFormUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_28_02"
+      - name: CodeFormMultiValue
+        type: errs.Code
+        value: "0x00_03_28_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/form
+    variables:
+      - name: ValueInvalid
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: MultiValue
+        type: "*errs.Error"
+  - functions:
+      - name: New
+        out:
+          - type: codec.Codec
+    imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/form
+    variables:
+      - name: Codec
+        type: codec.Codec
+  - constants:
+      - name: Format
+        value: "\"form\""
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_03_28_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_28_02"
+      - name: CodeMultiValue
+        type: errs.Code
+        value: "0x00_03_28_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/form
+    variables:
+      - name: ValueInvalid
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: MultiValue
+        type: "*errs.Error"

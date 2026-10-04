@@ -46,6 +46,7 @@ alias(
 go_test(
     name = "rotfile_test",
     srcs = [
+        "api_gen_test.go",
         "backups_internal_test.go",
         "decode_internal_test.go",
         "prune_internal_test.go",

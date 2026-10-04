@@ -23,9 +23,15 @@ alias(
 go_test(
     name = "validation_test",
     size = "small",
-    srcs = ["validation_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "validation_external_test.go",
+    ],
     deps = [
         ":validation",
+        "//internal/core/app/validation",
+        "//internal/kernel/errs",
+        "//internal/service/app/validation",
         "//pkg/v1/app/config",
     ],
 )

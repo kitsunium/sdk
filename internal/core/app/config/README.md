@@ -10,3 +10,7 @@ from). Concrete env/file sources, the merge+decode loader, the schema compiler,
 the traced loads and the cross-OS poll watcher live in
 `internal/service/app/config`; facade: `pkg/v1/app/config`. ADR 0028 + ADR 0061 +
 ADR 0097. See `CLAUDE.md`.
+
+The ports — `Source`, `Validator`, `Watcher` and `Describer` — are generated
+from `design/app/config.yaml` into `design_gen.go` (ADR 0163): a port changes
+in the design, then `kit gen`.

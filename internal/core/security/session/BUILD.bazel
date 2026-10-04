@@ -6,9 +6,9 @@ go_library(
     name = "session",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "id.go",
-        "sealer.go",
         "session.go",
         "session_value.go",
         "state_value.go",
@@ -34,6 +34,7 @@ go_test(
     name = "session_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "id_external_test.go",
         "port_external_test.go",
         "session_value_external_test.go",

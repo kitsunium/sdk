@@ -51,6 +51,7 @@ go_test(
     name = "sql_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "config_external_test.go",
         "harness_external_test.go",
         "health_external_test.go",

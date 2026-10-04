@@ -1,0 +1,578 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec
+packages:
+  - constants:
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_02_01"
+      - name: CodeEmptyInput
+        type: errs.Code
+        value: "0x00_02_02_02"
+      - name: CodeTargetInvalid
+        type: errs.Code
+        value: "0x00_02_02_03"
+      - name: CodeValueInvalid
+        type: errs.Code
+        value: "0x00_02_02_04"
+      - name: CodeCodecNil
+        type: errs.Code
+        value: "0x00_02_02_05"
+    functions:
+      - in:
+          - name: c
+            type: Codec
+        name: Register
+        out:
+          - type: Codec
+      - in:
+          - name: f
+            type: Format
+        name: Lookup
+        out:
+          - name: c
+            type: Codec
+          - name: ok
+            type: bool
+      - in:
+          - name: raw
+            type: string
+        name: LookupMIME
+        out:
+          - name: c
+            type: Codec
+          - name: ok
+            type: bool
+      - in:
+          - name: ext
+            type: string
+        name: LookupExt
+        out:
+          - name: c
+            type: Codec
+          - name: ok
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Format"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec
+    ports:
+      - doc: |-
+          Appender is the optional extension implemented by codecs that can encode
+          directly into a caller-supplied byte slice instead of allocating their own.
+          Hot paths (logger record formatting, NDJSON streams, batch sinks) consume
+          this interface to avoid the buffer-copy cost imposed by Marshal.
+
+          Implementations MUST:
+            - Append the encoded representation of v onto dst (typically via the
+              standard append(dst, …) idiom).
+            - Return the (possibly re-allocated) buffer back to the caller.
+            - Be safe for concurrent use by multiple goroutines.
+
+          The returned buffer's length grows by the number of bytes written; the
+          underlying array MAY be a fresh allocation when dst's capacity is too
+          small. Callers retain ownership of dst and SHOULD reuse it across calls.
+        embeds:
+          - Codec
+        methods:
+          - doc: |-
+              Append encodes v and appends the bytes onto dst. The returned slice
+              MUST contain the prior contents of dst followed by the encoded form.
+            in:
+              - name: dst
+                type: "[]byte"
+              - name: v
+                type: any
+            name: Append
+            out:
+              - name: out
+                type: "[]byte"
+              - name: err
+                type: error
+        name: Appender
+      - doc: |-
+          Codec is the minimum contract every format codec satisfies. Instances MUST
+          be safe for concurrent use; format-specific options are supplied via the
+          codec's constructor, not via the Codec interface.
+        methods:
+          - name: Name
+            out:
+              - type: string
+          - name: MIMETypes
+            out:
+              - type: "[]string"
+          - name: Extensions
+            out:
+              - type: "[]string"
+          - in:
+              - name: v
+                type: any
+            name: Marshal
+            out:
+              - name: data
+                type: "[]byte"
+              - name: err
+                type: error
+          - in:
+              - name: data
+                type: "[]byte"
+              - name: v
+                type: any
+            name: Unmarshal
+            out:
+              - name: err
+                type: error
+        name: Codec
+      - doc: |-
+          StreamingCodec is the optional extension for formats that support
+          incremental encode/decode over io.Writer / io.Reader. Codecs that CAN
+          stream SHOULD implement it; consumers detect support with a type assertion.
+        embeds:
+          - Codec
+        methods:
+          - in:
+              - name: w
+                type: io.Writer
+            name: NewEncoder
+            out:
+              - type: Encoder
+          - in:
+              - name: r
+                type: io.Reader
+            name: NewDecoder
+            out:
+              - type: Decoder
+        name: StreamingCodec
+      - doc: Encoder writes one or more values to the wrapped writer.
+        methods:
+          - in:
+              - name: v
+                type: any
+            name: Encode
+            out:
+              - name: err
+                type: error
+          - name: Close
+            out:
+              - name: err
+                type: error
+        name: Encoder
+      - doc: Decoder reads one or more values from the wrapped reader.
+        methods:
+          - in:
+              - name: v
+                type: any
+            name: Decode
+            out:
+              - name: err
+                type: error
+          - name: More
+            out:
+              - name: ok
+                type: bool
+        name: Decoder
+    types:
+      - methods:
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: Format
+        underlying: string
+    variables:
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+  - constants:
+      - name: Any
+        type: Kind
+        value: "0"
+      - name: Object
+        type: Kind
+        value: "1"
+      - name: Array
+        type: Kind
+        value: "2"
+      - name: Map
+        type: Kind
+        value: "3"
+      - name: String
+        type: Kind
+        value: "4"
+      - name: Integer
+        type: Kind
+        value: "5"
+      - name: Number
+        type: Kind
+        value: "6"
+      - name: Boolean
+        type: Kind
+        value: "7"
+      - name: Unsupported
+        type: Kind
+        value: "8"
+    functions:
+      - in:
+          - name: t
+            type: reflect.Type
+        name: Of
+        out:
+          - type: "*ShapeValue"
+      - name: For
+        out:
+          - type: "*ShapeValue"
+        typeParams:
+          - constraint: any
+            name: T
+    path: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: MarshalText
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: value
+        name: Kind
+        underlying: uint8
+      - name: ShapeValue
+        struct:
+          fields:
+            - name: Kind
+              tag: json:"kind"
+              type: Kind
+            - name: Name
+              tag: json:"name,omitempty"
+              type: string
+            - name: Format
+              tag: json:"format,omitempty"
+              type: string
+            - name: Nullable
+              tag: json:"nullable,omitempty"
+              type: bool
+            - name: Fields
+              tag: json:"fields,omitempty"
+              type: "[]FieldValue"
+            - name: Items
+              tag: json:"items,omitempty"
+              type: "*ShapeValue"
+            - name: Values
+              tag: json:"values,omitempty"
+              type: "*ShapeValue"
+            - name: Ref
+              tag: json:"ref,omitempty"
+              type: string
+      - name: FieldValue
+        struct:
+          fields:
+            - name: Name
+              tag: json:"name"
+              type: string
+            - name: Shape
+              tag: json:"shape"
+              type: "*ShapeValue"
+            - name: Optional
+              tag: json:"optional,omitempty"
+              type: bool
+            - name: Quoted
+              tag: json:"quoted,omitempty"
+              type: bool
+            - name: Rules
+              tag: json:"rules,omitempty"
+              type: string
+            - name: GoName
+              tag: json:"-"
+              type: string
+            - name: Tag
+              tag: json:"-"
+              type: reflect.StructTag
+            - name: Index
+              tag: json:"-"
+              type: "[]int"
+  - aliases:
+      - name: Format
+        target: corecodec.Format
+      - name: Codec
+        target: corecodec.Codec
+      - name: Encoder
+        target: corecodec.Encoder
+      - name: Decoder
+        target: corecodec.Decoder
+      - name: CompressAlgorithm
+        target: transform.Algorithm
+      - name: MultipartForm
+        target: multipart.Form
+      - name: MultipartPart
+        target: multipart.Part
+    constants:
+      - name: JSON
+        type: Format
+        value: "\"json\""
+      - name: NDJSON
+        type: Format
+        value: "\"ndjson\""
+      - name: XML
+        type: Format
+        value: "\"xml\""
+      - name: CSV
+        type: Format
+        value: "\"csv\""
+      - name: Form
+        type: Format
+        value: "\"form\""
+      - name: ASN1DER
+        type: Format
+        value: "\"asn1-der\""
+      - name: PEM
+        type: Format
+        value: "\"pem\""
+      - name: YAML
+        type: Format
+        value: "\"yaml\""
+      - name: TOML
+        type: Format
+        value: "\"toml\""
+      - name: CBOR
+        type: Format
+        value: "\"cbor\""
+      - name: MsgPack
+        type: Format
+        value: "\"msgpack\""
+      - name: TLV
+        type: Format
+        value: "\"tlv\""
+      - name: FlatBuffers
+        type: Format
+        value: "\"flatbuffers\""
+      - name: Base64
+        type: Format
+        value: "\"base64\""
+      - name: Base64URL
+        type: Format
+        value: "\"base64url\""
+      - name: Base32
+        type: Format
+        value: "\"base32\""
+      - name: Base16
+        type: Format
+        value: "\"base16\""
+      - name: Hex
+        type: Format
+        value: "\"hex\""
+      - name: ASCII85
+        type: Format
+        value: "\"ascii85\""
+      - name: Base45
+        type: Format
+        value: "\"base45\""
+      - name: Base58
+        type: Format
+        value: "\"base58\""
+      - name: Base62
+        type: Format
+        value: "\"base62\""
+      - name: BSON
+        type: Format
+        value: "\"bson\""
+      - name: Multipart
+        type: Format
+        value: "\"multipart\""
+      - name: CodeUnknownFormat
+        type: v1errs.Code
+        value: "0x01_02_00_01"
+      - name: CodeCodecUnavailable
+        type: v1errs.Code
+        value: "0x01_02_00_02"
+      - name: CodeStreamingUnsupported
+        type: v1errs.Code
+        value: "0x01_02_00_03"
+      - name: CodePromoteFailed
+        type: v1errs.Code
+        value: "0x01_02_00_04"
+      - name: Gzip
+        type: CompressAlgorithm
+        value: "\"gzip\""
+      - name: Flate
+        type: CompressAlgorithm
+        value: "\"flate\""
+    functions:
+      - in:
+          - name: f
+            type: Format
+          - name: v
+            type: any
+        name: Marshal
+        out:
+          - name: encoded
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: f
+            type: Format
+          - name: data
+            type: "[]byte"
+          - name: v
+            type: any
+        name: Unmarshal
+        out:
+          - type: error
+      - in:
+          - name: v
+            type: any
+          - name: formats
+            type: Format
+        name: MarshalMany
+        out:
+          - name: encodedByFormat
+            type: map[Format][]byte
+          - name: err
+            type: error
+        variadic: true
+      - in:
+          - name: f
+            type: Format
+          - name: w
+            type: io.Writer
+        name: NewEncoder
+        out:
+          - name: enc
+            type: Encoder
+          - name: err
+            type: error
+      - in:
+          - name: f
+            type: Format
+          - name: r
+            type: io.Reader
+        name: NewDecoder
+        out:
+          - name: dec
+            type: Decoder
+          - name: err
+            type: error
+      - name: Available
+        out:
+          - type: "[]Format"
+      - in:
+          - name: mime
+            type: string
+        name: FromMIME
+        out:
+          - name: f
+            type: Format
+          - name: ok
+            type: bool
+      - in:
+          - name: ext
+            type: string
+        name: FromExtension
+        out:
+          - name: f
+            type: Format
+          - name: ok
+            type: bool
+      - in:
+          - name: f
+            type: Format
+          - name: algo
+            type: CompressAlgorithm
+          - name: v
+            type: any
+        name: MarshalCompressed
+        out:
+          - name: box
+            type: "[]byte"
+          - name: err
+            type: error
+      - in:
+          - name: box
+            type: "[]byte"
+          - name: v
+            type: any
+        name: UnmarshalCompressed
+        out:
+          - type: error
+      - in:
+          - name: body
+            type: "[]byte"
+        name: MultipartContentType
+        out:
+          - name: value
+            type: string
+          - name: err
+            type: error
+    imports:
+      corecodec: github.com/kitsunium/sdk/internal/core/data/codec
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      multipart: github.com/kitsunium/sdk/pkg/v1/data/codec/multipart
+      transform: github.com/kitsunium/sdk/pkg/v1/data/transform
+      v1errs: github.com/kitsunium/sdk/pkg/v1/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec
+    variables:
+      - name: UnknownFormat
+        type: "*errs.Error"
+      - name: CodecUnavailable
+        type: "*errs.Error"
+      - name: StreamingUnsupported
+        type: "*errs.Error"
+      - name: PromoteFailed
+        type: "*errs.Error"
+  - aliases:
+      - name: Kind
+        target: svcjsonshape.Kind
+      - name: Shape
+        target: svcjsonshape.ShapeValue
+      - name: Field
+        target: svcjsonshape.FieldValue
+    constants:
+      - name: Any
+        type: Kind
+        value: "0"
+      - name: Object
+        type: Kind
+        value: "1"
+      - name: Array
+        type: Kind
+        value: "2"
+      - name: Map
+        type: Kind
+        value: "3"
+      - name: String
+        type: Kind
+        value: "4"
+      - name: Integer
+        type: Kind
+        value: "5"
+      - name: Number
+        type: Kind
+        value: "6"
+      - name: Boolean
+        type: Kind
+        value: "7"
+      - name: Unsupported
+        type: Kind
+        value: "8"
+    functions:
+      - in:
+          - name: t
+            type: reflect.Type
+        name: Of
+        out:
+          - type: "*Shape"
+      - name: For
+        out:
+          - type: "*Shape"
+        typeParams:
+          - constraint: any
+            name: T
+    imports:
+      svcjsonshape: github.com/kitsunium/sdk/internal/service/data/codec/jsonshape
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/jsonshape

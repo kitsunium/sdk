@@ -81,38 +81,3 @@ type Check func(ctx context.Context) error
 //
 // A nil error means the process is alive.
 type SelfCheck func() error
-
-// Health owns the registered checks and answers the three probes.
-// Implementations MUST be safe for concurrent use: probes arrive from an
-// orchestrator on their own schedule, concurrently with each other and with
-// the application's own shutdown.
-//
-// IFACE-PLUGIN: the concrete registry stays unexported behind its constructor
-// in internal/service/app/health.
-type Health interface {
-	// AddStartup registers a check that gates the startup probe. It is
-	// refused on an empty name or a nil body ([InvalidCheck]), and on a name
-	// already registered for the startup probe ([DuplicateCheck]).
-	AddStartup(check StartupCheckValue) error
-	// AddReadiness registers a check that gates routing. The same refusals,
-	// over the readiness namespace.
-	AddReadiness(check ReadinessCheckValue) error
-	// AddLiveness registers process-local evidence that the process is not
-	// irrecoverable. The same refusals, over the liveness namespace.
-	AddLiveness(check LivenessCheckValue) error
-	// Probe answers one probe. It never returns an error: a probe that could
-	// not be answered IS an answer, and the answer is the report's Status
-	// (see [ReportValue]). A Probe value this package never mints reports
-	// StatusUnhealthy carrying one [UnknownProbe] result, rather than
-	// defaulting to a verdict nobody asked for.
-	Probe(ctx context.Context, probe Probe) ReportValue
-	// Drain marks the process as going away: readiness reports not-ready from
-	// here on, without running a single check, while liveness keeps answering
-	// normally so a draining process is not killed mid-drain.
-	//
-	// It is idempotent and it is ONE-WAY. There is deliberately no Undrain: a
-	// process that has announced its departure has already had its endpoints
-	// withdrawn, and a flap would return live traffic to a process that is
-	// closing the very dependencies that traffic needs.
-	Drain()
-}

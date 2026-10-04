@@ -1,0 +1,309 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/mail/spool
+packages:
+  - constants:
+      - name: CodeSpoolMisconfigured
+        type: errs.Code
+        value: "0x00_03_51_01"
+      - name: CodeSpoolClosed
+        type: errs.Code
+        value: "0x00_03_51_02"
+      - name: CodeMessageUndecodable
+        type: errs.Code
+        value: "0x00_03_51_03"
+      - name: CodeMessageUnencodable
+        type: errs.Code
+        value: "0x00_03_51_04"
+      - name: CodeTransportPanicked
+        type: errs.Code
+        value: "0x00_03_51_05"
+      - name: CodeInvalidMailID
+        type: errs.Code
+        value: "0x00_03_51_06"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/mail/spool
+    variables:
+      - name: SpoolMisconfigured
+        type: "*errs.Error"
+      - name: SpoolClosed
+        type: "*errs.Error"
+      - name: MessageUndecodable
+        type: "*errs.Error"
+      - name: MessageUnencodable
+        type: "*errs.Error"
+      - name: TransportPanicked
+        type: "*errs.Error"
+      - name: InvalidMailID
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultSendTimeout
+        type: time.Duration
+        value: "60000000000"
+      - name: DefaultRetryBase
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultRetryMax
+        type: time.Duration
+        value: "300000000000"
+      - name: DefaultMaxMessageBytes
+        type: int
+        value: 32 << 20
+      - name: DeliveredMemory
+        type: int
+        value: "1024"
+      - name: EventQueued
+        type: EventKind
+        value: "1"
+      - name: EventSent
+        type: EventKind
+        value: "2"
+      - name: EventRetrying
+        type: EventKind
+        value: "3"
+      - name: EventDeadLettered
+        type: EventKind
+        value: "4"
+      - name: EventDuplicate
+        type: EventKind
+        value: "5"
+      - name: MaxIDBytes
+        type: int
+        value: "255"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+        name: AttemptFrom
+        out:
+          - name: attempt
+            type: AttemptValue
+          - name: ok
+            type: bool
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: "*Spool"
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/internal/kernel/clock
+      coremail: github.com/kitsunium/sdk/internal/core/app/mail
+      kbackoff: github.com/kitsunium/sdk/internal/kernel/backoff
+    path: github.com/kitsunium/sdk/internal/service/app/mail/spool
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Transport
+              type: coremail.Transport
+            - name: Clock
+              type: clock.Timed
+            - name: Observe
+              type: func(EventValue)
+            - name: Annotate
+              type: func(ctx context.Context) map[string]string
+            - name: NewID
+              type: func() (string, error)
+            - name: Dir
+              type: string
+            - name: From
+              type: coremail.AddressValue
+            - name: Backoff
+              type: kbackoff.Value
+            - name: MaxAttempts
+              type: int
+            - name: SendTimeout
+              type: time.Duration
+            - name: MaxMessageBytes
+              type: int
+            - name: PollInterval
+              type: time.Duration
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+        name: EventKind
+        underlying: uint8
+      - name: EventValue
+        struct:
+          fields:
+            - name: Err
+              type: error
+            - name: Meta
+              type: map[string]string
+            - name: At
+            - name: QueuedAt
+            - name: Next
+              type: time.Time
+            - name: ID
+              type: string
+            - name: Message
+              type: coremail.MessageValue
+            - name: Attempt
+              type: int
+            - name: Kind
+              type: EventKind
+      - name: AttemptValue
+        struct:
+          fields:
+            - name: QueuedAt
+              type: time.Time
+            - name: Meta
+              type: map[string]string
+            - name: ID
+              type: string
+            - name: Attempt
+              type: int
+      - name: DeadLetterValue
+        struct:
+          fields:
+            - name: Meta
+              type: map[string]string
+            - name: FailedAt
+            - name: QueuedAt
+              type: time.Time
+            - name: ID
+              type: string
+            - name: QueueID
+              type: string
+            - name: Reason
+            - name: Cause
+              type: string
+            - name: Message
+              type: coremail.MessageValue
+            - name: Attempts
+              type: int
+            - name: Code
+              type: uint32
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: msg
+                type: coremail.MessageValue
+            name: Send
+            out:
+              - name: id
+                type: string
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: id
+                type: string
+              - name: msg
+                type: coremail.MessageValue
+            name: SendWithID
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Run
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: maxLetters
+                type: int
+            name: DeadLetters
+            out:
+              - type: "[]DeadLetterValue"
+              - type: error
+            recv: pointer
+          - name: Close
+            out:
+              - type: error
+            recv: pointer
+        name: Spool
+        struct:
+          unexported: true
+  - aliases:
+      - name: Spool
+        target: svcspool.Spool
+      - name: Config
+        target: svcspool.Config
+      - name: Event
+        target: svcspool.EventValue
+      - name: EventKind
+        target: svcspool.EventKind
+      - name: Attempt
+        target: svcspool.AttemptValue
+      - name: DeadLetter
+        target: svcspool.DeadLetterValue
+    constants:
+      - name: DefaultSendTimeout
+        type: time.Duration
+        value: "60000000000"
+      - name: DefaultRetryBase
+        type: time.Duration
+        value: "1000000000"
+      - name: DefaultRetryMax
+        type: time.Duration
+        value: "300000000000"
+      - name: DefaultMaxMessageBytes
+        type: int
+        value: 32 << 20
+      - name: DeliveredMemory
+        type: int
+        value: "1024"
+      - name: MaxIDBytes
+        type: int
+        value: "255"
+      - name: EventQueued
+        type: EventKind
+        value: "1"
+      - name: EventSent
+        type: EventKind
+        value: "2"
+      - name: EventRetrying
+        type: EventKind
+        value: "3"
+      - name: EventDeadLettered
+        type: EventKind
+        value: "4"
+      - name: EventDuplicate
+        type: EventKind
+        value: "5"
+    functions:
+      - in:
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: "*Spool"
+          - type: error
+      - in:
+          - name: ctx
+            type: context.Context
+        name: AttemptFrom
+        out:
+          - name: attempt
+            type: Attempt
+          - name: ok
+            type: bool
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcspool: github.com/kitsunium/sdk/internal/service/app/mail/spool
+    path: github.com/kitsunium/sdk/pkg/v1/app/mail/spool
+    variables:
+      - name: Misconfigured
+        type: "*errs.Error"
+      - name: Closed
+        type: "*errs.Error"
+      - name: MessageUndecodable
+        type: "*errs.Error"
+      - name: MessageUnencodable
+        type: "*errs.Error"
+      - name: TransportPanicked
+        type: "*errs.Error"
+      - name: InvalidMailID
+        type: "*errs.Error"

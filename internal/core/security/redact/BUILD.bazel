@@ -6,6 +6,7 @@ go_library(
     name = "redact",
     srcs = [
         "codes.go",
+        "design_gen.go",
         "errors.go",
         "redact.go",
     ],
@@ -31,7 +32,10 @@ alias(
 
 go_test(
     name = "redact_test",
-    srcs = ["redact_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "redact_external_test.go",
+    ],
     deps = [
         ":redact",
         "//internal/kernel/errs",

@@ -1,0 +1,21 @@
+apiVersion: kit.kitsunium/design/v2
+domain: third-party/db/writer/mysql
+packages:
+  - constants:
+      - name: CodeMySQLClientInitFailed
+        type: errs.Code
+        value: "0x00_03_20_01"
+      - name: CodeMySQLInsertFailed
+        type: errs.Code
+        value: "0x00_03_20_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/third-party/db/writer/mysql
+    variables:
+      - name: ClientInitFailed
+        type: "*errs.Error"
+      - name: InsertFailed
+        type: "*errs.Error"
+      - name: Writer
+        type: writer.Factory

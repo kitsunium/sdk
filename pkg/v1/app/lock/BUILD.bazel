@@ -23,12 +23,15 @@ go_test(
     name = "lock_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "lock_bench_test.go",
         "lock_external_test.go",
     ],
     deps = [
         ":lock",
+        "//internal/core/app/lock",
         "//internal/kernel/errs",
+        "//internal/service/app/lock",
     ],
 )
 

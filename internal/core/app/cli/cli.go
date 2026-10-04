@@ -76,20 +76,3 @@ type Action func(ctx context.Context, invocation InvocationValue) error
 // sets are for. The alternative would be the SDK taking a lock around memory
 // it does not own, for a duration it cannot know.
 type Binder func(flags *flag.FlagSet)
-
-// Executor resolves an argument vector against a command tree and runs the
-// command it names.
-//
-// IFACE-PLUGIN: the concrete engine stays unexported behind its constructor in
-// internal/service/app/cli.
-type Executor interface {
-	// Execute resolves args against the tree and runs the command it names.
-	// args is the vector WITHOUT the program name — os.Args[1:] at a call
-	// site — because a library that reads os.Args itself cannot be tested and
-	// cannot be embedded.
-	//
-	// It returns nil when the command succeeded AND when help was requested,
-	// because asking for help is not a failure. Every other outcome is an
-	// *errs.Error whose exit status the caller reads with errs.ExitCodeOf.
-	Execute(ctx context.Context, args []string) error
-}

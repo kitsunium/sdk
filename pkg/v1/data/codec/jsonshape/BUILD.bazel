@@ -18,6 +18,12 @@ alias(
 
 go_test(
     name = "jsonshape_test",
-    srcs = ["jsonshape_external_test.go"],
-    deps = [":jsonshape"],
+    srcs = [
+        "api_gen_test.go",
+        "jsonshape_external_test.go",
+    ],
+    deps = [
+        ":jsonshape",
+        "//internal/service/data/codec/jsonshape",
+    ],
 )

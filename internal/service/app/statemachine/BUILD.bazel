@@ -44,6 +44,7 @@ go_test(
     srcs = [
         "agenda_bench_test.go",
         "agenda_internal_test.go",
+        "api_gen_test.go",
         "definition_external_test.go",
         "edge_external_test.go",
         "harness_external_test.go",

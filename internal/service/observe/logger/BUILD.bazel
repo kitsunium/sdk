@@ -36,6 +36,7 @@ go_test(
     name = "logger_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "builder_bench_test.go",
         "builder_external_test.go",
         "builder_internal_test.go",

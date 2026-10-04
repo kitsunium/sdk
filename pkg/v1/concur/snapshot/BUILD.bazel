@@ -18,6 +18,12 @@ alias(
 
 go_test(
     name = "snapshot_test",
-    srcs = ["snapshot_external_test.go"],
-    deps = [":snapshot"],
+    srcs = [
+        "api_gen_test.go",
+        "snapshot_external_test.go",
+    ],
+    deps = [
+        ":snapshot",
+        "//internal/kernel/concur/snapshot",
+    ],
 )

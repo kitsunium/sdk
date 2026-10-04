@@ -25,10 +25,13 @@ go_test(
     srcs = [
         "accessors_bench_test.go",
         "accessors_external_test.go",
+        "api_gen_test.go",
         "construct_external_test.go",
+        "facade_bench_test.go",
     ],
     deps = [
         ":errs",
+        "//internal/kernel/errs",
         "//pkg/v1/app/mail",
         "//pkg/v1/observe/logger",
     ],

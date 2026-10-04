@@ -1,0 +1,424 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/profiling
+packages:
+  - constants:
+      - name: CodeWindowInvalid
+        type: errs.Code
+        value: "0x00_03_59_01"
+      - name: CodeProfilerBusy
+        type: errs.Code
+        value: "0x00_03_59_02"
+      - name: CodeCaptureCanceled
+        type: errs.Code
+        value: "0x00_03_59_03"
+      - name: CodeCaptureFailed
+        type: errs.Code
+        value: "0x00_03_59_04"
+      - name: CodeProfileMalformed
+        type: errs.Code
+        value: "0x00_03_59_05"
+      - name: CodeProfileTooLarge
+        type: errs.Code
+        value: "0x00_03_59_06"
+      - name: CodeSampleTypeMissing
+        type: errs.Code
+        value: "0x00_03_59_07"
+      - name: FlameRoot
+        type: string
+        value: "\"root\""
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/profiling
+    types:
+      - name: FoldedValue
+        struct:
+          fields:
+            - name: Flame
+              type: "*FlameNodeValue"
+            - name: Owners
+              type: "[]OwnerCostValue"
+            - name: Top
+              type: "[]FunctionCostValue"
+            - name: SampleType
+              type: SampleTypeValue
+            - name: Total
+              type: int64
+            - name: Unattributed
+              type: int64
+      - name: OwnerCostValue
+        struct:
+          fields:
+            - name: Owner
+              type: string
+            - name: Top
+              type: "[]FunctionCostValue"
+            - name: Value
+              type: int64
+      - name: FunctionCostValue
+        struct:
+          fields:
+            - name: Function
+              type: string
+            - name: File
+              type: string
+            - name: Flat
+              type: int64
+            - name: Cum
+              type: int64
+            - name: StartLine
+              type: int
+      - name: FlameNodeValue
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Children
+              type: "[]*FlameNodeValue"
+            - name: Value
+              type: int64
+      - name: GoroutineValue
+        struct:
+          fields:
+            - name: Labels
+              type: map[string]string
+            - name: CreatedBy
+              type: FrameValue
+            - name: State
+              type: string
+            - name: Stack
+              type: "[]FrameValue"
+            - name: Waiting
+              type: time.Duration
+            - name: ID
+              type: int64
+            - name: Creator
+              type: int64
+            - name: LockedToThread
+              type: bool
+      - name: GoroutineGroupValue
+        struct:
+          fields:
+            - name: Labels
+              type: map[string]string
+            - name: State
+              type: string
+            - name: Top
+              type: string
+            - name: Stack
+              type: "[]FrameValue"
+            - name: Count
+              type: int
+      - name: ProfileValue
+        struct:
+          fields:
+            - name: Time
+              type: time.Time
+            - name: SampleTypes
+              type: "[]SampleTypeValue"
+            - name: Samples
+              type: "[]SampleValue"
+            - name: Comments
+              type: "[]string"
+            - name: PeriodType
+              type: SampleTypeValue
+            - name: DefaultSampleType
+              type: string
+            - name: Duration
+              type: time.Duration
+            - name: Period
+              type: int64
+      - name: SampleTypeValue
+        struct:
+          fields:
+            - name: Type
+              type: string
+            - name: Unit
+              type: string
+      - name: SampleValue
+        struct:
+          fields:
+            - name: Labels
+              type: map[string][]string
+            - name: NumLabels
+              type: map[string][]int64
+            - name: Stack
+              type: "[]FrameValue"
+            - name: Values
+              type: "[]int64"
+      - name: FrameValue
+        struct:
+          fields:
+            - name: Function
+              type: string
+            - name: File
+              type: string
+            - name: Line
+              type: int
+            - name: StartLine
+              type: int
+            - name: Address
+              type: uint64
+    variables:
+      - name: WindowInvalid
+        type: "*errs.Error"
+      - name: ProfilerBusy
+        type: "*errs.Error"
+      - name: CaptureCanceled
+        type: "*errs.Error"
+      - name: CaptureFailed
+        type: "*errs.Error"
+      - name: ProfileMalformed
+        type: "*errs.Error"
+      - name: ProfileTooLarge
+        type: "*errs.Error"
+      - name: SampleTypeMissing
+        type: "*errs.Error"
+  - constants:
+      - name: DefaultTopFunctions
+        type: int
+        value: "25"
+      - name: DefaultTopPerOwner
+        type: int
+        value: "8"
+      - name: DefaultFlameMinShare
+        type: float64
+        value: "0.005"
+      - name: DefaultFlameMaxDepth
+        type: int
+        value: "64"
+      - name: MaxCPUWindow
+        type: time.Duration
+        value: "300000000000"
+      - name: MaxProfileBytes
+        type: int
+        value: 64 << 20
+      - name: MaxFrames
+        type: int
+        value: 1 << 22
+    functions:
+      - in:
+          - name: name
+            type: string
+        name: CanonicalName
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: window
+            type: time.Duration
+        name: CaptureCPU
+        out:
+          - type: "*coreprofiling.ProfileValue"
+          - type: error
+      - name: CaptureHeap
+        out:
+          - type: "*coreprofiling.ProfileValue"
+          - type: error
+      - in:
+          - name: p
+            type: "*coreprofiling.ProfileValue"
+          - name: cfg
+            type: FoldConfig
+        name: Fold
+        out:
+          - type: coreprofiling.FoldedValue
+          - type: error
+      - name: Goroutines
+        out:
+          - type: "[]coreprofiling.GoroutineValue"
+          - type: error
+      - in:
+          - name: dump
+            type: "[]byte"
+        name: ParseGoroutines
+        out:
+          - type: "[]coreprofiling.GoroutineValue"
+      - in:
+          - name: gs
+            type: "[]coreprofiling.GoroutineValue"
+          - name: cfg
+            type: GroupConfig
+        name: GroupGoroutines
+        out:
+          - type: "[]coreprofiling.GoroutineGroupValue"
+      - in:
+          - name: data
+            type: "[]byte"
+        name: Parse
+        out:
+          - type: "*coreprofiling.ProfileValue"
+          - type: error
+    imports:
+      coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
+    path: github.com/kitsunium/sdk/internal/service/observe/profiling
+    types:
+      - name: FoldConfig
+        struct:
+          fields:
+            - name: Attribute
+              type: func(sample coreprofiling.SampleValue) string
+            - name: SampleType
+              type: string
+            - name: TopFunctions
+              type: int
+            - name: TopPerOwner
+              type: int
+            - name: FlameMinShare
+              type: float64
+            - name: FlameMaxDepth
+              type: int
+      - name: GroupConfig
+        struct:
+          fields:
+            - name: Labels
+              type: "[]string"
+            - name: MaxGroups
+              type: int
+            - name: MaxStack
+              type: int
+  - aliases:
+      - name: Profile
+        target: coreprofiling.ProfileValue
+      - name: SampleType
+        target: coreprofiling.SampleTypeValue
+      - name: Sample
+        target: coreprofiling.SampleValue
+      - name: Frame
+        target: coreprofiling.FrameValue
+      - name: FoldConfig
+        target: svcprof.FoldConfig
+      - name: Folded
+        target: coreprofiling.FoldedValue
+      - name: OwnerCost
+        target: coreprofiling.OwnerCostValue
+      - name: FunctionCost
+        target: coreprofiling.FunctionCostValue
+      - name: FlameNode
+        target: coreprofiling.FlameNodeValue
+      - name: Goroutine
+        target: coreprofiling.GoroutineValue
+      - name: GroupConfig
+        target: svcprof.GroupConfig
+      - name: GoroutineGroup
+        target: coreprofiling.GoroutineGroupValue
+    constants:
+      - name: MaxCPUWindow
+        type: time.Duration
+        value: "300000000000"
+      - name: MaxProfileBytes
+        type: int
+        value: 64 << 20
+      - name: FlameRoot
+        type: string
+        value: "\"root\""
+      - name: MaxFrames
+        type: int
+        value: 1 << 22
+      - name: DefaultTopFunctions
+        type: int
+        value: "25"
+      - name: DefaultTopPerOwner
+        type: int
+        value: "8"
+      - name: DefaultFlameMinShare
+        type: float64
+        value: "0.005"
+      - name: DefaultFlameMaxDepth
+        type: int
+        value: "64"
+      - name: CodeWindowInvalid
+        type: errs.Code
+        value: "0x00_03_59_01"
+      - name: CodeProfilerBusy
+        type: errs.Code
+        value: "0x00_03_59_02"
+      - name: CodeCaptureCanceled
+        type: errs.Code
+        value: "0x00_03_59_03"
+      - name: CodeCaptureFailed
+        type: errs.Code
+        value: "0x00_03_59_04"
+      - name: CodeProfileMalformed
+        type: errs.Code
+        value: "0x00_03_59_05"
+      - name: CodeProfileTooLarge
+        type: errs.Code
+        value: "0x00_03_59_06"
+      - name: CodeSampleTypeMissing
+        type: errs.Code
+        value: "0x00_03_59_07"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: window
+            type: time.Duration
+        name: CaptureCPU
+        out:
+          - type: "*Profile"
+          - type: error
+      - name: CaptureHeap
+        out:
+          - type: "*Profile"
+          - type: error
+      - in:
+          - name: data
+            type: "[]byte"
+        name: Parse
+        out:
+          - type: "*Profile"
+          - type: error
+      - in:
+          - name: p
+            type: "*Profile"
+          - name: cfg
+            type: FoldConfig
+        name: Fold
+        out:
+          - type: Folded
+          - type: error
+      - name: Goroutines
+        out:
+          - type: "[]Goroutine"
+          - type: error
+      - in:
+          - name: dump
+            type: "[]byte"
+        name: ParseGoroutines
+        out:
+          - type: "[]Goroutine"
+      - in:
+          - name: gs
+            type: "[]Goroutine"
+          - name: cfg
+            type: GroupConfig
+        name: GroupGoroutines
+        out:
+          - type: "[]GoroutineGroup"
+      - in:
+          - name: name
+            type: string
+        name: CanonicalName
+        out:
+          - type: string
+    imports:
+      coreprofiling: github.com/kitsunium/sdk/internal/core/observe/profiling
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcprof: github.com/kitsunium/sdk/internal/service/observe/profiling
+    path: github.com/kitsunium/sdk/pkg/v1/observe/profiling
+    variables:
+      - name: WindowInvalid
+        type: "*errs.Error"
+      - name: ProfilerBusy
+        type: "*errs.Error"
+      - name: CaptureCanceled
+        type: "*errs.Error"
+      - name: CaptureFailed
+        type: "*errs.Error"
+      - name: ProfileMalformed
+        type: "*errs.Error"
+      - name: ProfileTooLarge
+        type: "*errs.Error"
+      - name: SampleTypeMissing
+        type: "*errs.Error"

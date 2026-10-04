@@ -1,0 +1,93 @@
+apiVersion: kit.kitsunium/design/v2
+domain: data/codec/baseenc
+packages:
+  - constants:
+      - name: CodeBaseEncMarshalFailed
+        type: errs.Code
+        value: "0x00_03_18_01"
+      - name: CodeBaseEncUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_18_02"
+      - name: CodeBaseEncDecodeFailed
+        type: errs.Code
+        value: "0x00_03_18_03"
+      - name: CodeBaseEncSizeExceeded
+        type: errs.Code
+        value: "0x00_03_18_04"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/data/codec/baseenc
+    variables:
+      - name: BaseEncMarshalFailed
+        type: "*errs.Error"
+      - name: BaseEncUnmarshalFailed
+        type: "*errs.Error"
+      - name: BaseEncDecodeFailed
+        type: "*errs.Error"
+      - name: BaseEncSizeExceeded
+        type: "*errs.Error"
+  - imports:
+      codec: github.com/kitsunium/sdk/internal/core/data/codec
+    path: github.com/kitsunium/sdk/internal/service/data/codec/baseenc
+    variables:
+      - name: Base64
+        type: codec.Codec
+      - name: Base64URL
+        type: codec.Codec
+      - name: Base32
+        type: codec.Codec
+      - name: Base16
+        type: codec.Codec
+      - name: Hex
+        type: codec.Codec
+      - name: ASCII85
+        type: codec.Codec
+      - name: Base45
+        type: codec.Codec
+      - name: Base58
+        type: codec.Codec
+      - name: Base62
+        type: codec.Codec
+  - constants:
+      - name: Base64
+        value: "\"base64\""
+      - name: Base64URL
+        value: "\"base64url\""
+      - name: Base32
+        value: "\"base32\""
+      - name: Base16
+        value: "\"base16\""
+      - name: Hex
+        value: "\"hex\""
+      - name: ASCII85
+        value: "\"ascii85\""
+      - name: Base45
+        value: "\"base45\""
+      - name: Base58
+        value: "\"base58\""
+      - name: Base62
+        value: "\"base62\""
+      - name: CodeMarshalFailed
+        type: errs.Code
+        value: "0x00_03_18_01"
+      - name: CodeUnmarshalFailed
+        type: errs.Code
+        value: "0x00_03_18_02"
+      - name: CodeDecodeFailed
+        type: errs.Code
+        value: "0x00_03_18_03"
+      - name: CodeSizeExceeded
+        type: errs.Code
+        value: "0x00_03_18_04"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/data/codec/baseenc
+    variables:
+      - name: MarshalFailed
+        type: "*errs.Error"
+      - name: UnmarshalFailed
+        type: "*errs.Error"
+      - name: DecodeFailed
+        type: "*errs.Error"
+      - name: SizeExceeded
+        type: "*errs.Error"

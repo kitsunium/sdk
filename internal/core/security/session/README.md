@@ -23,3 +23,7 @@ conventions and writing the cookie onto an HTTP response belong to the framework
 
 Concrete stores and the sealer live in `internal/service/security/session`; facade:
 `pkg/v1/security/session`. ADR 0045. See `CLAUDE.md`.
+
+The ports — `Store`, `Sweeper` and `Sealer` — are generated from
+`design/security/session.yaml` into `design_gen.go` (ADR 0163): a port changes
+in the design, then `kit gen`.

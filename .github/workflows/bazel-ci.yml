@@ -175,10 +175,21 @@ jobs:
       - name: layer invariant — no layer depends on one above it
         run: bash scripts/check-layer-deps.sh
 
+      # scripts/ci/platforms.sh is the table tools/genindex judges doc links
+      # and writes docs/api on, and the cross-build matrix below is what CI
+      # compiles. A job's matrix has to be written here, so the table is
+      # written twice and this holds the two equal, cells and order.
+      - name: platforms invariant — the platforms table is the cross-build matrix
+        run: bash scripts/pre-commit/check-platforms.sh
+
       # The three checks of `make lint` that no lane ran (#236): `gofumpt -l`,
       # sdkguard and ktn-linter. The other five are the steps above — gazelle
       # drift, alloc-lane, audit-coverage, domain-docs, layer-deps — so this
-      # adds a class of analysis, it does not repeat one.
+      # adds a class of analysis, it does not repeat one. `make lint-check`
+      # also runs `make doclinks` (ADR 0138) and `make api-check`: docs/api
+      # regenerated from the code on every cell and compared byte for byte, the
+      # code's surface held to the pins' markers and every generated file to
+      # its design file's bytes (ADR 0163).
       #
       # These sit INSIDE the `bazel` job deliberately. `bazel` and `post-commit`
       # are the only required checks on main (the legacy branch protection and
@@ -193,7 +204,7 @@ jobs:
           GOFUMPT_VERSION: v0.12.0
         run: go install "mvdan.cc/gofumpt@${GOFUMPT_VERSION}"
 
-      - name: lint gate — gofumpt + sdkguard
+      - name: lint gate — gofumpt + sdkguard + doclinks + docs/api
         run: make lint-check
 
       # govulncheck, in source mode, over every module of the census (#210,
@@ -513,3 +524,33 @@ jobs:
             echo "::endgroup::"
           done
           exit $fail
+
+  # The docs portal, held to the code. docs/api is the
+  # exported API tools/genindex reads from the code, and `make api-check` (in
+  # the bazel job's lint gate) holds it byte for byte; the portal turns it into
+  # the ⌘K symbol index and the API section of every package page. This job
+  # builds the working tree's release alone — no release snapshot, no network,
+  # about a minute — and fails unless the ⌘K entries and the anchors of the API
+  # sections equal docs/api, counted by a script that shares no code with the
+  # writer, and every link and ⌘K entry of the build resolves under the deploy
+  # base, fragments included. Node only: the docs build runs no go command.
+  # fetch-depth: 0 because the Home page's feature catalogue dates each feature
+  # by the commit that added its anchor (git log --follow).
+  docs-site:
+    name: docs site — ⌘K and API sections equal docs/api, every link resolves
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@93cb6efe18208431cddfb8368fd83d5badbf9bfd # v5
+        with:
+          persist-credentials: false
+          fetch-depth: 0
+
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: docs/site/package-lock.json
+
+      - name: docs site — build the working tree, check it against docs/api
+        run: make docs-check

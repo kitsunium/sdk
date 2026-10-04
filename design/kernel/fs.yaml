@@ -1,0 +1,107 @@
+apiVersion: kit.kitsunium/design/v2
+domain: kernel/fs
+packages:
+  - constants:
+      - build: "!(linux || darwin || freebsd || openbsd || netbsd || dragonfly || windows)"
+        name: Native
+        type: bool
+        value: "false"
+      - build: linux || darwin || freebsd || openbsd || netbsd || dragonfly
+        name: Native
+        type: bool
+        value: "true"
+      - build: windows
+        name: Native
+        type: bool
+        value: "true"
+    functions:
+      - in:
+          - name: file
+            type: "*os.File"
+        name: TryLock
+        out:
+          - name: held
+            type: bool
+          - name: err
+            type: error
+      - in:
+          - name: file
+            type: "*os.File"
+        name: Unlock
+        out:
+          - type: error
+    path: github.com/kitsunium/sdk/internal/kernel/fs/flock
+  - functions:
+      - in:
+          - name: path
+            type: string
+        name: Resolve
+        out:
+          - name: steps
+            type: "[]StepValue"
+          - name: err
+            type: error
+    imports:
+      fs: io/fs
+    path: github.com/kitsunium/sdk/internal/kernel/fs/pathchain
+    types:
+      - name: StepValue
+        struct:
+          fields:
+            - name: Path
+              type: string
+            - name: Name
+              type: string
+            - name: Container
+              type: fs.FileMode
+            - name: Mode
+              type: fs.FileMode
+            - name: Info
+              type: fs.FileInfo
+            - name: Target
+              type: string
+            - name: Indirect
+              type: bool
+  - constants:
+      - name: RightAddFile
+        type: uint32
+        value: "0x0002"
+      - name: RightAddSubdirectory
+        type: uint32
+        value: "0x0004"
+      - name: RightDeleteChild
+        type: uint32
+        value: "0x0040"
+      - name: RightDelete
+        type: uint32
+        value: "0x00010000"
+      - name: RightWriteDAC
+        type: uint32
+        value: "0x00040000"
+      - name: RightWriteOwner
+        type: uint32
+        value: "0x00080000"
+      - name: ReplaceRights
+        type: uint32
+        value: "786496"
+      - name: CreateRights
+        type: uint32
+        value: "786436"
+      - name: ContentRights
+        type: uint32
+        value: "851974"
+    functions:
+      - build: windows
+        in:
+          - name: dir
+            type: string
+          - name: onDirectory
+          - name: onFilesWithin
+            type: uint32
+        name: GrantsAnyone
+        out:
+          - name: granted
+            type: bool
+          - name: observed
+            type: string
+    path: github.com/kitsunium/sdk/internal/kernel/fs/winacl

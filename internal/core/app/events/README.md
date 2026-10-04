@@ -26,3 +26,6 @@ value's dynamic type and such a listener could never fire (ADR 0031).
 The engine, the ordering, the panic guard and the typed `On[E]` front end live
 in `internal/service/app/events`; facade: `pkg/v1/app/events`. ADR 0053. See
 `CLAUDE.md`.
+
+The `Bus` port is generated from `design/app/events.yaml` into `design_gen.go`
+(ADR 0163): it changes in the design, then `kit gen`.

@@ -28,6 +28,7 @@ alias(
 go_test(
     name = "memlimit_test",
     srcs = [
+        "api_gen_test.go",
         "cgroup_internal_test.go",
         "memlimit_internal_test.go",
     ],

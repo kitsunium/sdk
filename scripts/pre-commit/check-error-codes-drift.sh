@@ -1,39 +1,30 @@
 #!/usr/bin/env bash
-# scripts/pre-commit/check-error-codes-drift.sh — error-code registry drift gate.
-# The committed docs/error-codes.yaml is the human-readable mirror of the
-# dotted-quad registry (ADR 0005/0006); it MUST match what
-# scripts/gen-error-codes.sh produces from the errs.Code constants now. This
-# guard regenerates into a temp file and diffs, so a new/changed code that
-# wasn't re-exported to the YAML fails CI and `make lint` (CLAUDE.md rule 11). The
-# executable source of truth remains the AST audit
-# (internal/kernel/errs/registry_external_test.go); this only keeps the doc
-# honest.
+# scripts/pre-commit/check-error-codes-drift.sh — error-code list drift gate.
+#
+# The committed docs/error-codes.yaml is the human-readable list of the SDK's
+# dotted-quad error codes (ADR 0005/0006). scripts/gen-error-codes.sh writes it
+# from docs/api (tools/genindex -write-error-codes), and `make api-check` holds
+# docs/api to the code, so this guard closes the chain: it fails CI and
+# `make lint` when the file is not what docs/api writes now — a code added,
+# changed or removed in the code, `make api` run, and the file not
+# regenerated — naming each entry listed and not declared, or declared and not
+# listed (tools/genindex -check-error-codes). It writes nothing. The executable
+# source of truth remains the AST audit
+# (internal/kernel/errs/registry_external_test.go); this keeps the doc honest
+# (CLAUDE.md rule 11).
 set -euo pipefail
 
 root="$(cd "$(dirname "$0")/../.." && pwd)"
-cd "$root"
 
-committed="docs/error-codes.yaml"
-if [ ! -f "$committed" ]; then
-	echo "✗ $committed missing — run 'make error-codes'." >&2
+if [ ! -f "$root/docs/error-codes.yaml" ]; then
+	echo "✗ docs/error-codes.yaml missing — run 'make error-codes'." >&2
 	exit 1
 fi
 
-tmp="$(mktemp)"
-# Snapshot the committed file, then ALWAYS restore it on exit — this gate is
-# read-only. The trap covers every exit path including a generator failure
-# under `set -e` (which would otherwise leave docs/error-codes.yaml modified
-# in a check-only gate).
-cp "$committed" "$tmp"
-trap 'cp "$tmp" "$committed" 2>/dev/null; rm -f "$tmp"' EXIT
-
-# Regenerate in place (the generator writes $committed); compare against the
-# snapshot to detect drift, then the trap restores the snapshot.
-bash scripts/gen-error-codes.sh >/dev/null
-
-if ! diff -u "$tmp" "$committed" >/dev/null 2>&1; then
-	echo "✗ docs/error-codes.yaml is stale — error codes changed but the YAML" >&2
-	echo "  mirror was not regenerated. Run 'make error-codes' and commit." >&2
-	diff -u "$tmp" "$committed" >&2 || true
+# genindex is an auxiliary module outside go.work: GOWORK=off, from its own
+# directory.
+cd "$root/tools/genindex"
+if ! GOWORK=off go run . -check-error-codes -repo-root "$root" >&2; then
+	echo "✗ docs/error-codes.yaml is stale — run 'make error-codes' (or 'make api') and commit." >&2
 	exit 1
 fi

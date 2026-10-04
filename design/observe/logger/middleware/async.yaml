@@ -1,0 +1,56 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/middleware/async
+packages:
+  - constants:
+      - name: CodeAsyncStopped
+        type: errs.Code
+        value: "0x00_03_11_01"
+      - name: CodeAsyncBufferFull
+        type: errs.Code
+        value: "0x00_03_11_02"
+      - name: CodeAsyncCtxCancelled
+        type: errs.Code
+        value: "0x00_03_11_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/middleware/async
+    variables:
+      - name: Stopped
+        type: "*errs.Error"
+      - name: BufferFull
+        type: "*errs.Error"
+      - name: CtxCancelled
+        type: "*errs.Error"
+  - constants:
+      - name: DropNewest
+        type: DropPolicy
+        value: "0"
+      - name: DropOldest
+        type: DropPolicy
+        value: "1"
+    functions:
+      - in:
+          - name: downstream
+            type: corelogger.Sink
+          - name: cfg
+            type: Config
+        name: New
+        out:
+          - type: corelogger.Sink
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/middleware/async
+    types:
+      - name: DropPolicy
+        underlying: uint8
+      - name: Config
+        struct:
+          fields:
+            - name: BufferSize
+              type: int
+            - name: Policy
+              type: DropPolicy
+            - name: OnDrop
+              type: func(missed int)
+            - name: OnError
+              type: func(err error)

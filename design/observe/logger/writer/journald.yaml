@@ -1,0 +1,41 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/writer/journald
+packages:
+  - constants:
+      - name: CodeJournaldOpenFailed
+        type: errs.Code
+        value: "0x00_03_1F_01"
+      - name: CodeJournaldWriteFailed
+        type: errs.Code
+        value: "0x00_03_1F_02"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/writer/journald
+    variables:
+      - name: JournaldOpenFailed
+        type: "*errs.Error"
+      - name: JournaldWriteFailed
+        type: "*errs.Error"
+  - imports:
+      level: github.com/kitsunium/sdk/internal/core/observe/logger/level
+      writer: github.com/kitsunium/sdk/internal/core/observe/logger/writer
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/writer/journald
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: SocketPath
+              type: string
+            - name: Dialer
+              type: func(network, addr string) (conn net.Conn, err error)
+            - name: MinLevel
+              type: level.Level
+            - name: BufferSize
+              type: int
+            - name: OnDrop
+              type: func(dropped int)
+            - name: OnError
+              type: func(err error)
+    variables:
+      - name: Writer
+        type: writer.Factory

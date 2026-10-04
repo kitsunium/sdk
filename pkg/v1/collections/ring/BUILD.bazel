@@ -18,9 +18,13 @@ alias(
 
 go_test(
     name = "ring_test",
-    srcs = ["ring_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "ring_external_test.go",
+    ],
     deps = [
         ":ring",
+        "//internal/kernel/collections/ring",
         "//pkg/v1/errs",
     ],
 )

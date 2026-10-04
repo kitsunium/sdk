@@ -38,18 +38,6 @@ func (s Scheme) Known() bool {
 	return found
 }
 
-// Generator is the contract every identifier scheme satisfies. Instances MUST
-// be safe for concurrent use (New is called from many goroutines). Scheme-
-// specific options (snowflake node id, etc.) are supplied via the scheme's
-// constructor, not via this interface.
-//
-// IFACE-PLUGIN: the registry stores plug-in scheme instances behind this
-// interface — concrete scheme types stay unexported per package.
-type Generator interface {
-	Scheme() Scheme
-	New() (newID string, err error)
-}
-
 // New generates a fresh identifier using the Generator registered under scheme.
 // A scheme with no registered generator returns UnknownScheme (blank-import the
 // scheme's package to register it); a generator entropy/clock fault propagates

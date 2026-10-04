@@ -1,6 +1,22 @@
+// Package logger — declares the Logger interface — the primary entry
+// point consumers interact with. A Logger binds a Handler and exposes
+// ergonomic Log / With / Enabled operations over it.
+//
 // Package logger — defines the RecordEvent value carried between
 // Logger and Handler. It is an immutable snapshot of a single log event at
 // the core boundary.
+//
+// Package logger — declares the Sink port — the transport-side
+// boundary of the logger architecture. A Sink receives a fully formatted
+// byte payload (typically produced by an Encoder) plus the originating
+// RecordEvent for sinks that need structured access (CloudWatch metadata,
+// S3 object tags, syslog severity mapping).
+//
+// Concrete Sink implementations live in internal/service/observe/logger/sink/<x>/
+// (console, file, multi, async, route, failover, sample, recover, syslog,
+// …). Encoders live in internal/service/observe/logger/encoder/. The Handler
+// composes one Encoder with one Sink — see commit 7 for the genericHandler
+// that wires them together.
 package logger
 
 import (

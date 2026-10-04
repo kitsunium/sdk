@@ -8,6 +8,7 @@ go_library(
         "cache.go",
         "cache_interface.go",
         "codes.go",
+        "design_gen.go",
         "entry.go",
         "errors.go",
     ],
@@ -32,6 +33,7 @@ go_test(
     name = "cache_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "cache_external_test.go",
         "service_range_external_test.go",
     ],

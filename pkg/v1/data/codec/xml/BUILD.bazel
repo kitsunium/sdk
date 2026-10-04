@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "xml_test",
-    srcs = ["xml_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "xml_external_test.go",
+    ],
     deps = [
         ":xml",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

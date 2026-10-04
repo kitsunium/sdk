@@ -119,6 +119,12 @@ alias(
 go_test(
     name = "reaper_test",
     srcs = [
+        "api_gen_1_test.go",
+        "api_gen_2_test.go",
+        "api_gen_3_test.go",
+        "api_gen_4_test.go",
+        "api_gen_5_test.go",
+        "api_gen_test.go",
         "handoff_unix_external_test.go",
         "reaper_external_test.go",
         "reaper_internal_test.go",
@@ -171,6 +177,9 @@ go_test(
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
+        "@rules_go//go/platform:js": [
+            "//internal/core/proc",
+        ],
         "@rules_go//go/platform:linux": [
             "//internal/core/proc",
             "//internal/kernel/clock",
@@ -189,11 +198,23 @@ go_test(
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
         ],
+        "@rules_go//go/platform:osx": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:plan9": [
+            "//internal/core/proc",
+        ],
+        "@rules_go//go/platform:qnx": [
+            "//internal/core/proc",
+        ],
         "@rules_go//go/platform:solaris": [
             "//internal/core/proc",
             "//internal/kernel/clock",
             "//internal/kernel/errs",
             "//internal/service/proc/exec",
+        ],
+        "@rules_go//go/platform:windows": [
+            "//internal/core/proc",
         ],
         "//conditions:default": [],
     }),

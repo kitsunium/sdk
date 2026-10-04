@@ -52,6 +52,7 @@ alias(
 go_test(
     name = "metrics_test",
     srcs = [
+        "api_gen_test.go",
         "cardinality_external_test.go",
         "exporter_description_external_test.go",
         "exporter_otlphttp_external_test.go",

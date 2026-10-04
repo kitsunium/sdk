@@ -1,0 +1,145 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/connectors/ssh
+packages:
+  - constants:
+      - name: CodeEnrolmentFailed
+        type: errs.Code
+        value: "0x00_03_41_01"
+    functions:
+      - in:
+          - name: sshDir
+            type: string
+        name: DiscoverSubject
+        out:
+          - name: uuid
+            type: string
+          - name: err
+            type: error
+      - name: DefaultSSHDir
+        out:
+          - type: string
+      - name: NewSubjectID
+        out:
+          - type: string
+      - in:
+          - name: product
+            type: "*entitlement.Product"
+          - name: sshDir
+          - name: subject
+            type: string
+        name: GenerateKeyPair
+        out:
+          - name: publicKey
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: product
+            type: "*entitlement.Product"
+          - name: subject
+          - name: publicKey
+            type: string
+          - name: rotation
+            type: bool
+        name: IssueURL
+        out:
+          - type: string
+      - in:
+          - name: sshDir
+          - name: uuid
+            type: string
+        name: PublicKeyPath
+        out:
+          - type: string
+      - in:
+          - name: sshDir
+          - name: uuid
+            type: string
+        name: PrivateKeyPath
+        out:
+          - type: string
+      - in:
+          - name: sshDir
+          - name: uuid
+            type: string
+        name: LoadPublicKey
+        out:
+          - name: pub
+            type: ssh.PublicKey
+          - name: err
+            type: error
+      - in:
+          - name: pub
+            type: ssh.PublicKey
+        name: Fingerprint
+        out:
+          - type: string
+      - in:
+          - name: signer
+            type: ssh.Signer
+          - name: pub
+            type: ssh.PublicKey
+        name: ProvePossession
+        out:
+          - type: error
+      - in:
+          - name: sshDir
+          - name: uuid
+            type: string
+        name: SignerFromFile
+        out:
+          - name: signer
+            type: ssh.Signer
+          - name: err
+            type: error
+      - in:
+          - name: dir
+            type: string
+        name: NewSSHIdentity
+        out:
+          - type: "*SSHIdentity"
+    imports:
+      entitlement: github.com/kitsunium/sdk/framework/entitlement
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      ssh: golang.org/x/crypto/ssh
+    path: github.com/kitsunium/sdk/framework/connectors/ssh
+    types:
+      - methods:
+          - name: Discover
+            out:
+              - name: subject
+                type: string
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: subject
+                type: string
+            name: Fingerprint
+            out:
+              - name: fingerprint
+                type: string
+              - name: err
+                type: error
+            recv: pointer
+          - in:
+              - name: subject
+                type: string
+            name: ProvePossession
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: subject
+              - name: authorised
+                type: string
+            name: ProvePossessionFor
+            out:
+              - type: error
+            recv: pointer
+        name: SSHIdentity
+        struct:
+          unexported: true
+    variables:
+      - name: EnrolmentFailed
+        type: "*errs.Error"

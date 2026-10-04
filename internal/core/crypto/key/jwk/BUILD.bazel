@@ -27,7 +27,10 @@ alias(
 
 go_test(
     name = "jwk_test",
-    srcs = ["errors_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "errors_external_test.go",
+    ],
     deps = [
         ":jwk",
         "//internal/kernel/errs",

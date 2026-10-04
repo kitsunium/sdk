@@ -1,0 +1,70 @@
+apiVersion: kit.kitsunium/design/v2
+domain: observe/logger/sink/syslog
+packages:
+  - constants:
+      - name: CodeSyslogAddrEmpty
+        type: errs.Code
+        value: "0x00_03_0F_01"
+      - name: CodeSyslogDialFailed
+        type: errs.Code
+        value: "0x00_03_0F_02"
+      - name: CodeSyslogWriteFailed
+        type: errs.Code
+        value: "0x00_03_0F_03"
+      - name: CodeSyslogCloseFailed
+        type: errs.Code
+        value: "0x00_03_0F_04"
+      - name: CodeSyslogProtoInvalid
+        type: errs.Code
+        value: "0x00_03_0F_05"
+      - name: CodeSyslogCtxCancelled
+        type: errs.Code
+        value: "0x00_03_0F_06"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/observe/logger/sink/syslog
+    variables:
+      - name: AddrEmpty
+        type: "*errs.Error"
+      - name: ProtoInvalid
+        type: "*errs.Error"
+      - name: DialFailed
+        type: "*errs.Error"
+      - name: WriteFailed
+        type: "*errs.Error"
+      - name: CloseFailed
+        type: "*errs.Error"
+      - name: CtxCancelled
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: network
+          - name: addr
+            type: string
+        name: New
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+      - in:
+          - name: network
+          - name: addr
+            type: string
+          - name: cfg
+            type: Config
+        name: NewWithConfig
+        out:
+          - name: sink
+            type: corelogger.Sink
+          - name: err
+            type: error
+    imports:
+      corelogger: github.com/kitsunium/sdk/internal/core/observe/logger
+    path: github.com/kitsunium/sdk/internal/service/observe/logger/sink/syslog
+    types:
+      - name: Config
+        struct:
+          fields:
+            - name: Dialer
+              type: func(network, addr string) (conn net.Conn, err error)

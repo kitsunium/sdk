@@ -3,9 +3,6 @@
 package secret
 
 import (
-	"context"
-	"iter"
-
 	"github.com/kitsunium/sdk/internal/kernel/errs"
 )
 
@@ -71,64 +68,6 @@ func ValidateSubject(subject string) error {
 func isSubjectByte(b byte) bool {
 	//: the anchors, and the four separators a derived reference uses.
 	return isAnchor(b) || b == '-' || b == '_' || b == '.' || b == ':'
-}
-
-// SubjectKeyStore keeps one wrapped data key per subject: the bytes the
-// subject-key engine (internal/service/security/secret, SubjectKeys) seals a subject's
-// data key into under the root keyring, which nothing but that engine, holding
-// the root they were wrapped under, can open. The caller implements it over
-// its own storage — a document store, a table — or takes the memory one the
-// service ships.
-//
-// Implementations MUST be safe for concurrent use, and Insert and Replace MUST
-// be atomic across every process that shares the storage. That is the whole
-// of what the engine asks, and a store that cannot promise it LOSES data
-// rather than failing:
-//
-//   - an Insert that is not insert-if-absent lets two processes both create
-//     the first key of one subject, and every box sealed under the key that
-//     was overwritten opens nowhere again;
-//   - a Replace that is not compare-and-swap lets a re-wrap write back a key an
-//     erasure destroyed while the re-wrap ran, and the erasure is undone.
-//
-// Absent and taken are answers, not errors, as in the state-machine port (ADR
-// 0120): Get reports found, Insert inserted, Replace replaced and Delete
-// deleted — each false, with a nil error, for the ordinary case — so an error
-// from a method always means the store FAILED.
-//
-// The engine validates every subject with [ValidateSubject] before it calls,
-// and never touches a slice it handed over once the call returns; a store
-// keeps its own copy, and a slice it returns belongs to the caller.
-//
-// The method set is FROZEN at five (ADR 0039): pkg/v1/security/secret aliases this
-// interface, so a sixth method would break every implementation downstream. A
-// new capability — an index that answers the oldest root version without a
-// scan — arrives as a SIBLING interface reached by type assertion.
-type SubjectKeyStore interface {
-	// Get returns the wrapped key filed under subject, and found == false —
-	// with a nil error — when there is none.
-	Get(ctx context.Context, subject string) (wrapped []byte, found bool, err error)
-	// Insert files wrapped under subject when no key is filed there. When one
-	// is, it stores nothing and reports inserted == false with a nil error.
-	Insert(ctx context.Context, subject string, wrapped []byte) (inserted bool, err error)
-	// Replace files next under subject only while subject still holds
-	// current, byte for byte. When it holds anything else — or nothing,
-	// because the key was destroyed meanwhile — it stores nothing and reports
-	// replaced == false with a nil error: a re-wrap never brings back a key
-	// an erasure destroyed.
-	Replace(ctx context.Context, subject string, current, next []byte) (replaced bool, err error)
-	// Delete removes the key filed under subject and reports whether there
-	// was one. It is the destruction a cryptographic erase rests on, so the
-	// key must leave the storage the store READS — a document store folds
-	// what it overwrote, a table deletes the row. Copies the backend keeps
-	// elsewhere — a write-ahead log, a replica, a backup — stay wrapped under
-	// the root version that sealed them, and open only while it is kept.
-	Delete(ctx context.Context, subject string) (deleted bool, err error)
-	// All yields every filed key once, then stops; an error ends the
-	// sequence. The engine replaces keys while it ranges, so an
-	// implementation holds no lock across a yield, and a key filed during
-	// the sequence may or may not be yielded.
-	All(ctx context.Context) iter.Seq2[SubjectKeyValue, error]
 }
 
 // SubjectKeyValue is one subject's wrapped data key, as a [SubjectKeyStore]

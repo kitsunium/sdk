@@ -9,6 +9,7 @@ go_library(
         "cli_command.go",
         "cli_invocation.go",
         "codes.go",
+        "design_gen.go",
         "errors.go",
     ],
     importpath = "github.com/kitsunium/sdk/internal/core/app/cli",
@@ -31,7 +32,10 @@ alias(
 go_test(
     name = "cli_test",
     size = "small",
-    srcs = ["cli_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "cli_external_test.go",
+    ],
     deps = [
         ":cli",
         "//internal/kernel/errs",

@@ -1,4 +1,4 @@
-<!-- updated: 2026-09-28T19:19:15Z -->
+<!-- updated: 2026-10-04T11:15:00Z -->
 # internal/core/app/health/
 
 ## Purpose
@@ -11,6 +11,13 @@ mechanism, and that conflation has a production signature: a dependency slows,
 every replica's liveness probe fails because its check talks to that dependency,
 the orchestrator kills them all, and the survivors take the redistributed load
 and fail faster. **The probe caused the outage.**
+
+**The port is generated from the design** (ADR 0163): `Health` is declared,
+with its doc comment, under `ports:` in `design/app/health.yaml`, and `kit gen`
+writes it into `design_gen.go`. A port or its doc comment changes in the
+design, then `kit gen`, then `make api` — never in `design_gen.go`, whose
+header digests `make api-check` verifies. It moved there from `health.go`,
+content moved and never deleted.
 
 ## Surface
 

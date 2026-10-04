@@ -1,0 +1,260 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/git
+packages:
+  - aliases:
+      - name: ChangedSet
+        target: coregit.ChangedSet
+      - name: LineRange
+        target: coregit.LineRangeValue
+      - name: Resolution
+        target: coregit.ResolutionValue
+      - name: Config
+        target: svcgit.Config
+      - name: Include
+        target: svcgit.IncludeFunc
+      - name: HeadState
+        target: svcgit.HeadValue
+    constants:
+      - name: CodeRepositoryUnresolved
+        type: errs.Code
+        value: "0x00_02_21_01"
+      - name: CodeCommandFailed
+        type: errs.Code
+        value: "0x00_02_21_02"
+      - name: CodePathAbsent
+        type: errs.Code
+        value: "0x00_02_21_03"
+    functions:
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: Config
+        name: Resolve
+        out:
+          - type: Resolution
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: root
+            type: string
+        name: GitDir
+        out:
+          - name: gitDir
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: dir
+            type: string
+        name: Head
+        out:
+          - name: head
+            type: HeadState
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: repoRoot
+          - name: sha
+          - name: relPath
+            type: string
+        name: ShowFile
+        out:
+          - name: content
+            type: string
+          - name: err
+            type: error
+    imports:
+      coregit: github.com/kitsunium/sdk/framework/internal/core/git
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+      svcgit: github.com/kitsunium/sdk/framework/internal/service/git
+    path: github.com/kitsunium/sdk/framework/git
+  - constants:
+      - name: CodeRepositoryUnresolved
+        type: errs.Code
+        value: "0x00_02_21_01"
+      - name: CodeCommandFailed
+        type: errs.Code
+        value: "0x00_02_21_02"
+      - name: CodePathAbsent
+        type: errs.Code
+        value: "0x00_02_21_03"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/framework/internal/core/git
+    types:
+      - interface:
+          methods:
+            - in:
+                - name: absFile
+                  type: string
+                - name: line
+                  type: int
+              name: ContainsLine
+              out:
+                - type: bool
+            - in:
+                - name: absFile
+                  type: string
+              name: ContainsFile
+              out:
+                - type: bool
+            - in:
+                - name: absDir
+                  type: string
+              name: ContainsDir
+              out:
+                - type: bool
+            - name: IsEmpty
+              out:
+                - type: bool
+        name: ChangedSet
+      - methods:
+          - name: Degraded
+            out:
+              - type: bool
+            recv: pointer
+        name: ResolutionValue
+        struct:
+          fields:
+            - name: Set
+              type: ChangedSet
+            - name: BaseRef
+              type: string
+            - name: BaseSHA
+              type: string
+            - name: HeadSHA
+              type: string
+            - name: FullFallback
+              type: bool
+            - name: Reason
+              type: string
+      - methods:
+          - in:
+              - name: line
+                type: int
+            name: Contains
+            out:
+              - type: bool
+            recv: value
+        name: LineRangeValue
+        struct:
+          fields:
+            - name: Start
+              type: int
+            - name: End
+              type: int
+    variables:
+      - name: RepositoryUnresolved
+        type: "*errs.Error"
+      - name: CommandFailed
+        type: "*errs.Error"
+      - name: PathAbsent
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: repoRoot
+            type: string
+        name: NewChangedSetValue
+        out:
+          - type: "*ChangedSetValue"
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: root
+            type: string
+        name: GitDir
+        out:
+          - name: gitDir
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: dir
+            type: string
+        name: Head
+        out:
+          - name: head
+            type: HeadValue
+          - name: err
+            type: error
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: cfg
+            type: Config
+        name: Resolve
+        out:
+          - type: coregit.ResolutionValue
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: repoRoot
+          - name: sha
+          - name: relPath
+            type: string
+        name: ShowFile
+        out:
+          - name: content
+            type: string
+          - name: err
+            type: error
+    imports:
+      coregit: github.com/kitsunium/sdk/framework/internal/core/git
+    path: github.com/kitsunium/sdk/framework/internal/service/git
+    types:
+      - methods:
+          - in:
+              - name: absFile
+                type: string
+              - name: line
+                type: int
+            name: ContainsLine
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: absFile
+                type: string
+            name: ContainsFile
+            out:
+              - type: bool
+            recv: pointer
+          - in:
+              - name: absDir
+                type: string
+            name: ContainsDir
+            out:
+              - type: bool
+            recv: pointer
+          - name: IsEmpty
+            out:
+              - type: bool
+            recv: pointer
+        name: ChangedSetValue
+        struct:
+          unexported: true
+      - name: Config
+        struct:
+          fields:
+            - name: Root
+              type: string
+            - name: Include
+              type: IncludeFunc
+      - name: IncludeFunc
+        underlying: func(absPath string) bool
+      - name: HeadValue
+        struct:
+          fields:
+            - name: Time
+              type: time.Time
+            - name: Revision
+              type: string
+            - name: Modified
+              type: bool

@@ -1,4 +1,4 @@
-.PHONY: help build test test-framework lint guard bench cover docs docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks
+.PHONY: help build test test-framework lint guard bench cover docs docs-check docs-dev serve release-dry-run docs-readme error-codes profile benchstat-install benchstat-diff sdk-bench sdk-bench-profile sdk-bench-compare ci-gates-check release-scripts-check pre-commit-check lint-check lint-ktn-check ci-scripts-check vuln-install vuln-check doclinks api api-check
 
 # `make` with no args prints the help. No aliases — every target on its own.
 .DEFAULT_GOAL := help
@@ -29,11 +29,13 @@ help: ## Print this help (default goal).
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "lint"   "$(DIM)mod tidy + gazelle diff + drift assert + gofumpt -l + ktn-linter$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "bench"  "Regenerate every BENCH.md $(DIM)(CPU/RAM/OS/Go/git SHA envelope)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs"   "Build the SDK documentation portal $(DIM)(→ docs/site/dist/, 15 pages)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-check" "$(DIM)build the working tree's portal, hold its ⌘K and API sections to docs/api, check every link$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "serve"  "kill / rebuild / re-serve docs on http://localhost:$(DIM)\$${PORT:-4321}$(RST)$(DIM)/$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-dev" "$(DIM)hot-reloading docs dev server (astro dev, no full rebuild — fast iteration)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "cover"  "bazel coverage --combined_report=lcov //..."
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "release-dry-run"  "$(DIM)compute-bumps + cut-tags in dry-run (see ADR 0007)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "docs-readme"  "$(DIM)regenerate every pkg/v1/*/README.md from its doc comment (see ADR 0008)$(RST)"
+	@printf "  $(GREEN)%-7s$(RST)  %s\n" "api"          "$(DIM)write docs/api — every exported symbol, read from the code on the 12 cells — then error-codes and gazelle$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "profile"      "$(DIM)capture cpu+mem+block+mutex pprof for codec bench (WAVE=<slug>)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "benchstat-diff" "$(DIM)compare two captured waves with mannwhitney p-values (BEFORE / AFTER)$(RST)"
 	@printf "  $(GREEN)%-7s$(RST)  %s\n" "sdk-bench"        "$(DIM)run every internal/kernel/**/*_bench_test.go → .bench.out (COUNT=N)$(RST)"
@@ -119,6 +121,9 @@ lint:
 	# service domain has a core at the same path, and every code the core
 	# declares belongs to an engine at that path or is the core's own range.
 	bash scripts/pre-commit/check-core-symmetry.sh
+	# The platforms table genindex judges and writes docs/api on is the
+	# cross-build matrix CI compiles: one table, written twice, held equal.
+	bash scripts/pre-commit/check-platforms.sh
 	# Package documentation, BENCH.md presence and the error-code YAML mirror.
 	# Only the in-repo pre-commit hook ran these until it was removed (ADR 0153);
 	# CI runs them now, as the same three direct steps.
@@ -132,8 +137,9 @@ lint:
 
 # `lint-check` and `lint-ktn-check` are the parts of `lint` a CI runner can
 # execute on its own: a Go toolchain and two pinned binaries, no Bazel, no
-# gazelle. `lint-check` also runs `doclinks` (ADR 0138), which needs nothing but
-# the toolchain either.
+# gazelle. `lint-check` also runs `doclinks` (ADR 0138) and `api-check`, which
+# need nothing but the toolchain either — api-check also the workspace's
+# modules, which the go command fetches when the module cache lacks them.
 #
 # They exist as named targets because of #236. Five of the eight checks `lint`
 # performed then were already invoked by bazel-ci.yml as direct `bash …` steps
@@ -171,6 +177,10 @@ lint-check:
 	$(MAKE) --no-print-directory guard
 	# Every same-package doc link resolves (ADR 0138).
 	$(MAKE) --no-print-directory doclinks
+	# docs/api is what the code exports, byte for byte, on every cell; the
+	# code's surface is the pins' markers, and every generated file still the
+	# bytes of its design file (ADR 0163).
+	$(MAKE) --no-print-directory api-check
 
 # Gate on the gating phases (1-7) only — phase 8 (tests) is advisory, matching
 # the MCP daemon's active set and the PostToolUse hook. `--phases=all` pulled in
@@ -187,7 +197,47 @@ lint-ktn-check:
 # (ADR 0138). tools/genindex already walks packages through go/doc for the docs
 # site, so the check is a mode of it: stdlib-only, GOWORK=off, no network.
 doclinks:
-	cd tools/genindex && GOWORK=off go run . -check-doclinks $(CURDIR)
+	cd tools/genindex && GOWORK=off go run . -platforms $(CURDIR)/scripts/ci/platforms.sh -check-doclinks $(CURDIR)
+
+# `api` writes docs/api: one JSON document per module of go.work — the SDK
+# module and every vendor module — holding every exported symbol, internal
+# packages included, with its go: id, kind, signature as its file spells it and
+# canonically, owner, doc text, cells, file, codes, layer and family
+# (docs/api/schema.json). tools/genindex reads the CODE: the go command lists
+# each cell of scripts/ci/platforms.sh, go/types checks every package from
+# source with function bodies ignored, and the records that differ between
+# cells say on which they hold. Run it after a doc edit — a doc edit needs
+# nothing else — and after any change to the exported surface, which starts in
+# design/ and `kit gen` (ADR 0163): the flow is the design, kit gen, the code,
+# then `make api`. Deterministic: the same tree writes the same bytes on every
+# machine. It needs the workspace's modules in the module cache, so its first
+# run may download them. It then writes docs/error-codes.yaml from the
+# documents it wrote (`error-codes`), and runs gazelle, which gives the pin
+# files kit gen writes — api_gen*_test.go, external tests — their test
+# targets.
+api:
+	cd tools/genindex && GOWORK=off go run . -write-api -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
+	$(MAKE) --no-print-directory error-codes
+	bazel run //:gazelle
+
+# `api-check` holds the code to docs/api and to its design (ADR 0163), with no
+# kit and no YAML read: it writes nothing and fails on
+#   - any byte docs/api regenerated in memory differs from what is committed,
+#     naming each record added, changed or removed — a doc edit without
+#     `make api` included;
+#   - -markers: on every cell, the code's exported (id, kind, canonical
+#     signature) set differs from the `// go:<id> <kind> <canonical>` markers
+#     of the api_gen*_test.go pins kit gen writes from design/ — a symbol
+#     added in the code alone, a function turned variable, a constraint
+#     widened, a struct tag, a receiver;
+#   - -digests: a generated file (a pin, or a design_gen.go port) whose header
+#     sha256 is no longer the bytes of the design file it names, or whose body
+#     was edited by hand — a design edit without `kit gen`.
+# What the pins hold themselves — a signature, a value, a type — the compiler
+# catches: `go vet` on every cell (cross-build) and the Bazel test targets. It
+# runs in `lint-check`, so CI's required job runs it.
+api-check:
+	cd tools/genindex && GOWORK=off go run . -check-api -markers -digests -repo-root $(CURDIR) -platforms $(CURDIR)/scripts/ci/platforms.sh
 
 # `guard` runs tools/sdkguard over the SDK's own tree, in two passes.
 #
@@ -331,6 +381,17 @@ docs:
 	cd docs/site && npm install --silent && npm run build
 	@echo "→ docs/site/dist/ ready ($$(find docs/site/dist -name '*.html' | wc -l) pages). Serve with: make serve"
 
+# `docs-check` is the docs portal's gate, run by CI's `docs-site` job. It
+# builds the working tree's release alone (DOCS_RELEASES=local: no release
+# snapshot, no network, about 30 s) and checks what it built against the code:
+# `npm test` (scripts/lib), then `npm run check` — the ⌘K index and every API
+# section equal docs/api, counted apart from the code that wrote them
+# (scripts/check-api-counts.mjs), and every link and ⌘K entry resolves under
+# the deploy base, fragments included (scripts/check-links.mjs). The deploy
+# (docs-deploy.yml) runs the same check over every release it builds.
+docs-check:
+	cd docs/site && npm ci --silent && npm test && DOCS_RELEASES=local npm run build && npm run check
+
 # `serve` is the kill → rebuild → re-serve loop for the docs portal.
 # Useful while iterating on src/pages/*.astro or src/styles/global.css:
 # one command replaces "Ctrl+C, make docs, npx serve dist".
@@ -429,11 +490,15 @@ docs-readme:
 	cd framework && go generate ./...
 	@echo "→ every pkg/v1 and framework package declaring //go:generate gomarkdoc regenerated"
 
-# `error-codes` regenerates docs/error-codes.yaml — the human-readable mirror of
-# the dotted-quad error-code registry (ADR 0005/0006), extracted from every
-# errs.Code constant in the tree. The executable source of truth stays the AST
-# audit (internal/kernel/errs:errs_test); this YAML is for humans. The
-# check-error-codes-drift guard fails CI and `make lint` when it is stale.
+# `error-codes` writes docs/error-codes.yaml — the human-readable list of the
+# dotted-quad error codes (ADR 0005/0006) — from docs/api: every errs.Code
+# constant a package declares under a name starting with Code, re-exports and
+# the errs masks left out (tools/genindex -write-error-codes, through
+# scripts/gen-error-codes.sh). docs/api is the code's (`make api-check`), so
+# the file is too; `make api` runs this target after writing docs/api. The
+# executable source of truth stays the AST audit
+# (internal/kernel/errs:errs_test). The check-error-codes-drift guard fails CI
+# and `make lint` when the file is not what this writes.
 error-codes:
 	bash scripts/gen-error-codes.sh
 

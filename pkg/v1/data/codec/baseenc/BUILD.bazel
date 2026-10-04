@@ -22,10 +22,14 @@ alias(
 
 go_test(
     name = "baseenc_test",
-    srcs = ["baseenc_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "baseenc_external_test.go",
+    ],
     deps = [
         ":baseenc",
         "//internal/core/data/codec",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

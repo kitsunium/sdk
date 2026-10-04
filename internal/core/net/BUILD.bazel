@@ -10,6 +10,7 @@ go_library(
         "client_config.go",
         "codes.go",
         "conn.go",
+        "design_gen.go",
         "drain.go",
         "duration.go",
         "errors.go",
@@ -55,6 +56,7 @@ go_test(
     name = "net_test",
     srcs = [
         "address_external_test.go",
+        "api_gen_test.go",
         "conn_handler_external_test.go",
         "drain_external_test.go",
         "duration_external_test.go",

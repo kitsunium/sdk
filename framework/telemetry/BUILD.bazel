@@ -30,12 +30,14 @@ alias(
 go_test(
     name = "telemetry_test",
     srcs = [
+        "api_gen_test.go",
         "telemetry_alloc_test.go",
         "telemetry_bench_test.go",
         "telemetry_external_test.go",
     ],
     deps = [
         ":telemetry",
+        "//internal/kernel/errs",
     ] + select({
         "@rules_go//go/platform:aix": [
             "//framework/model",

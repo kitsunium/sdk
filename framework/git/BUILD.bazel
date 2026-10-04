@@ -22,9 +22,15 @@ alias(
 
 go_test(
     name = "git_test",
-    srcs = ["git_external_test.go"],
+    srcs = [
+        "api_gen_test.go",
+        "git_external_test.go",
+    ],
     deps = [
         ":git",
+        "//framework/internal/core/git",
+        "//framework/internal/service/git",
+        "//internal/kernel/errs",
         "//pkg/v1/errs",
     ],
 )

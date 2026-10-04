@@ -1,0 +1,335 @@
+apiVersion: kit.kitsunium/design/v2
+domain: app/id
+packages:
+  - constants:
+      - name: CodeUnknownScheme
+        type: errs.Code
+        value: "0x00_02_07_01"
+      - name: CodeDuplicateRegistration
+        type: errs.Code
+        value: "0x00_02_07_05"
+      - name: CodeIDEntropyFailed
+        type: errs.Code
+        value: "0x00_03_27_01"
+      - name: CodeIDClockBackwards
+        type: errs.Code
+        value: "0x00_03_27_02"
+      - name: CodeIDClockStalled
+        type: errs.Code
+        value: "0x00_03_27_03"
+      - name: CodeIDInvalidSize
+        type: errs.Code
+        value: "0x00_03_27_04"
+      - name: CodeIDInvalidPrefix
+        type: errs.Code
+        value: "0x00_03_27_05"
+      - name: CodeIDMalformed
+        type: errs.Code
+        value: "0x00_03_27_06"
+      - name: CodeIDTimestampRange
+        type: errs.Code
+        value: "0x00_03_27_07"
+    functions:
+      - in:
+          - name: scheme
+            type: Scheme
+        name: New
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: g
+            type: Generator
+        name: Register
+        out:
+          - type: Generator
+      - in:
+          - name: name
+            type: Scheme
+        name: Lookup
+        out:
+          - name: g
+            type: Generator
+          - name: ok
+            type: bool
+      - name: Available
+        out:
+          - type: "[]Scheme"
+    imports:
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/internal/core/app/id
+    ports:
+      - doc: |-
+          Generator is the contract every identifier scheme satisfies. Instances MUST
+          be safe for concurrent use (New is called from many goroutines). Scheme-
+          specific options (snowflake node id, etc.) are supplied via the scheme's
+          constructor, not via this interface.
+
+          IFACE-PLUGIN: the registry stores plug-in scheme instances behind this
+          interface — concrete scheme types stay unexported per package.
+        methods:
+          - name: Scheme
+            out:
+              - type: Scheme
+          - name: New
+            out:
+              - name: newID
+                type: string
+              - name: err
+                type: error
+        name: Generator
+    types:
+      - methods:
+          - name: String
+            out:
+              - type: string
+            recv: value
+          - name: Known
+            out:
+              - type: bool
+            recv: value
+        name: Scheme
+        underlying: string
+    variables:
+      - name: UnknownScheme
+        type: "*errs.Error"
+      - name: DuplicateRegistration
+        type: "*errs.Error"
+      - name: EntropyFailed
+        type: "*errs.Error"
+      - name: ClockBackwards
+        type: "*errs.Error"
+      - name: ClockStalled
+        type: "*errs.Error"
+      - name: InvalidSize
+        type: "*errs.Error"
+      - name: InvalidPrefix
+        type: "*errs.Error"
+      - name: Malformed
+        type: "*errs.Error"
+      - name: TimestampRange
+        type: "*errs.Error"
+  - functions:
+      - in:
+          - name: s
+            type: string
+        name: ParseKSUID
+        out:
+          - name: issued
+            type: time.Time
+          - name: payload
+            type: "[ksuidPayloadBytes]byte"
+          - name: err
+            type: error
+      - in:
+          - name: size
+            type: int
+        name: NewNanoID
+        out:
+          - name: g
+            type: coreid.Generator
+          - name: err
+            type: error
+      - in:
+          - name: node
+            type: int64
+        name: NewSnowflake
+        out:
+          - type: coreid.Generator
+      - in:
+          - name: prefix
+            type: string
+        name: NewTypeID
+        out:
+          - name: g
+            type: coreid.Generator
+          - name: err
+            type: error
+      - in:
+          - name: prefix
+          - name: uuid
+            type: string
+        name: FormatTypeID
+        out:
+          - name: typeID
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: s
+            type: string
+        name: ParseTypeID
+        out:
+          - name: prefix
+          - name: uuid
+            type: string
+          - name: err
+            type: error
+    imports:
+      coreid: github.com/kitsunium/sdk/internal/core/app/id
+    path: github.com/kitsunium/sdk/internal/service/app/id
+    variables:
+      - name: KSUID
+        type: coreid.Generator
+      - name: NanoID
+        type: coreid.Generator
+      - name: Snowflake
+        type: coreid.Generator
+      - name: ULID
+        type: coreid.Generator
+      - name: UUIDv4
+        type: coreid.Generator
+      - name: UUIDv7
+        type: coreid.Generator
+  - aliases:
+      - name: Scheme
+        target: coreid.Scheme
+      - name: Generator
+        target: coreid.Generator
+    constants:
+      - name: UUIDv4Scheme
+        type: Scheme
+        value: "\"uuidv4\""
+      - name: UUIDv7Scheme
+        type: Scheme
+        value: "\"uuidv7\""
+      - name: ULIDScheme
+        type: Scheme
+        value: "\"ulid\""
+      - name: SnowflakeScheme
+        type: Scheme
+        value: "\"snowflake\""
+      - name: NanoIDScheme
+        type: Scheme
+        value: "\"nanoid\""
+      - name: KSUIDScheme
+        type: Scheme
+        value: "\"ksuid\""
+      - name: TypeIDScheme
+        type: Scheme
+        value: "\"typeid\""
+    functions:
+      - in:
+          - name: scheme
+            type: Scheme
+        name: New
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: UUIDv4
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: UUIDv7
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: ULID
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: Snowflake
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: NanoID
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - name: KSUID
+        out:
+          - name: newID
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: node
+            type: int64
+        name: NewSnowflake
+        out:
+          - type: Generator
+      - in:
+          - name: size
+            type: int
+        name: NewNanoID
+        out:
+          - name: g
+            type: Generator
+          - name: err
+            type: error
+      - in:
+          - name: prefix
+            type: string
+        name: NewTypeID
+        out:
+          - name: g
+            type: Generator
+          - name: err
+            type: error
+      - in:
+          - name: ksuid
+            type: string
+        name: ParseKSUID
+        out:
+          - name: issued
+            type: time.Time
+          - name: payload
+            type: "[ksuidPayloadBytes]byte"
+          - name: err
+            type: error
+      - in:
+          - name: typeID
+            type: string
+        name: ParseTypeID
+        out:
+          - name: prefix
+          - name: uuid
+            type: string
+          - name: err
+            type: error
+      - in:
+          - name: prefix
+          - name: uuid
+            type: string
+        name: FormatTypeID
+        out:
+          - name: typeID
+            type: string
+          - name: err
+            type: error
+      - name: Available
+        out:
+          - type: "[]Scheme"
+    imports:
+      coreid: github.com/kitsunium/sdk/internal/core/app/id
+      errs: github.com/kitsunium/sdk/internal/kernel/errs
+    path: github.com/kitsunium/sdk/pkg/v1/app/id
+    variables:
+      - name: UnknownScheme
+        type: "*errs.Error"
+      - name: EntropyFailed
+        type: "*errs.Error"
+      - name: ClockBackwards
+        type: "*errs.Error"
+      - name: InvalidSize
+        type: "*errs.Error"
+      - name: InvalidPrefix
+        type: "*errs.Error"
+      - name: Malformed
+        type: "*errs.Error"
+      - name: TimestampRange
+        type: "*errs.Error"

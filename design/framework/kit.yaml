@@ -1,0 +1,3910 @@
+apiVersion: kit.kitsunium/design/v2
+domain: framework/kit
+packages:
+  - aliases:
+      - name: Former
+        target: model.Former
+      - name: Erasure
+        target: model.Erasure
+      - name: PersonalData
+        target: model.PersonalData
+      - name: Edit
+        target: model.Edit
+    constants:
+      - name: CodeSingletonHeld
+        type: errs.Code
+        value: "0x00_04_02_3A"
+      - name: CodeCLIFailed
+        type: errs.Code
+        value: "0x00_04_02_3B"
+      - name: EnvDev
+        value: "\"dev\""
+      - name: EnvProduction
+        value: "\"production\""
+      - name: DefaultMaxBody
+        type: int64
+        value: 1 << 20
+      - name: WireInvalid
+        value: "\"invalid_argument\""
+      - name: WireNotFound
+        value: "\"not_found\""
+      - name: WireConflict
+        value: "\"conflict\""
+      - name: WireUnauth
+        value: "\"unauthenticated\""
+      - name: WireForbidden
+        value: "\"permission_denied\""
+      - name: WireTooLarge
+        value: "\"too_large\""
+      - name: WireUnsupported
+        value: "\"unsupported_media_type\""
+      - name: WireRateLimited
+        value: "\"rate_limited\""
+      - name: WireUnavailable
+        value: "\"unavailable\""
+      - name: WireTimeout
+        value: "\"deadline_exceeded\""
+      - name: WireCanceled
+        value: "\"canceled\""
+      - name: WireInternal
+        value: "\"internal\""
+      - name: CodeStoreDecode
+        type: errs.Code
+        value: "0x00_04_02_01"
+      - name: CodeStoreEncode
+        type: errs.Code
+        value: "0x00_04_02_02"
+      - name: CodeStorePersist
+        type: errs.Code
+        value: "0x00_04_02_03"
+      - name: CodeStoreLoad
+        type: errs.Code
+        value: "0x00_04_02_04"
+      - name: CodeStoreIndex
+        type: errs.Code
+        value: "0x00_04_02_05"
+      - name: CodeTopicEncode
+        type: errs.Code
+        value: "0x00_04_02_06"
+      - name: CodeTopicPublish
+        type: errs.Code
+        value: "0x00_04_02_07"
+      - name: CodeQueueOpen
+        type: errs.Code
+        value: "0x00_04_02_08"
+      - name: CodeUndecodable
+        type: errs.Code
+        value: "0x00_04_02_09"
+      - name: CodeHandlerPanic
+        type: errs.Code
+        value: "0x00_04_02_0A"
+      - name: CodeNotMounted
+        type: errs.Code
+        value: "0x00_04_02_0B"
+      - name: CodeWorkflowLoad
+        type: errs.Code
+        value: "0x00_04_02_0C"
+      - name: CodeWorkflowHookPanic
+        type: errs.Code
+        value: "0x00_04_02_0D"
+      - name: CodeWorkflowHookChange
+        type: errs.Code
+        value: "0x00_04_02_0E"
+      - name: CodeWorkflowReentrant
+        type: errs.Code
+        value: "0x00_04_02_0F"
+      - name: CodeAppConfig
+        type: errs.Code
+        value: "0x00_04_02_10"
+      - name: CodeAppRunning
+        type: errs.Code
+        value: "0x00_04_02_11"
+      - name: CodeAppListen
+        type: errs.Code
+        value: "0x00_04_02_12"
+      - name: CodeMailConfig
+        type: errs.Code
+        value: "0x00_04_02_13"
+      - name: CodeMailEncode
+        type: errs.Code
+        value: "0x00_04_02_14"
+      - name: CodeMailQueue
+        type: errs.Code
+        value: "0x00_04_02_15"
+      - name: CodeMailUndecodable
+        type: errs.Code
+        value: "0x00_04_02_16"
+      - name: CodeMailPanic
+        type: errs.Code
+        value: "0x00_04_02_17"
+      - name: CodeLoopPanic
+        type: errs.Code
+        value: "0x00_04_02_18"
+      - name: CodeLoopNotMounted
+        type: errs.Code
+        value: "0x00_04_02_19"
+      - name: CodeLoopStart
+        type: errs.Code
+        value: "0x00_04_02_1A"
+      - name: CodeSecretStore
+        type: errs.Code
+        value: "0x00_04_02_1B"
+      - name: CodeSecretMissing
+        type: errs.Code
+        value: "0x00_04_02_1C"
+      - name: CodeSecretRead
+        type: errs.Code
+        value: "0x00_04_02_1D"
+      - name: CodeSecretRotate
+        type: errs.Code
+        value: "0x00_04_02_1E"
+      - name: CodeDatabaseOpen
+        type: errs.Code
+        value: "0x00_04_02_1F"
+      - name: CodeDatabaseMigrate
+        type: errs.Code
+        value: "0x00_04_02_20"
+      - name: CodeDatabaseUnavailable
+        type: errs.Code
+        value: "0x00_04_02_21"
+      - name: CodeDatabaseConfig
+        type: errs.Code
+        value: "0x00_04_02_22"
+      - name: CodeTransactionSpan
+        type: errs.Code
+        value: "0x00_04_02_42"
+      - name: CodePrivacyKey
+        type: errs.Code
+        value: "0x00_04_02_23"
+      - name: CodePrivacyErase
+        type: errs.Code
+        value: "0x00_04_02_24"
+      - name: CodePrivacyJournal
+        type: errs.Code
+        value: "0x00_04_02_25"
+      - name: CodePrivacyData
+        type: errs.Code
+        value: "0x00_04_02_26"
+      - name: CodeHistoryLoad
+        type: errs.Code
+        value: "0x00_04_02_27"
+      - name: CodeHistoryWrite
+        type: errs.Code
+        value: "0x00_04_02_28"
+      - name: CodeHistoryRead
+        type: errs.Code
+        value: "0x00_04_02_29"
+      - name: CodePasswordHash
+        type: errs.Code
+        value: "0x00_04_02_2A"
+      - name: CodeCommandReentrant
+        type: errs.Code
+        value: "0x00_04_02_2B"
+      - name: CodeCommandKey
+        type: errs.Code
+        value: "0x00_04_02_2C"
+      - name: CodeCommandQueue
+        type: errs.Code
+        value: "0x00_04_02_2D"
+      - name: CodeCommandEncode
+        type: errs.Code
+        value: "0x00_04_02_2E"
+      - name: CodeWatchQueue
+        type: errs.Code
+        value: "0x00_04_02_2F"
+      - name: CodeSealKey
+        type: errs.Code
+        value: "0x00_04_02_3D"
+      - name: CodeSealWrite
+        type: errs.Code
+        value: "0x00_04_02_3E"
+      - name: CodeSealOpen
+        type: errs.Code
+        value: "0x00_04_02_3F"
+      - name: CodeSealRewrap
+        type: errs.Code
+        value: "0x00_04_02_40"
+      - name: CodeSealShred
+        type: errs.Code
+        value: "0x00_04_02_41"
+      - name: CodeRevisionRead
+        type: errs.Code
+        value: "0x00_04_02_43"
+      - name: CodeRevisionWrite
+        type: errs.Code
+        value: "0x00_04_02_44"
+      - name: CodeRevisionDecode
+        type: errs.Code
+        value: "0x00_04_02_45"
+      - name: CodeJobOverlapped
+        type: errs.Code
+        value: "0x00_04_02_31"
+      - name: CodeHistoryMoved
+        type: errs.Code
+        value: "0x00_04_02_32"
+      - name: CodeNotSource
+        type: errs.Code
+        value: "0x00_04_02_33"
+      - name: CodePasswordMoved
+        type: errs.Code
+        value: "0x00_04_02_34"
+      - name: CodeNothingToErase
+        type: errs.Code
+        value: "0x00_04_02_35"
+      - name: CodeKeyRekeyed
+        type: errs.Code
+        value: "0x00_04_02_36"
+      - name: CodeMigrateRefused
+        type: errs.Code
+        value: "0x00_04_02_37"
+      - name: CodeCatalogue
+        type: errs.Code
+        value: "0x00_04_02_38"
+      - name: CodeRetentionPanic
+        type: errs.Code
+        value: "0x00_04_02_39"
+      - name: CodeSealErased
+        type: errs.Code
+        value: "0x00_04_02_46"
+      - name: CodeSealKeyMoved
+        type: errs.Code
+        value: "0x00_04_02_47"
+      - name: CodeResealInPlace
+        type: errs.Code
+        value: "0x00_04_02_48"
+      - name: CodeResealMoved
+        type: errs.Code
+        value: "0x00_04_02_49"
+      - name: CodeWorkflowNotInPlace
+        type: errs.Code
+        value: "0x00_04_02_4A"
+      - name: CodeTransactionPanic
+        type: errs.Code
+        value: "0x00_04_02_4B"
+      - name: CodeProfileRead
+        type: errs.Code
+        value: "0x00_04_02_30"
+      - name: Personal
+        type: Mark
+        value: "\"personal\""
+      - name: Special
+        type: Mark
+        value: "\"special\""
+      - name: Moderated
+        type: Mark
+        value: "\"moderated\""
+      - name: CodeScopeUnknown
+        type: errs.Code
+        value: "0x00_04_02_3C"
+    functions:
+      - in:
+          - name: name
+            type: string
+          - name: services
+            type: "*Service"
+        name: NewApp
+        out:
+          - type: "*App"
+        variadic: true
+      - name: EnableServer
+      - in:
+          - name: fn
+            type: AnalyzeFunc
+        name: Analyzer
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: p
+            type: string
+        name: Profile
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: d
+            type: time.Duration
+        name: IdleStop
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: scope
+            type: string
+        name: Singleton
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: scopes
+            type: ScopeValue
+        name: SingletonPer
+        out:
+          - type: AppConfigurer
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Stop
+        out:
+          - type: bool
+      - name: Auth
+        out:
+          - type: OperationOption
+      - name: AuthOptional
+        out:
+          - type: OperationOption
+      - in:
+          - name: ctx
+            type: context.Context
+        name: UserID
+        out:
+          - type: UID
+          - type: bool
+      - in:
+          - name: ctx
+            type: context.Context
+        name: AuthData
+        out:
+          - type: D
+          - type: bool
+        typeParams:
+          - constraint: any
+            name: D
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: uid
+            type: UID
+          - name: data
+            type: D
+        name: WithUser
+        out:
+          - type: context.Context
+        typeParams:
+          - constraint: any
+            name: D
+      - name: Catalog
+        out:
+          - type: "[]model.Mechanic"
+      - in:
+          - name: prefix
+            type: string
+        name: NewID
+        out:
+          - type: string
+      - name: DefaultCommand
+        out:
+          - type: CommandLineConfigurer
+      - name: FailSafe
+        out:
+          - type: CommandLineConfigurer
+      - name: Queued
+        out:
+          - type: CommandConfigurer
+      - name: NoTransaction
+        out:
+          - type: CommandConfigurer
+      - name: NewCommand
+        out:
+          - type: "*Command[C, R]"
+        typeParams:
+          - name: C
+          - constraint: any
+            name: R
+      - in:
+          - name: env
+            type: string
+        name: Env
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: addr
+            type: string
+        name: Listen
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: dir
+            type: string
+        name: DataDir
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: "on"
+            type: bool
+        name: Studio
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: "on"
+            type: bool
+        name: Analyze
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: w
+            type: io.Writer
+        name: Logs
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: c
+            type: clock.Timed
+        name: Clock
+        out:
+          - type: AppConfigurer
+      - name: InMemory
+        out:
+          - type: interface{StoreConfigurer; AppConfigurer}
+      - in:
+          - name: things
+            type: Keeper
+        name: Keeps
+        out:
+          - type: DatabaseConfigurer
+        variadic: true
+      - in:
+          - name: m
+            type: sql.Migration
+        name: Migrations
+        out:
+          - type: interface{DatabaseConfigurer; ModuleConfigurer}
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: engine
+            type: Engine
+          - name: opts
+            type: DatabaseConfigurer
+        name: Database
+        out:
+          - type: AppConfigurer
+        variadic: true
+      - in:
+          - name: name
+            type: string
+        name: Name
+        out:
+          - type: EndpointConfigurer
+      - in:
+          - name: bytes
+            type: int64
+        name: MaxBody
+        out:
+          - type: EndpointConfigurer
+      - in:
+          - name: perSecond
+            type: float64
+          - name: burst
+            type: int
+        name: RateLimit
+        out:
+          - type: OperationOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: Timeout
+        out:
+          - type: OperationOption
+      - in:
+          - name: maxConcurrent
+            type: int
+        name: Bulkhead
+        out:
+          - type: OperationOption
+      - name: NewEndpointService
+        out:
+          - type: "*EndpointService[Req, Resp]"
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: message
+            type: string
+        name: Invalid
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: NotFound
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Conflict
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Unauthenticated
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Forbidden
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Unavailable
+        out:
+          - type: "*Error"
+      - in:
+          - name: status
+            type: int
+          - name: code
+          - name: message
+            type: string
+        name: NewError
+        out:
+          - type: "*Error"
+      - name: Anyone
+        out:
+          - type: ExposeConfigurer
+      - name: AnyUser
+        out:
+          - type: ExposeConfigurer
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: reason
+            type: string
+          - name: ids
+            type: string
+        name: HoldSubject
+        out:
+          - type: error
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: key
+            type: func(T) string
+        name: Unique
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: keys
+            type: func(T) []string
+        name: Index
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - name: EnableStudio
+      - in:
+          - name: path
+            type: string
+        name: SocketPath
+        out:
+          - type: ListenerConfigurer
+      - in:
+          - name: scopes
+            type: ScopeValue
+        name: SocketPer
+        out:
+          - type: ListenerConfigurer
+        variadic: true
+      - in:
+          - name: uids
+          - name: gids
+            type: "[]int"
+        name: AllowPeers
+        out:
+          - type: ListenerConfigurer
+      - in:
+          - name: product
+          - name: service
+          - name: name
+            type: string
+          - name: scopes
+            type: ScopeValue
+        name: SocketPathFor
+        out:
+          - type: string
+          - type: error
+        variadic: true
+      - in:
+          - name: contract
+            type: string
+          - name: handler
+            type: ListenHandler
+        name: NewListener
+        out:
+          - type: "*Listener"
+      - in:
+          - name: d
+            type: time.Duration
+        name: WakeEvery
+        out:
+          - type: LoopConfigurer
+      - in:
+          - name: next
+            type: func(context.Context) (time.Time, bool)
+        name: WakeAt
+        out:
+          - type: LoopConfigurer
+      - in:
+          - name: topic
+            type: "*TopicService[T]"
+        name: WakeOn
+        out:
+          - type: LoopConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: run
+            type: func(context.Context, WakeEvent) error
+        name: NewLoop
+        out:
+          - type: "*Loop"
+      - in:
+          - name: name
+          - name: addr
+            type: string
+        name: From
+        out:
+          - type: MailerConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: MailAttempts
+        out:
+          - type: MailerConfigurer
+      - name: NewMailer
+        out:
+          - type: "*Mailer"
+      - in:
+          - name: name
+          - name: doc
+            type: string
+          - name: parts
+            type: ModuleConfigurer
+        name: NewModule
+        out:
+          - type: "*Module"
+        variadic: true
+      - in:
+          - name: other
+            type: "*Module"
+        name: Requires
+        out:
+          - type: ModuleConfigurer
+      - in:
+          - name: m
+            type: "*Module"
+          - name: opts
+            type: MountConfigurer
+        name: Mount
+        out:
+          - type: AppConfigurer
+        variadic: true
+      - in:
+          - name: prefix
+            type: string
+        name: Prefix
+        out:
+          - type: MountConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: MinLength
+        out:
+          - type: PasswordConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: NotReused
+        out:
+          - type: PasswordConfigurer
+      - name: NotCommon
+        out:
+          - type: PasswordConfigurer
+      - in:
+          - name: op
+            type: Operation[Req, Resp]
+        name: Fallback
+        out:
+          - type: PortConfigurer[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: port
+            type: "*PortService[Req, Resp]"
+          - name: op
+            type: Operation[Req, Resp]
+        name: Bind
+        out:
+          - type: interface{AppConfigurer; MountConfigurer}
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - name: NewPortService
+        out:
+          - type: "*PortService[Req, Resp]"
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: reason
+            type: string
+          - name: ids
+            type: string
+        name: Erase
+        out:
+          - type: Erasure
+          - type: error
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: ids
+            type: string
+        name: Export
+        out:
+          - type: PersonalData
+          - type: error
+        variadic: true
+      - name: NewQuery
+        out:
+          - type: "*Query[Q, R]"
+        typeParams:
+          - name: Q
+          - constraint: any
+            name: R
+      - in:
+          - name: perSecond
+            type: float64
+          - name: burst
+            type: int
+        name: RateLimitPerClient
+        out:
+          - type: OperationOption
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: store
+            type: string
+        name: RecordsOf
+        out:
+          - type: RecordsService
+          - type: error
+      - in:
+          - name: port
+            type: recordsPort
+        name: NewRecordsService
+        out:
+          - type: RecordsService
+      - in:
+          - name: op
+            type: Operation[Req, Resp]
+          - name: fn
+            type: func(context.Context, Req) (Resp, error)
+        name: Replace
+        out:
+          - type: AppConfigurer
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: c
+            type: "*http.Cookie"
+        name: SetCookie
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: string
+        name: ClearCookie
+      - in:
+          - name: ctx
+            type: context.Context
+        name: ClientIP
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+        name: UserAgent
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Now
+        out:
+          - type: time.Time
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: NewTicker
+        out:
+          - type: clock.Ticker
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: After
+        out:
+          - type: <-chan time.Time
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Log
+        out:
+          - type: logger.Logger
+      - in:
+          - name: delay
+            type: D
+          - name: since
+            type: func(T) (time.Time, bool)
+        name: EraseAfter
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+          - constraint: Delay
+            name: D
+      - in:
+          - name: at
+            type: func(T) (time.Time, bool)
+        name: EraseAt
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: delay
+            type: D
+          - name: since
+            type: func(T) (time.Time, bool)
+        name: DeleteAfter
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+          - constraint: Delay
+            name: D
+      - in:
+          - name: at
+            type: func(T) (time.Time, bool)
+        name: DeleteAt
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: fn
+            type: func(*T)
+        name: Anonymise
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: until
+            type: func(T) (time.Time, bool)
+          - name: reason
+            type: string
+        name: HeldUntil
+        out:
+          - type: StoreConfigurer
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: text
+            type: string
+        name: Purpose
+        out:
+          - type: StoreConfigurer
+      - name: DeleteOnErasure
+        out:
+          - type: StoreConfigurer
+      - in:
+          - name: limits
+            type: string
+        name: RetentionByProduct
+        out:
+          - type: StoreConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: Revisions
+        out:
+          - type: StoreConfigurer
+      - in:
+          - name: name
+          - name: doc
+            type: string
+        name: NewBinary
+        out:
+          - type: "*Binary"
+      - in:
+          - name: name
+          - name: fallback
+            type: string
+        name: PerEnv
+        out:
+          - type: ScopeValue
+      - in:
+          - name: scopes
+            type: ScopeValue
+        name: ScopeKey
+        out:
+          - type: string
+          - type: error
+        variadic: true
+      - in:
+          - name: bytes
+            type: int
+        name: Generated
+        out:
+          - type: SecretConfigurer
+      - name: Optional
+        out:
+          - type: SecretConfigurer
+      - in:
+          - name: d
+            type: time.Duration
+        name: RotateEvery
+        out:
+          - type: SecretConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: KeepVersions
+        out:
+          - type: SecretConfigurer
+      - name: NewSecret
+        out:
+          - type: "*Secret"
+      - in:
+          - name: store
+            type: secret.Store
+        name: SecretStore
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: name
+          - name: doc
+            type: string
+        name: NewService
+        out:
+          - type: "*Service"
+      - name: Required
+        out:
+          - type: SettingConfigurer
+      - in:
+          - name: name
+            type: string
+          - name: value
+            type: any
+        name: Set
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: fsys
+            type: fs.FS
+        name: ConfigFiles
+        out:
+          - type: AppConfigurer
+      - in:
+          - name: ext
+          - name: format
+            type: string
+        name: RegisterConfigFormat
+      - in:
+          - name: def
+            type: T
+        name: NewSettingService
+        out:
+          - type: "*SettingService[T]"
+        typeParams:
+          - constraint: SettingValue
+            name: T
+      - in:
+          - name: dir
+            type: string
+        name: Root
+        out:
+          - type: StaticConfigurer
+      - name: ReadModel
+        out:
+          - type: StoreConfigurer
+      - in:
+          - name: key
+            type: func(T) string
+        name: NewStoreService
+        out:
+          - type: "*StoreService[T]"
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: path
+            type: string
+          - name: gids
+            type: int
+        name: Telemetry
+        out:
+          - type: AppConfigurer
+        variadic: true
+      - in:
+          - name: digest
+            type: string
+        name: DesignDigest
+        out:
+          - type: AppConfigurer
+      - name: OwnStores
+        out:
+          - type: SubscriptionConfigurer
+      - in:
+          - name: "n"
+            type: int
+        name: MaxDeliveries
+        out:
+          - type: DeliveryOption
+      - in:
+          - name: "n"
+            type: int
+        name: Parallelism
+        out:
+          - type: DeliveryOption
+      - name: NewTopicService
+        out:
+          - type: "*TopicService[T]"
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: fn
+            type: func(context.Context) error
+        name: Transact
+        out:
+          - type: error
+      - in:
+          - name: store
+            type: "*StoreService[E]"
+          - name: state
+            type: func(*E) *S
+        name: NewWorkflowService
+        out:
+          - type: "*WorkflowService[E, S]"
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+    imports:
+      authz: github.com/kitsunium/sdk/pkg/v1/security/authz
+      clock: github.com/kitsunium/sdk/pkg/v1/clock
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      fs: io/fs
+      http: net/http
+      ipc: github.com/kitsunium/sdk/pkg/v1/proc/ipc
+      json: encoding/json
+      logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+      mail: github.com/kitsunium/sdk/pkg/v1/app/mail
+      model: github.com/kitsunium/sdk/framework/model
+      secret: github.com/kitsunium/sdk/pkg/v1/security/secret
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+      stdsql: database/sql
+    path: github.com/kitsunium/sdk/framework/internal/kit
+    types:
+      - interface:
+          methods:
+            - name: Attrs
+              out:
+                - type: "[]authz.Attr"
+        name: AttrsProvider
+      - name: ActivityHandler
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: opts
+                type: AppConfigurer
+            name: With
+            out:
+              - type: "*App"
+            recv: pointer
+            variadic: true
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+          - name: URL
+            out:
+              - type: string
+            recv: pointer
+          - name: Handler
+            out:
+              - type: http.Handler
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Start
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Stop
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Run
+            out:
+              - type: error
+            recv: pointer
+          - name: Graph
+            out:
+              - type: "*model.Graph"
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: args
+                type: "[]string"
+            name: Main
+            out:
+              - type: int
+            recv: pointer
+          - in:
+              - name: m
+                type: Mark
+            name: Fields
+            out:
+              - type: "[]FieldRefValue"
+            recv: pointer
+          - in:
+              - name: store
+                type: string
+            name: Records
+            out:
+              - type: RecordsService
+              - type: error
+            recv: pointer
+        name: App
+        struct:
+          unexported: true
+      - methods:
+          - name: Error
+            out:
+              - type: string
+            recv: pointer
+        name: DiagnosticsError
+        struct:
+          fields:
+            - name: Diagnostics
+              type: "[]model.Diagnostic"
+      - name: AnalyzeFunc
+        underlying: func(ctx context.Context, dir string, modules []string) (*model.Graph, error)
+      - name: UID
+        underlying: string
+      - name: AuthenticatorHandler
+        struct:
+          unexported: true
+        typeParams:
+          - name: P
+          - constraint: any
+            name: D
+      - name: StdioValue
+        struct:
+          fields:
+            - name: In
+              type: io.Reader
+            - name: Out
+            - name: Err
+              type: io.Writer
+            - name: Interactive
+              type: bool
+      - name: CLIFunc
+        underlying: func(ctx context.Context, args []string, std StdioValue) int
+      - name: CLI
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: CommandLineConfigurer
+      - methods:
+          - in:
+              - name: policy
+                type: authz.Policy
+              - name: action
+              - name: resource
+                type: string
+            name: Allow
+            out:
+              - type: "*Command[C, R]"
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(context.Context, C) error
+            name: Authorize
+            out:
+              - type: "*Command[C, R]"
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(C) string
+            name: Key
+            out:
+              - type: "*Command[C, R]"
+            recv: pointer
+          - in:
+              - name: route
+                type: string
+              - name: opts
+                type: ExposeConfigurer
+            name: Expose
+            out:
+              - type: "*Command[C, R]"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: in
+                type: C
+            name: Dispatch
+            out:
+              - type: R
+              - type: error
+            recv: pointer
+        name: Command
+        struct:
+          unexported: true
+        typeParams:
+          - name: C
+          - constraint: any
+            name: R
+      - interface:
+          unexported: true
+        name: CommandConfigurer
+      - interface:
+          unexported: true
+        name: AppConfigurer
+      - name: DatabaseURLValue
+        struct:
+          fields:
+            - name: Driver
+              type: string
+            - name: Address
+              type: string
+            - name: Database
+              type: string
+            - name: TLS
+              type: string
+            - name: Plaintext
+              type: bool
+            - name: Networked
+              type: bool
+      - interface:
+          methods:
+            - name: Dialect
+              out:
+                - type: sql.Dialect
+            - in:
+                - name: url
+                  type: secret.Value
+              name: Describe
+              out:
+                - type: DatabaseURLValue
+                - type: error
+            - in:
+                - name: url
+                  type: secret.Value
+                - name: current
+                  type: func(context.Context) (secret.Value, error)
+              name: Open
+              out:
+                - type: "*stdsql.DB"
+                - type: error
+        name: Engine
+      - interface:
+          unexported: true
+        name: DatabaseConfigurer
+      - interface:
+          unexported: true
+        name: Keeper
+      - name: EmptyValue
+        struct: {}
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: req
+                type: Req
+            name: Call
+            out:
+              - type: Resp
+              - type: error
+            recv: pointer
+        name: EndpointService
+        struct:
+          unexported: true
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - interface:
+          embeds:
+            - ExposeConfigurer
+          unexported: true
+        name: EndpointConfigurer
+      - interface:
+          embeds:
+            - EndpointConfigurer
+            - CommandConfigurer
+            - QueryConfigurer
+        name: OperationOption
+      - methods:
+          - name: Error
+            out:
+              - type: string
+            recv: pointer
+          - name: Unwrap
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: cause
+                type: error
+            name: Wrap
+            out:
+              - type: "*Error"
+            recv: pointer
+        name: Error
+        struct:
+          fields:
+            - name: Status
+              type: int
+            - name: Code
+              type: string
+            - name: Message
+              type: string
+            - name: Violations
+              type: "[]ViolationMessage"
+          unexported: true
+      - name: ViolationMessage
+        struct:
+          fields:
+            - name: Path
+              tag: json:"path"
+              type: string
+            - name: Rule
+              tag: json:"rule"
+              type: string
+            - name: Message
+              tag: json:"message"
+              type: string
+      - interface:
+          unexported: true
+        name: ExposeConfigurer
+      - name: Job
+        struct:
+          unexported: true
+      - name: ListenHandler
+        underlying: func(ctx context.Context, conn *ipc.Conn) error
+      - methods:
+          - in:
+              - name: product
+                type: string
+            name: SocketPathIn
+            out:
+              - type: string
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: product
+                type: string
+            name: DialIn
+            out:
+              - type: "*ipc.Conn"
+              - type: error
+            recv: pointer
+          - name: Path
+            out:
+              - type: string
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Dial
+            out:
+              - type: "*ipc.Conn"
+              - type: error
+            recv: pointer
+        name: Listener
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: ListenerConfigurer
+      - methods:
+          - name: Nudge
+            recv: pointer
+        name: Loop
+        struct:
+          unexported: true
+      - name: WakeEvent
+        struct:
+          fields:
+            - name: Reason
+              type: string
+            - name: At
+              type: time.Time
+            - name: Topic
+              type: string
+      - interface:
+          unexported: true
+        name: LoopConfigurer
+      - name: Routine
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: msg
+                type: mail.Message
+            name: Send
+            out:
+              - type: string
+              - type: error
+            recv: pointer
+          - name: Captured
+            out:
+              - type: "[]model.MailMessage"
+            recv: pointer
+        name: Mailer
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: MailerConfigurer
+      - methods:
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+          - name: Prefix
+            out:
+              - type: string
+            recv: pointer
+        name: Module
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: ModuleConfigurer
+      - interface:
+          unexported: true
+        name: MountConfigurer
+      - interface:
+          embeds:
+            - node
+          unexported: true
+        name: Operation
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: password
+                type: "[]byte"
+            name: Set
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: current
+              - name: next
+                type: "[]byte"
+            name: Change
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: password
+                type: "[]byte"
+            name: Verify
+            out:
+              - type: bool
+              - type: error
+            recv: pointer
+        name: PasswordPolicyService
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - interface:
+          unexported: true
+        name: PasswordConfigurer
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: req
+                type: Req
+            name: Call
+            out:
+              - type: Resp
+              - type: error
+            recv: pointer
+        name: PortService
+        struct:
+          unexported: true
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - interface:
+          unexported: true
+        name: PortConfigurer
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - methods:
+          - in:
+              - name: policy
+                type: authz.Policy
+              - name: action
+              - name: resource
+                type: string
+            name: Allow
+            out:
+              - type: "*Query[Q, R]"
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(context.Context, Q) error
+            name: Authorize
+            out:
+              - type: "*Query[Q, R]"
+            recv: pointer
+          - in:
+              - name: route
+                type: string
+              - name: opts
+                type: ExposeConfigurer
+            name: Expose
+            out:
+              - type: "*Query[Q, R]"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: in
+                type: Q
+            name: Ask
+            out:
+              - type: R
+              - type: error
+            recv: pointer
+        name: Query
+        struct:
+          unexported: true
+        typeParams:
+          - name: Q
+          - constraint: any
+            name: R
+      - interface:
+          unexported: true
+        name: QueryConfigurer
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: json.RawMessage
+              - type: error
+            recv: value
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: reason
+                type: string
+              - name: paths
+                type: string
+            name: EraseFields
+            out:
+              - type: error
+            recv: value
+            variadic: true
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: reason
+                type: string
+            name: Delete
+            out:
+              - type: error
+            recv: value
+        name: RecordsService
+        struct:
+          unexported: true
+      - name: RevisionEvent
+        struct:
+          fields:
+            - name: Number
+              type: uint64
+            - name: At
+              type: time.Time
+            - name: By
+              type: string
+            - name: Command
+              type: string
+            - name: Value
+              type: T
+        typeParams:
+          - constraint: any
+            name: T
+      - methods:
+          - in:
+              - name: name
+                type: string
+              - name: app
+                type: "*App"
+              - name: args
+                type: string
+            name: Role
+            out:
+              - type: "*Binary"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: from
+              - name: to
+              - name: contractName
+                type: string
+            name: Talks
+            out:
+              - type: "*Binary"
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: args
+                type: "[]string"
+            name: Main
+            out:
+              - type: int
+            recv: pointer
+        name: Binary
+        struct:
+          unexported: true
+      - name: ScopeValue
+        struct:
+          unexported: true
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Value
+            out:
+              - type: secret.Value
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Present
+            out:
+              - type: bool
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: plaintext
+              - name: aad
+                type: "[]byte"
+            name: Seal
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: box
+              - name: aad
+                type: "[]byte"
+            name: Open
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: message
+                type: "[]byte"
+            name: Sign
+            out:
+              - type: "[]byte"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: message
+              - name: signature
+                type: "[]byte"
+            name: Verify
+            out:
+              - type: error
+            recv: pointer
+        name: Secret
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: SecretConfigurer
+      - methods:
+          - in:
+              - name: fn
+                type: func(context.Context) bool
+            name: Activity
+            out:
+              - type: "*ActivityHandler"
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+              - name: handler
+                type: func(context.Context, P) (UID, D, error)
+            name: AuthHandler
+            out:
+              - type: "*AuthenticatorHandler[P, D]"
+            recv: pointer
+            typeParams:
+              - name: P
+              - constraint: any
+                name: D
+          - in:
+              - name: name
+              - name: doc
+                type: string
+              - name: fn
+                type: CLIFunc
+              - name: opts
+                type: CommandLineConfigurer
+            name: CLI
+            out:
+              - type: "*CLI"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: handler
+                type: func(context.Context, C) (R, error)
+              - name: opts
+                type: CommandConfigurer
+            name: Command
+            out:
+              - type: "*Command[C, R]"
+            recv: pointer
+            typeParams:
+              - name: C
+              - constraint: any
+                name: R
+            variadic: true
+          - in:
+              - name: route
+                type: string
+              - name: handler
+                type: func(context.Context, Req) (Resp, error)
+              - name: opts
+                type: EndpointConfigurer
+            name: Endpoint
+            out:
+              - type: "*EndpointService[Req, Resp]"
+            recv: pointer
+            typeParams:
+              - name: Req
+              - constraint: any
+                name: Resp
+            variadic: true
+          - in:
+              - name: port
+                type: "*PortService[Req, Resp]"
+              - name: handler
+                type: func(context.Context, Req) (Resp, error)
+              - name: opts
+                type: EndpointConfigurer
+            name: Implement
+            out:
+              - type: "*EndpointService[Req, Resp]"
+            recv: pointer
+            typeParams:
+              - name: Req
+              - constraint: any
+                name: Resp
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: period
+                type: time.Duration
+              - name: fn
+                type: func(context.Context) error
+            name: Every
+            out:
+              - type: "*Job"
+            recv: pointer
+          - in:
+              - name: name
+              - name: expr
+                type: string
+              - name: fn
+                type: func(context.Context) error
+            name: Cron
+            out:
+              - type: "*Job"
+            recv: pointer
+          - in:
+              - name: name
+              - name: contract
+                type: string
+              - name: handler
+                type: ListenHandler
+              - name: opts
+                type: ListenerConfigurer
+            name: Listen
+            out:
+              - type: "*Listener"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: run
+                type: func(context.Context, WakeEvent) error
+              - name: opts
+                type: LoopConfigurer
+            name: Loop
+            out:
+              - type: "*Loop"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: run
+                type: func(context.Context) error
+            name: Go
+            out:
+              - type: "*Routine"
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+              - name: opts
+                type: MailerConfigurer
+            name: Mailer
+            out:
+              - type: "*Mailer"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: opts
+                type: PortConfigurer[Req, Resp]
+            name: Port
+            out:
+              - type: "*PortService[Req, Resp]"
+            recv: pointer
+            typeParams:
+              - name: Req
+              - constraint: any
+                name: Resp
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: handler
+                type: func(context.Context, Q) (R, error)
+              - name: opts
+                type: QueryConfigurer
+            name: Query
+            out:
+              - type: "*Query[Q, R]"
+            recv: pointer
+            typeParams:
+              - name: Q
+              - constraint: any
+                name: R
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: opts
+                type: SecretConfigurer
+            name: Secret
+            out:
+              - type: "*Secret"
+            recv: pointer
+            variadic: true
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+          - in:
+              - name: name
+                type: string
+              - name: def
+                type: T
+              - name: opts
+                type: SettingConfigurer
+            name: Setting
+            out:
+              - type: "*SettingService[T]"
+            recv: pointer
+            typeParams:
+              - constraint: SettingValue
+                name: T
+            variadic: true
+          - in:
+              - name: name
+              - name: prefix
+                type: string
+              - name: fsys
+                type: fs.FS
+              - name: opts
+                type: StaticConfigurer
+            name: Static
+            out:
+              - type: "*Frontend"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: key
+                type: func(T) string
+              - name: opts
+                type: StoreConfigurer
+            name: Store
+            out:
+              - type: "*StoreService[T]"
+            recv: pointer
+            typeParams:
+              - constraint: any
+                name: T
+            variadic: true
+          - in:
+              - name: name
+                type: string
+            name: Topic
+            out:
+              - type: "*TopicService[T]"
+            recv: pointer
+            typeParams:
+              - constraint: any
+                name: T
+          - in:
+              - name: name
+                type: string
+              - name: topic
+                type: "*TopicService[T]"
+              - name: handler
+                type: func(context.Context, T) error
+              - name: opts
+                type: SubscriptionConfigurer
+            name: Subscribe
+            out:
+              - type: "*SubscriptionWorker[T]"
+            recv: pointer
+            typeParams:
+              - constraint: any
+                name: T
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: mark
+                type: Mark
+              - name: handler
+                type: func(context.Context, WrittenEvent) error
+              - name: opts
+                type: SubscriptionConfigurer
+            name: Watch
+            out:
+              - type: "*Watch"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: name
+                type: string
+              - name: store
+                type: "*StoreService[E]"
+              - name: state
+                type: func(*E) *S
+            name: Workflow
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+            typeParams:
+              - constraint: any
+                name: E
+              - constraint: comparable
+                name: S
+        name: Service
+        struct:
+          unexported: true
+      - methods:
+          - name: Get
+            out:
+              - type: T
+            recv: pointer
+          - name: Name
+            out:
+              - type: string
+            recv: pointer
+        name: SettingService
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: SettingValue
+            name: T
+      - interface:
+          embeds:
+            - string | bool | int | int64 | float64 | time.Duration | []string
+        name: SettingValue
+      - interface:
+          unexported: true
+        name: SettingConfigurer
+      - name: Frontend
+        struct:
+          unexported: true
+      - interface:
+          unexported: true
+        name: StaticConfigurer
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: pointer
+                type: string
+            name: Former
+            out:
+              - type: "[]Former"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: reason
+                type: string
+            name: Hold
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Release
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Lookup
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: index
+              - name: key
+                type: string
+            name: Find
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: keep
+                type: func(T) bool
+            name: Filter
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: field
+                type: func(*T) *string
+              - name: opts
+                type: PasswordConfigurer
+            name: Passwords
+            out:
+              - type: "*PasswordPolicyService[T]"
+            recv: pointer
+            variadic: true
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: reason
+                type: string
+            name: Erase
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Revisions
+            out:
+              - type: "[]RevisionEvent[T]"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+            name: Revision
+            out:
+              - type: RevisionEvent[T]
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: from
+              - name: to
+                type: uint64
+            name: Diff
+            out:
+              - type: "[]Edit"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: number
+                type: uint64
+              - name: fields
+                type: string
+            name: Restore
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+            variadic: true
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Get
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: List
+            out:
+              - type: "[]T"
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Count
+            out:
+              - type: int
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Put
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: v
+                type: T
+            name: Insert
+            out:
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+              - name: fn
+                type: func(*T) error
+            name: Update
+            out:
+              - type: T
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+                type: string
+            name: Delete
+            out:
+              - type: error
+            recv: pointer
+        name: StoreService
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - interface:
+          unexported: true
+        name: StoreConfigurer
+      - methods:
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: msg
+                type: T
+            name: Publish
+            out:
+              - type: error
+            recv: pointer
+        name: TopicService
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - name: SubscriptionWorker
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: T
+      - interface:
+          unexported: true
+        name: SubscriptionConfigurer
+      - interface:
+          embeds:
+            - SubscriptionConfigurer
+            - CommandConfigurer
+        name: DeliveryOption
+      - name: WrittenEvent
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Key
+              tag: json:"key"
+              type: string
+            - name: Deleted
+              tag: json:"deleted,omitempty"
+              type: bool
+            - name: Fields
+              tag: json:"fields,omitempty"
+              type: "[]FieldRefValue"
+      - name: Watch
+        struct:
+          unexported: true
+      - name: Mark
+        underlying: string
+      - name: FieldRefValue
+        struct:
+          fields:
+            - name: Store
+              tag: json:"store"
+              type: string
+            - name: Path
+              tag: json:"path"
+              type: string
+            - name: Class
+              tag: json:"class,omitempty"
+              type: string
+            - name: Subject
+              tag: json:"subject,omitempty"
+              type: string
+      - methods:
+          - in:
+              - name: state
+                type: S
+            name: Initial
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+            name: "On"
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: d
+                type: D
+              - name: from
+              - name: to
+                type: S
+            name: After
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+            typeParams:
+              - constraint: Delay
+                name: D
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+              - name: instant
+                type: func(E) (time.Time, bool)
+            name: At
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: event
+                type: string
+              - name: from
+              - name: to
+                type: S
+              - name: guard
+                type: func(E) bool
+            name: When
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: state
+                type: S
+              - name: fn
+                type: func(context.Context, *E) error
+            name: OnEnter
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: fn
+                type: func(context.Context, ChangeEvent[E, S]) error
+            name: OnTransition
+            out:
+              - type: "*WorkflowService[E, S]"
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: e
+                type: E
+            name: Start
+            out:
+              - type: E
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+              - name: key
+              - name: event
+                type: string
+            name: Fire
+            out:
+              - type: E
+              - type: error
+            recv: pointer
+          - in:
+              - name: ctx
+                type: context.Context
+            name: Census
+            out:
+              - type: map[S]int
+              - type: error
+            recv: pointer
+          - in:
+              - name: e
+                type: E
+              - name: event
+                type: string
+            name: Can
+            out:
+              - type: bool
+            recv: pointer
+        name: WorkflowService
+        struct:
+          unexported: true
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - interface:
+          embeds:
+            - time.Duration | *SettingService[time.Duration]
+        name: Delay
+      - name: ChangeEvent
+        struct:
+          fields:
+            - name: Key
+              type: string
+            - name: Entity
+              type: E
+            - name: Event
+              type: string
+            - name: From
+              type: S
+            - name: To
+              type: S
+            - name: Trigger
+              type: string
+            - name: Caller
+              type: string
+            - name: At
+              type: time.Time
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+    variables:
+      - name: Privacy
+        type: "*Service"
+      - name: PerUID
+        type: ScopeValue
+      - name: PerExecutable
+        type: ScopeValue
+      - name: PerConfigDir
+        type: ScopeValue
+  - constants:
+      - name: LabelNode
+        type: string
+        value: "\"kit_node\""
+      - name: LabelLoop
+        type: string
+        value: "\"kit_loop\""
+    imports:
+      atomic: sync/atomic
+      fs: io/fs
+      http: net/http
+      model: github.com/kitsunium/sdk/framework/model
+    path: github.com/kitsunium/sdk/framework/internal/kit/plug
+    types:
+      - name: HTTPConfig
+        struct:
+          fields:
+            - name: Addr
+              type: string
+            - name: Shards
+              type: int
+            - name: ReadHeader
+            - name: Read
+            - name: Write
+            - name: Idle
+              type: time.Duration
+            - name: MaxHeaderBytes
+              type: int
+            - name: Handler
+              type: http.Handler
+      - name: HTTPState
+        struct:
+          fields:
+            - name: Addr
+              type: string
+            - name: Listeners
+              type: int
+            - name: Active
+              type: int64
+            - name: Total
+            - name: Rejected
+              type: uint64
+      - name: ProfilerConfig
+        struct:
+          fields:
+            - name: Heap
+              type: func(g *model.Graph, source SourceFunc) (*model.Profile, error)
+            - name: Goroutines
+              type: func(at time.Time) (*model.Goroutines, error)
+      - name: SourceFunc
+        underlying: func(file string, line int, fn string) *model.Source
+      - interface:
+          methods:
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Start
+              out:
+                - type: error
+            - name: State
+              out:
+                - type: HTTPState
+            - in:
+                - name: ctx
+                  type: context.Context
+              name: Shutdown
+              out:
+                - type: error
+        name: HTTPServer
+      - interface:
+          methods:
+            - in:
+                - name: data
+                  type: string
+              name: Send
+              out:
+                - type: error
+            - name: Done
+              out:
+                - type: <-chan struct{}
+            - name: Close
+              out:
+                - type: error
+        name: EventStream
+    variables:
+      - name: NewHTTPServer
+        type: atomic.Pointer[func(cfg HTTPConfig) HTTPServer]
+      - name: NewStaticFiles
+        type: atomic.Pointer[func(fsys fs.FS, csp string) (http.Handler, error)]
+      - name: OpenEventStream
+        type: atomic.Pointer[func(w http.ResponseWriter, r *http.Request) (EventStream, error)]
+      - name: StudioProfiler
+        type: atomic.Pointer[ProfilerConfig]
+  - functions:
+      - name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/serverkit
+  - functions:
+      - name: Enable
+    path: github.com/kitsunium/sdk/framework/internal/kit/studiokit
+  - aliases:
+      - name: Principal
+        target: ikit.AttrsProvider
+      - name: Activity
+        target: ikit.ActivityHandler
+      - name: App
+        target: ikit.App
+      - name: DiagnosticsError
+        target: ikit.DiagnosticsError
+      - name: AnalyzeFunc
+        target: ikit.AnalyzeFunc
+      - name: UID
+        target: ikit.UID
+      - name: Authenticator
+        target: ikit.AuthenticatorHandler[P, D]
+        typeParams:
+          - name: P
+          - constraint: any
+            name: D
+      - name: Stdio
+        target: ikit.StdioValue
+      - name: CLIFunc
+        target: ikit.CLIFunc
+      - name: CLI
+        target: ikit.CLI
+      - name: CLIOption
+        target: ikit.CommandLineConfigurer
+      - name: Command
+        target: ikit.Command[C, R]
+        typeParams:
+          - name: C
+          - constraint: any
+            name: R
+      - name: CommandOption
+        target: ikit.CommandConfigurer
+      - name: AppOption
+        target: ikit.AppConfigurer
+      - name: DatabaseURL
+        target: ikit.DatabaseURLValue
+      - name: Engine
+        target: ikit.Engine
+      - name: DatabaseOption
+        target: ikit.DatabaseConfigurer
+      - name: Keepable
+        target: ikit.Keeper
+      - name: Empty
+        target: ikit.EmptyValue
+      - name: Endpoint
+        target: ikit.EndpointService[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - name: EndpointOption
+        target: ikit.EndpointConfigurer
+      - name: OperationOption
+        target: ikit.OperationOption
+      - name: Error
+        target: ikit.Error
+      - name: Violation
+        target: ikit.ViolationMessage
+      - name: ExposeOption
+        target: ikit.ExposeConfigurer
+      - name: Former
+        target: ikit.Former
+      - name: Job
+        target: ikit.Job
+      - name: ListenHandler
+        target: ikit.ListenHandler
+      - name: Listener
+        target: ikit.Listener
+      - name: ListenerOption
+        target: ikit.ListenerConfigurer
+      - name: Loop
+        target: ikit.Loop
+      - name: Wake
+        target: ikit.WakeEvent
+      - name: LoopOption
+        target: ikit.LoopConfigurer
+      - name: Routine
+        target: ikit.Routine
+      - name: Mailer
+        target: ikit.Mailer
+      - name: MailerOption
+        target: ikit.MailerConfigurer
+      - name: Module
+        target: ikit.Module
+      - name: ModulePart
+        target: ikit.ModuleConfigurer
+      - name: MountOption
+        target: ikit.MountConfigurer
+      - name: Operation
+        target: ikit.Operation[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - name: PasswordPolicy
+        target: ikit.PasswordPolicyService[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: PasswordOption
+        target: ikit.PasswordConfigurer
+      - name: Port
+        target: ikit.PortService[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - name: PortOption
+        target: ikit.PortConfigurer[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - name: Erasure
+        target: ikit.Erasure
+      - name: PersonalData
+        target: ikit.PersonalData
+      - name: Query
+        target: ikit.Query[Q, R]
+        typeParams:
+          - name: Q
+          - constraint: any
+            name: R
+      - name: QueryOption
+        target: ikit.QueryConfigurer
+      - name: Records
+        target: ikit.RecordsService
+      - name: Revision
+        target: ikit.RevisionEvent[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Edit
+        target: ikit.Edit
+      - name: Binary
+        target: ikit.Binary
+      - name: Scope
+        target: ikit.ScopeValue
+      - name: Secret
+        target: ikit.Secret
+      - name: SecretOption
+        target: ikit.SecretConfigurer
+      - name: Service
+        target: ikit.Service
+      - name: Setting
+        target: ikit.SettingService[T]
+        typeParams:
+          - constraint: SettingValue
+            name: T
+      - name: SettingValue
+        target: ikit.SettingValue
+      - name: SettingOption
+        target: ikit.SettingConfigurer
+      - name: Frontend
+        target: ikit.Frontend
+      - name: StaticOption
+        target: ikit.StaticConfigurer
+      - name: Store
+        target: ikit.StoreService[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: StoreOption
+        target: ikit.StoreConfigurer
+      - name: Topic
+        target: ikit.TopicService[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: Subscription
+        target: ikit.SubscriptionWorker[T]
+        typeParams:
+          - constraint: any
+            name: T
+      - name: SubscriptionOption
+        target: ikit.SubscriptionConfigurer
+      - name: DeliveryOption
+        target: ikit.DeliveryOption
+      - name: Written
+        target: ikit.WrittenEvent
+      - name: Watch
+        target: ikit.Watch
+      - name: Mark
+        target: ikit.Mark
+      - name: FieldRef
+        target: ikit.FieldRefValue
+      - name: Workflow
+        target: ikit.WorkflowService[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+      - name: Delay
+        target: ikit.Delay
+      - name: Change
+        target: ikit.ChangeEvent[E, S]
+        typeParams:
+          - constraint: any
+            name: E
+          - constraint: comparable
+            name: S
+    constants:
+      - name: CodeSingletonHeld
+        type: errs.Code
+        value: "0x00_04_02_3A"
+      - name: CodeCLIFailed
+        type: errs.Code
+        value: "0x00_04_02_3B"
+      - name: EnvDev
+        type: string
+        value: "\"dev\""
+      - name: EnvProduction
+        type: string
+        value: "\"production\""
+      - name: DefaultMaxBody
+        type: int64
+        value: 1 << 20
+      - name: WireInvalid
+        type: string
+        value: "\"invalid_argument\""
+      - name: WireNotFound
+        type: string
+        value: "\"not_found\""
+      - name: WireConflict
+        type: string
+        value: "\"conflict\""
+      - name: WireUnauth
+        type: string
+        value: "\"unauthenticated\""
+      - name: WireForbidden
+        type: string
+        value: "\"permission_denied\""
+      - name: WireTooLarge
+        type: string
+        value: "\"too_large\""
+      - name: WireUnsupported
+        type: string
+        value: "\"unsupported_media_type\""
+      - name: WireRateLimited
+        type: string
+        value: "\"rate_limited\""
+      - name: WireUnavailable
+        type: string
+        value: "\"unavailable\""
+      - name: WireTimeout
+        type: string
+        value: "\"deadline_exceeded\""
+      - name: WireCanceled
+        type: string
+        value: "\"canceled\""
+      - name: WireInternal
+        type: string
+        value: "\"internal\""
+      - name: CodeStoreDecode
+        type: errs.Code
+        value: "0x00_04_02_01"
+      - name: CodeStoreEncode
+        type: errs.Code
+        value: "0x00_04_02_02"
+      - name: CodeStorePersist
+        type: errs.Code
+        value: "0x00_04_02_03"
+      - name: CodeStoreLoad
+        type: errs.Code
+        value: "0x00_04_02_04"
+      - name: CodeStoreIndex
+        type: errs.Code
+        value: "0x00_04_02_05"
+      - name: CodeTopicEncode
+        type: errs.Code
+        value: "0x00_04_02_06"
+      - name: CodeTopicPublish
+        type: errs.Code
+        value: "0x00_04_02_07"
+      - name: CodeQueueOpen
+        type: errs.Code
+        value: "0x00_04_02_08"
+      - name: CodeUndecodable
+        type: errs.Code
+        value: "0x00_04_02_09"
+      - name: CodeHandlerPanic
+        type: errs.Code
+        value: "0x00_04_02_0A"
+      - name: CodeNotMounted
+        type: errs.Code
+        value: "0x00_04_02_0B"
+      - name: CodeWorkflowLoad
+        type: errs.Code
+        value: "0x00_04_02_0C"
+      - name: CodeWorkflowHookPanic
+        type: errs.Code
+        value: "0x00_04_02_0D"
+      - name: CodeWorkflowHookChange
+        type: errs.Code
+        value: "0x00_04_02_0E"
+      - name: CodeWorkflowReentrant
+        type: errs.Code
+        value: "0x00_04_02_0F"
+      - name: CodeAppConfig
+        type: errs.Code
+        value: "0x00_04_02_10"
+      - name: CodeAppRunning
+        type: errs.Code
+        value: "0x00_04_02_11"
+      - name: CodeAppListen
+        type: errs.Code
+        value: "0x00_04_02_12"
+      - name: CodeMailConfig
+        type: errs.Code
+        value: "0x00_04_02_13"
+      - name: CodeMailEncode
+        type: errs.Code
+        value: "0x00_04_02_14"
+      - name: CodeMailQueue
+        type: errs.Code
+        value: "0x00_04_02_15"
+      - name: CodeMailUndecodable
+        type: errs.Code
+        value: "0x00_04_02_16"
+      - name: CodeMailPanic
+        type: errs.Code
+        value: "0x00_04_02_17"
+      - name: CodeLoopPanic
+        type: errs.Code
+        value: "0x00_04_02_18"
+      - name: CodeLoopNotMounted
+        type: errs.Code
+        value: "0x00_04_02_19"
+      - name: CodeLoopStart
+        type: errs.Code
+        value: "0x00_04_02_1A"
+      - name: CodeSecretStore
+        type: errs.Code
+        value: "0x00_04_02_1B"
+      - name: CodeSecretMissing
+        type: errs.Code
+        value: "0x00_04_02_1C"
+      - name: CodeSecretRead
+        type: errs.Code
+        value: "0x00_04_02_1D"
+      - name: CodeSecretRotate
+        type: errs.Code
+        value: "0x00_04_02_1E"
+      - name: CodeDatabaseOpen
+        type: errs.Code
+        value: "0x00_04_02_1F"
+      - name: CodeDatabaseMigrate
+        type: errs.Code
+        value: "0x00_04_02_20"
+      - name: CodeDatabaseUnavailable
+        type: errs.Code
+        value: "0x00_04_02_21"
+      - name: CodeDatabaseConfig
+        type: errs.Code
+        value: "0x00_04_02_22"
+      - name: CodeTransactionSpan
+        type: errs.Code
+        value: "0x00_04_02_42"
+      - name: CodePrivacyKey
+        type: errs.Code
+        value: "0x00_04_02_23"
+      - name: CodePrivacyErase
+        type: errs.Code
+        value: "0x00_04_02_24"
+      - name: CodePrivacyJournal
+        type: errs.Code
+        value: "0x00_04_02_25"
+      - name: CodePrivacyData
+        type: errs.Code
+        value: "0x00_04_02_26"
+      - name: CodeHistoryLoad
+        type: errs.Code
+        value: "0x00_04_02_27"
+      - name: CodeHistoryWrite
+        type: errs.Code
+        value: "0x00_04_02_28"
+      - name: CodeHistoryRead
+        type: errs.Code
+        value: "0x00_04_02_29"
+      - name: CodePasswordHash
+        type: errs.Code
+        value: "0x00_04_02_2A"
+      - name: CodeCommandReentrant
+        type: errs.Code
+        value: "0x00_04_02_2B"
+      - name: CodeCommandKey
+        type: errs.Code
+        value: "0x00_04_02_2C"
+      - name: CodeCommandQueue
+        type: errs.Code
+        value: "0x00_04_02_2D"
+      - name: CodeCommandEncode
+        type: errs.Code
+        value: "0x00_04_02_2E"
+      - name: CodeWatchQueue
+        type: errs.Code
+        value: "0x00_04_02_2F"
+      - name: CodeSealKey
+        type: errs.Code
+        value: "0x00_04_02_3D"
+      - name: CodeSealWrite
+        type: errs.Code
+        value: "0x00_04_02_3E"
+      - name: CodeSealOpen
+        type: errs.Code
+        value: "0x00_04_02_3F"
+      - name: CodeSealRewrap
+        type: errs.Code
+        value: "0x00_04_02_40"
+      - name: CodeSealShred
+        type: errs.Code
+        value: "0x00_04_02_41"
+      - name: CodeRevisionRead
+        type: errs.Code
+        value: "0x00_04_02_43"
+      - name: CodeRevisionWrite
+        type: errs.Code
+        value: "0x00_04_02_44"
+      - name: CodeRevisionDecode
+        type: errs.Code
+        value: "0x00_04_02_45"
+      - name: CodeJobOverlapped
+        type: errs.Code
+        value: "0x00_04_02_31"
+      - name: CodeHistoryMoved
+        type: errs.Code
+        value: "0x00_04_02_32"
+      - name: CodeNotSource
+        type: errs.Code
+        value: "0x00_04_02_33"
+      - name: CodePasswordMoved
+        type: errs.Code
+        value: "0x00_04_02_34"
+      - name: CodeNothingToErase
+        type: errs.Code
+        value: "0x00_04_02_35"
+      - name: CodeKeyRekeyed
+        type: errs.Code
+        value: "0x00_04_02_36"
+      - name: CodeMigrateRefused
+        type: errs.Code
+        value: "0x00_04_02_37"
+      - name: CodeCatalogue
+        type: errs.Code
+        value: "0x00_04_02_38"
+      - name: CodeRetentionPanic
+        type: errs.Code
+        value: "0x00_04_02_39"
+      - name: CodeSealErased
+        type: errs.Code
+        value: "0x00_04_02_46"
+      - name: CodeSealKeyMoved
+        type: errs.Code
+        value: "0x00_04_02_47"
+      - name: CodeResealInPlace
+        type: errs.Code
+        value: "0x00_04_02_48"
+      - name: CodeResealMoved
+        type: errs.Code
+        value: "0x00_04_02_49"
+      - name: CodeWorkflowNotInPlace
+        type: errs.Code
+        value: "0x00_04_02_4A"
+      - name: CodeTransactionPanic
+        type: errs.Code
+        value: "0x00_04_02_4B"
+      - name: CodeProfileRead
+        type: errs.Code
+        value: "0x00_04_02_30"
+      - name: Personal
+        type: Mark
+        value: "\"personal\""
+      - name: Special
+        type: Mark
+        value: "\"special\""
+      - name: Moderated
+        type: Mark
+        value: "\"moderated\""
+      - name: CodeScopeUnknown
+        type: errs.Code
+        value: "0x00_04_02_3C"
+    functions:
+      - in:
+          - name: name
+            type: string
+          - name: services
+            type: "*Service"
+        name: NewApp
+        out:
+          - type: "*App"
+        variadic: true
+      - in:
+          - name: fn
+            type: AnalyzeFunc
+        name: Analyzer
+        out:
+          - type: AppOption
+      - in:
+          - name: p
+            type: string
+        name: Profile
+        out:
+          - type: AppOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: IdleStop
+        out:
+          - type: AppOption
+      - in:
+          - name: scope
+            type: string
+        name: Singleton
+        out:
+          - type: AppOption
+      - in:
+          - name: scopes
+            type: Scope
+        name: SingletonPer
+        out:
+          - type: AppOption
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Stop
+        out:
+          - type: bool
+      - name: Auth
+        out:
+          - type: OperationOption
+      - name: AuthOptional
+        out:
+          - type: OperationOption
+      - in:
+          - name: ctx
+            type: context.Context
+        name: UserID
+        out:
+          - type: UID
+          - type: bool
+      - in:
+          - name: ctx
+            type: context.Context
+        name: AuthData
+        out:
+          - type: D
+          - type: bool
+        typeParams:
+          - constraint: any
+            name: D
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: uid
+            type: UID
+          - name: data
+            type: D
+        name: WithUser
+        out:
+          - type: context.Context
+        typeParams:
+          - constraint: any
+            name: D
+      - name: Catalog
+        out:
+          - type: "[]model.Mechanic"
+      - in:
+          - name: prefix
+            type: string
+        name: NewID
+        out:
+          - type: string
+      - name: DefaultCommand
+        out:
+          - type: CLIOption
+      - name: FailSafe
+        out:
+          - type: CLIOption
+      - name: Queued
+        out:
+          - type: CommandOption
+      - name: NoTransaction
+        out:
+          - type: CommandOption
+      - in:
+          - name: env
+            type: string
+        name: Env
+        out:
+          - type: AppOption
+      - in:
+          - name: addr
+            type: string
+        name: Listen
+        out:
+          - type: AppOption
+      - in:
+          - name: dir
+            type: string
+        name: DataDir
+        out:
+          - type: AppOption
+      - in:
+          - name: "on"
+            type: bool
+        name: Studio
+        out:
+          - type: AppOption
+      - in:
+          - name: "on"
+            type: bool
+        name: Analyze
+        out:
+          - type: AppOption
+      - in:
+          - name: w
+            type: io.Writer
+        name: Logs
+        out:
+          - type: AppOption
+      - in:
+          - name: c
+            type: clock.Timed
+        name: Clock
+        out:
+          - type: AppOption
+      - name: InMemory
+        out:
+          - type: interface{StoreOption; AppOption}
+      - in:
+          - name: things
+            type: Keepable
+        name: Keeps
+        out:
+          - type: DatabaseOption
+        variadic: true
+      - in:
+          - name: m
+            type: sql.Migration
+        name: Migrations
+        out:
+          - type: interface{DatabaseOption; ModulePart}
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: engine
+            type: Engine
+          - name: opts
+            type: DatabaseOption
+        name: Database
+        out:
+          - type: AppOption
+        variadic: true
+      - in:
+          - name: name
+            type: string
+        name: Name
+        out:
+          - type: EndpointOption
+      - in:
+          - name: bytes
+            type: int64
+        name: MaxBody
+        out:
+          - type: EndpointOption
+      - in:
+          - name: perSecond
+            type: float64
+          - name: burst
+            type: int
+        name: RateLimit
+        out:
+          - type: OperationOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: Timeout
+        out:
+          - type: OperationOption
+      - in:
+          - name: maxConcurrent
+            type: int
+        name: Bulkhead
+        out:
+          - type: OperationOption
+      - in:
+          - name: message
+            type: string
+        name: Invalid
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: NotFound
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Conflict
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Unauthenticated
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Forbidden
+        out:
+          - type: "*Error"
+      - in:
+          - name: message
+            type: string
+        name: Unavailable
+        out:
+          - type: "*Error"
+      - name: Anyone
+        out:
+          - type: ExposeOption
+      - name: AnyUser
+        out:
+          - type: ExposeOption
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: reason
+            type: string
+          - name: ids
+            type: string
+        name: HoldSubject
+        out:
+          - type: error
+        variadic: true
+      - in:
+          - name: name
+            type: string
+          - name: key
+            type: func(T) string
+        name: Unique
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+            type: string
+          - name: keys
+            type: func(T) []string
+        name: Index
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: path
+            type: string
+        name: SocketPath
+        out:
+          - type: ListenerOption
+      - in:
+          - name: scopes
+            type: Scope
+        name: SocketPer
+        out:
+          - type: ListenerOption
+        variadic: true
+      - in:
+          - name: uids
+          - name: gids
+            type: "[]int"
+        name: AllowPeers
+        out:
+          - type: ListenerOption
+      - in:
+          - name: product
+          - name: service
+          - name: name
+            type: string
+          - name: scopes
+            type: Scope
+        name: SocketPathFor
+        out:
+          - type: string
+          - type: error
+        variadic: true
+      - in:
+          - name: d
+            type: time.Duration
+        name: WakeEvery
+        out:
+          - type: LoopOption
+      - in:
+          - name: next
+            type: func(context.Context) (time.Time, bool)
+        name: WakeAt
+        out:
+          - type: LoopOption
+      - in:
+          - name: topic
+            type: "*ikit.TopicService[T]"
+        name: WakeOn
+        out:
+          - type: LoopOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: name
+          - name: addr
+            type: string
+        name: From
+        out:
+          - type: MailerOption
+      - in:
+          - name: "n"
+            type: int
+        name: MailAttempts
+        out:
+          - type: MailerOption
+      - in:
+          - name: name
+          - name: doc
+            type: string
+          - name: parts
+            type: ModulePart
+        name: NewModule
+        out:
+          - type: "*Module"
+        variadic: true
+      - in:
+          - name: other
+            type: "*Module"
+        name: Requires
+        out:
+          - type: ModulePart
+      - in:
+          - name: m
+            type: "*Module"
+          - name: opts
+            type: MountOption
+        name: Mount
+        out:
+          - type: AppOption
+        variadic: true
+      - in:
+          - name: prefix
+            type: string
+        name: Prefix
+        out:
+          - type: MountOption
+      - in:
+          - name: "n"
+            type: int
+        name: MinLength
+        out:
+          - type: PasswordOption
+      - in:
+          - name: "n"
+            type: int
+        name: NotReused
+        out:
+          - type: PasswordOption
+      - name: NotCommon
+        out:
+          - type: PasswordOption
+      - in:
+          - name: op
+            type: ikit.Operation[Req, Resp]
+        name: Fallback
+        out:
+          - type: ikit.PortConfigurer[Req, Resp]
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: port
+            type: "*ikit.PortService[Req, Resp]"
+          - name: op
+            type: ikit.Operation[Req, Resp]
+        name: Bind
+        out:
+          - type: interface{AppOption; MountOption}
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: reason
+            type: string
+          - name: ids
+            type: string
+        name: Erase
+        out:
+          - type: Erasure
+          - type: error
+        variadic: true
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: ids
+            type: string
+        name: Export
+        out:
+          - type: PersonalData
+          - type: error
+        variadic: true
+      - in:
+          - name: perSecond
+            type: float64
+          - name: burst
+            type: int
+        name: RateLimitPerClient
+        out:
+          - type: OperationOption
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: store
+            type: string
+        name: RecordsOf
+        out:
+          - type: Records
+          - type: error
+      - in:
+          - name: op
+            type: ikit.Operation[Req, Resp]
+          - name: fn
+            type: func(context.Context, Req) (Resp, error)
+        name: Replace
+        out:
+          - type: AppOption
+        typeParams:
+          - name: Req
+          - constraint: any
+            name: Resp
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: c
+            type: "*http.Cookie"
+        name: SetCookie
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: name
+            type: string
+        name: ClearCookie
+      - in:
+          - name: ctx
+            type: context.Context
+        name: ClientIP
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+        name: UserAgent
+        out:
+          - type: string
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Now
+        out:
+          - type: time.Time
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: NewTicker
+        out:
+          - type: clock.Ticker
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: d
+            type: time.Duration
+        name: After
+        out:
+          - type: <-chan time.Time
+      - in:
+          - name: ctx
+            type: context.Context
+        name: Log
+        out:
+          - type: logger.Logger
+      - in:
+          - name: delay
+            type: D
+          - name: since
+            type: func(T) (time.Time, bool)
+        name: EraseAfter
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+          - constraint: Delay
+            name: D
+      - in:
+          - name: at
+            type: func(T) (time.Time, bool)
+        name: EraseAt
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: delay
+            type: D
+          - name: since
+            type: func(T) (time.Time, bool)
+        name: DeleteAfter
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+          - constraint: Delay
+            name: D
+      - in:
+          - name: at
+            type: func(T) (time.Time, bool)
+        name: DeleteAt
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: fn
+            type: func(*T)
+        name: Anonymise
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: until
+            type: func(T) (time.Time, bool)
+          - name: reason
+            type: string
+        name: HeldUntil
+        out:
+          - type: StoreOption
+        typeParams:
+          - constraint: any
+            name: T
+      - in:
+          - name: text
+            type: string
+        name: Purpose
+        out:
+          - type: StoreOption
+      - name: DeleteOnErasure
+        out:
+          - type: StoreOption
+      - in:
+          - name: limits
+            type: string
+        name: RetentionByProduct
+        out:
+          - type: StoreOption
+      - in:
+          - name: "n"
+            type: int
+        name: Revisions
+        out:
+          - type: StoreOption
+      - in:
+          - name: name
+          - name: doc
+            type: string
+        name: NewBinary
+        out:
+          - type: "*Binary"
+      - in:
+          - name: name
+          - name: fallback
+            type: string
+        name: PerEnv
+        out:
+          - type: Scope
+      - in:
+          - name: scopes
+            type: Scope
+        name: ScopeKey
+        out:
+          - type: string
+          - type: error
+        variadic: true
+      - in:
+          - name: bytes
+            type: int
+        name: Generated
+        out:
+          - type: SecretOption
+      - in:
+          - name: d
+            type: time.Duration
+        name: RotateEvery
+        out:
+          - type: SecretOption
+      - in:
+          - name: "n"
+            type: int
+        name: KeepVersions
+        out:
+          - type: SecretOption
+      - name: Optional
+        out:
+          - type: SecretOption
+      - in:
+          - name: store
+            type: secret.Store
+        name: SecretStore
+        out:
+          - type: AppOption
+      - in:
+          - name: name
+          - name: doc
+            type: string
+        name: NewService
+        out:
+          - type: "*Service"
+      - name: Required
+        out:
+          - type: SettingOption
+      - in:
+          - name: name
+            type: string
+          - name: value
+            type: V
+        name: Set
+        out:
+          - type: AppOption
+        typeParams:
+          - constraint: any
+            name: V
+      - in:
+          - name: fsys
+            type: fs.FS
+        name: ConfigFiles
+        out:
+          - type: AppOption
+      - in:
+          - name: dir
+            type: string
+        name: Root
+        out:
+          - type: StaticOption
+      - name: ReadModel
+        out:
+          - type: StoreOption
+      - in:
+          - name: path
+            type: string
+          - name: gids
+            type: int
+        name: Telemetry
+        out:
+          - type: AppOption
+        variadic: true
+      - in:
+          - name: digest
+            type: string
+        name: DesignDigest
+        out:
+          - type: AppOption
+      - in:
+          - name: "n"
+            type: int
+        name: MaxDeliveries
+        out:
+          - type: DeliveryOption
+      - in:
+          - name: "n"
+            type: int
+        name: Parallelism
+        out:
+          - type: DeliveryOption
+      - name: OwnStores
+        out:
+          - type: SubscriptionOption
+      - in:
+          - name: ctx
+            type: context.Context
+          - name: fn
+            type: func(context.Context) error
+        name: Transact
+        out:
+          - type: error
+    imports:
+      clock: github.com/kitsunium/sdk/pkg/v1/clock
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      fs: io/fs
+      http: net/http
+      ikit: github.com/kitsunium/sdk/framework/internal/kit
+      logger: github.com/kitsunium/sdk/pkg/v1/observe/logger
+      model: github.com/kitsunium/sdk/framework/model
+      secret: github.com/kitsunium/sdk/pkg/v1/security/secret
+      sql: github.com/kitsunium/sdk/pkg/v1/data/sql
+    path: github.com/kitsunium/sdk/framework/kit
+    variables:
+      - name: Privacy
+        type: "*Service"
+      - name: PerUID
+        type: Scope
+      - name: PerExecutable
+        type: Scope
+      - name: PerConfigDir
+        type: Scope
+  - constants:
+      - name: App
+        type: string
+        value: "\"storetest\""
+      - name: CodeRolledBack
+        type: errs.Code
+        value: "0x00_04_04_01"
+    functions:
+      - in:
+          - name: t
+            type: "*testing.T"
+          - name: b
+            type: BackendConfig
+        name: Run
+    imports:
+      errs: github.com/kitsunium/sdk/pkg/v1/errs
+      kit: github.com/kitsunium/sdk/framework/kit
+    path: github.com/kitsunium/sdk/framework/kit/storetest
+    types:
+      - name: BackendConfig
+        struct:
+          fields:
+            - name: Name
+              type: string
+            - name: Options
+              type: func(t *testing.T, app string) []kit.AppOption

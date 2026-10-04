@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T00:32:31Z -->
+<!-- updated: 2026-10-04T10:00:00Z -->
 # .github/workflows/
 
 ## Purpose
@@ -16,14 +16,15 @@ CI/CD automation. The SDK lanes are `bazel-ci.yml` (gate), `post-commit.yml` (th
 | `release-size.yml` | pull request opened, reopened, synchronised, labelled or unlabelled | `scripts/release/check-pr-size.sh`: the question `cut-tags.sh` asks a merge, asked of the pull request before it — fails when a branch commit asks for more than a patch and no `release:*` label decides it, naming the label that settles it (ADR 0135). Read-only token, no secret, `pull_request` never `pull_request_target`. Not required: requiring it is a repository setting. |
 | `e2e-cross.yml` | push to any branch, manual `workflow_dispatch` | The runtime bar on real kernels (ADR 0018): the platform-sensitive packages on Linux, macOS, Windows, the three BSDs, and — in the `solarish` job, one OmniOS r151054 and one Oracle Solaris 11.4 guest booted by `vmactions`, with `pkg`'s `./v1/proc` beside them (ADR 0144) — illumos and Solaris, then — on macOS and Windows — every package (`go test -short ./...` per module of the census, ADR 0094). The platform-sensitive list is per layer directory of the SDK module: `KERNEL_PKGS`, `CORE_PKGS`, `SERVICE_PKGS` and, since ADR 0158 moved `entitlement` there, `FRAMEWORK_PKGS`, run from `framework/`. Both runs gate: Windows was an inventory (`continue-on-error`) under ADR 0094 until its first clean run, and ADR 0095 records how its 19 failing packages were resolved and made it a gate. |
 | `e2e-vm.yml` | manual `workflow_dispatch` only | The platform-sensitive suites and the conformance binary on persistent Proxmox VMs of the lab (Debian and Fedora with systemd, Alpine with OpenRC, the three BSDs, Windows 11), over SSH from the `kitsunium-runner` scale set. Needs the lab and its four secrets, so nothing triggers it automatically. Every suite binary runs with `-test.timeout=3m` and every conformance check under `harness.CheckTimeout`, so a hang prints stacks instead of eating the 25-minute job; a failed SSH wait says whether port 22 is open (sshd refuses us) or closed (no sshd) — #118. |
-| `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). |
+| `docs-deploy.yml` | `workflow_run` after `SDK Release`, push to `main` on docs paths, manual `workflow_dispatch` | Build + deploy the versioned docs portal (`docs/site`) to GitHub Pages. Separate from release (deploy is a consequence, not a release step). Before it deploys, `npm run check` holds the build to the code: the ⌘K index and API sections of the working tree equal `docs/api`, and every link of every release resolves under the deploy base (`docs/site/CLAUDE.md` §Checks). |
 | `bazel-bench.yml` | manual `workflow_dispatch` (`count` input), weekly schedule (Sunday 06:00 UTC), PRs labelled `run-bench` | Kernel benchmarks — not part of the PR gate: the bench targets are `manual` in Bazel, so the job runs `go test -bench` in `internal/kernel` directly, as `make sdk-bench` does locally |
 
 ## bazel-ci.yml (the SDK lane)
 
-Four jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
-nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH)
-and `test-386` (the 32-bit RUNTIME). The last two run raw `go` rather than
+Five jobs: `bazel` (the gate), `shell-gates` (the checks that need neither Bazel
+nor Go), `cross-build` (every module COMPILES, tests included, on every supported GOOS/GOARCH),
+`test-386` (the 32-bit RUNTIME) and `docs-site` (the docs portal, held to
+`docs/api`). The last two run raw `go` rather than
 Bazel, for the reason stated under Do NOT below: Bazel here builds for the host
 only, so a platform it cannot reach is covered by the toolchain that can, or by
 nothing.
@@ -43,7 +44,8 @@ Job `bazel` on `ubuntu-latest`, timeout 120 min. Steps in order:
    Then **core-symmetry invariant** — `scripts/pre-commit/check-core-symmetry.sh` fails the build when a production file under `internal/service` declares an error code, when a service domain has no core package at the same path, or when an `internal/core` package declares a code no engine at its path accounts for (ADR 0160). The six tracks that moved every code to the core did it by hand, one family each, and both halves reopen silently: a service sentinel still compiles and is still audited, because the audits ask that a package be listed, not where it sits.
    Then **package docs, BENCH.md presence and error-code drift** — `check-pkg-docs.sh`, `check-bench-md.sh` and `check-error-codes-drift.sh`, which only the opt-in local pre-commit hook ran until it was removed (ADR 0153).
 10. **Layer invariant** — `scripts/check-layer-deps.sh` asserts seven `bazel query` expressions empty (ADR 0068; the last three are the framework's, ADR 0147).
-11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane, while the same command run by a credentialed account downloads the asset. `gh` and not `curl`, because the signed redirect drops the Authorization header and a `curl` 404 cannot tell "asset absent" from "not authorised". **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so. Add the secret and the target to `GATES` in the same commit. The pin is v1.45.4 — the build the tree is kept clean under, so the step judges the tree with the rules it was checked against, not with a build 34 releases older — and the install asserts the binary matches it, because 1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects. These steps are in THIS job, not in `shell-gates`, because `bazel` and `post-commit` are the only required checks on `main` and a sibling job would report without blocking.
+   Then **platforms invariant** — `scripts/pre-commit/check-platforms.sh` fails when `scripts/ci/platforms.sh`, the table tools/genindex judges doc links and writes `docs/api` on, stops naming exactly the cells of the `cross-build` matrix below, in its order. The matrix has to be written in the workflow, so the cells are written twice and this holds the two equal.
+11. **Lint gate, in two halves.** `make lint-check` (`gofumpt -l` + `make guard` + `make doclinks`, ADR 0138, + `make api-check`: `docs/api` regenerated from the code on every cell and compared byte for byte, the code's surface held to the markers of the pins kit writes from `design/` and every generated file to its design file's bytes — ADR 0163) runs unconditionally, and `make lint-ktn-check` (`ktn-linter`, after the vulnerability gate) runs only when a `KTN_LINTER_TOKEN` secret exists. Those three are the checks of `make lint` that no lane ran until #236; the others are steps 2, 7, 8, 9 and 10 above, so this adds a CLASS of analysis rather than repeating one. The split is a measurement, not taste: `kodflow/ktn-linter` is private and a workflow token is scoped to the repository that issued it, so `gh release download v1.11.2 --repo kodflow/ktn-linter` answered `release not found` under `secrets.GITHUB_TOKEN` on this very lane, while the same command run by a credentialed account downloads the asset. `gh` and not `curl`, because the signed redirect drops the Authorization header and a `curl` 404 cannot tell "asset absent" from "not authorised". **`lint-ktn-check` is deliberately absent from `GATES`** — a step a missing secret can skip is not a gate, and the run emits a `::warning::` saying so. Add the secret and the target to `GATES` in the same commit. The pin is v1.45.4 — the build the tree is kept clean under, so the step judges the tree with the rules it was checked against, not with a build 34 releases older — and the install asserts the binary matches it, because 1.9.11 exits 0 with "No issues found" on a tree 1.11.2 rejects. These steps are in THIS job, not in `shell-gates`, because `bazel` and `post-commit` are the only required checks on `main` and a sibling job would report without blocking.
 12. **Vulnerability gate** — `make vuln-install` then `make vuln-check`: `govulncheck` in source mode in every module of the census (`scripts/ci/go-modules.sh`), `GOWORK=off`, one at a time. Fails on a REACHABLE vulnerable symbol (govulncheck's exit 3) and on a scan that did not complete — "no packages matched" included, from any module: the root is the SDK module since ADR 0162, no longer the empty anchor ADR 0157 §5 excused; an imported-but-uncalled vulnerable package is reported and passes. Blocking on purpose, and in THIS job because it is required: the SDK's requires are every consumer's floor, so a reachable vulnerability is ours to fix before anything else merges (ADR 0136, #210). The scanner version is pinned once, in the Makefile, and `vuln-check.sh` refuses any other.
 13. `bazel coverage --combined_report=lcov //...` → uploaded as `coverage-${{ github.run_number }}` artifact (per-run unique name so concurrent runs don't dedupe, post-audit finding #28). Note coverage runs under the default (race-on) config, so it does **not** reflect the step-6 tests.
 
@@ -63,7 +65,10 @@ behind the 120-minute Bazel lane.
    Fails when a target in its `GATES` manifest does not exist, is not `.PHONY`,
    or is not invoked by this file — matched against the executable `run:`
    commands, never the raw YAML, so a gate named only in a surviving comment
-   cannot satisfy enforcement — and when a guard in its `GUARDS` manifest (the
+   cannot satisfy enforcement. A gate CI reaches through a listed gate's recipe
+   — `make lint-check` runs `$(MAKE) api-check` — counts as run; deleting that
+   recipe line reports it UNGATED like a deleted step. It also fails when a
+   guard in its `GUARDS` manifest (the
    `bash scripts/…` checks of steps 7–10 that `make lint` runs too) is missing,
    is no `run:` step of the `bazel` job, or is no line of the `lint` recipe: a
    deleted step left the guard in `make lint`, gating nothing, and was the one
@@ -83,8 +88,8 @@ behind the 120-minute Bazel lane.
 5. **Pre-commit guard regression** — `make pre-commit-check`.
 
 These four, plus `make test-framework`, `make lint-check`, `make vuln-install`,
-`make vuln-check` and `make lint-ktn-check` in the `bazel` job, are the only `make` invocations in
-this workflow, and that is deliberate:
+`make vuln-check` and `make lint-ktn-check` in the `bazel` job and `make docs-check` in the
+`docs-site` job, are the only `make` invocations in this workflow, and that is deliberate:
 `ci-gates-check` asserts the Makefile↔CI link by target NAME, which only works
 if CI goes through the target. The two lint targets are not in THIS job because
 they need a Go toolchain and a downloaded binary — the two things `shell-gates`
@@ -98,11 +103,15 @@ runs it` (ADR 0088).
 
 `cross-build` runs `go build ./...` then `go vet ./...` per module across twelve
 GOOS/GOARCH cells, including linux/386, linux/arm, illumos/amd64 and
-solaris/amd64 (ADR 0144), so a platform-specific
+solaris/amd64 (ADR 0144) — the cells of `scripts/ci/platforms.sh`, which the
+platforms invariant of the `bazel` job holds equal to this matrix —, so a platform-specific
 low-level call can never silently drop a package (ADR 0018's build bar; local
 equivalent `bash scripts/cross-platform-audit.sh`, which needs bash 4). `go
 build` never compiles a `_test.go`; `go vet` type-checks it, so a test calling a
-helper only one GOOS defines fails the cells it breaks (ADR 0094).
+helper only one GOOS defines fails the cells it breaks (ADR 0094). The pins
+kit writes from `design/` (`api_gen*_test.go`, ADR 0163) are test files, so
+this is where every cell compiles them: a symbol that differs from its design
+on one platform fails that platform's cell.
 
 Both loop over the census — `scripts/ci/go-modules.sh`, every module whose
 `go.mod` git tracks — never over a list (ADR 0137). `./...` stops at a nested
@@ -132,6 +141,23 @@ synthesising a slice longer than a 32-bit `len` can hold.
 Linux/amd64 runners execute 386 binaries natively, so there is no emulation. It
 runs without `-race`, which has no 386 support at all — which also makes it the
 SECOND lane to compile the `//go:build !race` files, after the alloc lane.
+
+### docs-site (the docs portal, held to the code)
+
+`ubuntu-latest`, timeout 15 min, checkout with full history (the Home page's
+feature catalogue dates each feature by `git log --follow`), Node 24, then
+`make docs-check` — named in `scripts/ci-gates-check.sh`'s GATES: `npm ci`,
+`npm test`, a build of the working tree's release alone (`DOCS_RELEASES=local`:
+no release snapshot, no `gh`, no network — no go command either: the portal
+reads `docs/api`), then `npm run check`. That check fails unless the ⌘K index
+and the anchors of every package page's API section equal `docs/api` — every
+exported symbol of `pkg/v1`, and every method an alias reaches at its owner —,
+counted by `docs/site/scripts/check-api-counts.mjs`, which shares no code with
+the writer, and every link and ⌘K entry of the build resolves under the deploy
+base, fragments included (`check-links.mjs`). `make api-check`, in the `bazel`
+job, holds `docs/api` to the code; this job holds the portal to `docs/api`. A
+sibling of the required jobs, so it reports without blocking; the deploy runs
+the same check over every release before it publishes.
 
 ## sdk-release.yml (the SDK release lane)
 

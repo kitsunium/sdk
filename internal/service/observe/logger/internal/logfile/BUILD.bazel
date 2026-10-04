@@ -29,6 +29,7 @@ alias(
 go_test(
     name = "logfile_test",
     srcs = [
+        "api_gen_test.go",
         "logfile_external_test.go",
         "open_flags_unix_internal_test.go",
     ],

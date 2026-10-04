@@ -52,6 +52,7 @@ go_test(
     name = "validation_test",
     size = "small",
     srcs = [
+        "api_gen_test.go",
         "compose_external_test.go",
         "constraints_external_test.go",
         "equivalence_external_test.go",
