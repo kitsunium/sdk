@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T00:32:31Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/scripts/
 
 ## Purpose
@@ -14,7 +14,7 @@ table, the base path, the versioning — is `docs/site/CLAUDE.md`.
 
 | File | What it does | Writes |
 |---|---|---|
-| `sync-versions.mjs` | lists the releases (`gh release list`, else `git tag -l`), stitches them with the majors on disk (`lib/tag-format.mjs`), wipes the content tree and Astro's caches, and materialises every (release, major): the root `README.md` as Home (its package links rewritten to portal routes), a page per package under `pkg/<major>/` (`lib/packages.mjs` — README, then the package's `USES.md` and `BENCH.md` when present), the ADRs (their `CLAUDE.md` skipped), `concepts` from the root `CLAUDE.md`'s **Architecture at a glance** section, `contributors` with its **Verification** section, `getting-started` from `docs/getting-started.md`, the changelog from `git log`, and the feature catalogue (`lib/features.mjs`). A tagged release is read from a `git worktree` of its tag | `src/content/docs/<release>/<major>/**`, `src/data/versions.json`, `src/data/build-info.json`, `src/data/features-<release>-<major>.json` |
+| `sync-versions.mjs` | lists the releases (`gh release list`, else `git tag -l`), stitches them with the majors on disk (`lib/tag-format.mjs`), wipes the content tree and Astro's caches, and materialises every (release, major): the root `README.md` as Home (its package links rewritten to portal routes), a page per package under `pkg/<major>/` (`lib/packages.mjs` — README, then the package's `USES.md` and `BENCH.md` when present, their relative links rewritten for the page), the ADRs (their `CLAUDE.md` skipped, their links to each other pointed at their pages — `lib/adr.mjs`), `concepts` from the root `CLAUDE.md`'s **Architecture at a glance** section, `contributors` with its **Verification** section, `getting-started` from `docs/getting-started.md`, the changelog from `git log`, and the feature catalogue (`lib/features.mjs`). A tagged release is read from a `git worktree` of its tag | `src/content/docs/<release>/<major>/**`, `src/data/versions.json`, `src/data/build-info.json`, `src/data/features-<release>-<major>.json` |
 | `gen-symbols.mjs` | for each major in `versions.json`, runs `tools/genindex` with `GOWORK=off` (it is outside `go.work`) and a source-link prefix derived from `build-info.json` | `public/_search/symbols-<major>.json`, served at `/_search/` |
 | `gen-features.mjs` | regenerates the local release's feature-banner data alone, for every `pkg/v<N>/` major (`v1` when `pkg/` is absent) — a development and verification convenience; the prebuild produces the same data for every release | `src/data/features-<local>-<major>.json` |
 | `lib/` | the shared, unit-tested modules — see `lib/CLAUDE.md` | — |

@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/src/components/
 
 ## Purpose
@@ -23,7 +23,7 @@ layout that assembles them is `../layouts/Default.astro`.
 | `Breadcrumbs.astro` | the in-document path only (the slugs after `<major>`), labelled from the catalog; an intermediate crumb links only to a page that exists | `Default.astro` |
 | `PrevNext.astro` | the previous and next page in the catalog's reading order; nothing for a page outside it | `Default.astro` |
 | `EditLink.astro` | "Edit on GitHub" to the page's frontmatter `source`, at the branch tip or else the commit; nothing when either is unknown | `Default.astro` |
-| `WhatsNew.astro` | the Home page's banner: the most recently added public capabilities from `src/data/features-<release>-<major>.json`; nothing when the file is absent | `[release]/[major]/[...slug].astro`, on Home only |
+| `WhatsNew.astro` | the Home page's banner: the most recently added public capabilities from `src/data/features-<release>-<major>.json`; nothing when the file is absent. It is handed an absolute path without the base, which it adds | `[release]/[major]/[...slug].astro`, on Home only — the page whose id is `<release>/<major>/index` |
 | `Tabs.astro` | a WAI-ARIA tab set over named slots | no page imports it today; `Default.astro`'s `initTabs` binds any `[data-tabs]` markup |
 
 ## Rules

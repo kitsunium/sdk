@@ -33,7 +33,12 @@ import {
   LOCAL_RELEASE,
 } from "./lib/tag-format.mjs";
 import { RESERVED } from "./lib/page-catalog.mjs";
-import { listPackageDirs, rewriteReadmeLinks } from "./lib/packages.mjs";
+import {
+  listPackageDirs,
+  rewritePackageDocLinks,
+  rewriteReadmeLinks,
+} from "./lib/packages.mjs";
+import { rewriteAdrLinks } from "./lib/adr.mjs";
 import {
   deriveProvenance,
   buildFeaturePayload,
@@ -273,6 +278,9 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
   //: — family directories included (lib/packages.mjs, ADR 0155). The Home
   //: page's links (step 1) and the package pages (step 2) read the same list.
   const packages = await listPackageDirs(pkgMajor);
+  //: where a relative link to a file the portal does not publish points: the
+  //: file on GitHub, in the release's own tree.
+  const blob = `https://github.com/kitsunium/sdk/blob/${tag ?? "HEAD"}`;
 
   // 1. Landing page (index.md): the repo README is now the
   // authoritative "what is this SDK" doc — same vocabulary on
@@ -364,7 +372,11 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
       const usesPath = join(pkgDir, "USES.md");
       let body = narrative;
       if (existsSync(usesPath)) {
-        body += "\n" + (await readFile(usesPath, "utf8")) + "\n";
+        const uses = await readFile(usesPath, "utf8");
+        body +=
+          "\n" +
+          rewritePackageDocLinks(uses, major, rel, packages, blob) +
+          "\n";
       }
       if (symbols.length > 0) {
         body +=
@@ -379,9 +391,15 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
       const benchPath = join(pkgDir, "BENCH.md");
       if (existsSync(benchPath)) {
         const benchRaw = await readFile(benchPath, "utf8");
-        const benchBody = benchRaw
-          .replace(/^<!--[^>]*-->\s*/, "")
-          .replace(/^#\s+.+?\n+/m, "");
+        //: its relative links rewritten for the page it lands on:
+        //: crypto/agree's `../BENCH.md` is the crypto page's Benchmarks.
+        const benchBody = rewritePackageDocLinks(
+          benchRaw.replace(/^<!--[^>]*-->\s*/, "").replace(/^#\s+.+?\n+/m, ""),
+          major,
+          rel,
+          packages,
+          blob,
+        );
         body += `\n\n## Benchmarks\n\n${benchBody}`;
       }
 
@@ -410,21 +428,26 @@ async function materialiseRelease(major, release, sourceRoot, tag) {
     const adrDest = join(dest, "adr");
     await mkdir(adrDest, { recursive: true });
     const adrIndexRows = [];
-    for (const f of await readdir(adrDir)) {
-      if (!/\.md$/i.test(f)) continue;
-      //: CLAUDE.md is a maintainer-only file (per docs/adr/CLAUDE.md), not an
-      //: ADR — skip it so it neither gets a public /adr/CLAUDE/ page nor an
-      //: index row.
-      if (/^claude\.md$/i.test(f)) continue;
+    //: CLAUDE.md is a maintainer-only file (per docs/adr/CLAUDE.md), not an
+    //: ADR — skip it so it neither gets a public /adr/CLAUDE/ page nor an
+    //: index row.
+    const adrFiles = (await readdir(adrDir)).filter(
+      (f) => /\.md$/i.test(f) && !/^claude\.md$/i.test(f),
+    );
+    const adrSlugs = adrFiles.map((f) => f.replace(/\.md$/i, ""));
+    for (const f of adrFiles) {
       const raw = await readFile(join(adrDir, f), "utf8");
       //: Neutralise links to internal `.claude/` files (plan/context
       //: provenance in some ADR References sections): `.claude/` is not
       //: published to the portal, so the link would 404. Drop the href,
-      //: keep the label text. The source ADR is immutable — only the
-      //: rendered copy is rewritten.
-      const portalRaw = raw.replace(
-        /\[([^\]]+)\]\([^)]*\.claude\/[^)]*\)/g,
-        "$1",
+      //: keep the label text. Then point a link to another ADR at its page,
+      //: and one to another Markdown file of the repository at GitHub, at
+      //: the release's own tree (lib/adr.mjs). The source ADR is immutable —
+      //: only the rendered copy is rewritten.
+      const portalRaw = rewriteAdrLinks(
+        raw.replace(/\[([^\]]+)\]\([^)]*\.claude\/[^)]*\)/g, "$1"),
+        adrSlugs,
+        blob,
       );
       await writeFile(
         join(adrDest, f),

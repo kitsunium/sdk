@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-03T13:06:04Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/src/
 
 ## Purpose
@@ -13,7 +13,7 @@ the repository (`docs/site/CLAUDE.md`).
 | Path | Holds |
 |---|---|
 | `content.config.ts` | the `docs` collection: a glob loader over `src/content/docs/**/*.md` whose ids keep the on-disk `<release>/<major>/…` path verbatim (the default slugifier strips the dots of `0.1.5`), and a loose schema — `title`, `description`, `updated`, `source`, everything else passed through, since most pages are READMEs without frontmatter |
-| `pages/` | the routes: `index.astro` (`/` → the default major's default release), `404.astro` (recovery links from the site default), `rss.xml.js` (every materialised page), `[release]/index.astro` (`/<release>/` → its default major) and `[release]/[major]/[...slug].astro`, the whole versioned tree — title from frontmatter, else the body's first H1, else the last path segment |
+| `pages/` | the routes: `index.astro` (`/` → the default major's default release), `404.astro` (recovery links from the site default), `rss.xml.js` (every materialised page), `[release]/index.astro` (`/<release>/` → its default major) and `[release]/[major]/[...slug].astro`, the whole versioned tree — title from frontmatter, else the body's first H1, else the last path segment; an id ending in `/index` served at its directory (`pagePath`) |
 | `layouts/` | `Default.astro`, the page shell — see `layouts/CLAUDE.md` |
 | `components/` | the header, navigation, search and banner components — see `components/CLAUDE.md` |
 | `data/` | `features.mjs`, the curated feature catalogue, and the JSON the prebuild writes beside it — see `data/CLAUDE.md` |

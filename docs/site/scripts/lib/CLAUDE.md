@@ -1,4 +1,4 @@
-<!-- updated: 2026-10-04T00:32:31Z -->
+<!-- updated: 2026-10-04T04:30:00Z -->
 # docs/site/scripts/lib/
 
 ## Purpose
@@ -14,11 +14,12 @@ tests. The build that uses them is `../CLAUDE.md`.
 | File | Exports | Used by |
 |---|---|---|
 | `tag-format.mjs` | `TAG_REGEX` (the SDK module's root `vX.Y.Z` tag — ADR 0162 —, the `pkg/vX.Y.Z` tags of the releases before it, and the reserved `pkg/vN/vX.Y.Z` shape), `LOCAL_RELEASE`, `isValidTag`, `parseTag`, `groupByMajor`, `pickLatest`, `dropTombstones` (a `pkg/vX.Y.Z` beside the root tag of its version is the tombstone ADR 0162 cut, no release), `buildVersionsJson` (the two-axis `versions.json`), `localOnlyVersions`, `stitchVersions`, `changelogRefSpec`, `findDefaults` | `sync-versions.mjs`; `Header`, `ReleaseDropdown`, `Sidebar`, `Search`, `PrevNext`, `404.astro` |
-| `packages.mjs` | `listPackageDirs` (every directory under `pkg/<major>/` holding a `README.md`, at any depth — `internal`, `testdata` and dot or underscore names never entered), `rewriteReadmeLinks` (the root README's package links turned into portal routes, every other relative link into a GitHub blob link) | `sync-versions.mjs` |
-| `page-catalog.mjs` | `RESERVED` (the reserved slugs and their labels), `GROUP_ORDER` (Overview, Packages, Reference), `buildCatalog`, `flattenCatalog` — the grouped, ordered taxonomy of the content collection; `adr` and `contributors` are built but kept out of the main navigation | `Sidebar`, `Search`, `PrevNext`, `Breadcrumbs`, `404.astro` |
+| `packages.mjs` | `listPackageDirs` (every directory under `pkg/<major>/` holding a `README.md`, at any depth — `internal`, `testdata` and dot or underscore names never entered), `rewriteReadmeLinks` (the root README's package links turned into portal routes, every other relative link into a GitHub blob link), `rewritePackageDocLinks` (a `BENCH.md`'s or `USES.md`'s relative links for the page they land on: another package's `BENCH.md` is its page's Benchmarks, a `README.md` or directory its page, any other file GitHub) | `sync-versions.mjs` |
+| `adr.mjs` | `rewriteAdrLinks` — an ADR's link to another ADR (`0162-….md`, `./…`, `../adr/…`) pointed at its page, `../0162-…/`, and to any other Markdown file of the repository at GitHub; fenced code, absolute links and anchors untouched | `sync-versions.mjs` |
+| `page-catalog.mjs` | `RESERVED` (the reserved slugs and their labels), `GROUP_ORDER` (Overview, Packages, Reference), `pagePath` (the path an entry id is served at: `<release>/<major>/index` is `<release>/<major>`, `…/adr/index` is `…/adr`), `buildCatalog`, `flattenCatalog` — the grouped, ordered taxonomy of the content collection; `adr` and `contributors` are built but kept out of the main navigation | `Sidebar`, `Search`, `PrevNext`, `Breadcrumbs`, `404.astro`, the page route, `rss.xml.js` |
 | `features.mjs` | `DOMAIN_ORDER`, `DOMAIN_LABEL`, `deriveProvenance` (a feature's date: the commit that added its anchor file, found with `git log --follow` read newest first, because git follows no rename on a reversed walk), `buildFeaturePayload`, `renderCatalogMarkdown`, `uniqueAnchors` | `sync-versions.mjs`, `gen-features.mjs` |
 | `base.mjs` | `DEPLOY_BASE` and `withBase(path)` — the project-page base (`/sdk`) a hand-written absolute URL must carry | the components and pages only: it reads `import.meta.env.BASE_URL`, which Vite injects, and never runs under plain `node` |
-| `tag-format.test.mjs`, `packages.test.mjs`, `features.test.mjs` | the versioning policy and the tag-vs-ref contract; package discovery across family directories and the catalog's handling of those pages; the catalogue logic over a fixture registry | `npm test` |
+| `tag-format.test.mjs`, `packages.test.mjs`, `adr.test.mjs`, `features.test.mjs` | the versioning policy and the tag-vs-ref contract; package discovery across family directories, the catalog's handling of those pages and of the `/index` ids the collection gives, and the links of a package's docs; an ADR's links; the catalogue logic over a fixture registry | `npm test` |
 
 ## Rules
 
